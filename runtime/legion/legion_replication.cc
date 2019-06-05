@@ -1740,7 +1740,7 @@ namespace Legion {
         {
           ApBarrier &next_bar = indirection_bars[next_indirection_index++]; 
           indirection_barriers[idx] = next_bar;
-          Runtime::advance_barrier(next_bar);
+          ctx->advance_replicate_barrier(next_bar, ctx->total_shards);
           if (next_indirection_index == indirection_bars.size())
             next_indirection_index = 0;
         }
@@ -2130,8 +2130,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplDeletionOp::initialize_replication(RtBarrier &deletion_barrier,
-                                                bool is_total, bool is_first)
+    void ReplDeletionOp::initialize_replication(ReplicateContext *ctx,
+                      RtBarrier &deletion_barrier, bool is_total, bool is_first)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -2139,9 +2139,9 @@ namespace Legion {
       assert(!execution_barrier.exists());
 #endif
       mapping_barrier = deletion_barrier;
-      Runtime::advance_barrier(deletion_barrier);
+      ctx->advance_replicate_barrier(deletion_barrier, ctx->total_shards);
       execution_barrier = deletion_barrier;
-      Runtime::advance_barrier(deletion_barrier);
+      ctx->advance_replicate_barrier(deletion_barrier, ctx->total_shards);
       is_total_sharding = is_total;
       is_first_local_shard = is_first;
     }
@@ -3896,7 +3896,7 @@ namespace Legion {
       assert(sharded_view == NULL);
 #endif
       inline_barrier = bar;
-      Runtime::advance_barrier(bar);
+      ctx->advance_replicate_barrier(bar, ctx->total_shards);
       // We only check the results of the mapping if the runtime requests it
       // We can skip the check though if this is a read-only requirement
       if (!IS_READ_ONLY(requirement))
@@ -3905,12 +3905,12 @@ namespace Legion {
       if (IS_WRITE(requirement))
       {
         // We need a second generation of the barrier for writes
-        Runtime::advance_barrier(bar);
+        ctx->advance_replicate_barrier(bar, ctx->total_shards);
         // We need a third generation of the barrirer if we're not discarding
         // the previous version of the barrier so we can make sure all the
         // updates have been performed before we register our users
         if (!IS_DISCARD(requirement))
-          Runtime::advance_barrier(bar);
+          ctx->advance_replicate_barrier(bar, ctx->total_shards);
         view_did_broadcast = 
           new ValueBroadcast<DistributedID>(ctx, 0/*owner*/, COLLECTIVE_LOC_75);
         // if we're shard 0 then get the distributed id and send it out
@@ -4352,7 +4352,7 @@ namespace Legion {
       assert(sharded_view == NULL);
 #endif
       resource_barrier = resource_bar;
-      Runtime::advance_barrier(resource_bar);
+      ctx->advance_replicate_barrier(resource_bar, ctx->total_shards);
       // No matter what we're going to need a view broadcast either to make
       // an instance which everyone has the name of or a sharded view
       did_broadcast = 
@@ -4360,7 +4360,7 @@ namespace Legion {
       if ((resource == EXTERNAL_INSTANCE) || local_files)
       {
         // In this case we need a second generation of the resource_bar
-        Runtime::advance_barrier(resource_bar);
+        ctx->advance_replicate_barrier(resource_bar, ctx->total_shards);
         exchange = new ShardedMappingExchange(COLLECTIVE_LOC_78, ctx,
                            ctx->owner_shard->shard_id, false/*perform checks*/);
         
@@ -4674,7 +4674,7 @@ namespace Legion {
       assert(resource_bar.exists());
 #endif
       resource_barrier = resource_bar;
-      Runtime::advance_barrier(resource_bar);
+      ctx->advance_replicate_barrier(resource_bar, ctx->total_shards);
     }
 
     //--------------------------------------------------------------------------

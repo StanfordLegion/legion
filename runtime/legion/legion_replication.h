@@ -1077,8 +1077,8 @@ namespace Legion {
       virtual void trigger_mapping(void);
       virtual void trigger_complete(void);
     public:
-      void initialize_replication(RtBarrier &deletion_barrier, 
-                                  bool is_total, bool is_first);
+      void initialize_replication(ReplicateContext *ctx, 
+          RtBarrier &deletion_barrier, bool is_total, bool is_first);
     protected:
       RtBarrier mapping_barrier;
       RtBarrier execution_barrier;

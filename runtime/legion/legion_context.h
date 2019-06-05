@@ -1657,6 +1657,24 @@ namespace Legion {
       // Fence barrier methods
       RtBarrier get_next_mapping_fence_barrier(void);
       ApBarrier get_next_execution_fence_barrier(void);
+      inline void advance_replicate_barrier(RtBarrier &bar, size_t arrivals)
+        {
+          Runtime::advance_barrier(bar);
+          if (!bar.exists())
+            create_new_replicate_barrier(bar, arrivals);
+        }
+      inline void advance_replicate_barrier(ApBarrier &bar, size_t arrivals)
+        {
+          Runtime::advance_barrier(bar);
+          if (!bar.exists())
+            create_new_replicate_barrier(bar, arrivals);
+        }
+    protected:
+      // These can only be called inside the task for this context
+      // since they assume that all the shards are aligned and doing
+      // the same calls for the same operations in the same order
+      void create_new_replicate_barrier(RtBarrier &bar, size_t arrivals);
+      void create_new_replicate_barrier(ApBarrier &bar, size_t arrivals);
     public:
       ShardTask *const owner_shard;
       ShardManager *const shard_manager;
@@ -1711,6 +1729,8 @@ namespace Legion {
     protected:
       std::map<std::pair<unsigned,unsigned>,RtBarrier> ready_clone_barriers;
       std::map<std::pair<unsigned,unsigned>,RtUserEvent> pending_clone_barriers;
+    protected:
+      unsigned next_replicate_bar_index;
     };
 
     /**

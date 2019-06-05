@@ -8326,7 +8326,8 @@ namespace Legion {
         next_close_mapped_bar_index(0), next_indirection_bar_index(0),
         index_space_allocator_shard(0), index_partition_allocator_shard(0),
         field_space_allocator_shard(0), field_allocator_shard(0),
-        logical_region_allocator_shard(0), next_available_collective_index(0)
+        logical_region_allocator_shard(0), next_available_collective_index(0),
+        next_replicate_bar_index(0)
     //--------------------------------------------------------------------------
     {
       // Get our allocation barriers
@@ -8686,7 +8687,7 @@ namespace Legion {
         // Arrive on the creation barrier
         Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
       }
-      Runtime::advance_barrier(creation_barrier);
+      advance_replicate_barrier(creation_barrier, total_shards-1);
       register_index_space_creation(handle);
       index_space_allocator_shard++;
       if (index_space_allocator_shard == total_shards)
@@ -8735,7 +8736,7 @@ namespace Legion {
         // Signal we're done our creation
         Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
       }
-      Runtime::advance_barrier(creation_barrier);
+      advance_replicate_barrier(creation_barrier, total_shards-1);
       // Register the local creation
       register_index_space_creation(handle);
       // Update our allocator shard
@@ -8787,7 +8788,7 @@ namespace Legion {
         // Signal that we're done our creation
         Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
       }
-      Runtime::advance_barrier(creation_barrier);
+      advance_replicate_barrier(creation_barrier, total_shards-1);
       // Update the index space allocator shard
       index_space_allocator_shard++;
       if (index_space_allocator_shard == total_shards)
@@ -8835,7 +8836,7 @@ namespace Legion {
         // Signal that we're done our creation
         Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
       }
-      Runtime::advance_barrier(creation_barrier);
+      advance_replicate_barrier(creation_barrier, total_shards-1);
       // Update the allocation shard
       index_space_allocator_shard++;
       if (index_space_allocator_shard == total_shards)
@@ -8893,7 +8894,7 @@ namespace Legion {
       }
       ReplDeletionOp *op = runtime->get_available_repl_deletion_op();
       op->initialize_index_space_deletion(this, handle, sub_partitions);
-      op->initialize_replication(deletion_barrier, 
+      op->initialize_replication(this, deletion_barrier, 
                       shard_manager->is_total_sharding(),
                       shard_manager->is_first_local_shard(owner_shard));
       runtime->add_to_dependence_queue(this, executing_processor, op);
@@ -8942,7 +8943,7 @@ namespace Legion {
       }
       ReplDeletionOp *op = runtime->get_available_repl_deletion_op();
       op->initialize_index_part_deletion(this, handle, sub_partitions);
-      op->initialize_replication(deletion_barrier, 
+      op->initialize_replication(this, deletion_barrier, 
                       shard_manager->is_total_sharding(),
                       shard_manager->is_first_local_shard(owner_shard));
       runtime->add_to_dependence_queue(this, executing_processor, op);
@@ -9039,14 +9040,14 @@ namespace Legion {
         // any shard can handle requests for sub-regions of a partition
         creation_barrier.wait();
       }
-      Runtime::advance_barrier(creation_barrier);
+      advance_replicate_barrier(creation_barrier, total_shards-1);
       part_op->initialize_equal_partition(this, pid, granularity);
       // Now we can add the operation to the queue
       runtime->add_to_dependence_queue(this, executing_processor, part_op);
       // Trigger the pending partition barrier and advance it
       Runtime::phase_barrier_arrive(pending_partition_barrier, 
                                     1/*count*/, term_event);
-      Runtime::advance_barrier(pending_partition_barrier);
+      advance_replicate_barrier(pending_partition_barrier, total_shards);
       // Update the allocation shard
       index_partition_allocator_shard++;
       if (index_partition_allocator_shard == total_shards)
@@ -9191,14 +9192,14 @@ namespace Legion {
         // any shard can handle requests for sub-regions of a partition
         creation_barrier.wait();
       }
-      Runtime::advance_barrier(creation_barrier);
+      advance_replicate_barrier(creation_barrier, total_shards-1);
       part_op->initialize_union_partition(this, pid, handle1, handle2);
       // Now we can add the operation to the queue
       runtime->add_to_dependence_queue(this, executing_processor, part_op);
       // Update the pending partition barrier
       Runtime::phase_barrier_arrive(pending_partition_barrier, 
                                     1/*count*/, term_event);
-      Runtime::advance_barrier(pending_partition_barrier);
+      advance_replicate_barrier(pending_partition_barrier, total_shards);
       // Update our allocation shard
       index_partition_allocator_shard++;
       if (index_partition_allocator_shard == total_shards)
@@ -9342,14 +9343,14 @@ namespace Legion {
         // any shard can handle requests for sub-regions of a partition
         creation_barrier.wait();
       }
-      Runtime::advance_barrier(creation_barrier);
+      advance_replicate_barrier(creation_barrier, total_shards-1);
       part_op->initialize_intersection_partition(this, pid, handle1, handle2);
       // Now we can add the operation to the queue
       runtime->add_to_dependence_queue(this, executing_processor, part_op);
       // Update the pending partition barrier
       Runtime::phase_barrier_arrive(pending_partition_barrier, 
                                     1/*count*/, term_event);
-      Runtime::advance_barrier(pending_partition_barrier); 
+      advance_replicate_barrier(pending_partition_barrier, total_shards); 
       // Update our allocation shard
       index_partition_allocator_shard++;
       if (index_partition_allocator_shard == total_shards)
@@ -9483,14 +9484,14 @@ namespace Legion {
         // any shard can handle requests for sub-regions of a partition
         creation_barrier.wait();
       }
-      Runtime::advance_barrier(creation_barrier);
+      advance_replicate_barrier(creation_barrier, total_shards-1);
       part_op->initialize_difference_partition(this, pid, handle1, handle2);
       // Now we can add the operation to the queue
       runtime->add_to_dependence_queue(this, executing_processor, part_op);
       // Update the pending partition barrier
       Runtime::phase_barrier_arrive(pending_partition_barrier,
                                     1/*count*/, term_event);
-      Runtime::advance_barrier(pending_partition_barrier);
+      advance_replicate_barrier(pending_partition_barrier, total_shards);
       // Update our allocation shard
       index_partition_allocator_shard++;
       if (index_partition_allocator_shard == total_shards)
@@ -9559,7 +9560,7 @@ namespace Legion {
         // any shard can handle requests for any cross-product partition
         creation_barrier.wait();
       }
-      Runtime::advance_barrier(creation_barrier);
+      advance_replicate_barrier(creation_barrier, total_shards-1);
       part_op->initialize_cross_product(this, handle1, handle2,partition_color);
       // Now we can add the operation to the queue
       runtime->add_to_dependence_queue(this, executing_processor, part_op);
@@ -9715,7 +9716,7 @@ namespace Legion {
         // any shard can handle requests for sub-regions of a partition
         creation_barrier.wait();
       }
-      Runtime::advance_barrier(creation_barrier);
+      advance_replicate_barrier(creation_barrier, total_shards-1);
       part_op->initialize_restricted_partition(this, pid, transform, 
                                 transform_size, extent, extent_size);
       // Now we can add the operation to the queue
@@ -9723,7 +9724,7 @@ namespace Legion {
       // Now update the pending partition barrier
       Runtime::phase_barrier_arrive(pending_partition_barrier,
                                     1/*count*/, term_event);
-      Runtime::advance_barrier(pending_partition_barrier);
+      advance_replicate_barrier(pending_partition_barrier, total_shards);
       // Update our allocation shard
       index_partition_allocator_shard++;
       if (index_partition_allocator_shard == total_shards)
@@ -9825,7 +9826,7 @@ namespace Legion {
         // any shard can handle requests for sub-regions of a partition
         creation_barrier.wait();
       }
-      Runtime::advance_barrier(creation_barrier);
+      advance_replicate_barrier(creation_barrier, total_shards-1);
       part_op->initialize_by_field(this, index_partition_allocator_shard,
                                    pending_partition_barrier,
                                    pid, handle, parent_priv, fid, id, tag);
@@ -9851,7 +9852,7 @@ namespace Legion {
       // Update the pending partition barrier
       Runtime::phase_barrier_arrive(pending_partition_barrier,
                                     1/*count*/, term_event);
-      Runtime::advance_barrier(pending_partition_barrier);
+      advance_replicate_barrier(pending_partition_barrier, total_shards);
       // Remap any unmapped regions
       if (!unmapped_regions.empty())
         remap_unmapped_regions(current_trace, unmapped_regions);
@@ -9962,7 +9963,7 @@ namespace Legion {
         // any shard can handle requests for sub-regions of a partition
         creation_barrier.wait();
       }
-      Runtime::advance_barrier(creation_barrier);
+      advance_replicate_barrier(creation_barrier, total_shards-1);
       part_op->initialize_by_image(this, 
 #ifndef SHARD_BY_IMAGE
                                    index_partition_allocator_shard,
@@ -9992,7 +9993,7 @@ namespace Legion {
       // Update the pending partition barrier
       Runtime::phase_barrier_arrive(pending_partition_barrier,
                                     1/*count*/, term_event);
-      Runtime::advance_barrier(pending_partition_barrier);
+      advance_replicate_barrier(pending_partition_barrier, total_shards);
       // Remap any unmapped regions
       if (!unmapped_regions.empty())
         remap_unmapped_regions(current_trace, unmapped_regions);
@@ -10103,7 +10104,7 @@ namespace Legion {
         // any shard can handle requests for sub-regions of a partition
         creation_barrier.wait();
       }
-      Runtime::advance_barrier(creation_barrier);
+      advance_replicate_barrier(creation_barrier, total_shards-1);
       part_op->initialize_by_image_range(this, 
 #ifndef SHARD_BY_IMAGE
                                          index_partition_allocator_shard,
@@ -10133,7 +10134,7 @@ namespace Legion {
       // Update the pending partition barrier
       Runtime::phase_barrier_arrive(pending_partition_barrier,
                                     1/*count*/, term_event);
-      Runtime::advance_barrier(pending_partition_barrier);
+      advance_replicate_barrier(pending_partition_barrier, total_shards);
       // Remap any unmapped regions
       if (!unmapped_regions.empty())
         remap_unmapped_regions(current_trace, unmapped_regions);
@@ -10260,7 +10261,7 @@ namespace Legion {
         // any shard can handle requests for sub-regions of a partition
         creation_barrier.wait();
       }
-      Runtime::advance_barrier(creation_barrier);
+      advance_replicate_barrier(creation_barrier, total_shards-1);
       part_op->initialize_by_preimage(this, index_partition_allocator_shard,
                                       pending_partition_barrier,
                                       pid, projection, handle,
@@ -10287,7 +10288,7 @@ namespace Legion {
       // Update the pending partition barrier
       Runtime::phase_barrier_arrive(pending_partition_barrier,
                                     1/*count*/, term_event);
-      Runtime::advance_barrier(pending_partition_barrier);
+      advance_replicate_barrier(pending_partition_barrier, total_shards);
       // Remap any unmapped regions
       if (!unmapped_regions.empty())
         remap_unmapped_regions(current_trace, unmapped_regions);
@@ -10398,7 +10399,7 @@ namespace Legion {
         // any shard can handle requests for sub-regions of a partition
         creation_barrier.wait();
       }
-      Runtime::advance_barrier(creation_barrier);
+      advance_replicate_barrier(creation_barrier, total_shards-1);
       part_op->initialize_by_preimage_range(this, 
                                             index_partition_allocator_shard, 
                                             pending_partition_barrier,
@@ -10426,7 +10427,7 @@ namespace Legion {
       // Update the pending partition barrier
       Runtime::phase_barrier_arrive(pending_partition_barrier,
                                     1/*count*/, term_event);
-      Runtime::advance_barrier(pending_partition_barrier);
+      advance_replicate_barrier(pending_partition_barrier, total_shards);
       // Remap any unmapped regions
       if (!unmapped_regions.empty())
         remap_unmapped_regions(current_trace, unmapped_regions);
@@ -10539,7 +10540,7 @@ namespace Legion {
         // any shard can handle requests for sub-regions of a partition
         creation_barrier.wait();
       }
-      Runtime::advance_barrier(creation_barrier);
+      advance_replicate_barrier(creation_barrier, total_shards-1);
       // Update our allocation shard
       index_partition_allocator_shard++;
       if (index_partition_allocator_shard == total_shards)
@@ -10714,7 +10715,7 @@ namespace Legion {
         // races with field allocations
         creation_barrier.wait();
       }
-      Runtime::advance_barrier(creation_barrier); 
+      advance_replicate_barrier(creation_barrier, total_shards-1); 
       // Register the field space creation
       register_field_space_creation(space);
       // Update the allocator
@@ -10785,7 +10786,7 @@ namespace Legion {
       }
       ReplDeletionOp *op = runtime->get_available_repl_deletion_op();
       op->initialize_field_space_deletion(this, handle);
-      op->initialize_replication(deletion_barrier, 
+      op->initialize_replication(this, deletion_barrier, 
                       shard_manager->is_total_sharding(),
                       shard_manager->is_first_local_shard(owner_shard));
       runtime->add_to_dependence_queue(this, executing_processor, op);
@@ -10866,7 +10867,7 @@ namespace Legion {
       }
       ReplDeletionOp *op = runtime->get_available_repl_deletion_op();
       op->initialize_field_deletion(this, space, fid);
-      op->initialize_replication(deletion_barrier, 
+      op->initialize_replication(this, deletion_barrier, 
                       shard_manager->is_total_sharding(),
                       shard_manager->is_first_local_shard(owner_shard));
       runtime->add_to_dependence_queue(this, executing_processor, op);
@@ -10977,7 +10978,7 @@ namespace Legion {
         return;
       ReplDeletionOp *op = runtime->get_available_repl_deletion_op();
       op->initialize_field_deletions(this, space, free_now);
-      op->initialize_replication(deletion_barrier, 
+      op->initialize_replication(this, deletion_barrier, 
                       shard_manager->is_total_sharding(),
                       shard_manager->is_first_local_shard(owner_shard));
       runtime->add_to_dependence_queue(this, executing_processor, op);
@@ -11029,7 +11030,7 @@ namespace Legion {
         // Signal that we are done our creation
         Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
       }
-      Runtime::advance_barrier(creation_barrier); 
+      advance_replicate_barrier(creation_barrier, total_shards-1); 
       // Register the creation of a top-level region with the context
       register_region_creation(handle, task_local);
       // Update the allocator shard
@@ -11084,7 +11085,7 @@ namespace Legion {
       }
       ReplDeletionOp *op = runtime->get_available_repl_deletion_op();
       op->initialize_logical_region_deletion(this, handle);
-      op->initialize_replication(deletion_barrier, 
+      op->initialize_replication(this, deletion_barrier, 
                       shard_manager->is_total_sharding(),
                       shard_manager->is_first_local_shard(owner_shard));
       runtime->add_to_dependence_queue(this, executing_processor, op);
@@ -11104,7 +11105,7 @@ namespace Legion {
 #endif
       ReplDeletionOp *op = runtime->get_available_repl_deletion_op();
       op->initialize_logical_partition_deletion(this, handle);
-      op->initialize_replication(deletion_barrier, 
+      op->initialize_replication(this, deletion_barrier, 
                       shard_manager->is_total_sharding(),
                       shard_manager->is_first_local_shard(owner_shard));
       runtime->add_to_dependence_queue(this, executing_processor, op);
@@ -11977,11 +11978,11 @@ namespace Legion {
                                       &actual_barrier, sizeof(actual_barrier));
       assert(ready);
       assert(actual_barrier == barrier);
-      Runtime::advance_barrier(close_check_barrier);
+      advance_replicate_barrier(close_check_barrier, total_shards);
 #endif
       result->set_repl_close_info(mapped_bar);
       // Advance the phase for the next time through
-      Runtime::advance_barrier(mapped_bar);
+      advance_replicate_barrier(mapped_bar, total_shards);
       return result;
     }
 
@@ -12831,7 +12832,7 @@ namespace Legion {
                                    &actual_location, sizeof(actual_location));
       assert(ready);
       assert(location == actual_location);
-      Runtime::advance_barrier(collective_check_barrier);
+      advance_replicate_barrier(collective_check_barrier, total_shards);
 #endif
       // No need for a lock, should only be coming from the creation
       // of operations directly from the application and therefore
@@ -12913,7 +12914,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       ApBarrier result = future_map_barrier;
-      Runtime::advance_barrier(future_map_barrier);
+      advance_replicate_barrier(future_map_barrier, total_shards);
       return result;
     }
 
@@ -13012,7 +13013,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       RtBarrier result = mapping_fence_barrier;
-      Runtime::advance_barrier(mapping_fence_barrier);
+      advance_replicate_barrier(mapping_fence_barrier, total_shards);
       return result;
     }
 
@@ -13021,8 +13022,54 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       ApBarrier result = execution_fence_barrier;
-      Runtime::advance_barrier(execution_fence_barrier);
+      advance_replicate_barrier(execution_fence_barrier, total_shards);
       return result;
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplicateContext::create_new_replicate_barrier(RtBarrier &bar, 
+                                                        size_t arrivals)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!bar.exists());
+      assert(next_replicate_bar_index < total_shards);
+#endif
+      ValueBroadcast<RtBarrier> 
+        collective(this, next_replicate_bar_index, COLLECTIVE_LOC_83);
+      if (owner_shard->shard_id == next_replicate_bar_index++)
+      {
+        bar = RtBarrier(Realm::Barrier::create_barrier(arrivals));
+        collective.broadcast(bar);
+      }
+      else
+        bar = collective.get_value();
+      // Check to see if we need to reset the next_replicate_bar_index
+      if (next_replicate_bar_index == total_shards)
+        next_replicate_bar_index = 0;
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplicateContext::create_new_replicate_barrier(ApBarrier &bar,
+                                                        size_t arrivals)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!bar.exists());
+      assert(next_replicate_bar_index < total_shards);
+#endif
+      ValueBroadcast<ApBarrier> 
+        collective(this, next_replicate_bar_index, COLLECTIVE_LOC_84);
+      if (owner_shard->shard_id == next_replicate_bar_index++)
+      {
+        bar = ApBarrier(Realm::Barrier::create_barrier(arrivals));
+        collective.broadcast(bar);
+      }
+      else
+        bar = collective.get_value();
+      // Check to see if we need to reset the next_replicate_bar_index
+      if (next_replicate_bar_index == total_shards)
+        next_replicate_bar_index = 0;
     }
 
     /////////////////////////////////////////////////////////////
