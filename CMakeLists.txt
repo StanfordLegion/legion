@@ -200,8 +200,12 @@ if(Legion_USE_CUDA)
     DESTINATION ${CMAKE_INSTALL_DATADIR}/Legion/cmake/newcmake
   )
 
+  # define variable for legion_defines.h
+  set(LEGION_USE_CUDA ON)
+
   # define variable for realm_defines.h
-  set(USE_CUDA ON)
+  set(REALM_USE_CUDA ON)
+  set(USE_CUDA ON) # for backwards compatibility
 endif()
 
 #------------------------------------------------------------------------------#
