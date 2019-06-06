@@ -32,6 +32,8 @@ def hi(i):
 
 @task
 def main():
+    global global_var
+
     global_procs = legion.Tunable.select(legion.Tunable.GLOBAL_PYS).get()
 
     with legion.MustEpochLaunch(): # implicit launch domain

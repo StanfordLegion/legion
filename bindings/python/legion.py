@@ -1392,7 +1392,8 @@ class _MustEpochLauncher(object):
         self.domain = domain
         self.launcher = c.legion_must_epoch_launcher_create(0, 0)
         if self.domain is not None:
-            c.legion_must_epoch_launcher_set_launch_domain(self.domain.raw_value())
+            c.legion_must_epoch_launcher_set_launch_domain(
+                self.launcher, self.domain.raw_value())
         self.roots = []
         self.has_sublaunchers = False
 
@@ -1544,7 +1545,7 @@ class MustEpochLaunch(object):
         self.launcher = None
 
     def __enter__(self):
-        self.launcher = _MustEpochLauncher(domain=domain)
+        self.launcher = _MustEpochLauncher(domain=self.domain)
         _my.ctx.begin_launch(self)
 
     def __exit__(self, exc_type, exc_value, tb):
