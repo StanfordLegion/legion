@@ -33,6 +33,8 @@ namespace TestConfig {
   bool remote_tasks = false;
   bool chain_tasks = false;
   bool with_profiling = false;
+  bool skip_launch_procs = false;
+  bool use_posttriger_barrier = false;
 };
 
 // TASK IDs
@@ -56,6 +58,7 @@ enum TaskOrder {
 struct TestTaskArgs {
   int which_task;
   RegionInstance instance;
+  Barrier posttrigger_barrier;
   Barrier finish_barrier;
 };
 
@@ -79,6 +82,17 @@ void dummy_task_body(const void *args, size_t arglen,
   int task_type = ta.which_task;
   // quick out for most tasks
   if(task_type == MIDDLE_TASK) return;
+
+  if(TestConfig::use_posttriger_barrier && (task_type == FIRST_TASK)) {
+#if 0
+    // need scheduler lock stuff
+    Processor::enable_scheduler_lock();
+    ta.posttrigger_barrier.wait();
+    Processor::disable_scheduler_lock();
+#else
+    while(!ta.posttrigger_barrier.has_triggered());
+#endif
+  }
 
   AffineAccessor<TestTaskData, 1> ra(ta.instance, FieldIDs::TASKDATA);
   TestTaskData& mydata = ra[0];
@@ -122,6 +136,7 @@ void profiler_task(const void *args, size_t arglen,
 
 struct LauncherArgs {
   Barrier start_barrier;
+  Barrier posttrigger_barrier;
   Barrier finish_barrier;
   std::map<Processor, RegionInstance> instances;
 };
@@ -129,7 +144,10 @@ struct LauncherArgs {
 template<typename S>
 bool serdez(S& s, const LauncherArgs& t)
 {
-  return (s & t.start_barrier) && (s & t.finish_barrier) && (s & t.instances);
+  return ((s & t.start_barrier) &&
+	  (s & t.posttrigger_barrier) &&
+	  (s & t.finish_barrier) &&
+	  (s & t.instances));
 }
 
 
@@ -160,25 +178,36 @@ void task_launcher(const void *args, size_t arglen,
   // time how long this takes us
   double t1 = Clock::current_time();
   int total_tasks = 0;
-  for(Machine::ProcessorQuery::iterator it = pq.begin(); it != pq.end(); ++it) {
-    tta->instance = la.instances[*it];
-    assert(tta->instance.exists());
+  std::vector<Processor> targets;
+  for(Machine::ProcessorQuery::iterator it = pq.begin(); it != pq.end(); ++it)
+    if(!(TestConfig::skip_launch_procs && ((*it) == p)))
+      targets.push_back(*it);
 
-    Processor::TaskFuncID task_id = DUMMY_TASK;
+  // round-robin tasks across target processors in case barrier trigger
+  //  is slower than task execution rate
+  std::map<Processor, Event> preconds;
+  for(int i = 0; i < TestConfig::tasks_per_processor; i++) {
+    int which = ((i == 0) ? FIRST_TASK :
+		 (i == (TestConfig::tasks_per_processor - 1)) ? LAST_TASK :
+		 MIDDLE_TASK);
+    tta->which_task = which;
+    tta->posttrigger_barrier = la.posttrigger_barrier;
+    tta->finish_barrier = la.finish_barrier;
+    
+    for(std::vector<Processor>::const_iterator it = targets.begin(); it != targets.end(); ++it) {
+      tta->instance = la.instances[*it];
+      assert(tta->instance.exists());
+
+      Processor::TaskFuncID task_id = DUMMY_TASK;
 #ifdef USE_CUDA
-    if((*it).kind() == Processor::TOC_PROC)
-      task_id = DUMMY_GPU_TASK;
+      if((*it).kind() == Processor::TOC_PROC)
+	task_id = DUMMY_GPU_TASK;
 #endif
-    Event precond = la.start_barrier;
-    for(int i = 0; i < TestConfig::tasks_per_processor; i++) {
-      int which = ((i == 0) ? FIRST_TASK :
-		   (i == (TestConfig::tasks_per_processor - 1)) ? LAST_TASK :
-		   MIDDLE_TASK);
-      tta->which_task = which;
-      tta->finish_barrier = la.finish_barrier;
-      Event e = (*it).spawn(task_id, tta, argsize, prs, precond, which);
+      if(i == 0)
+	preconds[*it] = la.start_barrier;
+      Event e = (*it).spawn(task_id, tta, argsize, prs, preconds[*it], which);
       if(TestConfig::chain_tasks)
-	precond = e;
+	preconds[*it] = e;
       total_tasks++;
     }
   }
@@ -188,7 +217,19 @@ void task_launcher(const void *args, size_t arglen,
   log_app.print() << "spawn rate on " << p << ": " << spawn_rate << " tasks/s";
 
   // we're all done - we can arrive at the start barrier and then finish this task
+  double t3 = Clock::current_time();
   la.start_barrier.arrive();
+  double t4 = Clock::current_time();
+  if(!TestConfig::chain_tasks) {
+    double trigger_rate = total_tasks / (t4 - t3);
+    log_app.print() << "trigger rate on " << p << ": " << trigger_rate << " tasks/s";
+  }
+
+  if(TestConfig::use_posttriger_barrier)
+    la.posttrigger_barrier.arrive();
+  
+  if(TestConfig::skip_launch_procs)
+    la.finish_barrier.arrive();
 }
 
 void top_level_task(const void *args, size_t arglen, 
@@ -254,6 +295,8 @@ void top_level_task(const void *args, size_t arglen,
   // 2) one triggered by each processor when all task launches have been seen
   launch_args.start_barrier = Barrier::create_barrier(all_procs.size() * 
 						      TestConfig::launching_processors);
+  launch_args.posttrigger_barrier = Barrier::create_barrier(all_procs.size() * 
+							    TestConfig::launching_processors);
   launch_args.finish_barrier = Barrier::create_barrier(total_procs);
 
   // serialize the launcher args
@@ -298,6 +341,8 @@ int main(int argc, char **argv)
     .add_option_int("-args", TestConfig::task_argument_size)
     .add_option_bool("-remote", TestConfig::remote_tasks)
     .add_option_bool("-chain", TestConfig::chain_tasks)
+    .add_option_bool("-noself", TestConfig::skip_launch_procs)
+    .add_option_bool("-post", TestConfig::use_posttriger_barrier)
     .add_option_bool("-prof", TestConfig::with_profiling);
   ok = cp.parse_command_line(argc, (const char **)argv);
   assert(ok);
