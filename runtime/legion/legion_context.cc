@@ -5073,6 +5073,7 @@ namespace Legion {
       {
         const Operation::OpKind op_kind = op->get_operation_kind(); 
         if ((op_kind != Operation::FENCE_OP_KIND) &&
+            (op_kind != Operation::FRAME_OP_KIND) &&
             (op_kind != Operation::DELETION_OP_KIND) &&
             (op_kind != Operation::TRACE_BEGIN_OP_KIND) && 
             (op_kind != Operation::TRACE_COMPLETE_OP_KIND) &&
@@ -5111,6 +5112,7 @@ namespace Legion {
         // in register_fence_dependence that looks for all these kinds too
         // so that we do not run into trouble when running with Legion Spy.
         assert((op_kind == Operation::FENCE_OP_KIND) || 
+               (op_kind == Operation::FRAME_OP_KIND) || 
                (op_kind == Operation::DELETION_OP_KIND) ||
                (op_kind == Operation::TRACE_BEGIN_OP_KIND) ||
                (op_kind == Operation::TRACE_COMPLETE_OP_KIND) ||
