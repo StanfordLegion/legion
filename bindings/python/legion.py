@@ -1410,7 +1410,7 @@ class _MustEpochLauncher(object):
 
     def launch(self):
         if not self.has_sublaunchers:
-            raise Exception('MustEpochLaunch requires at least point task to be executed')
+            raise Exception('MustEpochLaunch requires at least one point task to be executed')
         result = c.legion_must_epoch_launcher_execute(
             _my.ctx.runtime, _my.ctx.context, self.launcher)
 
@@ -1557,10 +1557,14 @@ class MustEpochLaunch(object):
 def _dummy_task():
     return 1
 
-def execution_fence(block=False):
+def execution_fence(block=False, future=False):
     c.legion_runtime_issue_execution_fence(_my.ctx.runtime, _my.ctx.context)
-    if block:
-        _dummy_task().get()
+    if block or future:
+        f = _dummy_task()
+        if block:
+            f.get()
+        if future:
+            return f
 
 class Tunable(object):
     # FIXME: Deduplicate this with DefaultMapper::DefaultTunables
