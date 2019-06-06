@@ -1417,6 +1417,7 @@ class _MustEpochLauncher(object):
             raise Exception('MustEpochLaunch requires at least one point task to be executed')
         result = c.legion_must_epoch_launcher_execute(
             _my.ctx.runtime, _my.ctx.context, self.launcher)
+        c.legion_future_map_destroy(result)
 
 class TaskLaunch(object):
     __slots__ = []
