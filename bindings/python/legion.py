@@ -1392,7 +1392,7 @@ class _MustEpochLauncher(object):
         self.domain = domain
         self.launcher = c.legion_must_epoch_launcher_create(0, 0)
         if self.domain is not None:
-            c.legion_must_epoch_launcher_set_domain(self.domain.raw_value())
+            c.legion_must_epoch_launcher_set_launch_domain(self.domain.raw_value())
         self.roots = []
         self.has_sublaunchers = False
 
