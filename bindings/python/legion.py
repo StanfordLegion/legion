@@ -1386,10 +1386,13 @@ class _IndexLauncher(_TaskLauncher):
         c.legion_future_map_destroy(result)
 
 class _MustEpochLauncher(object):
-    __slots__ = ['launcher', 'roots', 'has_sublaunchers']
+    __slots__ = ['domain', 'launcher', 'roots', 'has_sublaunchers']
 
-    def __init__(self):
+    def __init__(self, domain=None):
+        self.domain = domain
         self.launcher = c.legion_must_epoch_launcher_create(0, 0)
+        if self.domain is not None:
+            c.legion_must_epoch_launcher_set_domain(self.domain.raw_value())
         self.roots = []
         self.has_sublaunchers = False
 
@@ -1527,13 +1530,21 @@ class IndexLaunch(object):
         self.launcher.launch()
 
 class MustEpochLaunch(object):
-    __slots__ = ['launcher']
+    __slots__ = ['domain', 'launcher']
 
-    def __init__(self):
+    def __init__(self, domain=None):
+        if isinstance(domain, Domain):
+            self.domain = domain
+        elif isinstance(domain, Ispace):
+            self.domain = ispace.domain
+        elif domain is not None:
+            self.domain = Domain.create(domain)
+        else:
+            self.domain = None
         self.launcher = None
 
     def __enter__(self):
-        self.launcher = _MustEpochLauncher()
+        self.launcher = _MustEpochLauncher(domain=domain)
         _my.ctx.begin_launch(self)
 
     def __exit__(self, exc_type, exc_value, tb):
