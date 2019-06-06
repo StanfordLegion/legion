@@ -4297,6 +4297,17 @@ legion_must_epoch_launcher_add_index_task(
   legion_index_launcher_destroy(handle_);
 }
 
+void
+legion_must_epoch_launcher_set_domain(
+  legion_must_epoch_launcher_t launcher_,
+  legion_domain_t handle_)
+{
+  MustEpochLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+  Domain handle = CObjectWrapper::unwrap(handle_);
+
+  launcher->launch_domain = handle;
+}
+
 // -----------------------------------------------------------------------
 // Tracing Operations
 // -----------------------------------------------------------------------

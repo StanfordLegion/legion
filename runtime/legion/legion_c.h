@@ -3443,6 +3443,14 @@ extern "C" {
     legion_must_epoch_launcher_t launcher,
     legion_index_launcher_t handle);
 
+  /**
+   * @see Legion::Must_EpochLauncher::launch_domain
+   */
+  void
+  legion_must_epoch_launcher_set_domain(
+    legion_must_epoch_launcher_t launcher,
+    legion_domain_t domain);
+
   // -----------------------------------------------------------------------
   // Fence Operations
   // -----------------------------------------------------------------------
