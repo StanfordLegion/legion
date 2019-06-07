@@ -4592,11 +4592,15 @@ function codegen.expr_image(cx, node)
     [actions]
     var colors = c.legion_index_partition_get_color_space(
       [cx.runtime], [partition.value].impl.index_partition)
+    var disjointness = [(node.disjointness and
+      ((node.disjointness:is(ast.disjointness_kind.Disjoint) and c.DISJOINT_KIND)
+       or c.ALIASED_KIND))
+      or c.COMPUTE_KIND]
     var [ip] = [create_partition](
       [cx.runtime], [cx.context],
       [parent.value].impl.index_space,
       [partition.value].impl, [region_parent].impl, field_id,
-      colors, c.COMPUTE_KIND, -1)
+      colors, disjointness, -1)
     var [lp] = c.legion_logical_partition_create(
       [cx.runtime], [cx.context], [parent.value].impl, [ip])
     [tag_imported(cx, lp)]

@@ -2068,6 +2068,8 @@ local function insert_partition_creation(parallelizable, caller_cx, call_stats)
                 base_name .. "__gp" .. "__image_" .. tostring(field_path))
               stats:insert(ast_util.mk_stat_var(gp_symbol, nil,
                 ast.typed.expr.Image {
+		  -- TODO: determine disjointness
+		  disjointness = false,
                   expr_type = gp_type,
                   parent = ast_util.mk_expr_id(region, std.rawref(&region:gettype())),
                   partition = ast_util.mk_expr_id(pp, std.rawref(&pp:gettype())),
