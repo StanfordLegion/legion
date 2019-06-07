@@ -19,9 +19,6 @@
 #define REALM_MACHINE_IMPL_H
 
 #include "realm/machine.h"
-
-#include "legion/legion_types.h"
-#include "legion/legion_utilities.h"
 #include "realm/activemsg.h"
 
 #include <vector>

@@ -30,6 +30,11 @@
 
 #include "realm/utils.h"
 
+#include "realm/nodeset.h"
+
+// For backwards compatibility with old accessors
+#include "legion/accessor.h"
+
 // For doing backtraces
 #include <execinfo.h> // symbols
 #include <cxxabi.h>   // demangling
@@ -1232,6 +1237,14 @@ namespace Realm {
         fprintf(stderr,"ERROR: Launched %d nodes, but low-level IDs are only "
                        "configured for at most %d nodes. Update the allocation "
 		       "of bits in ID", max_node_id+1, (ID::MAX_NODE_ID + 1));
+        exit(1);
+      }
+      if ((max_node_id+1) > REALM_MAX_NUM_NODES)
+      {
+        fprintf(stderr,"ERROR: Launched %d nodes, but REALM_MAX_NUM_NODES are only "
+                       "configured for at most %d nodes. Update the macro "
+                       "REALM_MAX_NUM_NODES in nodeset.h",
+		        max_node_id+1, REALM_MAX_NUM_NODES);
         exit(1);
       }
 

@@ -27,6 +27,7 @@
 #include "realm/rsrv_impl.h"
 #include "realm/metadata.h"
 #include "realm/event_impl.h"
+#include "realm/profiling.h"
 
 namespace Realm {
 
