@@ -13,15 +13,6 @@
  * limitations under the License.
  */
 
-// SJT: this comes first because some systems require __STDC_FORMAT_MACROS
-//  to be defined before inttypes.h is included anywhere
-#ifndef __MACH__
-#ifndef __STDC_FORMAT_MACROS
-#define __STDC_FORMAT_MACROS
-#endif
-#include <inttypes.h>
-#endif
-
 #include "legion.h"
 #include "legion/runtime.h"
 #include "legion/legion_ops.h"

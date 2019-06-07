@@ -18,6 +18,7 @@
 #define __BITMASK_H__
 
 #include <assert.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -944,6 +945,12 @@
 #ifdef __MACH__
 #define MASK_FMT "llx"
 #else
+// SJT: this comes first because some systems require __STDC_FORMAT_MACROS
+//  to be defined before inttypes.h is included anywhere
+#ifndef __STDC_FORMAT_MACROS
+#define __STDC_FORMAT_MACROS
+#endif
+#include <inttypes.h>
 #define MASK_FMT PRIx64
 #endif
     //--------------------------------------------------------------------------
