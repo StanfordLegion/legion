@@ -28,6 +28,7 @@ namespace TestConfig {
   extern bool remote_tasks;
   extern bool with_profiling;
   extern bool chain_tasks;
+  extern bool user_posttrigger_barrier;
 };
 
 void dummy_task_body(const void *args, size_t arglen, 

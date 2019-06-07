@@ -4322,9 +4322,20 @@ legion_must_epoch_launcher_add_index_task(
 }
 
 void
+legion_must_epoch_launcher_set_launch_domain(
+  legion_must_epoch_launcher_t launcher_,
+  legion_domain_t domain_)
+{
+  MustEpochLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+  Domain domain = CObjectWrapper::unwrap(domain_);
+
+  launcher->launch_domain = domain;
+}
+
+void
 legion_must_epoch_launcher_set_launch_space(
-    legion_must_epoch_launcher_t launcher_,
-    legion_index_space_t is_)
+  legion_must_epoch_launcher_t launcher_,
+  legion_index_space_t is_)
 {
   MustEpochLauncher *launcher = CObjectWrapper::unwrap(launcher_);
   IndexSpace is = CObjectWrapper::unwrap(is_);

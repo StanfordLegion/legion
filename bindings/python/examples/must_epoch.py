@@ -32,14 +32,25 @@ def hi(i):
 
 @task
 def main():
+    global global_var
+
     global_procs = legion.Tunable.select(legion.Tunable.GLOBAL_PYS).get()
 
-    with legion.MustEpochLaunch():
+    with legion.MustEpochLaunch(): # implicit launch domain
         for i in range(global_procs):
             hi(i, point=i)
     legion.execution_fence(block=True)
 
     assert global_var == 4123
+
+    global_var = 456
+
+    with legion.MustEpochLaunch([global_procs]):
+        for i in range(global_procs):
+            hi(i, point=i)
+    legion.execution_fence(block=True)
+
+    assert global_var == 4456
 
 if __name__ == '__legion_main__':
     main()

@@ -34,6 +34,7 @@
 #include <vector>
 #include <typeinfo>
 
+#include "bitmask.h"
 #include "legion/legion_config.h"
 #include "legion/legion_template_help.h"
 
@@ -1377,24 +1378,7 @@ namespace Legion {
     // legion_utilities.h
     struct RegionUsage; 
     template<typename T> class Fraction;
-    template<typename T, unsigned int MAX, 
-             unsigned SHIFT, unsigned MASK> class BitMask;
-    template<typename T, unsigned int MAX,
-             unsigned SHIFT, unsigned MASK> class TLBitMask;
-#ifdef __SSE2__
-    template<unsigned int MAX> class SSEBitMask;
-    template<unsigned int MAX> class SSETLBitMask;
-#endif
-#ifdef __AVX__
-    template<unsigned int MAX> class AVXBitMask;
-    template<unsigned int MAX> class AVXTLBitMask;
-#endif
-#ifdef __ALTIVEC__
-    template<unsigned int MAX> class PPCBitMask;
-    template<unsigned int MAX> class PPCTLBitMask;
-#endif
     template<typename T, unsigned LOG2MAX> class BitPermutation;
-    template<typename IT, typename DT, bool BIDIR = false> class IntegerSet;
 
     // Forward declarations for runtime level objects
     // runtime.h

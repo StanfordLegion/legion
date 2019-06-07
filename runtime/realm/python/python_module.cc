@@ -216,6 +216,7 @@ namespace Realm {
     if (!module) {
       log_py.fatal() << "unable to import Python module " << psi->module_name;
       (api->PyErr_PrintEx)(0);
+      (api->Py_Finalize)(); // otherwise Python doesn't flush its buffers
       assert(0);
     }
     //(api->PyObject_Print)(module, stdout, 0); printf("\n");
@@ -235,6 +236,7 @@ namespace Realm {
         }
       }
       (api->PyErr_PrintEx)(0);
+      (api->Py_Finalize)(); // otherwise Python doesn't flush its buffers
       assert(0);
     }
     //(api->PyObject_Print)(function, stdout, 0); printf("\n");
@@ -253,6 +255,7 @@ namespace Realm {
     if (!module) {
       log_py.fatal() << "unable to import Python module " << module_name;
       (api->PyErr_PrintEx)(0);
+      (api->Py_Finalize)(); // otherwise Python doesn't flush its buffers
       assert(0);
     }
     (api->Py_DecRef)(module);
@@ -275,6 +278,7 @@ namespace Realm {
     if(!res) {
       log_py.fatal() << "unable to run python string:" << script_text;
       (api->PyErr_PrintEx)(0);
+      (api->Py_Finalize)(); // otherwise Python doesn't flush its buffers
       assert(0);
     }
     (api->Py_DecRef)(res);
@@ -925,6 +929,7 @@ namespace Realm {
     } else {
       log_py.fatal() << "python exception occurred within task:";
       (interpreter->api->PyErr_PrintEx)(0);
+      (interpreter->api->Py_Finalize)(); // otherwise Python doesn't flush its buffers
       assert(0);
     }
   }

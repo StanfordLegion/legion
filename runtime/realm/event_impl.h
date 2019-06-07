@@ -27,6 +27,8 @@
 
 #include "realm/lists.h"
 #include "realm/threads.h"
+#include "realm/logging.h"
+#include "realm/redop.h"
 
 #include <vector>
 #include <map>

@@ -23,6 +23,8 @@
 #ifdef USE_HDF
 #include "realm/hdf5/hdf5_access.h"
 #endif
+// For backwards compatability accessors
+#include "legion/accessor.h"
 
 TYPE_IS_SERIALIZABLE(Realm::InstanceLayoutGeneric::FieldLayout);
 

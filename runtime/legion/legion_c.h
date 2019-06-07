@@ -3462,14 +3462,20 @@ extern "C" {
     legion_index_launcher_t handle);
 
   /**
-   * @param param handle Caller must have ownership of parameter `handle`.
-   *
-   * see Legion::Must_EpochLauncher::launch_space
+   * @see Legion::Must_EpochLauncher::launch_domain
+   */
+  void
+  legion_must_epoch_launcher_set_launch_domain(
+    legion_must_epoch_launcher_t launcher,
+    legion_domain_t domain);
+
+  /**
+   * @see Legion::Must_EpochLauncher::launch_space
    */
   void
   legion_must_epoch_launcher_set_launch_space(
-      legion_must_epoch_launcher_t launcher,
-      legion_index_space_t is);
+    legion_must_epoch_launcher_t launcher,
+    legion_index_space_t is);
 
   // -----------------------------------------------------------------------
   // Fence Operations

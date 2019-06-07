@@ -1386,10 +1386,14 @@ class _IndexLauncher(_TaskLauncher):
         c.legion_future_map_destroy(result)
 
 class _MustEpochLauncher(object):
-    __slots__ = ['launcher', 'roots', 'has_sublaunchers']
+    __slots__ = ['domain', 'launcher', 'roots', 'has_sublaunchers']
 
-    def __init__(self):
+    def __init__(self, domain=None):
+        self.domain = domain
         self.launcher = c.legion_must_epoch_launcher_create(0, 0)
+        if self.domain is not None:
+            c.legion_must_epoch_launcher_set_launch_domain(
+                self.launcher, self.domain.raw_value())
         self.roots = []
         self.has_sublaunchers = False
 
@@ -1410,9 +1414,10 @@ class _MustEpochLauncher(object):
 
     def launch(self):
         if not self.has_sublaunchers:
-            raise Exception('MustEpochLaunch requires at least point task to be executed')
+            raise Exception('MustEpochLaunch requires at least one point task to be executed')
         result = c.legion_must_epoch_launcher_execute(
             _my.ctx.runtime, _my.ctx.context, self.launcher)
+        c.legion_future_map_destroy(result)
 
 class TaskLaunch(object):
     __slots__ = []
@@ -1527,13 +1532,21 @@ class IndexLaunch(object):
         self.launcher.launch()
 
 class MustEpochLaunch(object):
-    __slots__ = ['launcher']
+    __slots__ = ['domain', 'launcher']
 
-    def __init__(self):
+    def __init__(self, domain=None):
+        if isinstance(domain, Domain):
+            self.domain = domain
+        elif isinstance(domain, Ispace):
+            self.domain = ispace.domain
+        elif domain is not None:
+            self.domain = Domain.create(domain)
+        else:
+            self.domain = None
         self.launcher = None
 
     def __enter__(self):
-        self.launcher = _MustEpochLauncher()
+        self.launcher = _MustEpochLauncher(domain=self.domain)
         _my.ctx.begin_launch(self)
 
     def __exit__(self, exc_type, exc_value, tb):
@@ -1557,10 +1570,14 @@ class MustEpochLaunch(object):
 def _dummy_task():
     return 1
 
-def execution_fence(block=False):
+def execution_fence(block=False, future=False):
     c.legion_runtime_issue_execution_fence(_my.ctx.runtime, _my.ctx.context)
-    if block:
-        _dummy_task().get()
+    if block or future:
+        f = _dummy_task()
+        if block:
+            f.get()
+        if future:
+            return f
 
 class Tunable(object):
     # FIXME: Deduplicate this with DefaultMapper::DefaultTunables
