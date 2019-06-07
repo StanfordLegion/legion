@@ -123,8 +123,10 @@ namespace Legion {
      */
     struct PhysicalTraceInfo {
     public:
-      explicit PhysicalTraceInfo(Operation *op, bool initialize = true);
-      PhysicalTraceInfo(Operation *op, Memoizable *memo);
+      explicit PhysicalTraceInfo(Operation *op, unsigned index = -1U,
+                                 bool initialize = false);
+      PhysicalTraceInfo(const PhysicalTraceInfo &info, unsigned index);
+      PhysicalTraceInfo(Operation *op, Memoizable &memo);
       PhysicalTraceInfo(const PhysicalTraceInfo &rhs);
     public:
       void record_merge_events(ApEvent &result, ApEvent e1, ApEvent e2) const;
@@ -135,38 +137,48 @@ namespace Legion {
       void record_op_sync_event(ApEvent &result) const;
     public:
       void record_issue_copy(ApEvent &result,
-                             IndexSpaceExpression *expr,
-                             const std::vector<CopySrcDstField>& src_fields,
-                             const std::vector<CopySrcDstField>& dst_fields,
+                          IndexSpaceExpression *expr,
+                          const std::vector<CopySrcDstField>& src_fields,
+                          const std::vector<CopySrcDstField>& dst_fields,
 #ifdef LEGION_SPY
-                             FieldSpace handle,
-                             RegionTreeID src_tree_id,
-                             RegionTreeID dst_tree_id,
+                          FieldSpace handle,
+                          RegionTreeID src_tree_id,
+                          RegionTreeID dst_tree_id,
 #endif
-                             ApEvent precondition,
-                             ReductionOpID redop,
-                             bool reduction_fold) const;
+                          ApEvent precondition,
+                          ReductionOpID redop,
+                          bool reduction_fold,
+                          const FieldMaskSet<InstanceView> *tracing_srcs,
+                          const FieldMaskSet<InstanceView> *tracing_dsts) const;
       void record_issue_fill(ApEvent &result,
-                             IndexSpaceExpression *expr,
-                             const std::vector<CopySrcDstField> &fields,
-                             const void *fill_value, size_t fill_size,
+                          IndexSpaceExpression *expr,
+                          const std::vector<CopySrcDstField> &fields,
+                          const void *fill_value, size_t fill_size,
 #ifdef LEGION_SPY
-                             UniqueID fill_uid,
-                             FieldSpace handle,
-                             RegionTreeID tree_id,
+                          UniqueID fill_uid,
+                          FieldSpace handle,
+                          RegionTreeID tree_id,
 #endif
-                             ApEvent precondition) const;
+                          ApEvent precondition,
+                          const FieldMaskSet<FillView> *tracing_srcs,
+                          const FieldMaskSet<InstanceView> *tracing_dsts) const;
       void record_issue_indirect(ApEvent &result,
                              IndexSpaceExpression *expr,
                              const std::vector<CopySrcDstField>& src_fields,
                              const std::vector<CopySrcDstField>& dst_fields,
                              const std::vector<void*> &indirections,
                              ApEvent precondition) const;
+      void record_op_view(const RegionUsage &usage,
+                          const FieldMask &user_mask,
+                          InstanceView *view) const;
+#if 0
       void record_empty_copy(DeferredView *view,
                              const FieldMask &copy_mask,
                              MaterializedView *dst) const;
+#endif
     public:
       Operation *const op;
+      const unsigned index;
       PhysicalTemplate *const tpl;
       const bool recording;
     };

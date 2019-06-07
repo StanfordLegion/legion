@@ -255,20 +255,28 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    PhysicalTraceInfo::PhysicalTraceInfo(Operation *o, bool initialize)
+    PhysicalTraceInfo::PhysicalTraceInfo(Operation *o, unsigned idx, bool init)
     //--------------------------------------------------------------------------
-      : op(o), tpl((op == NULL) ? NULL : 
+      : op(o), index(idx), tpl((op == NULL) ? NULL :
           (op->get_memoizable() == NULL) ? NULL :
             op->get_memoizable()->get_template()),
         recording((tpl == NULL) ? false : tpl->is_recording())
     {
-      if (recording && initialize)
+      if (recording && init)
         tpl->record_get_term_event(op->get_memoizable());
     }
 
     //--------------------------------------------------------------------------
-    PhysicalTraceInfo::PhysicalTraceInfo(Operation *o, Memoizable *memo)
-      : op(o), tpl(memo->get_template()),
+    PhysicalTraceInfo::PhysicalTraceInfo(
+                                    const PhysicalTraceInfo &info, unsigned idx)
+      : op(info.op), index(idx), tpl(info.tpl), recording(info.recording)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    PhysicalTraceInfo::PhysicalTraceInfo(Operation *o, Memoizable &memo)
+      : op(o), index(-1U), tpl(memo.get_template()),
         recording((tpl == NULL) ? false : tpl->is_recording())
     //--------------------------------------------------------------------------
     {
@@ -276,7 +284,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     PhysicalTraceInfo::PhysicalTraceInfo(const PhysicalTraceInfo &rhs)
-      : op(rhs.op), tpl(rhs.tpl), recording(rhs.recording)
+      : op(rhs.op), index(rhs.index), tpl(rhs.tpl), recording(rhs.recording)
     //--------------------------------------------------------------------------
     {
     }
@@ -334,54 +342,69 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void PhysicalTraceInfo::record_issue_copy(ApEvent &result,
-                                 IndexSpaceExpression *expr,
-                                 const std::vector<CopySrcDstField>& src_fields,
-                                 const std::vector<CopySrcDstField>& dst_fields,
+                           IndexSpaceExpression *expr,
+                           const std::vector<CopySrcDstField>& src_fields,
+                           const std::vector<CopySrcDstField>& dst_fields,
 #ifdef LEGION_SPY
-                                 FieldSpace handle,
-                                 RegionTreeID src_tree_id,
-                                 RegionTreeID dst_tree_id,
+                           FieldSpace handle,
+                           RegionTreeID src_tree_id,
+                           RegionTreeID dst_tree_id,
 #endif
-                                 ApEvent precondition,
-                                 ReductionOpID redop,
-                                 bool reduction_fold) const
+                           ApEvent precondition,
+                           ReductionOpID redop,
+                           bool reduction_fold,
+                           const FieldMaskSet<InstanceView> *tracing_srcs,
+                           const FieldMaskSet<InstanceView> *tracing_dsts) const
     //--------------------------------------------------------------------------
     {
+      Memoizable *memo = op->get_memoizable();
 #ifdef DEBUG_LEGION
+      assert(memo != NULL);
       assert(recording);
       assert(tpl != NULL);
       assert(tpl->is_recording());
+      assert(tracing_srcs != NULL);
+      assert(tracing_dsts != NULL);
 #endif
-      tpl->record_issue_copy(op, result, expr, src_fields, dst_fields,
+      tpl->record_issue_copy(memo, index, result, expr, src_fields, dst_fields,
 #ifdef LEGION_SPY
                              handle, src_tree_id, dst_tree_id,
 #endif
-                             precondition, redop, reduction_fold);
+                             precondition, redop, reduction_fold,
+                             *tracing_srcs, *tracing_dsts);
     }
 
     //--------------------------------------------------------------------------
     void PhysicalTraceInfo::record_issue_fill(ApEvent &result,
-                                     IndexSpaceExpression *expr,
-                                     const std::vector<CopySrcDstField> &fields,
-                                     const void *fill_value, size_t fill_size,
+                           IndexSpaceExpression *expr,
+                           const std::vector<CopySrcDstField> &fields,
+                           const void *fill_value, size_t fill_size,
 #ifdef LEGION_SPY
-                                     UniqueID fill_uid,
-                                     FieldSpace handle,
-                                     RegionTreeID tree_id,
+                           UniqueID fill_uid,
+                           FieldSpace handle,
+                           RegionTreeID tree_id,
 #endif
-                                     ApEvent precondition) const
+                           ApEvent precondition,
+                           const FieldMaskSet<FillView> *tracing_srcs,
+                           const FieldMaskSet<InstanceView> *tracing_dsts) const
     //--------------------------------------------------------------------------
     {
+      Memoizable *memo = op->get_memoizable();
 #ifdef DEBUG_LEGION
+      assert(memo != NULL);
       assert(recording);
       assert(tpl != NULL);
+      assert(index != -1U);
       assert(tpl->is_recording());
+      assert(tracing_srcs != NULL);
+      assert(tracing_dsts != NULL);
 #endif
-      tpl->record_issue_fill(op, result, expr, fields, fill_value, fill_size,
+      tpl->record_issue_fill(memo, index, result, expr, fields, fill_value,
+                             fill_size,
 #ifdef LEGION_SPY
                              fill_uid, handle, tree_id,
 #endif
-                             precondition);
+                             precondition, *tracing_srcs, *tracing_dsts);
     }
 
     //--------------------------------------------------------------------------
@@ -393,15 +416,35 @@ namespace Legion {
                                  ApEvent precondition) const
     //--------------------------------------------------------------------------
     {
+      Memoizable *memo = op->get_memoizable();
 #ifdef DEBUG_LEGION
+      assert(memo != NULL);
       assert(recording);
       assert(tpl != NULL);
       assert(tpl->is_recording());
 #endif
-      tpl->record_issue_indirect(op, result, expr, src_fields, dst_fields,
+      tpl->record_issue_indirect(memo, result, expr, src_fields, dst_fields,
                                  indirections, precondition);
     }
 
+    //--------------------------------------------------------------------------
+    void PhysicalTraceInfo::record_op_view(const RegionUsage &usage,
+                                           const FieldMask &user_mask,
+                                           InstanceView *view) const
+    //--------------------------------------------------------------------------
+    {
+      Memoizable *memo = op->get_memoizable();
+#ifdef DEBUG_LEGION
+      assert(memo != NULL);
+      assert(recording);
+      assert(index != -1U);
+      assert(tpl != NULL);
+      assert(tpl->is_recording());
+#endif
+      tpl->record_op_view(memo, index, view, usage, user_mask);
+    }
+
+#if 0
     //--------------------------------------------------------------------------
     void PhysicalTraceInfo::record_empty_copy(DeferredView *view,
                                               const FieldMask &copy_mask,
@@ -415,6 +458,7 @@ namespace Legion {
 #endif
       tpl->record_empty_copy(view, copy_mask, dst);
     }
+#endif
 
     /////////////////////////////////////////////////////////////
     // ProjectionInfo 
@@ -4605,7 +4649,7 @@ namespace Legion {
       {
         const bool needs_deferral = !already_deferred || 
           (input_aggregators.size() > 1);
-        const PhysicalTraceInfo trace_info(op, false/*initialize*/);
+        const PhysicalTraceInfo trace_info(op, index);
         for (std::map<RtEvent,CopyFillAggregator*>::const_iterator it = 
               input_aggregators.begin(); it != input_aggregators.end(); it++)
         {
@@ -4648,7 +4692,7 @@ namespace Legion {
       if (output_aggregator != NULL)
       {
         // Make sure we don't defer this
-        const PhysicalTraceInfo trace_info(op, false/*initialize*/);
+        const PhysicalTraceInfo trace_info(op, index);
         output_aggregator->issue_updates(trace_info, term_event);
         result = output_aggregator->summarize(trace_info);
         if (output_aggregator->release_guards(op->runtime, applied_events))
@@ -5179,7 +5223,7 @@ namespace Legion {
       if (release_aggregator != NULL)
       {
         std::set<RtEvent> guard_events;
-        const PhysicalTraceInfo trace_info(op, false/*initialize*/);
+        const PhysicalTraceInfo trace_info(op, index);
         release_aggregator->issue_updates(trace_info, precondition);
 #ifdef NON_AGGRESSIVE_AGGREGATORS
         if (release_aggregator->effects_applied.has_triggered())
@@ -5581,7 +5625,7 @@ namespace Legion {
             }
           }
         }
-        const PhysicalTraceInfo trace_info(op, false/*initialize*/);
+        const PhysicalTraceInfo trace_info(op, index);
         across_aggregator->issue_updates(trace_info, precondition,
             false/*has src preconditions*/, true/*has dst preconditions*/);
         // Need to wait before we can get the summary
@@ -5612,7 +5656,7 @@ namespace Legion {
         applied_events.insert(args.applied_event);
         return args.effects_event;
       }
-      const PhysicalTraceInfo trace_info(op, false/*initialize*/);
+      const PhysicalTraceInfo trace_info(op, index);
       if (across_aggregator != NULL)
       {
         const ApEvent result = across_aggregator->summarize(trace_info);
@@ -5950,7 +5994,7 @@ namespace Legion {
         apply_update_equivalence_sets();
       if (output_aggregator != NULL)
       {
-        const PhysicalTraceInfo trace_info(op, false/*initialize*/);
+        const PhysicalTraceInfo trace_info(op, index);
         output_aggregator->issue_updates(trace_info, precondition);
         // Need to wait before we can get the summary
 #ifdef NON_AGGRESSIVE_AGGREGATORS
@@ -5980,7 +6024,7 @@ namespace Legion {
         applied_events.insert(args.applied_event);
         return args.effects_event;
       }
-      const PhysicalTraceInfo trace_info(op, false/*initialize*/);
+      const PhysicalTraceInfo trace_info(op, index);
       if (output_aggregator != NULL)
       {
         const ApEvent result = output_aggregator->summarize(trace_info); 

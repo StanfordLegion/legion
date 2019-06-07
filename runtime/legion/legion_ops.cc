@@ -4027,7 +4027,7 @@ namespace Legion {
     void CopyOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
-      const PhysicalTraceInfo trace_info(this);
+      const PhysicalTraceInfo trace_info(this,-1U /*index*/,true/*initialize*/);
       std::vector<InstanceSet> valid_src_instances(src_requirements.size());
       std::vector<InstanceSet> valid_dst_instances(dst_requirements.size());
       std::vector<InstanceSet> valid_gather_instances(
@@ -4193,20 +4193,20 @@ namespace Legion {
           const bool record_valid = (output.untracked_valid_srcs.find(idx) ==
                                      output.untracked_valid_srcs.end());
           runtime->forest->physical_perform_updates_and_registration(
-                                                  src_requirements[idx],
-                                                  src_versions[idx],
-                                                  this, idx, 
-                                                  local_init_precondition,
-                                                  local_completion,
-                                                  src_targets,
-                                                  trace_info,
-                                                  local_applied_events,
+                                              src_requirements[idx],
+                                              src_versions[idx],
+                                              this, idx,
+                                              local_init_precondition,
+                                              local_completion,
+                                              src_targets,
+                                              PhysicalTraceInfo(trace_info,idx),
+                                              local_applied_events,
 #ifdef DEBUG_LEGION
-                                                  get_logging_name(),
-                                                  unique_op_id,
+                                              get_logging_name(),
+                                              unique_op_id,
 #endif
-                                                  false/*track effects*/,
-                                                  record_valid);
+                                              false/*track effects*/,
+                                              record_valid);
         }
         // Little bit of a hack here, if we are going to do a reduction
         // explicit copy, switch the privileges to read-write when doing
@@ -4221,19 +4221,19 @@ namespace Legion {
         set_mapping_state(dst_idx);
         ApEvent effects_done = 
           runtime->forest->physical_perform_updates_and_registration(
-                                                dst_requirements[idx],
-                                                dst_versions[idx], this, 
-                                                dst_idx,
-                                                local_init_precondition,
-                                                local_completion,
-                                                dst_targets,
-                                                trace_info,
-                                                local_applied_events,
+                                          dst_requirements[idx],
+                                          dst_versions[idx], this,
+                                          dst_idx,
+                                          local_init_precondition,
+                                          local_completion,
+                                          dst_targets,
+                                          PhysicalTraceInfo(trace_info,dst_idx),
+                                          local_applied_events,
 #ifdef DEBUG_LEGION
-                                                get_logging_name(),
-                                                unique_op_id,
+                                          get_logging_name(),
+                                          unique_op_id,
 #endif
-                                                track_effects);
+                                          track_effects);
         if (effects_done.exists())
           copy_complete_events.insert(effects_done);
         if (runtime->legion_spy_enabled)
@@ -4259,19 +4259,19 @@ namespace Legion {
                                     == output.untracked_valid_ind_srcs.end());
           ApEvent effects_done = 
             runtime->forest->physical_perform_updates_and_registration(
-                                                src_indirect_requirements[idx],
-                                                gather_versions[idx], this, 
-                                                gather_idx,
-                                                local_init_precondition,
-                                                local_completion,
-                                                gather_targets,
-                                                trace_info,
-                                                local_applied_events,
+                                       src_indirect_requirements[idx],
+                                       gather_versions[idx], this,
+                                       gather_idx,
+                                       local_init_precondition,
+                                       local_completion,
+                                       gather_targets,
+                                       PhysicalTraceInfo(trace_info,gather_idx),
+                                       local_applied_events,
 #ifdef DEBUG_LEGION
-                                                get_logging_name(),
-                                                unique_op_id,
+                                       get_logging_name(),
+                                       unique_op_id,
 #endif
-                                                track_effects, record_valid);
+                                       track_effects, record_valid);
           if (effects_done.exists())
             copy_complete_events.insert(effects_done);
           if (runtime->legion_spy_enabled)
@@ -4295,19 +4295,19 @@ namespace Legion {
           set_mapping_state(scatter_idx);
           ApEvent effects_done = 
             runtime->forest->physical_perform_updates_and_registration(
-                                                dst_indirect_requirements[idx],
-                                                scatter_versions[idx], this, 
-                                                scatter_idx,
-                                                local_init_precondition,
-                                                local_completion,
-                                                scatter_targets,
-                                                trace_info,
-                                                local_applied_events,
+                                      dst_indirect_requirements[idx],
+                                      scatter_versions[idx], this,
+                                      scatter_idx,
+                                      local_init_precondition,
+                                      local_completion,
+                                      scatter_targets,
+                                      PhysicalTraceInfo(trace_info,scatter_idx),
+                                      local_applied_events,
 #ifdef DEBUG_LEGION
-                                                get_logging_name(),
-                                                unique_op_id,
+                                      get_logging_name(),
+                                      unique_op_id,
 #endif
-                                                track_effects, record_valid);
+                                      track_effects, record_valid);
           if (effects_done.exists())
             copy_complete_events.insert(effects_done);
           if (runtime->legion_spy_enabled)
@@ -4504,7 +4504,7 @@ namespace Legion {
     {
       const DeferredCopyAcross *dargs = (const DeferredCopyAcross*)args;
       std::set<RtEvent> applied_conditions;
-      const PhysicalTraceInfo trace_info(dargs->copy, false);
+      const PhysicalTraceInfo trace_info(dargs->copy);
       dargs->copy->perform_copy_across(dargs->index, dargs->precondition,
                             dargs->done, dargs->guard, *dargs->src_targets, 
                             *dargs->dst_targets, dargs->gather_targets,
@@ -5176,6 +5176,51 @@ namespace Legion {
       Runtime::trigger_event(completion_event, copy_complete_event);
       need_completion_trigger = false;
       complete_execution();
+    }
+
+    //--------------------------------------------------------------------------
+    const VersionInfo& CopyOp::get_version_info(unsigned idx) const
+    //--------------------------------------------------------------------------
+    {
+      if (idx >= src_versions.size())
+      {
+        idx -= src_versions.size();
+        if (idx >= dst_versions.size())
+        {
+          idx -= dst_versions.size();
+          if (idx >= gather_versions.size())
+            return scatter_versions[idx - gather_versions.size()];
+          else
+            return gather_versions[idx];
+        }
+        else
+          return dst_versions[idx];
+      }
+      else
+        return src_versions[idx];
+    }
+
+    //--------------------------------------------------------------------------
+    const RegionRequirement& CopyOp::get_requirement(unsigned idx) const
+    //--------------------------------------------------------------------------
+    {
+      if (idx >= src_requirements.size())
+      {
+        idx -= src_requirements.size();
+        if (idx >= dst_requirements.size())
+        {
+          idx -= dst_requirements.size();
+          if (idx >= src_indirect_requirements.size())
+            return dst_indirect_requirements[
+              idx - src_indirect_requirements.size()];
+          else
+            return src_indirect_requirements[idx];
+        }
+        else
+          return dst_requirements[idx];
+      }
+      else
+        return src_requirements[idx];
     }
 
     //--------------------------------------------------------------------------
@@ -8436,7 +8481,7 @@ namespace Legion {
     void AcquireOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
-      const PhysicalTraceInfo trace_info(this);
+      const PhysicalTraceInfo trace_info(this, 0/*index*/, true/*initialize*/);
       // Invoke the mapper before doing anything else 
       invoke_mapper();
       InstanceSet restricted_instances;
@@ -8637,6 +8682,20 @@ namespace Legion {
       Runtime::trigger_event(completion_event, acquire_complete_event);
       need_completion_trigger = false;
       complete_execution();
+    }
+
+    //--------------------------------------------------------------------------
+    const VersionInfo& AcquireOp::get_version_info(unsigned idx) const
+    //--------------------------------------------------------------------------
+    {
+      return version_info;
+    }
+
+    //--------------------------------------------------------------------------
+    const RegionRequirement& AcquireOp::get_requirement(unsigned idx) const
+    //--------------------------------------------------------------------------
+    {
+      return get_requirement();
     }
 
     //--------------------------------------------------------------------------
@@ -9207,7 +9266,7 @@ namespace Legion {
     void ReleaseOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
-      const PhysicalTraceInfo trace_info(this);
+      const PhysicalTraceInfo trace_info(this, 0/*index*/, true/*initialize*/);
       // Invoke the mapper before doing anything else 
       invoke_mapper();
       InstanceSet restricted_instances;
@@ -9427,6 +9486,20 @@ namespace Legion {
       Runtime::trigger_event(completion_event, release_complete_event);
       need_completion_trigger = false;
       complete_execution();
+    }
+
+    //--------------------------------------------------------------------------
+    const VersionInfo& ReleaseOp::get_version_info(unsigned idx) const
+    //--------------------------------------------------------------------------
+    {
+      return version_info;
+    }
+
+    //--------------------------------------------------------------------------
+    const RegionRequirement& ReleaseOp::get_requirement(unsigned idx) const
+    //--------------------------------------------------------------------------
+    {
+      return get_requirement();
     }
 
     //--------------------------------------------------------------------------
@@ -13714,7 +13787,7 @@ namespace Legion {
     void FillOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
-      const PhysicalTraceInfo trace_info(this);
+      const PhysicalTraceInfo trace_info(this, 0/*index*/, true/*initialize*/);
       // Tell the region tree forest to fill in this field
       // Note that the forest takes ownership of the value buffer
       if (future.impl == NULL)
@@ -13798,7 +13871,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(fill_view == NULL);
 #endif
-      const PhysicalTraceInfo trace_info(this, false/*need init*/);
+      const PhysicalTraceInfo trace_info(this, 0/*index*/);
       // Make a copy of the future value since the region tree
       // will want to take ownership of the buffer
       size_t result_size = future.impl->get_untyped_size();
@@ -14854,7 +14927,7 @@ namespace Legion {
         memory_manager->attach_external_instance(external_manager);
       if (attached.exists())
         attached.wait();
-      const PhysicalTraceInfo trace_info(this);
+      const PhysicalTraceInfo trace_info(this, 0);
       InstanceSet external(1);
       external[0] = external_instance;
       InnerContext *context = find_physical_context(0/*index*/, requirement);
@@ -15394,7 +15467,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(!manager->is_reduction_manager()); 
 #endif
-      const PhysicalTraceInfo trace_info(this);
+      const PhysicalTraceInfo trace_info(this, 0);
       std::set<ApEvent> detach_events;
       // If we need to flush then register this operation to bring the
       // data that it has up to date, use READ-ONLY privileges since we're

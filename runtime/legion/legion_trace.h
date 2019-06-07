@@ -327,6 +327,8 @@ namespace Legion {
       virtual OpKind get_operation_kind(void) const;
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_mapping(void);
+    public:
+      virtual unsigned find_parent_index(unsigned index);
     protected:
       DynamicTrace *dynamic_trace;
       PhysicalTemplate *current_template;
@@ -359,6 +361,8 @@ namespace Legion {
       virtual OpKind get_operation_kind(void) const;
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_mapping(void);
+    public:
+      virtual unsigned find_parent_index(unsigned index);
     protected:
       PhysicalTemplate *current_template;
       ApEvent template_completion;
@@ -389,6 +393,13 @@ namespace Legion {
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
       virtual void trigger_dependence_analysis(void);
+    public:
+      virtual unsigned find_parent_index(unsigned index);
+    public:
+      void set_current_template(PhysicalTemplate *tpl)
+        { current_template = tpl; }
+    protected:
+      PhysicalTemplate *current_template;
     };
 
     /**
@@ -468,7 +479,7 @@ namespace Legion {
       PhysicalTrace& operator=(const PhysicalTrace &rhs);
     public:
       void clear_cached_template(void) { current_template = NULL; }
-      void check_template_preconditions(void);
+      void check_template_preconditions(TraceReplayOp *op);
     public:
       PhysicalTemplate* get_current_template(void) { return current_template; }
       bool has_any_templates(void) const { return templates.size() > 0; }
@@ -479,7 +490,9 @@ namespace Legion {
         { return previous_template_completion; }
     public:
       PhysicalTemplate* start_new_template(ApEvent fence_event);
-      RtEvent fix_trace(PhysicalTemplate *tpl, bool has_blocking_call);
+      RtEvent fix_trace(PhysicalTemplate *tpl,
+                        Operation *op,
+                        bool has_blocking_call);
     public:
       void initialize_template(ApEvent fence_completion, bool recurrent);
     public:
@@ -495,16 +508,7 @@ namespace Legion {
       ApEvent previous_template_completion;
     };
 
-    struct CachedMapping
-    {
-      VariantID               chosen_variant;
-      TaskPriority            task_priority;
-      bool                    postmap_task;
-      std::vector<Processor>  target_procs;
-      std::deque<InstanceSet> physical_instances;
-    };
     typedef Memoizable::TraceLocalID TraceLocalID;
-    typedef LegionMap<TraceLocalID, CachedMapping>::aligned CachedMappings; 
 
     /**
      * \class PhysicalTemplate
@@ -536,6 +540,15 @@ namespace Legion {
         PhysicalTemplate *tpl;
       };
     public:
+      struct ViewUser {
+        ViewUser(bool r, unsigned u, IndexSpaceExpression *e)
+          : read(r), user(u), expr(e)
+        { }
+        bool read;
+        unsigned user;
+        IndexSpaceExpression *expr;
+      };
+    public:
       PhysicalTemplate(PhysicalTrace *trace, ApEvent fence_event);
       PhysicalTemplate(const PhysicalTemplate &rhs);
     private:
@@ -546,29 +559,31 @@ namespace Legion {
                       bool recurrent);
       ApEvent get_completion(void) const;
       ApEvent get_completion_for_deletion(void) const;
-    private:
-      static bool check_logical_open(RegionTreeNode *node, ContextID ctx,
-                                     FieldMask fields);
-      static bool check_logical_open(RegionTreeNode *node, ContextID ctx,
-                          LegionMap<IndexSpaceNode*, FieldMask>::aligned projs);
     public:
-      bool check_preconditions(void);
+      void finalize(Operation *op, bool has_blocking_call);
       bool check_replayable(void) const;
-      void register_operation(Operation *op);
-      void execute_all(void);
-      void execute_slice(unsigned slice_idx);
-      void issue_summary_operations(InnerContext* context,
-                                    Operation *invalidator);
+      void compute_postcondition(void);
+      bool check_subsumption(void) const;
+      bool perform_precondition_versioning_analysis(Operation *op);
     public:
-      void finalize(bool has_blocking_call);
       void optimize(void);
+    private:
       void elide_fences(std::vector<unsigned> &gen);
       void propagate_merges(std::vector<unsigned> &gen);
       void transitive_reduction(void);
       void propagate_copies(std::vector<unsigned> &gen);
       void prepare_parallel_replay(const std::vector<unsigned> &gen);
-      void push_complete_replays();
+      void push_complete_replays(void);
+    public:
+      bool check_preconditions(TraceReplayOp *op);
+      void register_operation(Operation *op);
+      void execute_all(void);
+      void execute_slice(unsigned slice_idx);
+    public:
       void generate_summary_operations(void);
+      void issue_summary_operations(InnerContext* context,
+                                    Operation *invalidator);
+    public:
       void dump_template(void);
       void dump_instructions(const std::vector<Instruction*> &instructions);
     public:
@@ -604,17 +619,8 @@ namespace Legion {
                                ApEvent e3, Operation *owner);
       void record_merge_events(ApEvent &lhs, const std::set<ApEvent>& rhs,
                                Operation *owner);
-#if 0
-      void record_copy_views(InstanceView *src,
-                             const FieldMask &src_mask,
-                             ContextID src_logical_ctx,
-                             ContextID src_physucal_ctx,
-                             InstanceView *dst,
-                             const FieldMask &dst_mask,
-                             ContextID dst_logical_ctx,
-                             ContextID dst_physical_ctx);
-#endif
-      void record_issue_copy(Operation* op, ApEvent &lhs,
+      void record_issue_copy(Memoizable *memo, unsigned idx,
+                             ApEvent &lhs,
                              IndexSpaceExpression *expr,
                              const std::vector<CopySrcDstField>& src_fields,
                              const std::vector<CopySrcDstField>& dst_fields,
@@ -625,26 +631,21 @@ namespace Legion {
 #endif
                              ApEvent precondition,
                              ReductionOpID redop,
-                             bool reduction_fold);
-      void record_empty_copy(DeferredView *src,
-                             const FieldMask &copy_mask,
-                             MaterializedView *dst);
+                             bool reduction_fold,
+                             const FieldMaskSet<InstanceView> &tracing_srcs,
+                             const FieldMaskSet<InstanceView> &tracing_dsts);
       void record_summary_info(const RegionRequirement &region,
                                const InstanceSet &instance_set,
                                unsigned parent_idx);
-      void record_set_ready_event(Operation *op,
-                                  unsigned region_idx,
-                                  unsigned inst_idx,
-                                  ApEvent &ready_event,
-                                  const RegionRequirement &req,
-                                  RegionNode *region_node,
-                                  InstanceView *view,
-                                  const FieldMask &fields,
-                                  ContextID logical_ctx,
-                                  ContextID physical_ctx);
+      void record_op_view(Memoizable *memo,
+                          unsigned idx,
+                          InstanceView *view,
+                          const RegionUsage &usage,
+                          const FieldMask &user_mask);
       void record_set_op_sync_event(ApEvent &lhs, Operation *op);
       void record_complete_replay(Operation *op, ApEvent rhs);
-      void record_issue_fill(Operation *op, ApEvent &lhs,
+      void record_issue_fill(Memoizable *memo, unsigned idx,
+                             ApEvent &lhs,
                              IndexSpaceExpression *expr,
                              const std::vector<CopySrcDstField> &fields,
                              const void *fill_value, size_t fill_size,
@@ -653,22 +654,13 @@ namespace Legion {
                              FieldSpace handle,
                              RegionTreeID tree_id,
 #endif
-                             ApEvent precondition);
-#if 0
-      void record_fill_view(FillView *fill_view, const FieldMask &fill_mask);
-#endif
-      void record_deferred_copy_from_fill_view(FillView *fill_view,
-                                               InstanceView *dst_view,
-                                               const FieldMask &copy_mask,
-                                               ContextID logical_ctx,
-                                               ContextID physical_ctx);
-      void record_empty_copy_from_fill_view(InstanceView *dst_view,
-                                            const FieldMask &copy_mask,
-                                            ContextID logical_ctx,
-                                            ContextID physical_ctx);
+                             ApEvent precondition,
+                             const FieldMaskSet<FillView> &tracing_srcs,
+                             const FieldMaskSet<InstanceView> &tracing_dsts);
+      void record_fill_view(FillView *view, const FieldMask &user_mask);
       void record_outstanding_gc_event(CollectableView *view, 
                                        ApEvent term_event);
-      void record_issue_indirect(Operation* op, ApEvent &lhs,
+      void record_issue_indirect(Memoizable *memo, ApEvent &lhs,
                              IndexSpaceExpression *expr,
                              const std::vector<CopySrcDstField>& src_fields,
                              const std::vector<CopySrcDstField>& dst_fields,
@@ -680,15 +672,28 @@ namespace Legion {
       static void handle_replay_slice(const void *args);
       static void handle_delete_template(const void *args);
     private:
-#if 0
-      void update_valid_view(bool is_reduction,
-                             bool has_read,
-                             bool has_write,
-                             InstanceView *view,
-                             const FieldMask &fields,
-                             ContextID logical_ctx,
-                             ContextID physical_ctx);
-#endif
+      TraceLocalID find_trace_local_id(Memoizable *memo);
+      unsigned find_memo_entry(Memoizable *memo);
+      void record_precondition(Memoizable *memo,
+                               unsigned idx,
+                               IndexSpaceExpression *expr,
+                               const FieldMask &user_mask,
+                               InstanceView *view);
+      void record_views(Memoizable *memo,
+                        unsigned idx,
+                        unsigned entry,
+                        IndexSpaceExpression *expr,
+                        const RegionUsage &usage,
+                        const FieldMaskSet<InstanceView> &views,
+                        bool invalidates);
+      void record_view_user(Memoizable *memo,
+                            unsigned idx,
+                            InstanceView *view,
+                            ViewUser *user,
+                            const RegionUsage &usage,
+                            const FieldMask &user_mask,
+                            bool invalidates);
+      void record_fill_views(const FieldMaskSet<FillView> &tracing_srcs);
       void record_last_user(const PhysicalInstance &inst, 
                             IndexSpaceExpression *expr,
                             unsigned field, unsigned user, bool read);
@@ -754,20 +759,37 @@ namespace Legion {
       std::vector<ApEvent> events;
       std::vector<ApUserEvent> user_events;
       std::map<unsigned, unsigned> crossing_events;
-      CachedMappings                                  cached_mappings;
-      LegionMap<InstanceView*, FieldMask>::aligned    previous_valid_views;
-      LegionMap<std::pair<RegionTreeNode*, ContextID>,
-                FieldMask>::aligned                   previous_open_nodes;
-      std::map<std::pair<RegionTreeNode*, ContextID>,
-               LegionMap<IndexSpaceNode*, FieldMask>::aligned>
-                                                      previous_projections;
-      LegionMap<InstanceView*, FieldMask>::aligned    valid_views;
-      LegionMap<InstanceView*, FieldMask>::aligned    reduction_views;
-      LegionMap<FillView*,     FieldMask>::aligned    fill_views;
-      LegionMap<FillView*,     FieldMask>::aligned    untracked_fill_views;
-      LegionMap<InstanceView*, ContextID>::aligned    logical_contexts;
-      LegionMap<InstanceView*, ContextID>::aligned    physical_contexts;
-      std::map<CollectableView*, std::set<ApEvent> >  outstanding_gc_events;
+    public:
+      struct CachedMapping
+      {
+        VariantID               chosen_variant;
+        TaskPriority            task_priority;
+        bool                    postmap_task;
+        std::vector<Processor>  target_procs;
+        std::deque<InstanceSet> physical_instances;
+      };
+      typedef LegionMap<TraceLocalID, CachedMapping>::aligned CachedMappings;
+      CachedMappings cached_mappings;
+    public:
+      typedef LegionMap<InstanceView*,
+                        FieldMaskSet<ViewUser> >::aligned             ViewUsers;
+      typedef LegionMap<InstanceView*,
+                        FieldMaskSet<IndexSpaceExpression> >::aligned ViewExprs;
+      ViewUsers                                          view_users;
+      std::map<TraceLocalID,ViewExprs>                   op_views;
+    public:
+      LegionVector<FieldMaskSet<InstanceView> >::aligned pre_views;
+      std::vector<IndexSpaceExpression*>                 pre_exprs;
+      std::vector<RegionRequirement>                     pre_requirements;
+      std::vector<unsigned>                              pre_parent_indices;
+      LegionVector<VersionInfo>::aligned                 pre_version_infos;
+    public:
+      ViewExprs                                          post_views;
+    public:
+      FieldMaskSet<FillView>                             pre_fill_views;
+      FieldMaskSet<FillView>                             post_fill_views;
+    public:
+      std::map<CollectableView*, std::set<ApEvent> >     outstanding_gc_events;
     };
 
     enum InstructionKind

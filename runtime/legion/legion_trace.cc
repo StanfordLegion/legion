@@ -1186,14 +1186,24 @@ namespace Legion {
         assert(local_trace->get_physical_trace() != NULL);
 #endif
         RtEvent pending_deletion =
-          local_trace->get_physical_trace()->fix_trace(
-              current_template, has_blocking_call);
+          local_trace->get_physical_trace()->fix_trace(current_template, this,
+              has_blocking_call);
         if (pending_deletion.exists())
           execution_precondition = Runtime::merge_events(NULL,
               execution_precondition, ApEvent(pending_deletion));
         local_trace->initialize_tracing_state();
       }
       FenceOp::trigger_mapping();
+    }
+
+    //--------------------------------------------------------------------------
+    unsigned TraceCaptureOp::find_parent_index(unsigned index)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(current_template != NULL);
+#endif
+      return current_template->pre_parent_indices[index];
     }
 
     /////////////////////////////////////////////////////////////
@@ -1359,8 +1369,8 @@ namespace Legion {
         assert(local_trace->get_physical_trace() != NULL);
 #endif
         RtEvent pending_deletion =
-          local_trace->get_physical_trace()->fix_trace(
-              current_template, has_blocking_call);
+          local_trace->get_physical_trace()->fix_trace(current_template, this,
+              has_blocking_call);
         if (pending_deletion.exists())
           execution_precondition = Runtime::merge_events(NULL,
               execution_precondition, ApEvent(pending_deletion));
@@ -1380,6 +1390,16 @@ namespace Legion {
         return;
       }
       FenceOp::trigger_mapping();
+    }
+
+    //--------------------------------------------------------------------------
+    unsigned TraceCompleteOp::find_parent_index(unsigned index)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(current_template != NULL);
+#endif
+      return current_template->pre_parent_indices[index];
     }
 
     /////////////////////////////////////////////////////////////
@@ -1433,6 +1453,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       activate_operation();
+      current_template = NULL;
     }
 
     //--------------------------------------------------------------------------
@@ -1488,7 +1509,7 @@ namespace Legion {
 #endif
 
         if (physical_trace->get_current_template() == NULL)
-          physical_trace->check_template_preconditions();
+          physical_trace->check_template_preconditions(this);
 #ifdef DEBUG_LEGION
         assert(physical_trace->get_current_template() == NULL ||
                !physical_trace->get_current_template()->is_recording());
@@ -1537,6 +1558,16 @@ namespace Legion {
 #else
       parent_ctx->update_current_fence(this, false, true);
 #endif
+    }
+
+    //--------------------------------------------------------------------------
+    unsigned TraceReplayOp::find_parent_index(unsigned index)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(current_template != NULL);
+#endif
+      return current_template->pre_parent_indices[index];
     }
 
     /////////////////////////////////////////////////////////////
@@ -1920,13 +1951,13 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     RtEvent PhysicalTrace::fix_trace(
-                                  PhysicalTemplate *tpl, bool has_blocking_call)
+                   PhysicalTemplate *tpl, Operation *op, bool has_blocking_call)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(tpl->is_recording());
 #endif
-      tpl->finalize(has_blocking_call);
+      tpl->finalize(op, has_blocking_call);
       RtEvent pending_deletion = RtEvent::NO_RT_EVENT;
       if (!tpl->is_replayable())
       {
@@ -1948,19 +1979,22 @@ namespace Legion {
       {
         // Reset the nonreplayable count when we find a replayable template
         nonreplayable_count = 0;
+        current_template = NULL;
         templates.push_back(tpl);
       }
       return pending_deletion;
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTrace::check_template_preconditions(void)
+    void PhysicalTrace::check_template_preconditions(TraceReplayOp *op)
     //--------------------------------------------------------------------------
     {
       current_template = NULL;
       for (std::vector<PhysicalTemplate*>::reverse_iterator it =
            templates.rbegin(); it != templates.rend(); ++it)
-        if ((*it)->check_preconditions())
+      {
+        op->set_current_template((*it));
+        if ((*it)->check_preconditions(op))
         {
 #ifdef DEBUG_LEGION
           assert((*it)->is_replayable());
@@ -1969,8 +2003,11 @@ namespace Legion {
           // the precondition
           nonreplayable_count = 0;
           current_template = *it;
+          op->set_current_template(NULL);
           return;
         }
+        op->set_current_template(NULL);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -2103,13 +2140,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       std::set<ApEvent> to_merge;
-      for (std::map<InstanceAccess, UserInfos>::const_iterator it =
-           last_users.begin(); it != last_users.end(); ++it)
-        for (UserInfos::const_iterator iit = it->second.begin();
-             iit != it->second.end(); ++iit)
-          for (std::set<unsigned>::const_iterator uit = iit->users.begin();
-               uit != iit->users.end(); ++uit)
-            to_merge.insert(events[*uit]);
+      for (ViewUsers::const_iterator it = view_users.begin();
+           it != view_users.end(); ++it)
+        for (FieldMaskSet<ViewUser>::const_iterator uit = it->second.begin();
+             uit != it->second.end(); ++uit)
+          to_merge.insert(events[uit->first->user]);
       return Runtime::merge_events(NULL, to_merge);
     }
 
@@ -2125,210 +2160,100 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ bool PhysicalTemplate::check_logical_open(RegionTreeNode *node,
-                                                         ContextID ctx,
-                                                         FieldMask fields)
+    bool PhysicalTemplate::check_preconditions(TraceReplayOp *op)
     //--------------------------------------------------------------------------
     {
-#if 0
+      RegionTreeForest *forest = trace->runtime->forest;
+      for (unsigned idx = 0; idx < pre_views.size(); ++idx)
       {
-        const LogicalState &state = node->get_logical_state(ctx);
-        state.filter_dirty_fields(fields);
-        if (!fields) return true;
+        const FieldMaskSet<InstanceView> &precondition = pre_views[idx];
+        VersionInfo &version_info = pre_version_infos[idx];
+        FieldMaskSet<InstanceView> invalid_views;
+        std::set<RtEvent> map_applied_events;
+        forest->find_invalid_instances(op, idx, version_info, precondition,
+            invalid_views, map_applied_events);
+        Runtime::merge_events(map_applied_events).wait();
+        if (invalid_views.size() > 0) return false;
       }
-
-      RegionTreeNode *parent_node = node->get_parent();
-      if (parent_node != NULL)
-      {
-#ifdef DEBUG_LEGION
-        assert(!parent_node->is_region());
-#endif
-        const LogicalState &state = parent_node->get_logical_state(ctx);
-#ifdef DEBUG_LEGION
-        assert(!!fields);
-#endif
-        for (LegionList<FieldState>::aligned::const_iterator fit =
-             state.field_states.begin(); fit !=
-             state.field_states.end(); ++fit)
-        {
-          if (fit->open_state == NOT_OPEN)
-            continue;
-          FieldMask overlap = fit->valid_fields & fields;
-          if (!overlap)
-            continue;
-          // FIXME: This code will not work as expected if the projection
-          //        goes deeper than one level
-          const LegionColor &color = node->get_row_source()->color;
-          if ((fit->projection != 0 &&
-               fit->projection_space->contains_color(color)) ||
-              fit->open_children.find(color) != fit->open_children.end())
-            fields -= overlap;
-        }
-      }
-
-      const LogicalState &state = node->get_logical_state(ctx);
-      for (LegionList<FieldState>::aligned::const_iterator fit =
-           state.field_states.begin(); fit !=
-           state.field_states.end(); ++fit)
-      {
-        if (fit->open_state == NOT_OPEN)
-          continue;
-        FieldMask overlap = fit->valid_fields & fields;
-        if (!overlap)
-          continue;
-        fields -= overlap;
-      }
-#else
-      assert(false);
-#endif
-      return !fields;
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ bool PhysicalTemplate::check_logical_open(RegionTreeNode *node,
-                                                         ContextID ctx,
-                           LegionMap<IndexSpaceNode*, FieldMask>::aligned projs)
-    //--------------------------------------------------------------------------
-    {
-#if 0
-      const LogicalState &state = node->get_logical_state(ctx);
-      for (LegionList<FieldState>::aligned::const_iterator fit =
-           state.field_states.begin(); fit !=
-           state.field_states.end(); ++fit)
-      {
-        if (fit->open_state == NOT_OPEN)
-          continue;
-        if (fit->projection != 0)
-        {
-          LegionMap<IndexSpaceNode*, FieldMask>::aligned::iterator finder =
-            projs.find(fit->projection_space);
-          if (finder != projs.end())
-          {
-            FieldMask overlap = finder->second & fit->valid_fields;
-            if (!overlap)
-              continue;
-            finder->second -= overlap;
-            if (!finder->second)
-              projs.erase(finder);
-          }
-        }
-      }
-#else
-      assert(false);
-#endif
-      return projs.size() == 0;
-    }
-
-    //--------------------------------------------------------------------------
-    bool PhysicalTemplate::check_preconditions(void)
-    //--------------------------------------------------------------------------
-    {
-#if 0
-      for (LegionMap<std::pair<RegionTreeNode*, ContextID>,
-                     FieldMask>::aligned::iterator it =
-           previous_open_nodes.begin(); it !=
-           previous_open_nodes.end(); ++it)
-        if (!check_logical_open(it->first.first, it->first.second, it->second))
-          return false;
-
-      for (std::map<std::pair<RegionTreeNode*, ContextID>,
-           LegionMap<IndexSpaceNode*, FieldMask>::aligned>::iterator it =
-           previous_projections.begin(); it !=
-           previous_projections.end(); ++it)
-        if (!check_logical_open(it->first.first, it->first.second, it->second))
-          return false;
-
-      for (LegionMap<InstanceView*, FieldMask>::aligned::iterator it =
-           previous_valid_views.begin(); it !=
-           previous_valid_views.end(); ++it)
-      {
-#ifdef DEBUG_LEGION
-        assert(logical_contexts.find(it->first) != logical_contexts.end());
-        assert(physical_contexts.find(it->first) != physical_contexts.end());
-#endif
-        RegionTreeNode *logical_node = it->first->logical_node;
-        ContextID logical_ctx = logical_contexts[it->first];
-        std::pair<RegionTreeNode*, ContextID> key(logical_node, logical_ctx);
-
-        if (previous_open_nodes.find(key) == previous_open_nodes.end() &&
-            !check_logical_open(logical_node, logical_ctx, it->second))
-          return false;
-
-        ContextID physical_ctx = physical_contexts[it->first];
-        PhysicalState *state = new PhysicalState(logical_node, false);
-        VersionManager &manager =
-          logical_node->get_current_version_manager(physical_ctx);
-        manager.update_physical_state(state);
-        state->capture_state();
-
-        bool found = false;
-        if (it->first->is_materialized_view())
-        {
-          for (LegionMap<LogicalView*, FieldMask,
-                         VALID_VIEW_ALLOC>::track_aligned::iterator vit =
-               state->valid_views.begin(); vit !=
-               state->valid_views.end(); ++vit)
-          {
-            if (vit->first->is_materialized_view() &&
-                it->first == vit->first && !(it->second - vit->second))
-            {
-              found = true;
-              break;
-            }
-          }
-        }
-        else
-        {
-#ifdef DEBUG_LEGION
-          assert(it->first->is_reduction_view());
-#endif
-          for (LegionMap<ReductionView*, FieldMask,
-                         VALID_VIEW_ALLOC>::track_aligned::iterator vit =
-               state->reduction_views.begin(); vit !=
-               state->reduction_views.end(); ++vit)
-          {
-            if (it->first == vit->first && !(it->second - vit->second))
-            {
-              found = true;
-              break;
-            }
-          }
-        }
-        if (!found)
-          return false;
-      }
-#else
-      assert(false);
-#endif
       return true;
     }
-
     //--------------------------------------------------------------------------
     bool PhysicalTemplate::check_replayable(void) const
     //--------------------------------------------------------------------------
     {
-#if 0
-      if (untracked_fill_views.size() > 0)
-        return false;
-      for (LegionMap<InstanceView*, FieldMask>::aligned::const_iterator it =
-           reduction_views.begin(); it !=
-           reduction_views.end(); ++it)
+      if (pre_fill_views.size() > 0) return false;
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalTemplate::compute_postcondition(void)
+    //--------------------------------------------------------------------------
+    {
+      // Calculate postconditions from the last users
+      for (ViewUsers::const_iterator it = view_users.begin();
+           it != view_users.end(); ++it)
       {
-        if (it->first->get_manager()->instance_domain->get_volume() > 0)
-          return false;
+        FieldMaskSet<IndexSpaceExpression> &exprs = post_views[it->first];
+        for (FieldMaskSet<ViewUser>::const_iterator uit = it->second.begin();
+             uit != it->second.end(); ++uit)
+          exprs.insert(uit->first->expr, uit->second);
       }
-      for (LegionMap<InstanceView*, FieldMask>::aligned::const_iterator it =
-           previous_valid_views.begin(); it !=
-           previous_valid_views.end(); ++it)
+    }
+
+    //--------------------------------------------------------------------------
+    bool PhysicalTemplate::check_subsumption(void) const
+    //--------------------------------------------------------------------------
+    {
+      for (unsigned idx = 0; idx < pre_views.size(); ++idx)
       {
-        LegionMap<InstanceView*, FieldMask>::aligned::const_iterator finder =
-          valid_views.find(it->first);
-        if (finder == valid_views.end() || !!(it->second - finder->second))
-          return false;
+        const FieldMaskSet<InstanceView> &views = pre_views[idx];
+        IndexSpaceExpression* expr = pre_exprs[idx];
+        for (FieldMaskSet<InstanceView>::const_iterator vit = views.begin();
+             vit != views.end(); ++vit)
+        {
+          ViewExprs::const_iterator finder = post_views.find(vit->first);
+          if (finder == post_views.end())
+            return false;
+          FieldMaskSet<IndexSpaceExpression>::const_iterator efinder =
+            finder->second.find(expr);
+          if (efinder == finder->second.end() ||
+              !!(vit->second - efinder->second))
+            return false;
+        }
       }
-#else
-      //assert(false);
+      return true;
+    }
+    //--------------------------------------------------------------------------
+    bool PhysicalTemplate::perform_precondition_versioning_analysis(
+                                                                  Operation *op)
+    //--------------------------------------------------------------------------
+    {
+      RegionTreeForest *forest = trace->runtime->forest;
+      pre_version_infos.resize(pre_requirements.size());
+      std::set<RtEvent> ready_events;
+      for (unsigned idx = 0; idx < pre_requirements.size(); ++idx)
+      {
+        IndexSpaceExpression *expr = pre_exprs[idx];
+        VersionInfo &version_info = pre_version_infos[idx];
+        forest->perform_versioning_analysis(op, idx, pre_requirements[idx],
+            version_info, ready_events);
+        Runtime::merge_events(ready_events).wait();
+        FieldMaskSet<EquivalenceSet> to_add, to_remove;
+        const FieldMaskSet<EquivalenceSet> &eqs =
+          version_info.get_equivalence_sets();
+        for (FieldMaskSet<EquivalenceSet>::const_iterator it = eqs.begin();
+             it != eqs.end(); ++it)
+        {
+          if (it->first->has_refinements(it->second))
+            return false;
+          if (it->first->set_expr != expr)
+            to_remove.insert(it->first, it->second);
+        }
+        version_info.update_equivalence_sets(to_add, to_remove);
+#ifdef DEBUG_LEGION
+        assert(version_info.get_equivalence_sets().size() > 0);
 #endif
+      }
       return true;
     }
 
@@ -2395,19 +2320,29 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::finalize(bool has_blocking_call)
+    void PhysicalTemplate::finalize(Operation *op, bool has_blocking_call)
     //--------------------------------------------------------------------------
     {
       recording = false;
-      replayable = !has_blocking_call && check_replayable();
       if (outstanding_gc_events.size() > 0)
         for (std::map<CollectableView*, std::set<ApEvent> >::iterator it =
              outstanding_gc_events.begin(); it !=
              outstanding_gc_events.end(); ++it)
         {
+          IgnoreReferenceMutator mutator;
+          it->first->remove_collectable_reference(&mutator);
           it->first->update_gc_events(it->second);
-          it->first->collect_users(it->second);
         }
+
+      replayable = !has_blocking_call && check_replayable();
+      if (replayable)
+      {
+        compute_postcondition();
+        replayable = check_subsumption();
+      }
+      if (replayable)
+        replayable = perform_precondition_versioning_analysis(op);
+
       if (!replayable)
       {
         if (implicit_runtime->dump_physical_traces)
@@ -2418,7 +2353,7 @@ namespace Legion {
         return;
       }
       optimize();
-      generate_summary_operations();
+      //generate_summary_operations();
       if (implicit_runtime->dump_physical_traces) dump_template();
       size_t num_events = events.size();
       events.clear();
@@ -3235,7 +3170,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::push_complete_replays()
+    void PhysicalTemplate::push_complete_replays(void)
     //--------------------------------------------------------------------------
     {
       for (unsigned idx = 0; idx < slices.size(); ++idx)
@@ -3415,6 +3350,65 @@ namespace Legion {
            it != frontiers.end(); ++it)
         std::cerr << "  events[" << it->second << "] = events["
                   << it->first << "]" << std::endl;
+      std::cerr << "[Preconditions]" << std::endl;
+      for (unsigned idx = 0; idx < pre_views.size(); ++idx)
+      {
+        const FieldMaskSet<InstanceView> &views = pre_views[idx];
+        for (FieldMaskSet<InstanceView>::const_iterator vit = views.begin();
+             vit != views.end(); ++vit)
+        {
+          char *mask = vit->second.to_string();
+          std::cerr << "    "
+                    << (vit->first->is_reduction_view()
+                        ? "Reduction" : "Materialized")
+                    << " view: " << vit->first << ", Inst: " << std::hex
+                    << vit->first->get_manager()->get_instance().id << std::dec
+                    << ", Index expr: " << pre_exprs[idx]->expr_id
+                    << ", Field Mask: " << mask << std::endl;
+          free(mask);
+        }
+      }
+      for (FieldMaskSet<FillView>::const_iterator vit = pre_fill_views.begin();
+           vit != pre_fill_views.end(); ++vit)
+      {
+        char *mask = vit->second.to_string();
+        std::cerr << "    Fill view: " << vit->first
+                  << ", Field Mask: " << mask << std::endl;
+        free(mask);
+      }
+      for (unsigned idx = 0; idx < pre_requirements.size(); ++idx)
+      {
+        const RegionRequirement &req = pre_requirements[idx];
+        const LogicalRegion &handle = req.region;
+        std::stringstream ss;
+        ss << "Requirement " << idx << ": region: "
+           << "(" << handle.get_index_space().get_id()
+           << "," << handle.get_field_space().get_id()
+           << "," << handle.get_tree_id()
+           << "), fields: ";
+        for (std::set<FieldID>::const_iterator fit =
+             req.privilege_fields.begin(); fit !=
+             req.privilege_fields.end(); ++fit)
+          ss << *fit << ",";
+        std::cerr << ss.str() << std::endl;
+      }
+      std::cerr << "[Postcondition]" << std::endl;
+      for (ViewExprs::const_iterator it = post_views.begin();
+           it != post_views.end(); ++it)
+        for (FieldMaskSet<IndexSpaceExpression>::const_iterator eit =
+             it->second.begin(); eit != it->second.end(); ++eit)
+        {
+          char *mask = eit->second.to_string();
+          std::cerr << "    "
+                    << (it->first->is_reduction_view()
+                        ? "Reduction" : "Materialized")
+                    << " view: " << it->first << ", Inst: " << std::hex
+                    << it->first->get_manager()->get_instance().id << std::dec
+                    << ", Index expr: " << eit->first->expr_id
+                    << ", Field Mask: " << mask << std::endl;
+          free(mask);
+        }
+#if 0
       std::cerr << "[Previous Valid Views]" << std::endl;
       for (LegionMap<InstanceView*, FieldMask>::aligned::iterator it =
            previous_valid_views.begin(); it !=
@@ -3471,6 +3465,7 @@ namespace Legion {
                   << " " << std::endl;
         free(mask);
       }
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -3716,31 +3711,10 @@ namespace Legion {
 #endif
     }
 
-#if 0
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::record_copy_views(InstanceView *src,
-                                             const FieldMask &src_mask,
-                                             ContextID src_logical_ctx,
-                                             ContextID src_physical_ctx,
-                                             InstanceView *dst,
-                                             const FieldMask &dst_mask,
-                                             ContextID dst_logical_ctx,
-                                             ContextID dst_physical_ctx)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock t_lock(template_lock);
-#ifdef DEBUG_LEGION
-      assert(is_recording());
-#endif
-      update_valid_view(
-          false, true, false, src, src_mask, src_logical_ctx, src_physical_ctx);
-      update_valid_view(
-          false, false, false, dst, dst_mask, dst_logical_ctx, dst_physical_ctx);
-    }
-#endif
-
-    //--------------------------------------------------------------------------
-    void PhysicalTemplate::record_issue_copy(Operation* op, ApEvent &lhs,
+    void PhysicalTemplate::record_issue_copy(Memoizable *memo,
+                                             unsigned idx,
+                                             ApEvent &lhs,
                                              IndexSpaceExpression *expr,
                                  const std::vector<CopySrcDstField>& src_fields,
                                  const std::vector<CopySrcDstField>& dst_fields,
@@ -3751,7 +3725,9 @@ namespace Legion {
 #endif
                                              ApEvent precondition,
                                              ReductionOpID redop,
-                                             bool reduction_fold)
+                                             bool reduction_fold,
+                                 const FieldMaskSet<InstanceView> &tracing_srcs,
+                                 const FieldMaskSet<InstanceView> &tracing_dsts)
     //--------------------------------------------------------------------------
     {
       if (!lhs.exists())
@@ -3772,15 +3748,6 @@ namespace Legion {
 #endif
       event_map[lhs] = lhs_;
 
-      Memoizable *memoizable = op->get_memoizable();
-#ifdef DEBUG_LEGION
-      assert(memoizable != NULL);
-#endif
-      TraceLocalID op_key = memoizable->get_trace_local_id();
-#ifdef DEBUG_LEGION
-      assert(operations.find(op_key) != operations.end());
-#endif
-
       std::map<ApEvent, unsigned>::iterator pre_finder =
         event_map.find(precondition);
 #ifdef DEBUG_LEGION
@@ -3799,6 +3766,7 @@ namespace Legion {
       }
 
       unsigned precondition_idx = pre_finder->second;
+      TraceLocalID op_key = find_trace_local_id(memo);
       instructions.push_back(new IssueCopy(
             *this, lhs_, expr, op_key, src_fields, dst_fields,
 #ifdef LEGION_SPY
@@ -3808,148 +3776,12 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(instructions.size() == events.size());
 #endif
+
+      record_views(memo, idx, lhs_, expr, RegionUsage(READ_ONLY, EXCLUSIVE, 0),
+          tracing_srcs, false);
+      record_views(memo, idx, lhs_, expr,
+          RegionUsage(WRITE_DISCARD, EXCLUSIVE, 0), tracing_dsts, false);
     }
-
-    //--------------------------------------------------------------------------
-    void PhysicalTemplate::record_empty_copy(DeferredView *src,
-                                             const FieldMask &copy_mask,
-                                             MaterializedView *dst)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock tpl_lock(template_lock);
-#ifdef DEBUG_LEGION
-      assert(is_recording());
-#endif
-#if 0
-      // FIXME: Nested composite views potentially make the check expensive.
-      //        Here we simply handle the case we know can be done efficiently.
-      if (!src->has_nested_views())
-      {
-        bool already_valid = false;
-        LegionMap<InstanceView*, FieldMask>::aligned::iterator finder =
-          valid_views.find(dst);
-        if (finder == valid_views.end())
-          valid_views[dst] = dst_mask;
-        else
-        {
-          already_valid = !(dst_mask - finder->second);
-          finder->second |= dst_mask;
-        }
-        if (already_valid) return;
-
-        src->closed_tree->record_closed_tree(src_mask, logical_ctx,
-            previous_open_nodes, previous_projections);
-      }
-#else
-      // TODO: handle this case now that the composite view summary has changed
-      assert(false);
-#endif
-    }
-
-#if 0
-    //--------------------------------------------------------------------------
-    inline void PhysicalTemplate::update_valid_view(bool is_reduction,
-                                                    bool has_read,
-                                                    bool has_write,
-                                                    InstanceView *view,
-                                                    const FieldMask &fields,
-                                                    ContextID logical_ctx,
-                                                    ContextID physical_ctx)
-    //--------------------------------------------------------------------------
-    {
-      if (is_reduction)
-      {
-#ifdef DEBUG_LEGION
-        assert(view->is_reduction_view());
-        assert(reduction_views.find(view) == reduction_views.end());
-        assert(valid_views.find(view) == valid_views.end());
-#endif
-        reduction_views[view] = fields;
-        valid_views[view] = fields;
-      }
-      else
-      {
-#ifdef DEBUG_LEGION
-        assert(view->is_materialized_view() || view->is_reduction_view());
-#endif
-        if (has_read)
-        {
-          FieldMask invalid_fields = fields;
-
-          LegionMap<InstanceView*, FieldMask>::aligned::iterator finder =
-            valid_views.find(view);
-          if (finder != valid_views.end())
-            invalid_fields -= finder->second;
-
-          if (!!invalid_fields && view->is_materialized_view())
-            for (LegionMap<InstanceView*, FieldMask>::aligned::iterator vit =
-                valid_views.begin(); vit != valid_views.end(); ++vit)
-            {
-              if (vit->first->get_manager() != view->get_manager()) continue;
-              LogicalView *target = vit->first;
-              LogicalView *parent = view->get_parent();
-              while (parent != NULL)
-              {
-                if (parent == target)
-                  invalid_fields -= vit->second;
-                if (!invalid_fields)
-                  break;
-                parent = parent->get_parent();
-              }
-              if (!invalid_fields)
-                break;
-            }
-
-          if (!!invalid_fields)
-            previous_valid_views[view] |= invalid_fields;
-
-          if (view->is_reduction_view())
-          {
-            LegionMap<InstanceView*, FieldMask>::aligned::iterator finder =
-              reduction_views.find(view);
-            if (finder != reduction_views.end())
-            {
-              finder->second -= fields;
-              if (!finder->second)
-                reduction_views.erase(finder);
-            }
-          }
-        }
-
-        if (has_write)
-        {
-          RegionTreeNode *node = view->logical_node;
-          std::vector<InstanceView*> to_delete;
-          for (LegionMap<InstanceView*, FieldMask>::aligned::iterator vit =
-               valid_views.begin(); vit != valid_views.end(); ++vit)
-          {
-            if (vit->first->get_manager() == view->get_manager()) continue;
-            RegionTreeNode *other = vit->first->logical_node;
-            if (node->get_tree_id() != other->get_tree_id()) continue;
-            if (!!(fields & vit->second) &&
-                node->intersects_with(other, false))
-            {
-              vit->second = vit->second - fields;
-              if (!vit->second)
-                to_delete.push_back(vit->first);
-            }
-          }
-          for (unsigned idx = 0; idx < to_delete.size(); ++idx)
-            valid_views.erase(to_delete[idx]);
-        }
-
-        valid_views[view] |= fields;
-      }
-#ifdef DEBUG_LEGION
-      assert(logical_contexts.find(view) == logical_contexts.end() ||
-             logical_contexts[view] == logical_ctx);
-      assert(physical_contexts.find(view) == physical_contexts.end() ||
-             physical_contexts[view] == physical_ctx);
-#endif
-      logical_contexts[view] = logical_ctx;
-      physical_contexts[view] = physical_ctx;
-    }
-#endif
 
     //--------------------------------------------------------------------------
     void PhysicalTemplate::record_summary_info(const RegionRequirement &region,
@@ -3967,106 +3799,33 @@ namespace Legion {
       parent_indices.push_back(parent_idx);
     }
 
-#if 0
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::record_set_ready_event(Operation *op,
-                                                  unsigned region_idx,
-                                                  unsigned inst_idx,
-                                                  ApEvent &ready_event,
-                                                  const RegionRequirement &req,
-                                                  RegionNode *region_node,
-                                                  InstanceView *view,
-                                                  const FieldMask &fields,
-                                                  ContextID logical_ctx,
-                                                  ContextID physical_ctx)
+    void PhysicalTemplate::record_op_view(Memoizable *memo,
+                                          unsigned idx,
+                                          InstanceView *view,
+                                          const RegionUsage &usage,
+                                          const FieldMask &user_mask)
     //--------------------------------------------------------------------------
     {
+      const VersionInfo &info = memo->get_version_info(idx);
+      LegionList<FieldSet<EquivalenceSet*> >::aligned eqs;
+      info.get_equivalence_sets().compute_field_sets(user_mask, eqs);
+
+      bool read_only = IS_READ_ONLY(usage);
+      unsigned entry = find_memo_entry(memo);
+
       AutoLock tpl_lock(template_lock);
-#ifdef DEBUG_LEGION
-      assert(is_recording());
-#endif
 
-      Memoizable *memoizable = op->get_memoizable();
-#ifdef DEBUG_LEGION
-      assert(memoizable != NULL);
-#endif
-      TraceLocalID op_key = memoizable->get_trace_local_id();
-#ifdef DEBUG_LEGION
-      assert(operations.find(op_key) != operations.end());
-#endif
-
-      if (view->is_reduction_view())
-      {
-        ReductionView *reduction_view = view->as_reduction_view();
-        PhysicalManager *manager = reduction_view->get_manager();
-        LayoutDescription *const layout = manager->layout;
-        const ReductionOp *reduction_op =
-          Runtime::get_reduction_op(reduction_view->get_redop());
-
-        std::vector<CopySrcDstField> fields;
+      for (LegionList<FieldSet<EquivalenceSet*> >::aligned::iterator it =
+           eqs.begin(); it != eqs.end(); ++it)
+        for (std::set<EquivalenceSet*>::iterator eit = it->elements.begin();
+             eit != it->elements.end(); ++eit)
         {
-          std::vector<FieldID> fill_fields;
-          layout->get_fields(fill_fields);
-          layout->compute_copy_offsets(fill_fields, manager, fields);
+          ViewUser *view_user= new ViewUser(read_only, entry, (*eit)->set_expr);
+          record_view_user(memo, idx, view, view_user, usage, it->set_mask,
+              true);
         }
-
-        void *fill_buffer = malloc(reduction_op->sizeof_rhs);
-        reduction_op->init(fill_buffer, 1);
-
-#ifdef DEBUG_LEGION
-        assert(view->logical_node->is_region());
-#endif
-
-        std::map<ApEvent, unsigned>::iterator ready_finder =
-          event_map.find(ready_event);
-#ifdef DEBUG_LEGION
-        assert(ready_finder != event_map.end());
-#endif
-        unsigned ready_event_idx = ready_finder->second;
-
-        ApUserEvent lhs = Runtime::create_ap_user_event();
-        unsigned lhs_ = events.size();
-        events.push_back(lhs);
-        event_map[lhs] = lhs_;
-        Runtime::trigger_event(lhs, ready_event);
-        ready_event = lhs;
-
-        instructions.push_back(
-            new IssueFill(*this, lhs_,region_node->get_index_space_expression(),
-                          op_key, fields, fill_buffer, reduction_op->sizeof_rhs,
-#ifdef LEGION_SPY
-                          0,
-#endif
-                          ready_event_idx));
-        for (unsigned idx = 0; idx < fields.size(); ++idx)
-        {
-          const CopySrcDstField &field = fields[idx];
-          record_last_user(field.inst,region_node->get_index_space_expression(),
-                           field.field_id, lhs_, true);
-        }
-        free(fill_buffer);
-      }
-
-      update_valid_view(IS_REDUCE(req), HAS_READ(req), HAS_WRITE(req),
-                        view, fields, logical_ctx, physical_ctx);
-
-      std::map<TraceLocalID, unsigned>::iterator finder =
-        memo_entries.find(op_key);
-#ifdef DEBUG_LEGION
-      assert(finder != memo_entries.end());
-#endif
-      InstanceReq inst_req;
-      inst_req.instance = view->get_manager()->get_instance();
-      inst_req.node = region_node;
-      region_node->get_column_source()->get_field_set(fields, inst_req.fields);
-      inst_req.read = IS_READ_ONLY(req);
-      op_reqs[op_key].push_back(inst_req);
-      for (std::vector<FieldID>::iterator it = inst_req.fields.begin(); it !=
-           inst_req.fields.end(); ++it)
-        record_last_user(inst_req.instance, region_node, *it, 
-                         finder->second, inst_req.read);
     }
-#endif
 
     //--------------------------------------------------------------------------
     void PhysicalTemplate::record_set_op_sync_event(ApEvent &lhs, Operation *op)
@@ -4141,9 +3900,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::record_issue_fill(Operation *op, ApEvent &lhs,
+    void PhysicalTemplate::record_issue_fill(Memoizable *memo,
+                                             unsigned idx,
+                                             ApEvent &lhs,
                                              IndexSpaceExpression *expr,
-                                     const std::vector<CopySrcDstField> &fields,
+                                 const std::vector<CopySrcDstField> &fields,
                                              const void *fill_value, 
                                              size_t fill_size,
 #ifdef LEGION_SPY
@@ -4151,7 +3912,9 @@ namespace Legion {
                                              FieldSpace handle,
                                              RegionTreeID tree_id,
 #endif
-                                             ApEvent precondition)
+                                             ApEvent precondition,
+                                 const FieldMaskSet<FillView> &tracing_srcs,
+                                 const FieldMaskSet<InstanceView> &tracing_dsts)
     //--------------------------------------------------------------------------
     {
       if (!lhs.exists())
@@ -4160,9 +3923,6 @@ namespace Legion {
         rename.trigger();
         lhs = ApEvent(rename);
       }
-#ifdef DEBUG_LEGION
-      assert(op->is_memoizing());
-#endif
       AutoLock tpl_lock(template_lock);
 #ifdef DEBUG_LEGION
       assert(is_recording());
@@ -4175,16 +3935,7 @@ namespace Legion {
 #endif
       event_map[lhs] = lhs_;
 
-      Memoizable *memoizable = op->get_memoizable();
-#ifdef DEBUG_LEGION
-      assert(memoizable != NULL);
-#endif
-      TraceLocalID key = memoizable->get_trace_local_id();
-#ifdef DEBUG_LEGION
-      assert(operations.find(key) != operations.end());
-      assert(memo_entries.find(key) != memo_entries.end());
-#endif
-
+      TraceLocalID key = find_trace_local_id(memo);
       std::map<ApEvent, unsigned>::iterator pre_finder =
         event_map.find(precondition);
 #ifdef DEBUG_LEGION
@@ -4201,96 +3952,41 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(instructions.size() == events.size());
 #endif
+      record_fill_views(tracing_srcs);
+      record_views(memo, idx, lhs_, expr,
+          RegionUsage(WRITE_DISCARD, EXCLUSIVE, 0), tracing_dsts, true);
     }
 
-#if 0
     //--------------------------------------------------------------------------
     void PhysicalTemplate::record_fill_view(
-                                FillView *fill_view, const FieldMask &fill_mask)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock tpl_lock(template_lock);
-#ifdef DEBUG_LEGION
-      assert(fill_views.find(fill_view) == fill_views.end());
-      assert(is_recording());
-#endif
-      fill_views[fill_view] = fill_mask;
-    }
-#endif
-
-    //--------------------------------------------------------------------------
-    void PhysicalTemplate::record_deferred_copy_from_fill_view(
-                                                            FillView *fill_view,
-                                                         InstanceView* dst_view,
-                                                     const FieldMask &copy_mask,
-                                                          ContextID logical_ctx,
-                                                         ContextID physical_ctx)
+                                     FillView *view, const FieldMask &user_mask)
     //--------------------------------------------------------------------------
     {
       AutoLock tpl_lock(template_lock);
 #ifdef DEBUG_LEGION
       assert(is_recording());
 #endif
-      LegionMap<FillView*, FieldMask>::aligned::iterator finder =
-        fill_views.find(fill_view);
-      if (finder == fill_views.end())
-      {
-        finder = untracked_fill_views.find(fill_view);
-        if (finder == untracked_fill_views.end())
-          untracked_fill_views[fill_view] = copy_mask;
-        else
-          finder->second |= copy_mask;
-      }
-      else
-      {
-#ifdef DEBUG_LEGION
-        assert(!(copy_mask - finder->second));
-#endif
-        LegionMap<InstanceView*, FieldMask>::aligned::iterator finder =
-          valid_views.find(dst_view);
-        if (finder == valid_views.end())
-          valid_views[dst_view] = copy_mask;
-        else
-          finder->second |= copy_mask;
-
-#ifdef DEBUG_LEGION
-        assert(logical_contexts.find(dst_view) == logical_contexts.end() ||
-               logical_contexts[dst_view] == logical_ctx);
-        assert(physical_contexts.find(dst_view) == physical_contexts.end() ||
-               physical_contexts[dst_view] == physical_ctx);
-#endif
-        logical_contexts[dst_view] = logical_ctx;
-        physical_contexts[dst_view] = physical_ctx;
-      }
+      post_fill_views.insert(view, user_mask);
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::record_empty_copy_from_fill_view(
-                                                         InstanceView* dst_view,
-                                                     const FieldMask &copy_mask,
-                                                          ContextID logical_ctx,
-                                                         ContextID physical_ctx)
+    void PhysicalTemplate::record_fill_views(const FieldMaskSet<FillView>&views)
     //--------------------------------------------------------------------------
     {
-      AutoLock tpl_lock(template_lock);
-#ifdef DEBUG_LEGION
-      assert(is_recording());
-#endif
-      LegionMap<InstanceView*, FieldMask>::aligned::iterator finder =
-        valid_views.find(dst_view);
-      if (finder == valid_views.end())
-        valid_views[dst_view] = copy_mask;
-      else
-        finder->second |= copy_mask;
-
-#ifdef DEBUG_LEGION
-      assert(logical_contexts.find(dst_view) == logical_contexts.end() ||
-          logical_contexts[dst_view] == logical_ctx);
-      assert(physical_contexts.find(dst_view) == physical_contexts.end() ||
-          physical_contexts[dst_view] == physical_ctx);
-#endif
-      logical_contexts[dst_view] = logical_ctx;
-      physical_contexts[dst_view] = physical_ctx;
+      for (FieldMaskSet<FillView>::const_iterator it = views.begin();
+           it != views.end(); ++it)
+      {
+        FieldMaskSet<FillView>::iterator finder =
+          post_fill_views.find(it->first);
+        if (finder == post_fill_views.end())
+          pre_fill_views.insert(it->first, it->second);
+        else
+        {
+          FieldMask non_dominated = it->second - finder->second;
+          if (!!non_dominated)
+            pre_fill_views.insert(it->first, non_dominated);
+        }
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -4302,11 +3998,20 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(is_recording());
 #endif
-      outstanding_gc_events[view].insert(term_event);
+      std::map<CollectableView*, std::set<ApEvent> >::iterator finder =
+        outstanding_gc_events.find(view);
+      if (finder == outstanding_gc_events.end())
+      {
+        IgnoreReferenceMutator mutator;
+        view->add_collectable_reference(&mutator);
+        outstanding_gc_events[view].insert(term_event);
+      }
+      else
+        finder->second.insert(term_event);
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::record_issue_indirect(Operation* op, ApEvent &lhs,
+    void PhysicalTemplate::record_issue_indirect(Memoizable *memo, ApEvent &lhs,
                              IndexSpaceExpression *expr,
                              const std::vector<CopySrcDstField>& src_fields,
                              const std::vector<CopySrcDstField>& dst_fields,
@@ -4342,6 +4047,156 @@ namespace Legion {
     {
       const DeleteTemplateArgs *pargs = (const DeleteTemplateArgs*)args;
       delete pargs->tpl;
+    }
+
+    //--------------------------------------------------------------------------
+    TraceLocalID PhysicalTemplate::find_trace_local_id(Memoizable *memo)
+    //--------------------------------------------------------------------------
+    {
+      TraceLocalID op_key = memo->get_trace_local_id();
+#ifdef DEBUG_LEGION
+      assert(operations.find(op_key) != operations.end());
+#endif
+      return op_key;
+    }
+
+    //--------------------------------------------------------------------------
+    unsigned PhysicalTemplate::find_memo_entry(Memoizable *memo)
+    //--------------------------------------------------------------------------
+    {
+      TraceLocalID op_key = find_trace_local_id(memo);
+      std::map<TraceLocalID, unsigned>::iterator entry_finder =
+        memo_entries.find(op_key);
+#ifdef DEBUG_LEGION
+      assert(entry_finder != memo_entries.end());
+#endif
+      return entry_finder->second;
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalTemplate::record_precondition(Memoizable *memo,
+                                               unsigned idx,
+                                               IndexSpaceExpression *expr,
+                                               const FieldMask &user_mask,
+                                               InstanceView *view)
+    //--------------------------------------------------------------------------
+    {
+      // If the view is empty, we treat it as always valid.
+      if (expr->is_empty()) return;
+      FieldMaskSet<InstanceView> views;
+      views.insert(view, user_mask);
+      pre_views.push_back(views);
+      pre_exprs.push_back(expr);
+      pre_requirements.push_back(memo->get_requirement(idx));
+      pre_parent_indices.push_back(
+          memo->get_operation()->find_parent_index(idx));
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalTemplate::record_views(Memoizable *memo,
+                                        unsigned idx,
+                                        unsigned entry,
+                                        IndexSpaceExpression *expr,
+                                        const RegionUsage &usage,
+                                        const FieldMaskSet<InstanceView> &views,
+                                        bool invalidates)
+    //--------------------------------------------------------------------------
+    {
+      bool read_only = IS_READ_ONLY(usage);
+      for (FieldMaskSet<InstanceView>::const_iterator it = views.begin();
+           it != views.end(); ++it)
+      {
+        ViewUser *user = new ViewUser(read_only, entry, expr);
+        record_view_user(memo, idx, it->first, user, usage, it->second,
+            invalidates);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalTemplate::record_view_user(Memoizable *memo,
+                                            unsigned idx,
+                                            InstanceView *view,
+                                            ViewUser *user,
+                                            const RegionUsage &usage,
+                                            const FieldMask &user_mask,
+                                            bool invalidates)
+    //--------------------------------------------------------------------------
+    {
+      if (user->expr->is_empty())
+      {
+        op_views[find_trace_local_id(memo)][view].insert(user->expr, user_mask);
+        delete user;
+        return;
+      }
+
+      RegionTreeForest *forest = trace->runtime->forest;
+      ViewUsers::iterator finder = view_users.find(view);
+      if (finder == view_users.end())
+      {
+        if (HAS_READ(usage))
+          record_precondition(memo, idx, user->expr, user_mask, view);
+        view_users[view].insert(user, user_mask);
+      }
+      else
+      {
+        FieldMaskSet<ViewUser> &users = finder->second;
+        FieldMask dominated;
+        FieldMaskSet<ViewUser> invalidated;
+
+        for (FieldMaskSet<ViewUser>::iterator uit = users.begin();
+             uit != users.end(); ++uit)
+        {
+          FieldMask overlap = user_mask & uit->second;
+          // If the previous user accesses disjoint fields, there's nothing
+          // we need to do
+          if (!overlap) continue;
+          // First check the easy case of dominance where the previous user's
+          // expression is the same as the new user's.
+          if (user->expr == uit->first->expr)
+          {
+            dominated |= overlap;
+            if (invalidates && HAS_WRITE(usage))
+              invalidated.insert(uit->first, overlap);
+          }
+          // Then fall back to the slower case that needs an index space
+          // subtraction.
+          else
+          {
+            IndexSpaceExpression *subtract =
+              forest->subtract_index_spaces(user->expr, uit->first->expr);
+            if (subtract->is_empty())
+            {
+              dominated |= overlap;
+              if (invalidates && HAS_WRITE(usage))
+                invalidated.insert(uit->first, overlap);
+            }
+          }
+        }
+
+        for (FieldMaskSet<ViewUser>::iterator uit = invalidated.begin();
+             uit != invalidated.end(); ++uit)
+        {
+          FieldMaskSet<ViewUser>::iterator finder = users.find(uit->first);
+#ifdef DEBUG_LEGION
+          assert(finder != users.end());
+#endif
+          finder.filter(uit->second);
+          if (!finder->second)
+          {
+            ViewUser *user = finder->first;
+            users.erase(finder);
+            delete user;
+          }
+        }
+
+        users.insert(user, user_mask);
+
+        FieldMask non_dominated = user_mask - dominated;
+        if (HAS_READ(usage) && !!non_dominated)
+          record_precondition(memo, idx, user->expr, non_dominated, view);
+      }
+
+      op_views[find_trace_local_id(memo)][view].insert(user->expr, user_mask);
     }
 
     //--------------------------------------------------------------------------
@@ -4736,7 +4591,7 @@ namespace Legion {
 #endif
       Memoizable *memo = operations[owner];
       ApEvent precondition = events[precondition_idx];
-      const PhysicalTraceInfo trace_info(memo->get_operation(), memo);
+      const PhysicalTraceInfo trace_info(memo->get_operation(), *memo);
       events[lhs] = expr->issue_copy(trace_info, dst_fields, src_fields,
 #ifdef LEGION_SPY
                                      handle, src_tree_id, dst_tree_id,
@@ -4848,7 +4703,7 @@ namespace Legion {
 #endif
       Memoizable *memo = operations[owner];
       ApEvent precondition = events[precondition_idx];
-      const PhysicalTraceInfo trace_info(memo->get_operation(), memo);
+      const PhysicalTraceInfo trace_info(memo->get_operation(), *memo);
       events[lhs] = expr->issue_fill(trace_info, fields, 
                                      fill_value, fill_size,
 #ifdef LEGION_SPY
