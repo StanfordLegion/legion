@@ -713,7 +713,7 @@ namespace Realm {
       char *cpu_base;
     };
 
-  }; // namespace LowLevel
-}; // namespace LegionRuntime
+  }; // namespace Cuda
+}; // namespace Realm 
 
 #endif

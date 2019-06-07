@@ -14,15 +14,12 @@
  */
 
 
-#ifndef __LEGION_BITMASK_H__
-#define __LEGION_BITMASK_H__
+#ifndef __BITMASK_H__
+#define __BITMASK_H__
 
 #include <assert.h>
 #include <stdlib.h>
 #include <string.h>
-
-#include "legion/legion_types.h"
-#include "legion/legion_allocation.h"
 
 // Apple can go screw itself
 #ifndef __MACH__
@@ -46,200 +43,45 @@
 #include <immintrin.h>
 #endif
 #endif
-
-namespace Legion {
-
-    /////////////////////////////////////////////////////////////
-    // Serializer 
-    /////////////////////////////////////////////////////////////
-    class Serializer {
-    public:
-      Serializer(size_t base_bytes = 4096)
-        : total_bytes(base_bytes), buffer((char*)malloc(base_bytes)), 
-          index(0) 
-#ifdef DEBUG_LEGION
-          , context_bytes(0)
+#ifndef BITMASK_MAX_ALIGNMENT
+#define BITMASK_MAX_ALIGNMENT   16
 #endif
-      { }
-      Serializer(const Serializer &rhs)
-      {
-        // should never be called
-        assert(false);
-      }
-    public:
-      ~Serializer(void)
-      {
-        free(buffer);
-      }
-    public:
-      inline Serializer& operator=(const Serializer &rhs);
-    public:
+// This statically computes an integer log base 2 for a number
+// which is guaranteed to be a power of 2. Adapted from
+// http://graphics.stanford.edu/~seander/bithacks.html#IntegerLogDeBruijn
+#ifndef STATIC_LOG2
+#define STATIC_LOG2(x)  (LOG2_LOOKUP(uint32_t(x * 0x077CB531U) >> 27))
+#endif
+#ifndef LOG2_LOOKUP
+#define LOG2_LOOKUP(x) ((x==0) ? 0 : (x==1) ? 1 : (x==2) ? 28 : (x==3) ? 2 : \
+                   (x==4) ? 29 : (x==5) ? 14 : (x==6) ? 24 : (x==7) ? 3 : \
+                   (x==8) ? 30 : (x==9) ? 22 : (x==10) ? 20 : (x==11) ? 15 : \
+                   (x==12) ? 25 : (x==13) ? 17 : (x==14) ? 4 : (x==15) ? 8 : \
+                   (x==16) ? 31 : (x==17) ? 27 : (x==18) ? 13 : (x==19) ? 23 : \
+                   (x==20) ? 21 : (x==21) ? 19 : (x==22) ? 16 : (x==23) ? 7 : \
+                   (x==24) ? 26 : (x==25) ? 12 : (x==26) ? 18 : (x==27) ? 6 : \
+                   (x==28) ? 11 : (x==29) ? 5 : (x==30) ? 10 : 9)
+#endif
+
+  // Internal helper name space for bitmasks
+    namespace BitMaskHelp {
+      // A class for Bitmask objects to inherit from to have their dynamic
+      // memory allocations managed for alignment and tracing
       template<typename T>
-      inline void serialize(const T &element);
-      // we need special serializers for bit masks
-      template<typename T, unsigned int MAX, unsigned SHIFT, unsigned MASK>
-      inline void serialize(const Internal::BitMask<T,MAX,SHIFT,MASK> &mask);
-      template<typename T, unsigned int MAX, unsigned SHIFT, unsigned MASK>
-      inline void serialize(const Internal::TLBitMask<T,MAX,SHIFT,MASK> &mask);
-#ifdef __SSE2__
-      template<unsigned int MAX>
-      inline void serialize(const Internal::SSEBitMask<MAX> &mask);
-      template<unsigned int MAX>
-      inline void serialize(const Internal::SSETLBitMask<MAX> &mask);
-#endif
-#ifdef __AVX__
-      template<unsigned int MAX>
-      inline void serialize(const Internal::AVXBitMask<MAX> &mask);
-      template<unsigned int MAX>
-      inline void serialize(const Internal::AVXTLBitMask<MAX> &mask);
-#endif
-#ifdef __ALTIVEC__
-      template<unsigned int MAX>
-      inline void serialize(const Internal::PPCBitMask<MAX> &mask);
-      template<unsigned int MAX>
-      inline void serialize(const Internal::PPCTLBitMask<MAX> &mask);
-#endif
-      template<typename IT, typename DT, bool BIDIR>
-      inline void serialize(
-          const Internal::IntegerSet<IT,DT,BIDIR> &index_set);
-      inline void serialize(const Domain &domain);
-      inline void serialize(const DomainPoint &dp);
-      inline void serialize(const void *src, size_t bytes);
-    public:
-      inline void begin_context(void);
-      inline void end_context(void);
-    public:
-      inline size_t get_index(void) const { return index; }
-      inline const void* get_buffer(void) const { return buffer; }
-      inline size_t get_buffer_size(void) const { return total_bytes; }
-      inline size_t get_used_bytes(void) const { return index; }
-      inline void* reserve_bytes(size_t size);
-      inline void reset(void);
-    private:
-      inline void resize(void);
-    private:
-      size_t total_bytes;
-      char *buffer;
-      size_t index;
-#ifdef DEBUG_LEGION
-      size_t context_bytes;
-#endif
-    };
-
-    /////////////////////////////////////////////////////////////
-    // Deserializer 
-    /////////////////////////////////////////////////////////////
-    class Deserializer {
-    public:
-      Deserializer(const void *buf, size_t buffer_size)
-        : total_bytes(buffer_size), buffer((const char*)buf), index(0)
-#ifdef DEBUG_LEGION
-          , context_bytes(0)
-#endif
-      { }
-      Deserializer(const Deserializer &rhs)
-        : total_bytes(0)
-      {
-        // should never be called
-        assert(false);
-      }
-    public:
-      ~Deserializer(void)
-      {
-#ifdef DEBUG_LEGION
-        // should have used the whole buffer
-        assert(index == total_bytes); 
-#endif
-      }
-    public:
-      inline Deserializer& operator=(const Deserializer &rhs);
-    public:
-      template<typename T>
-      inline void deserialize(T &element);
-      // We need specialized deserializers for bit masks
-      template<typename T, unsigned int MAX, unsigned SHIFT, unsigned MASK>
-      inline void deserialize(Internal::BitMask<T,MAX,SHIFT,MASK> &mask);
-      template<typename T, unsigned int MAX, unsigned SHIFT, unsigned MASK>
-      inline void deserialize(Internal::TLBitMask<T,MAX,SHIFT,MASK> &mask);
-#ifdef __SSE2__
-      template<unsigned int MAX>
-      inline void deserialize(Internal::SSEBitMask<MAX> &mask);
-      template<unsigned int MAX>
-      inline void deserialize(Internal::SSETLBitMask<MAX> &mask);
-#endif
-#ifdef __AVX__
-      template<unsigned int MAX>
-      inline void deserialize(Internal::AVXBitMask<MAX> &mask);
-      template<unsigned int MAX>
-      inline void deserialize(Internal::AVXTLBitMask<MAX> &mask);
-#endif
-#ifdef __ALTIVEC__
-      template<unsigned int MAX>
-      inline void deserialize(Internal::PPCBitMask<MAX> &mask);
-      template<unsigned int MAX>
-      inline void deserialize(Internal::PPCTLBitMask<MAX> &mask);
-#endif
-      template<typename IT, typename DT, bool BIDIR>
-      inline void deserialize(Internal::IntegerSet<IT,DT,BIDIR> &index_set);
-      inline void deserialize(Domain &domain);
-      inline void deserialize(DomainPoint &dp);
-      inline void deserialize(void *dst, size_t bytes);
-    public:
-      inline void begin_context(void);
-      inline void end_context(void);
-    public:
-      inline size_t get_remaining_bytes(void) const;
-      inline const void* get_current_pointer(void) const;
-      inline void advance_pointer(size_t bytes);
-    private:
-      const size_t total_bytes;
-      const char *buffer;
-      size_t index;
-#ifdef DEBUG_LEGION
-      size_t context_bytes;
-#endif
-    };
-
-  namespace Internal {
-
-    /////////////////////////////////////////////////////////////
-    // Rez Checker 
-    /////////////////////////////////////////////////////////////
-    /*
-     * Helps in making the calls to begin and end context for
-     * both Serializer and Deserializer classes.
-     */
-    class RezCheck {
-    public:
-      RezCheck(Serializer &r) : rez(r) { rez.begin_context(); }
-      RezCheck(RezCheck &rhs) : rez(rhs.rez) { assert(false); }
-      ~RezCheck(void) { rez.end_context(); }
-    public:
-      inline RezCheck& operator=(const RezCheck &rhs)
-        { assert(false); return *this; }
-    private:
-      Serializer &rez;
-    };
-    // Same thing except for deserializers, yes we could template
-    // it, but then we have to type out to explicitly instantiate
-    // the template on the constructor call and that is a lot of
-    // unnecessary typing.
-    class DerezCheck {
-    public:
-      DerezCheck(Deserializer &r) : derez(r) { derez.begin_context(); }
-      DerezCheck(DerezCheck &rhs) : derez(rhs.derez) { assert(false); }
-      ~DerezCheck(void) { derez.end_context(); }
-    public:
-      inline DerezCheck& operator=(const DerezCheck &rhs)
-        { assert(false); return *this; }
-    private:
-      Deserializer &derez;
-    };
-
-    class BitMaskHelper {
-    public:
-      // Allocates memory that becomes owned by the caller
-      static char* to_string(const uint64_t *bits, int count);
+      class Heapify {
+      public:
+        static inline void* operator new(size_t count);
+        static inline void* operator new[](size_t count);
+      public:
+        static inline void* operator new(size_t count, void *ptr);
+        static inline void* operator new[](size_t count, void *ptr);
+      public:
+        static inline void operator delete(void *ptr);
+        static inline void operator delete[](void *ptr);
+      public:
+        static inline void operator delete(void *ptr, void *place);
+        static inline void operator delete[](void *ptr, void *place);
+      };
     };
 
     /////////////////////////////////////////////////////////////
@@ -247,7 +89,7 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
     template<typename T, unsigned int MAX,
              unsigned int SHIFT, unsigned int MASK>
-    class BitMask : public Internal::LegionHeapify<BitMask<T,MAX,SHIFT,MASK> > {
+    class BitMask : public BitMaskHelp::Heapify<BitMask<T,MAX,SHIFT,MASK> > {
     public:
       explicit BitMask(T init = 0);
       BitMask(const BitMask &rhs);
@@ -294,8 +136,10 @@ namespace Legion {
       inline BitMask& operator>>=(unsigned shift);
     public:
       inline T get_hash_key(void) const;
-      inline void serialize(Serializer &rez) const;
-      inline void deserialize(Deserializer &derez);
+      template<typename ST>
+      inline void serialize(ST &rez) const;
+      template<typename DT>
+      inline void deserialize(DT &derez);
     public:
       // Allocates memory that becomes owned by the caller
       inline char* to_string(void) const;
@@ -327,7 +171,7 @@ namespace Legion {
      */
     template<typename T, unsigned int MAX, unsigned SHIFT, unsigned MASK>
     class TLBitMask : 
-      public Internal::LegionHeapify<TLBitMask<T,MAX,SHIFT,MASK> > {
+      public BitMaskHelp::Heapify<TLBitMask<T,MAX,SHIFT,MASK> > {
     public:
       explicit TLBitMask(T init = 0);
       TLBitMask(const TLBitMask &rhs);
@@ -374,8 +218,10 @@ namespace Legion {
       inline TLBitMask& operator>>=(unsigned shift);
     public:
       inline T get_hash_key(void) const;
-      inline void serialize(Serializer &rez) const;
-      inline void deserialize(Deserializer &derez);
+      template<typename ST>
+      inline void serialize(ST &rez) const;
+      template<typename DT>
+      inline void deserialize(DT &derez);
     public:
       // Allocates memory that becomes owned by the caller
       inline char* to_string(void) const;
@@ -404,7 +250,7 @@ namespace Legion {
 #else
     class SSEBitMask // alignment handled below
 #endif
-      : public Internal::LegionHeapify<SSEBitMask<MAX> > {
+      : public BitMaskHelp::Heapify<SSEBitMask<MAX> > {
     public:
       explicit SSEBitMask(uint64_t init = 0);
       SSEBitMask(const SSEBitMask &rhs);
@@ -454,8 +300,10 @@ namespace Legion {
     public:
       inline uint64_t get_hash_key(void) const;
       inline const uint64_t* base(void) const;
-      inline void serialize(Serializer &rez) const;
-      inline void deserialize(Deserializer &derez);
+      template<typename ST>
+      inline void serialize(ST &rez) const;
+      template<typename DT>
+      inline void deserialize(DT &derez);
     public:
       // Allocates memory that becomes owned by the caller
       inline char* to_string(void) const;
@@ -484,7 +332,7 @@ namespace Legion {
 #else
     class SSETLBitMask 
 #endif
-      : public Internal::LegionHeapify<SSETLBitMask<MAX> > {
+      : public BitMaskHelp::Heapify<SSETLBitMask<MAX> > {
     public:
       explicit SSETLBitMask(uint64_t init = 0);
       SSETLBitMask(const SSETLBitMask &rhs);
@@ -534,8 +382,10 @@ namespace Legion {
     public:
       inline uint64_t get_hash_key(void) const;
       inline const uint64_t* base(void) const;
-      inline void serialize(Serializer &rez) const;
-      inline void deserialize(Deserializer &derez);
+      template<typename ST>
+      inline void serialize(ST &rez) const;
+      template<typename DT>
+      inline void deserialize(DT &derez);
     public:
       // Allocates memory that becomes owned by the caller
       inline char* to_string(void) const;
@@ -568,7 +418,7 @@ namespace Legion {
 #else
     class AVXBitMask // alignment handled below
 #endif
-      : public Internal::LegionHeapify<AVXBitMask<MAX> > {
+      : public BitMaskHelp::Heapify<AVXBitMask<MAX> > {
     public:
       explicit AVXBitMask(uint64_t init = 0);
       AVXBitMask(const AVXBitMask &rhs);
@@ -620,8 +470,10 @@ namespace Legion {
     public:
       inline uint64_t get_hash_key(void) const;
       inline const uint64_t* base(void) const;
-      inline void serialize(Serializer &rez) const;
-      inline void deserialize(Deserializer &derez);
+      template<typename ST>
+      inline void serialize(ST &rez) const;
+      template<typename DT>
+      inline void deserialize(DT &derez);
     public:
       // Allocates memory that becomes owned by the caller
       inline char* to_string(void) const;
@@ -651,7 +503,7 @@ namespace Legion {
 #else
     class AVXTLBitMask // alignment handled below
 #endif
-      : public Internal::LegionHeapify<AVXTLBitMask<MAX> > {
+      : public BitMaskHelp::Heapify<AVXTLBitMask<MAX> > {
     public:
       explicit AVXTLBitMask(uint64_t init = 0);
       AVXTLBitMask(const AVXTLBitMask &rhs);
@@ -703,8 +555,10 @@ namespace Legion {
     public:
       inline uint64_t get_hash_key(void) const;
       inline const uint64_t* base(void) const;
-      inline void serialize(Serializer &rez) const;
-      inline void deserialize(Deserializer &derez);
+      template<typename ST>
+      inline void serialize(ST &rez) const;
+      template<typename DT>
+      inline void deserialize(DT &derez);
     public:
       // Allocates memory that becomes owned by the caller
       inline char* to_string(void) const;
@@ -735,7 +589,7 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
     template<unsigned int MAX>
     class PPCBitMask // alignment handled below
-      : public Internal::LegionHeapify<PPCBitMask<MAX> > {
+      : public BitMaskHelp::Heapify<PPCBitMask<MAX> > {
     public:
       explicit PPCBitMask(uint64_t init = 0);
       PPCBitMask(const PPCBitMask &rhs);
@@ -788,8 +642,10 @@ namespace Legion {
     public:
       inline uint64_t get_hash_key(void) const;
       inline const uint64_t* base(void) const;
-      inline void serialize(Serializer &rez) const;
-      inline void deserialize(Deserializer &derez);
+      template<typename ST>
+      inline void serialize(ST &rez) const;
+      template<typename DT>
+      inline void deserialize(DT &derez);
     public:
       // Allocates memory that becomes owned by the caller
       inline char* to_string(void) const;
@@ -811,7 +667,7 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
     template<unsigned int MAX>
     class PPCTLBitMask // alignment handled below
-      : public Internal::LegionHeapify<PPCTLBitMask<MAX> > {
+      : public BitMaskHelp::Heapify<PPCTLBitMask<MAX> > {
     public:
       explicit PPCTLBitMask(uint64_t init = 0);
       PPCTLBitMask(const PPCTLBitMask &rhs);
@@ -864,8 +720,10 @@ namespace Legion {
     public:
       inline uint64_t get_hash_key(void) const;
       inline const uint64_t* base(void) const;
-      inline void serialize(Serializer &rez) const;
-      inline void deserialize(Deserializer &derez);
+      template<typename ST>
+      inline void serialize(ST &rez) const;
+      template<typename DT>
+      inline void deserialize(DT &derez);
     public:
       // Allocates memory that becomes owned by the caller
       inline char* to_string(void) const;
@@ -967,8 +825,10 @@ namespace Legion {
       inline CompoundBitMask& operator>>=(unsigned shift);
     public:
       inline uint64_t get_hash_key(void) const;
-      inline void serialize(Serializer &rez) const;
-      inline void deserialize(Deserializer &derez);
+      template<typename ST>
+      inline void serialize(ST &rez) const;
+      template<typename DT>
+      inline void deserialize(DT &derez);
     public:
       // Allocates memory that becomes owned by the caller
       inline char* to_string(void) const;
@@ -983,58 +843,10 @@ namespace Legion {
     };
 
     /////////////////////////////////////////////////////////////
-    // Bit Permutation 
-    /////////////////////////////////////////////////////////////
-    /*
-     * This is a class used for storing and performing fast 
-     * permutations of bit mask objects.  It is based on sections
-     * 7.4 and 7.5 of the first edition of Hacker's Delight.
-     * The bit mask MAX field must be a power of 2 and the
-     * second template parameter passed to this class must be
-     * the log2(MAX) from the bit mask's type.
-     *
-     * The permutation initially begins as the identity partition
-     * and is modified by the send_to command.  The send_to
-     * command maintains the invariant that a partition is 
-     * always represented for correctness.
-     *
-     *
-     */
-    template<typename BITMASK, unsigned LOG2MAX>
-    class BitPermutation : 
-      public Internal::LegionHeapify<BitPermutation<BITMASK,LOG2MAX> > {
-    public:
-      BitPermutation(void);
-      BitPermutation(const BitPermutation &rhs);
-    public:
-      inline bool is_identity(bool retest = false);
-      inline void send_to(unsigned src, unsigned dst);
-    public:
-      inline BITMASK generate_permutation(const BITMASK &mask);
-      inline void permute(BITMASK &mask);
-    protected:
-      inline BITMASK sheep_and_goats(const BITMASK &x, const BITMASK &m);
-      inline BITMASK compress_left(BITMASK x, BITMASK m);
-      inline BITMASK compress_right(BITMASK x, BITMASK m);
-    protected:
-      inline void set_edge(unsigned src, unsigned dst);
-      inline unsigned get_src(unsigned dst);
-      inline unsigned get_dst(unsigned src);
-    protected:
-      void compress_representation(void);
-      void test_identity(void);
-    protected:
-      bool dirty;
-      bool identity;
-      BITMASK p[LOG2MAX];
-      BITMASK comp[LOG2MAX];
-    };
-
-    /////////////////////////////////////////////////////////////
-    // Index Set 
+    // Integer Set 
     /////////////////////////////////////////////////////////////
     template<typename IT/*int type*/, typename DT/*dense type (BitMask)*/,
-             bool BIDIR/* = false (bi-directional)*/>
+             bool BIDIR=false/*(bi-directional)*/>
     class IntegerSet {
     public:
       // Size of an STL Node object in bytes
@@ -1043,7 +855,7 @@ namespace Legion {
       static const size_t STL_SET_NODE_SIZE = 32;
     public:
       // Need to inherit form LegionHeapify for alignment
-      struct DenseSet : public Internal::LegionHeapify<DenseSet> {
+      struct DenseSet : public BitMaskHelp::Heapify<DenseSet> {
       public:
         DT set;
       };
@@ -1092,8 +904,10 @@ namespace Legion {
       template<typename FUNCTOR>
       inline void map(FUNCTOR &functor) const;
     public:
-      inline void serialize(Serializer &rez) const;
-      inline void deserialize(Deserializer &derez);
+      template<typename ST>
+      inline void serialize(ST &rez) const;
+      template<typename ZT>
+      inline void deserialize(ZT &derez);
     public:
       inline IntegerSet operator|(const IntegerSet &rhs) const;
       inline IntegerSet operator&(const IntegerSet &rhs) const;
@@ -1116,466 +930,186 @@ namespace Legion {
       } set_ptr;
     };
 
-  }; // namspace Internal
+  namespace BitMaskHelp {
 
-    //--------------------------------------------------------------------------
-    // Give the implementations here so the templates get instantiated
-    //--------------------------------------------------------------------------
+    /**
+     * \struct BitMaskStaticAssert
+     * Help with static assertions.
+     */
+    template<bool> struct StaticAssert;
+    template<> struct StaticAssert<true> { };
+#define BITMASK_STATIC_ASSERT(condition) \
+    do { BitMaskHelp::StaticAssert<(condition)>(); } while (0)
 
+#ifdef __MACH__
+#define MASK_FMT "llx"
+#else
+#define MASK_FMT PRIx64
+#endif
     //--------------------------------------------------------------------------
-    inline Serializer& Serializer::operator=(const Serializer &rhs)
+    inline char* to_string(const uint64_t *bits, int count)
     //--------------------------------------------------------------------------
     {
-      // should never be called
-      assert(false);
-      return *this;
+      char *result = 
+        (char*)malloc(((((count + 63) >> 6) << 4) + 1) * sizeof(char));
+#if defined(LEGION_DEBUG) || defined(REALM_DEBUG)
+      assert(result != 0);
+#endif
+      char *p = result;
+      // special case for non-multiple-of-64
+      if((count & 63) != 0 && bits[count >> 6]) {
+        // each nibble (4 bits) takes one character
+        int nibbles = ((count & 63) + 3) >> 2;
+        sprintf(p, "%*.*" MASK_FMT, nibbles, nibbles, bits[count >> 6]);
+        p += nibbles;
+      }
+      // rest are whole words
+      int idx = (count >> 6);
+      while(idx > 0) {
+        if (bits[--idx] || idx == 0) {
+          sprintf(p, "%16.16" MASK_FMT, bits[idx]);
+          p += 16;
+        }
+      }
+      return result;
     }
+#undef MASK_FMT
 
-    //--------------------------------------------------------------------------
+    /**
+     * A helper class for determining alignment of types
+     */
     template<typename T>
-    inline void Serializer::serialize(const T &element)
-    //--------------------------------------------------------------------------
-    {
-      while ((index + sizeof(T)) > total_bytes)
-        resize();
-      *((T*)(buffer+index)) = element;
-      index += sizeof(T);
-#ifdef DEBUG_LEGION
-      context_bytes += sizeof(T);
-#endif
-    }
+    class AlignmentTrait {
+    public:
+      struct AlignmentFinder {
+        char a;
+        T b;
+      };
+      enum { AlignmentOf = sizeof(AlignmentFinder) - sizeof(T) };
+    };
 
     //--------------------------------------------------------------------------
-    template<>
-    inline void Serializer::serialize<bool>(const bool &element)
+    template<size_t SIZE, size_t ALIGNMENT, bool BYTES>
+    inline void* alloc_aligned(size_t cnt)
     //--------------------------------------------------------------------------
     {
-      while ((index + 4) > total_bytes)
-        resize();
-      *((bool*)buffer+index) = element;
-      index += 4;
-#ifdef DEBUG_LEGION
-      context_bytes += 4;
-#endif
-    }
-
-    //--------------------------------------------------------------------------
-    template<typename T, unsigned int MAX, unsigned SHIFT, unsigned MASK>
-    inline void Serializer::serialize(
-                                const Internal::BitMask<T,MAX,SHIFT,MASK> &mask)
-    //--------------------------------------------------------------------------
-    {
-      mask.serialize(*this);
-    }
-
-    //--------------------------------------------------------------------------
-    template<typename T, unsigned int MAX, unsigned SHIFT, unsigned MASK>
-    inline void Serializer::serialize(
-                              const Internal::TLBitMask<T,MAX,SHIFT,MASK> &mask)
-    //--------------------------------------------------------------------------
-    {
-      mask.serialize(*this);
-    }
-
-#ifdef __SSE2__
-    //--------------------------------------------------------------------------
-    template<unsigned int MAX>
-    inline void Serializer::serialize(const Internal::SSEBitMask<MAX> &mask)
-    //--------------------------------------------------------------------------
-    {
-      mask.serialize(*this);
-    }
-
-    //--------------------------------------------------------------------------
-    template<unsigned int MAX>
-    inline void Serializer::serialize(const Internal::SSETLBitMask<MAX> &mask)
-    //--------------------------------------------------------------------------
-    {
-      mask.serialize(*this);
-    }
-#endif
-
-#ifdef __AVX__
-    //--------------------------------------------------------------------------
-    template<unsigned int MAX>
-    inline void Serializer::serialize(const Internal::AVXBitMask<MAX> &mask)
-    //--------------------------------------------------------------------------
-    {
-      mask.serialize(*this);
-    }
-
-    //--------------------------------------------------------------------------
-    template<unsigned int MAX>
-    inline void Serializer::serialize(const Internal::AVXTLBitMask<MAX> &mask)
-    //--------------------------------------------------------------------------
-    {
-      mask.serialize(*this);
-    }
-#endif
-
-#ifdef __ALTIVEC__
-    //--------------------------------------------------------------------------
-    template<unsigned int MAX>
-    inline void Serializer::serialize(const Internal::PPCBitMask<MAX> &mask)
-    //--------------------------------------------------------------------------
-    {
-      mask.serialize(*this);
-    }
-
-    //--------------------------------------------------------------------------
-    template<unsigned int MAX>
-    inline void Serializer::serialize(const Internal::PPCTLBitMask<MAX> &mask)
-    //--------------------------------------------------------------------------
-    {
-      mask.serialize(*this);
-    }
-#endif
-
-    //--------------------------------------------------------------------------
-    template<typename IT, typename DT, bool BIDIR>
-    inline void Serializer::serialize(
-                               const Internal::IntegerSet<IT,DT,BIDIR> &int_set)
-    //--------------------------------------------------------------------------
-    {
-      int_set.serialize(*this);
-    }
-
-    //--------------------------------------------------------------------------
-    inline void Serializer::serialize(const Domain &dom)
-    //--------------------------------------------------------------------------
-    {
-      serialize(dom.dim);
-      if (dom.dim == 0)
-        serialize(dom.is_id);
-      else
+      BITMASK_STATIC_ASSERT((SIZE % ALIGNMENT) == 0);
+      size_t alloc_size = cnt;
+      if (!BYTES)
+        alloc_size *= SIZE;
+      void *result = NULL;
+      if (ALIGNMENT > BITMASK_MAX_ALIGNMENT)
       {
-        for (int i = 0; i < 2*dom.dim; i++)
-          serialize(dom.rect_data[i]);
+#if defined(DEBUG_LEGION) || defined(DEBUG_REALM)
+        assert((alloc_size % ALIGNMENT) == 0);
+#endif
+#if (defined(DEBUG_LEGION) || defined(DEBUG_REALM)) && !defined(NDEBUG)
+        int error = 
+#else
+#ifdef __GNUC__
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-result"
+#endif
+#ifdef __clang__
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wunused-result"
+#endif
+#endif
+          posix_memalign(&result, ALIGNMENT, alloc_size);
+#if (defined(DEBUG_LEGION) || defined(DEBUG_REALM)) && !defined(NDEBUG)
+        assert(error == 0);
+#else
+#ifdef __GNUC__
+#pragma GCC diagnostic pop
+#endif
+#ifdef __clang__
+#pragma clang diagnostic pop
+#endif
+#endif
       }
-    }
-
-    //--------------------------------------------------------------------------
-    inline void Serializer::serialize(const DomainPoint &dp)
-    //--------------------------------------------------------------------------
-    {
-      serialize(dp.dim);
-      if (dp.dim == 0)
-        serialize(dp.point_data[0]);
       else
-      {
-        for (int idx = 0; idx < dp.dim; idx++)
-          serialize(dp.point_data[idx]);
-      }
-    }
+        result = malloc(alloc_size);
 
-    //--------------------------------------------------------------------------
-    inline void Serializer::serialize(const void *src, size_t bytes)
-    //--------------------------------------------------------------------------
-    {
-      while ((index + bytes) > total_bytes)
-        resize();
-      memcpy(buffer+index,src,bytes);
-      index += bytes;
-#ifdef DEBUG_LEGION
-      context_bytes += bytes;
-#endif
-    }
-
-    //--------------------------------------------------------------------------
-    inline void Serializer::begin_context(void)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      while ((index + sizeof(size_t)) > total_bytes)
-        resize();
-      *((size_t*)(buffer+index)) = context_bytes;
-      index += sizeof(size_t);
-      context_bytes = 0;
-#endif
-    }
-
-    //--------------------------------------------------------------------------
-    inline void Serializer::end_context(void)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      // Save the size into the buffer
-      while ((index + sizeof(size_t)) > total_bytes)
-        resize();
-      *((size_t*)(buffer+index)) = context_bytes;
-      index += sizeof(size_t);
-      context_bytes = 0;
-#endif
-    }
-
-    //--------------------------------------------------------------------------
-    inline void* Serializer::reserve_bytes(size_t bytes)
-    //--------------------------------------------------------------------------
-    {
-      while ((index + bytes) > total_bytes)
-        resize();
-      void *result = buffer+index;
-      index += bytes;
-#ifdef DEBUG_LEGION
-      context_bytes += bytes;
+#if defined(DEBUG_LEGION) || defined(DEBUG_REALM)
+      assert(result != NULL);
 #endif
       return result;
     }
 
     //--------------------------------------------------------------------------
-    inline void Serializer::reset(void)
+    template<typename T, bool BYTES>
+    inline void* alloc_aligned(size_t cnt)
     //--------------------------------------------------------------------------
     {
-      index = 0;
-#ifdef DEBUG_LEGION
-      context_bytes = 0;
-#endif
-    }
-
-    //--------------------------------------------------------------------------
-    inline void Serializer::resize(void)
-    //--------------------------------------------------------------------------
-    {
-      // Double the buffer size
-      total_bytes *= 2;
-#ifdef DEBUG_LEGION
-      assert(total_bytes != 0); // this would cause deallocation
-#endif
-      char *next = (char*)realloc(buffer,total_bytes);
-#ifdef DEBUG_LEGION
-      assert(next != NULL);
-#endif
-      buffer = next;
-    }
-
-    //--------------------------------------------------------------------------
-    inline Deserializer& Deserializer::operator=(const Deserializer &rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *this;
+      return alloc_aligned<sizeof(T),
+              AlignmentTrait<T>::AlignmentOf,BYTES>(cnt);
     }
 
     //--------------------------------------------------------------------------
     template<typename T>
-    inline void Deserializer::deserialize(T &element)
+    /*static*/ inline void* Heapify<T>::operator new(size_t count)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      // Check to make sure we don't read past the end
-      assert((index+sizeof(T)) <= total_bytes);
-#endif
-      element = *((const T*)(buffer+index));
-      index += sizeof(T);
-#ifdef DEBUG_LEGION
-      context_bytes += sizeof(T);
-#endif
+      return alloc_aligned<T,true/*bytes*/>(count);  
     }
 
     //--------------------------------------------------------------------------
-    template<>
-    inline void Deserializer::deserialize<bool>(bool &element)
+    template<typename T>
+    /*static*/ inline void* Heapify<T>::operator new[](size_t count)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      // Check to make sure we don't read past the end
-      assert((index+4) <= total_bytes);
-#endif
-      element = *((const bool *)(buffer+index));
-      index += 4;
-#ifdef DEBUG_LEGION
-      context_bytes += 4;
-#endif
+      return alloc_aligned<T,true/*bytes*/>(count);
     }
 
     //--------------------------------------------------------------------------
-    template<typename T, unsigned int MAX, unsigned SHIFT, unsigned MASK>
-    inline void Deserializer::deserialize(
-                                      Internal::BitMask<T,MAX,SHIFT,MASK> &mask)
+    template<typename T>
+    /*static*/ inline void* Heapify<T>::operator new(size_t count, void *ptr)
     //--------------------------------------------------------------------------
     {
-      mask.deserialize(*this);
+      return ptr;
     }
 
     //--------------------------------------------------------------------------
-    template<typename T, unsigned int MAX, unsigned SHIFT, unsigned MASK>
-    inline void Deserializer::deserialize(
-                                    Internal::TLBitMask<T,MAX,SHIFT,MASK> &mask)
+    template<typename T>
+    /*static*/ inline void* Heapify<T>::operator new[](size_t count, void *ptr)
     //--------------------------------------------------------------------------
     {
-      mask.deserialize(*this);
-    }
-
-#ifdef __SSE2__
-    //--------------------------------------------------------------------------
-    template<unsigned int MAX>
-    inline void Deserializer::deserialize(Internal::SSEBitMask<MAX> &mask)
-    //--------------------------------------------------------------------------
-    {
-      mask.deserialize(*this);
+      return ptr;
     }
 
     //--------------------------------------------------------------------------
-    template<unsigned int MAX>
-    inline void Deserializer::deserialize(Internal::SSETLBitMask<MAX> &mask)
+    template<typename T>
+    /*static*/ inline void Heapify<T>::operator delete(void *ptr)
     //--------------------------------------------------------------------------
     {
-      mask.deserialize(*this);
-    }
-#endif
-
-#ifdef __AVX__
-    //--------------------------------------------------------------------------
-    template<unsigned int MAX>
-    inline void Deserializer::deserialize(Internal::AVXBitMask<MAX> &mask)
-    //--------------------------------------------------------------------------
-    {
-      mask.deserialize(*this);
+      free(ptr);
     }
 
     //--------------------------------------------------------------------------
-    template<unsigned int MAX>
-    inline void Deserializer::deserialize(Internal::AVXTLBitMask<MAX> &mask)
+    template<typename T>
+    /*static*/ inline void Heapify<T>::operator delete[](void *ptr)
     //--------------------------------------------------------------------------
     {
-      mask.deserialize(*this);
-    }
-#endif
-
-#ifdef __ALTIVEC__
-    //--------------------------------------------------------------------------
-    template<unsigned int MAX>
-    inline void Deserializer::deserialize(Internal::PPCBitMask<MAX> &mask)
-    //--------------------------------------------------------------------------
-    {
-      mask.deserialize(*this);
+      free(ptr);
     }
 
     //--------------------------------------------------------------------------
-    template<unsigned int MAX>
-    inline void Deserializer::deserialize(Internal::PPCTLBitMask<MAX> &mask)
+    template<typename T>
+    /*static*/ inline void Heapify<T>::operator delete(void *ptr, void *place)
     //--------------------------------------------------------------------------
     {
-      mask.deserialize(*this);
-    }
-#endif
-
-    //--------------------------------------------------------------------------
-    template<typename IT, typename DT, bool BIDIR>
-    inline void Deserializer::deserialize(
-                                     Internal::IntegerSet<IT,DT,BIDIR> &int_set)
-    //--------------------------------------------------------------------------
-    {
-      int_set.deserialize(*this);
+      free(ptr);
     }
 
     //--------------------------------------------------------------------------
-    inline void Deserializer::deserialize(Domain &dom)
+    template<typename T>
+    /*static*/ inline void Heapify<T>::operator delete[](void *ptr, void *place)
     //--------------------------------------------------------------------------
     {
-      deserialize(dom.dim);
-      if (dom.dim == 0)
-        deserialize(dom.is_id);
-      else
-      {
-        for (int i = 0; i < 2*dom.dim; i++)
-          deserialize(dom.rect_data[i]);
-      }
+      free(ptr);
     }
 
-    //--------------------------------------------------------------------------
-    inline void Deserializer::deserialize(DomainPoint &dp)
-    //--------------------------------------------------------------------------
-    {
-      deserialize(dp.dim);
-      if (dp.dim == 0)
-        deserialize(dp.point_data[0]);
-      else
-      {
-        for (int idx = 0; idx < dp.dim; idx++)
-          deserialize(dp.point_data[idx]);
-      }
-    }
-      
-    //--------------------------------------------------------------------------
-    inline void Deserializer::deserialize(void *dst, size_t bytes)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert((index + bytes) <= total_bytes);
-#endif
-      memcpy(dst,buffer+index,bytes);
-      index += bytes;
-#ifdef DEBUG_LEGION
-      context_bytes += bytes;
-#endif
-    }
-
-    //--------------------------------------------------------------------------
-    inline void Deserializer::begin_context(void)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      // Save our enclosing context on the stack
-#ifndef NDEBUG
-      size_t sent_context = *((const size_t*)(buffer+index));
-#endif
-      index += sizeof(size_t);
-      // Check to make sure that they match
-      assert(sent_context == context_bytes);
-      context_bytes = 0;
-#endif
-    }
-
-    //--------------------------------------------------------------------------
-    inline void Deserializer::end_context(void)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      // Read the send context size out of the buffer      
-#ifndef NDEBUG
-      size_t sent_context = *((const size_t*)(buffer+index));
-#endif
-      index += sizeof(size_t);
-      // Check to make sure that they match
-      assert(sent_context == context_bytes);
-      context_bytes = 0;
-#endif
-    }
-
-    //--------------------------------------------------------------------------
-    inline size_t Deserializer::get_remaining_bytes(void) const
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(index <= total_bytes);
-#endif
-      return total_bytes - index;
-    }
-
-    //--------------------------------------------------------------------------
-    inline const void* Deserializer::get_current_pointer(void) const
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(index <= total_bytes);
-#endif
-      return (const void*)(buffer+index);
-    }
-
-    //--------------------------------------------------------------------------
-    inline void Deserializer::advance_pointer(size_t bytes)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert((index+bytes) <= total_bytes);
-      context_bytes += bytes;
-#endif
-      index += bytes;
-    }
-
-  namespace Internal {
+  };
 
 #define BIT_ELMTS (MAX/(8*sizeof(T)))
     //-------------------------------------------------------------------------
@@ -1583,7 +1117,7 @@ namespace Legion {
     BitMask<T,MAX,SHIFT,MASK>::BitMask(T init /*= 0*/)
     //-------------------------------------------------------------------------
     {
-      LEGION_STATIC_ASSERT((MAX % (8*sizeof(T))) == 0);
+      BITMASK_STATIC_ASSERT((MAX % (8*sizeof(T))) == 0);
       for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
       {
         bit_vector[idx] = init;
@@ -1595,7 +1129,7 @@ namespace Legion {
     BitMask<T,MAX,SHIFT,MASK>::BitMask(const BitMask &rhs)
     //-------------------------------------------------------------------------
     {
-      LEGION_STATIC_ASSERT((MAX % (8*sizeof(T))) == 0);
+      BITMASK_STATIC_ASSERT((MAX % (8*sizeof(T))) == 0);
       for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
       {
         bit_vector[idx] = rhs[idx];
@@ -2135,16 +1669,18 @@ namespace Legion {
     }
 
     //-------------------------------------------------------------------------
-    template<typename T, unsigned MAX, unsigned SHIFT, unsigned MASK>
-    inline void BitMask<T,MAX,SHIFT,MASK>::serialize(Serializer &rez) const
+    template<typename T, unsigned MAX, unsigned SHIFT, unsigned MASK> 
+      template<typename ST>
+    inline void BitMask<T,MAX,SHIFT,MASK>::serialize(ST &rez) const
     //-------------------------------------------------------------------------
     {
       rez.serialize(bit_vector, (MAX/8));
     }
 
     //-------------------------------------------------------------------------
-    template<typename T, unsigned MAX, unsigned SHIFT, unsigned MASK>
-    inline void BitMask<T,MAX,SHIFT,MASK>::deserialize(Deserializer &derez)
+    template<typename T, unsigned MAX, unsigned SHIFT, unsigned MASK> 
+      template<typename DT>
+    inline void BitMask<T,MAX,SHIFT,MASK>::deserialize(DT &derez)
     //-------------------------------------------------------------------------
     {
       derez.deserialize(bit_vector, (MAX/8));
@@ -2155,7 +1691,7 @@ namespace Legion {
     inline char* BitMask<T,MAX,SHIFT,MASK>::to_string(void) const
     //-------------------------------------------------------------------------
     {
-      return BitMaskHelper::to_string(bit_vector, MAX);
+      return BitMaskHelp::to_string(bit_vector, MAX);
     }
 
     //-------------------------------------------------------------------------
@@ -2243,7 +1779,7 @@ namespace Legion {
       : sum_mask(init)
     //-------------------------------------------------------------------------
     {
-      LEGION_STATIC_ASSERT((MAX % (8*sizeof(T))) == 0);
+      BITMASK_STATIC_ASSERT((MAX % (8*sizeof(T))) == 0);
       for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
         bit_vector[idx] = init;
     }
@@ -2254,7 +1790,7 @@ namespace Legion {
       : sum_mask(rhs.sum_mask)
     //-------------------------------------------------------------------------
     {
-      LEGION_STATIC_ASSERT((MAX % (8*sizeof(T))) == 0);
+      BITMASK_STATIC_ASSERT((MAX % (8*sizeof(T))) == 0);
       for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
       {
         bit_vector[idx] = rhs[idx];
@@ -2845,7 +2381,8 @@ namespace Legion {
 
     //-------------------------------------------------------------------------
     template<typename T, unsigned int MAX, unsigned SHIFT, unsigned MASK>
-    inline void TLBitMask<T,MAX,SHIFT,MASK>::serialize(Serializer &rez) const
+      template<typename ST>
+    inline void TLBitMask<T,MAX,SHIFT,MASK>::serialize(ST &rez) const
     //-------------------------------------------------------------------------
     {
       rez.template serialize(sum_mask);
@@ -2854,7 +2391,8 @@ namespace Legion {
 
     //-------------------------------------------------------------------------
     template<typename T, unsigned int MAX, unsigned SHIFT, unsigned MASK>
-    inline void TLBitMask<T,MAX,SHIFT,MASK>::deserialize(Deserializer &derez)
+      template<typename DT>
+    inline void TLBitMask<T,MAX,SHIFT,MASK>::deserialize(DT &derez)
     //-------------------------------------------------------------------------
     {
       derez.template deserialize(sum_mask);
@@ -2866,7 +2404,7 @@ namespace Legion {
     inline char* TLBitMask<T,MAX,SHIFT,MASK>::to_string(void) const
     //-------------------------------------------------------------------------
     {
-      return BitMaskHelper::to_string(bit_vector, MAX);
+      return BitMaskHelp::to_string(bit_vector, MAX);
     }
 
     //-------------------------------------------------------------------------
@@ -2950,7 +2488,7 @@ namespace Legion {
     SSEBitMask<MAX>::SSEBitMask(uint64_t init /*= 0*/)
     //-------------------------------------------------------------------------
     {
-      LEGION_STATIC_ASSERT((MAX % 128) == 0);
+      BITMASK_STATIC_ASSERT((MAX % 128) == 0);
       for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
       {
         bits.bit_vector[idx] = init;
@@ -2962,7 +2500,7 @@ namespace Legion {
     SSEBitMask<MAX>::SSEBitMask(const SSEBitMask &rhs)
     //-------------------------------------------------------------------------
     {
-      LEGION_STATIC_ASSERT((MAX % 128) == 0);
+      BITMASK_STATIC_ASSERT((MAX % 128) == 0);
       for (unsigned idx = 0; idx < SSE_ELMTS; idx++)
       {
         bits.sse_vector[idx] = rhs(idx);
@@ -3518,16 +3056,16 @@ namespace Legion {
     }
 
     //-------------------------------------------------------------------------
-    template<unsigned int MAX>
-    inline void SSEBitMask<MAX>::serialize(Serializer &rez) const
+    template<unsigned int MAX> template<typename ST>
+    inline void SSEBitMask<MAX>::serialize(ST &rez) const
     //-------------------------------------------------------------------------
     {
       rez.serialize(bits.bit_vector, (MAX/8));
     }
 
     //-------------------------------------------------------------------------
-    template<unsigned int MAX>
-    inline void SSEBitMask<MAX>::deserialize(Deserializer &derez)
+    template<unsigned int MAX> template<typename DT>
+    inline void SSEBitMask<MAX>::deserialize(DT &derez)
     //-------------------------------------------------------------------------
     {
       derez.deserialize(bits.bit_vector, (MAX/8));
@@ -3538,7 +3076,7 @@ namespace Legion {
     inline char* SSEBitMask<MAX>::to_string(void) const
     //-------------------------------------------------------------------------
     {
-      return BitMaskHelper::to_string(bits.bit_vector, MAX);
+      return BitMaskHelp::to_string(bits.bit_vector, MAX);
     }
 
     //-------------------------------------------------------------------------
@@ -3569,7 +3107,7 @@ namespace Legion {
       : sum_mask(init)
     //-------------------------------------------------------------------------
     {
-      LEGION_STATIC_ASSERT((MAX % 128) == 0);
+      BITMASK_STATIC_ASSERT((MAX % 128) == 0);
       for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
       {
         bits.bit_vector[idx] = init;
@@ -3582,7 +3120,7 @@ namespace Legion {
       : sum_mask(rhs.sum_mask)
     //-------------------------------------------------------------------------
     {
-      LEGION_STATIC_ASSERT((MAX % 128) == 0);
+      BITMASK_STATIC_ASSERT((MAX % 128) == 0);
       for (unsigned idx = 0; idx < SSE_ELMTS; idx++)
       {
         bits.sse_vector[idx] = rhs(idx);
@@ -4199,8 +3737,8 @@ namespace Legion {
     }
 
     //-------------------------------------------------------------------------
-    template<unsigned int MAX>
-    inline void SSETLBitMask<MAX>::serialize(Serializer &rez) const
+    template<unsigned int MAX> template<typename ST>
+    inline void SSETLBitMask<MAX>::serialize(ST &rez) const
     //-------------------------------------------------------------------------
     {
       rez.serialize(sum_mask);
@@ -4208,8 +3746,8 @@ namespace Legion {
     }
 
     //-------------------------------------------------------------------------
-    template<unsigned int MAX>
-    inline void SSETLBitMask<MAX>::deserialize(Deserializer &derez)
+    template<unsigned int MAX> template<typename DT>
+    inline void SSETLBitMask<MAX>::deserialize(DT &derez)
     //-------------------------------------------------------------------------
     {
       derez.deserialize(sum_mask);
@@ -4221,7 +3759,7 @@ namespace Legion {
     inline char* SSETLBitMask<MAX>::to_string(void) const
     //-------------------------------------------------------------------------
     {
-      return BitMaskHelper::to_string(bits.bit_vector, MAX);
+      return BitMaskHelp::to_string(bits.bit_vector, MAX);
     }
 
     //-------------------------------------------------------------------------
@@ -4277,7 +3815,7 @@ namespace Legion {
     AVXBitMask<MAX>::AVXBitMask(uint64_t init /*= 0*/)
     //-------------------------------------------------------------------------
     {
-      LEGION_STATIC_ASSERT((MAX % 256) == 0);
+      BITMASK_STATIC_ASSERT((MAX % 256) == 0);
       for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
       {
         bits.bit_vector[idx] = init;
@@ -4289,7 +3827,7 @@ namespace Legion {
     AVXBitMask<MAX>::AVXBitMask(const AVXBitMask &rhs)
     //-------------------------------------------------------------------------
     {
-      LEGION_STATIC_ASSERT((MAX % 256) == 0);
+      BITMASK_STATIC_ASSERT((MAX % 256) == 0);
       for (unsigned idx = 0; idx < AVX_ELMTS; idx++)
       {
         bits.avx_vector[idx] = rhs(idx);
@@ -4934,16 +4472,16 @@ namespace Legion {
     }
 
     //-------------------------------------------------------------------------
-    template<unsigned int MAX>
-    inline void AVXBitMask<MAX>::serialize(Serializer &rez) const
+    template<unsigned int MAX> template<typename ST>
+    inline void AVXBitMask<MAX>::serialize(ST &rez) const
     //-------------------------------------------------------------------------
     {
       rez.serialize(bits.bit_vector, (MAX/8));
     }
 
     //-------------------------------------------------------------------------
-    template<unsigned int MAX>
-    inline void AVXBitMask<MAX>::deserialize(Deserializer &derez)
+    template<unsigned int MAX> template<typename DT>
+    inline void AVXBitMask<MAX>::deserialize(DT &derez)
     //-------------------------------------------------------------------------
     {
       derez.deserialize(bits.bit_vector, (MAX/8));
@@ -4954,7 +4492,7 @@ namespace Legion {
     inline char* AVXBitMask<MAX>::to_string(void) const
     //-------------------------------------------------------------------------
     {
-      return BitMaskHelper::to_string(bits.bit_vector, MAX);
+      return BitMaskHelp::to_string(bits.bit_vector, MAX);
     }
 
     //-------------------------------------------------------------------------
@@ -4985,7 +4523,7 @@ namespace Legion {
       : sum_mask(init)
     //-------------------------------------------------------------------------
     {
-      LEGION_STATIC_ASSERT((MAX % 256) == 0);
+      BITMASK_STATIC_ASSERT((MAX % 256) == 0);
       for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
       {
         bits.bit_vector[idx] = init;
@@ -4998,7 +4536,7 @@ namespace Legion {
       : sum_mask(rhs.sum_mask)
     //-------------------------------------------------------------------------
     {
-      LEGION_STATIC_ASSERT((MAX % 256) == 0);
+      BITMASK_STATIC_ASSERT((MAX % 256) == 0);
       for (unsigned idx = 0; idx < AVX_ELMTS; idx++)
       {
         bits.avx_vector[idx] = rhs(idx);
@@ -5712,8 +5250,8 @@ namespace Legion {
     }
 
     //-------------------------------------------------------------------------
-    template<unsigned int MAX>
-    inline void AVXTLBitMask<MAX>::serialize(Serializer &rez) const
+    template<unsigned int MAX> template<typename ST>
+    inline void AVXTLBitMask<MAX>::serialize(ST &rez) const
     //-------------------------------------------------------------------------
     {
       rez.serialize(sum_mask);
@@ -5721,8 +5259,8 @@ namespace Legion {
     }
 
     //-------------------------------------------------------------------------
-    template<unsigned int MAX>
-    inline void AVXTLBitMask<MAX>::deserialize(Deserializer &derez)
+    template<unsigned int MAX> template<typename DT>
+    inline void AVXTLBitMask<MAX>::deserialize(DT &derez)
     //-------------------------------------------------------------------------
     {
       derez.deserialize(sum_mask);
@@ -5734,7 +5272,7 @@ namespace Legion {
     inline char* AVXTLBitMask<MAX>::to_string(void) const
     //-------------------------------------------------------------------------
     {
-      return BitMaskHelper::to_string(bits.bit_vector, MAX);
+      return BitMaskHelp::to_string(bits.bit_vector, MAX);
     }
 
     //-------------------------------------------------------------------------
@@ -5810,7 +5348,7 @@ namespace Legion {
     PPCBitMask<MAX>::PPCBitMask(uint64_t init /*= 0*/)
     //-------------------------------------------------------------------------
     {
-      LEGION_STATIC_ASSERT((MAX % 128) == 0);
+      BITMASK_STATIC_ASSERT((MAX % 128) == 0);
       for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
       {
         bits.bit_vector[idx] = init;
@@ -5822,7 +5360,7 @@ namespace Legion {
     PPCBitMask<MAX>::PPCBitMask(const PPCBitMask &rhs)
     //-------------------------------------------------------------------------
     {
-      LEGION_STATIC_ASSERT((MAX % 128) == 0);
+      BITMASK_STATIC_ASSERT((MAX % 128) == 0);
       for (unsigned idx = 0; idx < PPC_ELMTS; idx++)
       {
         bits.ppc_vector[idx] = rhs(idx);
@@ -6380,16 +5918,16 @@ namespace Legion {
     }
 
     //-------------------------------------------------------------------------
-    template<unsigned int MAX>
-    inline void PPCBitMask<MAX>::serialize(Serializer &rez) const
+    template<unsigned int MAX> template<typename ST>
+    inline void PPCBitMask<MAX>::serialize(ST &rez) const
     //-------------------------------------------------------------------------
     {
       rez.serialize(bits.bit_vector, (MAX/8));
     }
 
     //-------------------------------------------------------------------------
-    template<unsigned int MAX>
-    inline void PPCBitMask<MAX>::deserialize(Deserializer &derez)
+    template<unsigned int MAX> template<typename DT>
+    inline void PPCBitMask<MAX>::deserialize(DT &derez)
     //-------------------------------------------------------------------------
     {
       derez.deserialize(bits.bit_vector, (MAX/8));
@@ -6400,7 +5938,7 @@ namespace Legion {
     inline char* PPCBitMask<MAX>::to_string(void) const
     //-------------------------------------------------------------------------
     {
-      return BitMaskHelper::to_string(bits.bit_vector, MAX);
+      return BitMaskHelp::to_string(bits.bit_vector, MAX);
     }
 
     //-------------------------------------------------------------------------
@@ -6431,7 +5969,7 @@ namespace Legion {
       : sum_mask(init)
     //-------------------------------------------------------------------------
     {
-      LEGION_STATIC_ASSERT((MAX % 128) == 0);
+      BITMASK_STATIC_ASSERT((MAX % 128) == 0);
       for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
       {
         bits.bit_vector[idx] = init;
@@ -6444,7 +5982,7 @@ namespace Legion {
       : sum_mask(rhs.sum_mask)
     //-------------------------------------------------------------------------
     {
-      LEGION_STATIC_ASSERT((MAX % 128) == 0);
+      BITMASK_STATIC_ASSERT((MAX % 128) == 0);
       for (unsigned idx = 0; idx < PPC_ELMTS; idx++)
       {
         bits.ppc_vector[idx] = rhs(idx);
@@ -7067,8 +6605,8 @@ namespace Legion {
     }
 
     //-------------------------------------------------------------------------
-    template<unsigned int MAX>
-    inline void PPCTLBitMask<MAX>::serialize(Serializer &rez) const
+    template<unsigned int MAX> template<typename ST>
+    inline void PPCTLBitMask<MAX>::serialize(ST &rez) const
     //-------------------------------------------------------------------------
     {
       rez.serialize(sum_mask);
@@ -7076,8 +6614,8 @@ namespace Legion {
     }
 
     //-------------------------------------------------------------------------
-    template<unsigned int MAX>
-    inline void PPCTLBitMask<MAX>::deserialize(Deserializer &derez)
+    template<unsigned int MAX> template<typename DT>
+    inline void PPCTLBitMask<MAX>::deserialize(DT &derez)
     //-------------------------------------------------------------------------
     {
       derez.deserialize(sum_mask);
@@ -7089,7 +6627,7 @@ namespace Legion {
     inline char* PPCTLBitMask<MAX>::to_string(void) const
     //-------------------------------------------------------------------------
     {
-      return BitMaskHelper::to_string(bits.bit_vector, MAX);
+      return BitMaskHelp::to_string(bits.bit_vector, MAX);
     }
 
     //-------------------------------------------------------------------------
@@ -7133,9 +6671,9 @@ namespace Legion {
     CompoundBitMask<BITMASK,MAX,WORDS>::CompoundBitMask(uint64_t init)
     //-------------------------------------------------------------------------
     {
-      LEGION_STATIC_ASSERT(WORDS >= 2);
-      LEGION_STATIC_ASSERT(VAL_BITS <= (8*sizeof(uint64_t)));
-      LEGION_STATIC_ASSERT((1 << VAL_BITS) >= MAX);
+      BITMASK_STATIC_ASSERT(WORDS >= 2);
+      BITMASK_STATIC_ASSERT(VAL_BITS <= (8*sizeof(uint64_t)));
+      BITMASK_STATIC_ASSERT((1 << VAL_BITS) >= MAX);
       if (init == 0)
       {
         set_count(0);
@@ -8709,8 +8247,8 @@ namespace Legion {
 
     //-------------------------------------------------------------------------
     template<typename BITMASK, unsigned int MAX, unsigned int WORDS>
-    inline void CompoundBitMask<BITMASK,MAX,WORDS>::serialize(Serializer &rez) 
-                                                                          const
+      template<typename ST>
+    inline void CompoundBitMask<BITMASK,MAX,WORDS>::serialize(ST &rez) const
     //-------------------------------------------------------------------------
     {
       int count = get_count();
@@ -8720,7 +8258,7 @@ namespace Legion {
       else if (count == SPARSE_CNT)
       {
         SparseSet *sparse = get_sparse();
-        rez.serialize<size_t>(sparse->size());
+        rez.template serialize<size_t>(sparse->size());
         for (SparseSet::const_iterator it = sparse->begin();
               it != sparse->end(); it++)
           rez.serialize(*it);
@@ -8735,8 +8273,8 @@ namespace Legion {
 
     //-------------------------------------------------------------------------
     template<typename BITMASK, unsigned int MAX, unsigned int WORDS>
-    inline void CompoundBitMask<BITMASK,MAX,WORDS>::deserialize(
-                                                           Deserializer &derez)
+      template<typename DT>
+    inline void CompoundBitMask<BITMASK,MAX,WORDS>::deserialize(DT &derez)
     //-------------------------------------------------------------------------
     {
       int current_count = get_count();
@@ -8834,252 +8372,6 @@ namespace Legion {
       else if (count == SPARSE_CNT)
         count = mask.get_sparse()->size();
       return count;
-    }
-
-    //-------------------------------------------------------------------------
-    template<typename BITMASK, unsigned LOG2MAX>
-    BitPermutation<BITMASK,LOG2MAX>::BitPermutation(void)
-      : dirty(false), identity(true)
-    //-------------------------------------------------------------------------
-    {
-      // First zero everything out
-      for (unsigned idx = 0; idx < LOG2MAX; idx++)
-        p[idx] = BITMASK();
-      // Initialize everything to the identity permutation
-      for (unsigned idx = 0; idx < (1 << LOG2MAX); idx++)
-        set_edge(idx, idx);
-    }
-
-    //-------------------------------------------------------------------------
-    template<typename BITMASK, unsigned LOG2MAX>
-    BitPermutation<BITMASK,LOG2MAX>::BitPermutation(const BitPermutation &rhs)
-      : dirty(rhs.dirty), identity(rhs.identity)
-    //-------------------------------------------------------------------------
-    {
-      for (unsigned idx = 0; idx < LOG2MAX; idx++)
-      {
-        p[idx] = rhs.p[idx];
-        comp[idx] = rhs.comp[idx];
-      }
-    }
-
-    //-------------------------------------------------------------------------
-    template<typename BITMASK, unsigned LOG2MAX>
-    inline bool BitPermutation<BITMASK,LOG2MAX>::is_identity(bool retest)
-    //-------------------------------------------------------------------------
-    {
-      if (identity)
-        return true;
-      if (retest)
-      {
-        test_identity();
-        return identity;
-      }
-      return false;
-    }
-
-    //-------------------------------------------------------------------------
-    template<typename BITMASK, unsigned LOG2MAX>
-    inline void BitPermutation<BITMASK,LOG2MAX>::send_to(unsigned src,
-                                                         unsigned dst)
-    //-------------------------------------------------------------------------
-    {
-      // If we're already in identity mode and the src
-      // and dst are equal then we are done
-      if (identity && (src == dst))
-        return;
-      unsigned old_dst = get_dst(src);
-      unsigned old_src = get_src(dst);
-      // Check to see if we already had this edge
-      if ((old_src == src) && (old_dst == dst))
-        return;
-      // Otherwise flip the edges and mark that we are no longer
-      // in identity mode
-      set_edge(src, dst);
-      set_edge(old_src, old_dst);
-      identity = false;
-      dirty = true;
-    }
-
-    //-------------------------------------------------------------------------
-    template<typename BITMASK, unsigned LOG2MAX>
-    inline BITMASK BitPermutation<BITMASK,LOG2MAX>::generate_permutation(
-                                                          const BITMASK &mask)
-    //-------------------------------------------------------------------------
-    {
-      if (dirty)
-      {
-        compress_representation();
-        // If we're going to do an expensive operation retest for identity
-        test_identity();
-      }
-      if (identity)
-        return mask;
-      BITMASK result = mask;
-      for (unsigned idx = 0; idx < LOG2MAX; idx++)
-        result = sheep_and_goats(result, comp[idx]);
-      return result;
-    }
-
-    //-------------------------------------------------------------------------
-    template<typename BITMASK, unsigned LOG2MAX>
-    inline void BitPermutation<BITMASK,LOG2MAX>::permute(BITMASK &mask)
-    //-------------------------------------------------------------------------
-    {
-      if (dirty)
-      {
-        compress_representation();
-        // If we're going to do an expensive operation retest for identity
-        test_identity();
-      }
-      if (identity)
-        return;
-      for (unsigned idx = 0; idx < LOG2MAX; idx++)
-        mask = sheep_and_goats(mask, comp[idx]);
-    }
-
-    //-------------------------------------------------------------------------
-    template<typename BITMASK, unsigned LOG2MAX>
-    inline BITMASK BitPermutation<BITMASK,LOG2MAX>::sheep_and_goats(
-                                            const BITMASK &x, const BITMASK &m)
-    //-------------------------------------------------------------------------
-    {
-      return (compress_left(x, m) | compress_right(x, ~m));
-    }
-
-    //-------------------------------------------------------------------------
-    template<typename BITMASK, unsigned LOG2MAX>
-    inline BITMASK BitPermutation<BITMASK,LOG2MAX>::compress_left(
-                                                          BITMASK x, BITMASK m)
-    //-------------------------------------------------------------------------
-    {
-      BITMASK mk, mp, mv, t;
-
-      x = x & m;
-      mk = ~m >> 1;
-
-      for (unsigned i = 0; i < LOG2MAX; i++)
-      {
-        mp = mk ^ (mk >> 1);
-        for (unsigned idx = 1; idx < LOG2MAX; idx++)
-          mp = mp ^ (mp >> (1 << idx));
-        mv = mp & m;
-        m = (m ^ mv) | (mv << (1 << i));
-        t = x & mv;
-        x = (x ^ t) | (t << (1 << i));
-        mk = mk & ~mp;
-      }
-      return x;
-    }
-    
-    //-------------------------------------------------------------------------
-    template<typename BITMASK, unsigned LOG2MAX>
-    inline BITMASK BitPermutation<BITMASK,LOG2MAX>::compress_right(
-                                                          BITMASK x, BITMASK m)
-    //-------------------------------------------------------------------------
-    {
-      BITMASK mk, mp, mv, t;
-
-      x = x & m;
-      mk = ~m << 1;
-
-      for (unsigned i = 0; i < LOG2MAX; i++)
-      {
-        mp = mk ^ (mk << 1);
-        for (unsigned idx = 1; idx < LOG2MAX; idx++)
-          mp = mp ^ (mp << (1 << idx));
-        mv = mp & m;
-        m = (m ^ mv) | (mv >> (1 << i));
-        t = x & mv;
-        x = (x ^ t) | (t >> (1 << i));
-        mk = mk & ~mp;
-      }
-      return x;
-    }
-
-    //-------------------------------------------------------------------------
-    template<typename BITMASK, unsigned LOG2MAX>
-    inline void BitPermutation<BITMASK,LOG2MAX>::set_edge(unsigned src,
-                                                          unsigned dst)
-    //-------------------------------------------------------------------------
-    {
-      for (unsigned idx = 0; idx < LOG2MAX; idx++)
-      {
-        unsigned bit = (dst & (1 << idx));
-        if (bit)
-          p[idx].set_bit(src);
-        else
-          p[idx].unset_bit(src);
-      }
-    }
-
-    //-------------------------------------------------------------------------
-    template<typename BITMASK, unsigned LOG2MAX>
-    inline unsigned BitPermutation<BITMASK,LOG2MAX>::get_src(unsigned dst)
-    //-------------------------------------------------------------------------
-    {
-      for (unsigned idx = 0; idx < (1 << LOG2MAX); idx++)
-      {
-        if (get_dst(idx) == dst)
-          return idx;
-      }
-      // If we ever get here then we no longer had a permutation
-      assert(false);
-      return 0;
-    }
-
-    //-------------------------------------------------------------------------
-    template<typename BITMASK, unsigned LOG2MAX>
-    inline unsigned BitPermutation<BITMASK,LOG2MAX>::get_dst(unsigned src)
-    //-------------------------------------------------------------------------
-    {
-      unsigned dst = 0;
-      for (unsigned idx = 0; idx < LOG2MAX; idx++)
-      {
-        if (p[idx].is_set(src))
-          dst |= (1 << idx);
-      }
-      return dst;
-    }
-
-    //-------------------------------------------------------------------------
-    template<typename BITMASK, unsigned LOG2MAX>
-    void BitPermutation<BITMASK,LOG2MAX>::compress_representation(void)
-    //-------------------------------------------------------------------------
-    {
-      for (unsigned idx = 0; idx < LOG2MAX; idx++)
-      {
-        if (idx == 0)
-          comp[0] = p[0];
-        else
-        {
-          comp[idx] = sheep_and_goats(p[idx],comp[0]);
-          for (unsigned i = 1; i < idx; i++)
-            comp[idx] = sheep_and_goats(comp[idx],comp[i]);
-        }
-      }
-      dirty = false;
-    }
-
-    //-------------------------------------------------------------------------
-    template<typename BITMASK, unsigned LOG2MAX>
-    void BitPermutation<BITMASK,LOG2MAX>::test_identity(void)
-    //-------------------------------------------------------------------------
-    {
-      // If we're still the identity then we're done
-      if (identity)
-        return;
-      for (unsigned idx = 0; idx < (1 << LOG2MAX); idx++)
-      {
-        unsigned src = 1 << idx;
-        unsigned dst = get_dst(src);
-        if (src != dst)
-        {
-          identity = false;
-          return;
-        }
-      }
-      identity = true;
     }
 
     //-------------------------------------------------------------------------
@@ -9336,16 +8628,16 @@ namespace Legion {
     }
 
     //-------------------------------------------------------------------------
-    template<typename IT, typename DT, bool BIDIR>
-    inline void IntegerSet<IT,DT,BIDIR>::serialize(Serializer &rez) const
+    template<typename IT, typename DT, bool BIDIR> template<typename ST>
+    inline void IntegerSet<IT,DT,BIDIR>::serialize(ST &rez) const
     //-------------------------------------------------------------------------
     {
-      rez.serialize<bool>(sparse);
+      rez.template serialize<bool>(sparse);
       if (sparse)
       {
 	if (set_ptr.sparse)
 	{
-          rez.serialize<size_t>(set_ptr.sparse->size());
+          rez.template serialize<size_t>(set_ptr.sparse->size());
           for (typename std::set<IT>::const_iterator it = 
                 set_ptr.sparse->begin(); it != set_ptr.sparse->end(); it++)
           {
@@ -9353,19 +8645,19 @@ namespace Legion {
           }
         }
 	else
-          rez.serialize<size_t>(0);
+          rez.template serialize<size_t>(0);
       }
       else
         rez.serialize(set_ptr.dense->set);
     }
 
     //-------------------------------------------------------------------------
-    template<typename IT, typename DT, bool BIDIR>
-    inline void IntegerSet<IT,DT,BIDIR>::deserialize(Deserializer &derez)
+    template<typename IT, typename DT, bool BIDIR> template<typename ZT>
+    inline void IntegerSet<IT,DT,BIDIR>::deserialize(ZT &derez)
     //-------------------------------------------------------------------------
     {
       bool is_sparse;
-      derez.deserialize<bool>(is_sparse);
+      derez.template deserialize<bool>(is_sparse);
       if (is_sparse)
       {
         // If it doesn't match then replace the old one
@@ -9378,7 +8670,7 @@ namespace Legion {
         else if (set_ptr.sparse)
 	  set_ptr.sparse->clear();
         size_t num_elements;
-        derez.deserialize<size_t>(num_elements);
+        derez.template deserialize<size_t>(num_elements);
 	if (num_elements > 0) {
 	  if (!set_ptr.sparse)
 	    set_ptr.sparse = new typename std::set<IT>;
@@ -9572,7 +8864,4 @@ namespace Legion {
       return *this;
     }
 
-  }; // namespace Internal
-}; // namespace Legion 
-
-#endif // __LEGION_BITMASK_H__
+#endif // __BITMASK_H__

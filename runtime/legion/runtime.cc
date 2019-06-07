@@ -15,14 +15,11 @@
 
 // SJT: this comes first because some systems require __STDC_FORMAT_MACROS
 //  to be defined before inttypes.h is included anywhere
-#ifdef __MACH__
-#define MASK_FMT "llx"
-#else
+#ifndef __MACH__
 #ifndef __STDC_FORMAT_MACROS
 #define __STDC_FORMAT_MACROS
 #endif
 #include <inttypes.h>
-#define MASK_FMT PRIx64
 #endif
 
 #include "legion.h"
@@ -20891,32 +20888,7 @@ namespace Legion {
       }
       runtime->trace_free(a, size, elems);
     }
-#endif
-
-    //--------------------------------------------------------------------------
-    /*static*/ char* BitMaskHelper::to_string(const uint64_t *bits, int count)
-    //--------------------------------------------------------------------------
-    {
-      char *result = (char*)malloc(((((count + 63) >> 6) << 4) + 1)*sizeof(char));
-      assert(result != 0);
-      char *p = result;
-      // special case for non-multiple-of-64
-      if((count & 63) != 0 && bits[count >> 6]) {
-        // each nibble (4 bits) takes one character
-        int nibbles = ((count & 63) + 3) >> 2;
-        sprintf(p, "%*.*" MASK_FMT, nibbles, nibbles, bits[count >> 6]);
-        p += nibbles;
-      }
-      // rest are whole words
-      int idx = (count >> 6);
-      while(idx > 0) {
-        if (bits[--idx] || idx == 0) {
-          sprintf(p, "%16.16" MASK_FMT, bits[idx]);
-          p += 16;
-        }
-      }
-      return result;
-    }
+#endif 
 
   }; // namespace Internal 
 }; // namespace Legion 
