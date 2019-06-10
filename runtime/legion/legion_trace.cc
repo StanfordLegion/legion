@@ -2438,21 +2438,19 @@ namespace Legion {
       // - frontiers[idx] == (event idx from the previous trace)
       // - after each replay, we do assignment events[frontiers[idx]] = idx
       // Note that 'frontiers' is used in 'find_last_users()'
-      for (std::map<InstanceAccess,UserInfos>::iterator it = last_users.begin();
-           it != last_users.end(); ++it)
-        for (UserInfos::iterator iit = it->second.begin(); iit !=
-             it->second.end(); ++iit)
-          for (std::set<unsigned>::iterator uit = iit->users.begin(); uit !=
-               iit->users.end(); ++uit)
+      for (ViewUsers::const_iterator it = view_users.begin(); it !=
+           view_users.end(); ++it)
+        for (FieldMaskSet<ViewUser>::const_iterator vit = it->second.begin();
+             vit != it->second.end(); ++vit)
+        {
+          unsigned frontier = vit->first->user;
+          if (frontiers.find(frontier) == frontiers.end())
           {
-            unsigned frontier = *uit;
-            if (frontiers.find(frontier) == frontiers.end())
-            {
-              unsigned next_event_id = events.size();
-              frontiers[frontier] = next_event_id;
-              events.resize(next_event_id + 1);
-            }
+            unsigned next_event_id = events.size();
+            frontiers[frontier] = next_event_id;
+            events.resize(next_event_id + 1);
           }
+        }
 
       // We are now going to break the invariant that
       // the generator of events[idx] is instructions[idx].
@@ -2472,43 +2470,34 @@ namespace Legion {
           case COMPLETE_REPLAY:
             {
               CompleteReplay *replay = inst->as_complete_replay();
-              std::map<TraceLocalID, std::vector<InstanceReq> >::iterator
-                finder = op_reqs.find(replay->owner);
-              if (finder == op_reqs.end())
-                break;
-              const std::vector<InstanceReq> &reqs = finder->second;
-              for (std::vector<InstanceReq>::const_iterator it = reqs.begin();
-                   it != reqs.end(); ++it)
-                for (std::vector<FieldID>::const_iterator fit =
-                     it->fields.begin(); fit != it->fields.end(); ++fit)
-                  find_last_users(it->instance, it->node, *fit, users);
+              std::map<TraceLocalID, ViewExprs>::iterator finder =
+                op_views.find(replay->owner);
+              if (finder == op_views.end()) break;
+              find_all_last_users(finder->second, users);
               precondition_idx = &replay->rhs;
               break;
             }
           case ISSUE_COPY:
             {
               IssueCopy *copy = inst->as_issue_copy();
-              for (unsigned idx = 0; idx < copy->src_fields.size(); ++idx)
-              {
-                const CopySrcDstField &field = copy->src_fields[idx];
-                find_last_users(field.inst, copy->expr, field.field_id, users);
-              }
-              for (unsigned idx = 0; idx < copy->dst_fields.size(); ++idx)
-              {
-                const CopySrcDstField &field = copy->dst_fields[idx];
-                find_last_users(field.inst, copy->expr, field.field_id, users);
-              }
+              std::map<unsigned, ViewExprs>::iterator finder =
+                copy_views.find(copy->lhs);
+#ifdef DEBUG_LEGION
+              assert(finder != copy_views.end());
+#endif
+              find_all_last_users(finder->second, users);
               precondition_idx = &copy->precondition_idx;
               break;
             }
           case ISSUE_FILL:
             {
               IssueFill *fill = inst->as_issue_fill();
-              for (unsigned idx = 0; idx < fill->fields.size(); ++idx)
-              {
-                const CopySrcDstField &field = fill->fields[idx];
-                find_last_users(field.inst, fill->expr, field.field_id, users);
-              }
+              std::map<unsigned, ViewExprs>::iterator finder =
+                copy_views.find(fill->lhs);
+#ifdef DEBUG_LEGION
+              assert(finder != copy_views.end());
+#endif
+              find_all_last_users(finder->second, users);
               precondition_idx = &fill->precondition_idx;
               break;
             }
@@ -3754,17 +3743,6 @@ namespace Legion {
       assert(pre_finder != event_map.end());
 #endif
 
-      for (unsigned idx = 0; idx < src_fields.size(); ++idx)
-      {
-        const CopySrcDstField &field = src_fields[idx];
-        record_last_user(field.inst, expr, field.field_id, lhs_, true);
-      }
-      for (unsigned idx = 0; idx < dst_fields.size(); ++idx)
-      {
-        const CopySrcDstField &field = dst_fields[idx];
-        record_last_user(field.inst, expr, field.field_id, lhs_, false);
-      }
-
       unsigned precondition_idx = pre_finder->second;
       TraceLocalID op_key = find_trace_local_id(memo);
       instructions.push_back(new IssueCopy(
@@ -3779,8 +3757,10 @@ namespace Legion {
 
       record_views(memo, idx, lhs_, expr, RegionUsage(READ_ONLY, EXCLUSIVE, 0),
           tracing_srcs, false);
+      record_copy_views(lhs_, expr, tracing_srcs);
       record_views(memo, idx, lhs_, expr,
           RegionUsage(WRITE_DISCARD, EXCLUSIVE, 0), tracing_dsts, false);
+      record_copy_views(lhs_, expr, tracing_dsts);
     }
 
     //--------------------------------------------------------------------------
@@ -3955,6 +3935,19 @@ namespace Legion {
       record_fill_views(tracing_srcs);
       record_views(memo, idx, lhs_, expr,
           RegionUsage(WRITE_DISCARD, EXCLUSIVE, 0), tracing_dsts, true);
+      record_copy_views(lhs_, expr, tracing_dsts);
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalTemplate::record_copy_views(unsigned copy_id,
+                                             IndexSpaceExpression *expr,
+                                        const FieldMaskSet<InstanceView> &views)
+    //--------------------------------------------------------------------------
+    {
+      ViewExprs &cviews = copy_views[copy_id];
+      for (FieldMaskSet<InstanceView>::const_iterator it = views.begin();
+           it != views.end(); ++it)
+        cviews[it->first].insert(expr, it->second);
     }
 
     //--------------------------------------------------------------------------
@@ -4065,6 +4058,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       TraceLocalID op_key = find_trace_local_id(memo);
+      return find_memo_entry(op_key);
+    }
+
+    //--------------------------------------------------------------------------
+    unsigned PhysicalTemplate::find_memo_entry(TraceLocalID op_key)
+    //--------------------------------------------------------------------------
+    {
       std::map<TraceLocalID, unsigned>::iterator entry_finder =
         memo_entries.find(op_key);
 #ifdef DEBUG_LEGION
@@ -4072,7 +4072,6 @@ namespace Legion {
 #endif
       return entry_finder->second;
     }
-
     //--------------------------------------------------------------------------
     void PhysicalTemplate::record_precondition(Memoizable *memo,
                                                unsigned idx,
@@ -4243,30 +4242,45 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    inline void PhysicalTemplate::find_last_users(const PhysicalInstance &inst,
-                                                  IndexSpaceExpression *expr,
-                                                  unsigned field,
-                                                  std::set<unsigned> &users)
+    void PhysicalTemplate::find_all_last_users(ViewExprs &view_exprs,
+                                               std::set<unsigned> &users)
     //--------------------------------------------------------------------------
     {
-      InstanceAccess key(inst, field);
-      std::map<InstanceAccess, UserInfos>::iterator finder =
-        last_users.find(key);
-#ifdef DEBUG_LEGION
-      assert(finder != last_users.end());
-#endif
+      for (ViewExprs::iterator it = view_exprs.begin(); it != view_exprs.end();
+           ++it)
+        for (FieldMaskSet<IndexSpaceExpression>::iterator eit =
+             it->second.begin(); eit != it->second.end(); ++eit)
+          find_last_users(it->first, eit->first, eit->second, users);
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalTemplate::find_last_users(InstanceView *view,
+                                           IndexSpaceExpression *expr,
+                                           const FieldMask &mask,
+                                           std::set<unsigned> &users)
+    //--------------------------------------------------------------------------
+    {
+      if (expr->is_empty()) return;
       RegionTreeForest *forest = trace->runtime->forest;
-      for (UserInfos::iterator uit = finder->second.begin();
-           uit != finder->second.end(); ++uit)
-        for (std::set<unsigned>::iterator it = uit->users.begin(); it !=
-             uit->users.end(); ++it)
-          if (!forest->intersect_index_spaces(expr, uit->expr)->is_empty())
-          {
+      ViewUsers::iterator finder = view_users.find(view);
 #ifdef DEBUG_LEGION
-            assert(frontiers.find(*it) != frontiers.end());
+      assert(finder != view_users.end());
 #endif
-            users.insert(frontiers[*it]);
+      for (FieldMaskSet<ViewUser>::iterator uit = finder->second.begin(); uit !=
+           finder->second.end(); ++uit)
+        if (!!(uit->second & mask))
+        {
+          ViewUser *user = uit->first;
+          if (!forest->intersect_index_spaces(expr, user->expr)->is_empty())
+          {
+            std::map<unsigned, unsigned>::const_iterator finder =
+              frontiers.find(user->user);
+#ifdef DEBUG_LEGION
+            assert(finder != frontiers.end());
+#endif
+            users.insert(finder->second);
           }
+        }
     }
 
     /////////////////////////////////////////////////////////////

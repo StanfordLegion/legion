@@ -548,6 +548,19 @@ namespace Legion {
         unsigned user;
         IndexSpaceExpression *expr;
       };
+      struct CachedMapping
+      {
+        VariantID               chosen_variant;
+        TaskPriority            task_priority;
+        bool                    postmap_task;
+        std::vector<Processor>  target_procs;
+        std::deque<InstanceSet> physical_instances;
+      };
+      typedef LegionMap<TraceLocalID, CachedMapping>::aligned CachedMappings;
+      typedef LegionMap<InstanceView*,
+                        FieldMaskSet<ViewUser> >::aligned             ViewUsers;
+      typedef LegionMap<InstanceView*,
+                        FieldMaskSet<IndexSpaceExpression> >::aligned ViewExprs;
     public:
       PhysicalTemplate(PhysicalTrace *trace, ApEvent fence_event);
       PhysicalTemplate(const PhysicalTemplate &rhs);
@@ -674,6 +687,7 @@ namespace Legion {
     private:
       TraceLocalID find_trace_local_id(Memoizable *memo);
       unsigned find_memo_entry(Memoizable *memo);
+      unsigned find_memo_entry(TraceLocalID op_key);
       void record_precondition(Memoizable *memo,
                                unsigned idx,
                                IndexSpaceExpression *expr,
@@ -693,7 +707,10 @@ namespace Legion {
                             const RegionUsage &usage,
                             const FieldMask &user_mask,
                             bool invalidates);
-      void record_fill_views(const FieldMaskSet<FillView> &tracing_srcs);
+      void record_copy_views(unsigned copy_id,
+                             IndexSpaceExpression *expr,
+                             const FieldMaskSet<InstanceView> &views);
+      void record_fill_views(const FieldMaskSet<FillView> &views);
       void record_last_user(const PhysicalInstance &inst, 
                             IndexSpaceExpression *expr,
                             unsigned field, unsigned user, bool read);
@@ -702,12 +719,12 @@ namespace Legion {
                                    unsigned field, unsigned user, bool read)
        { record_last_user(inst, node->get_index_space_expression(),
                           field, user, read); }
-      void find_last_users(const PhysicalInstance &inst,
+      void find_all_last_users(ViewExprs &view_exprs,
+                               std::set<unsigned> &users);
+      void find_last_users(InstanceView *view,
                            IndexSpaceExpression *expr,
-                           unsigned field, std::set<unsigned> &users);
-      inline void find_last_users(const PhysicalInstance &inst,RegionNode *node,
-                                  unsigned field, std::set<unsigned> &users)
-       { find_last_users(inst,node->get_index_space_expression(),field,users); }
+                           const FieldMask &mask,
+                           std::set<unsigned> &users);
     private:
       PhysicalTrace *trace;
       volatile bool recording;
@@ -760,23 +777,11 @@ namespace Legion {
       std::vector<ApUserEvent> user_events;
       std::map<unsigned, unsigned> crossing_events;
     public:
-      struct CachedMapping
-      {
-        VariantID               chosen_variant;
-        TaskPriority            task_priority;
-        bool                    postmap_task;
-        std::vector<Processor>  target_procs;
-        std::deque<InstanceSet> physical_instances;
-      };
-      typedef LegionMap<TraceLocalID, CachedMapping>::aligned CachedMappings;
       CachedMappings cached_mappings;
     public:
-      typedef LegionMap<InstanceView*,
-                        FieldMaskSet<ViewUser> >::aligned             ViewUsers;
-      typedef LegionMap<InstanceView*,
-                        FieldMaskSet<IndexSpaceExpression> >::aligned ViewExprs;
       ViewUsers                                          view_users;
       std::map<TraceLocalID,ViewExprs>                   op_views;
+      std::map<unsigned,ViewExprs>                       copy_views;
     public:
       LegionVector<FieldMaskSet<InstanceView> >::aligned pre_views;
       std::vector<IndexSpaceExpression*>                 pre_exprs;
