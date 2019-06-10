@@ -4835,12 +4835,15 @@ namespace Legion {
     void ReductionView::update_gc_events(const std::set<ApEvent> &term_events)
     //--------------------------------------------------------------------------
     {
-      AutoLock v_lock(view_lock);
-      for (std::set<ApEvent>::const_iterator it = term_events.begin();
-            it != term_events.end(); it++)
       {
-        outstanding_gc_events.insert(*it);
+        AutoLock v_lock(view_lock);
+        for (std::set<ApEvent>::const_iterator it = term_events.begin();
+              it != term_events.end(); it++)
+        {
+          outstanding_gc_events.insert(*it);
+        }
       }
+      collect_users(term_events);
     }
 
 
