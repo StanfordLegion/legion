@@ -13,8 +13,8 @@
 -- limitations under the License.
 
 -- fails-with:
--- region_partition_by_unspecified_image_index_type1.rg:69: invalid call missing constraint $77 * $78
---   assert_disjoint(q[0], q[1])
+-- region_partition_by_unspecified_image_index_type1.rg:73: invalid call missing constraint $q0 * $q1
+--   assert_disjoint(q0, q1)
 --                  ^
 
 import "regent"
@@ -66,9 +66,13 @@ task f()
     t += @x
   end
 
-  assert_disjoint(q[0], q[1])
-  assert_disjoint(q[0], q[2])
-  assert_disjoint(q[1], q[2])
+  var q0 = q[0]
+  var q1 = q[1]
+  var q2 = q[2]
+
+  assert_disjoint(q0, q1)
+  assert_disjoint(q0, q2)
+  assert_disjoint(q1, q2)
 
   return t
 end

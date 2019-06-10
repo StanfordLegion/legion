@@ -13,8 +13,8 @@
 -- limitations under the License.
 
 -- fails-with:
--- region_partition_by_unspecified_image_index_type4.rg:70: invalid call missing constraint $74 * $75
---   assert_disjoint(q[0], q[1])
+-- region_partition_by_unspecified_image_index_type4.rg:74: invalid call missing constraint $q0 * $q1
+--   assert_disjoint(q0, q1)
 --                  ^
 
 
@@ -67,9 +67,13 @@ task f()
     t += @x
   end
 
-  assert_disjoint(q[0], q[1])
-  assert_disjoint(q[0], q[2])
-  assert_disjoint(q[1], q[2])
+  var q0 = q[0]
+  var q1 = q[1]
+  var q2 = q[2]
+
+  assert_disjoint(q0, q1)
+  assert_disjoint(q0, q2)
+  assert_disjoint(q1, q2)
 
   return t
 end
