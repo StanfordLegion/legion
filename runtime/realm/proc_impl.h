@@ -37,6 +37,12 @@ namespace Realm {
 
     class ProcessorGroup;
 
+    namespace ThreadLocal {
+      // if nonzero, prevents application thread from yielding execution
+      //  resources on an Event wait
+      extern __thread int scheduler_lock;
+    };
+
     class ProcessorImpl {
     public:
       ProcessorImpl(Processor _me, Processor::Kind _kind, int _num_cores=1);

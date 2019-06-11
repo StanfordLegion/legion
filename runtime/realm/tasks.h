@@ -128,6 +128,8 @@ namespace Realm {
       std::vector<TaskQueue *> task_queues;
       std::vector<Thread *> idle_workers;
       std::set<Thread *> blocked_workers;
+      // threads that block while holding a scheduler lock go here instead
+      std::set<Thread *> spinning_workers;
 
       typedef PriorityQueue<Thread *, DummyLock> ResumableQueue;
       ResumableQueue resumable_workers;

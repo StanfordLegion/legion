@@ -48,6 +48,10 @@ namespace Realm {
 
   namespace ThreadLocal {
     __thread Processor current_processor;
+    
+    // if nonzero, prevents application thread from yielding execution
+    //  resources on an Event wait
+    __thread int scheduler_lock = 0;
   };
 
     Processor::Kind Processor::kind(void) const
@@ -402,6 +406,22 @@ namespace Realm {
       }
       return NULL;
     }
+
+  /*static*/ void Processor::enable_scheduler_lock(void)
+  {
+#ifdef DEBUG_REALM
+    assert(ThreadLocal::current_processor.exists());
+#endif
+    ThreadLocal::scheduler_lock++;
+  }
+
+  /*static*/ void Processor::disable_scheduler_lock(void)
+  {
+#ifdef DEBUG_REALM
+    assert(ThreadLocal::scheduler_lock > 0);
+#endif
+    ThreadLocal::scheduler_lock--;
+  }
 
 
   ////////////////////////////////////////////////////////////////////////

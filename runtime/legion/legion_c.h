@@ -3557,6 +3557,12 @@ extern "C" {
   legion_runtime_get_executing_processor(legion_runtime_t runtime,
                                          legion_context_t ctx);
 
+  void
+  legion_runtime_enable_scheduler_lock();
+
+  void
+  legion_runtime_disable_scheduler_lock();
+  
   // -----------------------------------------------------------------------
   // Physical Data Operations
   // -----------------------------------------------------------------------
