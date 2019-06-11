@@ -969,24 +969,26 @@ function calculateLayout() {
       var node_id = parseInt(proc_match[3], 16);
       if (!(node_id in seen_nodes)) {
         seen_nodes[node_id] = 1;
-        var proc_kinds = util_files[node_id];
-
-        proc_kinds.forEach(function(kind) {
-          var util_name = "node " + kind;
-	  var kind_element = getElement(0, util_name, undefined, "util",
-                                         constants.util_levels, load_util,
-                                         "tsv/" + kind + "_util.tsv",
-                                         undefined, util_files[kind],
-                                         false, true);
-          state.layoutData.push(kind_element);
-        });
+        if (node_id in util_files) {
+            var proc_kinds = util_files[node_id];
+            proc_kinds.forEach(function(kind) {
+		var util_name = "node " + kind;
+		var kind_element = getElement(0, util_name, undefined, "util",
+                                              constants.util_levels, load_util,
+                                              "tsv/" + kind + "_util.tsv",
+                                              undefined, util_files[kind],
+                                              false, true);
+		state.layoutData.push(kind_element);
+            });
+	}
       }
-    } else {
-      state.layoutData.push(getElement(0, proc.text, proc.full_text, "proc",
-                                       proc.height, load_proc_timeline,
-                                       proc.tsv, undefined, undefined,
-                                       false, true));
     }
+      else {
+	  state.layoutData.push(getElement(0, proc.text, proc.full_text, "proc",
+					   proc.height, load_proc_timeline,
+					   proc.tsv, undefined, undefined,
+					   false, true));
+      }
   });
   state.num_nodes = seen_nodes.length;
 }
