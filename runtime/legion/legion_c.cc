@@ -4449,6 +4449,18 @@ legion_runtime_get_executing_processor(legion_runtime_t runtime_,
   return CObjectWrapper::wrap(proc);
 }
 
+void
+legion_runtime_enable_scheduler_lock()
+{
+  Processor::enable_scheduler_lock();
+}
+
+void
+legion_runtime_disable_scheduler_lock()
+{
+  Processor::disable_scheduler_lock();
+}
+
 // -----------------------------------------------------------------------
 // Physical Data Operations
 // -----------------------------------------------------------------------
