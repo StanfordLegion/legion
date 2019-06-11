@@ -4898,6 +4898,9 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(total_shards > 0);
 #endif
+      // Add an extra reference if we're not the owner manager
+      if (owner_space != runtime->address_space)
+        add_reference();
       runtime->register_shard_manager(repl_id, this);
       if (control_replicated && (owner_space == runtime->address_space))
       {
@@ -5729,7 +5732,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       const ShardManagerDeleteArgs *dargs = (const ShardManagerDeleteArgs*)args;
-      delete dargs->manager;
+      if (dargs->manager->remove_reference())
+        delete dargs->manager;
     }
 
     //--------------------------------------------------------------------------
