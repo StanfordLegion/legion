@@ -12852,7 +12852,13 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(collectives.find(collective->collective_index) == 
                collectives.end());
+        assert(shard_manager != NULL);
 #endif
+        // If the collectives are empty then we add a reference to the
+        // shard manager to prevent it being collected before we're
+        // done handling all the collectives
+        if (collectives.empty())
+          shard_manager->add_reference();
         collectives[collective->collective_index] = collective;
         std::map<CollectiveID,std::vector<std::pair<void*,size_t> > >::
           iterator finder = pending_collective_updates.find(
@@ -12903,12 +12909,22 @@ namespace Legion {
     void ReplicateContext::unregister_collective(ShardCollective *collective)
     //--------------------------------------------------------------------------
     {
-      AutoLock repl_lock(replication_lock); 
-      std::map<CollectiveID,ShardCollective*>::iterator finder =
-        collectives.find(collective->collective_index);
-      // Sometimes collectives are not used
-      if (finder != collectives.end())
-        collectives.erase(finder);
+      bool remove_reference = false;
+      {
+        AutoLock repl_lock(replication_lock); 
+        std::map<CollectiveID,ShardCollective*>::iterator finder =
+          collectives.find(collective->collective_index);
+        // Sometimes collectives are not used
+        if (finder != collectives.end())
+        {
+          collectives.erase(finder);
+          // Once we've done all our collectives then we can remove the
+          // reference that we added on the shard manager
+          remove_reference = collectives.empty();
+        }
+      }
+      if (remove_reference && shard_manager->remove_reference())
+        delete shard_manager;
     }
 
     //--------------------------------------------------------------------------

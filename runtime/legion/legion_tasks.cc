@@ -2296,7 +2296,7 @@ namespace Legion {
       untracked_valid_regions.clear();
       if ((execution_context != NULL) && execution_context->remove_reference())
         delete execution_context;
-      if (shard_manager != NULL)
+      if ((shard_manager != NULL) && shard_manager->remove_reference())
         delete shard_manager;
 #ifdef DEBUG_LEGION
       premapped_instances.clear();
@@ -3532,6 +3532,7 @@ namespace Legion {
         {
           shard_manager = new ShardManager(runtime, repl_context, true/*cr*/,
               is_top_level_task(), total_shards, runtime->address_space, this);
+          shard_manager->add_reference();
           if (output.control_replication_map.size() != total_shards)
             REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                           "Mapper %s specified a non-empty control replication "
@@ -3577,6 +3578,7 @@ namespace Legion {
         {
           shard_manager = new ShardManager(runtime, repl_context, false/*cr*/,
               is_top_level_task(), total_shards, runtime->address_space, this);
+          shard_manager->add_reference();
           if (!runtime->unsafe_mapper)
           {
             // Currently we only support non-control replication of 

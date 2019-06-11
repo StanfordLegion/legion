@@ -1487,7 +1487,8 @@ namespace Legion {
      * reductions, and exchanges of information between the 
      * variaous shard tasks.
      */
-    class ShardManager : public Mapper::SelectShardingFunctorInput {
+    class ShardManager : public Mapper::SelectShardingFunctorInput, 
+                          public Collectable {
     public:
       struct ShardManagerLaunchArgs :
         public LgTaskArgs<ShardManagerLaunchArgs> {
