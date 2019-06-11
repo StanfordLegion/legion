@@ -180,6 +180,13 @@ before_script:
         module load openmpi/p9/3.1.4-gcc_6.5.0
       elif [[ "$CXX" = "g++-7" ]]; then
         module load openmpi/p9/3.1.4-gcc_7.4.0
+      elif [[ "$CXX" = "g++-8" ]]; then
+        module load openmpi/p9/3.1.4-gcc_8.3.0
+      elif [[ "$CXX" = "clang++-8" ]]; then
+        module load clang/8.0.0
+        export CXX=clang++
+        export CC_FLAGS="$CC_FLAGS --gcc-toolchain=/projects/opt/ppc64le/gcc/8.3.0"
+        export LD_FLAGS="$LD_FLAGS --gcc-toolchain=/projects/opt/ppc64le/gcc/8.3.0"
       else
         echo "Failed to detect Darwin compiler version"
         false
@@ -633,10 +640,10 @@ clang35_cxx98_debug_legion:
 #   <<: [*linux_compute, *image, *tests]
 #   variables:
 #     <<: [*clang35, *terra35, *debug, *cxx98_normal, *regent]
-clang8_cxx98_debug_legion:
+clang8_cxx17_debug_legion:
   <<: [*linux, *image, *tests]
   variables:
-    <<: [*clang8, *terra38, *debug, *cxx98_normal, *legion]
+    <<: [*clang8, *terra38, *debug, *cxx17_normal, *legion]
 
 # Performance tests:
 # n0004_gcc49_cxx98_release_perf:
@@ -661,11 +668,11 @@ n0003_gcc48_cxx98_release_legion_cuda:
 #     <<: [*gcc48, *terra38, *release, *cxx98_normal, *cuda, *regent]
 
 # Darwin Power9 tests:
-darwin_power9_gcc6_cxx14_release_legion:
+darwin_power9_gcc8_cxx17_release_legion:
   <<: [*darwin_power9, *tests]
   variables:
-    <<: [*gcc6, *debug, *cxx14_normal, *legion, *darwin_power9_scheduler]
-darwin_power9_gcc7_cxx17_release_legion:
+    <<: [*gcc8, *debug, *cxx17_normal, *legion, *darwin_power9_scheduler]
+darwin_power9_clang8_cxx17_release_legion:
   <<: [*darwin_power9, *tests]
   variables:
-    <<: [*gcc7, *debug, *cxx17_normal, *legion, *darwin_power9_scheduler]
+    <<: [*clang8, *debug, *cxx17_normal, *legion, *darwin_power9_scheduler]
