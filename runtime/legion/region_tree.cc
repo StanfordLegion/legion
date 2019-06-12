@@ -4391,7 +4391,7 @@ namespace Legion {
 #endif
       IndexSpaceNode *node = get_node(test);
       IndexPartNode *const dom = get_node(dominator);
-      while (node->depth < (dom->depth + 1))
+      while (node->depth > (dom->depth + 1))
       {
 #ifdef DEBUG_LEGION
         assert(node->parent != NULL);
@@ -4414,7 +4414,7 @@ namespace Legion {
 #endif
       IndexPartNode *node = get_node(test);
       IndexSpaceNode *const dom = get_node(dominator);
-      while (node->depth < (dom->depth + 1))
+      while (node->depth > (dom->depth + 1))
       {
 #ifdef DEBUG_LEGION
         assert(node->parent != NULL);
@@ -4437,7 +4437,7 @@ namespace Legion {
 #endif
       IndexPartNode *node = get_node(test);
       IndexPartNode *const dom = get_node(dominator);
-      while (node->depth < dom->depth)
+      while (node->depth > dom->depth)
       {
 #ifdef DEBUG_LEGION
         assert(node->parent != NULL);
