@@ -576,7 +576,7 @@ function countSelected() {
 }
 
 function in_channel_node_id(text) {
-    var node_regex = /node\s(\d+)/;
+    var node_regex = /n(\d+)/;
     var match = node_regex.exec(text);
     var node_id;
     if (match) {
@@ -586,7 +586,7 @@ function in_channel_node_id(text) {
 }
 
 function out_channel_node_id(text) {
-    var node_regex = /to\s+\[node\s(\d+)/;
+    var node_regex = /to\s+\[n(\d+)/;
     var match = node_regex.exec(text);
     var node_id;
     if (match) {
@@ -596,7 +596,7 @@ function out_channel_node_id(text) {
 }
 
 function in_channel_node(text) {
-    var node_regex = /node\s(\d+)/;
+    var node_regex = /n(\d+)/;
     var match = node_regex.exec(text);
     var node_id;
     if (match) {
@@ -606,7 +606,7 @@ function in_channel_node(text) {
 }
 
 function out_channel_node(text) {
-    var node_regex = /to\s+\[node\s(\d+)/;
+    var node_regex = /to\s+\[n(\d+)/;
     var match = node_regex.exec(text);
     var node_id;
     if (match) {
@@ -616,7 +616,7 @@ function out_channel_node(text) {
 }
 
 function in_channel_proc(text) {
-    var node_regex = /^\s+\[node\s+\d+\]\[(\w+)\s+(\d+)/;
+    var node_regex = /^\s+\[n\d+\]\[(\w+)\s+(\d+)/;
     var match = node_regex.exec(text);
     var node_id;
     if (match) {
@@ -626,8 +626,8 @@ function in_channel_proc(text) {
 }
 
 function out_channel_proc(text) {
-    // node[....] to  [node n][proc m]
-    var node_regex = /to\s+\[node\s+\d+\]\[(\w+)\s+(\d+)/;
+    // [n...] to [n...][proc m]
+    var node_regex = /to\s+\[n\d+\]\[(\w+)\s+(\d+)/;
     var match = node_regex.exec(text);
     var node_id;
     if (match) {

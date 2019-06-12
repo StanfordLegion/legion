@@ -77,6 +77,21 @@ memory_node_proc = {
     'L1 Cache': 'Proc_id',
 }
 
+memory_kinds_abbr = {
+    'GASNet Global': ' glob',
+    'System': ' sys',
+    'Registered': ' reg',
+    'Socket': ' sock',
+    'Zero-Copy': ' zcpy',
+    'Framebuffer': ' fb',
+    'Disk': ' disk',
+    'HDF5': ' hdf5',
+    'File': ' file',
+    'L3 Cache': ' l3',
+    'L2 Cache': ' l2',
+    'L1 Cache': ' l1',
+}
+
 # Make sure this is up to date with legion_types.h
 dep_part_kinds = {
     0 : 'Union',
@@ -756,13 +771,13 @@ class MemProcAffinity(object):
 
     def get_short_text(self):
         if memory_node_proc[self.mem.kind] == "None":
-            return "[all nodes]"
+            return "[all n]"
         elif memory_node_proc[self.mem.kind] == "Node_id":
-            return " [node " + str(self.mem.node_id) + "]"
+            return " [n" + str(self.mem.node_id) + "]" + memory_kinds_abbr[self.mem.kind]
         elif memory_node_proc[self.mem.kind] == "GPU_proc_id":
-            return " [node " + str(self.proc[0].node_id) + "][GPU " + str(self.proc[0].proc_in_node) + "]"
+            return " [n" + str(self.proc[0].node_id) + "][gpu" + str(self.proc[0].proc_in_node) + "]" + memory_kinds_abbr[self.mem.kind]
         elif memory_node_proc[self.mem.kind] == "Proc_id":
-            return " [node " + str(self.proc[0].node_id) + "][CPU " + str(self.proc[0].proc_in_node) + "]"
+            return " [n" + str(self.proc[0].node_id) + "][cpu" + str(self.proc[0].proc_in_node) + "]" + memory_kinds_abbr[self.mem.kind]
         else:
             return ""
 
