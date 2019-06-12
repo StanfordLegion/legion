@@ -21,10 +21,6 @@ import legion
 from legion import task, RW
 import numpy
 
-print(numpy)
-print(numpy.version.version)
-print(dir(numpy))
-
 # Define a custom struct type.
 legion.ffi.cdef(r'''
 typedef struct mystruct {
