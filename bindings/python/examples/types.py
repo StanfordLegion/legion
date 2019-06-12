@@ -32,7 +32,6 @@ def main():
             'b': legion.bool_,
             'c64': legion.complex64,
             'c128': legion.complex128,
-            'f16': legion.float16,
             'f32': legion.float32,
             'f64': legion.float64,
             'i8': legion.int8,
