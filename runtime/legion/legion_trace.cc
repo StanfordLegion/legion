@@ -4252,49 +4252,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    inline void PhysicalTemplate::record_last_user(const PhysicalInstance &inst,
-                                                   IndexSpaceExpression *expr,
-                                                   unsigned field,
-                                                   unsigned user, bool read)
-    //--------------------------------------------------------------------------
-    {
-      InstanceAccess key(inst, field);
-      std::map<InstanceAccess, UserInfos>::iterator finder =
-        last_users.find(key);
-      if (finder == last_users.end())
-      {
-        UserInfos &infos = last_users[key];
-        infos.push_back(UserInfo(read, user, expr));
-      }
-      else
-      {
-        bool joined = false;
-        RegionTreeForest *forest = trace->runtime->forest;
-        for (UserInfos::iterator it = finder->second.begin();
-             it != finder->second.end();)
-        {
-          if ((read && it->read) || 
-              forest->intersect_index_spaces(it->expr, expr)->is_empty())
-          {
-            if (it->expr == expr)
-            {
-#ifdef DEBUG_LEGION
-              assert(!joined);
-#endif
-              it->users.insert(user);
-              joined = true;
-            }
-            ++it;
-          }
-          else
-            it = finder->second.erase(it);
-        }
-        if (!joined)
-          finder->second.push_back(UserInfo(read, user, expr));
-      }
-    }
-
-    //--------------------------------------------------------------------------
     void PhysicalTemplate::find_all_last_users(ViewExprs &view_exprs,
                                                std::set<unsigned> &users)
     //--------------------------------------------------------------------------

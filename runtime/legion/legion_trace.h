@@ -721,14 +721,6 @@ namespace Legion {
                              const FieldMaskSet<InstanceView> &views);
       void record_fill_views(const FieldMaskSet<FillView> &views);
     private:
-      void record_last_user(const PhysicalInstance &inst, 
-                            IndexSpaceExpression *expr,
-                            unsigned field, unsigned user, bool read);
-      inline void record_last_user(const PhysicalInstance &inst,
-                                   RegionNode *node,
-                                   unsigned field, unsigned user, bool read)
-       { record_last_user(inst, node->get_index_space_expression(),
-                          field, user, read); }
       void find_all_last_users(ViewExprs &view_exprs,
                                std::set<unsigned> &users);
       void find_last_users(InstanceView *view,
@@ -750,24 +742,6 @@ namespace Legion {
       std::vector<std::vector<Instruction*> > slices;
       std::vector<std::vector<TraceLocalID> > slice_tasks;
       std::map<TraceLocalID, unsigned> memo_entries;
-      typedef std::pair<PhysicalInstance, unsigned> InstanceAccess;
-      struct UserInfo {
-        UserInfo(bool r, unsigned u, IndexSpaceExpression *e)
-          : read(r), expr(e)
-          { users.insert(u); }
-        bool read;
-        std::set<unsigned> users;
-        IndexSpaceExpression *expr;
-      };
-      typedef std::list<UserInfo> UserInfos;
-      std::map<InstanceAccess, UserInfos> last_users;
-      struct InstanceReq {
-        bool read;
-        PhysicalInstance instance;
-        RegionNode *node;
-        std::vector<FieldID> fields;
-      };
-      std::map<TraceLocalID, std::vector<InstanceReq> > op_reqs;
       std::vector<std::pair<RegionRequirement, InstanceSet> > summary_info;
       std::vector<unsigned> parent_indices;
       struct SummaryOpInfo {
