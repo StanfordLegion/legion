@@ -541,12 +541,20 @@ namespace Legion {
       };
     public:
       struct ViewUser {
-        ViewUser(bool r, unsigned u, IndexSpaceExpression *e)
-          : read(r), user(u), expr(e)
+        ViewUser(bool r, unsigned u, unsigned p, EquivalenceSet *e)
+          : read(r), user(u), parent(p), eq(e)
         { }
         bool read;
         unsigned user;
-        IndexSpaceExpression *expr;
+        unsigned parent;
+        EquivalenceSet *eq;
+      };
+      struct Condition {
+        Condition(unsigned p, EquivalenceSet *e)
+          : parent(p), eq(e)
+        { }
+        unsigned parent;
+        EquivalenceSet *eq;
       };
       struct CachedMapping
       {
@@ -558,7 +566,7 @@ namespace Legion {
       };
       typedef LegionMap<TraceLocalID, CachedMapping>::aligned CachedMappings;
       typedef LegionMap<InstanceView*,
-                        FieldMaskSet<ViewUser> >::aligned             ViewUsers;
+                        FieldMaskSet<ViewUser> >::aligned            Conditions;
       typedef LegionMap<InstanceView*,
                         FieldMaskSet<IndexSpaceExpression> >::aligned ViewExprs;
     public:
@@ -574,8 +582,8 @@ namespace Legion {
       ApEvent get_completion_for_deletion(void) const;
     public:
       void finalize(Operation *op, bool has_blocking_call);
+      void generate_conditions(void);
       bool check_replayable(void) const;
-      void compute_postcondition(void);
       bool check_subsumption(void) const;
       bool perform_precondition_versioning_analysis(Operation *op);
     public:
@@ -688,11 +696,12 @@ namespace Legion {
       TraceLocalID find_trace_local_id(Memoizable *memo);
       unsigned find_memo_entry(Memoizable *memo);
       unsigned find_memo_entry(TraceLocalID op_key);
-      void record_precondition(Memoizable *memo,
-                               unsigned idx,
-                               IndexSpaceExpression *expr,
-                               const FieldMask &user_mask,
-                               InstanceView *view);
+    private:
+      void record_precondition(InstanceView *view,
+                               ViewUser *user,
+                               const FieldMask &user_mask);
+      bool is_precondition(ViewUser *user);
+    private:
       void record_views(Memoizable *memo,
                         unsigned idx,
                         unsigned entry,
@@ -711,6 +720,7 @@ namespace Legion {
                              IndexSpaceExpression *expr,
                              const FieldMaskSet<InstanceView> &views);
       void record_fill_views(const FieldMaskSet<FillView> &views);
+    private:
       void record_last_user(const PhysicalInstance &inst, 
                             IndexSpaceExpression *expr,
                             unsigned field, unsigned user, bool read);
@@ -779,17 +789,19 @@ namespace Legion {
     public:
       CachedMappings cached_mappings;
     public:
-      ViewUsers                                          view_users;
       std::map<TraceLocalID,ViewExprs>                   op_views;
       std::map<unsigned,ViewExprs>                       copy_views;
     public:
+      Conditions                                         pre, post;
+      std::set<ViewUser*>                                pre_users;
       LegionVector<FieldMaskSet<InstanceView> >::aligned pre_views;
       std::vector<IndexSpaceExpression*>                 pre_exprs;
-      std::vector<RegionRequirement>                     pre_requirements;
       std::vector<unsigned>                              pre_parent_indices;
       LegionVector<VersionInfo>::aligned                 pre_version_infos;
-    public:
-      ViewExprs                                          post_views;
+      LegionVector<FieldMaskSet<InstanceView> >::aligned post_views;
+      std::vector<IndexSpaceExpression*>                 post_exprs;
+      std::vector<unsigned>                              post_parent_indices;
+      LegionVector<VersionInfo>::aligned                 post_version_infos;
     public:
       FieldMaskSet<FillView>                             pre_fill_views;
       FieldMaskSet<FillView>                             post_fill_views;
