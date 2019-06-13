@@ -1280,6 +1280,12 @@ namespace Legion {
               "in task tree rooted by %s", it->id, get_task_name())
         deleted_index_spaces.clear();
       }
+      // TODO: we can't soundly report these right now because these
+      // index partitions could also be deleted by the top level 
+      // index space tree and removed from the set, we need to 
+      // figure out a better way to know when its safe to report
+      // that these partitions have been deleted
+#if 0
       if (!deleted_index_partitions.empty())
       {
         for (std::vector<IndexPartition>::const_iterator it =
@@ -1290,6 +1296,7 @@ namespace Legion {
               "in task tree rooted by %s", it->id, get_task_name())
         deleted_index_partitions.clear();
       }
+#endif
     }
 
     //--------------------------------------------------------------------------
