@@ -46,7 +46,6 @@ def main():
     R.b.fill(False)
     R.c64.fill(1+2j)
     R.c128.fill(3+4j)
-    R.f16.fill(1.23)
     R.f32.fill(3.45)
     R.f64.fill(6.78)
     R.i8.fill(-1)
