@@ -3420,24 +3420,6 @@ namespace Legion {
                   << ", Field Mask: " << mask << std::endl;
         free(mask);
       }
-#if 0
-      for (unsigned idx = 0; idx < pre_requirements.size(); ++idx)
-      {
-        const RegionRequirement &req = pre_requirements[idx];
-        const LogicalRegion &handle = req.region;
-        std::stringstream ss;
-        ss << "Requirement " << idx << ": region: "
-           << "(" << handle.get_index_space().get_id()
-           << "," << handle.get_field_space().get_id()
-           << "," << handle.get_tree_id()
-           << "), fields: ";
-        for (std::set<FieldID>::const_iterator fit =
-             req.privilege_fields.begin(); fit !=
-             req.privilege_fields.end(); ++fit)
-          ss << *fit << ",";
-        std::cerr << ss.str() << std::endl;
-      }
-#endif
       std::cerr << "[Postcondition]" << std::endl;
       for (unsigned idx = 0; idx < post_views.size(); ++idx)
       {
@@ -3456,64 +3438,6 @@ namespace Legion {
           free(mask);
         }
       }
-#if 0
-      std::cerr << "[Previous Valid Views]" << std::endl;
-      for (LegionMap<InstanceView*, FieldMask>::aligned::iterator it =
-           previous_valid_views.begin(); it !=
-           previous_valid_views.end(); ++it)
-      {
-        char *mask = it->second.to_string();
-        std::cerr << "  " << view_to_string(it->first) << " " << mask
-                  << " logical ctx: " << logical_contexts[it->first]
-                  << " physical ctx: " << physical_contexts[it->first]
-                  << std::endl;
-        free(mask);
-      }
-
-      std::cerr << "[Previous Fill Views]" << std::endl;
-      for (LegionMap<FillView*, FieldMask>::aligned::iterator it =
-           untracked_fill_views.begin(); it != untracked_fill_views.end(); ++it)
-      {
-        char *mask = it->second.to_string();
-        std::cerr << "  " << view_to_string(it->first) << " " << mask
-                  << " " << std::endl;
-        free(mask);
-      }
-
-      std::cerr << "[Valid Views]" << std::endl;
-      for (LegionMap<InstanceView*, FieldMask>::aligned::iterator it =
-           valid_views.begin(); it != valid_views.end(); ++it)
-      {
-        char *mask = it->second.to_string();
-        std::cerr << "  " << view_to_string(it->first) << " " << mask
-                  << " logical ctx: " << logical_contexts[it->first]
-                  << " physical ctx: " << physical_contexts[it->first]
-                  << std::endl;
-        free(mask);
-      }
-
-      std::cerr << "[Pending Reductions]" << std::endl;
-      for (LegionMap<InstanceView*, FieldMask>::aligned::iterator it =
-           reduction_views.begin(); it != reduction_views.end(); ++it)
-      {
-        char *mask = it->second.to_string();
-        std::cerr << "  " << view_to_string(it->first) << " " << mask
-                  << " logical ctx: " << logical_contexts[it->first]
-                  << " physical ctx: " << physical_contexts[it->first]
-                  << std::endl;
-        free(mask);
-      }
-
-      std::cerr << "[Fill Views]" << std::endl;
-      for (LegionMap<FillView*, FieldMask>::aligned::iterator it =
-           fill_views.begin(); it != fill_views.end(); ++it)
-      {
-        char *mask = it->second.to_string();
-        std::cerr << "  " << view_to_string(it->first) << " " << mask
-                  << " " << std::endl;
-        free(mask);
-      }
-#endif
     }
 
     //--------------------------------------------------------------------------
