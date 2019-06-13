@@ -2064,6 +2064,18 @@ namespace Legion {
     {
       {
         AutoLock tpl_lock(template_lock);
+        std::set<ViewUser*> to_delete;
+        for (Conditions::iterator it = pre.begin(); it != pre.end(); ++it)
+          for (FieldMaskSet<ViewUser>::iterator uit = it->second.begin(); uit !=
+               it->second.end(); ++uit)
+            to_delete.insert(uit->first);
+        for (Conditions::iterator it = post.begin(); it != post.end(); ++it)
+          for (FieldMaskSet<ViewUser>::iterator uit = it->second.begin(); uit !=
+               it->second.end(); ++uit)
+            to_delete.insert(uit->first);
+        for (std::set<ViewUser*>::iterator uit = to_delete.begin(); uit !=
+             to_delete.end(); ++uit)
+          delete (*uit);
         for (std::vector<Instruction*>::iterator it = instructions.begin();
              it != instructions.end(); ++it)
           delete *it;
@@ -4176,7 +4188,7 @@ namespace Legion {
       {
         TraceLocalID op_key = find_trace_local_id(memo);
         op_views[op_key][view].insert(user->eq->set_expr, user_mask);
-        delete user;
+        post[view].insert(user, user_mask);
         return;
       }
 
