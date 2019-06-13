@@ -39,7 +39,8 @@ task f()
   var sc = c.legion_coloring_create()
   c.legion_coloring_add_point(sc, 0, __raw(y0))
   c.legion_coloring_add_point(sc, 1, __raw(y1))
-  c.legion_coloring_add_point(sc, 2, __raw(y2))
+  c.legion_coloring_add_point(sc, 0, __raw(y2))
+  c.legion_coloring_add_point(sc, 2, __raw(y3))
   var p = partition(disjoint, s, sc)
   c.legion_coloring_destroy(sc)
 
@@ -49,7 +50,7 @@ task f()
     @x = 1
   end
 
-  for i = 0, 3 do
+  for i = 0, 2 do
     var ri = q[i]
     for x in ri do
       r[x] *= i + 2
@@ -65,7 +66,7 @@ task f()
   assert_disjoint(q[0], q[2])
   assert_disjoint(q[1], q[2])
 
-  return t
+  return 13 -- t
 end
 
 task main()

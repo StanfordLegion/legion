@@ -39,7 +39,7 @@ task f()
   var sc = c.legion_coloring_create()
   c.legion_coloring_add_point(sc, 0, __raw(y0))
   c.legion_coloring_add_point(sc, 1, __raw(y1))
-  c.legion_coloring_add_point(sc, 2, __raw(y2))
+  c.legion_coloring_add_point(sc, 2, __raw(y3))
   var p = partition(disjoint, s, sc)
   c.legion_coloring_destroy(sc)
 
@@ -69,6 +69,6 @@ task f()
 end
 
 task main()
-  regentlib.assert(f() == 13, "test failed")
+  regentlib.assert(f() == 10, "test failed")
 end
 regentlib.start(main)

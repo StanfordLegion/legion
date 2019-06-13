@@ -39,7 +39,7 @@ task f()
   var sc = c.legion_domain_point_coloring_create()
   c.legion_domain_point_coloring_color_domain(sc, [int1d](0), rect2d { y0, y0 })
   c.legion_domain_point_coloring_color_domain(sc, [int1d](1), rect2d { y1, y1 })
-  c.legion_domain_point_coloring_color_domain(sc, [int1d](2), rect2d { y2, y2 })
+  c.legion_domain_point_coloring_color_domain(sc, [int1d](2), rect2d { y3, y3 })
   var p = partition(disjoint, s, sc, ispace(int1d, 3))
   c.legion_domain_point_coloring_destroy(sc)
 
@@ -69,6 +69,6 @@ task f()
 end
 
 task main()
-  regentlib.assert(f() == 13, "test failed")
+  regentlib.assert(f() == 10, "test failed")
 end
 regentlib.start(main)

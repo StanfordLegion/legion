@@ -32,9 +32,9 @@ task f()
   var y3 = dynamic_cast(ptr(int3d, s), 3)
 
   @y0 = x0
-  @y1 = x1
+  @y1 = x2
   @y2 = x1
-  @y3 = x2
+  @y3 = x1
 
   var sc = c.legion_coloring_create()
   c.legion_coloring_add_point(sc, 0, __raw(y0))
@@ -69,6 +69,6 @@ task f()
 end
 
 task main()
-  regentlib.assert(f() == 16, "test failed")
+  regentlib.assert(f() == 10, "test failed")
 end
 regentlib.start(main)
