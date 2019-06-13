@@ -3843,8 +3843,8 @@ namespace Legion {
              eit != it->elements.end(); ++eit)
         {
           ViewUser *view_user = new ViewUser(read_only, entry, parent, (*eit));
-          record_view_user(memo, idx, view, view_user, usage, it->set_mask,
-              true);
+          record_view_user(memo, idx, view, view_user, usage,
+              it->set_mask & user_mask, true);
         }
     }
 
@@ -4120,6 +4120,7 @@ namespace Legion {
                                                const FieldMask &user_mask)
     //--------------------------------------------------------------------------
     {
+      assert(!view->is_reduction_view());
       pre[view].insert(user, user_mask);
       pre_users.insert(user);
     }
@@ -4155,8 +4156,8 @@ namespace Legion {
                eit != it->elements.end(); ++eit)
           {
             ViewUser *user = new ViewUser(read_only, entry, parent, (*eit));
-            record_view_user(memo, idx, vit->first, user, usage, it->set_mask,
-                invalidates);
+            record_view_user(memo, idx, vit->first, user, usage,
+                it->set_mask & vit->second, invalidates);
           }
       }
     }
