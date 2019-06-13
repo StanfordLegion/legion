@@ -1439,7 +1439,7 @@ local function make_symbol(cx, node, var_name, var_type)
     end
   end
 
-  report.error(node, "unable to specialize value of type " .. tostring(type(var_name)))
+  report.error(node, "mismatch in specialization: expected a symbol but got value of type " .. tostring(type(var_name)))
 end
 
 function specialize.stat_for_num(cx, node)
@@ -1845,7 +1845,7 @@ local function make_symbols(cx, node, var_name)
     return var_name:map(function(v) return {v, v} end)
   end
 
-  report.error(node, "unable to specialize value of type " .. tostring(type(var_name)))
+  report.error(node, "mismatch in specialization: expected a symbol or list of symbols but got value of type " .. tostring(type(var_name)))
 end
 
 function specialize.top_task_param(cx, node)

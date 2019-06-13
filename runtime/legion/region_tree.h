@@ -3034,7 +3034,8 @@ namespace Legion {
                                  RegionTreePath &path,
                                  const LogicalTraceInfo &trace_info,
                                  const ProjectionInfo &projection_info,
-                                 FieldMask &unopened_field_mask);
+                                 FieldMask &unopened_field_mask,
+                                 FieldMask &already_closed_mask);
       void register_local_user(LogicalState &state,
                                const LogicalUser &user,
                                const LogicalTraceInfo &trace_info);
@@ -3101,7 +3102,8 @@ namespace Legion {
                                      const LogicalUser &user,
                                      const FieldMask &check_mask,
                                      RegionTreePath &path,
-                                     const LogicalTraceInfo &trace_info);
+                                     const LogicalTraceInfo &trace_info,
+                                     FieldMask &already_closed_mask);
       void siphon_logical_deletion(LogicalCloser &closer,
                                    LogicalState &state,
                                    const FieldMask &current_mask,

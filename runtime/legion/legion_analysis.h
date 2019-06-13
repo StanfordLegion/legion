@@ -404,7 +404,23 @@ namespace Legion {
     public:
       LogicalCloser& operator=(const LogicalCloser &rhs);
     public:
-      inline bool has_close_operations(void) const { return !!close_mask; }
+      inline bool has_close_operations(FieldMask &already_closed_mask)
+        {
+          if (!close_mask)
+            return false;
+          if (!!already_closed_mask)
+          {
+            // Remove any fields which were already closed
+            // We only need one close per field for a traversal
+            // This handles the upgrade cases after we've already
+            // done a closer higher up in the tree
+            close_mask -= already_closed_mask;
+            if (!close_mask)
+              return false;
+          }
+          already_closed_mask |= close_mask;
+          return true;
+        }
       // Record normal closes like this
       void record_close_operation(const FieldMask &mask);
       void record_closed_user(const LogicalUser &user, const FieldMask &mask);

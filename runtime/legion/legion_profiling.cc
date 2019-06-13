@@ -1026,7 +1026,7 @@ namespace Legion {
         PhysicalInstRegionDesc &front = phy_inst_rdesc.front();
         serializer->serialize(front);
         diff += sizeof(front);
-        phy_inst_layout_rdesc.pop_front();
+        phy_inst_rdesc.pop_front();
         const long long t_curr = Realm::Clock::current_time_in_microseconds();
         if (t_curr >= t_stop)
           return diff;

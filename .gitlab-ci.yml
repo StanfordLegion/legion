@@ -668,10 +668,6 @@ n0003_gcc48_cxx98_release_legion_cuda:
 #     <<: [*gcc48, *terra38, *release, *cxx98_normal, *cuda, *regent]
 
 # Darwin Power9 tests:
-darwin_power9_gcc7_cxx17_release_legion:
-  <<: [*darwin_power9, *tests]
-  variables:
-    <<: [*gcc7, *debug, *cxx17_normal, *legion, *darwin_power9_scheduler]
 darwin_power9_gcc8_cxx17_release_legion:
   <<: [*darwin_power9, *tests]
   variables:

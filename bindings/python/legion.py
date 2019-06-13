@@ -388,6 +388,7 @@ class Future(object):
 
             value_ptr = c.legion_future_get_untyped_pointer(self.handle)
             value_size = c.legion_future_get_untyped_size(self.handle)
+            print(value_size, expected_size)
             assert value_size == expected_size
             value = ffi.cast(ffi.getctype(self.value_type.cffi_type, '*'), value_ptr)[0]
             return value
@@ -424,7 +425,7 @@ class Type(object):
         assert (numpy_type is None) == (cffi_type is None)
         self.numpy_type = numpy_type
         self.cffi_type = cffi_type
-        self.size = numpy.dtype(numpy_type).itemsize if numpy_type is not None else 0
+        self.size = ffi.sizeof(cffi_type) if cffi_type is not None else 0
 
     def __reduce__(self):
         return (Type, (self.numpy_type, self.cffi_type))
@@ -434,7 +435,6 @@ void = Type(None, None)
 bool_ = Type(numpy.bool_, 'bool')
 complex64 = Type(numpy.complex64, 'float _Complex')
 complex128 = Type(numpy.complex128, 'double _Complex')
-float16 = Type(numpy.float16, 'short float')
 float32 = Type(numpy.float32, 'float')
 float64 = Type(numpy.float64, 'double')
 int8 = Type(numpy.int8, 'int8_t')
