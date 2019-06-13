@@ -26,7 +26,7 @@ legion.ffi.cdef(r'''
 typedef struct mystruct {
   int x;
   double y;
-  char z;
+  int8_t z;
 } mystruct;
 ''')
 mystruct_np = numpy.dtype([('x', numpy.intc), ('y', numpy.double), ('z', numpy.byte)])
@@ -40,7 +40,7 @@ def main():
     myvalue = myvalue_root[0]
     myvalue.x = 123
     myvalue.y = 3.14
-    myvalue.z = str('A')
+    myvalue.z = 65
 
     # Make a future with the custom struct type.
     g = legion.Future(myvalue, mystruct)
