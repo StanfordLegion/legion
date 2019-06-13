@@ -1212,8 +1212,9 @@ namespace Legion {
       // analysis for a single context are performed in order
       {
         FieldMask unopened_mask = user_mask;
+        FieldMask already_closed_mask;
         parent_node->register_logical_user(ctx.get_id(), user, path, trace_info,
-                                           projection_info, unopened_mask);
+                           projection_info, unopened_mask, already_closed_mask);
       }
 #ifdef DEBUG_LEGION
       TreeStateLogger::capture_state(runtime, &req, idx, op->get_logging_name(),
@@ -1256,8 +1257,9 @@ namespace Legion {
                        FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES), user_mask);
 #endif
       // Do the traversal
-      parent_node->register_logical_deletion(ctx.get_id(), user, 
-                                             user_mask, path, trace_info);
+      FieldMask already_closed_mask;
+      parent_node->register_logical_deletion(ctx.get_id(), user, user_mask, 
+                                     path, trace_info, already_closed_mask);
       // Once we are done we can clear out the list of recorded dependences
       op->clear_logical_records();
 #ifdef DEBUG_LEGION
@@ -11477,7 +11479,8 @@ namespace Legion {
                                              RegionTreePath &path,
                                              const LogicalTraceInfo &trace_info,
                                              const ProjectionInfo &proj_info,
-                                             FieldMask &unopened_field_mask)
+                                             FieldMask &unopened_field_mask,
+                                             FieldMask &already_closed_mask)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(context->runtime, 
@@ -11514,7 +11517,7 @@ namespace Legion {
         // regardless of whether we are tracing or not
         // If we're not replaying a trace we need to do work here
         // See if we need to register a close operation
-        if (closer.has_close_operations())
+        if (closer.has_close_operations(already_closed_mask))
         {
           // Generate the close operations         
           closer.initialize_close_operations(state, user.op, trace_info);
@@ -11622,7 +11625,7 @@ namespace Legion {
           assert(!open_below);
 #endif
         child->register_logical_user(ctx, user, path, trace_info,
-                                     proj_info, unopened_field_mask);
+             proj_info, unopened_field_mask, already_closed_mask);
       }
     }
 
@@ -13123,7 +13126,8 @@ namespace Legion {
                                              const LogicalUser &user,
                                              const FieldMask &check_mask,
                                              RegionTreePath &path,
-                                             const LogicalTraceInfo &trace_info)
+                                             const LogicalTraceInfo &trace_info,
+                                             FieldMask &already_closed_mask)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(context->runtime, 
@@ -13144,7 +13148,7 @@ namespace Legion {
           LogicalCloser closer(ctx, user, this, false/*validates*/);
           siphon_logical_deletion(closer, state, check_mask, next_child, 
                               open_below, ((depth+1) == path.get_max_depth()));
-          if (closer.has_close_operations())
+          if (closer.has_close_operations(already_closed_mask))
           {
             // Generate the close operations         
             // We need to record the version numbers for this node as well
@@ -13184,7 +13188,8 @@ namespace Legion {
         // Continue the traversal
         RegionTreeNode *child = get_tree_child(next_child);
         // Only continue checking the fields that are open below
-        child->register_logical_deletion(ctx, user, open_below,path,trace_info);
+        child->register_logical_deletion(ctx, user, open_below, path,
+                                         trace_info, already_closed_mask);
       }
       else
       {
