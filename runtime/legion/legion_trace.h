@@ -585,7 +585,6 @@ namespace Legion {
       void generate_conditions(void);
       bool check_replayable(void) const;
       bool check_subsumption(void) const;
-      bool perform_precondition_versioning_analysis(Operation *op);
     public:
       void optimize(void);
     private:
@@ -767,6 +766,7 @@ namespace Legion {
       std::map<unsigned,ViewExprs>                       copy_views;
     public:
       Conditions                                         pre, post;
+      Conditions                                         reductions_in_trace;
       std::set<ViewUser*>                                pre_users;
       LegionVector<FieldMaskSet<InstanceView> >::aligned pre_views;
       std::vector<IndexSpaceExpression*>                 pre_exprs;

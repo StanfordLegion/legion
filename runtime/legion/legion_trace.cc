@@ -2183,7 +2183,7 @@ namespace Legion {
         std::set<RtEvent> map_applied_events;
         forest->find_invalid_instances(op, idx, version_info, precondition,
             invalid_views, map_applied_events);
-        Runtime::merge_events(map_applied_events).wait();
+
         if (invalid_views.size() > 0) return false;
       }
       return true;
@@ -2193,6 +2193,46 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (pre_fill_views.size() > 0) return false;
+
+      for (Conditions::const_iterator it = pre.begin(); it != pre.end(); ++it)
+      {
+        if (it->first->is_reduction_view()) return false;
+
+        for (FieldMaskSet<ViewUser>::const_iterator uit = it->second.begin();
+             uit != it->second.end(); ++uit)
+          if (uit->first->eq->has_refinements(uit->second)) return false;
+      }
+
+      for (Conditions::const_iterator it = post.begin(); it != post.end(); ++it)
+      {
+        if (it->first->is_reduction_view())
+        {
+          Conditions::const_iterator finder =
+            reductions_in_trace.find(it->first);
+
+          if (finder == reductions_in_trace.end()) return false;
+
+          const FieldMaskSet<ViewUser> &known_reductions = finder->second;
+          for (FieldMaskSet<ViewUser>::const_iterator uit = it->second.begin();
+               uit != it->second.end(); ++uit)
+          {
+            if (uit->first->eq->has_refinements(uit->second)) return false;
+
+            FieldMaskSet<ViewUser>::const_iterator finder =
+              known_reductions.find(uit->first);
+
+            if (finder == known_reductions.end() ||
+                !!(uit->second - finder->second))
+              return false;
+          }
+        }
+        else
+        {
+          for (FieldMaskSet<ViewUser>::const_iterator uit = it->second.begin();
+               uit != it->second.end(); ++uit)
+            if (uit->first->eq->has_refinements(uit->second)) return false;
+        }
+      }
       return true;
     }
 
@@ -2219,42 +2259,6 @@ namespace Legion {
           if (!!non_dominated) return false;
         }
       }
-      return true;
-    }
-
-    //--------------------------------------------------------------------------
-    bool PhysicalTemplate::perform_precondition_versioning_analysis(
-                                                                  Operation *op)
-    //--------------------------------------------------------------------------
-    {
-#if 0
-      RegionTreeForest *forest = trace->runtime->forest;
-      pre_version_infos.resize(pre_requirements.size());
-      std::set<RtEvent> ready_events;
-      for (unsigned idx = 0; idx < pre_requirements.size(); ++idx)
-      {
-        IndexSpaceExpression *expr = pre_exprs[idx];
-        VersionInfo &version_info = pre_version_infos[idx];
-        forest->perform_versioning_analysis(op, idx, pre_requirements[idx],
-            version_info, ready_events);
-        Runtime::merge_events(ready_events).wait();
-        FieldMaskSet<EquivalenceSet> to_add, to_remove;
-        const FieldMaskSet<EquivalenceSet> &eqs =
-          version_info.get_equivalence_sets();
-        for (FieldMaskSet<EquivalenceSet>::const_iterator it = eqs.begin();
-             it != eqs.end(); ++it)
-        {
-          if (it->first->has_refinements(it->second))
-            return false;
-          if (it->first->set_expr != expr)
-            to_remove.insert(it->first, it->second);
-        }
-        version_info.update_equivalence_sets(to_add, to_remove);
-#ifdef DEBUG_LEGION
-        assert(version_info.get_equivalence_sets().size() > 0);
-#endif
-      }
-#endif
       return true;
     }
 
@@ -2335,7 +2339,6 @@ namespace Legion {
           it->first->update_gc_events(it->second);
         }
 
-      generate_conditions();
       replayable = !has_blocking_call && check_replayable();
       replayable = replayable && check_subsumption();
 
@@ -2343,11 +2346,13 @@ namespace Legion {
       {
         if (implicit_runtime->dump_physical_traces)
         {
+          generate_conditions();
           optimize();
           dump_template();
         }
         return;
       }
+      generate_conditions();
       optimize();
       //generate_summary_operations();
       if (implicit_runtime->dump_physical_traces) dump_template();
@@ -2376,6 +2381,7 @@ namespace Legion {
       pre_version_infos.resize(pre_parent_indices.size());
       unsigned idx = 0;
       for (Conditions::iterator it = pre.begin(); it != pre.end(); ++it)
+      {
         for (FieldMaskSet<ViewUser>::iterator uit = it->second.begin(); uit !=
              it->second.end(); ++uit)
         {
@@ -2384,6 +2390,7 @@ namespace Legion {
           pre_version_infos[idx++].record_equivalence_set(NULL, UINT_MAX,
               user->eq, fields);
         }
+      }
 
       for (Conditions::iterator it = post.begin(); it != post.end(); ++it)
         for (FieldMaskSet<ViewUser>::iterator uit = it->second.begin(); uit !=
@@ -2399,7 +2406,7 @@ namespace Legion {
         }
       post_version_infos.resize(post_parent_indices.size());
       idx = 0;
-      for (Conditions::iterator it = pre.begin(); it != pre.end(); ++it)
+      for (Conditions::iterator it = post.begin(); it != post.end(); ++it)
         for (FieldMaskSet<ViewUser>::iterator uit = it->second.begin(); uit !=
              it->second.end(); ++uit)
         {
@@ -4184,6 +4191,8 @@ namespace Legion {
                                             bool invalidates)
     //--------------------------------------------------------------------------
     {
+      // invalidates == false <==> (the user is a realm copy)
+
       if (user->eq->set_expr->is_empty())
       {
         TraceLocalID op_key = find_trace_local_id(memo);
@@ -4218,7 +4227,10 @@ namespace Legion {
           if (user->eq->set_expr == uit->first->eq->set_expr)
           {
             dominated |= overlap;
-            if (invalidates && HAS_WRITE(usage))
+            if ((invalidates && HAS_WRITE(usage)) ||
+                // Realm copies invalidate their sources when
+                // the sources are reduction views.
+                (!invalidates && view->is_reduction_view()))
               invalidated.insert(uit->first, overlap);
           }
           // Then fall back to the slower case that needs an index space
@@ -4231,7 +4243,10 @@ namespace Legion {
             if (subtract->is_empty())
             {
               dominated |= overlap;
-              if (invalidates && HAS_WRITE(usage))
+              if ((invalidates && HAS_WRITE(usage)) ||
+                  // Realm copies invalidate their sources when
+                  // the sources are reduction views.
+                  (!invalidates && view->is_reduction_view()))
                 invalidated.insert(uit->first, overlap);
             }
           }
@@ -4254,6 +4269,8 @@ namespace Legion {
         }
 
         users.insert(user, user_mask);
+        if (!invalidates && view->is_reduction_view())
+          reductions_in_trace[view].insert(user, user_mask);
 
         FieldMask non_dominated = user_mask - dominated;
         if (HAS_READ(usage) && !!non_dominated)
