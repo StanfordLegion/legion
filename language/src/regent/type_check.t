@@ -4200,7 +4200,8 @@ function type_check.top_fspace(cx, node)
   }
 end
 
-function type_check.top_quote_expr(cx, node)  -- Type check lazily, when the expression is interpolated.
+function type_check.top_quote_expr(cx, node)
+  -- Type check lazily, when the expression is interpolated.
   return node
 end
 
