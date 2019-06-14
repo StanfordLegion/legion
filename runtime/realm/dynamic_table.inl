@@ -115,10 +115,12 @@ namespace Realm {
     if (!n || (n->level < level_needed))
       return false;
 
+#ifdef DEBUG_REALM
     // when we get here, root is high enough
     assert((level_needed <= n->level) &&
 	   (index >= n->first_index) &&
 	   (index <= n->last_index));
+#endif
 
     // now walk tree, populating the path we need
     while(n->level > 0) {
@@ -127,16 +129,20 @@ namespace Realm {
 
       IT i = ((index >> (ALLOCATOR::LEAF_BITS + (n->level - 1) * ALLOCATOR::INNER_BITS)) &
 	      ((((IT)1) << ALLOCATOR::INNER_BITS) - 1));
+#ifdef DEBUG_REALM
       assert((i >= 0) && (((size_t)i) < ALLOCATOR::INNER_TYPE::SIZE));
+#endif
 
       NodeBase *child = inner->elems[i];
       if(child == 0) {
 	return false;	
       }
+#ifdef DEBUG_REALM
       assert((child != 0) &&
 	     (child->level == (n->level - 1)) &&
 	     (index >= child->first_index) &&
 	     (index <= child->last_index));
+#endif
       n = child;
     }
     return true;
@@ -194,10 +200,12 @@ namespace Realm {
 
       lock.unlock();
     }
+#ifdef DEBUG_REALM
     // when we get here, root is high enough
     assert((level_needed <= n->level) &&
 	   (index >= n->first_index) &&
 	   (index <= n->last_index));
+#endif
 
     // now walk tree, populating the path we need
     while(n->level > 0) {
@@ -206,7 +214,9 @@ namespace Realm {
 
       IT i = ((index >> (ALLOCATOR::LEAF_BITS + (n->level - 1) * ALLOCATOR::INNER_BITS)) &
 	      ((((IT)1) << ALLOCATOR::INNER_BITS) - 1));
+#ifdef DEBUG_REALM
       assert((i >= 0) && (((size_t)i) < ALLOCATOR::INNER_TYPE::SIZE));
+#endif
 
       NodeBase *child = inner->elems[i];
       if(child == 0) {
@@ -238,10 +248,12 @@ namespace Realm {
 
 	inner->lock.unlock();
       }
+#ifdef DEBUG_REALM
       assert((child != 0) &&
 	     (child->level == (n->level - 1)) &&
 	     (index >= child->first_index) &&
 	     (index <= child->last_index));
+#endif
       n = child;
     }
 
