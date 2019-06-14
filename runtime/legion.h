@@ -1002,6 +1002,10 @@ namespace Legion {
                         LogicalRegion _parent, MappingTagID _tag = 0, 
                         bool _verified = false);
     public:
+      RegionRequirement(const RegionRequirement &rhs);
+      ~RegionRequirement(void);
+      RegionRequirement& operator=(const RegionRequirement &req);
+    public:
       bool operator==(const RegionRequirement &req) const;
       bool operator<(const RegionRequirement &req) const;
     public:
@@ -1025,6 +1029,9 @@ namespace Legion {
       inline bool must_premap(void) const
         { return (flags & MUST_PREMAP_FLAG); }
     public:
+      const void* get_projection_args(size_t *size) const;
+      void set_projection_args(const void *args, size_t size, bool own = false);
+    public:
 #ifdef PRIVILEGE_CHECKS
       unsigned get_accessor_privilege(void) const;
 #endif
@@ -1041,8 +1048,12 @@ namespace Legion {
       ReductionOpID redop; /**<reduction operation (default 0)*/
       MappingTagID tag; /**< mapping tag for this region requirement*/
       RegionFlags flags; /**< optional flags set for region requirements*/
+    public:
       ProjectionType handle_type; /**< region or partition requirement*/
       ProjectionID projection; /**< projection function for index space tasks*/
+    protected:
+      void *projection_args; /**< projection arguments buffer*/
+      size_t projection_args_size; /**< projection arguments buffer size*/
     };
 
     /**
