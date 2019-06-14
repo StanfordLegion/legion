@@ -33,14 +33,16 @@ namespace Realm {
 	     const void *_args, size_t _arglen,
 	     const ProfilingRequestSet &reqs,
 	     Event _before_event,
-	     Event _finish_event, int _priority)
-    : Operation(_finish_event, reqs), proc(_proc), func_id(_func_id),
+	     GenEventImpl *_finish_event, EventImpl::gen_t _finish_gen,
+	     int _priority)
+    : Operation(_finish_event, _finish_gen, reqs)
+    , proc(_proc), func_id(_func_id),
       args(_args, _arglen), before_event(_before_event), priority(_priority),
       executing_thread(0)
   {
     log_task.info() << "task " << (void *)this << " created: func=" << func_id
 		    << " proc=" << _proc << " arglen=" << _arglen
-		    << " before=" << _before_event << " after=" << _finish_event;
+		    << " before=" << _before_event << " after=" << get_finish_event();
   }
 
   Task::~Task(void)
@@ -204,11 +206,12 @@ namespace Realm {
   //
 
   void Task::DeferredSpawn::defer(ProcessorImpl *_proc, Task *_task,
-				  Event wait_on)
+				  EventImpl *_wait_on,
+				  EventImpl::gen_t _wait_gen)
   {
     proc = _proc;
     task = _task;
-    EventImpl::add_waiter(wait_on, this);
+    _wait_on->add_waiter(_wait_gen, this);
   }
     
   void Task::DeferredSpawn::event_triggered(Event e, bool poisoned)

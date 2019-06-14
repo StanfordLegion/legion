@@ -40,7 +40,8 @@ namespace Realm {
 	   const void *_args, size_t _arglen,
            const ProfilingRequestSet &reqs,
 	   Event _before_event,
-	   Event _finish_event, int _priority);
+	   GenEventImpl *_finish_event, EventImpl::gen_t _finish_gen,
+	   int _priority);
 
     protected:
       // deletion performed when reference count goes to zero
@@ -66,7 +67,8 @@ namespace Realm {
 
       class DeferredSpawn : public EventWaiter {
       public:
-	void defer(ProcessorImpl *_proc, Task *_task, Event wait_on);
+	void defer(ProcessorImpl *_proc, Task *_task,
+		   EventImpl *_wait_on, EventImpl::gen_t _wait_gen);
 	virtual void event_triggered(Event e, bool poisoned);
 	virtual void print(std::ostream& os) const;
 	virtual Event get_finish_event(void) const;

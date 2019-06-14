@@ -121,9 +121,11 @@ namespace Realm {
     typedef unsigned long long XferDesID;
     class DmaRequest : public Realm::Operation {
     public:
-      DmaRequest(int _priority, Event _after_copy);
+      DmaRequest(int _priority,
+		 GenEventImpl *_after_copy, EventImpl::gen_t _after_gen);
 
-      DmaRequest(int _priority, Event _after_copy,
+      DmaRequest(int _priority,
+		 GenEventImpl *_after_copy, EventImpl::gen_t _after_gen,
                  const Realm::ProfilingRequestSet &reqs);
 
     protected:
@@ -253,13 +255,13 @@ namespace Realm {
     public:
       CopyRequest(const void *data, size_t datalen,
 		  Event _before_copy,
-		  Event _after_copy,
+		  GenEventImpl *_after_copy, EventImpl::gen_t _after_gen,
 		  int _priority);
 
       CopyRequest(const TransferDomain *_domain, //const Domain& _domain,
 		  OASByInst *_oas_by_inst,
 		  Event _before_copy,
-		  Event _after_copy,
+		  GenEventImpl *_after_copy, EventImpl::gen_t _after_gen,
 		  int _priority,
                   const Realm::ProfilingRequestSet &reqs);
 
@@ -291,13 +293,6 @@ namespace Realm {
       // operations on ib_by_inst are protected by ib_mutex
       IBByInst ib_by_inst;
       GASNetHSL ib_mutex;
-      class IBAllocOp : public Realm::Operation {
-      public:
-        IBAllocOp(Event _completion) : Operation(_completion, Realm::ProfilingRequestSet()) {};
-        ~IBAllocOp() {};
-        void print(std::ostream& os) const {os << "IBAllocOp"; };
-      };
-
       std::vector<Memory> mem_path;
       // </NEW_DMA>
 
@@ -311,7 +306,7 @@ namespace Realm {
 		    ReductionOpID _redop_id,
 		    bool _red_fold,
 		    Event _before_copy,
-		    Event _after_copy,
+		    GenEventImpl *_after_copy, EventImpl::gen_t _after_gen,
 		    int _priority);
 
       ReduceRequest(const TransferDomain *_domain, //const Domain& _domain,
@@ -321,7 +316,7 @@ namespace Realm {
 		    ReductionOpID _redop_id,
 		    bool _red_fold,
 		    Event _before_copy,
-		    Event _after_copy,
+		    GenEventImpl *_after_copy, EventImpl::gen_t _after_gen,
 		    int _priority,
                     const Realm::ProfilingRequestSet &reqs);
 
@@ -356,13 +351,13 @@ namespace Realm {
                   RegionInstance inst,
                   FieldID field_id, unsigned size,
                   Event _before_fill, 
-                  Event _after_fill,
+		  GenEventImpl *_after_fill, EventImpl::gen_t _after_gen,
                   int priority);
       FillRequest(const TransferDomain *_domain, //const Domain &_domain,
                   const CopySrcDstField &_dst,
                   const void *fill_value, size_t fill_size,
                   Event _before_fill,
-                  Event _after_fill,
+		  GenEventImpl *_after_fill, EventImpl::gen_t _after_gen,
                   int priority,
                   const Realm::ProfilingRequestSet &reqs);
 

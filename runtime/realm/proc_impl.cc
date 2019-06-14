@@ -138,7 +138,7 @@ namespace Realm {
 #endif
 
       p->spawn_task(func_id, args, arglen, ProfilingRequestSet(),
-		    wait_on, e, priority);
+		    wait_on, finish_event, ID(e).event_generation(), priority);
       return e;
     }
 
@@ -163,7 +163,7 @@ namespace Realm {
 #endif
 
       p->spawn_task(func_id, args, arglen, reqs,
-		    wait_on, e, priority);
+		    wait_on, finish_event, ID(e).event_generation(), priority);
       return e;
     }
 
@@ -205,11 +205,14 @@ namespace Realm {
       // TODO: special case - registration on a local processor with a raw function pointer and no
       //  profiling requests - can be done immediately and return NO_EVENT
 
-      Event finish_event = GenEventImpl::create_genevent()->current_event();
+      GenEventImpl *finish_event_impl = GenEventImpl::create_genevent();
+      Event finish_event = finish_event_impl->current_event();
 
       TaskRegistration *tro = new TaskRegistration(codedesc, 
 						   ByteArrayRef(user_data, user_data_len),
-						   finish_event, prs);
+						   finish_event_impl,
+						   ID(finish_event).event_generation(),
+						   prs);
       get_runtime()->optable.add_local_operation(finish_event, tro);
       // we haven't told anybody about this operation yet, so cancellation really shouldn't
       //  be possible
@@ -301,11 +304,14 @@ namespace Realm {
       // TODO: special case - registration on local processord with a raw function pointer and no
       //  profiling requests - can be done immediately and return NO_EVENT
 
-      Event finish_event = GenEventImpl::create_genevent()->current_event();
+      GenEventImpl *finish_event_impl = GenEventImpl::create_genevent();
+      Event finish_event = finish_event_impl->current_event();
 
       TaskRegistration *tro = new TaskRegistration(codedesc, 
 						   ByteArrayRef(user_data, user_data_len),
-						   finish_event, prs);
+						   finish_event_impl,
+						   ID(finish_event).event_generation(),
+						   prs);
       get_runtime()->optable.add_local_operation(finish_event, tro);
       // we haven't told anybody about this operation yet, so cancellation really shouldn't
       //  be possible
@@ -546,24 +552,27 @@ namespace Realm {
     /*virtual*/ void ProcessorGroup::spawn_task(Processor::TaskFuncID func_id,
 						const void *args, size_t arglen,
                                                 const ProfilingRequestSet &reqs,
-						Event start_event, Event finish_event,
+						Event start_event,
+						GenEventImpl *finish_event,
+						EventImpl::gen_t finish_gen,
 						int priority)
     {
       // check for spawn to remote processor group
       NodeID target = ID(me).pgroup_owner_node();
       if(target != my_node_id) {
+	Event e = finish_event->make_event(finish_gen);
 	log_task.debug() << "sending remote spawn request:"
 			 << " func=" << func_id
 			 << " proc=" << me
-			 << " finish=" << finish_event;
+			 << " finish=" << e;
 
-	get_runtime()->optable.add_remote_operation(finish_event, target);
+	get_runtime()->optable.add_remote_operation(e, target);
 	// if profiling data need DynamicBufferSerializer?
 	size_t len = reqs.empty() ? arglen: arglen+512;
 	ActiveMessage<SpawnTaskMessage> amsg(target, len);
 	amsg->proc = me;
 	amsg->start_event = start_event;
-	amsg->finish_event = finish_event;
+	amsg->finish_event = e;
 	amsg->user_arglen = arglen;
 	amsg->priority = priority;
 	amsg->func_id = func_id;
@@ -578,18 +587,25 @@ namespace Realm {
 
       // create a task object and insert it into the queue
       Task *task = new Task(me, func_id, args, arglen, reqs,
-                            start_event, finish_event, priority);
-      get_runtime()->optable.add_local_operation(finish_event, task);
+                            start_event, finish_event, finish_gen, priority);
+      get_runtime()->optable.add_local_operation(finish_event->make_event(finish_gen),
+						 task);
 
-      bool poisoned = false;
-      if (start_event.has_triggered_faultaware(poisoned)) {
-	if(poisoned) {
-	  log_poison.info() << "cancelling poisoned task - task=" << task << " after=" << task->get_finish_event();
-	  task->handle_poisoned_precondition(start_event);
-	} else
-	  enqueue_task(task);
+      if(start_event.exists()) {
+	EventImpl *start_impl = get_runtime()->get_event_impl(start_event);
+	EventImpl::gen_t start_gen = ID(start_event).event_generation();
+	bool poisoned = false;
+	if(start_impl->has_triggered(start_gen, poisoned)) {
+	  if(poisoned) {
+	    log_poison.info() << "cancelling poisoned task - task=" << task << " after=" << task->get_finish_event();
+	    task->handle_poisoned_precondition(start_event);
+	  } else
+	    enqueue_task(task);
+	} else {
+	  task->deferred_spawn.defer(this, task, start_impl, start_gen);
+	}
       } else
-	task->deferred_spawn.defer(this, task, start_event);
+	enqueue_task(task);
     }
 
 
@@ -681,13 +697,16 @@ namespace Realm {
     void RemoteProcessor::spawn_task(Processor::TaskFuncID func_id,
 				     const void *args, size_t arglen,
 				     const ProfilingRequestSet &reqs,
-				     Event start_event, Event finish_event,
+				     Event start_event,
+				     GenEventImpl *finish_event,
+				     EventImpl::gen_t finish_gen,
 				     int priority)
     {
+      Event e = finish_event->make_event(finish_gen);
       log_task.debug() << "sending remote spawn request:"
 		       << " func=" << func_id
 		       << " proc=" << me
-		       << " finish=" << finish_event;
+		       << " finish=" << e;
 
       ID id(me);
       NodeID target = 0;
@@ -699,13 +718,13 @@ namespace Realm {
 	assert(0);
       }
 
-      get_runtime()->optable.add_remote_operation(finish_event, target);
+      get_runtime()->optable.add_remote_operation(e, target);
       // if profiling data need DynamicBufferSerializer?
       size_t len = reqs.empty() ? arglen: arglen+512;
       ActiveMessage<SpawnTaskMessage> amsg(target,len);
       amsg->proc = me;
       amsg->start_event = start_event;
-      amsg->finish_event = finish_event;
+      amsg->finish_event = e;
       amsg->user_arglen = arglen;
       amsg->priority = priority;
       amsg->func_id = func_id;
@@ -776,27 +795,35 @@ namespace Realm {
   }
 
   void LocalTaskProcessor::spawn_task(Processor::TaskFuncID func_id,
-				     const void *args, size_t arglen,
-				     const ProfilingRequestSet &reqs,
-				     Event start_event, Event finish_event,
-				     int priority)
+				      const void *args, size_t arglen,
+				      const ProfilingRequestSet &reqs,
+				      Event start_event,
+				      GenEventImpl *finish_event,
+				      EventImpl::gen_t finish_gen,
+				      int priority)
   {
     // create a task object for this
     Task *task = new Task(me, func_id, args, arglen, reqs,
-			  start_event, finish_event, priority);
-    get_runtime()->optable.add_local_operation(finish_event, task);
+			  start_event, finish_event, finish_gen, priority);
+    get_runtime()->optable.add_local_operation(finish_event->make_event(finish_gen),
+					       task);
 
     // if the start event has already triggered, we can enqueue right away
-    bool poisoned = false;
-    if (start_event.has_triggered_faultaware(poisoned)) {
-      if(poisoned) {
-	log_poison.info() << "cancelling poisoned task - task=" << task << " after=" << task->get_finish_event();
-	task->handle_poisoned_precondition(start_event);
-      } else
-	enqueue_task(task);
-    } else {
-      task->deferred_spawn.defer(this, task, start_event);
-    }
+    if(start_event.exists()) {
+      EventImpl *start_impl = get_runtime()->get_event_impl(start_event);
+      EventImpl::gen_t start_gen = ID(start_event).event_generation();
+      bool poisoned = false;
+      if(start_impl->has_triggered(start_gen, poisoned)) {
+	if(poisoned) {
+	  log_poison.info() << "cancelling poisoned task - task=" << task << " after=" << task->get_finish_event();
+	  task->handle_poisoned_precondition(start_event);
+	} else
+	  enqueue_task(task);
+      } else {
+	task->deferred_spawn.defer(this, task, start_impl, start_gen);
+      }
+    } else
+      enqueue_task(task);
   }
 
   void LocalTaskProcessor::register_task(Processor::TaskFuncID func_id,
@@ -1022,8 +1049,10 @@ namespace Realm {
 
   TaskRegistration::TaskRegistration(const CodeDescriptor& _codedesc,
 				     const ByteArrayRef& _userdata,
-				     Event _finish_event, const ProfilingRequestSet &_requests)
-    : Operation(_finish_event, _requests)
+				     GenEventImpl *_finish_event,
+				     EventImpl::gen_t _finish_gen,
+				     const ProfilingRequestSet &_requests)
+    : Operation(_finish_event, _finish_gen, _requests)
     , codedesc(_codedesc), userdata(_userdata)
   {
     log_taskreg.debug() << "task registration created: op=" << (void *)this << " finish=" << _finish_event;
@@ -1086,8 +1115,11 @@ namespace Realm {
     if(fbd.bytes_left() > 0)
       fbd >> prs;
 
+    GenEventImpl *finish_impl = get_runtime()->get_genevent_impl(args.finish_event);
     p->spawn_task(args.func_id, data, args.user_arglen, prs,
-		  args.start_event, args.finish_event, args.priority);
+		  args.start_event,
+		  finish_impl, ID(args.finish_event).event_generation(),
+		  args.priority);
   }
 
   ActiveMessageHandlerReg<SpawnTaskMessage> spawn_task_message_handler;

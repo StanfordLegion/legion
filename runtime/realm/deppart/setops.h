@@ -127,7 +127,7 @@ namespace Realm {
   class UnionOperation : public PartitioningOperation {
   public:
     UnionOperation(const ProfilingRequestSet& reqs,
-		   Event _finish_event);
+		   GenEventImpl *_finish_event, EventImpl::gen_t _finish_gen);
 
     virtual ~UnionOperation(void);
 
@@ -147,7 +147,7 @@ namespace Realm {
   class IntersectionOperation : public PartitioningOperation {
   public:
     IntersectionOperation(const ProfilingRequestSet& reqs,
-			  Event _finish_event);
+			  GenEventImpl *_finish_event, EventImpl::gen_t _finish_gen);
 
     virtual ~IntersectionOperation(void);
 
@@ -167,7 +167,7 @@ namespace Realm {
   class DifferenceOperation : public PartitioningOperation {
   public:
     DifferenceOperation(const ProfilingRequestSet& reqs,
-			Event _finish_event);
+			GenEventImpl *_finish_event, EventImpl::gen_t _finish_gen);
 
     virtual ~DifferenceOperation(void);
 

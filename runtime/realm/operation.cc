@@ -244,8 +244,8 @@ namespace Realm {
 
   void Operation::trigger_finish_event(bool poisoned)
   {
-    if(finish_event.exists())
-      GenEventImpl::trigger(finish_event, poisoned);
+    if(finish_event)
+      finish_event->trigger(finish_gen, my_node_id, poisoned);
 #ifndef REALM_USE_OPERATION_TABLE
     // no operation table to decrement the refcount, so do it ourselves
     // SJT: should this always be done for operations without finish events?

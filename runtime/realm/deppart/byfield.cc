@@ -39,8 +39,9 @@ namespace Realm {
     // output vector should start out empty
     assert(subspaces.empty());
 
-    Event e = GenEventImpl::create_genevent()->current_event();
-    ByFieldOperation<N,T,FT> *op = new ByFieldOperation<N,T,FT>(*this, field_data, reqs, e);
+    GenEventImpl *finish_event = GenEventImpl::create_genevent();
+    Event e = finish_event->current_event();
+    ByFieldOperation<N,T,FT> *op = new ByFieldOperation<N,T,FT>(*this, field_data, reqs, finish_event, ID(e).event_generation());
 
     size_t n = colors.size();
     subspaces.resize(n);
@@ -273,8 +274,9 @@ namespace Realm {
   ByFieldOperation<N,T,FT>::ByFieldOperation(const IndexSpace<N,T>& _parent,
 					     const std::vector<FieldDataDescriptor<IndexSpace<N,T>,FT> >& _field_data,
 					     const ProfilingRequestSet &reqs,
-					     Event _finish_event)
-    : PartitioningOperation(reqs, _finish_event)
+					     GenEventImpl *_finish_event,
+					     EventImpl::gen_t _finish_gen)
+    : PartitioningOperation(reqs, _finish_event, _finish_gen)
     , parent(_parent)
     , field_data(_field_data)
   {}

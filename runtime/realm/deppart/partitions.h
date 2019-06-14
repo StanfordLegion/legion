@@ -140,7 +140,8 @@ namespace Realm {
   class PartitioningOperation : public Operation {
   public:
     PartitioningOperation(const ProfilingRequestSet &reqs,
-			  Event _finish_event);
+			  GenEventImpl *_finish_event,
+			  EventImpl::gen_t _finish_gen);
 
     virtual void execute(void) = 0;
 

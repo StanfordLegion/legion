@@ -29,7 +29,8 @@ namespace Realm {
   class Operation {
   protected:
     // must be subclassed
-    Operation(Event _finish_event, const ProfilingRequestSet &_requests);
+    Operation(GenEventImpl *_finish_event, EventImpl::gen_t _finish_gen,
+	      const ProfilingRequestSet &_requests);
 
     // can't destroy directly either - done when last reference is removed
     // (subclasses may still override the method - just not call it directly)
@@ -103,10 +104,11 @@ namespace Realm {
 
     void send_profiling_data(void);
 
-    Event finish_event;
+    GenEventImpl *finish_event;
+    EventImpl::gen_t finish_gen;
     int refcount;
   public:
-    Event get_finish_event(void) const { return finish_event; }
+    Event get_finish_event(void) const;
   protected:
     typedef ProfilingMeasurements::OperationStatus Status;
     ProfilingMeasurements::OperationStatus status;

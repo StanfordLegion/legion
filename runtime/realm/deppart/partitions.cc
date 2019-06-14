@@ -719,8 +719,9 @@ namespace Realm {
   // class PartitioningOperation
 
   PartitioningOperation::PartitioningOperation(const ProfilingRequestSet &reqs,
-					       Event _finish_event)
-    : Operation(_finish_event, reqs)
+					       GenEventImpl *_finish_event,
+					       EventImpl::gen_t _finish_gen)
+    : Operation(_finish_event, _finish_gen, reqs)
   {}
 
   void PartitioningOperation::launch(Event wait_for)

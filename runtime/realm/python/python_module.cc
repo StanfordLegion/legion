@@ -815,25 +815,32 @@ namespace Realm {
   void LocalPythonProcessor::spawn_task(Processor::TaskFuncID func_id,
 					const void *args, size_t arglen,
 					const ProfilingRequestSet &reqs,
-					Event start_event, Event finish_event,
+					Event start_event,
+					GenEventImpl *finish_event,
+					EventImpl::gen_t finish_gen,
 					int priority)
   {
     // create a task object for this
     Task *task = new Task(me, func_id, args, arglen, reqs,
-			  start_event, finish_event, priority);
-    get_runtime()->optable.add_local_operation(finish_event, task);
+			  start_event, finish_event, finish_gen, priority);
+    get_runtime()->optable.add_local_operation(finish_event->make_event(finish_gen), task);
 
     // if the start event has already triggered, we can enqueue right away
-    bool poisoned = false;
-    if (start_event.has_triggered_faultaware(poisoned)) {
-      if(poisoned) {
-	log_poison.info() << "cancelling poisoned task - task=" << task << " after=" << task->get_finish_event();
-	task->handle_poisoned_precondition(start_event);
-      } else
-	enqueue_task(task);
-    } else {
-      task->deferred_spawn.defer(this, task, start_event);
-    }
+    if(start_event.exists()) {
+      EventImpl *start_impl = get_runtime()->get_event_impl(start_event);
+      EventImpl::gen_t start_gen = ID(start_event).event_generation();
+      bool poisoned = false;
+      if(start_impl->has_triggered(start_gen, poisoned)) {
+	if(poisoned) {
+	  log_poison.info() << "cancelling poisoned task - task=" << task << " after=" << task->get_finish_event();
+	  task->handle_poisoned_precondition(start_event);
+	} else
+	  enqueue_task(task);
+      } else {
+	task->deferred_spawn.defer(this, task, start_impl, start_gen);
+      }
+    } else
+      enqueue_task(task);
   }
 
   void LocalPythonProcessor::add_to_group(ProcessorGroup *group)
