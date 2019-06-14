@@ -103,7 +103,8 @@ namespace Realm {
       }
     };
 
-    typedef DynamicTableAllocator<GenEventImpl, 10, 8> EventTableAllocator;
+    // use a wide tree for events - max depth will be 2
+    typedef DynamicTableAllocator<GenEventImpl, 11, 16> EventTableAllocator;
     typedef DynamicTableAllocator<BarrierImpl, 10, 4> BarrierTableAllocator;
     typedef DynamicTableAllocator<ReservationImpl, 10, 8> ReservationTableAllocator;
     typedef DynamicTableAllocator<ProcessorGroup, 10, 4> ProcessorGroupTableAllocator;
