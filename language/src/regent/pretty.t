@@ -459,7 +459,8 @@ end
 function pretty.expr_image(cx, node)
   return join({
       "image(",
-      commas({pretty.expr(cx, node.parent),
+      commas({node.disjointness and tostring(node.disjointness),
+	      pretty.expr(cx, node.parent),
               pretty.expr(cx, node.partition),
               pretty.expr_region_root(cx, node.region)}),
       ")"})
