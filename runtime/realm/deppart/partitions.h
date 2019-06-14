@@ -193,7 +193,7 @@ namespace Realm {
     void worker_thread_loop(void);
 
   protected:
-    bool shutdown_flag;
+    atomic<bool> shutdown_flag;
     CoreReservation *rsrv;
     PriorityQueue<void *, DummyLock> queued_ops;
     GASNetHSL mutex;

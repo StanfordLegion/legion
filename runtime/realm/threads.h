@@ -20,6 +20,7 @@
 
 #include "realm/realm_config.h"
 #include "realm/activemsg.h"
+#include "realm/atomics.h"
 
 #ifdef REALM_USE_USER_THREADS
 #ifdef __MACH__
@@ -215,7 +216,7 @@ namespace Realm {
     // send an asynchronous notification to the thread
     virtual void alert_thread(void) = 0;
 
-    State state;
+    atomic<State> state;
     ThreadScheduler *scheduler;
     Operation *current_op;
     int exception_handler_count;
