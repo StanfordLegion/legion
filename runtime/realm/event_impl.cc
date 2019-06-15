@@ -561,10 +561,11 @@ namespace Realm {
 
 	{
 	  AutoHSLLock al(impl->mutex);
-	  if(impl->generation >= id.event_generation()) {
+	  gen_t gen = impl->generation.load();
+	  if(gen >= id.event_generation()) {
 	    // already triggered!?
 	    assert(0);
-	  } else if((impl->generation + 1) == id.event_generation()) {
+	  } else if((gen + 1) == id.event_generation()) {
 	    // current generation
 	    waiters_head = impl->current_local_waiters.head.next;
 	  } else {
@@ -652,7 +653,7 @@ namespace Realm {
   void EventMerger::MergeEventPrecondition::print(std::ostream& os) const
   {
     os << "event merger: " << get_finish_event()
-       << " left=" << merger->count_needed;
+       << " left=" << merger->count_needed.load();
   }
 
   Event EventMerger::MergeEventPrecondition::get_finish_event(void) const
@@ -739,7 +740,7 @@ namespace Realm {
       GenEventImpl *event_impl;
       Event::gen_t finish_gen;
       bool ignore_faults;
-      int count_needed;
+      atomic<int> count_needed;
       int faults_observed;
 
       static const size_t MAX_INLINE_PRECONDITIONS = 6;
@@ -771,7 +772,7 @@ namespace Realm {
 
     bool EventMerger::is_active(void) const
     {
-      return(count_needed != 0);
+      return(count_needed.load() != 0);
     }
 
     void EventMerger::prepare_merger(Event _finish_event, bool _ignore_faults, unsigned _max_preconditions)
@@ -780,7 +781,7 @@ namespace Realm {
       finish_gen = ID(_finish_event).event_generation();
       assert(event_impl->make_event(finish_gen) == _finish_event);
       ignore_faults = _ignore_faults;
-      count_needed = 1;  // this matches the subsequent call to arm()
+      count_needed.store(1);  // this matches the subsequent call to arm()
       faults_observed = 0;
       num_preconditions = 0;
       // resize the precondition array if needed
@@ -817,7 +818,7 @@ namespace Realm {
       MergeEventPrecondition *p = &preconditions[num_preconditions++];
 
       // increment count first, then add the waiter
-      __sync_fetch_and_add(&count_needed, 1);
+      count_needed.fetch_add(1);
       EventImpl::add_waiter(wait_for, p);
     }
 
@@ -838,7 +839,7 @@ namespace Realm {
 	}
       }
 
-      int count_left = __sync_fetch_and_add(&count_needed, -1);
+      int count_left = count_needed.fetch_add(-1);
 
       // Put the logging first to avoid segfaults
       log_event.debug() << "received trigger merged event=" << event_impl->make_event(finish_gen)
@@ -879,10 +880,10 @@ namespace Realm {
   //
 
   GenEventImpl::GenEventImpl(void)
-    : merger(this)
+    : generation(0)
+    , gen_subscribed(0)
+    , merger(this)
   {
-    generation = 0;
-    gen_subscribed = 0;
     next_free = 0;
     num_poisoned_generations = 0;
     poisoned_generations = 0;
@@ -903,7 +904,7 @@ namespace Realm {
 			<< (remote_waiters.empty() ? "" : " remote waiters");
       while(!current_local_waiters.empty()) {
 	EventWaiter *ew = current_local_waiters.pop_front();
-	log_event.fatal() << "  waiting on " << make_event(generation) << ": " << ew;
+	log_event.fatal() << "  waiting on " << make_event(generation.load()) << ": " << ew;
       }
       for(std::map<gen_t, EventWaiter::EventWaiterList>::iterator it = future_local_waiters.begin();
 	  it != future_local_waiters.end();
@@ -921,7 +922,7 @@ namespace Realm {
   {
     me = _me;
     owner = _init_owner;
-    generation = 0;
+    generation.store(0);
     gen_subscribed = 0;
     next_free = 0;
     num_poisoned_generations = 0;
@@ -1190,25 +1191,25 @@ namespace Realm {
 
 #ifdef EVENT_GRAPH_TRACE
       log_event_graph.info("Event Merge: (" IDFMT ",%d) %d",
-               finish_event->me.id(), finish_event->generation, existential_count);
+               finish_event->me.id(), finish_event->generation.load(), existential_count);
       if (ev1.exists())
         log_event_graph.info("Event Precondition: (" IDFMT ",%d) (" IDFMT ", %d)",
-            finish_event->me.id(), finish_event->generation, ev1.id, ev1.gen);
+            finish_event->me.id(), finish_event->generation.load(), ev1.id, ev1.gen);
       if (ev2.exists())
         log_event_graph.info("Event Precondition: (" IDFMT ",%d) (" IDFMT ", %d)",
-            finish_event->me.id(), finish_event->generation, ev2.id, ev2.gen);
+            finish_event->me.id(), finish_event->generation.load(), ev2.id, ev2.gen);
       if (ev3.exists())
         log_event_graph.info("Event Precondition: (" IDFMT ",%d) (" IDFMT ", %d)",
-            finish_event->me.id(), finish_event->generation, ev3.id, ev3.gen);
+            finish_event->me.id(), finish_event->generation.load(), ev3.id, ev3.gen);
       if (ev4.exists())
         log_event_graph.info("Event Precondition: (" IDFMT ",%d) (" IDFMT ", %d)",
-            finish_event->me.id(), finish_event->generation, ev4.id, ev4.gen);
+            finish_event->me.id(), finish_event->generation.load(), ev4.id, ev4.gen);
       if (ev5.exists())
         log_event_graph.info("Event Precondition: (" IDFMT ",%d) (" IDFMT ", %d)",
-            finish_event->me.id(), finish_event->generation, ev5.id, ev5.gen);
+            finish_event->me.id(), finish_event->generation.load(), ev5.id, ev5.gen);
       if (ev6.exists())
         log_event_graph.info("Event Precondition: (" IDFMT ",%d) (" IDFMT ", %d)",
-            finish_event->me.id(), finish_event->generation, ev6.id, ev6.gen);
+            finish_event->me.id(), finish_event->generation.load(), ev6.id, ev6.gen);
 #endif
 
       // once they're all added - arm the thing (it might go off immediately)
@@ -1259,7 +1260,7 @@ namespace Realm {
 
 	// three cases below
 
-	if(needed_gen <= generation) {
+	if(needed_gen <= generation.load()) {
 	  // 1) the event has triggered and any poison information is in the poisoned generation list
 	  trigger_now = true; // actually do trigger outside of mutex
 	  trigger_poisoned = is_generation_poisoned(needed_gen);
@@ -1272,12 +1273,12 @@ namespace Realm {
 	    trigger_poisoned = it->second;
 	  } else {
 	    // 3) we don't know of a trigger of this event, so record the waiter and subscribe if needed
-
+	    gen_t cur_gen = generation.load();
 	    log_event.debug() << "event not ready: event=" << me << "/" << needed_gen
-			      << " owner=" << owner << " gen=" << generation << " subscr=" << gen_subscribed;
+			      << " owner=" << owner << " gen=" << cur_gen << " subscr=" << gen_subscribed;
 
 	    // is this for the "current" next generation?
-	    if(needed_gen == (generation + 1)) {
+	    if(needed_gen == (cur_gen + 1)) {
 	      // yes, put in the current waiter list
 	      current_local_waiters.push_back(waiter);
 	    } else {
@@ -1373,7 +1374,7 @@ namespace Realm {
 
       // early-out case: if we can see the generation needed has already
       //  triggered, signal without taking the mutex
-      EventImpl::gen_t stale_gen = impl->generation;
+      EventImpl::gen_t stale_gen = impl->generation.load_acquire();
       if(stale_gen >= subscribe_gen) {
 	trigger_gen = stale_gen;
       } else {
@@ -1381,22 +1382,23 @@ namespace Realm {
 
 	// look at the previously-subscribed generation from the requestor - we'll send
 	//  a trigger message if anything newer has triggered
-        if(impl->generation > args.previous_subscribe_gen)
-	  trigger_gen = impl->generation;
+	EventImpl::gen_t cur_gen = impl->generation.load();
+        if(cur_gen > args.previous_subscribe_gen)
+	  trigger_gen = cur_gen;
 
 	// are they subscribing to the current generation?
-	if(subscribe_gen == (impl->generation + 1)) {
+	if(subscribe_gen == (cur_gen + 1)) {
 	  impl->remote_waiters.add(sender);
 	  subscription_recorded = true;
 	} else {
 	  // should never get subscriptions newer than our current
-	  assert(subscribe_gen <= impl->generation);
+	  assert(subscribe_gen <= cur_gen);
 	}
       }
 
       if(subscription_recorded)
 	log_event.debug() << "event subscription recorded: node=" << sender
-			  << " event=" << args.event << " (> " << impl->generation << ")";
+			  << " event=" << args.event << " (> " << stale_gen << ")";
 
       if(trigger_gen > 0) {
 	log_event.debug() << "event subscription immediate trigger: node=" << sender
@@ -1405,10 +1407,9 @@ namespace Realm {
 	trig_id.event_generation() = trigger_gen;
 	Event triggered = trig_id.convert<Event>();
 
-	// it is legal to use poisoned generation info like this because it is always
-	// updated before the generation - the barrier makes sure we read in the correct
-	// order
-	__sync_synchronize();
+	// it is legal to use poisoned generation info like this because it is
+	// always updated before the generation - the load_acquire above makes
+	// sure we read in the correct order
 	ActiveMessage<EventUpdateMessage> amsg(sender, impl->num_poisoned_generations*sizeof(EventImpl::gen_t));
 	amsg->event = triggered;
 	amsg.add_payload(impl->poisoned_generations, impl->num_poisoned_generations*sizeof(EventImpl::gen_t), PAYLOAD_KEEP);
@@ -1480,7 +1481,7 @@ namespace Realm {
 #endif
 
       // this might be old news if we had subscribed to an event and then triggered it ourselves
-      if(current_gen <= generation)
+      if(current_gen <= generation.load())
 	return;
 
       // first thing - update the poisoned generation list
@@ -1497,7 +1498,7 @@ namespace Realm {
 
       // grab any/all waiters - start with current generation
       if(!current_local_waiters.empty())
-	to_wake[generation + 1].swap(current_local_waiters);
+	to_wake[generation.load() + 1].swap(current_local_waiters);
 
       // now any future waiters up to and including the triggered gen
       if(!future_local_waiters.empty()) {
@@ -1527,8 +1528,7 @@ namespace Realm {
       }
 
       // finally, update the generation count, representing that we have complete information to that point
-      __sync_synchronize();
-      generation = current_gen;
+      generation.store_release(current_gen);
     }
 
     // now trigger anybody that needs to be triggered
@@ -1589,9 +1589,8 @@ namespace Realm {
       }
 #endif
       // lock-free check
-      if(needed_gen <= generation) {
-	// it is safe to call is_generation_poisoned after just a memory barrier - no lock
-	__sync_synchronize();
+      if(needed_gen <= generation.load_acquire()) {
+	// it is safe to call is_generation_poisoned after just a load_acquire
 	poisoned = is_generation_poisoned(needed_gen);
 	return true;
       }
@@ -1703,7 +1702,7 @@ namespace Realm {
 	  AutoHSLLock a(mutex);
 
 	  // must always be the next generation
-	  assert(gen_triggered == (generation + 1));
+	  assert(gen_triggered == (generation.load() + 1));
 
 	  to_wake.swap(current_local_waiters);
 	  assert(future_local_waiters.empty()); // no future waiters here
@@ -1720,13 +1719,12 @@ namespace Realm {
 
 	  // update generation last, with a synchronization to make sure poisoned generation
 	  // list is valid to any observer of this update
-	  __sync_synchronize();
-	  generation = gen_triggered;
+	  generation.store_release(gen_triggered);
 
 	  // we'll free the event unless it's maxed out on poisoned generations
 	  //  or generation count
 	  free_event = ((num_poisoned_generations < POISONED_GENERATION_LIMIT) &&
-			(generation < ((1U << ID::EVENT_GENERATION_WIDTH) - 1)));
+			(gen_triggered < ((1U << ID::EVENT_GENERATION_WIDTH) - 1)));
 	  // special case: if the merger is still active, defer the
 	  //  re-insertion until all the preconditions have triggered
 	  if(free_event && merger.is_active()) {
@@ -1754,7 +1752,7 @@ namespace Realm {
 	//  already subscribed), so check here that we're triggering a new generation
 	// (the alternative is to not send the message until after we update local state, but
 	// that adds latency for everybody else)
-	assert(gen_triggered > generation);
+	assert(gen_triggered > generation.load());
 	ActiveMessage<EventTriggerMessage> amsg(owner);
 	amsg->event = make_event(gen_triggered);
 	amsg->poisoned = poisoned;
@@ -1767,8 +1765,9 @@ namespace Realm {
 	{
 	  AutoHSLLock a(mutex);
 
+	  gen_t cur_gen = generation.load();
 	  // is this the "next" version?
-	  if(gen_triggered == (generation + 1)) {
+	  if(gen_triggered == (cur_gen + 1)) {
 	    // yes, so we have complete information and can update the state directly
 	    to_wake.swap(current_local_waiters);
 	    // any future waiters?
@@ -1788,12 +1787,11 @@ namespace Realm {
               subscribe_needed = true; // make sure we get that update
 	    }
 
-	    // update generation last, with a synchronization to make sure poisoned generation
+	    // update generation last, with a store_release to make sure poisoned generation
 	    // list is valid to any observer of this update
-	    __sync_synchronize();
-	    generation = gen_triggered;
+	    generation.store_release(gen_triggered);
 	  } else 
-	    if(gen_triggered > (generation + 1)) {
+	    if(gen_triggered > (cur_gen + 1)) {
 	      // we can't update the main state because there are generations that we know
 	      //  have triggered, but we do not know if they are poisoned, so look in the
 	      //  future waiter list to see who we can wake, and update the local trigger
