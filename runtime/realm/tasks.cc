@@ -37,9 +37,23 @@ namespace Realm {
 	     int _priority)
     : Operation(_finish_event, _finish_gen, reqs)
     , proc(_proc), func_id(_func_id),
-      args(_args, _arglen), before_event(_before_event), priority(_priority),
+      before_event(_before_event), priority(_priority),
       executing_thread(0)
   {
+    arglen = _arglen;
+    if(arglen <= SHORT_ARGLEN_MAX) {
+      if(arglen) {
+	memcpy(short_argdata, _args, arglen);
+        argdata = short_argdata;
+      } else
+	argdata = 0;
+      free_argdata = false;
+    } else {
+      argdata = static_cast<char *>(malloc(arglen));
+      assert(argdata != 0);
+      memcpy(argdata, _args, arglen);
+      free_argdata = true;
+    }
     log_task.info() << "task " << (void *)this << " created: func=" << func_id
 		    << " proc=" << _proc << " arglen=" << _arglen
 		    << " before=" << _before_event << " after=" << get_finish_event();
@@ -47,6 +61,8 @@ namespace Realm {
 
   Task::~Task(void)
   {
+    if(free_argdata)
+      free(argdata);
   }
 
   void Task::print(std::ostream& os) const
@@ -57,7 +73,7 @@ namespace Realm {
   bool Task::mark_ready(void)
   {
     log_task.info() << "task " << (void *)this << " ready: func=" << func_id
-		    << " proc=" << proc << " arglen=" << args.size()
+		    << " proc=" << proc << " arglen=" << arglen
 		    << " before=" << before_event << " after=" << finish_event;
     return Operation::mark_ready();
   }
@@ -65,7 +81,7 @@ namespace Realm {
   bool Task::mark_started(void)
   {
     log_task.info() << "task " << (void *)this << " started: func=" << func_id
-		    << " proc=" << proc << " arglen=" << args.size()
+		    << " proc=" << proc << " arglen=" << arglen
 		    << " before=" << before_event << " after=" << finish_event;
     return Operation::mark_started();
   }
@@ -73,7 +89,7 @@ namespace Realm {
   void Task::mark_completed(void)
   {
     log_task.info() << "task " << (void *)this << " completed: func=" << func_id
-		    << " proc=" << proc << " arglen=" << args.size()
+		    << " proc=" << proc << " arglen=" << arglen
 		    << " before=" << before_event << " after=" << finish_event;
     Operation::mark_completed();
   }
@@ -158,7 +174,8 @@ namespace Realm {
 	try {
 	  Thread::ExceptionHandlerPresence ehp;
 	  thread->start_perf_counters();
-	  get_runtime()->get_processor_impl(p)->execute_task(func_id, args);
+	  get_runtime()->get_processor_impl(p)->execute_task(func_id,
+							     ByteArrayRef(argdata, arglen));
 	  thread->stop_perf_counters();
 	  thread->stop_operation(this);
 	  thread->record_perf_counters(measurements);
@@ -174,7 +191,8 @@ namespace Realm {
       {
 	// just run the task - if it completes, we assume it was successful
 	thread->start_perf_counters();
-	get_runtime()->get_processor_impl(p)->execute_task(func_id, args);
+	get_runtime()->get_processor_impl(p)->execute_task(func_id,
+							   ByteArrayRef(argdata, arglen));
 	thread->stop_perf_counters();
 	thread->stop_operation(this);
 	thread->record_perf_counters(measurements);

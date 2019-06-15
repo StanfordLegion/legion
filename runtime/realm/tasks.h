@@ -61,7 +61,15 @@ namespace Realm {
 
       Processor proc;
       Processor::TaskFuncID func_id;
-      ByteArray args;
+
+      // "small-vector" optimization for task args
+      char *argdata;
+      size_t arglen;
+      static const size_t SHORT_ARGLEN_MAX = 64;
+      char short_argdata[SHORT_ARGLEN_MAX];
+      bool free_argdata;
+      //ByteArray args;
+
       Event before_event;
       int priority;
 
