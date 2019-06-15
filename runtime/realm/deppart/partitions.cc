@@ -697,7 +697,7 @@ namespace Realm {
     EventImpl::add_waiter(wait_on, this);
   }
 
-  void PartitioningOperation::DeferredLaunch::event_triggered(Event e, bool poisoned)
+  void PartitioningOperation::DeferredLaunch::event_triggered(bool poisoned)
   {
     assert(!poisoned); // TODO: POISON_FIXME
     op_queue->enqueue_partitioning_operation(op);

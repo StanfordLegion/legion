@@ -211,15 +211,16 @@ namespace Realm {
   {
     proc = _proc;
     task = _task;
+    wait_on = _wait_on->make_event(_wait_gen);
     _wait_on->add_waiter(_wait_gen, this);
   }
     
-  void Task::DeferredSpawn::event_triggered(Event e, bool poisoned)
+  void Task::DeferredSpawn::event_triggered(bool poisoned)
   {
     if(poisoned) {
       // cancel the task - this has to work
       log_poison.info() << "cancelling poisoned task - task=" << task << " after=" << task->get_finish_event();
-      task->handle_poisoned_precondition(e);
+      task->handle_poisoned_precondition(wait_on);
       return;
     }
 

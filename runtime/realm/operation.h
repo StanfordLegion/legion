@@ -151,7 +151,7 @@ namespace Realm {
     class TableCleaner : public EventWaiter {
     public:
       TableCleaner(OperationTable *_table);
-      virtual bool event_triggered(Event e, bool poisoned);
+      virtual bool event_triggered(bool poisoned);
       virtual void print(std::ostream& os) const;
       virtual Event get_finish_event(void) const;
 
@@ -161,12 +161,12 @@ namespace Realm {
 #endif
 
     struct TableEntry : public EventWaiter {
-      virtual void event_triggered(Event e, bool poisoned);
+      virtual void event_triggered(bool poisoned);
       virtual void print(std::ostream& os) const;
       virtual Event get_finish_event(void) const;
 
       OperationTable *table;
-      //Event finish_event;
+      Event finish_event;
       Operation *local_op;
       int remote_node;
       bool pending_cancellation;

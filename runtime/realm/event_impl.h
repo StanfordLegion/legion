@@ -55,7 +55,7 @@ namespace Realm {
     class EventWaiter {
     public:
       virtual ~EventWaiter(void) {}
-      virtual void event_triggered(Event e, bool poisoned) = 0;
+      virtual void event_triggered(bool poisoned) = 0;
       virtual void print(std::ostream& os) const = 0;
       virtual Event get_finish_event(void) const = 0;
 
@@ -68,6 +68,9 @@ namespace Realm {
     public:
       typedef unsigned gen_t;
 
+      EventImpl(void);
+      virtual ~EventImpl(void);
+
       // test whether an event has triggered without waiting
       virtual bool has_triggered(gen_t needed_gen, bool& poisoned) = 0;
 
@@ -76,11 +79,18 @@ namespace Realm {
 
       virtual void external_wait(gen_t needed_gen, bool& poisoned) = 0;
 
+      // helper to create the Event for an arbitrary generation
+      Event make_event(gen_t gen) const;
+
       virtual bool add_waiter(gen_t needed_gen, EventWaiter *waiter/*, bool pre_subscribed = false*/) = 0;
 
       static bool add_waiter(Event needed, EventWaiter *waiter);
 
       static bool detect_event_chain(Event search_from, Event target, int max_depth, bool print_chain);
+
+    public:
+      ID me;
+      NodeID owner;
     };
 
     class GenEventImpl;
@@ -107,7 +117,7 @@ namespace Realm {
       public:
 	EventMerger *merger;
 
-	virtual void event_triggered(Event e, bool poisoned);
+	virtual void event_triggered(bool poisoned);
 	virtual void print(std::ostream& os) const;
 	virtual Event get_finish_event(void) const;
       };
@@ -138,9 +148,6 @@ namespace Realm {
       // get the Event (id+generation) for the current (i.e. untriggered) generation
       Event current_event(void) const;
 
-      // helper to create the Event for an arbitrary generation
-      Event make_event(gen_t gen) const;
-
       // test whether an event has triggered without waiting
       virtual bool has_triggered(gen_t needed_gen, bool& poisoned);
 
@@ -170,9 +177,6 @@ namespace Realm {
 			  int new_poisoned_count);
 
     public: //protected:
-      ID me;
-      NodeID owner;
-      
       // these state variables are monotonic, so can be checked without a lock for
       //  early-out conditions
       gen_t generation, gen_subscribed;
@@ -264,8 +268,6 @@ namespace Realm {
       bool get_result(gen_t result_gen, void *value, size_t value_size);
 
     public: //protected:
-      ID me;
-      NodeID owner;
       gen_t generation, gen_subscribed;
       gen_t first_generation;
       BarrierImpl *next_free;

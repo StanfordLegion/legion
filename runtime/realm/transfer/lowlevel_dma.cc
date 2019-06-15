@@ -482,14 +482,15 @@ namespace Realm {
 					    Reservation l /*= Reservation::NO_RESERVATION*/)
     {
       current_lock = l;
+      wait_on = e;
       EventImpl::add_waiter(e, this);
     }
 
-    void DmaRequest::Waiter::event_triggered(Event e, bool poisoned)
+    void DmaRequest::Waiter::event_triggered(bool poisoned)
     {
       if(poisoned) {
 	log_poison.info() << "cancelling poisoned dma operation - op=" << req << " after=" << req->get_finish_event();
-	req->handle_poisoned_precondition(e);
+	req->handle_poisoned_precondition(wait_on);
 	return;
       }
 

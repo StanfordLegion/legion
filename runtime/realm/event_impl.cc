@@ -30,6 +30,12 @@ namespace Realm {
   // used in places that don't currently propagate poison but should
   static const bool POISON_FIXME = false;
 
+  // turn nested event triggers into a list walk instead - keeps from blowing
+  //  out the stack
+  namespace ThreadLocal {
+    __thread EventWaiter::EventWaiterList *nested_wake_list = 0;
+  };
+
 #if 0
   ////////////////////////////////////////////////////////////////////////
   //
@@ -172,7 +178,7 @@ namespace Realm {
     public:
       Callback(const EventTriggeredCondition& _cond);
       virtual ~Callback(void);
-      virtual void event_triggered(Event e, bool poisoned);
+      virtual void event_triggered(bool poisoned);
       virtual void print(std::ostream& os) const;
       virtual Event get_finish_event(void) const;
       virtual void operator()(bool poisoned) = 0;
@@ -214,7 +220,7 @@ namespace Realm {
   {
   }
   
-  void EventTriggeredCondition::Callback::event_triggered(Event e, bool poisoned)
+  void EventTriggeredCondition::Callback::event_triggered(bool poisoned)
   {
     if(cond.interval)
       cond.interval->record_wait_ready();
@@ -638,7 +644,7 @@ namespace Realm {
   // class EventMerger::MergeEventPrecondition
   //
 
-  void EventMerger::MergeEventPrecondition::event_triggered(Event e, bool poisoned)
+  void EventMerger::MergeEventPrecondition::event_triggered(bool poisoned)
   {
     merger->precondition_triggered(poisoned);
   }
@@ -683,7 +689,7 @@ namespace Realm {
       public:
 	EventMerger *merger;
 
-	virtual void event_triggered(Event e, bool poisoned)
+	virtual void event_triggered(bool poisoned)
 	{
 	  merger->precondition_triggered(poisoned);
 	}
@@ -853,12 +859,24 @@ namespace Realm {
 
   ////////////////////////////////////////////////////////////////////////
   //
+  // class EventImpl
+  //
+
+  EventImpl::EventImpl(void)
+    : me((ID::IDType)-1), owner(-1)
+  {}
+
+  EventImpl::~EventImpl(void)
+  {}
+
+  
+  ////////////////////////////////////////////////////////////////////////
+  //
   // class GenEventImpl
   //
 
   GenEventImpl::GenEventImpl(void)
-    : me((ID::IDType)-1), owner(-1)
-    , merger(this)
+    : merger(this)
   {
     generation = 0;
     gen_subscribed = 0;
@@ -1283,8 +1301,7 @@ namespace Realm {
       }
 
       if(trigger_now)
-	waiter->event_triggered(make_event(needed_gen),
-				trigger_poisoned);
+	waiter->event_triggered(trigger_poisoned);
 
       return true;  // waiter is always either enqueued or triggered right now
     }
@@ -1516,11 +1533,24 @@ namespace Realm {
       for(std::map<gen_t, EventWaiter::EventWaiterList>::iterator it = to_wake.begin();
 	  it != to_wake.end();
 	  it++) {
-	Event e = make_event(it->first);
 	bool poisoned = is_generation_poisoned(it->first);
-	while(!it->second.empty()) {
-	  EventWaiter *w = it->second.pop_front();
-	  w->event_triggered(e, poisoned);
+	if(!poisoned) {
+	  if(ThreadLocal::nested_wake_list != 0) {
+	    // append our waiters for caller to handle rather than recursing
+	    ThreadLocal::nested_wake_list->absorb_append(it->second);
+	  } else {
+	    ThreadLocal::nested_wake_list = &(it->second);  // avoid recursion
+	    while(!it->second.empty()) {
+	      EventWaiter *w = it->second.pop_front();
+	      w->event_triggered(false /*!poisoned*/);
+	    }
+	    ThreadLocal::nested_wake_list = 0;
+	  }
+	} else {
+	  while(!it->second.empty()) {
+	    EventWaiter *w = it->second.pop_front();
+	    w->event_triggered(true /*poisoned*/);
+	  }
 	}
       }
     }
@@ -1599,7 +1629,7 @@ namespace Realm {
       {
       }
 
-      virtual void event_triggered(Event e, bool _poisoned)
+      virtual void event_triggered(bool _poisoned)
       {
 	// record whether event was poisoned - owner will inspect once awake
 	poisoned = _poisoned;
@@ -1791,11 +1821,24 @@ namespace Realm {
 
       // finally, trigger any local waiters
       if(!to_wake.empty()) {
-	Event e = make_event(gen_triggered);
-	while(!to_wake.empty()) {
-	  EventWaiter *ew = to_wake.pop_front();
-	  ew->event_triggered(e, poisoned);
-        }
+	if(!poisoned) {
+	  if(ThreadLocal::nested_wake_list != 0) {
+	    // append our waiters for caller to handle rather than recursing
+	    ThreadLocal::nested_wake_list->absorb_append(to_wake);
+	  } else {
+	    ThreadLocal::nested_wake_list = &to_wake;  // avoid recursion
+	    while(!to_wake.empty()) {
+	      EventWaiter *ew = to_wake.pop_front();
+	      ew->event_triggered(false /*!poisoned*/);
+	    }
+	    ThreadLocal::nested_wake_list = 0;
+	  }
+	} else {
+	  while(!to_wake.empty()) {
+	    EventWaiter *ew = to_wake.pop_front();
+	    ew->event_triggered(true /*poisoned*/);
+	  }
+	}
       }
     }
 
@@ -1865,7 +1908,6 @@ namespace Realm {
     }
 
     BarrierImpl::BarrierImpl(void)
-      : me((ID::IDType)-1), owner(-1)
     {
       generation = 0;
       gen_subscribed = 0;
@@ -1986,7 +2028,7 @@ static void *bytedup(const void *data, size_t datalen)
 	  free(data);
       }
 
-      virtual void event_triggered(Event e, bool poisoned)
+      virtual void event_triggered(bool poisoned)
       {
 	// TODO: handle poison
 	assert(poisoned == POISON_FIXME);
@@ -2298,10 +2340,25 @@ static void *bytedup(const void *data, size_t datalen)
 	log_barrier.info() << "barrier trigger: event=" << me << "/" << trigger_gen;
 
 	// notify local waiters first
-	Barrier b = make_barrier(trigger_gen);
-	while(!local_notifications.empty()) {
-	  EventWaiter *ew = local_notifications.pop_front();
-	  ew->event_triggered(b, POISON_FIXME);
+	if(!local_notifications.empty()) {
+	  if(!POISON_FIXME) {
+	    if(ThreadLocal::nested_wake_list != 0) {
+	      // append our waiters for caller to handle rather than recursing
+	      ThreadLocal::nested_wake_list->absorb_append(local_notifications);
+	    } else {
+	      ThreadLocal::nested_wake_list = &local_notifications;  // avoid recursion
+	      while(!local_notifications.empty()) {
+		EventWaiter *ew = local_notifications.pop_front();
+		ew->event_triggered(false /*!poisoned*/);
+	      }
+	      ThreadLocal::nested_wake_list = 0;
+	    }
+	  } else {
+	    while(!local_notifications.empty()) {
+	      EventWaiter *ew = local_notifications.pop_front();
+	      ew->event_triggered(true /*poisoned*/);
+	    }
+	  }
 	}
 
 	// now do remote notifications
@@ -2408,8 +2465,7 @@ static void *bytedup(const void *data, size_t datalen)
       }
 
       if(trigger_now) {
-	Barrier b = make_barrier(needed_gen);
-	waiter->event_triggered(b, POISON_FIXME);
+	waiter->event_triggered(POISON_FIXME);
       }
 
       return true;
@@ -2606,9 +2662,25 @@ static void *bytedup(const void *data, size_t datalen)
       }
 
       // with lock released, perform any local notifications
-      while(!local_notifications.empty()) {
-	EventWaiter *ew = local_notifications.pop_front();
-	ew->event_triggered(b, POISON_FIXME);
+      if(!local_notifications.empty()) {
+	if(!POISON_FIXME) {
+	  if(ThreadLocal::nested_wake_list != 0) {
+	    // append our waiters for caller to handle rather than recursing
+	    ThreadLocal::nested_wake_list->absorb_append(local_notifications);
+	  } else {
+	    ThreadLocal::nested_wake_list = &local_notifications;  // avoid recursion
+	    while(!local_notifications.empty()) {
+	      EventWaiter *ew = local_notifications.pop_front();
+	      ew->event_triggered(false /*!poisoned*/);
+	    }
+	    ThreadLocal::nested_wake_list = 0;
+	  }
+	} else {
+	  while(!local_notifications.empty()) {
+	    EventWaiter *ew = local_notifications.pop_front();
+	    ew->event_triggered(true /*poisoned*/);
+	  }
+	}
       }
     }
 

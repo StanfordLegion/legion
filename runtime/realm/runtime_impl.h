@@ -287,7 +287,7 @@ namespace Realm {
 	void defer(RuntimeImpl *_runtime, int _result_code,
 		   Event wait_on);
 
-	virtual void event_triggered(Event e, bool poisoned);
+	virtual void event_triggered(bool poisoned);
 	virtual void print(std::ostream& os) const;
 	virtual Event get_finish_event(void) const;
 

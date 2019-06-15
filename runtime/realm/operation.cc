@@ -300,9 +300,9 @@ namespace Realm {
   {}
 #endif
 
-  void OperationTable::TableEntry::event_triggered(Event e, bool poisoned)
+  void OperationTable::TableEntry::event_triggered(bool poisoned)
   {
-    table->event_triggered(e);
+    table->event_triggered(finish_event);
   }
 
   void OperationTable::TableEntry::print(std::ostream& os) const
@@ -312,7 +312,7 @@ namespace Realm {
 
   Event OperationTable::TableEntry::get_finish_event(void) const
   {
-    return Event::NO_EVENT;
+    return finish_event;
   }
 
 
@@ -391,6 +391,7 @@ namespace Realm {
 	e.reason_data = 0;
 	e.reason_size = 0;
 	e.table = this;
+	e.finish_event = finish_event;
 	entry = &e;
       } else {
 	// existing entry should only occur if there's a pending cancellation
@@ -399,6 +400,7 @@ namespace Realm {
 	assert(e.remote_node == -1);
 	assert(e.pending_cancellation);
 	assert(e.table == this);
+	assert(e.finish_event == finish_event);
 
 	// put the operation in the table in case anybody else comes along while we're trying to
 	//  cancel it - add a reference since we're keeping one
@@ -452,6 +454,7 @@ namespace Realm {
       e.reason_data = 0;
       e.reason_size = 0;
       e.table = this;
+      e.finish_event = finish_event;
       entry = &e;
     }
 

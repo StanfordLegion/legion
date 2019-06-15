@@ -69,13 +69,14 @@ namespace Realm {
       public:
 	void defer(ProcessorImpl *_proc, Task *_task,
 		   EventImpl *_wait_on, EventImpl::gen_t _wait_gen);
-	virtual void event_triggered(Event e, bool poisoned);
+	virtual void event_triggered(bool poisoned);
 	virtual void print(std::ostream& os) const;
 	virtual Event get_finish_event(void) const;
 
       protected:
 	ProcessorImpl *proc;
 	Task *task;
+	Event wait_on;
       };
       DeferredSpawn deferred_spawn;
       

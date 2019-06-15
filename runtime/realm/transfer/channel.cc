@@ -3774,7 +3774,7 @@ namespace Realm {
 	Realm::EventImpl::add_waiter(wait_on, this);
       }
 
-      void XferDes::DeferredXDEnqueue::event_triggered(Event e, bool poisoned)
+      void XferDes::DeferredXDEnqueue::event_triggered(bool poisoned)
       {
 	// TODO: handle poisoning
 	assert(!poisoned);

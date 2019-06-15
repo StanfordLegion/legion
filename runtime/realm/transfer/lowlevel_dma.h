@@ -183,10 +183,11 @@ namespace Realm {
 	Reservation current_lock;
 	DmaRequestQueue *queue;
 	DmaRequest *req;
+	Event wait_on;
 
 	void sleep_on_event(Event e, Reservation l = Reservation::NO_RESERVATION);
 
-	virtual void event_triggered(Event e, bool poisoned);
+	virtual void event_triggered(bool poisoned);
 	virtual void print(std::ostream& os) const;
 	virtual Event get_finish_event(void) const;
       };
