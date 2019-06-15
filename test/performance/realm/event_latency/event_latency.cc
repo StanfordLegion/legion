@@ -142,7 +142,7 @@ void top_level_task(const void *args, size_t arglen,
   {
     double elapsed = t2 - t1;
     double per_task = elapsed / (targs->chain_depth + 1);
-    log_app.print() << "chain construction: " << (1e6 * per_task) << " us/task";
+    log_app.print() << "chain construction: " << (1e6 * per_task) << " us/event";
   }
 
   // trigger first event and see how long it takes to get to the end
@@ -153,7 +153,7 @@ void top_level_task(const void *args, size_t arglen,
   {
     double elapsed = t4 - t3;
     double per_task = elapsed / (targs->chain_depth + 1);
-    log_app.print() << "chain trigger: " << (1e6 * per_task) << " us/task, " << elapsed << " s total";
+    log_app.print() << "chain trigger: " << (1e6 * per_task) << " us/event, " << elapsed << " s total";
   }
 }
 
