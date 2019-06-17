@@ -25,7 +25,9 @@
 #include "realm/utils.h"
 
 #include <dlfcn.h>
+#ifdef REALM_USE_DLMOPEN
 #include <link.h>
+#endif // REALM_USE_DLMOPEN
 
 #include <list>
 
