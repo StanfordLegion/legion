@@ -701,7 +701,7 @@ namespace Realm {
     : Module("core")
     , num_cpu_procs(1), num_util_procs(1), num_io_procs(0)
     , concurrent_io_threads(1)  // Legion does not support values > 1 right now
-    , sysmem_size_in_mb(512), stack_size_in_mb(2)
+    , sysmem_size(512 << 20), stack_size(2 << 20)
     , pin_util_procs(false)
   {}
 
@@ -719,8 +719,8 @@ namespace Realm {
       .add_option_int("-ll:util", m->num_util_procs)
       .add_option_int("-ll:io", m->num_io_procs)
       .add_option_int("-ll:concurrent_io", m->concurrent_io_threads)
-      .add_option_int("-ll:csize", m->sysmem_size_in_mb)
-      .add_option_int("-ll:stacksize", m->stack_size_in_mb, true /*keep*/)
+      .add_option_int_units("-ll:csize", m->sysmem_size, 'm')
+      .add_option_int_units("-ll:stacksize", m->stack_size, 'm', true /*binary*/, true /*keep*/)
       .add_option_bool("-ll:pin_util", m->pin_util_procs)
       .parse_command_line(cmdline);
 
@@ -733,9 +733,9 @@ namespace Realm {
   {
     Module::create_memories(runtime);
 
-    if(sysmem_size_in_mb > 0) {
+    if(sysmem_size > 0) {
       Memory m = runtime->next_local_memory_id();
-      MemoryImpl *mi = new LocalCPUMemory(m, sysmem_size_in_mb << 20, 
+      MemoryImpl *mi = new LocalCPUMemory(m, sysmem_size,
           -1/*don't care numa domain*/, Memory::SYSTEM_MEM);
       runtime->add_memory(mi);
     }
@@ -751,7 +751,7 @@ namespace Realm {
     for(int i = 0; i < num_util_procs; i++) {
       Processor p = runtime->next_local_processor_id();
       ProcessorImpl *pi = new LocalUtilityProcessor(p, runtime->core_reservation_set(),
-						    stack_size_in_mb << 20,
+						    stack_size,
 						    Config::force_kernel_threads,
                                                     pin_util_procs);
       runtime->add_processor(pi);
@@ -760,7 +760,7 @@ namespace Realm {
     for(int i = 0; i < num_io_procs; i++) {
       Processor p = runtime->next_local_processor_id();
       ProcessorImpl *pi = new LocalIOProcessor(p, runtime->core_reservation_set(),
-					       stack_size_in_mb << 20,
+					       stack_size,
 					       concurrent_io_threads);
       runtime->add_processor(pi);
     }
@@ -768,7 +768,7 @@ namespace Realm {
     for(int i = 0; i < num_cpu_procs; i++) {
       Processor p = runtime->next_local_processor_id();
       ProcessorImpl *pi = new LocalCPUProcessor(p, runtime->core_reservation_set(),
-						stack_size_in_mb << 20,
+						stack_size,
 						Config::force_kernel_threads);
       runtime->add_processor(pi);
     }
@@ -810,7 +810,7 @@ namespace Realm {
     RuntimeImpl *runtime_singleton = 0;
 
   // these should probably be member variables of RuntimeImpl?
-    static size_t stack_size_in_mb;
+    static size_t stack_size;
   
     RuntimeImpl::RuntimeImpl(void)
       : machine(0), 
@@ -1145,17 +1145,17 @@ namespace Realm {
 
       // low-level runtime parameters
 #ifdef USE_GASNET
-      size_t gasnet_mem_size_in_mb = 256;
-      size_t reg_ib_mem_size_in_mb = 256;
+      size_t gasnet_mem_size = 256 << 20;
+      size_t reg_ib_mem_size = 256 << 20;
 #else
-      size_t gasnet_mem_size_in_mb = 0;
-      size_t reg_ib_mem_size_in_mb = 64; // for transposes/serdez
+      size_t gasnet_mem_size = 0;
+      size_t reg_ib_mem_size = 64 << 20; // for transposes/serdez
 #endif
-      size_t reg_mem_size_in_mb = 0;
-      size_t disk_mem_size_in_mb = 0;
+      size_t reg_mem_size = 0;
+      size_t disk_mem_size = 0;
       // Static variable for stack size since we need to 
       // remember it when we launch threads in run 
-      stack_size_in_mb = 2;
+      stack_size = 2;
       //unsigned cpu_worker_threads = 1;
       unsigned dma_worker_threads = 1;
       unsigned active_msg_worker_threads = 1;
@@ -1176,11 +1176,11 @@ namespace Realm {
       bool pin_dma_threads = false;
 
       CommandLineParser cp;
-      cp.add_option_int("-ll:gsize", gasnet_mem_size_in_mb)
-	.add_option_int("-ll:rsize", reg_mem_size_in_mb)
-	.add_option_int("-ll:ib_rsize", reg_ib_mem_size_in_mb)
-	.add_option_int("-ll:dsize", disk_mem_size_in_mb)
-	.add_option_int("-ll:stacksize", stack_size_in_mb)
+      cp.add_option_int_units("-ll:gsize", gasnet_mem_size, 'm')
+	.add_option_int_units("-ll:rsize", reg_mem_size, 'm')
+	.add_option_int_units("-ll:ib_rsize", reg_ib_mem_size, 'm')
+	.add_option_int_units("-ll:dsize", disk_mem_size, 'm')
+	.add_option_int_units("-ll:stacksize", stack_size, 'm')
 	.add_option_int("-ll:dma", dma_worker_threads)
         .add_option_bool("-ll:pin_dma", pin_dma_threads)
 	.add_option_int("-ll:amsg", active_msg_worker_threads)
@@ -1288,7 +1288,7 @@ namespace Realm {
 	}
       }
 
-      init_endpoints(gasnet_mem_size_in_mb, reg_mem_size_in_mb, reg_ib_mem_size_in_mb,
+      init_endpoints(gasnet_mem_size, reg_mem_size, reg_ib_mem_size,
 		     *core_reservations,
 		     cmdline);
 
@@ -1357,7 +1357,7 @@ namespace Realm {
 
       start_handler_threads(active_msg_handler_threads,
 			    *core_reservations,
-			    stack_size_in_mb << 20);
+			    stack_size);
 
 #if defined(USE_GASNET) && (((GEX_SPEC_VERSION_MAJOR << 8) + GEX_SPEC_VERSION_MINOR) < 5)
       // this needs to happen after init_endpoints
@@ -1390,10 +1390,10 @@ namespace Realm {
       //gasnet_seginfo_t seginfos = new gasnet_seginfo_t[num_nodes];
       //CHECK_GASNET( gasnet_getSegmentInfo(seginfos, num_nodes) );
 
-      if(gasnet_mem_size_in_mb > 0)
+      if(gasnet_mem_size > 0)
 	// use an 'owner_node' of all 1's for this
         // SJT: actually, go back to an owner node of 0 and memory_idx of all 1's for now
-	global_memory = new GASNetMemory(ID::make_memory(0, -1U).convert<Memory>(), gasnet_mem_size_in_mb << 20);
+	global_memory = new GASNetMemory(ID::make_memory(0, -1U).convert<Memory>(), gasnet_mem_size);
       else
 	global_memory = 0;
 
@@ -1406,20 +1406,20 @@ namespace Realm {
 	(*it)->create_memories(this);
 
       LocalCPUMemory *regmem;
-      if(reg_mem_size_in_mb > 0) {
+      if(reg_mem_size > 0) {
 #ifdef USE_GASNET
 	gasnet_seginfo_t *seginfos = new gasnet_seginfo_t[max_node_id + 1];
 	CHECK_GASNET( gasnet_getSegmentInfo(seginfos, max_node_id + 1) );
-	char *regmem_base = ((char *)(seginfos[my_node_id].addr)) + (gasnet_mem_size_in_mb << 20);
+	char *regmem_base = ((char *)(seginfos[my_node_id].addr)) + gasnet_mem_size;
 	delete[] seginfos;
 #else
-	nongasnet_regmem_base = malloc(reg_mem_size_in_mb << 20);
+	nongasnet_regmem_base = malloc(reg_mem_size);
 	assert(nongasnet_regmem_base != 0);
 	char *regmem_base = static_cast<char *>(nongasnet_regmem_base);
 #endif
 	Memory m = get_runtime()->next_local_memory_id();
 	regmem = new LocalCPUMemory(m,
-				    reg_mem_size_in_mb << 20,
+				    reg_mem_size,
                                     -1/*don't care numa domain*/,
                                     Memory::REGDMA_MEM,
 				    regmem_base,
@@ -1434,21 +1434,21 @@ namespace Realm {
 	(*it)->create_processors(this);
 
       LocalCPUMemory *reg_ib_mem;
-      if(reg_ib_mem_size_in_mb > 0) {
+      if(reg_ib_mem_size > 0) {
 #ifdef USE_GASNET
 	gasnet_seginfo_t *seginfos = new gasnet_seginfo_t[max_node_id + 1];
 	CHECK_GASNET( gasnet_getSegmentInfo(seginfos, max_node_id + 1) );
-	char *reg_ib_mem_base = ((char *)(seginfos[my_node_id].addr)) + (gasnet_mem_size_in_mb << 20)
-                                + (reg_mem_size_in_mb << 20);
+	char *reg_ib_mem_base = ((char *)(seginfos[my_node_id].addr)) + gasnet_mem_size
+                                + reg_mem_size;
 	delete[] seginfos;
 #else
-	nongasnet_reg_ib_mem_base = malloc(reg_ib_mem_size_in_mb << 20);
+	nongasnet_reg_ib_mem_base = malloc(reg_ib_mem_size);
 	assert(nongasnet_reg_ib_mem_base != 0);
 	char *reg_ib_mem_base = static_cast<char *>(nongasnet_reg_ib_mem_base);
 #endif
 	Memory m = get_runtime()->next_local_ib_memory_id();
 	reg_ib_mem = new LocalCPUMemory(m,
-				        reg_ib_mem_size_in_mb << 20,
+				        reg_ib_mem_size,
                                         -1/*don't care numa domain*/,
                                         Memory::REGDMA_MEM,
 				        reg_ib_mem_base,
@@ -1459,12 +1459,12 @@ namespace Realm {
 
       // create local disk memory
       DiskMemory *diskmem;
-      if(disk_mem_size_in_mb > 0) {
+      if(disk_mem_size > 0) {
         char file_name[30];
         sprintf(file_name, "disk_file%d.tmp", my_node_id);
         Memory m = get_runtime()->next_local_memory_id();
         diskmem = new DiskMemory(m,
-                                 disk_mem_size_in_mb << 20,
+                                 disk_mem_size,
                                  std::string(file_name));
         get_runtime()->add_memory(diskmem);
       } else

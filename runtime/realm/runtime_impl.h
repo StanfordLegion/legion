@@ -180,7 +180,7 @@ namespace Realm {
     protected:
       int num_cpu_procs, num_util_procs, num_io_procs;
       int concurrent_io_threads;
-      size_t sysmem_size_in_mb, stack_size_in_mb;
+      size_t sysmem_size, stack_size;
       bool pin_util_procs;
     };
 

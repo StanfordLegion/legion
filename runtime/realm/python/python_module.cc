@@ -953,7 +953,7 @@ namespace Realm {
       : Module("python")
       , cfg_num_python_cpus(0)
       , cfg_use_numa(false)
-      , cfg_stack_size_in_mb(2)
+      , cfg_stack_size(2 << 20)
     {
     }
 
@@ -978,7 +978,7 @@ namespace Realm {
 
         cp.add_option_int("-ll:py", m->cfg_num_python_cpus)
 	  .add_option_int("-ll:pynuma", m->cfg_use_numa)
-	  .add_option_int("-ll:pystack", m->cfg_stack_size_in_mb)
+	  .add_option_int_units("-ll:pystack", m->cfg_stack_size, 'm')
 	  .add_option_stringlist("-ll:pyimport", m->cfg_import_modules)
 	  .add_option_stringlist("-ll:pyinit", m->cfg_init_scripts);
 
@@ -1065,7 +1065,7 @@ namespace Realm {
           Processor p = runtime->next_local_processor_id();
           ProcessorImpl *pi = new LocalPythonProcessor(p, cpu_node,
                                                        runtime->core_reservation_set(),
-                                                       cfg_stack_size_in_mb << 20,
+                                                       cfg_stack_size,
 						       cfg_import_modules,
 						       cfg_init_scripts);
           runtime->add_processor(pi);

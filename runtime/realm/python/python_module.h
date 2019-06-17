@@ -67,7 +67,7 @@ namespace Realm {
 
       int cfg_num_python_cpus;
       bool cfg_use_numa;
-      size_t cfg_stack_size_in_mb;
+      size_t cfg_stack_size;
       std::vector<std::string> cfg_import_modules;
       std::vector<std::string> cfg_init_scripts;
 
