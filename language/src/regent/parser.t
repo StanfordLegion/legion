@@ -1109,11 +1109,16 @@ function parser.expr_prefix(p)
     local filename = p:expr()
     p:expect(",")
     local mode = p:expr()
+    local field_map = false
+    if p:nextif(",") then
+      field_map = p:expr()
+    end
     p:expect(")")
     return ast.unspecialized.expr.AttachHDF5 {
       region = region,
       filename = filename,
       mode = mode,
+      field_map = field_map,
       annotations = ast.default_annotations(),
       span = ast.span(start, p),
     }

@@ -6764,6 +6764,8 @@ function codegen.expr_attach_hdf5(cx, node)
   local filename = codegen.expr(cx, node.filename):read(cx, filename_type)
   local mode_type = std.as_read(node.mode.expr_type)
   local mode = codegen.expr(cx, node.mode):read(cx, mode_type)
+  local field_map_type = node.field_map and std.as_read(node.field_map.expr_type)
+  local field_map = node.field_map and codegen.expr(cx, node.field_map):read(cx, field_map_type)
 
   if not cx.variant:get_config_options().inner then
     report.warn(node, "WARNING: Attach invalidates region contents. DO NOT attempt to access region after using attach.")
@@ -6771,34 +6773,26 @@ function codegen.expr_attach_hdf5(cx, node)
 
   assert(cx:has_region(region_type))
 
-  local all_fields = std.flatten_struct_fields(region_type:fspace())
-  local full_fields = terralib.newlist()
-  for i, region_field in ipairs(node.region.fields) do
-    local region_full_fields = data.filter(
-      function(field) return field:starts_with(region_field) end,
-      all_fields)
-    full_fields:insertall(region_full_fields)
-  end
-
-  local field_map = terralib.newsymbol(c.legion_field_map_t, "field_map")
-  local field_map_setup = quote
-    var [field_map] = c.legion_field_map_create()
-    [full_fields:map(
-       function(field_path)
+  local fm = terralib.newsymbol(c.legion_field_map_t, "fm")
+  local fm_setup = quote
+    var [fm] = c.legion_field_map_create()
+    [data.mapi(
+       function(i, field_path)
          return quote
            c.legion_field_map_insert(
-               [field_map],
+               [fm],
                [cx:region(region_type):field_id(field_path)],
-               [field_path:concat(".")])
+               [(field_map and `([field_map][ [i] ])) or field_path:concat(".")])
          end
-       end)]
+       end,
+       node.region.fields)]
   end
-  local field_map_teardown = quote
-    c.legion_field_map_destroy([field_map])
+  local fm_teardown = quote
+    c.legion_field_map_destroy([fm])
   end
 
   local parent = get_container_root(
-    cx, `([region.value].impl), region_type, full_fields)
+    cx, `([region.value].impl), region_type, node.region.fields)
 
   local new_pr = terralib.newsymbol(c.legion_physical_region_t, "new_pr")
 
@@ -6808,13 +6802,13 @@ function codegen.expr_attach_hdf5(cx, node)
     [mode.actions]
     [emit_debuginfo(node)]
 
-    [field_map_setup]
+    [fm_setup]
     var [new_pr] = c.legion_runtime_attach_hdf5(
       [cx.runtime], [cx.context],
-      [filename.value], [region.value].impl, [parent], [field_map], [mode.value])
-    [field_map_teardown]
+      [filename.value], [region.value].impl, [parent], [fm], [mode.value])
+    [fm_teardown]
 
-    [full_fields:map(
+    [node.region.fields:map(
        function(field_path)
          return quote
            -- FIXME: This is redundant (since the same physical region

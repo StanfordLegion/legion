@@ -654,7 +654,8 @@ function pretty.expr_attach_hdf5(cx, node)
       commas({"hdf5",
               pretty.expr_region_root(cx, node.region),
               pretty.expr(cx, node.filename),
-              pretty.expr(cx, node.mode)}),
+              pretty.expr(cx, node.mode),
+              node.field_map and pretty.expr(cx, node.field_map)}),
       ")"})
 end
 

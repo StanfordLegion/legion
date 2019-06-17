@@ -1092,6 +1092,7 @@ function specialize.expr_attach_hdf5(cx, node, allow_lists)
     region = specialize.expr_region_root(cx, node.region),
     filename = specialize.expr(cx, node.filename),
     mode = specialize.expr(cx, node.mode),
+    field_map = node.field_map and specialize.expr(cx, node.field_map),
     annotations = node.annotations,
     span = node.span,
   }
