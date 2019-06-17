@@ -6782,7 +6782,7 @@ function codegen.expr_attach_hdf5(cx, node)
            c.legion_field_map_insert(
                [fm],
                [cx:region(region_type):field_id(field_path)],
-               [(field_map and `([field_map][ [i] ])) or field_path:concat(".")])
+               [(field_map and `([field_map.value][ [i] ])) or field_path:concat(".")])
          end
        end,
        node.region.fields)]
@@ -6800,6 +6800,7 @@ function codegen.expr_attach_hdf5(cx, node)
     [region.actions]
     [filename.actions]
     [mode.actions]
+    [field_map and field_map.actions or quote end]
     [emit_debuginfo(node)]
 
     [fm_setup]
