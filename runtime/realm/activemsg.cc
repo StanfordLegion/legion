@@ -2525,55 +2525,45 @@ static void handle_new_activemsg(gasnet_token_t token,
     record_message(src, false);
 }
 
-void init_endpoints(int gasnet_mem_size_in_mb,
-		    int registered_mem_size_in_mb,
-		    int registered_ib_mem_size_in_mb,
+void init_endpoints(int gasnet_mem_size,
+		    int registered_mem_size,
+		    int registered_ib_mem_size,
 		    Realm::CoreReservationSet& crs,
 		    std::vector<std::string>& cmdline)
 {
-  size_t lmbsize_in_kb = 0;
-  size_t sdpsize_in_mb = 64;
-  size_t spillwarn_in_mb = 0;
-  size_t spillstep_in_mb = 0;
-  size_t spillstall_in_mb = 0;
+  size_t srcdatapool_size = 64 << 20;
 
   Realm::CommandLineParser cp;
   cp.add_option_int("-ll:numlmbs", num_lmbs)
-    .add_option_int("-ll:lmbsize", lmbsize_in_kb)
+    .add_option_int_units("-ll:lmbsize", lmb_size, 'k')
     .add_option_int("-ll:forcelong", force_long_messages)
-    .add_option_int("-ll:sdpsize", sdpsize_in_mb)
+    .add_option_int_units("-ll:sdpsize", srcdatapool_size, 'm')
     .add_option_int("-ll:maxsend", max_msgs_to_send)
-    .add_option_int("-ll:spillwarn", spillwarn_in_mb)
-    .add_option_int("-ll:spillstep", spillstep_in_mb)
-    .add_option_int("-ll:spillstall", spillstep_in_mb);
+    .add_option_int_units("-ll:spillwarn", SrcDataPool::print_spill_threshold, 'm')
+    .add_option_int_units("-ll:spillstep", SrcDataPool::print_spill_step, 'm')
+    .add_option_int_units("-ll:spillstall", SrcDataPool::max_spill_bytes, 'm');
 
   bool ok = cp.parse_command_line(cmdline);
   assert(ok);
-
-  size_t srcdatapool_size = sdpsize_in_mb << 20;
-  if(lmbsize_in_kb) lmb_size = lmbsize_in_kb << 10;
-  if(spillwarn_in_mb)
-    SrcDataPool::print_spill_threshold = spillwarn_in_mb << 20;
-  if(spillstep_in_mb)
-    SrcDataPool::print_spill_step = spillstep_in_mb << 20;
-  if(spillstall_in_mb)
-    SrcDataPool::max_spill_bytes = spillstall_in_mb << 20;
 
   size_t total_lmb_size = (gasnet_nodes() * 
 			   num_lmbs *
 			   lmb_size);
 
   // add in our internal handlers and space we need for LMBs
-  size_t attach_size = ((((size_t)gasnet_mem_size_in_mb) << 20) +
-			(((size_t)registered_mem_size_in_mb) << 20) +
-			(((size_t)registered_ib_mem_size_in_mb) << 20) +
+  size_t attach_size = (gasnet_mem_size +
+			registered_mem_size +
+			registered_ib_mem_size +
 			srcdatapool_size +
 			total_lmb_size);
 
   if(gasnet_mynode() == 0) {
-    log_amsg.info("Pinned Memory Usage: GASNET=%d, RMEM=%d, IBRMEM=%d, LMB=%zd, SDP=%zd, total=%zd\n",
-		  gasnet_mem_size_in_mb, registered_mem_size_in_mb, registered_ib_mem_size_in_mb,
-		  total_lmb_size >> 20, srcdatapool_size >> 20,
+    log_amsg.info("Pinned Memory Usage: GASNET=%d MB, RMEM=%d MB, IBRMEM=%d MB, LMB=%zd MB, SDP=%zd MB, total=%zd MB\n",
+		  gasnet_mem_size >> 20,
+		  registered_mem_size >> 20,
+		  registered_ib_mem_size >> 20,
+		  total_lmb_size >> 20,
+		  srcdatapool_size >> 20,
 		  attach_size >> 20);
 #ifdef DEBUG_REALM_STARTUP
     Realm::TimeStamp ts("entering gasnet_attach", false);
@@ -2642,9 +2632,9 @@ void init_endpoints(int gasnet_mem_size_in_mb,
   CHECK_GASNET( gasnet_getSegmentInfo(segment_info, gasnet_nodes()) );
 
   char *my_segment = (char *)(segment_info[gasnet_mynode()].addr);
-  /*char *gasnet_mem_base = my_segment;*/  my_segment += (gasnet_mem_size_in_mb << 20);
-  /*char *reg_mem_base = my_segment;*/  my_segment += (registered_mem_size_in_mb << 20);
-  /*char *reg_ib_mem_base = my_segment;*/ my_segment += (registered_ib_mem_size_in_mb << 20);
+  /*char *gasnet_mem_base = my_segment;*/  my_segment += gasnet_mem_size;
+  /*char *reg_mem_base = my_segment;*/  my_segment += registered_mem_size;
+  /*char *reg_ib_mem_base = my_segment;*/ my_segment += registered_ib_mem_size;
   char *srcdatapool_base = my_segment;  my_segment += srcdatapool_size;
   /*char *lmb_base = my_segment;*/  my_segment += total_lmb_size;
   assert(my_segment <= ((char *)(segment_info[gasnet_mynode()].addr) + segment_info[gasnet_mynode()].size)); 
@@ -2976,9 +2966,9 @@ void handle_long_msgptr(NodeID source, const void *ptr)
   assert(0 && "compiled without USE_GASNET - active messages not available!");
 }
 
-void init_endpoints(int gasnet_mem_size_in_mb,
-		    int registered_mem_size_in_mb,
-		    int registered_ib_mem_size_in_mb,
+void init_endpoints(int gasnet_mem_size,
+		    int registered_mem_size,
+		    int registered_ib_mem_size,
 		    Realm::CoreReservationSet& crs,
 		    std::vector<std::string>& cmdline)
 {

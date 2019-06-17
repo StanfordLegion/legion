@@ -113,7 +113,7 @@ legion_hdf_cxx_tests = [
 if platform.system() != 'Darwin':
     legion_hdf_cxx_tests += [
         # FIXME: Fails non-deterministically on Mac OS: https://github.com/StanfordLegion/legion/issues/213
-        ['examples/attach_file/attach_file', []],
+        ['examples/attach_file/attach_file', ['-h', 'data.h5', '-d', '/path/to/data']],
     ]
 
 def get_legion_cxx_perf_tests(nodes, cores_per_node):

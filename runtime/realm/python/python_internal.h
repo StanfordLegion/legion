@@ -133,7 +133,9 @@ namespace Realm {
     virtual void spawn_task(Processor::TaskFuncID func_id,
 			    const void *args, size_t arglen,
 			    const ProfilingRequestSet &reqs,
-			    Event start_event, Event finish_event,
+			    Event start_event,
+			    GenEventImpl *finish_event,
+			    EventImpl::gen_t finish_gen,
 			    int priority);
     
     virtual void execute_task(Processor::TaskFuncID func_id,

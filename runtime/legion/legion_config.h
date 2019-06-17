@@ -21,8 +21,10 @@
 #include "legion/legion_defines.h"
 #endif
 
+#ifndef LEGION_USE_PYTHON_CFFI
 // for UINT_MAX, INT_MAX, INT_MIN
 #include <limits.h>
+#endif // LEGION_USE_PYTHON_CFFI
 
 /**
  * \file legion_config.h

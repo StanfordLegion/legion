@@ -44,7 +44,7 @@ namespace Realm {
 
       virtual ~DeferredLockRequest(void) { }
 
-      virtual void event_triggered(Event e, bool poisoned)
+      virtual void event_triggered(bool poisoned)
       {
 	// if input event is poisoned, do not attempt to take the lock - simply poison
 	//  the output event too
@@ -89,7 +89,7 @@ namespace Realm {
 
       virtual ~DeferredUnlockRequest(void) { }
 
-      virtual void event_triggered(Event e, bool poisoned)
+      virtual void event_triggered(bool poisoned)
       {
 	// if input event is poisoned, do not attempt to release the lock
 	// we don't have an output event here, so this may result in a hang if nobody is
@@ -129,7 +129,7 @@ namespace Realm {
 
       virtual ~DeferredLockDestruction(void) { }
 
-      virtual void event_triggered(Event e, bool poisoned)
+      virtual void event_triggered(bool poisoned)
       {
 	// if input event is poisoned, do not attempt to destroy the lock
 	// we don't have an output event here, so this may result in a leak if nobody is

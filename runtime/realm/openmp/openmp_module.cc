@@ -162,7 +162,7 @@ namespace Realm {
       , cfg_num_threads_per_cpu(1)
       , cfg_use_numa(true)
       , cfg_fake_cpukind(false)
-      , cfg_stack_size_in_mb(2)
+      , cfg_stack_size(2 << 20)
     {
     }
       
@@ -183,7 +183,7 @@ namespace Realm {
 	cp.add_option_int("-ll:ocpu", m->cfg_num_openmp_cpus)
 	  .add_option_int("-ll:othr", m->cfg_num_threads_per_cpu)
 	  .add_option_int("-ll:onuma", m->cfg_use_numa)
-	  .add_option_int("-ll:ostack", m->cfg_stack_size_in_mb)
+	  .add_option_int_units("-ll:ostack", m->cfg_stack_size, 'm')
 	  .add_option_bool("-ll:okindhack", m->cfg_fake_cpukind);
 	
 	bool ok = cp.parse_command_line(cmdline);
@@ -260,7 +260,7 @@ namespace Realm {
                                                      cfg_num_threads_per_cpu,
                                                      cfg_fake_cpukind,
                                                      runtime->core_reservation_set(),
-                                                     cfg_stack_size_in_mb << 20,
+                                                     cfg_stack_size,
                                                      Config::force_kernel_threads);
         runtime->add_processor(pi);
 

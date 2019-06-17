@@ -70,7 +70,7 @@ namespace Realm {
     ByFieldOperation(const IndexSpace<N,T>& _parent,
 		     const std::vector<FieldDataDescriptor<IndexSpace<N,T>,FT> >& _field_data,
 		     const ProfilingRequestSet &reqs,
-		     Event _finish_event);
+		     GenEventImpl *_finish_event, EventImpl::gen_t _finish_gen);
 
     virtual ~ByFieldOperation(void);
 

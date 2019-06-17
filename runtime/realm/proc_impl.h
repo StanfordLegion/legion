@@ -54,7 +54,9 @@ namespace Realm {
       virtual void spawn_task(Processor::TaskFuncID func_id,
 			      const void *args, size_t arglen,
                               const ProfilingRequestSet &reqs,
-			      Event start_event, Event finish_event,
+			      Event start_event,
+			      GenEventImpl *finish_event,
+			      EventImpl::gen_t finish_gen,
                               int priority) = 0;
 
       // starts worker threads and performs any per-processor initialization
@@ -93,7 +95,9 @@ namespace Realm {
       virtual void spawn_task(Processor::TaskFuncID func_id,
 			      const void *args, size_t arglen,
                               const ProfilingRequestSet &reqs,
-			      Event start_event, Event finish_event,
+			      Event start_event,
+			      GenEventImpl *finish_event,
+			      EventImpl::gen_t finish_gen,
                               int priority);
 
       virtual void register_task(Processor::TaskFuncID func_id,
@@ -177,7 +181,9 @@ namespace Realm {
       virtual void spawn_task(Processor::TaskFuncID func_id,
 			      const void *args, size_t arglen,
                               const ProfilingRequestSet &reqs,
-			      Event start_event, Event finish_event,
+			      Event start_event,
+			      GenEventImpl *finish_event,
+			      EventImpl::gen_t finish_gen,
                               int priority);
     };
 
@@ -202,7 +208,9 @@ namespace Realm {
       virtual void spawn_task(Processor::TaskFuncID func_id,
 			      const void *args, size_t arglen,
                               const ProfilingRequestSet &reqs,
-			      Event start_event, Event finish_event,
+			      Event start_event,
+			      GenEventImpl *finish_event,
+			      EventImpl::gen_t finish_gen,
                               int priority);
 
     public: //protected:
@@ -224,7 +232,9 @@ namespace Realm {
     public:
       TaskRegistration(const CodeDescriptor& _codedesc,
 		       const ByteArrayRef& _userdata,
-		       Event _finish_event, const ProfilingRequestSet &_requests);
+		       GenEventImpl *_finish_event,
+		       EventImpl::gen_t _finish_gen,
+		       const ProfilingRequestSet &_requests);
 
     protected:
       // deletion performed when reference count goes to zero

@@ -208,8 +208,10 @@ namespace Realm {
 
       // general case - create op if needed
       if(!op) {
-	e = GenEventImpl::create_genevent()->current_event();
-	op = new UnionOperation<N,T>(reqs, e);
+	GenEventImpl *finish_event = GenEventImpl::create_genevent();
+	e = finish_event->current_event();
+	op = new UnionOperation<N,T>(reqs,
+				     finish_event, ID(e).event_generation());
       }
       results[i] = op->add_union(l, r);
     }
@@ -277,8 +279,11 @@ namespace Realm {
 
       // general case - create op if needed
       if(!op) {
-	e = GenEventImpl::create_genevent()->current_event();
-	op = new IntersectionOperation<N,T>(reqs, e);
+	GenEventImpl *finish_event = GenEventImpl::create_genevent();
+	e = finish_event->current_event();
+	op = new IntersectionOperation<N,T>(reqs,
+					    finish_event,
+					    ID(e).event_generation());
       }
       results[i] = op->add_intersection(lhss[li], rhss[ri]);
     }
@@ -359,8 +364,11 @@ namespace Realm {
 
       // general case - create op if needed
       if(!op) {
-	e = GenEventImpl::create_genevent()->current_event();
-	op = new DifferenceOperation<N,T>(reqs, e);
+	GenEventImpl *finish_event = GenEventImpl::create_genevent();
+	e = finish_event->current_event();
+	op = new DifferenceOperation<N,T>(reqs,
+					  finish_event,
+					  ID(e).event_generation());
       }
       results[i] = op->add_difference(lhss[li], rhss[ri]);
     }
@@ -416,8 +424,11 @@ namespace Realm {
 	}
 
 	// general case - do full computation
-	e = GenEventImpl::create_genevent()->current_event();
-	UnionOperation<N,T> *op = new UnionOperation<N,T>(reqs, e);
+	GenEventImpl *finish_event = GenEventImpl::create_genevent();
+	e = finish_event->current_event();
+	UnionOperation<N,T> *op = new UnionOperation<N,T>(reqs,
+							  finish_event,
+							  ID(e).event_generation());
 
 	result = op->add_union(subspaces);
 	op->launch(wait_on);
@@ -496,8 +507,11 @@ namespace Realm {
 	}
 
 	// general case - do full computation
-	e = GenEventImpl::create_genevent()->current_event();
-	IntersectionOperation<N,T> *op = new IntersectionOperation<N,T>(reqs, e);
+	GenEventImpl *finish_event = GenEventImpl::create_genevent();
+	e = finish_event->current_event();
+	IntersectionOperation<N,T> *op = new IntersectionOperation<N,T>(reqs,
+									finish_event,
+									ID(e).event_generation());
 
 	result = op->add_intersection(subspaces);
 	op->launch(wait_on);
@@ -1500,8 +1514,9 @@ namespace Realm {
 
   template <int N, typename T>
   UnionOperation<N,T>::UnionOperation(const ProfilingRequestSet& reqs,
-				      Event _finish_event)
-    : PartitioningOperation(reqs, _finish_event)
+				      GenEventImpl *_finish_event,
+				      EventImpl::gen_t _finish_gen)
+    : PartitioningOperation(reqs, _finish_event, _finish_gen)
   {}
 
   template <int N, typename T>
@@ -1611,8 +1626,9 @@ namespace Realm {
 
   template <int N, typename T>
   IntersectionOperation<N,T>::IntersectionOperation(const ProfilingRequestSet& reqs,
-						    Event _finish_event)
-    : PartitioningOperation(reqs, _finish_event)
+						    GenEventImpl *_finish_event,
+						    EventImpl::gen_t _finish_gen)
+    : PartitioningOperation(reqs, _finish_event, _finish_gen)
   {}
 
   template <int N, typename T>
@@ -1730,8 +1746,9 @@ namespace Realm {
 
   template <int N, typename T>
   DifferenceOperation<N,T>::DifferenceOperation(const ProfilingRequestSet& reqs,
-				      Event _finish_event)
-    : PartitioningOperation(reqs, _finish_event)
+						GenEventImpl *_finish_event,
+						EventImpl::gen_t _finish_gen)
+    : PartitioningOperation(reqs, _finish_event, _finish_gen)
   {}
 
   template <int N, typename T>

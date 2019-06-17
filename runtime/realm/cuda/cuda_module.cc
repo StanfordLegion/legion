@@ -2395,7 +2395,25 @@ namespace Realm {
       {
 	AutoGPUContext agc(this);
 
-	CHECK_CU( cuMemAlloc(&fbmem_base, size) );
+	CUresult ret = cuMemAlloc(&fbmem_base, size);
+	if(ret != CUDA_SUCCESS) {
+	  if(ret == CUDA_ERROR_OUT_OF_MEMORY) {
+	    size_t free_bytes, total_bytes;
+	    CHECK_CU( cuMemGetInfo(&free_bytes, &total_bytes) );
+	    log_gpu.fatal() << "insufficient memory on gpu " << info->index
+			    << ": " << size << " bytes needed (from -ll:fsize), "
+			    << free_bytes << " (out of " << total_bytes << " available)";
+	  } else {
+	    const char *errstring = "error message not available";
+#if CUDA_VERSION >= 6050
+	    cuGetErrorName(ret, &errstring);
+#endif
+	    log_gpu.fatal() << "unexpected error from cuMemAlloc on gpu " << info->index
+			    << ": result=" << ret
+			    << " (" << errstring << ")";
+	  }
+	  abort();
+	}
       }
 
       Memory m = runtime->next_local_memory_id();
@@ -2567,9 +2585,9 @@ namespace Realm {
 
     CudaModule::CudaModule(void)
       : Module("cuda")
-      , cfg_zc_mem_size_in_mb(64)
-      , cfg_zc_ib_size_in_mb(256)
-      , cfg_fb_mem_size_in_mb(256)
+      , cfg_zc_mem_size(64 << 20)
+      , cfg_zc_ib_size(256 << 20)
+      , cfg_fb_mem_size(256 << 20)
       , cfg_num_gpus(0)
       , cfg_gpu_streams(12)
       , cfg_use_background_workers(true)
@@ -2657,9 +2675,9 @@ namespace Realm {
       {
 	CommandLineParser cp;
 
-	cp.add_option_int("-ll:fsize", m->cfg_fb_mem_size_in_mb)
-	  .add_option_int("-ll:zsize", m->cfg_zc_mem_size_in_mb)
-	  .add_option_int("-ll:ib_zsize", m->cfg_zc_ib_size_in_mb)
+	cp.add_option_int_units("-ll:fsize", m->cfg_fb_mem_size, 'm')
+	  .add_option_int_units("-ll:zsize", m->cfg_zc_mem_size, 'm')
+	  .add_option_int_units("-ll:ib_zsize", m->cfg_zc_ib_size, 'm')
 	  .add_option_int("-ll:gpu", m->cfg_num_gpus)
 	  .add_option_int("-ll:streams", m->cfg_gpu_streams)
 	  .add_option_int("-ll:gpuworker", m->cfg_use_shared_worker)
@@ -2729,22 +2747,36 @@ namespace Realm {
       Module::create_memories(runtime);
 
       // each GPU needs its FB memory
-      if(cfg_fb_mem_size_in_mb > 0)
+      if(cfg_fb_mem_size > 0)
 	for(std::vector<GPU *>::iterator it = gpus.begin();
 	    it != gpus.end();
 	    it++)
-	  (*it)->create_fb_memory(runtime, cfg_fb_mem_size_in_mb << 20);
+	  (*it)->create_fb_memory(runtime, cfg_fb_mem_size);
 
       // a single ZC memory for everybody
-      if((cfg_zc_mem_size_in_mb > 0) && !gpus.empty()) {
+      if((cfg_zc_mem_size > 0) && !gpus.empty()) {
 	CUdeviceptr zcmem_gpu_base;
 	// borrow GPU 0's context for the allocation call
 	{
 	  AutoGPUContext agc(gpus[0]);
 
-	  CHECK_CU( cuMemHostAlloc(&zcmem_cpu_base, 
-				   cfg_zc_mem_size_in_mb << 20,
-				   CU_MEMHOSTALLOC_PORTABLE | CU_MEMHOSTALLOC_DEVICEMAP) );
+	  CUresult ret = cuMemHostAlloc(&zcmem_cpu_base, 
+					cfg_zc_mem_size,
+					CU_MEMHOSTALLOC_PORTABLE | CU_MEMHOSTALLOC_DEVICEMAP);
+	  if(ret != CUDA_SUCCESS) {
+	    if(ret == CUDA_ERROR_OUT_OF_MEMORY) {
+	      log_gpu.fatal() << "insufficient device-mappable host memory: "
+			      << cfg_zc_mem_size << " bytes needed (from -ll:zsize)";
+	    } else {
+	      const char *errstring = "error message not available";
+#if CUDA_VERSION >= 6050
+	      cuGetErrorName(ret, &errstring);
+#endif
+	      log_gpu.fatal() << "unexpected error from cuMemHostAlloc: result=" << ret
+			      << " (" << errstring << ")";
+	    }
+	    abort();
+	  }
 	  CHECK_CU( cuMemHostGetDevicePointer(&zcmem_gpu_base,
 					      zcmem_cpu_base,
 					      0) );
@@ -2755,7 +2787,7 @@ namespace Realm {
 
 	Memory m = runtime->next_local_memory_id();
 	zcmem = new GPUZCMemory(m, zcmem_gpu_base, zcmem_cpu_base, 
-				cfg_zc_mem_size_in_mb << 20);
+				cfg_zc_mem_size);
 	runtime->add_memory(zcmem);
 
 	// add the ZC memory as a pinned memory to all GPUs
@@ -2775,12 +2807,12 @@ namespace Realm {
       }
 
       // allocate intermediate buffers in ZC memory for DMA engine
-      if ((cfg_zc_ib_size_in_mb > 0) && !gpus.empty()) {
+      if ((cfg_zc_ib_size > 0) && !gpus.empty()) {
         CUdeviceptr zcib_gpu_base;
         {
           AutoGPUContext agc(gpus[0]);
           CHECK_CU( cuMemHostAlloc(&zcib_cpu_base,
-                                   cfg_zc_ib_size_in_mb << 20,
+                                   cfg_zc_ib_size,
                                    CU_MEMHOSTALLOC_PORTABLE | CU_MEMHOSTALLOC_DEVICEMAP) );
           CHECK_CU( cuMemHostGetDevicePointer(&zcib_gpu_base,
                                               zcib_cpu_base, 0) );
@@ -2791,7 +2823,7 @@ namespace Realm {
         Memory m = runtime->next_local_ib_memory_id();
         GPUZCMemory* ib_mem;
         ib_mem = new GPUZCMemory(m, zcib_gpu_base, zcib_cpu_base,
-                                 cfg_zc_ib_size_in_mb << 20);
+                                 cfg_zc_ib_size);
         runtime->add_ib_memory(ib_mem);
         // add the ZC memory as a pinned memory to all GPUs
         for (unsigned i = 0; i < gpus.size(); i++) {

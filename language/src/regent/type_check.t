@@ -1760,6 +1760,7 @@ function type_check.expr_partition_by_restriction(cx, node)
 end
 
 function type_check.expr_image(cx, node)
+  local disjointness = node.disjointness or std.aliased
   local parent = type_check.expr(cx, node.parent)
   local parent_type = std.check_read(cx, parent)
   local partition = type_check.expr(cx, node.partition)
@@ -1830,7 +1831,7 @@ function type_check.expr_image(cx, node)
   else
     parent_symbol = std.newsymbol()
   end
-  local expr_type = std.partition(std.aliased, parent_symbol, partition_type.colors_symbol)
+  local expr_type = std.partition(disjointness, parent_symbol, partition_type.colors_symbol)
 
   -- Hack: Stuff the region type back into the partition's region
   -- argument, if necessary.
@@ -1868,6 +1869,7 @@ function type_check.expr_image(cx, node)
   end
 
   return ast.typed.expr.Image {
+    disjointness = node.disjointness,
     parent = parent,
     partition = partition,
     region = region,
@@ -2761,6 +2763,8 @@ function type_check.expr_attach_hdf5(cx, node)
   local filename_type = std.check_read(cx, filename)
   local mode = type_check.expr(cx, node.mode)
   local mode_type = std.check_read(cx, mode)
+  local field_map = node.field_map and type_check.expr(cx, node.field_map)
+  local field_map_type = field_map and std.check_read(cx, field_map)
   local expr_type = terralib.types.unit
 
   if not std.is_region(region_type) then
@@ -2777,6 +2781,11 @@ function type_check.expr_attach_hdf5(cx, node)
     report.error(node, "type mismatch in argument 3: expected " .. tostring(std.c.legion_file_mode_t) .. " but got " .. tostring(mode_type))
   end
   mode = insert_implicit_cast(mode, mode_type, std.c.legion_file_mode_t)
+
+  if field_map and not std.validate_implicit_cast(field_map_type, &rawstring) then
+    report.error(node, "type mismatch in argument 2: expected " .. tostring(&rawstring) .. " but got " .. tostring(field_map_type))
+  end
+  field_map = field_map and insert_implicit_cast(field_map, field_map_type, &rawstring)
 
   for _, field_path in ipairs(region.fields) do
     if not std.check_privilege(cx, std.reads, region_type, field_path) then
@@ -2807,6 +2816,7 @@ function type_check.expr_attach_hdf5(cx, node)
     region = region,
     filename = filename,
     mode = mode,
+    field_map = field_map,
     expr_type = expr_type,
     annotations = node.annotations,
     span = node.span,

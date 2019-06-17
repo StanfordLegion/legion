@@ -1452,6 +1452,11 @@ namespace Legion {
       rez.serialize(req.flags);
       rez.serialize(req.handle_type);
       rez.serialize(req.projection);
+      size_t projection_size = 0;
+      const void *projection_args = req.get_projection_args(&projection_size);
+      rez.serialize(projection_size);
+      if (projection_size > 0)
+        rez.serialize(projection_args, projection_size);
     }
 
     //--------------------------------------------------------------------------
@@ -1512,6 +1517,14 @@ namespace Legion {
       derez.deserialize(req.handle_type);
       derez.deserialize(req.projection);
       req.flags |= VERIFIED_FLAG;
+      size_t projection_size;
+      derez.deserialize(projection_size);
+      if (projection_size > 0)
+      {
+        void *projection_ptr = malloc(projection_size);
+        derez.deserialize(projection_ptr, projection_size);
+        req.set_projection_args(projection_ptr, projection_size, true/*own*/);
+      }
     }
 
     //--------------------------------------------------------------------------

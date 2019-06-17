@@ -43,7 +43,7 @@ namespace Realm {
       class DeferredDestroy : public EventWaiter {
       public:
 	void defer(RegionInstanceImpl *_inst, MemoryImpl *_mem, Event wait_on);
-	virtual void event_triggered(Event e, bool poisoned);
+	virtual void event_triggered(bool poisoned);
 	virtual void print(std::ostream& os) const;
 	virtual Event get_finish_event(void) const;
 

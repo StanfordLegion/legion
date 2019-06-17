@@ -131,17 +131,19 @@ namespace Realm {
   // class DmaRequest
   //
 
-    DmaRequest::DmaRequest(int _priority, Event _after_copy) 
-      : Operation(_after_copy, ProfilingRequestSet()),
+    DmaRequest::DmaRequest(int _priority,
+			   GenEventImpl *_after_copy, EventImpl::gen_t _after_gen)
+      : Operation(_after_copy, _after_gen, ProfilingRequestSet()),
 	state(STATE_INIT), priority(_priority)
     {
       tgt_fetch_completion = Event::NO_EVENT;
       pthread_mutex_init(&request_lock, NULL);
     }
 
-    DmaRequest::DmaRequest(int _priority, Event _after_copy,
+    DmaRequest::DmaRequest(int _priority,
+			   GenEventImpl *_after_copy, EventImpl::gen_t _after_gen,
 			   const ProfilingRequestSet &reqs)
-      : Operation(_after_copy, reqs), state(STATE_INIT),
+      : Operation(_after_copy, _after_gen, reqs), state(STATE_INIT),
 	priority(_priority)
     {
       tgt_fetch_completion = Event::NO_EVENT;
@@ -365,9 +367,9 @@ namespace Realm {
 
     CopyRequest::CopyRequest(const void *data, size_t datalen,
 			     Event _before_copy,
-			     Event _after_copy,
+			     GenEventImpl *_after_copy, EventImpl::gen_t _after_gen,
 			     int _priority)
-      : DmaRequest(_priority, _after_copy),
+      : DmaRequest(_priority, _after_copy, _after_gen),
 	oas_by_inst(0),
 	before_copy(_before_copy)
     {
@@ -421,10 +423,10 @@ namespace Realm {
     CopyRequest::CopyRequest(const TransferDomain *_domain, //const Domain& _domain,
 			     OASByInst *_oas_by_inst,
 			     Event _before_copy,
-			     Event _after_copy,
+			     GenEventImpl *_after_copy, EventImpl::gen_t _after_gen,
 			     int _priority,
                              const ProfilingRequestSet &reqs)
-      : DmaRequest(_priority, _after_copy, reqs)
+      : DmaRequest(_priority, _after_copy, _after_gen, reqs)
       , domain(_domain->clone())
       , oas_by_inst(_oas_by_inst)
       , before_copy(_before_copy)
@@ -466,13 +468,13 @@ namespace Realm {
       amsg->redop_id = 0;
       amsg->red_fold = false;
       amsg->before_copy = before_copy;
-      amsg->after_copy = finish_event;
+      amsg->after_copy = get_finish_event();
       amsg->priority = priority;
       amsg << *domain;
       amsg << *oas_by_inst;
       amsg << requests;
       amsg.commit();
-      log_dma.debug() << "forwarding copy: target=" << target_node << " finish=" << finish_event;
+      log_dma.debug() << "forwarding copy: target=" << target_node << " finish=" << get_finish_event();
       clear_profiling();
     }
 
@@ -480,14 +482,15 @@ namespace Realm {
 					    Reservation l /*= Reservation::NO_RESERVATION*/)
     {
       current_lock = l;
+      wait_on = e;
       EventImpl::add_waiter(e, this);
     }
 
-    void DmaRequest::Waiter::event_triggered(Event e, bool poisoned)
+    void DmaRequest::Waiter::event_triggered(bool poisoned)
     {
       if(poisoned) {
 	log_poison.info() << "cancelling poisoned dma operation - op=" << req << " after=" << req->get_finish_event();
-	req->handle_poisoned_precondition(e);
+	req->handle_poisoned_precondition(wait_on);
 	return;
       }
 
@@ -1860,9 +1863,9 @@ namespace Realm {
 				 ReductionOpID _redop_id,
 				 bool _red_fold,
 				 Event _before_copy,
-				 Event _after_copy,
+				 GenEventImpl *_after_copy, EventImpl::gen_t _after_gen,
 				 int _priority)
-      : DmaRequest(_priority, _after_copy),
+      : DmaRequest(_priority, _after_copy, _after_gen),
 	inst_lock_event(Event::NO_EVENT),
 	redop_id(_redop_id), red_fold(_red_fold),
 	before_copy(_before_copy)
@@ -1895,10 +1898,10 @@ namespace Realm {
 				 ReductionOpID _redop_id,
 				 bool _red_fold,
 				 Event _before_copy,
-				 Event _after_copy,
+				 GenEventImpl *_after_copy, EventImpl::gen_t _after_gen,
 				 int _priority, 
                                  const ProfilingRequestSet &reqs)
-      : DmaRequest(_priority, _after_copy, reqs),
+      : DmaRequest(_priority, _after_copy, _after_gen, reqs),
 	domain(_domain->clone()),
 	dst(_dst), 
 	inst_lock_needed(_inst_lock_needed), inst_lock_event(Event::NO_EVENT),
@@ -1928,7 +1931,7 @@ namespace Realm {
       amsg->redop_id = redop_id;
       amsg->red_fold = red_fold;
       amsg->before_copy = before_copy;
-      amsg->after_copy = finish_event;
+      amsg->after_copy = get_finish_event();
       amsg->priority = priority;
       amsg << *domain;
       amsg << srcs;
@@ -1936,7 +1939,7 @@ namespace Realm {
       amsg << inst_lock_needed;
       amsg << requests;
       amsg.commit();
-      log_dma.debug() << "forwarding copy: target=" << target_node << " finish=" << finish_event;
+      log_dma.debug() << "forwarding copy: target=" << target_node << " finish=" << get_finish_event();
       clear_profiling();
     }
 
@@ -2243,9 +2246,11 @@ namespace Realm {
     FillRequest::FillRequest(const void *data, size_t datalen,
                              RegionInstance inst,
                              FieldID field_id, unsigned size,
-                             Event _before_fill, Event _after_fill,
+                             Event _before_fill,
+			     GenEventImpl *_after_fill, EventImpl::gen_t _after_gen,
                              int _priority)
-      : DmaRequest(_priority, _after_fill), before_fill(_before_fill)
+      : DmaRequest(_priority, _after_fill, _after_gen)
+      , before_fill(_before_fill)
     {
       dst.inst = inst;
       dst.field_id = field_id;
@@ -2275,9 +2280,11 @@ namespace Realm {
     FillRequest::FillRequest(const TransferDomain *_domain, //const Domain &d, 
                              const CopySrcDstField &_dst,
                              const void *_fill_value, size_t _fill_size,
-                             Event _before_fill, Event _after_fill, int _priority,
+                             Event _before_fill,
+			     GenEventImpl *_after_fill, EventImpl::gen_t _after_gen,
+			     int _priority,
                              const ProfilingRequestSet &reqs)
-      : DmaRequest(_priority, _after_fill, reqs)
+      : DmaRequest(_priority, _after_fill, _after_gen, reqs)
       , domain(_domain->clone())
       , dst(_dst)
       , before_fill(_before_fill)
@@ -2290,7 +2297,7 @@ namespace Realm {
 
       log_dma.info() << "dma request " << (void *)this << " created - is="
 		     << *domain << " fill dst=" << dst.inst << "[" << dst.field_id << "+" << dst.subfield_offset << "] size="
-		     << fill_size << " before=" << _before_fill << " after=" << _after_fill;
+		     << fill_size << " before=" << _before_fill << " after=" << get_finish_event();
       {
 	LoggerMessage msg(log_dma.debug());
 	if(msg.is_active()) {
@@ -2319,12 +2326,12 @@ namespace Realm {
       assert(dst.subfield_offset == 0);
       amsg->size = fill_size;
       amsg->before_fill = before_fill;
-      amsg->after_fill = finish_event;
+      amsg->after_fill = get_finish_event();
       amsg << *domain;
       amsg << ba;
       amsg << requests;
       amsg.commit();
-      log_dma.debug() << "forwarding fill: target=" << target_node << " finish=" << finish_event;
+      log_dma.debug() << "forwarding fill: target=" << target_node << " finish=" << get_finish_event();
       clear_profiling();
     }
 
@@ -2767,12 +2774,15 @@ namespace Realm {
     {
       DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
 
+      GenEventImpl *after_copy = get_runtime()->get_genevent_impl(args.after_copy);
+      
       // is this a copy or a reduction (they deserialize differently)
       if(args.redop_id == 0) {
 	// a copy
 	CopyRequest *r = new CopyRequest(data, msglen,
 					 args.before_copy,
-					 args.after_copy,
+					 after_copy,
+					 ID(args.after_copy).event_generation(),
 					 args.priority);
 	get_runtime()->optable.add_local_operation(args.after_copy, r);
 
@@ -2783,7 +2793,8 @@ namespace Realm {
 					     args.redop_id,
 					     args.red_fold,
 					     args.before_copy,
-					     args.after_copy,
+					     after_copy,
+					     ID(args.after_copy).event_generation(),
 					     args.priority);
 	get_runtime()->optable.add_local_operation(args.after_copy, r);
 
@@ -2794,12 +2805,14 @@ namespace Realm {
   /*static*/ void RemoteFillMessage::handle_message(NodeID sender, const RemoteFillMessage &args,
 						    const void *data, size_t msglen)
     {
+      GenEventImpl *after_fill = get_runtime()->get_genevent_impl(args.after_fill);
       FillRequest *r = new FillRequest(data, msglen,
                                        args.inst,
                                        args.field_id,
                                        args.size,
                                        args.before_fill,
-                                       args.after_fill,
+                                       after_fill,
+				       ID(args.after_fill).event_generation(),
                                        0 /* no room for args.priority */);
       get_runtime()->optable.add_local_operation(args.after_fill, r);
 

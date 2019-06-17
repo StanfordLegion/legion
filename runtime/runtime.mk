@@ -458,6 +458,12 @@ else
 CC_FLAGS	+= -O2 -fno-strict-aliasing #-ggdb
 endif
 
+# DEBUG_TSAN=1 enables thread sanitizer (data race) checks
+ifeq ($(strip $(DEBUG_TSAN)),1)
+CC_FLAGS        += -fsanitize=thread -g -DTSAN_ENABLED
+LD_FLAGS        += -fsanitize=thread
+endif
+
 # Set maximum number of dimensions
 ifneq ($(strip ${MAX_DIM}),)
 CC_FLAGS	+= -DREALM_MAX_DIM=$(MAX_DIM) -DLEGION_MAX_DIM=$(MAX_DIM)

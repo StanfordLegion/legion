@@ -85,12 +85,12 @@ namespace Realm {
     ImageOperation(const IndexSpace<N,T>& _parent,
 		   const std::vector<FieldDataDescriptor<IndexSpace<N2,T2>,Point<N,T> > >& _field_data,
 		   const ProfilingRequestSet &reqs,
-		   Event _finish_event);
+		   GenEventImpl *_finish_event, EventImpl::gen_t _finish_gen);
 
     ImageOperation(const IndexSpace<N,T>& _parent,
 		   const std::vector<FieldDataDescriptor<IndexSpace<N2,T2>,Rect<N,T> > >& _field_data,
 		   const ProfilingRequestSet &reqs,
-		   Event _finish_event);
+		   GenEventImpl *_finish_event, EventImpl::gen_t _finish_gen);
 
     virtual ~ImageOperation(void);
 

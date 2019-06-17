@@ -189,6 +189,38 @@ namespace Realm {
 
   ////////////////////////////////////////////////////////////////////////
   //
+  // class IntegerUnitsCommandLineOption<T>
+
+  bool convert_integer_units_cmdline_argument(const char *s,
+					      char default_unit,
+					      bool binary,
+					      double &value)
+  {
+    errno = 0;  // no errors from before
+    char *pos;
+    // parse as floating point to allow things like 3.5g
+    value = strtod(s, &pos);
+    if(errno != 0) return false;
+    char unit = tolower(*pos ? *pos++ : default_unit);
+    switch(unit) {
+    case 'k': value *= (binary ? 1024 : 1000); break;
+    case 'm': value *= (binary ? 1048576 : 1000000); break;
+    case 'g': value *= (binary ? 1073741824 : 1000000000); break;
+    case 't': value *= (binary ? 1099511627776LL : 1000000000000LL); break;
+    case 0:
+    case 'b': break;
+    default: return false;
+    }
+    // allow a trailing 'b' so that things like 'kb' work
+    if(*pos && ((unit == 'b') || (tolower(*pos) != 'b')))
+      return false;
+    
+    return true;
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
   // class StringCommandLineOption
 
   StringCommandLineOption::StringCommandLineOption(const std::string& _optname,

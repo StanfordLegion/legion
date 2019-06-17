@@ -186,9 +186,9 @@ protected:
   };
 };
 
-extern void init_endpoints(int gasnet_mem_size_in_mb,
-			   int registered_mem_size_in_mb,
-			   int registered_ib_mem_size_in_mb,
+extern void init_endpoints(int gasnet_mem_size,
+			   int registered_mem_size,
+			   int registered_ib_mem_size,
 			   Realm::CoreReservationSet& crs,
 			   std::vector<std::string>& cmdline);
 extern void start_polling_threads(int count);

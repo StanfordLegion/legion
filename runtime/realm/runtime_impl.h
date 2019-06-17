@@ -103,7 +103,8 @@ namespace Realm {
       }
     };
 
-    typedef DynamicTableAllocator<GenEventImpl, 10, 8> EventTableAllocator;
+    // use a wide tree for events - max depth will be 2
+    typedef DynamicTableAllocator<GenEventImpl, 11, 16> EventTableAllocator;
     typedef DynamicTableAllocator<BarrierImpl, 10, 4> BarrierTableAllocator;
     typedef DynamicTableAllocator<ReservationImpl, 10, 8> ReservationTableAllocator;
     typedef DynamicTableAllocator<ProcessorGroup, 10, 4> ProcessorGroupTableAllocator;
@@ -179,7 +180,7 @@ namespace Realm {
     protected:
       int num_cpu_procs, num_util_procs, num_io_procs;
       int concurrent_io_threads;
-      size_t sysmem_size_in_mb, stack_size_in_mb;
+      size_t sysmem_size, stack_size;
       bool pin_util_procs;
     };
 
@@ -286,7 +287,7 @@ namespace Realm {
 	void defer(RuntimeImpl *_runtime, int _result_code,
 		   Event wait_on);
 
-	virtual void event_triggered(Event e, bool poisoned);
+	virtual void event_triggered(bool poisoned);
 	virtual void print(std::ostream& os) const;
 	virtual Event get_finish_event(void) const;
 

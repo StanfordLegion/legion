@@ -459,7 +459,8 @@ end
 function pretty.expr_image(cx, node)
   return join({
       "image(",
-      commas({pretty.expr(cx, node.parent),
+      commas({node.disjointness and tostring(node.disjointness),
+	      pretty.expr(cx, node.parent),
               pretty.expr(cx, node.partition),
               pretty.expr_region_root(cx, node.region)}),
       ")"})
@@ -653,7 +654,8 @@ function pretty.expr_attach_hdf5(cx, node)
       commas({"hdf5",
               pretty.expr_region_root(cx, node.region),
               pretty.expr(cx, node.filename),
-              pretty.expr(cx, node.mode)}),
+              pretty.expr(cx, node.mode),
+              node.field_map and pretty.expr(cx, node.field_map)}),
       ")"})
 end
 
