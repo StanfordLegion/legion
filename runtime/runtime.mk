@@ -199,6 +199,10 @@ endif
 USE_OPENMP ?= 0
 ifeq ($(strip $(USE_OPENMP)),1)
   CC_FLAGS += -DREALM_USE_OPENMP
+  # Add the -fopenmp flag for Linux, but not for Mac as clang doesn't need it
+  ifneq ($(strip $(DARWIN)),1)
+    CC_FLAGS += -fopenmp 
+  endif
   REALM_OPENMP_GOMP_SUPPORT ?= 1
   ifeq ($(strip $(REALM_OPENMP_GOMP_SUPPORT)),1)
     CC_FLAGS += -DREALM_OPENMP_GOMP_SUPPORT
