@@ -40,8 +40,9 @@ namespace Realm {
     // output vector should start out empty
     assert(preimages.empty());
 
-    Event e = GenEventImpl::create_genevent()->current_event();
-    PreimageOperation<N,T,N2,T2> *op = new PreimageOperation<N,T,N2,T2>(*this, field_data, reqs, e);
+    GenEventImpl *finish_event = GenEventImpl::create_genevent();
+    Event e = finish_event->current_event();
+    PreimageOperation<N,T,N2,T2> *op = new PreimageOperation<N,T,N2,T2>(*this, field_data, reqs, finish_event, ID(e).event_generation());
 
     size_t n = targets.size();
     preimages.resize(n);
@@ -65,8 +66,9 @@ namespace Realm {
     // output vector should start out empty
     assert(preimages.empty());
 
-    Event e = GenEventImpl::create_genevent()->current_event();
-    PreimageOperation<N,T,N2,T2> *op = new PreimageOperation<N,T,N2,T2>(*this, field_data, reqs, e);
+    GenEventImpl *finish_event = GenEventImpl::create_genevent();
+    Event e = finish_event->current_event();
+    PreimageOperation<N,T,N2,T2> *op = new PreimageOperation<N,T,N2,T2>(*this, field_data, reqs, finish_event, ID(e).event_generation());
 
     size_t n = targets.size();
     preimages.resize(n);
@@ -289,8 +291,9 @@ namespace Realm {
   PreimageOperation<N,T,N2,T2>::PreimageOperation(const IndexSpace<N,T>& _parent,
 						  const std::vector<FieldDataDescriptor<IndexSpace<N,T>,Point<N2,T2> > >& _field_data,
 						  const ProfilingRequestSet &reqs,
-						  Event _finish_event)
-    : PartitioningOperation(reqs, _finish_event)
+						  GenEventImpl *_finish_event,
+						  EventImpl::gen_t _finish_gen)
+    : PartitioningOperation(reqs, _finish_event, _finish_gen)
     , parent(_parent)
     , ptr_data(_field_data)
     , overlap_tester(0)
@@ -303,8 +306,9 @@ namespace Realm {
   PreimageOperation<N,T,N2,T2>::PreimageOperation(const IndexSpace<N,T>& _parent,
 						  const std::vector<FieldDataDescriptor<IndexSpace<N,T>,Rect<N2,T2> > >& _field_data,
 						  const ProfilingRequestSet &reqs,
-						  Event _finish_event)
-    : PartitioningOperation(reqs, _finish_event)
+						  GenEventImpl *_finish_event,
+						  EventImpl::gen_t _finish_gen)
+    : PartitioningOperation(reqs, _finish_event, _finish_gen)
     , parent(_parent)
     , range_data(_field_data)
     , overlap_tester(0)

@@ -32,6 +32,13 @@ namespace Realm {
   //
   // class EventImpl
 
+  inline Event EventImpl::make_event(gen_t gen) const
+  {
+    ID id(me);
+    id.event_generation() = gen;
+    return id.convert<Event>();
+  }
+
   inline /*static*/ bool EventImpl::add_waiter(Event needed, EventWaiter *waiter)
   {
     return get_event_impl(needed)->add_waiter(ID(needed).event_generation(), waiter);
@@ -46,13 +53,6 @@ namespace Realm {
   {
     ID id(me);
     id.event_generation() = this->generation + 1;
-    return id.convert<Event>();
-  }
-
-  inline Event GenEventImpl::make_event(gen_t gen) const
-  {
-    ID id(me);
-    id.event_generation() = gen;
     return id.convert<Event>();
   }
 

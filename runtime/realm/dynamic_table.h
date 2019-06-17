@@ -18,6 +18,8 @@
 #ifndef REALM_DYNAMIC_TABLE_H
 #define REALM_DYNAMIC_TABLE_H
 
+#include "realm/atomics.h"
+
 namespace Realm {
 
     // we have a base type that's element-type agnostic
@@ -68,9 +70,16 @@ namespace Realm {
 
       // lock protects _changes_ to 'root', but not access to it
       LT lock;
-      NodeBase * volatile root;
+      // encode level of root directly in value - saves an extra memory load
+      //  per level
+      atomic<intptr_t> root_and_level;
+      static intptr_t encode_root_and_level(NodeBase *root, int level);
+      static NodeBase *extract_root(intptr_t rlval);
+      static int extract_level(intptr_t rlval);
+      
       // all nodes in a table are linked in a list for destruction
-      NodeBase *first_alloced_node;
+      atomic<NodeBase *> first_alloced_node;
+      void prepend_alloced_node(NodeBase *new_node);
     };
 
     template <typename ALLOCATOR>

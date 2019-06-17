@@ -697,7 +697,7 @@ namespace Realm {
     EventImpl::add_waiter(wait_on, this);
   }
 
-  void PartitioningOperation::DeferredLaunch::event_triggered(Event e, bool poisoned)
+  void PartitioningOperation::DeferredLaunch::event_triggered(bool poisoned)
   {
     assert(!poisoned); // TODO: POISON_FIXME
     op_queue->enqueue_partitioning_operation(op);
@@ -719,8 +719,9 @@ namespace Realm {
   // class PartitioningOperation
 
   PartitioningOperation::PartitioningOperation(const ProfilingRequestSet &reqs,
-					       Event _finish_event)
-    : Operation(_finish_event, reqs)
+					       GenEventImpl *_finish_event,
+					       EventImpl::gen_t _finish_gen)
+    : Operation(_finish_event, _finish_gen, reqs)
   {}
 
   void PartitioningOperation::launch(Event wait_for)

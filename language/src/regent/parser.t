@@ -730,6 +730,11 @@ function parser.expr_prefix(p)
 
   elseif p:nextif("image") then
     p:expect("(")
+    local disjointness = false
+    if p:is_disjointness_kind() then
+       disjointness = p:disjointness_kind()
+       p:expect(",")
+    end
     local parent = p:expr()
     p:expect(",")
     local partition = p:expr()
@@ -737,6 +742,7 @@ function parser.expr_prefix(p)
     local region = p:expr_region_root()
     p:expect(")")
     return ast.unspecialized.expr.Image {
+      disjointness = disjointness,
       parent = parent,
       partition = partition,
       region = region,
@@ -1103,11 +1109,16 @@ function parser.expr_prefix(p)
     local filename = p:expr()
     p:expect(",")
     local mode = p:expr()
+    local field_map = false
+    if p:nextif(",") then
+      field_map = p:expr()
+    end
     p:expect(")")
     return ast.unspecialized.expr.AttachHDF5 {
       region = region,
       filename = filename,
       mode = mode,
+      field_map = field_map,
       annotations = ast.default_annotations(),
       span = ast.span(start, p),
     }

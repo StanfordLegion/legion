@@ -105,8 +105,8 @@ namespace Realm {
       virtual void cleanup(void);
 
     public:
-      size_t cfg_zc_mem_size_in_mb, cfg_zc_ib_size_in_mb;
-      size_t cfg_fb_mem_size_in_mb;
+      size_t cfg_zc_mem_size, cfg_zc_ib_size;
+      size_t cfg_fb_mem_size;
       unsigned cfg_num_gpus, cfg_gpu_streams;
       bool cfg_use_background_workers, cfg_use_shared_worker, cfg_pin_sysmem;
       bool cfg_fences_use_callbacks;

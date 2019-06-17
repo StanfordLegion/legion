@@ -21,8 +21,10 @@
 
 #include "realm/realm_config.h"
 
+#ifndef LEGION_USE_PYTHON_CFFI
 // for size_t
 #include <stddef.h>
+#endif // LEGION_USE_PYTHON_CFFI
 
 #ifdef __cplusplus
 extern "C" {

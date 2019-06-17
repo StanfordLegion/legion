@@ -140,7 +140,8 @@ namespace Realm {
   class PartitioningOperation : public Operation {
   public:
     PartitioningOperation(const ProfilingRequestSet &reqs,
-			  Event _finish_event);
+			  GenEventImpl *_finish_event,
+			  EventImpl::gen_t _finish_gen);
 
     virtual void execute(void) = 0;
 
@@ -158,7 +159,7 @@ namespace Realm {
     public:
       void defer(PartitioningOperation *_op, Event wait_on);
 
-      virtual void event_triggered(Event e, bool poisoned);
+      virtual void event_triggered(bool poisoned);
       virtual void print(std::ostream& os) const;
       virtual Event get_finish_event(void) const;
 

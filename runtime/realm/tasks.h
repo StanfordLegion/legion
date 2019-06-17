@@ -40,7 +40,8 @@ namespace Realm {
 	   const void *_args, size_t _arglen,
            const ProfilingRequestSet &reqs,
 	   Event _before_event,
-	   Event _finish_event, int _priority);
+	   GenEventImpl *_finish_event, EventImpl::gen_t _finish_gen,
+	   int _priority);
 
     protected:
       // deletion performed when reference count goes to zero
@@ -60,20 +61,30 @@ namespace Realm {
 
       Processor proc;
       Processor::TaskFuncID func_id;
-      ByteArray args;
+
+      // "small-vector" optimization for task args
+      char *argdata;
+      size_t arglen;
+      static const size_t SHORT_ARGLEN_MAX = 64;
+      char short_argdata[SHORT_ARGLEN_MAX];
+      bool free_argdata;
+      //ByteArray args;
+
       Event before_event;
       int priority;
 
       class DeferredSpawn : public EventWaiter {
       public:
-	void defer(ProcessorImpl *_proc, Task *_task, Event wait_on);
-	virtual void event_triggered(Event e, bool poisoned);
+	void defer(ProcessorImpl *_proc, Task *_task,
+		   EventImpl *_wait_on, EventImpl::gen_t _wait_gen);
+	virtual void event_triggered(bool poisoned);
 	virtual void print(std::ostream& os) const;
 	virtual Event get_finish_event(void) const;
 
       protected:
 	ProcessorImpl *proc;
 	Task *task;
+	Event wait_on;
       };
       DeferredSpawn deferred_spawn;
       

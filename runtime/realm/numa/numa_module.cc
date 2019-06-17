@@ -92,11 +92,11 @@ namespace Realm {
 
     NumaModule::NumaModule(void)
       : Module("numa")
-      , cfg_numa_mem_size_in_mb(0)
-      , cfg_numa_nocpu_mem_size_in_mb(-1)
+      , cfg_numa_mem_size(0)
+      , cfg_numa_nocpu_mem_size(-1)
       , cfg_num_numa_cpus(0)
       , cfg_pin_memory(false)
-      , cfg_stack_size_in_mb(2)
+      , cfg_stack_size(2 << 20)
     {
     }
       
@@ -114,8 +114,8 @@ namespace Realm {
       {
 	CommandLineParser cp;
 
-	cp.add_option_int("-ll:nsize", m->cfg_numa_mem_size_in_mb)
-	  .add_option_int("-ll:ncsize", m->cfg_numa_nocpu_mem_size_in_mb)
+	cp.add_option_int_units("-ll:nsize", m->cfg_numa_mem_size, 'm')
+	  .add_option_int_units("-ll:ncsize", m->cfg_numa_nocpu_mem_size, 'm')
 	  .add_option_int("-ll:ncpu", m->cfg_num_numa_cpus)
 	  .add_option_bool("-numa:pin", m->cfg_pin_memory);
 	
@@ -127,8 +127,8 @@ namespace Realm {
       }
 
       // if neither NUMA memory nor cpus was requested, there's no point
-      if((m->cfg_numa_mem_size_in_mb == 0) &&
-	 (m->cfg_numa_nocpu_mem_size_in_mb <= 0) &&
+      if((m->cfg_numa_mem_size == 0) &&
+	 (m->cfg_numa_nocpu_mem_size <= 0) &&
 	 (m->cfg_num_numa_cpus == 0)) {
 	log_numa.debug() << "no NUMA memory or cpus requested";
 	delete m;
@@ -159,11 +159,11 @@ namespace Realm {
 	const NumaNodeMemInfo& mi = it->second;
 	log_numa.info() << "NUMA memory node " << mi.node_id << ": " << (mi.bytes_available >> 20) << " MB";
 
-	size_t mem_size = (m->cfg_numa_mem_size_in_mb << 20);
-	if(m->cfg_numa_nocpu_mem_size_in_mb >= 0) {
+	size_t mem_size = m->cfg_numa_mem_size;
+	if(m->cfg_numa_nocpu_mem_size >= 0) {
 	  // use this value instead if there are no cpus in this domain
 	  if(cpuinfo.count(mi.node_id) == 0)
-	    mem_size = (m->cfg_numa_nocpu_mem_size_in_mb << 20);
+	    mem_size = m->cfg_numa_nocpu_mem_size;
 	}
 
 	// skip domain silently if no memory is requested
@@ -259,7 +259,7 @@ namespace Realm {
 	  Processor p = runtime->next_local_processor_id();
 	  ProcessorImpl *pi = new LocalNumaProcessor(p, it->first,
 						     runtime->core_reservation_set(),
-						     cfg_stack_size_in_mb << 20,
+						     cfg_stack_size,
 						     Config::force_kernel_threads);
 	  runtime->add_processor(pi);
 

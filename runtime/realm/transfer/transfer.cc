@@ -1926,7 +1926,8 @@ namespace Realm {
 				       const ProfilingRequestSet& requests,
 				       Event wait_on, int priority)
   {
-    Event ev = GenEventImpl::create_genevent()->current_event();
+    GenEventImpl *finish_event = GenEventImpl::create_genevent();
+    Event ev = finish_event->current_event();
 
 #if 0
     int priority = 0;
@@ -1949,7 +1950,9 @@ namespace Realm {
 		    << " node=" << dma_node;
 
     CopyRequest *r = new CopyRequest(td, oas_by_inst, 
-				     wait_on, ev, priority, requests);
+				     wait_on,
+				     finish_event, ID(ev).event_generation(),
+				     priority, requests);
     // we've given oas_by_inst to the copyrequest, so forget it
     assert(oas_by_inst != 0);
     oas_by_inst = 0;
@@ -2016,7 +2019,8 @@ namespace Realm {
 					 const ProfilingRequestSet& requests,
 					 Event wait_on, int priority)
   {
-    Event ev = GenEventImpl::create_genevent()->current_event();
+    GenEventImpl *finish_event = GenEventImpl::create_genevent();
+    Event ev = finish_event->current_event();
 
     // TODO
     bool inst_lock_needed = false;
@@ -2026,7 +2030,9 @@ namespace Realm {
 					 dst,
 					 inst_lock_needed,
 					 redop_id, red_fold,
-					 wait_on, ev,
+					 wait_on,
+					 finish_event,
+					 ID(ev).event_generation(),
 					 0 /*priority*/, requests);
 
     NodeID src_node = ID(src.inst).instance_owner_node();
@@ -2093,9 +2099,13 @@ namespace Realm {
     f.subfield_offset = 0;
     f.size = data.size();
 
-    Event ev = GenEventImpl::create_genevent()->current_event();
+    GenEventImpl *finish_event = GenEventImpl::create_genevent();
+    Event ev = finish_event->current_event();
     FillRequest *r = new FillRequest(td, f, data.base(), data.size(),
-				     wait_on, ev, priority, requests);
+				     wait_on,
+				     finish_event,
+				     ID(ev).event_generation(),
+				     priority, requests);
 
     NodeID tgt_node = ID(inst).instance_owner_node();
     if(tgt_node == my_node_id) {

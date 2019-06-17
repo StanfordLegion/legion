@@ -23,8 +23,11 @@
 
 #include <realm.h>
 #include <realm/timers.h>
+#include <realm/cmdline.h>
 
 using namespace Realm;
+
+Logger log_app("app");
 
 #define DEFAULT_DEPTH 1024 
 
@@ -32,25 +35,46 @@ using namespace Realm;
 enum {
   TOP_LEVEL_TASK = Processor::TASK_ID_FIRST_AVAILABLE+0,
   THUNK_BUILDER  = Processor::TASK_ID_FIRST_AVAILABLE+1,
-  SET_FINAL_EVENT= Processor::TASK_ID_FIRST_AVAILABLE+2,
 };
 
-struct InputArgs {
-  int argc;
-  char **argv;
+struct TopLevelArgs {
+  int chain_depth;
 };
 
-InputArgs& get_input_args(void)
-{
-  static InputArgs args;
-  return args;
-}
+struct ThunkBuilderArgs {
+  int depth_remaining;
+  UserEvent next_event;
+  Barrier chain_done;
+};
 
-Event& get_final_event(void)
-{
-  static Event final_event;
-  return final_event;
-}
+template <typename T>
+class AssignRedop {
+public:
+  typedef T LHS;
+  typedef T RHS;
+
+  static void apply(T& lhs, T rhs) { lhs = rhs; }
+};
+
+class UserEventAssignRedop {
+public:
+  typedef UserEvent LHS;
+  typedef UserEvent RHS;
+
+  template <bool EXCL>
+  static void apply(UserEvent& lhs, UserEvent rhs) { lhs = rhs; }
+
+  static const UserEvent identity; // = UserEvent::NO_USER_EVENT;
+
+  template <bool EXCL>
+  static void fold(UserEvent& rhs1, UserEvent rhs2) { rhs1 = rhs2; }
+};
+
+/*static*/ const UserEvent UserEventAssignRedop::identity = UserEvent::NO_USER_EVENT;
+
+enum {
+  REDOP_ASSIGN = 66,
+};
 
 Processor get_next_processor(Processor cur)
 {
@@ -83,132 +107,78 @@ Processor get_next_processor(Processor cur)
 void top_level_task(const void *args, size_t arglen, 
                     const void *userdata, size_t userlen, Processor p)
 {
-  int depth = DEFAULT_DEPTH;
-  // Parse the input arguments
-#define INT_ARG(argname, varname) do { \
-        if(!strcmp((argv)[i], argname)) {		\
-          varname = atoi((argv)[++i]);		\
-          continue;					\
-        } } while(0)
+  const TopLevelArgs *targs = static_cast<const TopLevelArgs *>(args);
 
-#define BOOL_ARG(argname, varname) do { \
-        if(!strcmp((argv)[i], argname)) {		\
-          varname = true;				\
-          continue;					\
-        } } while(0)
-  {
-    InputArgs &inputs = get_input_args();
-    char **argv = inputs.argv;
-    for (int i = 1; i < inputs.argc; i++)
-    {
-      INT_ARG("-d", depth);
-    }
-    assert(depth > 0);
+  // create the final event in the chain
+  UserEvent final_event = UserEvent::create_user_event();
+
+  // create a barrier that will be used to communicate the first event in
+  //  the chain back to us
+  Barrier chain_done = Barrier::create_barrier(1,
+					       REDOP_ASSIGN,
+					       &UserEvent::NO_EVENT,
+					       sizeof(UserEvent));
+
+  // construct chain
+  log_app.print() << "initializing event latency experiment with a depth of "
+		  << targs->chain_depth << " events...";
+  double t1 = Clock::current_time();
+  if(targs->chain_depth > 1) {
+    ThunkBuilderArgs bargs;
+    bargs.depth_remaining = targs->chain_depth - 1;
+    bargs.next_event = final_event;
+    bargs.chain_done = chain_done;
+    Processor nextp = get_next_processor(p);
+    nextp.spawn(THUNK_BUILDER, &bargs, sizeof(bargs));
+  } else {
+    // single-event chain
+    chain_done.arrive(1, Event::NO_EVENT, &final_event, sizeof(UserEvent));
   }
-#undef INT_ARG
-#undef BOOL_ARG
-
-  // Set the final event to a no-event
-  get_final_event() = Event::NO_EVENT;
-
-  // Make a user event that will be the trigger
-  UserEvent start_event = UserEvent::create_user_event();
-  
-  // Initialize a big long chain of events, wait until it is done being initialized
-  fprintf(stdout,"Initializing event latency experiment with a depth of %d events...\n",depth);
+  chain_done.wait();
+  UserEvent first_event;
+  bool ok = chain_done.get_result(&first_event, sizeof(UserEvent));
+  assert(ok);
+  double t2 = Clock::current_time();
   {
-    size_t buffer_size = sizeof(Processor) + sizeof (Event) + sizeof(int);
-    void *buffer = malloc(buffer_size); 
-    char *ptr = (char*)buffer;
-    *((Processor*)ptr) = p; // Everything starts with this processor
-    ptr += sizeof(Processor);
-    *((Event*)ptr) = start_event; // the starting event
-    ptr += sizeof(Event);
-    *((int*)ptr) = depth; // the depth to go to
-    Processor next_proc = get_next_processor(p);
-    // Launch the task to build the big chain of events
-    Event initialized = next_proc.spawn(THUNK_BUILDER,buffer,buffer_size);
-    // We can free our memory now
-    free(buffer);
-    // Wait for it to return
-    initialized.wait();
+    double elapsed = t2 - t1;
+    double per_task = elapsed / (targs->chain_depth + 1);
+    log_app.print() << "chain construction: " << (1e6 * per_task) << " us/event";
   }
-  // At this point the final event should be set
-  assert(get_final_event().exists());
-  Event final_event = get_final_event();
 
-  // Now we're ready to start our simulation
-  fprintf(stdout,"Running experiment...\n");
+  // trigger first event and see how long it takes to get to the end
+  double t3 = Clock::current_time();
+  first_event.trigger();
+  final_event.wait();
+  double t4 = Clock::current_time();
   {
-    double start, stop;
-    start = Realm::Clock::current_time_in_microseconds();
-    // Trigger the start event
-    start_event.trigger();
-    // Wait for the final event
-    final_event.wait();
-    stop = Realm::Clock::current_time_in_microseconds();
-
-    double latency = stop - start;
-    fprintf(stdout,"Total time: %7.3f us\n", latency);
-    fprintf(stdout,"Average trigger time: %7.3f us\n", latency/depth);
+    double elapsed = t4 - t3;
+    double per_task = elapsed / (targs->chain_depth + 1);
+    log_app.print() << "chain trigger: " << (1e6 * per_task) << " us/event, " << elapsed << " s total";
   }
-  
-  fprintf(stdout,"Cleaning up...\n");
 }
 
 void thunk_builder(const void *args, size_t arglen, 
                    const void *userdata, size_t userlen, Processor p)
 {
-  assert(arglen == (sizeof(Processor) + sizeof(Event) + sizeof(int)));
-  // Unpack everything
-  const char *ptr = (const char*)args;
-  Processor orig = *((Processor*)ptr);
-  ptr += sizeof(Processor);
-  Event prev_event = *((Event*)ptr);
-  ptr += sizeof(Event);
-  int depth = *((int*)ptr);
+  const ThunkBuilderArgs *bargs = static_cast<const ThunkBuilderArgs *>(args);
 
-  // Make a temporary user event
-  UserEvent temp_event = UserEvent::create_user_event();
-  // Merge it with the previous event
-  Event next_event = Event::merge_events(prev_event, temp_event);
+  // create a user event and stick it on the front of the chain
+  UserEvent my_event = UserEvent::create_user_event();
+  bargs->next_event.trigger(my_event);
 
-  Event initialized = Event::NO_EVENT;
-  if (depth == 0)
-  {
-    // We're done, send the next event to the original processor
-    initialized = orig.spawn(SET_FINAL_EVENT,&next_event,sizeof(Event));
+  if(bargs->depth_remaining > 1) {
+    // continue chain on next processor
+    ThunkBuilderArgs next_args;
+    next_args.depth_remaining = bargs->depth_remaining - 1;
+    next_args.next_event = my_event;
+    next_args.chain_done = bargs->chain_done;
+    Processor nextp = get_next_processor(p);
+    nextp.spawn(THUNK_BUILDER, &next_args, sizeof(next_args));
+  } else {
+    // chain is done - signal main task
+    bargs->chain_done.arrive(1, Event::NO_EVENT, &my_event, sizeof(UserEvent));
   }
-  else
-  {
-    // Continue building the thunk
-    void *buffer = malloc(arglen);
-    char *ptr = (char*)buffer;
-    *((Processor*)ptr) = orig;
-    ptr += sizeof(Processor);
-    *((Event*)ptr) = next_event;
-    ptr += sizeof(Event);
-    *((int*)ptr) = (depth-1);
-    Processor next_proc = get_next_processor(p);
-    initialized = next_proc.spawn(THUNK_BUILDER,buffer,arglen);
-    free(buffer);
-  }
-  // Wait for the initialization to complete
-  initialized.wait();
-  // Now we can trigger our temporary event so there
-  // is only one big log chain of events to be triggered
-  temp_event.trigger();
 }
-
-void set_final_event(const void *args, size_t arglen, 
-                     const void *userdata, size_t userlen, Processor p)
-{
-  assert(arglen == sizeof(Event));
-  assert(!(get_final_event().exists()));
-  Event final_event = *((Event*)args);
-  get_final_event() = final_event;
-}
-
 
 int main(int argc, char **argv)
 {
@@ -217,13 +187,17 @@ int main(int argc, char **argv)
   bool ok = r.init(&argc, &argv);
   assert(ok);
 
+  TopLevelArgs top_args;
+  top_args.chain_depth = DEFAULT_DEPTH;
+
+  CommandLineParser cp;
+  cp.add_option_int("-d", top_args.chain_depth);
+  ok = cp.parse_command_line(argc, (const char **)argv);
+
   r.register_task(TOP_LEVEL_TASK, top_level_task);
   r.register_task(THUNK_BUILDER, thunk_builder);
-  r.register_task(SET_FINAL_EVENT, set_final_event);
 
-  // Set the input args
-  get_input_args().argv = argv;
-  get_input_args().argc = argc;
+  r.register_reduction<UserEventAssignRedop>(REDOP_ASSIGN);
 
   // select a processor to run the top level task on
   Processor p = Processor::NO_PROC;
@@ -241,7 +215,7 @@ int main(int argc, char **argv)
   assert(p.exists());
 
   // collective launch of a single task - everybody gets the same finish event
-  Event e = r.collective_spawn(p, TOP_LEVEL_TASK, 0, 0);
+  Event e = r.collective_spawn(p, TOP_LEVEL_TASK, &top_args, sizeof(top_args));
 
   // request shutdown once that task is complete
   r.shutdown(e);

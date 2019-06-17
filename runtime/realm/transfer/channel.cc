@@ -1889,12 +1889,33 @@ namespace Realm {
 	    if(it != info->dset_ids.end()) {
 	      dset_id = it->second;
 	    } else {
+	      // follow group path if any /'s are present
+	      hid_t loc_id = info->file_id;
+	      size_t startpos = 0;
+	      // leading slash in dataset path is optional - ignore if present
+	      if((*hdf5_info.dsetname)[0] == '/') startpos++;
+	      while(true) {
+		size_t pos = hdf5_info.dsetname->find_first_of('/', startpos);
+		if(pos == std::string::npos) break;
+		std::string grpname(*hdf5_info.dsetname, startpos, pos-startpos);
+		hid_t grp_id;
+		CHECK_HDF5( grp_id = H5Gopen2(loc_id,
+					      grpname.c_str(),
+					      H5P_DEFAULT) );
+		log_hdf5.info() << "H5Gopen2(" << loc_id << ", \"" << grpname << "\") = " << grp_id;
+		if(loc_id != info->file_id)
+		  CHECK_HDF5( H5Gclose(loc_id) );
+		loc_id = grp_id;
+		startpos = pos + 1;
+	      }
 	      // have to open the dataset
-	      CHECK_HDF5( dset_id = H5Dopen2(info->file_id,
-					     hdf5_info.dsetname->c_str(),
+	      CHECK_HDF5( dset_id = H5Dopen2(loc_id,
+					     hdf5_info.dsetname->c_str()+startpos,
 					     H5P_DEFAULT) );
 	      log_hdf5.info() << "H5Dopen2(" << info->file_id << ", \"" << *hdf5_info.dsetname << "\") = " << dset_id;
 	      info->dset_ids[*hdf5_info.dsetname] = dset_id;
+	      if(loc_id != info->file_id)
+		CHECK_HDF5( H5Gclose(loc_id) );
 	    }
 	  }
 	  hid_t dtype_id;
@@ -3774,7 +3795,7 @@ namespace Realm {
 	Realm::EventImpl::add_waiter(wait_on, this);
       }
 
-      void XferDes::DeferredXDEnqueue::event_triggered(Event e, bool poisoned)
+      void XferDes::DeferredXDEnqueue::event_triggered(bool poisoned)
       {
 	// TODO: handle poisoning
 	assert(!poisoned);

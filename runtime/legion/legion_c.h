@@ -30,9 +30,11 @@
 
 #include "legion/legion_config.h"
 
+#ifndef LEGION_USE_PYTHON_CFFI
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#endif // LEGION_USE_PYTHON_CFFI
 
 #ifdef __cplusplus
 extern "C" {

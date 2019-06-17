@@ -13,7 +13,6 @@
  * limitations under the License.
  */
 
-
 #include "legion.h"
 #include "legion/runtime.h"
 #include "legion/legion_ops.h"
@@ -1097,6 +1096,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     RegionRequirement::RegionRequirement(void)
+      : region(LogicalRegion::NO_REGION), partition(LogicalPartition::NO_PART),
+        privilege(NO_ACCESS), prop(EXCLUSIVE), parent(LogicalRegion::NO_REGION),
+        redop(0), tag(0), flags(NO_FLAG), handle_type(SINGULAR), projection(0),
+        projection_args(NULL), projection_args_size(0)
     //--------------------------------------------------------------------------
     {
     }
@@ -1111,7 +1114,8 @@ namespace Legion {
 				        MappingTagID _tag, bool _verified)
       : region(_handle), privilege(_priv), prop(_prop), parent(_parent),
         redop(0), tag(_tag), flags(_verified ? VERIFIED_FLAG : NO_FLAG), 
-        handle_type(SINGULAR), projection(0)
+        handle_type(SINGULAR), projection(0), projection_args(NULL),
+        projection_args_size(0)
     //--------------------------------------------------------------------------
     { 
       privilege_fields = priv_fields;
@@ -1136,7 +1140,8 @@ namespace Legion {
                 LogicalRegion _parent, MappingTagID _tag, bool _verified)
       : partition(pid), privilege(_priv), prop(_prop), parent(_parent),
         redop(0), tag(_tag), flags(_verified ? VERIFIED_FLAG : NO_FLAG),
-        handle_type(PART_PROJECTION), projection(_proj)
+        handle_type(PART_PROJECTION), projection(_proj), projection_args(NULL),
+        projection_args_size(0)
     //--------------------------------------------------------------------------
     { 
       privilege_fields = priv_fields;
@@ -1161,7 +1166,8 @@ namespace Legion {
                 LogicalRegion _parent, MappingTagID _tag, bool _verified)
       : region(_handle), privilege(_priv), prop(_prop), parent(_parent),
         redop(0), tag(_tag), flags(_verified ? VERIFIED_FLAG : NO_FLAG),
-        handle_type(REG_PROJECTION), projection(_proj)
+        handle_type(REG_PROJECTION), projection(_proj), projection_args(NULL),
+        projection_args_size(0)
     //--------------------------------------------------------------------------
     {
       privilege_fields = priv_fields;
@@ -1186,7 +1192,8 @@ namespace Legion {
                                     bool _verified)
       : region(_handle), privilege(REDUCE), prop(_prop), parent(_parent),
         redop(op), tag(_tag), flags(_verified ? VERIFIED_FLAG : NO_FLAG), 
-        handle_type(SINGULAR)
+        handle_type(SINGULAR), projection(0), projection_args(NULL),
+        projection_args_size(0)
     //--------------------------------------------------------------------------
     {
       privilege_fields = priv_fields;
@@ -1208,7 +1215,8 @@ namespace Legion {
                         bool _verified)
       : partition(pid), privilege(REDUCE), prop(_prop), parent(_parent),
         redop(op), tag(_tag), flags(_verified ? VERIFIED_FLAG : NO_FLAG),
-        handle_type(PART_PROJECTION), projection(_proj)
+        handle_type(PART_PROJECTION), projection(_proj), projection_args(NULL),
+        projection_args_size(0)
     //--------------------------------------------------------------------------
     {
       privilege_fields = priv_fields;
@@ -1230,7 +1238,8 @@ namespace Legion {
                         bool _verified)
       : region(_handle), privilege(REDUCE), prop(_prop), parent(_parent),
         redop(op), tag(_tag), flags(_verified ? VERIFIED_FLAG : NO_FLAG),
-        handle_type(REG_PROJECTION), projection(_proj)
+        handle_type(REG_PROJECTION), projection(_proj), projection_args(NULL),
+        projection_args_size(0)
     //--------------------------------------------------------------------------
     {
       privilege_fields = priv_fields;
@@ -1251,7 +1260,8 @@ namespace Legion {
                                          bool _verified)
       : region(_handle), privilege(_priv), prop(_prop), parent(_parent),
         redop(0), tag(_tag), flags(_verified ? VERIFIED_FLAG : NO_FLAG), 
-        handle_type(SINGULAR)
+        handle_type(SINGULAR), projection(), projection_args(NULL),
+        projection_args_size(0)
     //--------------------------------------------------------------------------
     { 
       // For backwards compatibility with the old encoding
@@ -1275,7 +1285,8 @@ namespace Legion {
                                          bool _verified)
       : partition(pid), privilege(_priv), prop(_prop), parent(_parent),
         redop(0), tag(_tag), flags(_verified ? VERIFIED_FLAG : NO_FLAG), 
-        handle_type(PART_PROJECTION), projection(_proj)
+        handle_type(PART_PROJECTION), projection(_proj), projection_args(NULL),
+        projection_args_size(0)
     //--------------------------------------------------------------------------
     { 
       // For backwards compatibility with the old encoding
@@ -1299,7 +1310,8 @@ namespace Legion {
                                          bool _verified)
       : region(_handle), privilege(_priv), prop(_prop), parent(_parent),
         redop(0), tag(_tag), flags(_verified ? VERIFIED_FLAG : NO_FLAG), 
-        handle_type(REG_PROJECTION), projection(_proj)
+        handle_type(REG_PROJECTION), projection(_proj), projection_args(NULL),
+        projection_args_size(0)
     //--------------------------------------------------------------------------
     {
       // For backwards compatibility with the old encoding
@@ -1322,7 +1334,8 @@ namespace Legion {
                                          bool _verified)
       : region(_handle), privilege(REDUCE), prop(_prop), parent(_parent),
         redop(op), tag(_tag), flags(_verified ? VERIFIED_FLAG : NO_FLAG), 
-        handle_type(SINGULAR)
+        handle_type(SINGULAR), projection(0), projection_args(NULL),
+        projection_args_size(0)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -1342,7 +1355,8 @@ namespace Legion {
                                          bool _verified)
       : partition(pid), privilege(REDUCE), prop(_prop), parent(_parent),
         redop(op), tag(_tag), flags(_verified ? VERIFIED_FLAG : NO_FLAG), 
-        handle_type(PART_PROJECTION), projection(_proj)
+        handle_type(PART_PROJECTION), projection(_proj), projection_args(NULL),
+        projection_args_size(0)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -1362,7 +1376,8 @@ namespace Legion {
                                          bool _verified)
       : region(_handle), privilege(REDUCE), prop(_prop), parent(_parent),
         redop(op), tag(_tag), flags(_verified ? VERIFIED_FLAG : NO_FLAG), 
-        handle_type(REG_PROJECTION), projection(_proj)
+        handle_type(REG_PROJECTION), projection(_proj), projection_args(NULL),
+        projection_args_size(0)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -1370,6 +1385,63 @@ namespace Legion {
         REPORT_LEGION_ERROR(ERROR_RESERVED_REDOP_ID, 
                                    "Zero is not a valid ReductionOpID")
 #endif
+    }
+
+    //--------------------------------------------------------------------------
+    RegionRequirement::RegionRequirement(const RegionRequirement &rhs)
+      : region(rhs.region), partition(rhs.partition), 
+        privilege_fields(rhs.privilege_fields), 
+        instance_fields(rhs.instance_fields), privilege(rhs.privilege),
+        prop(rhs.prop), parent(rhs.parent), redop(rhs.redop), tag(rhs.tag),
+        flags(rhs.flags), handle_type(rhs.handle_type), 
+        projection(rhs.projection), projection_args(NULL),
+        projection_args_size(rhs.projection_args_size)
+    //--------------------------------------------------------------------------
+    {
+      if (projection_args_size > 0)
+      {
+        projection_args = malloc(projection_args_size);
+        memcpy(projection_args, rhs.projection_args, projection_args_size);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    RegionRequirement::~RegionRequirement(void)
+    //--------------------------------------------------------------------------
+    {
+      if (projection_args_size > 0)
+        free(projection_args);
+    }
+
+    //--------------------------------------------------------------------------
+    RegionRequirement& RegionRequirement::operator=(
+                                                   const RegionRequirement &rhs)
+    //--------------------------------------------------------------------------
+    {
+      region = rhs.region;
+      partition = rhs.partition;
+      privilege_fields = rhs.privilege_fields;
+      instance_fields = rhs.instance_fields;
+      privilege = rhs.privilege;
+      prop = rhs.prop;
+      parent = rhs.parent;
+      redop = rhs.redop;
+      tag = rhs.tag;
+      flags = rhs.flags;
+      handle_type = rhs.handle_type;
+      projection = rhs.projection;
+      projection_args_size = rhs.projection_args_size;
+      if (projection_args != NULL)
+      {
+        free(projection_args);
+        projection_args = NULL;
+      }
+      if (projection_args_size > 0)
+      {
+        projection_args = malloc(projection_args_size);
+        memcpy(projection_args, rhs.projection_args, projection_args_size);
+      }
+      return *this;
     }
 
     //--------------------------------------------------------------------------
@@ -1388,8 +1460,16 @@ namespace Legion {
           if ((privilege_fields.size() == rhs.privilege_fields.size()) &&
               (instance_fields.size() == rhs.instance_fields.size()))
           {
-            return ((privilege_fields == rhs.privilege_fields) 
-                && (instance_fields == rhs.instance_fields));
+            if (projection_args_size == rhs.projection_args_size)
+            {
+              if ((projection_args_size == 0) ||
+                  (memcmp(projection_args, rhs.projection_args, 
+                          projection_args_size) == 0))
+              {
+                return ((privilege_fields == rhs.privilege_fields) 
+                    && (instance_fields == rhs.instance_fields));
+              }
+            }
           }
         }
       }
@@ -1456,6 +1536,20 @@ namespace Legion {
                       {
                         if (handle_type == SINGULAR)
                           return (region < rhs.region);
+                        else if (projection_args_size < 
+                                  rhs.projection_args_size)
+                          return true;
+                        else if (projection_args_size > 
+                                  rhs.projection_args_size)
+                          return false;
+                        else if ((projection_args_size > 0) &&
+                            (memcmp(projection_args, rhs.projection_args, 
+                                    projection_args_size) < 0))
+                          return true;
+                        else if ((projection_args_size > 0) && 
+                            (memcmp(projection_args, rhs.projection_args,
+                                    projection_args_size) > 0))
+                          return false;
                         else if (handle_type == PART_PROJECTION)
                         {
                           if (partition < rhs.partition)
@@ -1514,6 +1608,38 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return (privilege_fields.find(fid) != privilege_fields.end());
+    }
+
+    //--------------------------------------------------------------------------
+    const void* RegionRequirement::get_projection_args(size_t *size) const
+    //--------------------------------------------------------------------------
+    {
+      if (size != NULL)
+        *size = projection_args_size;
+      return projection_args;
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionRequirement::set_projection_args(const void *args, size_t size,
+                                                bool own)
+    //--------------------------------------------------------------------------
+    {
+      if (projection_args_size > 0)
+      {
+        free(projection_args);
+        projection_args = NULL;
+      }
+      projection_args_size = size;
+      if (projection_args_size > 0)
+      {
+        if (!own)
+        {
+          projection_args = malloc(projection_args_size);
+          memcpy(projection_args, args, projection_args_size);
+        }
+        else
+          projection_args = const_cast<void*>(args);
+      }
     }
 
     /////////////////////////////////////////////////////////////

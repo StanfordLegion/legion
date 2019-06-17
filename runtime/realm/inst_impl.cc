@@ -46,7 +46,7 @@ namespace Realm {
     EventImpl::add_waiter(wait_on, this);
   }
 
-  void RegionInstanceImpl::DeferredDestroy::event_triggered(Event e, bool poisoned)
+  void RegionInstanceImpl::DeferredDestroy::event_triggered(bool poisoned)
   {
     // if input event is poisoned, do not attempt to destroy the lock
     // we don't have an output event here, so this may result in a leak if nobody is

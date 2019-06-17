@@ -111,22 +111,6 @@ namespace Realm {
     void HDF5Module::initialize(RuntimeImpl *runtime)
     {
       Module::initialize(runtime);
-
-#if 0
-      // memory allocations are performed here
-      for(std::map<int, void *>::iterator it = HDF5_mem_bases.begin();
-	  it != HDF5_mem_bases.end();
-	  ++it) {
-	void *base = HDF5sysif_alloc_mem(it->first,
-					 cfg_HDF5_mem_size_in_mb << 20,
-					 cfg_pin_memory);
-	if(!base) {
-	  log_hdf5.fatal() << "allocation of " << cfg_HDF5_mem_size_in_mb << " MB in HDF5 node " << it->first << " failed!";
-	  assert(false);
-	}
-	it->second = base;
-      }
-#endif
     }
 
     // create any memories provided by this module (default == do nothing)
@@ -172,17 +156,6 @@ namespace Realm {
       herr_t err = H5close();
       if(err < 0)
 	log_hdf5.warning() << "unable to close HDF5 library - result = " << err;
-#if 0
-      // free our allocations here
-      for(std::map<int, void *>::iterator it = HDF5_mem_bases.begin();
-	  it != HDF5_mem_bases.end();
-	  ++it) {
-	bool ok = HDF5sysif_free_mem(it->first, it->second,
-				     cfg_HDF5_mem_size_in_mb << 20);
-	if(!ok)
-	  log_hdf5.error() << "failed to free memory in HDF5 node " << it->first << ": ptr=" << it->second;
-      }
-#endif
     }
 
 

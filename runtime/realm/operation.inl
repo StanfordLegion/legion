@@ -13,7 +13,7 @@
  * limitations under the License.
  */
 
-// INCLDUED FROM operation.h - DO NOT INCLUDE THIS DIRECTLY
+// INCLUDED FROM operation.h - DO NOT INCLUDE THIS DIRECTLY
 
 // this is a nop, but it's for the benefit of IDEs trying to parse this file
 #include "realm/operation.h"
@@ -25,9 +25,11 @@ namespace Realm {
   // class Operation
   //
 
-  inline Operation::Operation(Event _finish_event,
+  inline Operation::Operation(GenEventImpl *_finish_event,
+			      EventImpl::gen_t _finish_gen,
                               const ProfilingRequestSet &_requests)
     : finish_event(_finish_event)
+    , finish_gen(_finish_gen)
     , refcount(1)
     , requests(_requests)
     , pending_work_items(1 /* i.e. the main work item */)
@@ -91,6 +93,11 @@ namespace Realm {
   inline bool Operation::cancellation_requested(void) const
   {
     return status.result == Status::INTERRUPT_REQUESTED;
+  }
+
+  inline Event Operation::get_finish_event(void) const
+  {
+    return finish_event->make_event(finish_gen);
   }
 
   // used to record event wait intervals, if desired

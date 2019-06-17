@@ -33,18 +33,36 @@ namespace Realm {
 	     const void *_args, size_t _arglen,
 	     const ProfilingRequestSet &reqs,
 	     Event _before_event,
-	     Event _finish_event, int _priority)
-    : Operation(_finish_event, reqs), proc(_proc), func_id(_func_id),
-      args(_args, _arglen), before_event(_before_event), priority(_priority),
+	     GenEventImpl *_finish_event, EventImpl::gen_t _finish_gen,
+	     int _priority)
+    : Operation(_finish_event, _finish_gen, reqs)
+    , proc(_proc), func_id(_func_id),
+      before_event(_before_event), priority(_priority),
       executing_thread(0)
   {
+    arglen = _arglen;
+    if(arglen <= SHORT_ARGLEN_MAX) {
+      if(arglen) {
+	memcpy(short_argdata, _args, arglen);
+        argdata = short_argdata;
+      } else
+	argdata = 0;
+      free_argdata = false;
+    } else {
+      argdata = static_cast<char *>(malloc(arglen));
+      assert(argdata != 0);
+      memcpy(argdata, _args, arglen);
+      free_argdata = true;
+    }
     log_task.info() << "task " << (void *)this << " created: func=" << func_id
 		    << " proc=" << _proc << " arglen=" << _arglen
-		    << " before=" << _before_event << " after=" << _finish_event;
+		    << " before=" << _before_event << " after=" << get_finish_event();
   }
 
   Task::~Task(void)
   {
+    if(free_argdata)
+      free(argdata);
   }
 
   void Task::print(std::ostream& os) const
@@ -55,7 +73,7 @@ namespace Realm {
   bool Task::mark_ready(void)
   {
     log_task.info() << "task " << (void *)this << " ready: func=" << func_id
-		    << " proc=" << proc << " arglen=" << args.size()
+		    << " proc=" << proc << " arglen=" << arglen
 		    << " before=" << before_event << " after=" << finish_event;
     return Operation::mark_ready();
   }
@@ -63,7 +81,7 @@ namespace Realm {
   bool Task::mark_started(void)
   {
     log_task.info() << "task " << (void *)this << " started: func=" << func_id
-		    << " proc=" << proc << " arglen=" << args.size()
+		    << " proc=" << proc << " arglen=" << arglen
 		    << " before=" << before_event << " after=" << finish_event;
     return Operation::mark_started();
   }
@@ -71,7 +89,7 @@ namespace Realm {
   void Task::mark_completed(void)
   {
     log_task.info() << "task " << (void *)this << " completed: func=" << func_id
-		    << " proc=" << proc << " arglen=" << args.size()
+		    << " proc=" << proc << " arglen=" << arglen
 		    << " before=" << before_event << " after=" << finish_event;
     Operation::mark_completed();
   }
@@ -156,7 +174,8 @@ namespace Realm {
 	try {
 	  Thread::ExceptionHandlerPresence ehp;
 	  thread->start_perf_counters();
-	  get_runtime()->get_processor_impl(p)->execute_task(func_id, args);
+	  get_runtime()->get_processor_impl(p)->execute_task(func_id,
+							     ByteArrayRef(argdata, arglen));
 	  thread->stop_perf_counters();
 	  thread->stop_operation(this);
 	  thread->record_perf_counters(measurements);
@@ -172,7 +191,8 @@ namespace Realm {
       {
 	// just run the task - if it completes, we assume it was successful
 	thread->start_perf_counters();
-	get_runtime()->get_processor_impl(p)->execute_task(func_id, args);
+	get_runtime()->get_processor_impl(p)->execute_task(func_id,
+							   ByteArrayRef(argdata, arglen));
 	thread->stop_perf_counters();
 	thread->stop_operation(this);
 	thread->record_perf_counters(measurements);
@@ -204,19 +224,21 @@ namespace Realm {
   //
 
   void Task::DeferredSpawn::defer(ProcessorImpl *_proc, Task *_task,
-				  Event wait_on)
+				  EventImpl *_wait_on,
+				  EventImpl::gen_t _wait_gen)
   {
     proc = _proc;
     task = _task;
-    EventImpl::add_waiter(wait_on, this);
+    wait_on = _wait_on->make_event(_wait_gen);
+    _wait_on->add_waiter(_wait_gen, this);
   }
     
-  void Task::DeferredSpawn::event_triggered(Event e, bool poisoned)
+  void Task::DeferredSpawn::event_triggered(bool poisoned)
   {
     if(poisoned) {
       // cancel the task - this has to work
       log_poison.info() << "cancelling poisoned task - task=" << task << " after=" << task->get_finish_event();
-      task->handle_poisoned_precondition(e);
+      task->handle_poisoned_precondition(wait_on);
       return;
     }
 
