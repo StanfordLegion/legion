@@ -34,6 +34,19 @@ namespace Realm {
   }
 
   template <typename T>
+  CommandLineParser& CommandLineParser::add_option_int_units(const std::string& optname,
+							     T& target,
+							     char default_unit /*= 0*/,
+							     bool binary /*= true*/,
+							     bool keep /*= false*/)
+  {
+    options.push_back(new IntegerUnitsCommandLineOption<T>(optname,
+							   default_unit, binary,
+							   keep, target));
+    return *this;
+  }
+
+  template <typename T>
   CommandLineParser& CommandLineParser::add_option_string(const std::string& optname,
 							  T& target,
 							  bool keep /*= false*/)
@@ -163,6 +176,69 @@ namespace Realm {
     // parse into a copy to avoid corrupting the value on failure
     T val;
     if(convert_integer_cmdline_argument(argv[pos], val)) {
+      target = val;
+      // can't update this array - have to keep
+      ++pos;
+      return true;
+    } else
+      return false;
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class IntegerUnitsCommandLineOption<T>
+
+  template <typename T>
+  IntegerUnitsCommandLineOption<T>::IntegerUnitsCommandLineOption(const std::string& _optname,
+								  char _default_unit,
+								  bool _binary,
+								  bool _keep,
+								  T& _target)
+    : CommandLineOption(_optname, _keep)
+    , default_unit(_default_unit)
+    , binary(_binary)
+    , target(_target)
+  {}
+    
+  bool convert_integer_units_cmdline_argument(const char *s,
+					      char default_unit,
+					      bool binary,
+					      double &value);
+  
+  template <typename T>
+  bool IntegerUnitsCommandLineOption<T>::parse_argument(std::vector<std::string>& cmdline,
+							std::vector<std::string>::iterator& pos)
+  {
+    // requires an additional argument
+    if(pos == cmdline.end()) return false;
+
+    // parse into a copy to avoid corrupting the value on failure
+    double val;
+    if(convert_integer_units_cmdline_argument((*pos).c_str(),
+					      default_unit, binary, val)) {
+      target = val;
+      if(keep) {
+	++pos;
+      } else {
+	pos = cmdline.erase(pos);
+      }
+      return true;
+    } else
+      return false;
+  }
+
+  template <typename T>
+  bool IntegerUnitsCommandLineOption<T>::parse_argument(int& pos, int argc,
+							const char *argv[])
+  {
+    // requires an additional argument
+    if(pos >= argc) return false;
+
+    // parse into a copy to avoid corrupting the value on failure
+    double val;
+    if(convert_integer_units_cmdline_argument(argv[pos],
+					      default_unit, binary, val)) {
       target = val;
       // can't update this array - have to keep
       ++pos;

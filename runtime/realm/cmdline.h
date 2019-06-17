@@ -34,6 +34,11 @@ namespace Realm {
     CommandLineParser& add_option_int(const std::string& optname, T& target, bool keep = false);
 
     template <typename T>
+    CommandLineParser& add_option_int_units(const std::string& optname, T& target,
+					    char default_unit = 0, bool binary = true,
+					    bool keep = false);
+
+    template <typename T>
     CommandLineParser& add_option_string(const std::string& optname, T& target, bool keep = false);
 
     CommandLineParser& add_option_string(const std::string& optname, char *target, size_t maxlen, bool keep = false);
@@ -81,6 +86,23 @@ namespace Realm {
     virtual bool parse_argument(int& pos, int argc, const char *argv[]);
 
   protected:
+    T& target;
+  };
+
+  template <typename T>
+  class IntegerUnitsCommandLineOption : public CommandLineOption {
+  public:
+    IntegerUnitsCommandLineOption(const std::string& _optname,
+				  char _default_unit, bool _binary,
+				  bool _keep, T& _target);
+    
+    virtual bool parse_argument(std::vector<std::string>& cmdline,
+				std::vector<std::string>::iterator& pos);
+    virtual bool parse_argument(int& pos, int argc, const char *argv[]);
+
+  protected:
+    char default_unit;
+    bool binary;
     T& target;
   };
 
