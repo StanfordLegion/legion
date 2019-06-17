@@ -2395,7 +2395,25 @@ namespace Realm {
       {
 	AutoGPUContext agc(this);
 
-	CHECK_CU( cuMemAlloc(&fbmem_base, size) );
+	CUresult ret = cuMemAlloc(&fbmem_base, size);
+	if(ret != CUDA_SUCCESS) {
+	  if(ret == CUDA_ERROR_OUT_OF_MEMORY) {
+	    size_t free_bytes, total_bytes;
+	    CHECK_CU( cuMemGetInfo(&free_bytes, &total_bytes) );
+	    log_gpu.fatal() << "insufficient memory on gpu " << info->index
+			    << ": " << size << " bytes needed (from -ll:fsize), "
+			    << free_bytes << " (out of " << total_bytes << " available)";
+	  } else {
+	    const char *errstring = "error message not available";
+#if CUDA_VERSION >= 6050
+	    cuGetErrorName(ret, &errstring);
+#endif
+	    log_gpu.fatal() << "unexpected error from cuMemAlloc on gpu " << info->index
+			    << ": result=" << ret
+			    << " (" << errstring << ")";
+	  }
+	  abort();
+	}
       }
 
       Memory m = runtime->next_local_memory_id();
@@ -2742,9 +2760,23 @@ namespace Realm {
 	{
 	  AutoGPUContext agc(gpus[0]);
 
-	  CHECK_CU( cuMemHostAlloc(&zcmem_cpu_base, 
-				   cfg_zc_mem_size_in_mb << 20,
-				   CU_MEMHOSTALLOC_PORTABLE | CU_MEMHOSTALLOC_DEVICEMAP) );
+	  CUresult ret = cuMemHostAlloc(&zcmem_cpu_base, 
+					cfg_zc_mem_size_in_mb << 20,
+					CU_MEMHOSTALLOC_PORTABLE | CU_MEMHOSTALLOC_DEVICEMAP);
+	  if(ret != CUDA_SUCCESS) {
+	    if(ret == CUDA_ERROR_OUT_OF_MEMORY) {
+	      log_gpu.fatal() << "insufficient device-mappable host memory: "
+			      << (cfg_zc_mem_size_in_mb << 20) << " bytes needed (from -ll:zsize)";
+	    } else {
+	      const char *errstring = "error message not available";
+#if CUDA_VERSION >= 6050
+	      cuGetErrorName(ret, &errstring);
+#endif
+	      log_gpu.fatal() << "unexpected error from cuMemHostAlloc: result=" << ret
+			      << " (" << errstring << ")";
+	    }
+	    abort();
+	  }
 	  CHECK_CU( cuMemHostGetDevicePointer(&zcmem_gpu_base,
 					      zcmem_cpu_base,
 					      0) );
