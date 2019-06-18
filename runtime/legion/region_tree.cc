@@ -5906,8 +5906,6 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(temp != result);
 #endif
-        // Add an extra expression reference to this result
-        temp->add_expression_reference();
         return temp;
       }
     }
@@ -14148,7 +14146,8 @@ namespace Legion {
       {
         for (std::vector<PartitionNode*>::const_iterator it = 
               color_map_copy.begin(); it != color_map_copy.end(); it++)
-          (*it)->destroy_node(local_space, false/*top*/);
+          if ((*it)->destroy_node(local_space, false/*top*/))
+            delete (*it);
       }
       // Invalidate our version managers
       invalidate_version_managers();
@@ -15354,7 +15353,8 @@ namespace Legion {
       {
         for (std::vector<RegionNode*>::const_iterator it = 
               color_map_copy.begin(); it != color_map_copy.end(); it++)
-          (*it)->destroy_node(local_space);
+          if ((*it)->destroy_node(local_space))
+            delete (*it);
       }
       // Remove ourselves from the parent to prevent future deletions
       parent->remove_child(row_source->color);
