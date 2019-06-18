@@ -6153,7 +6153,7 @@ class Operation(object):
                 self.compute_current_version_numbers()
             num_reqs = len(self.reqs)
             assert num_reqs % 2 == 0
-            num_copies = num_reqs / 2
+            num_copies = num_reqs // 2
             for idx in range(num_copies):
                 if not self.verify_copy_requirements(idx, self.reqs[idx],
                         idx+num_copies, self.reqs[idx+num_copies], perform_checks):
