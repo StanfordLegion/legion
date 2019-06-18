@@ -3265,7 +3265,13 @@ namespace Legion {
       for (unsigned idx = 0; idx < processors.size(); idx++)
       {
         const Processor &proc = processors[idx];
-        if (proc.kind() != kind)
+        if (!proc.exists())
+          REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                        "Invalid mapper output. Mapper %s requested an illegal "
+                        "NO_PROC for a target processor when mapping task %s "
+                        "(ID %lld).", mapper->get_mapper_name(), 
+                        get_task_name(), get_unique_id())
+        else if (proc.kind() != kind)
           REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                         "Invalid mapper output. Mapper %s requested processor "
                         IDFMT " which is of kind %s when mapping task %s "
