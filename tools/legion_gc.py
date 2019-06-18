@@ -15,6 +15,10 @@
 # limitations under the License.
 #
 
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+
 import sys, os, shutil, gc
 import string, re
 from math import sqrt, log
@@ -24,6 +28,18 @@ GC_REF_KIND = 0
 VALID_REF_KIND = 1
 RESOURCE_REF_KIND = 2
 REMOTE_REF_KIND = 3
+
+# Help for python 2/3 foolishness
+long_type = int if sys.version_info > (3,) else eval("long")
+
+def iteritems(obj):
+    return obj.items() if sys.version_info > (3,) else obj.viewitems()
+
+def iterkeys(obj):
+    return obj.keys() if sys.version_info > (3,) else obj.viewkeys()
+
+def itervalues(obj):
+    return obj.values() if sys.version_info > (3,) else obj.viewvalues()
 
 prefix = r'\[(?P<realmnode>[0-9]+) - (?P<thread>[0-9a-f]+)\] \{\w+\}\{legion_gc\}: '
 # References
@@ -77,7 +93,7 @@ class TracePrinter(object):
     def println(self, line):
         for idx in range(self.depth):
             line = '  '+line
-        print line
+        print(line)
 
 class Base(object):
     def __init__(self, did, node):
@@ -145,7 +161,7 @@ class Base(object):
                 self.base_resource_adds[src] = cnt
                 self.base_resource_rems[src] = 0
         else:
-            print 'BAD BASE REF '+str(kind)
+            print('BAD BASE REF '+str(kind))
             assert False
 
     def add_nested_ref(self, kind, src, cnt):
@@ -289,7 +305,7 @@ class Base(object):
             new_gc_refs = dict()
             new_gc_adds = dict()
             new_gc_rems = dict()
-            for did,refs in self.nested_gc_refs.iteritems():
+            for did,refs in iteritems(self.nested_gc_refs):
                 src = state.get_obj(did, self.node)
                 new_gc_refs[src] = refs
                 new_gc_adds[src] = self.nested_gc_adds[did]
@@ -301,7 +317,7 @@ class Base(object):
             new_valid_refs = dict()
             new_valid_adds = dict()
             new_valid_rems = dict()
-            for did,refs in self.nested_valid_refs.iteritems():
+            for did,refs in iteritems(self.nested_valid_refs):
                 src = state.get_obj(did, self.node)
                 new_valid_refs[src] = refs
                 new_valid_adds[src] = self.nested_valid_adds[did]
@@ -313,7 +329,7 @@ class Base(object):
             new_remote_refs = dict()
             new_remote_adds = dict()
             new_remote_rems = dict()
-            for did,refs in self.nested_remote_refs.iteritems():
+            for did,refs in iteritems(self.nested_remote_refs):
                 src = state.get_obj(did, self.node)
                 new_remote_refs[src] = refs
                 new_remote_adds[src] = self.nested_remote_adds[did]
@@ -325,7 +341,7 @@ class Base(object):
             new_resource_refs = dict()
             new_resource_adds = dict()
             new_resource_rems = dict()
-            for did,refs in self.nested_resource_refs.iteritems():
+            for did,refs in iteritems(self.nested_resource_refs):
                 src = state.get_obj(did, self.node)
                 new_resource_refs[src] = refs
                 new_resource_adds[src] = self.nested_resource_adds[did]
@@ -337,16 +353,16 @@ class Base(object):
     def check_for_leaks(self, verbose):
         if self.deleted:
             if verbose:
-                print "----------------------------------------------------------------"
-                print str(self)+' was properly deleted'
+                print("----------------------------------------------------------------")
+                print(str(self)+' was properly deleted')
                 printer = TracePrinter()
                 self.report_references(printer, GC_REF_KIND, verbose)
                 self.report_references(printer, VALID_REF_KIND, verbose)
                 self.report_references(printer, REMOTE_REF_KIND, verbose)
                 self.report_references(printer, RESOURCE_REF_KIND, verbose)
-                print "----------------------------------------------------------------"
+                print("----------------------------------------------------------------")
             else:
-                print str(self)+' was properly deleted'
+                print(str(self)+' was properly deleted')
             if isinstance(self,Manager):
                 return (True,False)
             return True
@@ -354,31 +370,31 @@ class Base(object):
         # then we don't need to report this as an error
         if isinstance(self,Manager):
             is_pinned = False 
-            for kind in self.base_valid_refs.iterkeys():
+            for kind in iterkeys(self.base_valid_refs):
                 if kind == 'Never GC Reference':
                     is_pinned = True
                     break
             if is_pinned:
                 if verbose:
-                    print "----------------------------------------------------------------"
-                    print "INFO: "+str(self)+' was not deleted because it was pinned by the user'
+                    print("----------------------------------------------------------------")
+                    print("INFO: "+str(self)+' was not deleted because it was pinned by the user')
                     printer = TracePrinter()
                     self.report_references(printer, GC_REF_KIND, verbose)
                     self.report_references(printer, VALID_REF_KIND, verbose)
                     self.report_references(printer, REMOTE_REF_KIND, verbose)
                     self.report_references(printer, RESOURCE_REF_KIND, verbose)
-                    print "----------------------------------------------------------------"
+                    print("----------------------------------------------------------------")
                 else:
-                    print "INFO: "+str(self)+' was not deleted because it was pinned by the user'
+                    print("INFO: "+str(self)+' was not deleted because it was pinned by the user')
                 return (False,True)
-        print "----------------------------------------------------------------"
-        print "ERROR: "+str(self)+" was not properly deleted"
+        print("----------------------------------------------------------------")
+        print("ERROR: "+str(self)+" was not properly deleted")
         printer = TracePrinter()
         self.report_references(printer, GC_REF_KIND, verbose)
         self.report_references(printer, VALID_REF_KIND, verbose)
         self.report_references(printer, REMOTE_REF_KIND, verbose)
         self.report_references(printer, RESOURCE_REF_KIND, verbose)
-        print "----------------------------------------------------------------"
+        print("----------------------------------------------------------------")
         if isinstance(self,Manager):
             return (False,False)
         return False
@@ -386,7 +402,7 @@ class Base(object):
     def report_references(self, printer, kind, verbose):
         printer.down()
         if kind == GC_REF_KIND and self.base_gc_refs:
-            for src,refs in self.base_gc_refs.iteritems():
+            for src,refs in iteritems(self.base_gc_refs):
                 if refs == 0:
                     if verbose:
                         printer.println('Empty (Refs=0): Base GC '+repr(src)+
@@ -398,7 +414,7 @@ class Base(object):
                     else:
                         printer.println('Base GC '+repr(src)+' (Refs='+str(refs)+')')
         if kind == VALID_REF_KIND and self.base_valid_refs:
-            for src,refs in self.base_valid_refs.iteritems():
+            for src,refs in iteritems(self.base_valid_refs):
                 if refs == 0:
                     if verbose:
                         printer.println('Empty (Refs=0): Base Valid '+repr(src)+
@@ -410,7 +426,7 @@ class Base(object):
                     else:
                         printer.println('Base Valid '+repr(src)+' (Refs='+str(refs)+')')
         if kind == REMOTE_REF_KIND and self.base_remote_refs:
-            for src,refs in self.base_remote_refs.iteritems():
+            for src,refs in iteritems(self.base_remote_refs):
                 if refs == 0:
                     if verbose:
                         printer.println('Empty (Refs=0): Base Remote '+repr(src)+
@@ -422,7 +438,7 @@ class Base(object):
                     else:
                         printer.println('Base Remote '+repr(src)+' (Refs='+str(refs)+')')
         if kind == RESOURCE_REF_KIND and self.base_resource_refs:
-            for src,refs in self.base_resource_refs.iteritems():
+            for src,refs in iteritems(self.base_resource_refs):
                 if refs == 0:
                     if verbose:
                         printer.println('Empty (Refs=0): Base Resource '+repr(src)+
@@ -434,7 +450,7 @@ class Base(object):
                     else:
                         printer.println('Base Resource '+repr(src)+' (Refs='+str(refs)+')')
         if kind == GC_REF_KIND and self.nested_gc_refs:
-            for src,refs in self.nested_gc_refs.iteritems():
+            for src,refs in iteritems(self.nested_gc_refs):
                 if refs == 0:
                     if verbose:
                         printer.println('Empty (Refs=0): Nested GC '+repr(src)+
@@ -449,7 +465,7 @@ class Base(object):
                 src.report_references(printer, kind, verbose)
                 printer.up()
         if kind == VALID_REF_KIND and self.nested_valid_refs:
-            for src,refs in self.nested_valid_refs.iteritems():
+            for src,refs in iteritems(self.nested_valid_refs):
                 if refs == 0:
                     if verbose:
                         printer.println('Empty (Refs=0): Nested Valid '+repr(src)+
@@ -464,7 +480,7 @@ class Base(object):
                 src.report_references(printer, kind, verbose)
                 printer.up()
         if kind == REMOTE_REF_KIND and self.nested_remote_refs:
-            for src,refs in self.nested_remote_refs.iteritems():
+            for src,refs in iteritems(self.nested_remote_refs):
                 if refs == 0:
                     if verbose:
                         printer.println('Empty (Refs=0): Nested Remote '+repr(src)+
@@ -479,7 +495,7 @@ class Base(object):
                 src.report_references(printer, kind, verbose)
                 printer.up()
         if kind == RESOURCE_REF_KIND and self.nested_resource_refs:
-            for src,refs in self.nested_resource_refs.iteritems():
+            for src,refs in iteritems(self.nested_resource_refs):
                 if refs == 0:
                     if verbose:
                         printer.println('Empty (Refs=0): Nested Resource '+repr(src)+
@@ -508,30 +524,30 @@ class Base(object):
 
     def check_for_cycles_by_kind(self, stack, kind):
         if self.on_stack:
-            print 'CYCLE DETECTED!'
+            print('CYCLE DETECTED!')
             for obj in stack:
-                print '  '+repr(obj)
-            print 'Exiting...'
+                print('  '+repr(obj))
+            print('Exiting...')
             sys.exit(0)
         stack.append(self)
         self.on_stack = True
         if kind == GC_REF_KIND and self.nested_gc_refs:
-            for src,refs in self.nested_gc_refs.iteritems():
+            for src,refs in iteritems(self.nested_gc_refs):
                 if refs is 0:
                     continue
                 src.check_for_cycles_by_kind(stack, kind)
         if kind == VALID_REF_KIND and self.nested_valid_refs:
-            for src,refs in self.nested_valid_refs.iteritems():
+            for src,refs in iteritems(self.nested_valid_refs):
                 if refs is 0:
                     continue
                 src.check_for_cycles_by_kind(stack, kind)
         if kind == REMOTE_REF_KIND and self.nested_remote_refs:
-            for src,refs in self.nested_remote_refs.iteritems():
+            for src,refs in iteritems(self.nested_remote_refs):
                 if refs is 0:
                     continue
                 src.check_for_cycles_by_kind(stack, kind)
         if kind == RESOURCE_REF_KIND and self.nested_resource_refs:
-            for src,refs in self.nested_resource_refs.iteritems():
+            for src,refs in iteritems(self.nested_resource_refs):
                 if refs is 0:
                     continue
                 src.check_for_cycles_by_kind(stack, kind)
@@ -669,138 +685,139 @@ class State(object):
             matches = 0
             for line in log:
                 matches += 1
+                line = line.decode('utf-8')
                 m = add_base_ref_pat.match(line)
                 if m is not None:
                     self.log_add_base_ref(int(m.group('kind')),
-                                          long(m.group('did')),
-                                          long(m.group('node')),
+                                          long_type(m.group('did')),
+                                          long_type(m.group('node')),
                                           int(m.group('src')),
                                           int(m.group('cnt')))
                     continue
                 m = add_nested_ref_pat.match(line)
                 if m is not None:
                     self.log_add_nested_ref(int(m.group('kind')),
-                                            long(m.group('did')),
-                                            long(m.group('node')),
-                                            long(m.group('src')),
+                                            long_type(m.group('did')),
+                                            long_type(m.group('node')),
+                                            long_type(m.group('src')),
                                             int(m.group('cnt')))
                     continue
                 m = remove_base_ref_pat.match(line)
                 if m is not None:
                     self.log_remove_base_ref(int(m.group('kind')),
-                                             long(m.group('did')),
-                                             long(m.group('node')),
+                                             long_type(m.group('did')),
+                                             long_type(m.group('node')),
                                              int(m.group('src')),
                                              int(m.group('cnt')))
                     continue
                 m = remove_nested_ref_pat.match(line)
                 if m is not None:
                     self.log_remove_nested_ref(int(m.group('kind')),
-                                               long(m.group('did')),
-                                               long(m.group('node')),
-                                               long(m.group('src')),
+                                               long_type(m.group('did')),
+                                               long_type(m.group('node')),
+                                               long_type(m.group('src')),
                                                int(m.group('cnt')))
                     continue
                 m = inst_manager_pat.match(line)
                 if m is not None:
-                    self.log_inst_manager(long(m.group('did')),
-                                          long(m.group('node')), 
-                                          long(m.group('iid'),16),
-                                          long(m.group('mem'),16))
+                    self.log_inst_manager(long_type(m.group('did')),
+                                          long_type(m.group('node')), 
+                                          long_type(m.group('iid'),16),
+                                          long_type(m.group('mem'),16))
                     continue
                 m = list_manager_pat.match(line)
                 if m is not None:
-                    self.log_list_manager(long(m.group('did')),
-                                          long(m.gropu('node')),
-                                          long(m.group('iid'),16),
-                                          long(m.group('mem'),16))
+                    self.log_list_manager(long_type(m.group('did')),
+                                          long_type(m.gropu('node')),
+                                          long_type(m.group('iid'),16),
+                                          long_type(m.group('mem'),16))
                     continue
                 m = fold_manager_pat.match(line)
                 if m is not None:
-                    self.log_fold_manager(long(m.group('did')),
-                                          long(m.group('node')),
-                                          long(m.group('iid'),16),
-                                          long(m.group('mem'),16))
+                    self.log_fold_manager(long_type(m.group('did')),
+                                          long_type(m.group('node')),
+                                          long_type(m.group('iid'),16),
+                                          long_type(m.group('mem'),16))
                     continue
                 m = materialize_pat.match(line)
                 if m is not None:
-                    self.log_materialized_view(long(m.group('did')),
-                                               long(m.group('node')),
-                                               long(m.group('inst')))
+                    self.log_materialized_view(long_type(m.group('did')),
+                                               long_type(m.group('node')),
+                                               long_type(m.group('inst')))
                     continue
                 m = composite_pat.match(line)
                 if m is not None:
-                    self.log_composite_view(long(m.group('did')),
-                                            long(m.group('node')))
+                    self.log_composite_view(long_type(m.group('did')),
+                                            long_type(m.group('node')))
                     continue
                 m = fill_pat.match(line)
                 if m is not None:
-                    self.log_fill_view(long(m.group('did')),
-                                       long(m.group('node')))
+                    self.log_fill_view(long_type(m.group('did')),
+                                       long_type(m.group('node')))
                     continue
                 m = phi_pat.match(line)
                 if m is not None:
-                    self.log_phi_view(long(m.group('did')),
-                                      long(m.group('node')))
+                    self.log_phi_view(long_type(m.group('did')),
+                                      long_type(m.group('node')))
                 m = reduction_pat.match(line)
                 if m is not None:
-                    self.log_reduction_view(long(m.group('did')),
-                                            long(m.group('node')),
-                                            long(m.group('inst')))
+                    self.log_reduction_view(long_type(m.group('did')),
+                                            long_type(m.group('node')),
+                                            long_type(m.group('inst')))
                     continue
                 m = equivalence_set_pat.match(line)
                 if m is not None:
-                    self.log_equivalence_set(long(m.group('did')),
-                                             long(m.group('node')))
+                    self.log_equivalence_set(long_type(m.group('did')),
+                                             long_type(m.group('node')))
                     continue
                 m = future_pat.match(line)
                 if m is not None:
-                    self.log_future(long(m.group('did')),
-                                    long(m.group('node')))
+                    self.log_future(long_type(m.group('did')),
+                                    long_type(m.group('node')))
                     continue
                 m = future_map_pat.match(line)
                 if m is not None:
-                    self.log_future_map(long(m.group('did')),
-                                        long(m.group('node')))
+                    self.log_future_map(long_type(m.group('did')),
+                                        long_type(m.group('node')))
                     continue
                 m = constraints_pat.match(line)
                 if m is not None:
-                    self.log_constraints(long(m.group('did')),
-                                         long(m.group('node')))
+                    self.log_constraints(long_type(m.group('did')),
+                                         long_type(m.group('node')))
                     continue
                 m = index_space_pat.match(line)
                 if m is not None:
-                    self.log_index_space(long(m.group('did')),
-                                         long(m.group('node')),
-                                         long(m.group('handle')))
+                    self.log_index_space(long_type(m.group('did')),
+                                         long_type(m.group('node')),
+                                         long_type(m.group('handle')))
                     continue
                 m = index_part_pat.match(line)
                 if m is not None:
-                    self.log_index_partition(long(m.group('did')),
-                                             long(m.group('node')),
-                                             long(m.group('handle')))
+                    self.log_index_partition(long_type(m.group('did')),
+                                             long_type(m.group('node')),
+                                             long_type(m.group('handle')))
                     continue
                 m = field_space_pat.match(line)
                 if m is not None:
-                    self.log_field_space(long(m.group('did')),
-                                         long(m.group('node')),
-                                         long(m.group('handle')))
+                    self.log_field_space(long_type(m.group('did')),
+                                         long_type(m.group('node')),
+                                         long_type(m.group('handle')))
                     continue
                 m = region_pat.match(line)
                 if m is not None:
-                    self.log_region(long(m.group('did')),
-                                    long(m.group('node')),
-                                    long(m.group('is')),
-                                    long(m.group('fs')),
-                                    long(m.group('tid')))
+                    self.log_region(long_type(m.group('did')),
+                                    long_type(m.group('node')),
+                                    long_type(m.group('is')),
+                                    long_type(m.group('fs')),
+                                    long_type(m.group('tid')))
                     continue
                 m = partition_pat.match(line)
                 if m is not None:
-                    self.log_partition(long(m.group('did')),
-                                       long(m.group('node')),
-                                       long(m.group('ip')),
-                                       long(m.group('fs')),
-                                       long(m.group('tid')))
+                    self.log_partition(long_type(m.group('did')),
+                                       long_type(m.group('node')),
+                                       long_type(m.group('ip')),
+                                       long_type(m.group('fs')),
+                                       long_type(m.group('tid')))
                     continue
                 m = source_kind_pat.match(line)
                 if m is not None:
@@ -809,47 +826,47 @@ class State(object):
                     continue
                 m = deletion_pat.match(line)
                 if m is not None:
-                    self.log_deletion(long(m.group('did')),
-                                      long(m.group('node')))
+                    self.log_deletion(long_type(m.group('did')),
+                                      long_type(m.group('node')))
                     continue
                 matches -= 1
-                print 'Skipping unmatched line: '+line
+                print('Skipping unmatched line: '+line)
         return matches
 
     def post_parse(self):
         # Delete the virtual instance it is special
         to_del = list()
-        for key,val in self.unknowns.iteritems():
+        for key,val in iteritems(self.unknowns):
             if key[0] == 0:
                 to_del.append(key)
         for key in to_del:
             del self.unknowns[key]
         if self.unknowns:
-            print "WARNING: Found %d unknown objects!" % len(self.unknowns)
-            for did in self.unknowns.iterkeys():
-                print '  Unknown DID '+str(hex(did[0]))+' on node '+str(did[1])
+            print("WARNING: Found %d unknown objects!" % len(self.unknowns))
+            for did in iterkeys(self.unknowns):
+                print('  Unknown DID '+str(hex(did[0]))+' on node '+str(did[1]))
         # Now update all the pointers to references
-        for man in self.managers.itervalues():
+        for man in itervalues(self.managers):
             man.update_nested_references(self)
-        for view in self.views.itervalues():
+        for view in itervalues(self.views):
             view.update_nested_references(self)
-        for future in self.futures.itervalues():
+        for future in itervalues(self.futures):
             future.update_nested_references(self)
-        for future_map in self.future_maps.itervalues():
+        for future_map in itervalues(self.future_maps):
             future_map.update_nested_references(self)
-        for constraint in self.constraints.itervalues():
+        for constraint in itervalues(self.constraints):
             constraint.update_nested_references(self)
-        for state in self.equivalence_sets.itervalues():
+        for state in itervalues(self.equivalence_sets):
             state.update_nested_references(self)
-        for index_space in self.index_spaces.itervalues():
+        for index_space in itervalues(self.index_spaces):
             index_space.update_nested_references(self)
-        for index_part in self.index_partitions.itervalues():
+        for index_part in itervalues(self.index_partitions):
             index_part.update_nested_references(self)
-        for field_space in self.field_spaces.itervalues():
+        for field_space in itervalues(self.field_spaces):
             field_space.update_nested_references(self)
-        for region in self.regions.itervalues():
+        for region in itervalues(self.regions):
             region.update_nested_references(self)
-        for partition in self.partitions.itervalues():
+        for partition in itervalues(self.partitions):
             partition.update_nested_references(self)
         # Run the garbage collector
         gc.collect()
@@ -1075,39 +1092,39 @@ class State(object):
         return self.unknowns[key]
 
     def check_for_cycles(self):
-        for did,manager in self.managers.iteritems():
-            print "Checking for cycles in "+repr(manager)
+        for did,manager in iteritems(self.managers):
+            print("Checking for cycles in "+repr(manager))
             manager.check_for_cycles()
-        for did,view in self.views.iteritems():
-            print "Checking for cycles in "+repr(view)
+        for did,view in iteritems(self.views):
+            print("Checking for cycles in "+repr(view))
             view.check_for_cycles()
-        for did,future in self.futures.iteritems():
-            print "Checking for cycles in "+repr(future)
+        for did,future in iteritems(self.futures):
+            print("Checking for cycles in "+repr(future))
             future.check_for_cycles()
-        for did,future_map in self.future_maps.iteritems():
-            print "Checking for cycles in "+repr(future_map)
+        for did,future_map in iteritems(self.future_maps):
+            print("Checking for cycles in "+repr(future_map))
             future_map.check_for_cycles()
-        for did,eq in self.equivalence_sets.iteritems():
-            print "Checking for cycles in "+repr(eq)
+        for did,eq in iteritems(self.equivalence_sets):
+            print("Checking for cycles in "+repr(eq))
             eq.check_for_cycles()
-        for did,constraint in self.constraints.iteritems():
-            print "Checking for cycles in "+repr(constraint)
+        for did,constraint in iteritems(self.constraints):
+            print("Checking for cycles in "+repr(constraint))
             constraint.check_for_cycles()
-        for did,index_space in self.index_spaces.iteritems():
-            print "Checking for cycles in "+repr(index_space)
+        for did,index_space in iteritems(self.index_spaces):
+            print("Checking for cycles in "+repr(index_space))
             index_space.check_for_cycles()
-        for did,index_part in self.index_partitions.iteritems():
-            print "Checking for cycles in "+repr(index_part)
+        for did,index_part in iteritems(self.index_partitions):
+            print("Checking for cycles in "+repr(index_part))
             index_part.check_for_cycles()
-        for did,field_space in self.field_spaces.iteritems():
-            print "Checking for cycles in "+repr(field_space)
+        for did,field_space in iteritems(self.field_spaces):
+            print("Checking for cycles in "+repr(field_space))
             field_space.check_for_cycles();
-        for did,region in self.regions.iteritems():
-            print "Checking for cycles in "+repr(region)
+        for did,region in iteritems(self.regions):
+            print("Checking for cycles in "+repr(region))
             region.check_for_cycles()
-        for did,partition in self.partitions.iteritems():
-            print "Checking for cycles in "+repr(partition)
-        print "NO CYCLES"
+        for did,partition in iteritems(self.partitions):
+            print("Checking for cycles in "+repr(partition))
+        print("NO CYCLES")
 
     def check_for_leaks(self, verbose): 
         leaked_futures = 0
@@ -1122,98 +1139,98 @@ class State(object):
         leaked_field_spaces = 0
         leaked_regions = 0
         leaked_partitions = 0
-        for future in self.futures.itervalues():
+        for future in itervalues(self.futures):
             if not future.check_for_leaks(verbose):
                 leaked_futures += 1
-        for future_map in self.future_maps.itervalues():
+        for future_map in itervalues(self.future_maps):
             if not future_map.check_for_leaks(verbose):
                 leaked_future_maps += 1
-        for constraint in self.constraints.itervalues():
+        for constraint in itervalues(self.constraints):
             if not constraint.check_for_leaks(verbose): 
                 leaked_constraints += 1
-        for manager in self.managers.itervalues():
+        for manager in itervalues(self.managers):
             deleted,pinned = manager.check_for_leaks(verbose)
             if not deleted:
                 if pinned:
                     pinned_managers += 1
                 else:
                     leaked_managers += 1
-        for view in self.views.itervalues():
+        for view in itervalues(self.views):
             if not view.check_for_leaks(verbose):
                 leaked_views += 1
-        for eq in self.equivalence_sets.itervalues():
+        for eq in itervalues(self.equivalence_sets):
             if not eq.check_for_leaks(verbose):
                 leaked_eq_sets += 1
-        for index_space in self.index_spaces.itervalues():
+        for index_space in itervalues(self.index_spaces):
             if not index_space.check_for_leaks(verbose):
                 leaked_index_spaces += 1
-        for index_part in self.index_partitions.itervalues():
+        for index_part in itervalues(self.index_partitions):
             if not index_part.check_for_leaks(verbose):
                 leaked_index_partitions += 1
-        for field_space in self.field_spaces.itervalues():
+        for field_space in itervalues(self.field_spaces):
             if not field_space.check_for_leaks(verbose):
                 leaked_field_spaces += 1
-        for region in self.regions.itervalues():
+        for region in itervalues(self.regions):
             if not region.check_for_leaks(verbose):
                 leaked_regions += 1
-        for partition in self.partitions.itervalues():
+        for partition in itervalues(self.partitions):
             if not partition.check_for_leaks(verbose):
                 leaked_partitions += 1
-        print "LEAK SUMMARY"
+        print("LEAK SUMMARY")
         if leaked_futures > 0:
-            print "  LEAKED FUTURES: "+str(leaked_futures)
+            print("  LEAKED FUTURES: "+str(leaked_futures))
         else:
-            print "  Leaked Futures: "+str(leaked_futures)
+            print("  Leaked Futures: "+str(leaked_futures))
         if leaked_future_maps > 0:
-            print "  LEAKD FUTURE MAPS: "+str(leaked_future_maps)
+            print("  LEAKD FUTURE MAPS: "+str(leaked_future_maps))
         else:
-            print "  Leaked Future Maps: "+str(leaked_future_maps)
+            print("  Leaked Future Maps: "+str(leaked_future_maps))
         if leaked_constraints > 0:
-            print "  LEAKED CONSTRAINTS: "+str(leaked_constraints)
+            print("  LEAKED CONSTRAINTS: "+str(leaked_constraints))
         else:
-            print "  Leaked Constraints: "+str(leaked_constraints)
+            print("  Leaked Constraints: "+str(leaked_constraints))
         if leaked_managers > 0:
-            print "  LEAKED MANAGERS: "+str(leaked_managers)
+            print("  LEAKED MANAGERS: "+str(leaked_managers))
         else:
-            print "  Leaked Managers: "+str(leaked_managers)
+            print("  Leaked Managers: "+str(leaked_managers))
         if pinned_managers > 0:
-            print "  PINNED MANAGERS: "+str(pinned_managers)
+            print("  PINNED MANAGERS: "+str(pinned_managers))
         else:
-            print "  Pinned Managers: "+str(pinned_managers)
+            print("  Pinned Managers: "+str(pinned_managers))
         if leaked_views > 0:
-            print "  LEAKED VIEWS: "+str(leaked_views)
+            print("  LEAKED VIEWS: "+str(leaked_views))
         else:
-            print "  Leaked Views: "+str(leaked_views)
+            print("  Leaked Views: "+str(leaked_views))
         if leaked_eq_sets > 0:
-            print "  LEAKED EQUIVALENCE SETS: "+str(leaked_eq_sets)
+            print("  LEAKED EQUIVALENCE SETS: "+str(leaked_eq_sets))
         else:
-            print "  Leaked Equivalence Sets: "+str(leaked_eq_sets)
+            print("  Leaked Equivalence Sets: "+str(leaked_eq_sets))
         if leaked_index_spaces > 0:
-            print "  LEAKED INDEX SPACES: "+str(leaked_index_spaces)
+            print("  LEAKED INDEX SPACES: "+str(leaked_index_spaces))
         else:
-            print "  Leaked Index Spaces: "+str(leaked_index_spaces)
+            print("  Leaked Index Spaces: "+str(leaked_index_spaces))
         if leaked_index_partitions > 0:
-            print "  LEAKED INDEX PARTITIONS: "+str(leaked_index_partitions)
+            print("  LEAKED INDEX PARTITIONS: "+str(leaked_index_partitions))
         else:
-            print "  Leaked Index Partitions: "+str(leaked_index_partitions)
+            print("  Leaked Index Partitions: "+str(leaked_index_partitions))
         if leaked_field_spaces > 0:
-            print "  LEAKED FIELD SPACES: "+str(leaked_field_spaces)
+            print("  LEAKED FIELD SPACES: "+str(leaked_field_spaces))
         else:
-            print "  Leaked Field Spaces: "+str(leaked_field_spaces)
+            print("  Leaked Field Spaces: "+str(leaked_field_spaces))
         if leaked_regions > 0:
-            print "  LEAKED REGIONS: "+str(leaked_regions)
+            print("  LEAKED REGIONS: "+str(leaked_regions))
         else:
-            print "  Leaked Regions: "+str(leaked_regions)
+            print("  Leaked Regions: "+str(leaked_regions))
         if leaked_partitions > 0:
-            print "  LEAKED PARTITIONS: "+str(leaked_partitions)
+            print("  LEAKED PARTITIONS: "+str(leaked_partitions))
         else:
-            print "  Leaked Partitions: "+str(leaked_partitions)
+            print("  Leaked Partitions: "+str(leaked_partitions))
 
 def usage():
-    print 'Usage: '+sys.argv[0]+' [-c -l -v] <file_names>+'
-    print '  -c : check for cycles'
-    print '  -l : check for leaks'
-    print '  -v : verbose'
+    print('Usage: '+sys.argv[0]+' [-c -l -v] <file_names>+')
+    print('  -c : check for cycles')
+    print('  -l : check for leaks')
+    print('  -v : verbose')
     sys.exit(1)
 
 def main():
@@ -1236,13 +1253,13 @@ def main():
     state = State()
     has_matches = False
     for file_name in file_names:
-        print 'Reading log file %s...' % file_name
+        print('Reading log file %s...' % file_name)
         total_matches = state.parse_log_file(file_name)
-        print 'Matched %s lines' % total_matches
+        print('Matched %s lines' % total_matches)
         if total_matches > 0:
             has_matches = True
     if not has_matches:
-        print 'No matches found! Exiting...'
+        print('No matches found! Exiting...')
         return
 
     state.post_parse()

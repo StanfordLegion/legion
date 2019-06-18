@@ -14,6 +14,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from __future__ import absolute_import
+from __future__ import division
 from __future__ import print_function
 
 import tempfile
@@ -143,7 +145,9 @@ def slugify(filename):
     if (slugified[-1] == "L"):
         slugified = slugified[:-1]
     # remove special characters
-    slugified = slugified.translate(None, "!@#$%^&*(),/?<>\"':;{}[]|/+=`~")
+    slugified = slugified.translate("!@#$%^&*(),/?<>\"':;{}[]|/+=`~") if \
+            sys.version_info > (3,) else \
+            slugified.translate(None, "!@#$%^&*(),/?<>\"':;{}[]|/+=`~")
     return slugified
 
 # Helper function for computing nice colors
@@ -191,6 +195,15 @@ def color_helper(step, num_steps):
     b = "%02x" % b
     return ("#"+r+g+b)
 
+# Helper methods for python 2/3 foolishness
+def iteritems(obj):
+    return obj.items() if sys.version_info > (3,) else obj.viewitems()
+
+def iterkeys(obj):
+    return obj.keys() if sys.version_info > (3,) else obj.viewkeys()
+
+def itervalues(obj):
+    return obj.values() if sys.version_info > (3,) else obj.viewvalues()
 
 class PathRange(object):
     def __init__(self, start, stop, path):
@@ -202,9 +215,18 @@ class PathRange(object):
         self_elapsed = self.elapsed()
         other_elapsed = other.elapsed()
         if self_elapsed == other_elapsed:
-            return cmp(len(self.path), len(other.path))
+            return len(other.path) - len(self.path)
         else:
-            return cmp(self_elapsed, other_elapsed)
+            if self_elapsed < other_elapsed:
+                return -1
+            elif self_elapsed == other_elapsed:
+                return 0
+            else:
+                return 1
+    def __lt__(self, other):
+        return self.__cmp__(other) < 0
+    def __gt__(self, other):
+        return self.__cmp__(other) > 0
     def clone(self):
         return PathRange(self.start, self.stop, self.path)
     def elapsed(self):
@@ -293,12 +315,9 @@ class HasNoDependencies(HasDependencies):
 
 class TimeRange(object):
     def __init__(self, create, ready, start, stop):
-        if (ready > start):
-            print("ready = " + str(ready))
-            print("start = " + str(start))
-        assert create <= ready
-        assert ready <= start
-        assert start <= stop
+        assert create is None or create <= ready
+        assert ready is None or ready <= start
+        assert start is None or start <= stop
         self.create = create
         self.ready = ready
         self.start = start
@@ -321,6 +340,12 @@ class TimeRange(object):
         if self.stop < other.stop:
             return 1
         return 0
+
+    def __lt__(self, other):
+        return self.__cmp__(other) < 0
+
+    def __gt__(self, other):
+        return self.__cmp__(other) > 0
 
     def __repr__(self):
         return "Start: %d us  Stop: %d us  Total: %d us" % (
@@ -621,8 +646,13 @@ class Processor(object):
         return '%s Processor %s' % (self.kind, hex(self.proc_id))
 
     def __cmp__(a, b):
-        return cmp(a.proc_id, b.proc_id)
+        return b.proc_id - a.proc_id;
 
+    def __lt__(self, other):
+        return self.__cmp__(other) < 0
+
+    def __gt__(self, other):
+        return self.__cmp__(other) > 0
 
 class TimePoint(object):
     def __init__(self, time, thing, first):
@@ -632,8 +662,16 @@ class TimePoint(object):
         self.first = first
         self.time_key = 2*time + (0 if first is True else 1)
     def __cmp__(a, b):
-        return cmp(a.time_key, b.time_key)
-
+        if a.time_key < b.time_key:
+            return -1
+        elif a.time_key > b.time_key:
+            return 1
+        else:
+            return 0
+    def __lt__(self, other):
+        return self.__cmp__(other) < 0
+    def __gt__(self, other):
+        return self.__cmp__(other) > 0
 
 class Memory(object):
     def __init__(self, mem_id, kind, capacity):
@@ -732,7 +770,7 @@ class Memory(object):
         previous_time = 0
         for point in sorted(self.time_points,key=lambda p: p.time_key):
             # First do the math for the previous interval
-            usage = float(current_size)/float(self.capacity) if self.capacity <> 0 else 0
+            usage = float(current_size)/float(self.capacity) if self.capacity != 0 else 0
             if usage > max_usage:
                 max_usage = usage
             duration = point.time - previous_time
@@ -758,8 +796,13 @@ class Memory(object):
         return '%s Memory %s' % (self.kind, hex(self.mem_id))
 
     def __cmp__(a, b):
-        return cmp(a.mem_id, b.mem_id)
+        return b.mem_id - a.mem_id
 
+    def __lt__(self, other):
+        return self.__cmp__(other) < 0
+
+    def __gt__(self, other):
+        return self.__cmp__(other) > 0
 
 class MemProcAffinity(object):
     def __init__(self, mem, proc):
@@ -928,7 +971,7 @@ class Channel(object):
     def __cmp__(a, b):
         if a.dst:
             if b.dst:
-                return cmp(a.dst, b.dst)
+                return a.dst.__cmp__(b.dst)
             else:
                 return 1
         else:
@@ -936,6 +979,12 @@ class Channel(object):
                 return -1
             else:
                 return 0
+
+    def __lt__(self, other):
+        return self.__cmp__(other) < 0
+
+    def __gt__(self, other):
+        return self.__cmp__(other) > 0
 
 class WaitInterval(object):
     def __init__(self, start, ready, end):
@@ -961,13 +1010,13 @@ class StatObject(object):
 
     def get_total_execution_time(self):
         total_execution_time = 0
-        for proc_exec_time in self.total_execution_time.itervalues():
+        for proc_exec_time in itervalues(self.total_execution_time):
             total_execution_time += proc_exec_time
         return total_execution_time
 
     def get_total_calls(self):
         total_calls = 0
-        for proc_calls in self.total_calls.itervalues():
+        for proc_calls in itervalues(self.total_calls.itervalues):
             total_calls += proc_calls
         return total_calls
 
@@ -991,7 +1040,7 @@ class StatObject(object):
         print('       Minimum Time: %d us (%.3f sig)' % (min_call,min_dev))
 
     def print_stats(self, verbose):
-        procs = sorted(self.total_calls.iterkeys())
+        procs = sorted(iterkeys(self.total_calls))
         total_execution_time = self.get_total_execution_time()
         total_calls = self.get_total_calls()
 
@@ -1014,7 +1063,7 @@ class StatObject(object):
         print()
 
         if verbose and len(procs) > 1:
-            for proc in sorted(self.total_calls.iterkeys()):
+            for proc in sorted(iterkeys(self.total_calls)):
                 avg = float(self.total_execution_time[proc]) / float(self.total_calls[proc]) \
                         if self.total_calls[proc] > 0 else 0
                 stddev = 0
@@ -1060,7 +1109,7 @@ class Variant(StatObject):
     def __repr__(self):
         if self.task_kind:
             title = self.task_kind.name
-            if self.name <> None and self.name <> self.task_kind.name:
+            if self.name != None and self.name != self.task_kind.name:
                 title += ' ['+self.name+']'
         else:
             title = self.name
@@ -1130,7 +1179,7 @@ class Operation(Base):
         if self.is_task:
             assert self.variant is not None
             title = self.variant.task_kind.name if self.variant.task_kind is not None else 'unnamed'
-            if self.variant.name <> None and self.variant.name.find("unnamed") > 0:
+            if self.variant.name != None and self.variant.name.find("unnamed") > 0:
                 title += ' ['+self.variant.name+']'
             return title+' '+self.get_info()
         elif self.is_multi:
@@ -1303,7 +1352,7 @@ class Task(Operation, TimeRange, HasDependencies, HasWaiters):
     def __repr__(self):
         assert self.variant is not None
         title = self.variant.task_kind.name if self.variant.task_kind is not None else 'unnamed'
-        if self.variant.name <> None and self.variant.name.find("unnamed") > 0:
+        if self.variant.name != None and self.variant.name.find("unnamed") > 0:
             title += ' ['+self.variant.name+']'
         return title+' '+self.get_info()
 
@@ -2053,7 +2102,7 @@ class StatGatherer(object):
         self.mapper_tasks = set()
         self.runtime_tasks = set()
         self.message_tasks = set()
-        for proc in state.processors.itervalues():
+        for proc in itervalues(state.processors):
             for task in proc.tasks:
                 if isinstance(task, Task):
                     self.application_tasks.add(task.variant)
@@ -2128,7 +2177,7 @@ class State(object):
         self.multi_tasks = {}
         self.first_times = {}
         self.last_times = {}
-        self.last_time = 0L
+        self.last_time = 0
         self.message_kinds = {}
         self.messages = {}
         self.mapper_call_kinds = {}
@@ -2696,11 +2745,11 @@ class State(object):
             stop = None
         if start is None and stop is None:
             return
-        for proc in self.processors.itervalues():
+        for proc in itervalues(self.processors):
             proc.trim_time_range(start, stop)
-        for mem in self.memories.itervalues():
+        for mem in itervalues(self.memories):
             mem.trim_time_range(start, stop)
-        for channel in self.channels.itervalues():
+        for channel in itervalues(self.channels):
             channel.trim_time_range(start, stop)
         if start is not None and stop is not None:
             self.last_time = stop - start
@@ -2712,13 +2761,13 @@ class State(object):
     def sort_time_ranges(self):
         assert self.last_time is not None 
         # Processors first
-        for proc in self.processors.itervalues():
+        for proc in itervalues(self.processors):
             proc.last_time = self.last_time
             proc.sort_time_range()
-        for mem in self.memories.itervalues():
+        for mem in itervalues(self.memories):
             mem.init_time_range(self.last_time)
             mem.sort_time_range()
-        for channel in self.channels.itervalues():
+        for channel in itervalues(self.channels):
             channel.init_time_range(self.last_time)
             channel.sort_time_range()
 
@@ -2726,7 +2775,7 @@ class State(object):
         print('****************************************************')
         print('   PROCESSOR STATS')
         print('****************************************************')
-        for proc in sorted(self.processors.itervalues()):
+        for proc in sorted(itervalues(self.processors)):
             proc.print_stats(verbose)
         print
 
@@ -2734,7 +2783,7 @@ class State(object):
         print('****************************************************')
         print('   MEMORY STATS')
         print('****************************************************')
-        for mem in sorted(self.memories.itervalues()):
+        for mem in sorted(itervalues(self.memories)):
             mem.print_stats(verbose)
         print
 
@@ -2742,7 +2791,7 @@ class State(object):
         print('****************************************************')
         print('   CHANNEL STATS')
         print('****************************************************')
-        for channel in sorted(self.channels.itervalues()):
+        for channel in sorted(itervalues(self.channels)):
             channel.print_stats(verbose)
         print
 
@@ -2769,9 +2818,9 @@ class State(object):
         lsfr = LFSR(num_colors)
         num_colors = lsfr.get_max_value()
         op_colors = {}
-        for variant in self.variants.itervalues():
+        for variant in itervalues(self.variants):
             variant.compute_color(lsfr.get_next(), num_colors)
-        for variant in self.meta_variants.itervalues():
+        for variant in itervalues(self.meta_variants):
             if variant.variant_id == 1: # Remote message
                 variant.assign_color('#006600') # Evergreen
             elif variant.variant_id == 2: # Post-Execution
@@ -2786,16 +2835,16 @@ class State(object):
                 variant.assign_color('#009900') #Green
             else:
                 variant.compute_color(lsfr.get_next(), num_colors)
-        for kind in self.op_kinds.iterkeys():
+        for kind in iterkeys(self.op_kinds):
             op_colors[kind] = color_helper(lsfr.get_next(), num_colors)
         # Now we need to assign all the operations colors
-        for op in self.operations.itervalues():
+        for op in itervalues(self.operations):
             op.assign_color(op_colors)
         # Assign all the message kinds different colors
         for kinds in (self.message_kinds,
                       self.mapper_call_kinds,
                       self.runtime_call_kinds):
-            for kind in kinds.itervalues():
+            for kind in itervalues(kinds):
                 kind.assign_color(color_helper(lsfr.get_next(), num_colors))
 
     def show_copy_matrix(self, output_prefix):
@@ -2806,7 +2855,7 @@ class State(object):
 
         def node_id(memory):
             return (memory.mem_id >> 23) & ((1 << 5) - 1)
-        memories = sorted(self.memories.itervalues())
+        memories = sorted(itervalues(self.memories))
 
         tsv_file = open(tsv_file_name, "w")
         tsv_file.write("source\ttarget\tremote\ttotal\tcount\taverage\tbandwidth\n")
@@ -2814,7 +2863,7 @@ class State(object):
             for j in range(0, len(memories)):
                 src = memories[i]
                 dst = memories[j]
-                is_remote = node_id(src) <> node_id(dst) or \
+                is_remote = node_id(src) != node_id(dst) or \
                     src.kind == memory_kinds[0] or \
                     dst.kind == memory_kinds[0]
                 sum = 0.0
@@ -2947,7 +2996,7 @@ class State(object):
     # group by processor kind per node. Also compute the children relationships
     def group_node_proc_kind_timepoints(self, timepoints_dict):
         # procs
-        for proc in self.processors.itervalues():
+        for proc in itervalues(self.processors):
             if len(proc.tasks) > 0:
                 # add this processor kind to both all and the node group
                 groups = [str(proc.node_id), "all"]
@@ -2958,7 +3007,7 @@ class State(object):
                     else:
                         timepoints_dict[group].append(proc.util_time_points)
         # memories
-        for mem in self.memories.itervalues():
+        for mem in itervalues(self.memories):
             if len(mem.time_points) > 0:
                 # add this memory kind to both the all and the node group
                 groups = [str(mem.node_id), "all"]
@@ -2969,7 +3018,7 @@ class State(object):
                     else:
                         timepoints_dict[group].append(mem.time_points)
         # channels
-        for channel in self.channels.itervalues():
+        for channel in itervalues(self.channels):
             if len(channel.time_points) > 0:
                 # add this channel to both the all and the node group
                 if (channel.node_id() != None):
@@ -2988,7 +3037,7 @@ class State(object):
 
     def get_nodes(self):
         nodes = {}
-        for proc in self.processors.itervalues():
+        for proc in itervalues(self.processors):
             if len(proc.tasks) > 0:
                 nodes[str(proc.node_id)] = 1
         if (len(nodes) > 1):
@@ -3012,11 +3061,11 @@ class State(object):
 
         # for each node grouping, add all the subtypes of processors
         for node in nodes:
-            for kind in processor_kinds.itervalues():
+            for kind in itervalues(processor_kinds):
                 group = str(node) + " (" + kind + ")"
                 if group in timepoints_dict:
                     stats_structure[node].append(group)
-            for kind in memory_kinds.itervalues():
+            for kind in itervalues(memory_kinds):
                 group = str(node) + " (" + kind + " Memory)"
                 if group in timepoints_dict:
                     stats_structure[node].append(group)
@@ -3079,14 +3128,14 @@ class State(object):
         # pointers until we get to an existing op
         transitive_map = {"in": {}, "out": {}, "parents": {}, "children": {}}
 
-        for _dir in transitive_map.iterkeys():
-            for op_id in op_dependencies.iterkeys():
+        for _dir in iterkeys(transitive_map):
+            for op_id in iterkeys(op_dependencies):
                 if not op_id in transitive_map[_dir]:
                     self.simplify_op(op_dependencies, op_existence_set,
                                      transitive_map, [op_id], _dir)
 
-        for op_id in op_dependencies.iterkeys():
-            for _dir in transitive_map.iterkeys():
+        for op_id in iterkeys(op_dependencies):
+            for _dir in iterkeys(transitive_map):
                 if len(op_dependencies[op_id][_dir]) > 0:
                     # replace each op with the transitive map
                     transformed_dependencies = [transitive_map[_dir][op]
@@ -3121,7 +3170,7 @@ class State(object):
         # compute the slice_index, slice_slice, and point_slice dependencies
         # (which legion_spy throws away). We just need to copy this data over
         # before legion spy throws it away
-        for _slice, index in self.spy_state.slice_index.iteritems():
+        for _slice, index in iteritems(self.spy_state.slice_index):
             while _slice in self.spy_state.slice_slice:
                 _slice = self.spy_state.slice_slice[_slice]
             if index.uid not in op_dependencies:
@@ -3141,7 +3190,7 @@ class State(object):
             op_dependencies[index.uid]["out"].add(_slice)
             op_dependencies[_slice]["in"].add(index.uid)
 
-        for _slice1, _slice2 in self.spy_state.slice_slice.iteritems():
+        for _slice1, _slice2 in iteritems(self.spy_state.slice_slice):
             if _slice1 not in op_dependencies:
                 op_dependencies[_slice1] = {
                     "in" : set(), 
@@ -3159,7 +3208,7 @@ class State(object):
             op_dependencies[_slice1]["out"].add(_slice2)
             op_dependencies[_slice2]["in"].add(_slice1)
 
-        for point, _slice in self.spy_state.point_slice.iteritems():
+        for point, _slice in iteritems(self.spy_state.point_slice):
             while _slice in self.spy_state.slice_slice:
                 _slice = self.spy_state.slice_slice[_slice]
             if _slice not in op_dependencies:
@@ -3220,7 +3269,7 @@ class State(object):
 
 
         # compute implicit dependencies
-        for op in self.spy_state.ops.itervalues():
+        for op in itervalues(self.spy_state.ops):
             if op.context is not None:
                 child_uid = op.uid
                 parent_uid = op.context.op.uid
@@ -3246,7 +3295,7 @@ class State(object):
         # actually executed
         op_existence_set = set()
 
-        for op_id, operation in self.operations.iteritems():
+        for op_id, operation in iteritems(self.operations):
             if operation.proc is not None:
                 op_existence_set.add(op_id)
 
@@ -3269,11 +3318,11 @@ class State(object):
                                                    op_dependencies[op_id][_dir]))
 
     def add_initiation_dependencies(self, state, op_dependencies, transitive_map):
-        for proc in self.processors.itervalues():
+        for proc in itervalues(self.processors):
             proc.add_initiation_dependencies(state, op_dependencies, transitive_map)
 
     def attach_dependencies(self, op_dependencies, transitive_map):
-        for proc in self.processors.itervalues():
+        for proc in itervalues(self.processors):
             proc.attach_dependencies(self, op_dependencies, transitive_map)
 
     # traverse one op to get the max outbound path from this point
@@ -3319,7 +3368,7 @@ class State(object):
     def compute_critical_path(self):
         paths = []
         # compute the critical path for each task
-        for proc in self.processors.itervalues():
+        for proc in itervalues(self.processors):
             for task in proc.tasks:
                 if (len(task.deps["parents"]) > 0) or (len(task.deps["out"]) > 0):
                     path = self.traverse_op_for_critical_path(task)
@@ -3416,7 +3465,7 @@ class State(object):
 
         ops_file = open(ops_file_name, "w")
         ops_file.write("op_id\tdesc\tproc\tlevel\n")
-        for op_id, operation in self.operations.iteritems():
+        for op_id, operation in iteritems(self.operations):
             if operation.is_trimmed():
                 continue
             proc = ""
@@ -3429,13 +3478,13 @@ class State(object):
         ops_file.close()
 
         if show_procs:
-            for proc in self.processors.itervalues():
+            for proc in itervalues(self.processors):
                 if self.has_spy_data and len(proc.tasks) > 0:
                     proc.add_initiation_dependencies(self, op_dependencies,
                                                      transitive_map)
                     self.convert_op_ids_to_tuples(op_dependencies)
 
-            for p,proc in sorted(self.processors.iteritems(), key=lambda x: x[1]):
+            for p,proc in sorted(iteritems(self.processors), key=lambda x: x[1]):
                 if len(proc.tasks) > 0:
                     if self.has_spy_data:
                         proc.attach_dependencies(self, op_dependencies,
@@ -3454,7 +3503,7 @@ class State(object):
 
                     last_time = max(last_time, proc.last_time)
         if show_channels:
-            for c,chan in sorted(self.channels.iteritems(), key=lambda x: x[1]):
+            for c,chan in sorted(iteritems(self.channels), key=lambda x: x[1]):
                 if len(chan.copies) > 0:
                     chan_name = slugify(str(c))
                     chan_tsv_file_name = os.path.join(tsv_dir, chan_name + ".tsv")
@@ -3470,7 +3519,7 @@ class State(object):
 
                     last_time = max(last_time, chan.last_time)
         if show_instances:
-            for m,mem in sorted(self.memories.iteritems(), key=lambda x: x[1]):
+            for m,mem in sorted(iteritems(self.memories), key=lambda x: x[1]):
                 if len(mem.instances) > 0:
                     mem_name = slugify("Mem_" + str(hex(m)))
                     mem_tsv_file_name = os.path.join(tsv_dir, mem_name + ".tsv")

@@ -14,9 +14,13 @@
 # limitations under the License.
 #
 
+USE_OPENMP ?= 0
 ifeq ($(shell uname -s),Darwin)
 DARWIN = 1
 CC_FLAGS += -DDARWIN
+ifeq ($(strip $(USE_OPENMP)),1)
+$(warning "Some versions of Clang on Mac OSX do not support OpenMP")
+endif
 else
 #use disk unless on DARWIN 
 CC_FLAGS += -DUSE_DISK 
@@ -196,9 +200,13 @@ ifeq ($(strip $(USE_LLVM)),1)
   LEGION_LD_FLAGS += $(LLVM_LIBS) $(LLVM_SYSTEM_LIBS)
 endif
 
-USE_OPENMP ?= 0
+OMP_FLAGS ?=
 ifeq ($(strip $(USE_OPENMP)),1)
   CC_FLAGS += -DREALM_USE_OPENMP
+  # Add the -fopenmp flag for Linux, but not for Mac as clang doesn't need it
+  #ifneq ($(strip $(DARWIN)),1)
+  OMP_FLAGS += -fopenmp 
+  #endif
   REALM_OPENMP_GOMP_SUPPORT ?= 1
   ifeq ($(strip $(REALM_OPENMP_GOMP_SUPPORT)),1)
     CC_FLAGS += -DREALM_OPENMP_GOMP_SUPPORT
@@ -630,7 +638,7 @@ $(SLIB_REALM) : $(REALM_OBJS)
 	$(AR) rc $@ $^
 
 $(GEN_OBJS) : %.cc.o : %.cc
-	$(CXX) -o $@ -c $< $(CC_FLAGS) $(INC_FLAGS)
+	$(CXX) -o $@ -c $< $(CC_FLAGS) $(INC_FLAGS) $(OMP_FLAGS)
 
 $(ASM_OBJS) : %.S.o : %.S
 	$(CXX) -o $@ -c $< $(CC_FLAGS) $(INC_FLAGS)
