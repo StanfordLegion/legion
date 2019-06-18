@@ -685,7 +685,9 @@ class State(object):
             matches = 0
             for line in log:
                 matches += 1
-                line = line.decode('utf-8')
+                # Python 2/3 foolishness
+                if sys.version_info > (3,):
+                    line = line.decode('utf-8')
                 m = add_base_ref_pat.match(line)
                 if m is not None:
                     self.log_add_base_ref(int(m.group('kind')),
