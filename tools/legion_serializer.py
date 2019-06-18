@@ -30,6 +30,8 @@ import sys
 def iteritems(obj):
     return obj.items() if sys.version_info > (3,) else obj.viewitems()
 
+long_type = int if sys.version_info > (3,) else eval("long")
+
 binary_filetype_pat = re.compile(b"FileType: BinaryLegionProf v: (?P<version>\d+(\.\d+)?)") \
         if sys.version_info > (3,) else \
                         re.compile(r"FileType: BinaryLegionProf v: (?P<version>\d+(\.\d+)?)")
@@ -61,7 +63,7 @@ class LegionDeserializer(object):
         raise NotImplementedError
 
 def read_time(string):
-    return int(string) // 1000 if sys.version_info > (3,) else eval("long("+string+") // 1000")
+    return long_type(string) // 1000
 
 def read_max_dim(string):
     global max_dim_val
@@ -127,10 +129,10 @@ class LegionProfASCIIDeserializer(LegionDeserializer):
         # "UserInfo": re.compile(prefix + r'Prof User Info (?P<proc_id>[a-f0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+) (?P<name>[$()a-zA-Z0-9_]+)')
     }
     parse_callbacks = {
-        "op_id": int if sys.version_info > (3,) else eval("long"),
-        "parent_id": int if sys.version_info > (3,) else eval("long"),
-        "size": int if sys.version_info > (3,) else eval("long"),
-        "capacity": int if sys.version_info > (3,) else eval("long"),
+        "op_id": long_type,
+        "parent_id": long_type,
+        "size": long_type,
+        "capacity": long_type,
         "variant_id": int,
         "lg_id": int,
         "uid": int,
@@ -140,14 +142,14 @@ class LegionProfASCIIDeserializer(LegionDeserializer):
         "opkind": int,
         "part_op": int,
         "point": int,
-        "point0": int if sys.version_info > (3,) else eval("long"),
-        "point1": int if sys.version_info > (3,) else eval("long"),
-        "point2": int if sys.version_info > (3,) else eval("long"),
+        "point0": long_type,
+        "point1": long_type,
+        "point2": long_type,
         "dim": int,
         "field_id": int,
         "fspace_id": int,
-        "ispace_id": int if sys.version_info > (3,) else eval("long"),
-        "unique_id": int if sys.version_info > (3,) else eval("long"),
+        "ispace_id": long_type,
+        "unique_id": long_type,
         "disjoint": bool,
         "tree_id": int,
         "maxdim": read_max_dim,
@@ -176,8 +178,7 @@ class LegionProfASCIIDeserializer(LegionDeserializer):
         LegionDeserializer.__init__(self, state, callbacks)
         assert len(callbacks) == len(LegionProfASCIIDeserializer.patterns)
         callbacks_valid = True
-        for callback_name, callback in callbacks.items() if \
-                sys.version_info > (3,) else callbacks.viewitems():
+        for callback_name, callback in iteritems(callbacks):
             cur_valid = callback_name in LegionProfASCIIDeserializer.patterns and \
                         callable(callback)
             callbacks_valid = callbacks_valid and cur_valid
@@ -186,8 +187,7 @@ class LegionProfASCIIDeserializer(LegionDeserializer):
     def parse_regex_matches(self, m):
         kwargs = m.groupdict()
 
-        for key, arg in kwargs.items() if \
-                sys.version_info > (3,) else kwargs.viewitems():
+        for key, arg in iteritems(kwargs.items()):
             kwargs[key] = LegionProfASCIIDeserializer.parse_callbacks[key](arg)
         return kwargs
 
@@ -204,8 +204,8 @@ class LegionProfASCIIDeserializer(LegionDeserializer):
         with open(filename, 'rb') as log:
             matches = 0
             # Keep track of the first and last times
-            first_time = 0 if sys.version_info > (3,) else eval("0L")
-            last_time = 0 if sys.version_info > (3,) else eval("0L")
+            first_time = 0
+            last_time = 0
             for line in log:
                 if not self.state.has_spy_data and \
                     (legion_spy.config_pat.match(line) or \
@@ -349,8 +349,7 @@ class LegionProfBinaryDeserializer(LegionDeserializer):
         # change the callbacks to be by id
         if not self.callbacks_translated:
             new_callbacks = {LegionProfBinaryDeserializer.name_to_id[name]: callback 
-                               for name, callback in (self.callbacks.items() if \
-                                   sys.version_info > (3,) else self.callbacks.viewitems())
+                               for name, callback in iteritems(self.callbacks)
                                if name in LegionProfBinaryDeserializer.name_to_id}
             self.callbacks = new_callbacks
             self.callbacks_translated = True

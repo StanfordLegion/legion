@@ -2177,7 +2177,7 @@ class State(object):
         self.multi_tasks = {}
         self.first_times = {}
         self.last_times = {}
-        self.last_time = 0 if sys.version_info > (3,) else eval("0L")
+        self.last_time = 0
         self.message_kinds = {}
         self.messages = {}
         self.mapper_call_kinds = {}
