@@ -18,6 +18,8 @@
 # TODO LIST
 # Support predication for physical analysis
 
+from __future__ import absolute_import
+from __future__ import division
 from __future__ import print_function
 
 import argparse
@@ -125,6 +127,16 @@ INDEX_SPACE_EXPR = 0
 UNION_EXPR = 1
 INTERSECT_EXPR = 2
 DIFFERENCE_EXPR = 3,
+
+# Helper methods for python 2/3 foolishness
+def iteritems(obj):
+    return obj.items() if sys.version_info > (3,) else obj.viewitems()
+
+def iterkeys(obj):
+    return obj.keys() if sys.version_info > (3,) else obj.viewkeys()
+
+def itervalues(obj):
+    return obj.values() if sys.version_info > (3,) else obj.viewvalues()
 
 def check_for_anti_dependence(req1, req2, actual):
     if req1.is_read_only():
@@ -2113,7 +2125,7 @@ class NodeSet(object):
                     mask = 1 << offset
                     self.impl[index] |= mask
             else:
-                for index in xrange(self.bound):
+                for index in range(self.bound):
                     self.impl[index] |= other.impl[index]
 
     def contains(self, node):
@@ -2158,7 +2170,7 @@ class Processor(object):
             (self.node_name, label))
 
     def print_mem_edges(self, printer):
-        for mem,band in self.mem_bandwidth.iteritems():
+        for mem,band in iteritems(self.mem_bandwidth):
             label = 'bandwidth=%s,latency=%s' % (band, self.mem_latency[mem])
             printer.println(
                 '%s -> %s [label="%s",style=solid,color=black,penwidth=2];' %
@@ -2207,7 +2219,7 @@ class Memory(object):
             (self.node_name, label))
 
     def print_mem_edges(self, printer):
-        for mem,band in self.mem_bandwidth.iteritems():
+        for mem,band in iteritems(self.mem_bandwidth):
             label = 'bandwidth=%s,latency=%s' % (band, self.mem_latency[mem])
             printer.println(
                 '%s -> %s [label="%s",style=solid,color=black,penwidth=2];' %
@@ -2351,7 +2363,7 @@ class IndexSpace(object):
 
     def update_depth(self, parent_depth):
         self.depth = parent_depth + 1
-        for child in self.children.itervalues():
+        for child in itervalues(self.children):
             child.update_depth(self.depth)
 
     def add_child(self, child):
@@ -2390,7 +2402,7 @@ class IndexSpace(object):
         local_points = self.shape.copy()
         new_sets = dict()
         del_sets = list()
-        for shape,index_set in index_sets.iteritems():
+        for shape,index_set in iteritems(index_sets):
             intersect = local_points & shape
             # No overlap so keep going
             if intersect.empty():
@@ -2417,7 +2429,7 @@ class IndexSpace(object):
         for key in del_sets:
             del index_sets[key]
         # Add the new entries
-        for shape,index_set in new_sets.iteritems():
+        for shape,index_set in iteritems(new_sets):
             index_sets[shape] = index_set
         # If we had left over points, add them as a new set
         if not local_points.empty():
@@ -2425,7 +2437,7 @@ class IndexSpace(object):
             index_set.add(self)
             index_sets[local_points] = index_set   
         # Traverse the children
-        for child in self.children.itervalues():
+        for child in itervalues(self.children):
             child.update_index_sets(index_sets)                
 
     def add_refined_point(self, point):
@@ -2448,7 +2460,7 @@ class IndexSpace(object):
 
     def check_partition_properties(self):
         # Check all the partitions
-        for child in self.children.itervalues():
+        for child in itervalues(self.children):
             child.check_partition_properties()
 
     def compute_reduced_shapes(self, dim_sets):
@@ -2530,7 +2542,7 @@ class IndexSpace(object):
                 label = 'subspace %s' % self.uid
         if self.parent is not None:
             color = None
-            for c, child in self.parent.children.iteritems():
+            for c, child in iteritems(self.parent.children):
                 if child == self:
                     color = c
                     break
@@ -2539,9 +2551,9 @@ class IndexSpace(object):
         printer.println('%s [label="%s",shape=plaintext,fontsize=14,fontcolor=black,fontname="Helvetica"];' %
                         (self.node_name, label))
         # print links to children
-        for child in self.children.itervalues():
+        for child in itervalues(self.children):
             child.print_link_to_parent(printer, self.node_name)
-        for child in self.children.itervalues():
+        for child in itervalues(self.children):
             child.print_graph(printer)
 
     def print_tree(self):
@@ -2553,7 +2565,7 @@ class IndexSpace(object):
             for i in range(self.depth):
                 prefix += '  '
             print('%s%s Color: %s' % (prefix, self, self.color.to_string()))
-        for child in self.children.itervalues():
+        for child in itervalues(self.children):
             child.print_tree()
         if self.depth == 0:
             print("---------------------------------------")
@@ -2586,7 +2598,7 @@ class IndexPartition(object):
 
     def update_depth(self, parent_depth):
         self.depth = parent_depth + 1
-        for child in self.children.itervalues():
+        for child in itervalues(self.children):
             child.update_depth(self.depth)
 
     def set_disjoint(self, disjoint):
@@ -2611,7 +2623,7 @@ class IndexPartition(object):
 
     def check_partition_properties(self):
         # Check for dominance of children by parent
-        for child in self.children.itervalues():
+        for child in itervalues(self.children):
             if not self.parent.dominates(child):
                 print(('WARNING: child %s is not dominated by parent %s in %s. '+
                       'This is definitely an application bug.') %
@@ -2623,7 +2635,7 @@ class IndexPartition(object):
         # Check disjointness
         if self.disjoint:
             previous = PointSet()
-            for child in self.children.itervalues():
+            for child in itervalues(self.children):
                 child_shape = child.get_point_set()
                 if not (child_shape & previous).empty():
                     print(('WARNING: %s was logged disjoint '+
@@ -2635,7 +2647,7 @@ class IndexPartition(object):
                 previous |= child_shape
         if self.complete:
             total = PointSet()
-            for child in self.children.itervalues():
+            for child in itervalues(self.children):
                 total |= child.get_point_set()
             if len(total) != len(self.parent.get_point_set()):
                 print(('WARNING: %s was logged complete '+
@@ -2645,7 +2657,7 @@ class IndexPartition(object):
                     assert False
 
     def update_index_sets(self, index_sets):
-        for child in self.children.itervalues():
+        for child in itervalues(self.children):
             child.update_index_sets(index_sets)
 
     def are_all_children_disjoint(self):
@@ -2660,7 +2672,7 @@ class IndexPartition(object):
 
     def get_shape(self):
         if self.shape is None:
-            for child in self.children.itervalues():
+            for child in itervalues(self.children):
                 if self.shape is None:
                     self.shape = child.get_shape().copy()
                 else:
@@ -2669,7 +2681,7 @@ class IndexPartition(object):
 
     def get_point_set(self):
         if self.point_set is None:
-            for child in self.children.itervalues():
+            for child in itervalues(self.children):
                 if self.point_set is None:
                     self.point_set = child.get_point_set().copy()
                 else:
@@ -2728,7 +2740,7 @@ class IndexPartition(object):
         else:
             label = 'Index Partition '+str(self.uid)
         color = None
-        for c,child in self.parent.children.iteritems():
+        for c,child in iteritems(self.parent.children):
             if child == self:
                 color = c
                 break
@@ -2739,15 +2751,15 @@ class IndexPartition(object):
             '%s [label="%s",shape=plaintext,fontsize=14,fontcolor=black,fontname="times italic"];' %
             (self.node_name, label))
         # print links to children
-        for child in self.children.itervalues():
+        for child in itervalues(self.children):
             child.print_link_to_parent(printer, self.node_name)
-        for child in self.children.itervalues():
+        for child in itervalues(self.children):
             child.print_graph(printer)
 
     def print_tree(self):
         prefix = '  ' * self.depth
         print('%s%s Color: %s' % (prefix, self, self.color.to_string()))
-        for child in self.children.itervalues():
+        for child in itervalues(self.children):
             child.print_tree()
 
 class Field(object):
@@ -2805,7 +2817,7 @@ class FieldSpace(object):
                 '",shape=plaintext,fontsize=14,'+
                 'fontcolor=black,fontname="Helvetica"];')
 
-        for fid,field in self.fields.iteritems():
+        for fid,field in iteritems(self.fields):
             field_id = "field_node_"+str(self.uid)+"_"+str(fid)
             if field.name is not None:
                 field_name = field.name + '(FID: ' + str(fid) + ')'
@@ -2966,7 +2978,7 @@ class LogicalRegion(object):
         if field not in self.logical_state:
             return
         self.logical_state[field].perform_deletion_invalidation(op, req)
-        for child in self.children.itervalues():
+        for child in itervalues(self.children):
             child.perform_deletion_invalidation(op, req, field)
 
     def close_logical_tree(self, field, closed_users):
@@ -3129,7 +3141,7 @@ class LogicalRegion(object):
     def mark_named_children(self):
         if self.name is not None:
             self.has_named_children = True
-        for child in self.children.itervalues():
+        for child in itervalues(self.children):
             has_named_children = child.mark_named_children()
             self.has_named_children = self.has_named_children or has_named_children
         return self.has_named_children
@@ -3163,14 +3175,14 @@ class LogicalRegion(object):
         self.print_node(printer)
         # Instantiate the region tree if it isn't full
         if len(self.children) < len(self.index_space.children):
-            for color,child in self.index_space.children.iteritems():
+            for color,child in iteritems(self.index_space.children):
                 if color not in self.children:
                     self.state.get_partition(child.uid, self.field_space.uid, self.tree_id)
         # print links to children
-        for child in self.children.itervalues():
+        for child in itervalues(self.children):
             if not simplify_graph or child.has_named_children:
                 child.print_link_to_parent(printer, self.node_name)
-        for child in self.children.itervalues():
+        for child in itervalues(self.children):
             child.print_graph(printer, simplify_graph)
 
     def print_tree(self):
@@ -3182,7 +3194,7 @@ class LogicalRegion(object):
             for i in range(self.index_space.depth):
                 prefix += '  '
             print('%s%s Color: %s' % (prefix, self, self.index_space.color.to_string()))
-        for child in self.children.itervalues():
+        for child in itervalues(self.children):
             child.print_tree()
         if self.index_space.depth == 0:
             print("---------------------------------------")
@@ -3329,7 +3341,7 @@ class LogicalPartition(object):
         if field not in self.logical_state:
             return
         self.logical_state[field].perform_deletion_invalidation(op, req)
-        for child in self.children.itervalues():
+        for child in itervalues(self.children):
             child.perform_deletion_invalidation(op, req, field)
 
     def close_logical_tree(self, field, closed_users):
@@ -3349,7 +3361,7 @@ class LogicalPartition(object):
     def mark_named_children(self):
         if self.name is not None:
             self.has_named_children = True
-        for child in self.children.itervalues():
+        for child in itervalues(self.children):
             has_named_children = child.mark_named_children()
             self.has_named_children = self.has_named_children or has_named_children
         return self.has_named_children
@@ -3381,16 +3393,16 @@ class LogicalPartition(object):
         self.print_node(printer)
         # instantiate the region tree if it isn't full
         if len(self.children) < len(self.index_partition.children):
-            for color,child in self.index_partition.children.iteritems():
+            for color,child in iteritems(self.index_partition.children):
                 if color not in self.children:
                     self.state.get_region(child.uid,
                         self.field_space.uid, self.tree_id)
         # print links to children
-        for child in self.children.itervalues():
+        for child in itervalues(self.children):
             child.print_link_to_parent(printer, self.node_name)
             if simplify_graph and not child.has_named_children:
                 child.print_node(printer)
-        for child in self.children.itervalues():
+        for child in itervalues(self.children):
             child.print_graph(printer, simplify_graph)
 
     def print_tree(self):
@@ -3398,7 +3410,7 @@ class LogicalPartition(object):
         for i in range(self.index_partition.depth):
             prefix += '  '
         print('%s%s Color: %s' % (prefix, self, self.index_partition.color.to_string()))
-        for child in self.children.itervalues():
+        for child in itervalues(self.children):
             child.print_tree()
 
 class LogicalState(object):
@@ -3512,7 +3524,7 @@ class LogicalState(object):
             elif req.is_reduce():
                 # See how many interfering children there are in the same mode
                 other_children = set()
-                for child,redop in self.open_redop.iteritems():
+                for child,redop in iteritems(self.open_redop):
                     if redop != req.redop:
                         continue
                     if self.node.are_children_disjoint(child,next_child):
@@ -3593,7 +3605,7 @@ class LogicalState(object):
         elif self.current_redop != 0 and self.current_redop != req.redop:
             children_to_close = set()
             # Flushing reductions close all children no matter what
-            for child,open_mode in self.open_children.iteritems():
+            for child,open_mode in iteritems(self.open_children):
                 children_to_close.add(child)
             # If we are flushing reductions we do a close no matter what
             closed = True
@@ -3608,7 +3620,7 @@ class LogicalState(object):
             upgrade_child = False
             depth = self.node.get_index_node().depth
             # Not flushing reductions so we can take the normal path
-            for child,open_mode in self.open_children.iteritems():
+            for child,open_mode in iteritems(self.open_children):
                 if open_mode == OPEN_READ_ONLY:
                     # Both read-only we can keep going
                     if req.is_read_only():
@@ -3668,7 +3680,7 @@ class LogicalState(object):
                 # the operation is not predicated and it dominates
                 overwrite = req.priv == WRITE_DISCARD and not op.predicate and \
                                req.logical_node.dominates(self.node)
-                for child,open_mode in self.open_children.iteritems():
+                for child,open_mode in iteritems(self.open_children):
                     if open_mode == OPEN_READ_ONLY:                
                         children_to_close[child] = False
                     elif open_mode == OPEN_READ_WRITE:
@@ -3690,7 +3702,7 @@ class LogicalState(object):
             elif need_read_only_close:
                 children_to_read_close = dict()
                 # Read only closes can close specific children
-                for child,open_mode in self.open_children.iteritems():
+                for child,open_mode in iteritems(self.open_children):
                     # Only read-only matters for read-only closes
                     if open_mode != OPEN_READ_ONLY:
                         continue
@@ -3800,7 +3812,7 @@ class LogicalState(object):
         elif self.current_redop != 0 and self.current_redop != req.redop:
             children_to_close = set()
             # Flushing reductions close all children no matter what
-            for child,open_mode in self.open_children.iteritems():
+            for child,open_mode in iteritems(self.open_children):
                 children_to_close.add(child)
             # If we are flushing reductions we do a close no matter what
             closed = True
@@ -3811,7 +3823,7 @@ class LogicalState(object):
             # Close all open children
             children_to_close = dict()
             children_to_read_close = dict()
-            for child,open_mode in self.open_children.iteritems():
+            for child,open_mode in iteritems(self.open_children):
                 if open_mode == OPEN_READ_ONLY:
                     children_to_read_close[child] = False
                 else:
@@ -4006,7 +4018,7 @@ class LogicalState(object):
             # leave the dirty fields in place
             still_dirty = disjoint_close 
             if not still_dirty:
-                for privilege in self.open_children.itervalues():
+                for privilege in itervalues(self.open_children):
                     if privilege == READ_WRITE or privilege == REDUCE or \
                         privilege == WRITE_DISCARD:
                           still_dirty = True
@@ -4976,13 +4988,6 @@ class MappingDependence(object):
         self.idx2 = idx2
         self.dtype = dtype
 
-    def __eq__(self,other):
-        return (self.op1 is other.op1) and \
-               (self.op2 is other.op2) and \
-               (self.idx1 == other.idx1) and \
-               (self.idx2 == other.idx2) and \
-               (self.dtype == other.dtype)
-
     def __str__(self):
         return "index %d of %s and index %d of %s (type: %s)" % \
                 (self.idx1, str(self.op1),
@@ -5078,7 +5083,7 @@ class Operation(object):
     def set_name(self, name):
         self.name = name
         if self.points is not None:
-            for point in self.points.itervalues():
+            for point in itervalues(self.points):
                 point.set_name(name)
 
     def __str__(self):
@@ -5097,7 +5102,7 @@ class Operation(object):
                 close.set_context(context, False)
         # Also recurse for any points we have
         if self.points is not None:
-            for point in self.points.itervalues():
+            for point in itervalues(self.points):
                 point.op.set_context(context, False)
         # Finaly recurse for any summary operations
         if self.summary_ops:
@@ -5271,9 +5276,9 @@ class Operation(object):
 
     def update_instance_uses(self):
         if self.mappings:
-            for mapping in self.mappings.itervalues():
+            for mapping in itervalues(self.mappings):
                 unique_insts = set()
-                for inst in mapping.itervalues():
+                for inst in itervalues(mapping):
                     unique_insts.add(inst) 
                 for inst in unique_insts:
                     inst.increment_use_count() 
@@ -5356,7 +5361,7 @@ class Operation(object):
         if self.eq_privileges is None:
             self.eq_privileges = dict()
             if self.reqs is not None:
-                for req in self.reqs.itervalues():
+                for req in itervalues(self.reqs):
                     point_set = req.index_node.get_point_set()
                     for point in point_set.iterator():
                         for field in req.fields:
@@ -5401,13 +5406,13 @@ class Operation(object):
         if not self.reqs:
             self.reqs = other.reqs
         elif other.reqs:
-            for idx,req in other.reqs.iteritems():
+            for idx,req in iteritems(other.reqs):
                 assert idx not in self.reqs
                 self.reqs[idx] = req
         if not self.mappings:
             self.mappings = other.mappings
         elif other.mappings:
-            for idx,mapping in other.mappings.iteritems():
+            for idx,mapping in iteritems(other.mappings):
                 assert idx not in self.mappings
                 self.mappings[idx] = mapping
         if not self.start_event.exists():
@@ -5601,7 +5606,7 @@ class Operation(object):
         all_reqs = list()
         # Find all non-projection requirements, and ensure that they are
         # compatible with themselves (as they will be used by all point tasks)
-        for req in self.reqs.itervalues():
+        for req in itervalues(self.reqs):
             if not req.is_projection():
                 if len(self.points) > 1:
                     dep_type = compute_dependence_type(req, req)
@@ -5610,8 +5615,8 @@ class Operation(object):
                                "operation %s is self interfering in %s") %
                                (req.index,str(self),str(self.context)))
                         return True
-        for point_task in self.points.itervalues():
-            for req in point_task.op.reqs.itervalues():
+        for point_task in itervalues(self.points):
+            for req in itervalues(point_task.op.reqs):
                 all_reqs.append(req)
         # All requirements should be non interfering
         for idx1 in range(0, len(all_reqs)):
@@ -5799,7 +5804,7 @@ class Operation(object):
             return True
         if self.kind == DELETION_OP_KIND:
             # Perform dependence analysis on the deletion region requirements
-            for idx in self.reqs.iterkeys():
+            for idx in iterkeys(self.reqs):
                 if not self.analyze_logical_deletion(idx, perform_checks):
                     return False
             return True
@@ -5874,7 +5879,7 @@ class Operation(object):
                         assert False
                     return False
             return True
-        for req in self.reqs.itervalues():
+        for req in itervalues(self.reqs):
             # Check to see if there is any overlap in fields or regions 
             if len(set(req.fields) & set(next_req.fields)) == 0:
                 continue # No overlapping fields so we can keep going
@@ -5904,7 +5909,7 @@ class Operation(object):
         return True
 
     def analyze_logical_interference(self, prev_op, reachable):
-        for req in self.reqs.itervalues():  
+        for req in itervalues(self.reqs):  
             if not prev_op.analyze_previous_interference(self, req, reachable):
                 return False
         return True
@@ -5935,7 +5940,7 @@ class Operation(object):
         assert self.context
         # Now do all of our region requirements
         assert not self.version_numbers
-        for index,req in self.reqs.iteritems():
+        for index,req in iteritems(self.reqs):
             if self.mappings and index in self.mappings:
                 mapping = self.mappings[index]
             else:
@@ -6120,12 +6125,12 @@ class Operation(object):
                 prefix += '  '
         # If we are an index space task, only do our points
         if self.kind == INDEX_TASK_KIND:
-            for point in sorted(self.points.itervalues(), key=lambda x: x.op.uid):
+            for point in sorted(itervalues(self.points), key=lambda x: x.op.uid):
                 if not point.op.perform_op_physical_verification(perform_checks):
                     return False
             return True
         elif self.points: # Handle other index space operations too
-            for point in sorted(self.points.itervalues(), key=lambda x: x.uid):
+            for point in sorted(itervalues(self.points), key=lambda x: x.uid):
                 if not point.perform_op_physical_verification(perform_checks):
                     return False
             return True
@@ -6139,7 +6144,7 @@ class Operation(object):
         if self.kind == COPY_OP_KIND:
             # Check to see if this is an index copy
             if self.points:
-                for point in sorted(self.points.itervalues(), key=lambda x: x.uid):
+                for point in sorted(itervalues(self.points), key=lambda x: x.uid):
                     if not point.perform_op_physical_verification(perform_checks): 
                         return False
                 return True
@@ -6156,19 +6161,19 @@ class Operation(object):
         elif self.kind == FILL_OP_KIND:
             # Check to see if this is an index fill
             if self.points:
-                for point in sorted(self.points.itervalues(), key=lambda x: x.uid):
+                for point in sorted(itervalues(self.points), key=lambda x: x.uid):
                     if not point.perform_op_physical_verification(perform_checks):
                         return False
                 return True
             # Compute our version numbers first
             if perform_checks:
                 self.compute_current_version_numbers()
-            for index,req in self.reqs.iteritems():
+            for index,req in iteritems(self.reqs):
                 if not self.verify_fill_requirement(index, req, perform_checks):
                     return False
         elif self.kind == DEP_PART_OP_KIND and self.points:
             # Index partition operation
-            for point in sorted(self.points.itervalues(), key=lambda x: x.uid):
+            for point in sorted(itervalues(self.points), key=lambda x: x.uid):
                 if not point.perform_op_physical_verification(perform_checks):
                     return False
             return True
@@ -6180,16 +6185,16 @@ class Operation(object):
                 # Compute our version numbers first
                 if perform_checks:
                     self.compute_current_version_numbers()
-                for index,req, in self.reqs.iteritems():
+                for index,req, in iteritems(self.reqs):
                     if not self.verify_physical_requirement(index, req, perform_checks):
                         return False
             # Add any restrictions for different kinds of ops
             if self.kind == RELEASE_OP_KIND or self.kind == ATTACH_OP_KIND:
-                for index,req in self.reqs.iteritems():
+                for index,req in iteritems(self.reqs):
                     if not self.add_restriction(index, req, perform_checks):
                         return False
             elif self.kind == ACQUIRE_OP_KIND or self.kind == DETACH_OP_KIND:
-                for index,req in self.reqs.iteritems():
+                for index,req in iteritems(self.reqs):
                     if not self.remove_restriction(index, req, perform_checks):
                         return False
                 return True
@@ -6198,7 +6203,7 @@ class Operation(object):
                 # requirements since we didn't do it as part of the 
                 # normal physical analysis
                 if self.reqs:
-                    for index,req, in self.reqs.iteritems():
+                    for index,req, in iteritems(self.reqs):
                         if not self.perform_verification_registration(index, req, 
                                                                       perform_checks):
                             return False
@@ -6216,7 +6221,7 @@ class Operation(object):
         # If we are an index task just do our points and return
         if self.kind == INDEX_TASK_KIND:
             assert self.points is not None
-            for point in self.points.itervalues():
+            for point in itervalues(self.points):
                 point.op.print_op_mapping_decisions(depth)
             return
         # Print our mapping decisions
@@ -6233,12 +6238,12 @@ class Operation(object):
                     'Yes' if self.task.variant.inner else 'No',
                     'Yes' if self.task.variant.leaf else 'No'))
         if self.mappings is not None:
-            for index,mappings in self.mappings.iteritems():
+            for index,mappings in iteritems(self.mappings):
                 assert index in self.reqs
                 req = self.reqs[index]
                 print(prefix+'  Region Requirement '+str(index)+' Region=('+
                       str(req.index_node)+','+str(req.field_space)+','+str(req.tid)+')')
-                for fid,inst in mappings.iteritems():
+                for fid,inst in iteritems(mappings):
                     field = req.field_space.get_field(fid)
                     print(prefix+'    '+str(field)+': '+str(inst))
         print(prefix+' End '+str(self)+' (depth='+str(depth)+')')
@@ -6352,10 +6357,10 @@ class Operation(object):
             # Might have been predicated
             if self.points:
                 if self.kind is INDEX_TASK_KIND:
-                    for point in self.points.itervalues():
+                    for point in itervalues(self.points):
                         point.op.print_event_graph(printer, elevate, all_nodes, False)
                 else:
-                    for point in self.points.itervalues():
+                    for point in itervalues(self.points):
                         point.print_event_graph(printer, elevate, all_nodes, False)
             # Put any operations we generated in the elevate set
             if self.realm_copies:
@@ -6433,7 +6438,7 @@ class Operation(object):
         if mapping:
             # Get the unique set of instances
             unique_insts = set()
-            for inst in mapping.itervalues():
+            for inst in itervalues(mapping):
                 if inst.is_virtual():
                     continue
                 unique_insts.add(inst)
@@ -6571,14 +6576,14 @@ class Task(object):
                 assert index in self.op.mappings
                 mapping = self.op.mappings[index]
                 unique_insts = set()
-                for inst in mapping.itervalues():
+                for inst in itervalues(mapping):
                     unique_insts.add(inst)
                 for inst in unique_insts:
                     inst.increment_use_count() 
         if self.postmappings:
-            for mapping in self.postmappings.itervalues():
+            for mapping in itervalues(self.postmappings):
                 unique_insts = set()
-                for inst in mapping.itervalues():
+                for inst in itervalues(mapping):
                     unique_insts.add(inst)
                 for inst in unique_insts:
                     inst.increment_use_count()
@@ -6734,7 +6739,7 @@ class Task(object):
             return depth
         if self.op.reqs:
             # Find which region requirement privileges were derived from
-            for idx,our_req in self.op.reqs.iteritems():
+            for idx,our_req in iteritems(self.op.reqs):
                 if child_req.parent is not our_req.logical_node:
                     continue
                 fields_good = True
@@ -6758,7 +6763,7 @@ class Task(object):
                     return self.op.context.find_enclosing_context_depth(our_req, mappings)
                 else:
                     if mappings:
-                        for fid,inst in mappings.iteritems():
+                        for fid,inst in iteritems(mappings):
                             self.used_instances.add((inst,fid))
                     return depth
         # Trust the runtime privilege checking here
@@ -6775,7 +6780,7 @@ class Task(object):
         self.used_instances = set()
         # Initialize any regions that we mapped
         if self.op.reqs:
-            for idx,req in self.op.reqs.iteritems():
+            for idx,req in iteritems(self.op.reqs):
                 # Skip any no access requirements
                 if req.is_no_access() or len(req.fields) == 0:
                     continue
@@ -6841,7 +6846,7 @@ class Task(object):
             reachable = dict()
             total_nodes = len(all_ops)
             # Now traverse the list in reverse order
-            for src_index in xrange(total_nodes-1,-1,-1):
+            for src_index in range(total_nodes-1,-1,-1):
                 src = all_ops[src_index]
                 index_map[src] = src_index
                 our_reachable = NodeSet(total_nodes)
@@ -6916,7 +6921,7 @@ class Task(object):
             op.print_event_graph(printer, elevate, all_nodes, False)
         # Find our local nodes
         local_nodes = list()
-        for node,context in elevate.iteritems():
+        for node,context in iteritems(elevate):
             if context is self:
                 local_nodes.append(node)
                 node.print_event_node(printer)
@@ -7040,7 +7045,7 @@ class Future(object):
                         self.physical_creators.add(
                                 self.logical_creator.get_point_task(self.point).op)
                     else:
-                        for point in self.logical_creator.points.itervalues():
+                        for point in itervalues(self.logical_creator.points):
                             self.physical_creators.add(point.op)
             else:
                 self.physical_creators.add(self.logical_creator) 
@@ -7661,7 +7666,7 @@ class Event(object):
         # This is an untriggered user event, report it
         if self.ap_user_event:
             owner = None
-            for op in self.state.ops.itervalues():
+            for op in itervalues(self.state.ops):
                 if op.finish_event is self:
                     owner = op
                     break
@@ -7843,7 +7848,7 @@ class RealmBase(object):
     def get_point_set(self):
         result = PointSet()
         if self.version_numbers:
-            for eq_key in self.version_numbers.iterkeys():
+            for eq_key in iterkeys(self.version_numbers):
                 result.add_point(eq_key[0])
         return result
 
@@ -7977,7 +7982,7 @@ class RealmCopy(RealmBase):
         else:
             self.across = False
             assert len(self.src_fields) == len(self.dst_fields)
-            for idx in xrange(len(self.src_fields)):
+            for idx in range(len(self.src_fields)):
                 if self.src_fields[idx] != self.dst_fields[idx]:
                     self.across = True
                     break
@@ -9793,20 +9798,20 @@ class State(object):
         return matches
 
     def post_parse(self, simplify_graphs, need_physical):
-        for space in self.index_spaces.itervalues():
+        for space in itervalues(self.index_spaces):
             if space.parent is None:
                 space.update_depth(-1)
         print('Reducing top-level index space shapes...')
         # Have to do the same sets across all index spaces
         # with the same dimensions in case of copy across
         dim_sets = dict()
-        for space in self.index_spaces.itervalues():
+        for space in itervalues(self.index_spaces):
             if space.parent is None:
                 space.compute_reduced_shapes(dim_sets)            
-        for dim,index_sets in dim_sets.iteritems():
+        for dim,index_sets in iteritems(dim_sets):
             point_value = 0
             total_sets = len(index_sets)
-            for shape,index_set in index_sets.iteritems():
+            for shape,index_set in iteritems(index_sets):
                 point = Point(1)
                 point.vals[0] = point_value
                 point.shape = shape
@@ -9818,7 +9823,7 @@ class State(object):
         print('Done')
         # Find the top-level index spaces
         num_index_trees = 0
-        for space in self.index_spaces.itervalues():
+        for space in itervalues(self.index_spaces):
             if space.parent is None:
                 self.top_spaces[num_index_trees] = space
                 num_index_trees += 1
@@ -9831,23 +9836,23 @@ class State(object):
         for partition in self.partitions.values():
             partition.update_parent()
         # Find the top-level regions
-        for region in self.regions.itervalues():
+        for region in itervalues(self.regions):
             if region.parent is None:
                 self.trees[region.tree_id] = region
         # Merge the individual tasks
-        for p1,p2 in self.point_point.iteritems():
+        for p1,p2 in iteritems(self.point_point):
             self.alias_individual_points(p1, p2)
         # Merge the points and slices
-        for point,slice_ in self.point_slice.iteritems():
+        for point,slice_ in iteritems(self.point_slice):
             while slice_ in self.slice_slice:
                 slice_ = self.slice_slice[slice_]
             assert slice_ in self.slice_index
             self.slice_index[slice_].add_point_task(point)
         # Flatten summary operations in each context
-        for task in self.tasks.itervalues():
+        for task in itervalues(self.tasks):
             task.flatten_summary_operations()
         # Create the unique set of operations
-        self.unique_ops = set(self.ops.itervalues())
+        self.unique_ops = set(itervalues(self.ops))
         # Add implicit dependencies between point and index operations
         if self.detailed_logging:
             index_owners = set()
@@ -9875,7 +9880,7 @@ class State(object):
                 if self.assert_on_error:
                     assert False
         # Fill in any task names
-        for task in self.tasks.itervalues():
+        for task in itervalues(self.tasks):
             if task.op.task_id in self.task_names:
                 task.op.set_name(self.task_names[task.op.task_id])
         # Assign the depth of the top context
@@ -9893,15 +9898,15 @@ class State(object):
             if self.assert_on_warning:
                 assert False
         # Update the instance 
-        for inst in self.instances.itervalues():
+        for inst in itervalues(self.instances):
             inst.update_creator()
         # Update the instance users
         for op in self.unique_ops:
             op.update_instance_uses() 
-        for task in self.tasks.itervalues():
+        for task in itervalues(self.tasks):
             task.update_instance_uses()
         # Update the futures
-        for future in self.futures.itervalues():
+        for future in itervalues(self.futures):
             future.update_creator_and_users()     
         # We can delete some of these data structures now that we
         # no longer need them, go go garbage collection
@@ -9912,11 +9917,11 @@ class State(object):
             # Compute the physical reachable
             for op in self.unique_ops:
                 op.compute_physical_reachable()
-            for copy in self.copies.itervalues():
+            for copy in itervalues(self.copies):
                 copy.compute_physical_reachable()
-            for fill in self.fills.itervalues():
+            for fill in itervalues(self.fills):
                 fill.compute_physical_reachable()
-            for deppart in self.depparts.itervalues():
+            for deppart in itervalues(self.depparts):
                 deppart.compute_physical_reachable()
         if self.verbose:
             print("Found %d processors" % len(self.processors))
@@ -9956,13 +9961,13 @@ class State(object):
         for op in self.unique_ops:
             if not op.physical_incoming:
                 topological_sorter.visit_node(op)
-        for copy in self.copies.itervalues():
+        for copy in itervalues(self.copies):
             if not copy.physical_incoming:
                 topological_sorter.visit_node(copy)
-        for fill in self.fills.itervalues():
+        for fill in itervalues(self.fills):
             if not fill.physical_incoming:
                 topological_sorter.visit_node(fill)
-        for deppart in self.depparts.itervalues():
+        for deppart in itervalues(self.depparts):
             if not deppart.physical_incoming:
                 topological_sorter.visit_node(deppart)
         # Now that we have everything sorted based on topology
@@ -10041,7 +10046,7 @@ class State(object):
             if node in incoming_sets:
                 local_sets = incoming_sets[node]
                 del incoming_sets[node]
-                for eq in node.get_equivalence_privileges().iterkeys():
+                for eq in iterkeys(node.get_equivalence_privileges()):
                     if eq in local_sets:
                         # Add the incoming equivalence edges and update
                         eq_incoming = local_sets[eq]
@@ -10072,7 +10077,7 @@ class State(object):
                     incoming_sets[dst] = dst_sets
                 else:
                     dst_sets = incoming_sets[dst]
-                for eq,eq_outgoing in local_sets.iteritems():
+                for eq,eq_outgoing in iteritems(local_sets):
                     assert len(eq_outgoing) > 0
                     if eq in dst_sets:
                         eq_target = dst_sets[eq]
@@ -10108,13 +10113,13 @@ class State(object):
         for op in self.unique_ops:
             if not op.physical_incoming:
                 process_node(op)
-        for copy in self.copies.itervalues():
+        for copy in itervalues(self.copies):
             if not copy.physical_incoming:
                 process_node(copy)
-        for fill in self.fills.itervalues():
+        for fill in itervalues(self.fills):
             if not fill.physical_incoming:
                 process_node(fill)
-        for deppart in self.depparts.itervalues():
+        for deppart in itervalues(self.depparts):
             if not deppart.physical_incoming:
                 process_node(deppart)
         # Iterate until we've walked the whole graph O(V + E)
@@ -10138,13 +10143,13 @@ class State(object):
             for op in self.unique_ops:
                 if not op.physical_incoming:
                     topological_sorter.visit_node(op)
-            for copy in self.copies.itervalues():
+            for copy in itervalues(self.copies):
                 if not copy.physical_incoming:
                     topological_sorter.visit_node(copy)
-            for fill in self.fills.itervalues():
+            for fill in itervalues(self.fills):
                 if not fill.physical_incoming:
                     topological_sorter.visit_node(fill)
-            for deppart in self.depparts.itervalues():
+            for deppart in itervalues(self.depparts):
                 if not deppart.physical_incoming:
                     topological_sorter.visit_node(deppart)
             postorder = topological_sorter.postorder
@@ -10170,11 +10175,11 @@ class State(object):
             # if we have no outgoing equivalence edges then there is nothing to do
             if src.eq_outgoing is None or len(src.eq_outgoing) == 0:
                 # Still need to populate it
-                for eq in src.get_equivalence_privileges().iterkeys():
+                for eq in iterkeys(src.get_equivalence_privileges()):
                     our_reachable[eq] = NodeSet(total_nodes)
                 continue
             # Iterate over all the equivalence classes for this node
-            for eq in src.get_equivalence_privileges().iterkeys():
+            for eq in iterkeys(src.get_equivalence_privileges()):
                 # No outgoing equivalence classes for this node so nothing to do
                 eq_reachable = NodeSet(total_nodes) 
                 our_reachable[eq] = eq_reachable
@@ -10282,7 +10287,7 @@ class State(object):
     def perform_logical_analysis(self, perform_checks, sanity_checks):
         # Run the full analysis first, this will confirm that
         # the runtime did what we thought it should do
-        for task in self.tasks.itervalues():
+        for task in itervalues(self.tasks):
             # If we're only performing checks then we might break out early
             if not task.perform_logical_dependence_analysis(perform_checks):
                 return False
@@ -10360,10 +10365,10 @@ class State(object):
         for op in self.unique_ops: 
             if op.perform_cycle_check(cycle_detector):
                 return True
-        for copy in self.copies.itervalues():
+        for copy in itervalues(self.copies):
             if copy.perform_cycle_check(cycle_detector):
                 return True
-        for fill in self.fills.itervalues():
+        for fill in itervalues(self.fills):
             if fill.perform_cycle_check(cycle_detector):
                 return True
         if print_result:
@@ -10371,23 +10376,23 @@ class State(object):
         return False 
 
     def perform_user_event_leak_checks(self):
-        for event in self.events.itervalues():
+        for event in itervalues(self.events):
             event.check_for_user_event_leak()
 
     def make_region_tree_graphs(self, path, simplify_graphs):
         index_space_printer = GraphPrinter(path, 'index_space_graph', 'TB')
-        for node in self.index_spaces.itervalues():
+        for node in itervalues(self.index_spaces):
             if node.parent is None:
                 node.print_graph(index_space_printer)
         index_space_printer.print_pdf_after_close(simplify_graphs)
 
         field_space_printer = GraphPrinter(path, 'field_space_graph', 'TB')
-        for node in self.field_spaces.itervalues():
+        for node in itervalues(self.field_spaces):
             node.print_graph(field_space_printer)
         field_space_printer.print_pdf_after_close(simplify_graphs)
 
         region_graph_printer = GraphPrinter(path, 'region_graph', 'TB')
-        for node in self.trees.itervalues():
+        for node in itervalues(self.trees):
             if simplify_graphs:
                 node.mark_named_children()
             node.print_graph(region_graph_printer, simplify_graphs)
@@ -10395,19 +10400,19 @@ class State(object):
 
     def make_machine_graphs(self, path):
         machine_printer = GraphPrinter(path, 'machine_graph', 'TB')
-        for proc in self.processors.itervalues():
+        for proc in itervalues(self.processors):
             proc.print_node(machine_printer)
-        for mem in self.memories.itervalues():
+        for mem in itervalues(self.memories):
             mem.print_node(machine_printer)
-        for proc in self.processors.itervalues():
+        for proc in itervalues(self.processors):
             proc.print_mem_edges(machine_printer)
-        for mem in self.memories.itervalues():
+        for mem in itervalues(self.memories):
             mem.print_mem_edges(machine_printer)
         machine_printer.print_pdf_after_close(False)
 
     def make_dataflow_graphs(self, path, simplify_graphs, zoom_graphs):
         total_dataflow_graphs = 0
-        for task in self.tasks.itervalues():
+        for task in itervalues(self.tasks):
             total_dataflow_graphs += task.print_dataflow_graph(path, simplify_graphs, zoom_graphs)
         if self.verbose:
             print("Made "+str(total_dataflow_graphs)+" dataflow graphs")
@@ -10430,12 +10435,12 @@ class State(object):
         print('Total events: '+str(len(self.events)))
         print('Total copies: '+str(len(self.copies)))
         total_copy_bytes = 0
-        for copy in self.copies.itervalues():
+        for copy in itervalues(self.copies):
             total_copy_bytes += copy.compute_copy_size()
         print('  Total bytes moved: '+str(total_copy_bytes))
         print('Total fills:  '+str(len(self.fills)))
         total_fill_bytes = 0
-        for fill in self.fills.itervalues():
+        for fill in itervalues(self.fills):
             total_fill_bytes += fill.compute_fill_size()
         print('  Total bytes filled: '+str(total_fill_bytes))
 
@@ -10445,19 +10450,19 @@ class State(object):
         with open(file_name,'wb') as replay_file:
             # Write out processors
             replay_file.write(struct.pack('I',len(self.processors)))
-            for proc in self.processors.itervalues():
+            for proc in itervalues(self.processors):
                 replay_file.write(struct.pack('Q', proc.uid))    
                 replay_file.write(struct.pack('I', proc.kind_num))
             # Write out memories
             replay_file.write(struct.pack('I',len(self.memories)))
-            for mem in self.memories.itervalues():
+            for mem in itervalues(self.memories):
                 replay_file.write(struct.pack('Q', mem.uid))
                 replay_file.write(struct.pack('I', mem.kind_num))
             # Write out the instances
             assert len(self.instances) > 0
             # Skip the virtual instance
             replay_file.write(struct.pack('I',len(self.instances)-1))
-            for inst in self.instances.itervalues():
+            for inst in itervalues(self.instances):
                 if inst.is_virtual():
                     continue
                 inst.pack_inst_replay_info(replay_file)
@@ -10501,7 +10506,7 @@ class State(object):
                 op.task.pack_task_replay_info(replay_file, op.uid)
             actual_index_tasks = 0
             for task in index_tasks:
-                for point in task.points.itervalues():
+                for point in itervalues(task.points):
                     point.pack_task_replay_info(replay_file, task.uid)
                     actual_index_tasks += 1
             assert actual_index_tasks == total_index
@@ -10523,7 +10528,7 @@ class State(object):
                 op.pack_release_replay_info(replay_file)
 
     def print_instance_descriptions(self):
-        for inst in self.instances.itervalues():
+        for inst in itervalues(self.instances):
             # Skip the virtual instance
             if inst.is_virtual():
                 continue
@@ -10543,10 +10548,10 @@ class State(object):
         top_task.print_task_mapping_decisions()
 
     def print_trees(self):
-        for node in self.index_spaces.itervalues():
+        for node in itervalues(self.index_spaces):
             if node.parent is None:
                 node.print_tree()
-        for node in self.trees.itervalues():
+        for node in itervalues(self.trees):
             node.print_tree()
 
     def get_processor(self, proc_id):
@@ -10729,23 +10734,23 @@ class State(object):
         return self.memory_kinds[kind]
 
     def reset_logical_state(self):
-        for region in self.regions.itervalues():
+        for region in itervalues(self.regions):
             region.reset_logical_state()
-        for partition in self.partitions.itervalues():
+        for partition in itervalues(self.partitions):
             partition.reset_logical_state()
         # Definitely run the garbage collector here
         gc.collect()
 
     def reset_physical_state(self, depth):
-        for region in self.regions.itervalues():
+        for region in itervalues(self.regions):
             region.reset_physical_state(depth)
-        for partition in self.partitions.itervalues():
+        for partition in itervalues(self.partitions):
             partition.reset_physical_state(depth)
         # Definitely run the garbage collector here
         gc.collect()
 
     def reset_verification_state(self, depth):
-        for region in self.trees.itervalues():
+        for region in itervalues(self.trees):
             region.reset_verification_state(depth)
         # Definitely run the garbage collector here
         gc.collect()
