@@ -676,4 +676,4 @@ darwin_power9_gcc8_cxx17_release_legion:
 darwin_power9_clang8_cxx17_debug_legion:
   <<: [*darwin_power9, *tests]
   variables:
-    <<: [*clang8, *debug, *cxx17_debug, *legion, *darwin_power9_scheduler]
+    <<: [*clang8, *debug, *cxx17_normal, *legion, *darwin_power9_scheduler]
