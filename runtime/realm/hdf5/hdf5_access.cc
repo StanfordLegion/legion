@@ -25,9 +25,7 @@ namespace Realm {
   /*static*/ Event RegionInstance::create_hdf5_instance(RegionInstance& inst,
 							const char *file_name,
 							const IndexSpace<N,T>& space,
-							const std::vector<FieldID> &field_ids,
-							const std::vector<size_t> &field_sizes,
-							const std::vector<const char*> &field_files,
+							const std::vector<RegionInstance::HDF5FieldInfo<N,T> >& field_infos,
 							bool read_only,
 							const ProfilingRequestSet& prs,
 							Event wait_on /*= Event::NO_EVENT*/)
@@ -44,25 +42,31 @@ namespace Realm {
     layout->bytes_used = 0;
     layout->alignment_reqd = 0;  // no allocation being made
     layout->space = space;
-    layout->piece_lists.resize(field_sizes.size());
+    layout->piece_lists.resize(field_infos.size());
 
-    for(size_t i = 0; i < field_sizes.size(); i++) {
-      FieldID id = field_ids[i];
+    int idx = 0;
+    for(typename std::vector<HDF5FieldInfo<N,T> >::const_iterator it = field_infos.begin();
+	it != field_infos.end();
+	++it) {
+      FieldID id = it->field_id;
       InstanceLayoutGeneric::FieldLayout& fl = layout->fields[id];
-      fl.list_idx = i;
+      fl.list_idx = idx;
       fl.rel_offset = 0;
-      fl.size_in_bytes = field_sizes[i];
+      fl.size_in_bytes = it->field_size;
 
       // create a single piece (for non-empty index spaces)
       if(!space.empty()) {
 	HDF5LayoutPiece<N,T> *hlp = new HDF5LayoutPiece<N,T>;
 	hlp->bounds = space.bounds;
 	hlp->filename = file_name;
-	hlp->dsetname = field_files[i];
+	hlp->dsetname = it->dataset_name;
+	hlp->offset = it->offset;
 	for(int j = 0; j < N; j++)
-	  hlp->offset[j] = 0;
-	layout->piece_lists[i].pieces.push_back(hlp);
+	  hlp->dim_order[j] = it->dim_order[j];
+	hlp->read_only = read_only;
+	layout->piece_lists[idx].pieces.push_back(hlp);
       }
+      idx++;
     }
 
     // and now create the instance using this layout
@@ -73,9 +77,7 @@ namespace Realm {
   template Event RegionInstance::create_hdf5_instance<N,T>(RegionInstance&, \
 							      const char *, \
 							      const IndexSpace<N,T>&, \
-							      const std::vector<FieldID>&, \
-							      const std::vector<size_t>&, \
-							      const std::vector<const char *>&, \
+							      const std::vector<RegionInstance::HDF5FieldInfo<N,T> >&, \
 							      bool, \
 							      const ProfilingRequestSet&, \
 							      Event);

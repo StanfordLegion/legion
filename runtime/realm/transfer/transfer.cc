@@ -441,18 +441,18 @@ namespace Realm {
       }
 
       // translate the target_subrect into the dataset's coordinates
-      // HDF5 uses C-style (row-major) ordering, so invert array indices
+      //   using the dimension order specified in the instance's layout
       info.dset_bounds.resize(N);
       info.offset.resize(N);
       info.extent.resize(N);
       for(int di = 0; di < N; di++) {
 	int d = dim_order[di];
 
-	info.offset[N - 1 - d] = (target_subrect.lo[d] - hlp->bounds.lo[d] + hlp->offset[d]);
-	info.extent[N - 1 - d] = (target_subrect.hi[d] - target_subrect.lo[d] + 1);
-	info.dset_bounds[N - 1 - d] = (hlp->offset[d] +
-				       (hlp->bounds.hi[d] - hlp->bounds.lo[d]) +
-				       1);
+	info.offset[hlp->dim_order[d]] = (target_subrect.lo[d] - hlp->bounds.lo[d] + hlp->offset[d]);
+	info.extent[hlp->dim_order[d]] = (target_subrect.hi[d] - target_subrect.lo[d] + 1);
+	info.dset_bounds[hlp->dim_order[d]] = (hlp->offset[d] +
+					       (hlp->bounds.hi[d] - hlp->bounds.lo[d]) +
+					       1);
       }
     } else {
       assert(0);

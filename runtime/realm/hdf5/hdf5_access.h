@@ -46,6 +46,8 @@ namespace Realm {
 
     std::string filename, dsetname;
     Point<N, hsize_t> offset;
+    int dim_order[N];
+    bool read_only;
   };
 
 }; // namespace Realm

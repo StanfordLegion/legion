@@ -2902,9 +2902,24 @@ namespace Legion {
       Realm::ProfilingRequestSet requests;
       PhysicalInstance result;
 #ifdef USE_HDF
+      std::vector<PhysicalInstance::HDF5FieldInfo<DIM,T> >
+	field_infos(field_ids.size());
+      for (size_t i = 0; i < field_ids.size(); i++)
+      {
+	field_infos[i].field_id = field_ids[i];
+	field_infos[i].field_size = field_sizes[i];
+	field_infos[i].dataset_name = field_files[i];
+	for (int j = 0; j < DIM; j++)
+	  field_infos[i].offset[j] = 0;
+	// HDF5 is always C-style layout, so reverse dimensions by default
+	//  to match Legion's default of Fortran layout
+	// TODO: actually use layout constraints here!
+	for (int j = 0; j < DIM; j++)
+	  field_infos[i].dim_order[j] = DIM - 1 - j;
+      }
       ready_event = ApEvent(PhysicalInstance::create_hdf5_instance(result, 
-                            file_name, local_space, field_ids, field_sizes,
-		            field_files, read_only, requests));
+                            file_name, local_space, field_infos,
+		            read_only, requests));
 #else
       assert(0 && "no HDF5 support");
       result = PhysicalInstance::NO_INST;
