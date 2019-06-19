@@ -25,6 +25,30 @@
 
 namespace Realm {
 
+  namespace HDF5 {
+
+    class HDF5Dataset {
+    public:
+      static HDF5Dataset *open(const char *filename,
+			       const char *dsetname,
+			       bool read_only);
+      void flush();
+      void close();
+
+    protected:
+      HDF5Dataset();
+      ~HDF5Dataset();
+
+    public:
+      hid_t file_id, dset_id, dtype_id;
+      int ndims;
+      static const int MAX_DIM = 16;
+      hsize_t dset_size[MAX_DIM];
+      bool read_only;
+    };
+  }; // namespace HDF5
+
+
   template <int N, typename T>
   class HDF5LayoutPiece : public InstanceLayoutPiece<N,T> {
   public:

@@ -409,6 +409,7 @@ namespace Realm {
     if(layout_piece->layout_type == InstanceLayoutPiece<N,T>::HDF5LayoutType) {
       const HDF5LayoutPiece<N,T> *hlp = static_cast<const HDF5LayoutPiece<N,T> *>(layout_piece);
 
+      info.field_id = fields[field_idx];
       info.filename = &hlp->filename;
       info.dsetname = &hlp->dsetname;
 
