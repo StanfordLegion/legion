@@ -77,6 +77,7 @@ variables:
   # but the alternatives look scary
   PYTHON_LIB: "/usr/lib/x86_64-linux-gnu/libpython3.5m.so"
   PYTHON_VERSION_MAJOR: "3"
+  TEST_PYTHON_EXE: "python3"
 .hdf5: &hdf5
   USE_HDF: "1"
   HDF_HEADER: "hdf5/serial/hdf5.h"
@@ -253,7 +254,7 @@ before_script:
     - which $CXX
     - $CXX --version
     - free
-    - ./test.py
+    - $TEST_PYTHON_EXE ./test.py
   retry:
     max: 2
     when:
@@ -269,7 +270,7 @@ before_script:
         eval $(ssh-agent -s)
         ssh-add <(echo "$GITLAB_DEPLOY_KEY")
       fi
-    - ./test.py --test=external --test=private
+    - $TEST_PYTHON_EXE ./test.py --test=external --test=private
   retry:
     max: 2
     when:
@@ -289,7 +290,7 @@ before_script:
     - git config --global user.email "legion-testing@googlegroups.com"
     - export PERF_MIN_NODES=1
     - export PERF_MAX_NODES=1
-    - ./test.py --test=perf
+    - $TEST_PYTHON_EXE ./test.py --test=perf
   retry:
     max: 2
     when:
@@ -672,7 +673,7 @@ darwin_power9_gcc8_cxx17_release_legion:
   <<: [*darwin_power9, *tests]
   variables:
     <<: [*gcc8, *debug, *cxx17_normal, *legion, *darwin_power9_scheduler]
-darwin_power9_clang8_cxx17_release_legion:
+darwin_power9_clang8_cxx17_debug_legion:
   <<: [*darwin_power9, *tests]
   variables:
     <<: [*clang8, *debug, *cxx17_normal, *legion, *darwin_power9_scheduler]
