@@ -82,6 +82,7 @@ legion_openmp_cxx_tests = [
 legion_python_cxx_tests = [
     # Bindings
     ['bindings/python/legion_python', ['examples/domain.py', '-ll:py', '1', '-ll:cpu', '0']],
+    ['bindings/python/legion_python', ['examples/domain_transform.py', '-ll:py', '1', '-ll:cpu', '0']],
     ['bindings/python/legion_python', ['examples/future.py', '-ll:py', '1', '-ll:cpu', '0']],
     ['bindings/python/legion_python', ['examples/hello.py', '-ll:py', '1', '-ll:cpu', '0']],
     ['bindings/python/legion_python', ['examples/import.py', '-ll:py', '1', '-ll:cpu', '0']],
@@ -90,6 +91,7 @@ legion_python_cxx_tests = [
     ['bindings/python/legion_python', ['examples/method.py', '-ll:py', '1', '-ll:cpu', '0']],
     ['bindings/python/legion_python', ['examples/must_epoch.py', '-ll:py', '1', '-ll:cpu', '0']],
     ['bindings/python/legion_python', ['examples/partition.py', '-ll:py', '1', '-ll:cpu', '0']],
+    ['bindings/python/legion_python', ['examples/partition_by_restriction.py', '-ll:py', '1', '-ll:cpu', '0']],
     ['bindings/python/legion_python', ['examples/region.py', '-ll:py', '1', '-ll:cpu', '0']],
     ['bindings/python/legion_python', ['examples/return_region.py', '-ll:py', '1', '-ll:cpu', '0']],
     ['bindings/python/legion_python', ['examples/single_launch.py', '-ll:py', '1', '-ll:cpu', '0']],
