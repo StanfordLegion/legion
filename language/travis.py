@@ -16,7 +16,7 @@
 #
 
 from __future__ import print_function
-import argparse, os, platform, subprocess
+import argparse, os, platform, subprocess, sys
 
 def test(root_dir, install_only, debug, max_dim, short, spy, prof, gcov, hdf5, cuda, openmp, python, jobs, env):
     threads = ['-j', '2'] if 'TRAVIS' in env else []
@@ -39,7 +39,7 @@ def test(root_dir, install_only, debug, max_dim, short, spy, prof, gcov, hdf5, c
         rdir = 'auto'
 
     subprocess.check_call(
-        ['./install.py', '--rdir=%s' % rdir] + threads + terra + build + debug_flag,
+        [sys.executable, './install.py', '--rdir=%s' % rdir] + threads + terra + build + debug_flag,
         env = env,
         cwd = root_dir)
     if not install_only:
@@ -55,7 +55,7 @@ def test(root_dir, install_only, debug, max_dim, short, spy, prof, gcov, hdf5, c
         if not spy and not prof and not gcov and not hdf5 and not openmp: extra_flags.append('--debug')
 
         subprocess.check_call(
-            ['./test.py', '-q'] + threads + max_dim_flag + short_flag + extra_flags + inner_flag,
+            [sys.executable, './test.py', '-q'] + threads + max_dim_flag + short_flag + extra_flags + inner_flag,
             env = env,
             cwd = root_dir)
 
@@ -71,7 +71,7 @@ if __name__ == '__main__':
     legion_dir = os.path.dirname(root_dir)
     runtime_dir = os.path.join(legion_dir, 'runtime')
 
-    env = dict(os.environ.iteritems())
+    env = dict(os.environ.items())
     env.update({
         'LG_RT_DIR': runtime_dir,
         # 'LUAJIT_URL': 'http://legion.stanford.edu/~eslaught/mirror/LuaJIT-2.0.4.tar.gz',

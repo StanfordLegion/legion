@@ -20,12 +20,12 @@ import argparse, datetime, glob, json, multiprocessing, os, platform, shutil, su
 
 # Find physical core count of the machine.
 if platform.system() == 'Linux':
-    lines = subprocess.check_output(['lscpu', '--parse=core'])
+    lines = subprocess.check_output(['lscpu', '--parse=core']).decode('utf-8')
     physical_cores = len(set(line for line in lines.strip().split('\n')
                              if not line.startswith('#')))
 elif platform.system() == 'Darwin':
     physical_cores = int(
-        subprocess.check_output(['sysctl', '-n', 'hw.physicalcpu']))
+        subprocess.check_output(['sysctl', '-n', 'hw.physicalcpu']).decode('utf-8'))
 else:
     raise Exception('Unknown platform: %s' % platform.system())
 
@@ -153,7 +153,7 @@ def cmd(command, env=None, cwd=None):
     return subprocess.check_call(command, env=env, cwd=cwd)
 
 def run_test_regent(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
-    cmd([os.path.join(root_dir, 'language/travis.py')], env=env)
+    cmd([sys.executable, os.path.join(root_dir, 'language/travis.py')], env=env)
 
 def run_cxx(tests, flags, launcher, root_dir, bin_dir, env, thread_count):
     for test_file, test_flags in tests:
@@ -307,13 +307,13 @@ def run_test_external(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
     barnes_hut_dir = os.path.join(tmp_dir, 'barnes_hut')
     cmd(['git', 'clone', 'https://github.com/StanfordLegion/barnes-hut.git', barnes_hut_dir])
     regent_path = os.path.join(root_dir, 'language', 'regent.py')
-    cmd([regent_path, 'hdf5_converter.rg',
+    cmd([sys.executable, regent_path, 'hdf5_converter.rg',
          '-i', 'input/bodies-16384-blitz.csv',
          '-o', 'bodies-16384-blitz.h5',
          '-n', '16384'],
         cwd=barnes_hut_dir,
         env=env)
-    cmd([regent_path, 'barnes_hut.rg',
+    cmd([sys.executable, regent_path, 'barnes_hut.rg',
          '-i', 'bodies-16384-blitz.h5',
          '-n', '16384'],
         cwd=barnes_hut_dir,
@@ -463,7 +463,7 @@ def run_test_perf_one_configuration(launcher, root_dir, tmp_dir, bin_dir, env, t
     ])
 
     # Build Regent first to avoid recompiling later.
-    cmd([os.path.join(root_dir, 'language/travis.py'), '--install-only'], env=env)
+    cmd([sys.executable, os.path.join(root_dir, 'language/travis.py'), '--install-only'], env=env)
 
     # Run Legion C++ performance tests.
     runner = os.path.join(root_dir, 'perf.py')
@@ -488,7 +488,8 @@ def run_test_perf_one_configuration(launcher, root_dir, tmp_dir, bin_dir, env, t
 
     # Render the final charts.
     subprocess.check_call(
-        [os.path.join(root_dir, 'tools', 'perf_chart.py'),
+        [sys.executable,
+         os.path.join(root_dir, 'tools', 'perf_chart.py'),
          'git@github.com:StanfordLegion/perf-data.git',
          'git@github.com:StanfordLegion/perf-data.git'],
         env=env)

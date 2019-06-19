@@ -46,8 +46,10 @@ class TestFailure(Exception):
 
 def detect_python_interpreter():
     try:
-        if subprocess.call(["pypy", "-h"], stdout=subprocess.PIPE, stderr=subprocess.PIPE) == 0:
+        if _version == 2 and subprocess.call(["pypy", "-h"], stdout=subprocess.PIPE, stderr=subprocess.PIPE) == 0:
             return "pypy"
+        if _version == 3 and subprocess.call(["pypy3", "-h"], stdout=subprocess.PIPE, stderr=subprocess.PIPE) == 0:
+            return "pypy3"
     except:
         pass
     return sys.executable
