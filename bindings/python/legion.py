@@ -622,6 +622,9 @@ class Fspace(object):
         del self.field_ids
         del self.field_types
 
+    def keys(self):
+        return self.field_ids.keys()
+
 # Hack: Can't pickle static methods.
 def _Region_unpickle(tree_id, ispace, fspace, owned):
     handle = ffi.new('legion_logical_region_t *')
@@ -696,6 +699,9 @@ class Region(object):
         del self.handle
         del self.ispace
         del self.fspace
+
+    def keys(self):
+        return self.fspace.keys()
 
     def _set_privilege(self, field_name, privilege):
         assert self.parent is None # not supported on subregions
