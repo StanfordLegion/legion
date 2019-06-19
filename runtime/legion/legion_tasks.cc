@@ -3224,7 +3224,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void SingleTask::replay_map_task_output()
+    void SingleTask::replay_map_task_output(void)
     //--------------------------------------------------------------------------
     {
       std::vector<Processor> procs;
@@ -3252,6 +3252,21 @@ namespace Legion {
                                                 regions[idx],
                                                 instances);
       }
+    }
+
+    //--------------------------------------------------------------------------
+    InnerContext* SingleTask::create_implicit_context(void)
+    //--------------------------------------------------------------------------
+    {
+      InnerContext *inner_ctx = new InnerContext(runtime, this, 
+          get_depth(), false/*is inner*/, regions, 
+          parent_req_indexes, virtual_mapped, unique_op_id);
+      if (mapper == NULL)
+        mapper = runtime->find_mapper(current_proc, map_id);
+      inner_ctx->configure_context(mapper, task_priority);
+      execution_context = inner_ctx;
+      execution_context->add_reference();
+      return inner_ctx;
     }
 
     //--------------------------------------------------------------------------

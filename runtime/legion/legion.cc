@@ -6660,6 +6660,26 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    /*static*/ Context Runtime::start_implicit(int argc, char **argv,
+                                               TaskID top_task_id,
+                                               Processor::Kind proc_kind,
+                                               const char *task_name,
+                                               bool control_replicable)
+    //--------------------------------------------------------------------------
+    {
+      return Internal::Runtime::start_implicit(argc, argv, top_task_id,
+                              proc_kind, task_name, control_replicable);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void Runtime::finish_implicit(Context ctx)
+    //--------------------------------------------------------------------------
+    {
+      // this is just a normal finish operation
+      ctx->end_task(NULL, 0, false/*owned*/);
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ void Runtime::set_top_level_task_id(TaskID top_id)
     //--------------------------------------------------------------------------
     {

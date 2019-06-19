@@ -1345,6 +1345,9 @@ namespace Legion {
     // the provenance of meta-task operations for profiling
     // purposes, this has no bearing on correctness
     extern __thread ::legion_unique_id_t implicit_provenance;
+    // Use this global variable to track if we're an
+    // implicit top-level task that needs to do external waits
+    extern __thread bool implicit_top_level_task;
 
     /**
      * \class LgTaskArgs
@@ -2174,7 +2177,10 @@ namespace Legion {
         const Realm::UserEvent done = Realm::UserEvent::create_user_event();
         local_lock_list_copy->advise_sleep_entry(done);
         // Now we can do the wait
-        Realm::Event::wait();
+        if (implicit_top_level_task)
+          Realm::Event::external_wait();
+        else
+          Realm::Event::wait();
         // When we wake up, notify that we are done and exited the wait
         local_lock_list_copy->advise_sleep_exit();
         // Trigger the user-event
@@ -2186,7 +2192,12 @@ namespace Legion {
         Internal::local_lock_list = local_lock_list_copy; 
       }
       else // Just do the normal wait
-        Realm::Event::wait();
+      {
+        if (implicit_top_level_task)
+          Realm::Event::external_wait();
+        else
+          Realm::Event::wait();
+      }
       // Write the context back
       Internal::implicit_context = local_ctx;
       // Write the provenance information back
