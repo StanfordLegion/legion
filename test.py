@@ -57,6 +57,7 @@ legion_cxx_tests = [
     ['examples/virtual_map/virtual_map', []],
     ['examples/attach_2darray_c_fortran_layout/attach_2darray', []],
     ['examples/attach_array_daxpy/attach_array_daxpy', []],
+    ['examples/implicit_top_task/implicit_top_task', []],
 
     # Tests
     ['test/rendering/rendering', ['-i', '2', '-n', '64', '-ll:cpu', '4']],
