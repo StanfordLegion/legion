@@ -20,12 +20,12 @@ import argparse, datetime, glob, json, multiprocessing, os, platform, shutil, su
 
 # Find physical core count of the machine.
 if platform.system() == 'Linux':
-    lines = subprocess.check_output(['lscpu', '--parse=core'])
+    lines = subprocess.check_output(['lscpu', '--parse=core']).decode('utf-8')
     physical_cores = len(set(line for line in lines.strip().split('\n')
                              if not line.startswith('#')))
 elif platform.system() == 'Darwin':
     physical_cores = int(
-        subprocess.check_output(['sysctl', '-n', 'hw.physicalcpu']))
+        subprocess.check_output(['sysctl', '-n', 'hw.physicalcpu']).decode('utf-8'))
 else:
     raise Exception('Unknown platform: %s' % platform.system())
 
@@ -57,6 +57,7 @@ legion_cxx_tests = [
     ['examples/virtual_map/virtual_map', []],
     ['examples/attach_2darray_c_fortran_layout/attach_2darray', []],
     ['examples/attach_array_daxpy/attach_array_daxpy', []],
+    ['examples/implicit_top_task/implicit_top_task', []],
 
     # Tests
     ['test/rendering/rendering', ['-i', '2', '-n', '64', '-ll:cpu', '4']],
@@ -82,6 +83,7 @@ legion_openmp_cxx_tests = [
 legion_python_cxx_tests = [
     # Bindings
     ['bindings/python/legion_python', ['examples/domain.py', '-ll:py', '1', '-ll:cpu', '0']],
+    ['bindings/python/legion_python', ['examples/domain_transform.py', '-ll:py', '1', '-ll:cpu', '0']],
     ['bindings/python/legion_python', ['examples/future.py', '-ll:py', '1', '-ll:cpu', '0']],
     ['bindings/python/legion_python', ['examples/hello.py', '-ll:py', '1', '-ll:cpu', '0']],
     ['bindings/python/legion_python', ['examples/import.py', '-ll:py', '1', '-ll:cpu', '0']],
@@ -90,6 +92,7 @@ legion_python_cxx_tests = [
     ['bindings/python/legion_python', ['examples/method.py', '-ll:py', '1', '-ll:cpu', '0']],
     ['bindings/python/legion_python', ['examples/must_epoch.py', '-ll:py', '1', '-ll:cpu', '0']],
     ['bindings/python/legion_python', ['examples/partition.py', '-ll:py', '1', '-ll:cpu', '0']],
+    ['bindings/python/legion_python', ['examples/partition_by_restriction.py', '-ll:py', '1', '-ll:cpu', '0']],
     ['bindings/python/legion_python', ['examples/region.py', '-ll:py', '1', '-ll:cpu', '0']],
     ['bindings/python/legion_python', ['examples/return_region.py', '-ll:py', '1', '-ll:cpu', '0']],
     ['bindings/python/legion_python', ['examples/single_launch.py', '-ll:py', '1', '-ll:cpu', '0']],
@@ -153,7 +156,7 @@ def cmd(command, env=None, cwd=None):
     return subprocess.check_call(command, env=env, cwd=cwd)
 
 def run_test_regent(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
-    cmd([os.path.join(root_dir, 'language/travis.py')], env=env)
+    cmd([sys.executable, os.path.join(root_dir, 'language/travis.py')], env=env)
 
 def run_cxx(tests, flags, launcher, root_dir, bin_dir, env, thread_count):
     for test_file, test_flags in tests:
@@ -307,13 +310,13 @@ def run_test_external(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
     barnes_hut_dir = os.path.join(tmp_dir, 'barnes_hut')
     cmd(['git', 'clone', 'https://github.com/StanfordLegion/barnes-hut.git', barnes_hut_dir])
     regent_path = os.path.join(root_dir, 'language', 'regent.py')
-    cmd([regent_path, 'hdf5_converter.rg',
+    cmd([sys.executable, regent_path, 'hdf5_converter.rg',
          '-i', 'input/bodies-16384-blitz.csv',
          '-o', 'bodies-16384-blitz.h5',
          '-n', '16384'],
         cwd=barnes_hut_dir,
         env=env)
-    cmd([regent_path, 'barnes_hut.rg',
+    cmd([sys.executable, regent_path, 'barnes_hut.rg',
          '-i', 'bodies-16384-blitz.h5',
          '-n', '16384'],
         cwd=barnes_hut_dir,
@@ -463,7 +466,7 @@ def run_test_perf_one_configuration(launcher, root_dir, tmp_dir, bin_dir, env, t
     ])
 
     # Build Regent first to avoid recompiling later.
-    cmd([os.path.join(root_dir, 'language/travis.py'), '--install-only'], env=env)
+    cmd([sys.executable, os.path.join(root_dir, 'language/travis.py'), '--install-only'], env=env)
 
     # Run Legion C++ performance tests.
     runner = os.path.join(root_dir, 'perf.py')
@@ -488,7 +491,8 @@ def run_test_perf_one_configuration(launcher, root_dir, tmp_dir, bin_dir, env, t
 
     # Render the final charts.
     subprocess.check_call(
-        [os.path.join(root_dir, 'tools', 'perf_chart.py'),
+        [sys.executable,
+         os.path.join(root_dir, 'tools', 'perf_chart.py'),
          'git@github.com:StanfordLegion/perf-data.git',
          'git@github.com:StanfordLegion/perf-data.git'],
         env=env)
@@ -630,6 +634,9 @@ def report_mode(debug, max_dim, launcher,
     print()
     print('#'*60)
     print('### Test Suite Configuration')
+    print('###')
+    print('### Python:')
+    print('\n'.join(['###   ' + line for line in  sys.version.split('\n')]))
     print('###')
     print('### Debug:          %s' % debug)
     print('### Launcher:       %s' % launcher)

@@ -1468,7 +1468,7 @@ namespace Legion {
     public:
       struct LegionConfiguration {
       public:
-        LegionConfiguration(void)
+        LegionConfiguration(bool implicit_top)
           : delay_start(0),
             legion_collective_radix(LEGION_COLLECTIVE_RADIX),
             initial_task_window_size(LEGION_DEFAULT_MAX_TASK_WINDOW),
@@ -1481,6 +1481,7 @@ namespace Legion {
             gc_epoch_size(LEGION_DEFAULT_GC_EPOCH_SIZE),
             max_local_fields(LEGION_DEFAULT_LOCAL_FIELDS),
             max_replay_parallelism(LEGION_DEFAULT_MAX_REPLAY_PARALLELISM),
+            implicit_top_level(implicit_top),
             program_order_execution(false),
             dump_physical_traces(false),
             no_tracing(false),
@@ -1536,6 +1537,7 @@ namespace Legion {
         unsigned max_local_fields;
         unsigned max_replay_parallelism;
       public:
+        bool implicit_top_level;
         bool program_order_execution;
         bool dump_physical_traces;
         bool no_tracing;
@@ -1676,6 +1678,7 @@ namespace Legion {
       const unsigned max_local_fields;
       const unsigned max_replay_parallelism;
     public:
+      const bool implicit_top_level;
       const bool program_order_execution;
       const bool dump_physical_traces;
       const bool no_tracing;
@@ -3169,6 +3172,11 @@ namespace Legion {
           const LegionConfiguration &config, RealmRuntime &realm,
           Processor::Kind &startup_kind);
       static int wait_for_shutdown(void);
+      static Context start_implicit(int argc, char **argv,
+                                    TaskID top_task_id,
+                                    Processor::Kind proc_kind,
+                                    const char *task_name,
+                                    bool control_replicable);
       static void set_top_level_task_id(TaskID top_id);
       static void configure_MPI_interoperability(int rank);
       static void register_handshake(MPILegionHandshake &handshake);
