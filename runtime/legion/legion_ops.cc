@@ -1393,7 +1393,12 @@ namespace Legion {
         one_below_path.register_child(idx2, projection_path.get_child(idx2));
       const LegionMap<ProjectionEpochID,FieldMask>::aligned &proj_epochs = 
         proj_info.get_projection_epochs();
+#ifdef __clang__ // FUCK clang 3.5
+      const LegionMap<unsigned,FieldMask>::aligned empty_dirty_previous =
+        LegionMap<unsigned,FieldMask>::aligned();
+#else
       const LegionMap<unsigned,FieldMask>::aligned empty_dirty_previous;
+#endif
       // Do the analysis to see if we've opened all the nodes to the child
       {
         for (LegionMap<ProjectionEpochID,FieldMask>::aligned::const_iterator
@@ -7019,7 +7024,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       std::set<RtEvent> open_events;
+#ifdef __clang__ // FUCK clang 3.5
+      const LegionMap<unsigned,FieldMask>::aligned empty_dirty_previous = 
+        LegionMap<unsigned,FieldMask>::aligned();
+#else
       const LegionMap<unsigned,FieldMask>::aligned empty_dirty_previous;
+#endif
       runtime->forest->advance_version_numbers(this, 0/*idx*/,
                                                false/*update parent state*/,
                                                parent_ctx->get_context_uid(),

@@ -6029,7 +6029,12 @@ namespace Legion {
       // first have to check to see if the tree is open, and then
       // again to see if it has been advanced if we are going to 
       // be writing/reducing below in the tree
+#ifdef __clang__ // FUCK clang 3.5
+      const LegionMap<unsigned,FieldMask>::aligned empty_dirty_previous =
+        LegionMap<unsigned,FieldMask>::aligned();
+#else
       const LegionMap<unsigned,FieldMask>::aligned empty_dirty_previous;
+#endif
       const UniqueID logical_context_uid = parent_ctx->get_context_uid();
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
