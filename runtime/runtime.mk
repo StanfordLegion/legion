@@ -785,7 +785,7 @@ endif
 ifeq ($(strip ${USE_PYTHON}),)
 	@echo "#define REALM_PYTHON_VERSION_MAJOR $(PYTHON_VERSION_MAJOR)" >> $@
 else
-	@echo "/* #undef REALM_USE_PYTHON */" >> $@
+	@echo "/* #undef REALM_PYTHON_VERSION_MAJOR */" >> $@
 endif
 	@echo "#endif\n" >> $@
 	@echo "#ifndef REALM_USE_CUDA" >> $@
@@ -876,7 +876,7 @@ else
 endif
 	@echo "#endif\n" >> $@
 	@echo "#ifndef GASNETI_BUG1389_WORKAROUND" >> $@
-	@echo "#define GASNETI_BUG1389_WORKAROUND" >> $@
+	@echo "#define GASNETI_BUG1389_WORKAROUND 1" >> $@
 	@echo "#endif\n" >> $@
 	@echo "#ifndef REALM_USE_LLVM" >> $@
 ifeq ($(strip $(USE_LLVM)),1)
