@@ -282,7 +282,7 @@ int main(int argc, char **argv)
   stencil_launcher.add_field(0, FID_VAL);
   stencil_launcher.add_region_requirement(
       RegionRequirement(disjoint_lp, 0/*projection ID*/,
-                        READ_WRITE, EXCLUSIVE, stencil_lr));
+                        WRITE_DISCARD, EXCLUSIVE, stencil_lr));
   stencil_launcher.add_field(1, FID_DERIV);
   runtime->execute_index_space(ctx, stencil_launcher);
 
@@ -299,6 +299,7 @@ int main(int argc, char **argv)
   runtime->destroy_logical_region(ctx, stencil_lr);
   runtime->destroy_field_space(ctx, fs);
   runtime->destroy_index_space(ctx, is);
+  runtime->destroy_index_space(ctx, color_is);
 
   // Mark that we are done excecuting the top-level task
   // After this call the context is no longer valid
