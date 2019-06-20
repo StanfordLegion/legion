@@ -524,7 +524,12 @@ namespace Realm {
     } else {
       // allocate our own space
       // enforce alignment on the whole memory range
-      base_orig = new char[_size + ALIGNMENT - 1];
+      base_orig = static_cast<char *>(malloc(_size + ALIGNMENT - 1));
+      if(!base_orig) {
+	log_malloc.fatal() << "insufficient system memory: "
+			   << size << " bytes needed (from -ll:csize)";
+	abort();
+      }
       size_t ofs = reinterpret_cast<size_t>(base_orig) % ALIGNMENT;
       if(ofs > 0) {
 	base = base_orig + (ALIGNMENT - ofs);
@@ -543,7 +548,7 @@ namespace Realm {
   LocalCPUMemory::~LocalCPUMemory(void)
   {
     if(!prealloced)
-      delete[] base_orig;
+      free(base_orig);
   }
 
   off_t LocalCPUMemory::alloc_bytes(size_t size)
