@@ -15,6 +15,7 @@
 #
 
 USE_OPENMP ?= 0
+BOUNDS_CHECKS ?= 0
 ifeq ($(shell uname -s),Darwin)
 DARWIN = 1
 CC_FLAGS += -DDARWIN
@@ -637,32 +638,284 @@ $(SLIB_REALM) : $(REALM_OBJS)
 	rm -f $@
 	$(AR) rc $@ $^
 
-$(GEN_OBJS) : %.cc.o : %.cc
+$(GEN_OBJS) : %.cc.o : %.cc legion_defines.h realm_defines.h
 	$(CXX) -o $@ -c $< $(CC_FLAGS) $(INC_FLAGS) $(OMP_FLAGS)
 
 $(ASM_OBJS) : %.S.o : %.S
 	$(CXX) -o $@ -c $< $(CC_FLAGS) $(INC_FLAGS)
 
-$(REALM_OBJS) : %.cc.o : %.cc
+$(REALM_OBJS) : %.cc.o : %.cc legion_defines.h realm_defines.h
 	$(CXX) -o $@ -c $< $(CC_FLAGS) $(INC_FLAGS)
 
-$(LEGION_OBJS) : %.cc.o : %.cc
+$(LEGION_OBJS) : %.cc.o : %.cc legion_defines.h realm_defines.h
 	$(CXX) -o $@ -c $< $(CC_FLAGS) $(INC_FLAGS)
 
-$(MAPPER_OBJS) : %.cc.o : %.cc
+$(MAPPER_OBJS) : %.cc.o : %.cc legion_defines.h realm_defines.h
 	$(CXX) -o $@ -c $< $(CC_FLAGS) $(INC_FLAGS)
 
-$(GEN_GPU_OBJS) : %.cu.o : %.cu
+$(GEN_GPU_OBJS) : %.cu.o : %.cu legion_defines.h realm_defines.h
 	$(NVCC) -o $@ -c $< $(NVCC_FLAGS) $(INC_FLAGS)
 
-$(GPU_RUNTIME_OBJS): %.cu.o : %.cu
+$(GPU_RUNTIME_OBJS): %.cu.o : %.cu legion_defines.h realm_defines.h
 	$(NVCC) -o $@ -c $< $(NVCC_FLAGS) $(INC_FLAGS)
 
 # disable gmake's default rule for building % from %.o
 % : %.o
 
 clean::
-	$(RM) -f $(OUTFILE) $(SLIB_LEGION) $(SLIB_REALM) $(GEN_OBJS) $(GEN_GPU_OBJS) $(REALM_OBJS) $(LEGION_OBJS) $(GPU_RUNTIME_OBJS) $(MAPPER_OBJS) $(ASM_OBJS)
+	$(RM) -f $(OUTFILE) $(SLIB_LEGION) $(SLIB_REALM) $(GEN_OBJS) $(GEN_GPU_OBJS) $(REALM_OBJS) $(LEGION_OBJS) $(GPU_RUNTIME_OBJS) $(MAPPER_OBJS) $(ASM_OBJS) legion_defines.h realm_defines.h
+
+legion_defines.h : Makefile
+	@echo "/**" > $@
+	@echo " * \\\file legion_defines.h" >> $@
+	@echo " * Public-facing definitions of variables configured at build time" >> $@
+	@echo " */\n" >> $@
+	@echo "// ******************** IMPORTANT **************************" >> $@
+	@echo "//" >> $@
+	@echo "// This file is PURE C, **NOT** C++. Keep any C++-isms in" >> $@
+	@echo "// legion_types.h, or elsewhere." >> $@
+	@echo "//" >> $@
+	@echo "// ******************** IMPORTANT **************************\n" >> $@
+	@echo "#ifndef DEBUG_LEGION" >> $@
+ifeq ($(strip $(DEBUG)),1)
+	@echo "#define DEBUG_LEGION" >> $@
+else
+	@echo "/* #undef DEBUG_LEGION */" >> $@
+endif
+	@echo "#endif\n" >> $@
+	@echo "#ifndef PRIVILEGE_CHECKS" >> $@
+ifeq ($(strip $(DEBUG)),1)
+	@echo "#define PRIVILEGE_CHECKS" >> $@
+else
+	@echo "/* #undef PRIVILEGE_CHECKS */" >> $@
+endif
+	@echo "#endif\n" >> $@
+	@echo "#ifndef BOUNDS_CHECKS" >> $@
+ifeq ($(strip $(BOUNDS_CHECKS)),1)
+	@echo "#define BOUNDS_CHECKS" >> $@
+else
+	@echo "/* #undef BOUNDS_CHECKS */" >> $@
+endif
+	@echo "#endif\n" >> $@
+	@echo "#ifndef LEGION_MAX_DIM" >> $@
+ifeq ($(strip ${MAX_DIM}),)
+	@echo "#define LEGION_MAX_DIM 3" >> $@
+else
+	@echo "#define LEGION_MAX_DIM $(MAX_DIM)" >> $@
+endif
+	@echo "#endif\n" >> $@
+	@echo "#ifndef MAX_FIELDS" >> $@
+ifeq ($(strip ${MAX_FIELDS}),)
+	@echo "#define MAX_FIELDS 512" >> $@
+else
+	@echo "#define MAX_FIELDS $(MAX_FIELDS)" >> $@
+endif
+	@echo "#endif\n" >> $@
+	@echo "#ifndef ENABLE_LEGION_TLS" >> $@
+	@echo "#define ENABLE_LEGION_TLS" >> $@
+	@echo "#endif\n" >> $@
+	@echo "#ifndef __STDC_FORMAT_MACROS" >> $@
+	@echo "#define __STDC_FORMAT_MACROS" >> $@
+	@echo "#endif\n" >> $@
+	@echo "#ifndef LEGION_USE_CUDA" >> $@
+ifeq ($(strip $(USE_CUDA)),1)
+	@echo "#define LEGION_USE_CUDA" >> $@
+else
+	@echo "/* #undef LEGION_USE_CUDA */" >> $@
+endif
+	@echo "#endif" >> $@
+
+realm_defines.h : Makefile
+	@echo "/**" > $@
+	@echo " * \\\file realm_defines.h" >> $@
+	@echo " * Public-facing definitions of variables configured at build time" >> $@
+	@echo " */\n" >> $@
+	@echo "// ******************** IMPORTANT **************************" >> $@
+	@echo "//" >> $@
+	@echo "// This file is PURE C, **NOT** C++. Keep any C++-isms in" >> $@
+	@echo "// realm_config.h, or elsewhere." >> $@
+	@echo "//" >> $@
+	@echo "// ******************** IMPORTANT **************************\n" >> $@
+	@echo "#ifndef DEBUG_REALM" >> $@
+ifeq ($(strip $(DEBUG)),1)
+	@echo "#define DEBUG_REALM" >> $@
+else
+	@echo "/* #undef DEBUG_REALM*/" >> $@
+endif
+	@echo "#endif\n" >> $@
+	@echo "#ifndef COMPILE_TIME_MIN_LEVEL" >> $@
+	@echo "#define COMPILE_TIME_MIN_LEVEL $(OUTPUT_LEVEL)" >> $@
+	@echo "#endif\n" >> $@
+	@echo "#ifndef REALM_MAX_DIM" >> $@
+ifeq ($(strip ${MAX_DIM}),)
+	@echo "#define REALM_MAX_DIM 3" >> $@
+else
+	@echo "#define REALM_MAX_DIM $(MAX_DIM)" >> $@
+endif
+	@echo "#endif\n" >> $@
+	@echo "#ifndef REALM_USE_OPENMP" >> $@
+ifeq ($(strip $(USE_OPENMP)),1)
+	@echo "#define REALM_USE_OPENMP" >> $@
+else
+	@echo "/* #undef REALM_USE_OPENMP */" >> $@
+endif
+	@echo "#endif\n" >> $@
+	@echo "#ifndef REALM_OPENMP_GOMP_SUPPORT" >> $@
+ifeq ($(strip $(USE_OPENMP)),1)
+	@echo "#define REALM_OPENMP_GOMP_SUPPORT" >> $@
+else
+	@echo "/* #undef REALM_OPENMP_GOMP_SUPPORT*/" >> $@
+endif
+	@echo "#endif\n" >> $@
+	@echo "#ifndef REALM_OPENMP_KMP_SUPPORT" >> $@
+ifeq ($(strip $(USE_OPENMP)),1)
+	@echo "#define REALM_OPENMP_KMP_SUPPORT" >> $@
+else
+	@echo "/* #undef REALM_OPENMP_KMP_SUPPORT*/" >> $@
+endif
+	@echo "#endif\n" >> $@
+	@echo "#ifndef REALM_USE_PYTHON" >> $@
+ifeq ($(strip ${USE_PYTHON}),)
+	@echo "#define REALM_USE_PYTHON" >> $@
+else
+	@echo "/* #undef REALM_USE_PYTHON */" >> $@
+endif
+	@echo "#endif\n" >> $@
+	@echo "#ifndef REALM_PYTHON_VERSION_MAJOR" >> $@
+ifeq ($(strip ${USE_PYTHON}),)
+	@echo "#define REALM_PYTHON_VERSION_MAJOR $(PYTHON_VERSION_MAJOR)" >> $@
+else
+	@echo "/* #undef REALM_USE_PYTHON */" >> $@
+endif
+	@echo "#endif\n" >> $@
+	@echo "#ifndef REALM_USE_CUDA" >> $@
+ifeq ($(strip $(USE_CUDA)),1)
+	@echo "#define REALM_USE_CUDA" >> $@
+else
+	@echo "/* #undef REALM_USE_CUDA */" >> $@
+endif
+	@echo "#endif\n" >> $@
+	@echo "#ifndef USE_CUDA" >> $@
+ifeq ($(strip $(USE_CUDA)),1)
+	@echo "#define USE_CUDA" >> $@
+else
+	@echo "/* #undef USE_CUDA */" >> $@
+endif
+	@echo "#endif\n" >> $@
+	@echo "#ifndef USE_GASNET" >> $@
+ifeq ($(strip $(USE_GASNET)),1)
+	@echo "#define USE_GASNET" >> $@
+else
+	@echo "/* #undef USE_GASNET */" >> $@
+endif
+	@echo "#endif\n" >> $@
+	@echo "#ifndef GASNET_CONDUIT_MPI" >> $@
+ifeq ($(strip $(USE_GASNET)),1)
+ifeq ($(strip $(CONDUIT)),mpi)
+	@echo "#define GASNET_CONDUIT_MPI" >> $@
+else
+	@echo "/* #undef GASNET_CONDUIT_MPI */" >> $@
+endif
+else
+	@echo "/* #undef GASNET_CONDUIT_MPI */" >> $@
+endif
+	@echo "#endif\n" >> $@
+	@echo "#ifndef GASNET_CONDUIT_IBV" >> $@
+ifeq ($(strip $(USE_GASNET)),1)
+ifeq ($(strip $(CONDUIT)),ibv)
+	@echo "#define GASNET_CONDUIT_IBV" >> $@
+else
+	@echo "/* #undef GASNET_CONDUIT_IBV */" >> $@
+endif
+else
+	@echo "/* #undef GASNET_CONDUIT_IBV */" >> $@
+endif
+	@echo "#endif\n" >> $@
+	@echo "#ifndef GASNET_CONDUIT_UDP" >> $@
+ifeq ($(strip $(USE_GASNET)),1)
+ifeq ($(strip $(CONDUIT)),udp)
+	@echo "#define GASNET_CONDUIT_UDP" >> $@
+else
+	@echo "/* #undef GASNET_CONDUIT_UDP */" >> $@
+endif
+else
+	@echo "/* #undef GASNET_CONDUIT_UDP */" >> $@
+endif
+	@echo "#endif\n" >> $@
+	@echo "#ifndef GASNET_CONDUIT_ARIES" >> $@
+ifeq ($(strip $(USE_GASNET)),1)
+ifeq ($(strip $(CONDUIT)),aries)
+	@echo "#define GASNET_CONDUIT_ARIES" >> $@
+else
+	@echo "/* #undef GASNET_CONDUIT_ARIES */" >> $@
+endif
+else
+	@echo "/* #undef GASNET_CONDUIT_ARIES */" >> $@
+endif
+	@echo "#endif\n" >> $@
+	@echo "#ifndef GASNET_CONDUIT_GEMINI" >> $@
+ifeq ($(strip $(USE_GASNET)),1)
+ifeq ($(strip $(CONDUIT)),gemini)
+	@echo "#define GASNET_CONDUIT_GEMINI" >> $@
+else
+	@echo "/* #undef GASNET_CONDUIT_GEMINI */" >> $@
+endif
+else
+	@echo "/* #undef GASNET_CONDUIT_GEMINI */" >> $@
+endif
+	@echo "#endif\n" >> $@
+	@echo "#ifndef GASNET_CONDUIT_PSM" >> $@
+ifeq ($(strip $(USE_GASNET)),1)
+ifeq ($(strip $(CONDUIT)),psm)
+	@echo "#define GASNET_CONDUIT_PSM" >> $@
+else
+	@echo "/* #undef GASNET_CONDUIT_PSM */" >> $@
+endif
+else
+	@echo "/* #undef GASNET_CONDUIT_PSM */" >> $@
+endif
+	@echo "#endif\n" >> $@
+	@echo "#ifndef GASNETI_BUG1389_WORKAROUND" >> $@
+	@echo "#define GASNETI_BUG1389_WORKAROUND" >> $@
+	@echo "#endif\n" >> $@
+	@echo "#ifndef REALM_USE_LLVM" >> $@
+ifeq ($(strip $(USE_LLVM)),1)
+	@echo "#define REALM_USE_LLVM" >> $@
+else
+	@echo "/* #undef REALM_USE_LLVM */" >> $@
+endif
+	@echo "#endif\n" >> $@
+	@echo "#ifndef REALM_LLVM_VERSION" >> $@
+ifeq ($(strip $(USE_LLVM)),1)
+	@echo "#define REALM_LLVM_VERSION $(LLVM_VERSION_NUMBER)" >> $@
+else
+	@echo "/* #undef REALM_LLVM_VERSION */" >> $@
+endif
+	@echo "#endif\n" >> $@
+	@echo "#ifndef REALM_ALLOW_MISSING_LLVM_LIBS" >> $@
+ifeq ($(strip $(USE_LLVM)),1)
+	@echo "#define REALM_ALLOW_MISSING_LLVM_LIBS" >> $@
+else
+	@echo "/* #undef REALM_ALLOW_MISSING_LLVM_LIBS */" >> $@
+endif
+	@echo "#endif\n" >> $@
+	@echo "#ifndef USE_HDF" >> $@
+ifeq ($(strip $(USE_HDF)),1)
+	@echo "#define USE_HDF" >> $@
+else
+	@echo "/* #undef USE_HDF*/" >> $@
+endif
+	@echo "#endif\n" >> $@
+	@echo "#ifndef USE_LIBDL" >> $@
+ifeq ($(strip $(USE_LIBDL)),1)
+	@echo "#define USE_LIBDL" >> $@
+else
+	@echo "/* #undef USE_LIBDL*/" >> $@
+endif
+	@echo "#endif\n" >> $@
+	@echo "#ifndef __STDC_FORMAT_MACROS" >> $@
+	@echo "#define __STDC_FORMAT_MACROS" >> $@
+	@echo "#endif" >> $@
 
 endif
 
