@@ -34,7 +34,7 @@ add_subdirectory(attach_array_daxpy)
 
 if(Legion_USE_GASNet)
   add_subdirectory(mpi_interop)
-else
+else()
   add_subdirectory(implicit_top_task)
 endif()
 
