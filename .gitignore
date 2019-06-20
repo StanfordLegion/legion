@@ -16,3 +16,6 @@ core
 *.bbl
 *.blg
 *.aux
+
+legion_defines.h
+realm_defines.h
