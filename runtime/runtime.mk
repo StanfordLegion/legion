@@ -639,25 +639,25 @@ $(SLIB_REALM) : $(REALM_OBJS)
 	rm -f $@
 	$(AR) rc $@ $^
 
-$(GEN_OBJS) : %.cc.o : %.cc legion_defines.h realm_defines.h
+$(GEN_OBJS) : %.cc.o : %.cc #legion_defines.h realm_defines.h
 	$(CXX) -o $@ -c $< $(CC_FLAGS) $(INC_FLAGS) $(OMP_FLAGS)
 
 $(ASM_OBJS) : %.S.o : %.S
 	$(CXX) -o $@ -c $< $(CC_FLAGS) $(INC_FLAGS)
 
-$(REALM_OBJS) : %.cc.o : %.cc legion_defines.h realm_defines.h
+$(REALM_OBJS) : %.cc.o : %.cc #legion_defines.h realm_defines.h
 	$(CXX) -o $@ -c $< $(CC_FLAGS) $(INC_FLAGS)
 
-$(LEGION_OBJS) : %.cc.o : %.cc legion_defines.h realm_defines.h
+$(LEGION_OBJS) : %.cc.o : %.cc #legion_defines.h realm_defines.h
 	$(CXX) -o $@ -c $< $(CC_FLAGS) $(INC_FLAGS)
 
-$(MAPPER_OBJS) : %.cc.o : %.cc legion_defines.h realm_defines.h
+$(MAPPER_OBJS) : %.cc.o : %.cc #legion_defines.h realm_defines.h
 	$(CXX) -o $@ -c $< $(CC_FLAGS) $(INC_FLAGS)
 
-$(GEN_GPU_OBJS) : %.cu.o : %.cu legion_defines.h realm_defines.h
+$(GEN_GPU_OBJS) : %.cu.o : %.cu #legion_defines.h realm_defines.h
 	$(NVCC) -o $@ -c $< $(NVCC_FLAGS) $(INC_FLAGS)
 
-$(GPU_RUNTIME_OBJS): %.cu.o : %.cu legion_defines.h realm_defines.h
+$(GPU_RUNTIME_OBJS): %.cu.o : %.cu #legion_defines.h realm_defines.h
 	$(NVCC) -o $@ -c $< $(NVCC_FLAGS) $(INC_FLAGS)
 
 # disable gmake's default rule for building % from %.o
