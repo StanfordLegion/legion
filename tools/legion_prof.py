@@ -215,7 +215,7 @@ class PathRange(object):
         self_elapsed = self.elapsed()
         other_elapsed = other.elapsed()
         if self_elapsed == other_elapsed:
-            return len(other.path) - len(self.path)
+            return len(self.path) - len(other.path)
         else:
             if self_elapsed < other_elapsed:
                 return -1
@@ -646,7 +646,7 @@ class Processor(object):
         return '%s Processor %s' % (self.kind, hex(self.proc_id))
 
     def __cmp__(a, b):
-        return b.proc_id - a.proc_id;
+        return a.proc_id - b.proc_id;
 
     def __lt__(self, other):
         return self.__cmp__(other) < 0
@@ -796,7 +796,7 @@ class Memory(object):
         return '%s Memory %s' % (self.kind, hex(self.mem_id))
 
     def __cmp__(a, b):
-        return b.mem_id - a.mem_id
+        return a.mem_id - b.mem_id
 
     def __lt__(self, other):
         return self.__cmp__(other) < 0
