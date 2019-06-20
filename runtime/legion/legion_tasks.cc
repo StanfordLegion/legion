@@ -5290,7 +5290,7 @@ namespace Legion {
       }
 #ifdef DEBUG_LEGION
 #ifndef NDEBUG
-      else
+      else if (!implicit_top_level_task)
       {
         assert(!mapped_precondition.exists());
         assert(map_applied_conditions.empty());
