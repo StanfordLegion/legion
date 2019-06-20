@@ -6822,6 +6822,29 @@ namespace Legion {
        * invoke this method. Returns the exit code for the application.
        */
       static int wait_for_shutdown(void);
+
+      /**
+       * An alternative way to start the runtime to create an implicit
+       * top-level task in the main thread. After this call the main
+       * thread will be treated as though it is the top-level task 
+       * running on a specific kind of processor. Users can also mark
+       * that this implicit top-level task is control replicable for
+       * supporting implicit top-level tasks for multi-node runs.
+       */
+      static Context start_implicit(int argc, char **argv,
+                                    TaskID top_task_id,
+                                    Processor::Kind proc_kind,
+                                    const char *task_name = NULL,
+                                    bool control_replicable = false);
+
+      /**
+       * This is the final method for marking the end of an 
+       * implicit top-level task. Note that it executes asychronously
+       * and it is still the responsibility of the user to wait for 
+       * the runtime to shutdown when all of it's effects are done.
+       * The Context object is no longer valid after this call.
+       */
+      static void finish_implicit(Context ctx);
       
       /**
        * Set the top-level task ID for the runtime to use when beginning

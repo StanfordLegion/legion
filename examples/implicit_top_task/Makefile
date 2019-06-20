@@ -19,20 +19,18 @@ $(error LG_RT_DIR variable is not defined, aborting build)
 endif
 
 # Flags for directing the runtime makefile what to include
-DEBUG           ?= 1		# Include debugging symbols
-MAX_DIM         ?= 3		# Maximum number of dimensions
+DEBUG           := 1		# Include debugging symbols
 OUTPUT_LEVEL    ?= LEVEL_DEBUG	# Compile time logging level
 USE_CUDA        ?= 0		# Include CUDA support (requires CUDA)
 USE_GASNET      ?= 0		# Include GASNet support (requires GASNet)
 USE_HDF         ?= 0		# Include HDF5 support (requires HDF5)
 ALT_MAPPERS     ?= 0		# Include alternative mappers (not recommended)
-USE_OPENMP      ?= 1
 
 # Put the binary file name here
-OUTFILE		?= omp_saxpy
+OUTFILE		?= implicit_top_task
 # List all the application source files here
-GEN_SRC		?= omp_saxpy.cc simple_blas.cc
-GEN_GPU_SRC	?= 					# .cu files
+GEN_SRC		?= implicit_top_task.cc		# .cc files
+GEN_GPU_SRC	?=				# .cu files
 
 # You can modify these variables, some will be appended to by the runtime makefile
 INC_FLAGS	?=

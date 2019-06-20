@@ -3218,7 +3218,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void SingleTask::replay_map_task_output()
+    void SingleTask::replay_map_task_output(void)
     //--------------------------------------------------------------------------
     {
       std::vector<Processor> procs;
@@ -3249,6 +3249,21 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    InnerContext* SingleTask::create_implicit_context(void)
+    //--------------------------------------------------------------------------
+    {
+      InnerContext *inner_ctx = new InnerContext(runtime, this, 
+          get_depth(), false/*is inner*/, regions, 
+          parent_req_indexes, virtual_mapped, unique_op_id);
+      if (mapper == NULL)
+        mapper = runtime->find_mapper(current_proc, map_id);
+      inner_ctx->configure_context(mapper, task_priority);
+      execution_context = inner_ctx;
+      execution_context->add_reference();
+      return inner_ctx;
+    }
+
+    //--------------------------------------------------------------------------
     void SingleTask::validate_target_processors(
                                  const std::vector<Processor> &processors) const
     //--------------------------------------------------------------------------
@@ -3259,7 +3274,13 @@ namespace Legion {
       for (unsigned idx = 0; idx < processors.size(); idx++)
       {
         const Processor &proc = processors[idx];
-        if (proc.kind() != kind)
+        if (!proc.exists())
+          REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                        "Invalid mapper output. Mapper %s requested an illegal "
+                        "NO_PROC for a target processor when mapping task %s "
+                        "(ID %lld).", mapper->get_mapper_name(), 
+                        get_task_name(), get_unique_id())
+        else if (proc.kind() != kind)
           REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                         "Invalid mapper output. Mapper %s requested processor "
                         IDFMT " which is of kind %s when mapping task %s "

@@ -1685,16 +1685,10 @@ namespace Realm {
 		  _max_req_size, _priority,
                   _order, _kind, _complete_fence)
       {
-#ifdef USE_HDF_OLD
-        HDF5Memory* hdf_mem;
-#endif
         switch (kind) {
           case XferDes::XFER_HDF_READ:
           {
 	    assert(src_mem->kind == MemoryImpl::MKIND_HDF);
-#ifdef USE_HDF_OLD
-            hdf_mem = (HDF5Memory*) src_mem;
-#endif
             //pthread_rwlock_rdlock(&hdf_mem->rwlock);
             // std::map<RegionInstance, HDFMetadata*>::iterator it;
             // it = hdf_mem->hdf_metadata.find(inst);
@@ -1710,9 +1704,6 @@ namespace Realm {
           case XferDes::XFER_HDF_WRITE:
           {
             assert(dst_mem->kind == MemoryImpl::MKIND_HDF);
-#ifdef USE_HDF_OLD
-            hdf_mem = (HDF5Memory*) dst_mem;
-#endif
             //pthread_rwlock_rdlock(&hdf_mem->rwlock);
             // std::map<RegionInstance, HDFMetadata*>::iterator it;
             // it = hdf_mem->hdf_metadata.find(inst);
@@ -1729,12 +1720,6 @@ namespace Realm {
             assert(0);
         }
 
-#ifdef USE_HDF_OLD
-	std::map<RegionInstance, HDFMetadata*>::iterator it;
-	it = hdf_mem->hdf_metadata.find(inst);
-	assert(it != hdf_mem->hdf_metadata.end());
-	hdf_metadata = it->second;
-#endif
 	// defer H5Fopen and friends so that we can call them from the correct
 	//  thread
 
@@ -1853,19 +1838,6 @@ namespace Realm {
 			         dst_mem :
 			         src_mem)->get_direct_ptr(mem_info.base_offset,
 							  mem_info.bytes_per_chunk);
-#ifdef USE_HDF_OLD
-	  new_req->dataset_id = hdf5_info.dset_id;
-	  new_req->datatype_id = hdf5_info.dtype_id;
-
-	  // TODO: this should be based on analysis of memory strides
-	  std::vector<hsize_t> mem_dims = hdf5_info.extent;
-	  CHECK_HDF5( new_req->mem_space_id = H5Screate_simple(mem_dims.size(), mem_dims.data(), NULL) );
-	  //std::vector<hsize_t> mem_start(DIM, 0);
-	  //CHECK_HDF5( H5Sselect_hyperslab(new_req->mem_space_id, H5S_SELECT_SET, ms_start, NULL, count, NULL) );
-
-	  CHECK_HDF5( new_req->file_space_id = H5Screate_simple(hdf5_info.dset_bounds.size(), hdf5_info.dset_bounds.data(), 0) );
-	  CHECK_HDF5( H5Sselect_hyperslab(new_req->file_space_id, H5S_SELECT_SET, hdf5_info.offset.data(), 0, hdf5_info.extent.data(), 0) );
-#else
 	  HDFFileInfo *info;
 	  {
 	    std::map<std::string, HDFFileInfo *>::const_iterator it = file_infos.find(*hdf5_info.filename);
@@ -1931,7 +1903,6 @@ namespace Realm {
 
 	  CHECK_HDF5( new_req->file_space_id = H5Screate_simple(hdf5_info.dset_bounds.size(), hdf5_info.dset_bounds.data(), 0) );
 	  CHECK_HDF5( H5Sselect_hyperslab(new_req->file_space_id, H5S_SELECT_SET, hdf5_info.offset.data(), 0, hdf5_info.extent.data(), 0) );
-#endif
 
 	  new_req->nbytes = hdf5_bytes;
 
@@ -1947,111 +1918,6 @@ namespace Realm {
 	}
 
 	return idx;
-#if 0
-        long ns = 0;
-        while (ns < nr && !available_reqs.empty() && fit != oas_vec.end()) {
-          requests[ns] = dequeue_request();
-          switch (kind) {
-            case XferDes::XFER_HDF_READ:
-            {
-              off_t hdf_ofs = fit->src_offset;
-              assert(hdf_metadata->dataset_ids.count(hdf_ofs) > 0);
-              //pthread_rwlock_rdlock(&hdf_metadata->hdf_memory->rwlock);
-              size_t elemnt_size = H5Tget_size(hdf_metadata->datatype_ids[hdf_ofs]);
-              HDFRequest* hdf_req = (HDFRequest*) requests[ns];
-              hdf_req->dataset_id = hdf_metadata->dataset_ids[hdf_ofs];
-              //hdf_req->rwlock = &hdf_metadata->dataset_rwlocks[hdf_idx];
-              hdf_req->mem_type_id = hdf_metadata->datatype_ids[hdf_ofs];
-              hsize_t count[DIM], ms_start[DIM], ds_start[DIM], ms_dims[DIM];
-              // assume SOA for now
-              assert(dst_buf.block_size >= lsi->image_lo[0] + domain.get_volume());
-              assert(lsi->strides[0][0] == 1);
-              ms_dims[DIM - 1] = lsi->strides[1][0];
-              for (unsigned i = 1; i < DIM - 1; i++)
-                ms_dims[DIM - 1 - i] = lsi->strides[i+1][0] / lsi->strides[i][0];
-              ms_dims[0] = lsi->subrect.hi[DIM - 1] - lsi->subrect.lo[DIM - 1] + 1;
-              size_t todo = 1;
-              for (unsigned i = 0; i < DIM; i++) {
-                ms_start[i] = 0;
-                count[i] = lsi->subrect.hi[DIM - 1 - i] - lsi->subrect.lo[DIM - 1 - i] + 1;
-                todo *= count[i];
-                ds_start[i] = lsi->subrect.lo[DIM - 1 - i] - hdf_metadata->lo[DIM - 1 - i];
-              }
-              hdf_req->file_space_id = H5Dget_space(hdf_metadata->dataset_ids[hdf_ofs]);
-              // HDF dimension always start with zero, but Legion::Domain may start with any integer
-              // We need to deal with the offset between them here
-              herr_t ret = H5Sselect_hyperslab(hdf_req->file_space_id, H5S_SELECT_SET, ds_start, NULL, count, NULL);
-              assert(ret >= 0);
-              //pthread_rwlock_unlock(&hdf_metadata->hdf_memory->rwlock);
-              //pthread_rwlock_wrlock(&hdf_metadata->hdf_memory->rwlock);
-              hdf_req->mem_space_id = H5Screate_simple(DIM, ms_dims, NULL);
-              ret = H5Sselect_hyperslab(hdf_req->mem_space_id, H5S_SELECT_SET, ms_start, NULL, count, NULL);
-              assert(ret >= 0);
-              //pthread_rwlock_unlock(&hdf_metadata->hdf_memory->rwlock);
-              off_t dst_offset = Realm::calc_mem_loc(0, fit->dst_offset, fit->size,
-                                              dst_buf.elmt_size, dst_buf.block_size, lsi->image_lo[0]);
-              hdf_req->mem_base = buf_base + dst_offset;
-              hdf_req->nbytes = todo * elemnt_size;
-              break;
-            }
-            case XferDes::XFER_HDF_WRITE:
-            {
-              off_t hdf_ofs = fit->dst_offset;
-              assert(hdf_metadata->dataset_ids.count(hdf_ofs) > 0);
-              //pthread_rwlock_rdlock(&hdf_metadata->hdf_memory->rwlock);
-              size_t elemnt_size = H5Tget_size(hdf_metadata->datatype_ids[hdf_ofs]);
-              HDFRequest* hdf_req = (HDFRequest*) requests[ns];
-              hdf_req->dataset_id = hdf_metadata->dataset_ids[hdf_ofs];
-              //hdf_req->rwlock = &hdf_metadata->dataset_rwlocks[hdf_idx];
-              hdf_req->mem_type_id = hdf_metadata->datatype_ids[hdf_ofs];
-              hsize_t count[DIM], ms_start[DIM], ds_start[DIM], ms_dims[DIM];
-              //assume SOA for now
-              assert(src_buf.block_size >= lsi->image_lo[0] + domain.get_volume());
-              assert(lsi->strides[0][0] == 1);
-              ms_dims[DIM - 1] = lsi->strides[1][0];
-              for (unsigned i = 1; i < DIM - 1; i++)
-                ms_dims[DIM - 1 - i] = lsi->strides[i+1][0] / lsi->strides[i][0];
-              ms_dims[0] = lsi->subrect.hi[DIM - 1] - lsi->subrect.lo[DIM - 1] + 1;
-              size_t todo = 1;
-              for (unsigned i = 0; i < DIM; i++) {
-                ms_start[i] = 0;
-                count[i] = lsi->subrect.hi[DIM - 1 - i] - lsi->subrect.lo[DIM - 1 - i] + 1;
-                todo *= count[i];
-                ds_start[i] = lsi->subrect.lo[DIM - 1 - i] - hdf_metadata->lo[DIM - 1 - i];
-              }
-              hdf_req->file_space_id = H5Dget_space(hdf_metadata->dataset_ids[hdf_ofs]);
-              // HDF dimension always start with zero, but Legion::Domain may start with any integer
-              // We need to deal with the offset between them here
-              herr_t ret = H5Sselect_hyperslab(hdf_req->file_space_id, H5S_SELECT_SET, ds_start, NULL, count, NULL);
-              assert(ret >= 0);
-              //pthread_rwlock_unlock(&hdf_metadata->hdf_memory->rwlock);
-              //pthread_rwlock_wrlock(&hdf_metadata->hdf_memory->rwlock);
-              hdf_req->mem_space_id = H5Screate_simple(DIM, ms_dims, NULL);
-              ret = H5Sselect_hyperslab(hdf_req->mem_space_id, H5S_SELECT_SET, ms_start, NULL, count, NULL);
-              assert(ret >= 0);
-              //pthread_rwlock_unlock(&hdf_metadata->hdf_memory->rwlock);
-              off_t src_offset = Realm::calc_mem_loc(0, fit->src_offset, fit->size,
-                                              src_buf.elmt_size, src_buf.block_size, lsi->image_lo[0]);
-              hdf_req->mem_base = buf_base + src_offset;
-              hdf_req->nbytes = todo * elemnt_size;
-              break;
-            }
-            default:
-              assert(0);
-          }
-          lsi->step();
-          if (!lsi->any_left) {
-            fit++;
-            delete lsi;
-            if (kind == XferDes::XFER_HDF_READ)
-              lsi = new GenericLinearSubrectIterator<Mapping<DIM, 1> >(domain.get_rect<DIM>(), (*dst_buf.linearization.get_mapping<DIM>()));
-            else
-              lsi = new GenericLinearSubrectIterator<Mapping<DIM, 1> >(domain.get_rect<DIM>(), (*src_buf.linearization.get_mapping<DIM>()));
-          }
-          ns ++;
-        }
-        return ns;
-#endif
       }
 
       void HDFXferDes::notify_request_read_done(Request* req)
@@ -3274,17 +3140,6 @@ namespace Realm {
 						const void *msgdata,
 						size_t msglen)
       {
-#if 0
-        const Payload *payload = (const Payload *)msgdata;
-        std::vector<OffsetsAndSize> oas_vec(payload->oas_vec_size);
-        for(size_t i = 0; i < payload->oas_vec_size; i++)
-          oas_vec[i] = payload->oas_vec(i);
-        Buffer src_buf, dst_buf;
-        src_buf.deserialize(payload->src_buf_bits);
-        src_buf.memory = args.src_mem;
-        dst_buf.deserialize(payload->dst_buf_bits);
-        dst_buf.memory = args.dst_mem;
-#else
 	intptr_t dma_req_as_intptr = 0;
 	NodeID launch_node = 0;
 	XferDesID guid = XferDes::XFERDES_NO_GUID;
@@ -3339,41 +3194,6 @@ namespace Realm {
 			src_serdez_id, dst_serdez_id,
 			max_req_size, max_nr, priority,
 			order, kind, args.fence, args.inst);
-#endif
-#if 0
-        switch(payload->domain.dim) {
-        case 0:
-          create_xfer_des<0>(payload->dma_request, payload->launch_node,
-                             payload->guid, payload->pre_xd_guid, payload->next_xd_guid,
-                             payload->mark_started, src_buf, dst_buf, payload->domain, oas_vec,
-                             payload->max_req_size, payload->max_nr, payload->priority,
-                             payload->order, payload->kind, args.fence, args.inst);
-          break;
-        case 1:
-          create_xfer_des<1>(payload->dma_request, payload->launch_node,
-                             payload->guid, payload->pre_xd_guid, payload->next_xd_guid,
-                             payload->mark_started, src_buf, dst_buf, payload->domain, oas_vec,
-                             payload->max_req_size, payload->max_nr, payload->priority,
-                             payload->order, payload->kind, args.fence, args.inst);
-          break;
-        case 2:
-          create_xfer_des<2>(payload->dma_request, payload->launch_node,
-                             payload->guid, payload->pre_xd_guid, payload->next_xd_guid,
-                             payload->mark_started, src_buf, dst_buf, payload->domain, oas_vec,
-                             payload->max_req_size, payload->max_nr, payload->priority,
-                             payload->order, payload->kind, args.fence, args.inst);
-          break;
-        case 3:
-          create_xfer_des<3>(payload->dma_request, payload->launch_node,
-                             payload->guid, payload->pre_xd_guid, payload->next_xd_guid,
-                             payload->mark_started, src_buf, dst_buf, payload->domain, oas_vec,
-                             payload->max_req_size, payload->max_nr, payload->priority,
-                             payload->order, payload->kind, args.fence, args.inst);
-          break;
-        default:
-          assert(0);
-        }
-#endif
       }
 
       /*static*/
@@ -3522,40 +3342,6 @@ namespace Realm {
       }
 
       ChannelManager::~ChannelManager(void) {
-	// these are deleted by runtime now
-#if 0
-        if (memcpy_channel)
-          delete memcpy_channel;
-        if (gasnet_read_channel)
-          delete gasnet_read_channel;
-        if (gasnet_write_channel)
-          delete gasnet_write_channel;
-        if (remote_write_channel)
-          delete remote_write_channel;
-        if (file_read_channel)
-          delete file_read_channel;
-        if (file_write_channel)
-          delete file_write_channel;
-        if (disk_read_channel)
-          delete disk_read_channel;
-        if (disk_write_channel)
-          delete disk_write_channel;
-#ifdef USE_CUDA
-        std::map<Cuda::GPU*, GPUChannel*>::iterator it;
-        for (it = gpu_to_fb_channels.begin(); it != gpu_to_fb_channels.end(); it++) {
-          delete it->second;
-        }
-        for (it = gpu_from_fb_channels.begin(); it != gpu_from_fb_channels.end(); it++) {
-          delete it->second;
-        }
-        for (it = gpu_in_fb_channels.begin(); it != gpu_in_fb_channels.end(); it++) {
-          delete it->second;
-        }
-        for (it = gpu_peer_fb_channels.begin(); it != gpu_peer_fb_channels.end(); it++) {
-          delete it->second;
-        }
-#endif
-#endif
       }
 
       MemcpyChannel* ChannelManager::create_memcpy_channel(long max_nr)

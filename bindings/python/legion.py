@@ -266,6 +266,12 @@ class DomainPoint(object):
         handle[0].point_data[0] = int(value)
         return DomainPoint(handle, take_ownership=True)
 
+    @staticmethod
+    def coerce(value):
+        if not isinstance(value, DomainPoint):
+            return DomainPoint.create(value)
+        return value
+
     def raw_value(self):
         return self.handle[0]
 
@@ -300,6 +306,12 @@ class Domain(object):
             rect[0].hi.x[i] = start[i] + extent[i] - 1
         return Domain(getattr(c, 'legion_domain_from_rect_{}d'.format(len(extent)))(rect[0]))
 
+    @staticmethod
+    def coerce(value):
+        if not isinstance(value, Domain):
+            return Domain.create(value)
+        return value
+
     def __iter__(self):
         dim = self.handle[0].dim
         return imap(
@@ -309,6 +321,28 @@ class Domain(object):
                     self.handle[0].rect_data[i],
                     self.handle[0].rect_data[i+dim] + 1)
                   for i in xrange(dim)]))
+
+    def raw_value(self):
+        return self.handle[0]
+
+class DomainTransform(object):
+    __slots__ = ['handle']
+    def __init__(self, handle):
+        # Important: Copy handle. Do NOT assume ownership.
+        self.handle = ffi.new('legion_domain_transform_t *', handle)
+
+    @staticmethod
+    def create(matrix):
+        matrix = numpy.asarray(matrix)
+        transform = ffi.new('legion_transform_{}x{}_t *'.format(*matrix.shape))
+        ffi.buffer(transform[0].trans)[:] = matrix
+        return DomainTransform(getattr(c, 'legion_domain_transform_from_{}x{}'.format(*matrix.shape))(transform[0]))
+
+    @staticmethod
+    def coerce(value):
+        if not isinstance(value, DomainTransform):
+            return DomainTransform.create(value)
+        return value
 
     def raw_value(self):
         return self.handle[0]
@@ -385,7 +419,6 @@ class Future(object):
 
             value_ptr = c.legion_future_get_untyped_pointer(self.handle)
             value_size = c.legion_future_get_untyped_size(self.handle)
-            print(value_size, expected_size)
             assert value_size == expected_size
             value = ffi.cast(ffi.getctype(self.value_type.cffi_type, '*'), value_ptr)[0]
             return value
@@ -409,8 +442,7 @@ class FutureMap(object):
         c.legion_future_map_destroy(self.handle)
 
     def __getitem__(self, point):
-        if not isinstance(point, DomainPoint):
-            point = DomainPoint.create(point)
+        point = DomainPoint.coerce(point)
         return Future.from_cdata(
             c.legion_future_map_get_future(self.handle, point.raw_value()),
             value_type=self.value_type)
@@ -491,6 +523,36 @@ RO = Privilege(read=True)
 RW = Privilege(read=True, write=True)
 WD = Privilege(write=True, discard=True)
 
+class Disjointness(object):
+    __slots__ = ['kind', 'value']
+
+    def __init__(self, kind, value):
+        self.kind = kind
+        self.value = value
+
+    def __eq__(self, other):
+        return isinstance(other, Disjointness) and self.value == other.value
+
+    def __cmp__(self, other):
+        assert isinstance(other, Disjointness)
+        return self.value.__cmp__(other.value)
+
+    def __hash__(self):
+        return hash(self.value)
+
+    def __str__(self):
+        return self.kind
+
+disjoint = Disjointness('disjoint', 0)
+aliased = Disjointness('aliased', 1)
+compute = Disjointness('compute', 2)
+disjoint_complete = Disjointness('disjoint_complete', 3)
+aliased_complete = Disjointness('aliased_complete', 4)
+compute_complete = Disjointness('compute_complete', 5)
+disjoint_incomplete = Disjointness('disjoint_incomplete', 6)
+aliased_incomplete = Disjointness('aliased_incomplete', 7)
+compute_incomplete = Disjointness('compute_incomplete', 8)
+
 # Hack: Can't pickle static methods.
 def _Ispace_unpickle(ispace_tid, ispace_id, ispace_type_tag, owned):
     handle = ffi.new('legion_index_space_t *')
@@ -542,6 +604,12 @@ class Ispace(object):
         domain = Domain.create(extent, start=start).raw_value()
         handle = c.legion_index_space_create_domain(_my.ctx.runtime, _my.ctx.context, domain)
         return Ispace(handle, owned=True)
+
+    @staticmethod
+    def coerce(value):
+        if not isinstance(value, Ispace):
+            return Ispace.create(value)
+        return value
 
     def destroy(self):
         assert self.owned and not self.escaped
@@ -610,6 +678,12 @@ class Fspace(object):
         c.legion_field_allocator_destroy(alloc)
         return Fspace(handle, field_ids, field_types, owned=True)
 
+    @staticmethod
+    def coerce(value):
+        if not isinstance(value, Fspace):
+            return Fspace.create(value)
+        return value
+
     def destroy(self):
         assert self.owned and not self.escaped
 
@@ -621,6 +695,9 @@ class Fspace(object):
         del self.handle
         del self.field_ids
         del self.field_types
+
+    def keys(self):
+        return self.field_ids.keys()
 
 # Hack: Can't pickle static methods.
 def _Region_unpickle(tree_id, ispace, fspace, owned):
@@ -674,10 +751,8 @@ class Region(object):
 
     @staticmethod
     def create(ispace, fspace):
-        if not isinstance(ispace, Ispace):
-            ispace = Ispace.create(ispace)
-        if not isinstance(fspace, Fspace):
-            fspace = Fspace.create(fspace)
+        ispace = Ispace.coerce(ispace)
+        fspace = Fspace.coerce(fspace)
         handle = c.legion_logical_region_create(
             _my.ctx.runtime, _my.ctx.context, ispace.handle[0], fspace.handle[0], False)
         return Region(handle, ispace, fspace, owned=True)
@@ -696,6 +771,9 @@ class Region(object):
         del self.handle
         del self.ispace
         del self.fspace
+
+    def keys(self):
+        return self.fspace.keys()
 
     def _set_privilege(self, field_name, privilege):
         assert self.parent is None # not supported on subregions
@@ -852,8 +930,7 @@ class Ipartition(object):
                 (self.handle[0].id, self.parent, self.color_space))
 
     def __getitem__(self, point):
-        if not isinstance(point, DomainPoint):
-            point = DomainPoint.create(point)
+        point = DomainPoint.coerce(point)
         subspace = c.legion_index_partition_get_index_subspace_domain_point(
             _my.ctx.runtime, self.handle[0], point.raw_value())
         return Ispace(subspace)
@@ -865,11 +942,23 @@ class Ipartition(object):
     @staticmethod
     def create_equal(parent, color_space, granularity=1, color=AUTO_GENERATE_ID):
         assert isinstance(parent, Ispace)
-        if not isinstance(color_space, Ispace):
-            color_space = Ispace.create(color_space)
+        color_space = Ispace.coerce(color_space)
         handle = c.legion_index_partition_create_equal(
             _my.ctx.runtime, _my.ctx.context,
             parent.handle[0], color_space.handle[0], granularity, color)
+        return Ipartition(handle, parent, color_space)
+
+    @staticmethod
+    def create_by_restriction(parent, color_space, transform, extent,
+                              part_kind=compute, color=AUTO_GENERATE_ID):
+        assert isinstance(parent, Ispace)
+        assert isinstance(part_kind, Disjointness)
+        color_space = Ispace.coerce(color_space)
+        transform = DomainTransform.coerce(transform)
+        extent = Domain.coerce(extent)
+        handle = c.legion_index_partition_create_by_restriction(
+            _my.ctx.runtime, _my.ctx.context,
+            parent.handle[0], color_space.handle[0], transform.raw_value(), extent.raw_value(), part_kind.value, color)
         return Ipartition(handle, parent, color_space)
 
     def destroy(self):
@@ -911,8 +1000,7 @@ class Partition(object):
                  self.ipartition))
 
     def __getitem__(self, point):
-        if not isinstance(point, DomainPoint):
-            point = DomainPoint.create(point)
+        point = DomainPoint.coerce(point)
         subspace = self.ipartition[point]
         subregion = c.legion_logical_partition_get_logical_subregion_by_color_domain_point(
             _my.ctx.runtime, self.handle[0], point.raw_value())
@@ -939,6 +1027,14 @@ class Partition(object):
     def create_equal(parent, color_space, granularity=1, color=AUTO_GENERATE_ID):
         assert isinstance(parent, Region)
         ipartition = Ipartition.create_equal(parent.ispace, color_space, granularity, color)
+        return Partition.create(parent, ipartition)
+
+    @staticmethod
+    def create_by_restriction(parent, color_space, transform, extent,
+                              part_kind=compute, color=AUTO_GENERATE_ID):
+        assert isinstance(parent, Region)
+        ipartition = Ipartition.create_by_restriction(
+            parent.ispace, color_space, transform, extent, part_kind, color)
         return Partition.create(parent, ipartition)
 
     def destroy(self):
@@ -1311,8 +1407,7 @@ class _TaskLauncher(object):
         launcher = c.legion_task_launcher_create(
             self.task.task_id, task_args[0], c.legion_predicate_true(), 0, 0)
         if point is not None:
-            if not isinstance(point, DomainPoint):
-                point = DomainPoint.create(point)
+            point = DomainPoint.coerce(point)
             c.legion_task_launcher_set_point(launcher, point.raw_value())
         for i, arg in zip(range(len(args)), args):
             if isinstance(arg, Region):
