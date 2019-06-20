@@ -21515,8 +21515,7 @@ namespace Legion {
         TaskLauncher launcher(legion_main_id, TaskArgument());
         // Mark that this task is the top-level task
         top_task->set_top_level();
-        top_task->initialize_task(top_context, launcher, 
-                                  false/*check priv*/, false/*track parent*/);
+        top_task->initialize_task(top_context, launcher, false/*track parent*/);
         if (the_runtime->legion_spy_enabled)
         {
           the_runtime->log_machine(the_runtime->machine);
