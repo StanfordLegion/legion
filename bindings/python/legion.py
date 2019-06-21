@@ -1410,6 +1410,8 @@ class _TaskLauncher(object):
             point = DomainPoint.coerce(point)
             c.legion_task_launcher_set_point(launcher, point.raw_value())
         for i, arg in zip(range(len(args)), args):
+            if i < len(self.task.privileges) and self.task.privileges[i] and not isinstance(arg, Region):
+                raise TypeError('Privileges can only be specified for Region arguments, got %s' % type(arg))
             if isinstance(arg, Region):
                 assert i < len(self.task.privileges)
                 priv = self.task.privileges[i]

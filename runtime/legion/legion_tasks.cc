@@ -5632,9 +5632,12 @@ namespace Legion {
         else
           Runtime::trigger_event(to_trigger);
       }
+      // If we're an implicit top-level we do our complete mapping call here
+      else if (top_level_task && runtime->implicit_top_level)
+        complete_mapping(mapped_precondition);
 #ifdef DEBUG_LEGION
 #ifndef NDEBUG
-      else if (!implicit_top_level_task)
+      else
       {
         assert(!mapped_precondition.exists());
         assert(map_applied_conditions.empty());

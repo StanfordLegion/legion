@@ -2402,7 +2402,7 @@ namespace Realm {
 	    CHECK_CU( cuMemGetInfo(&free_bytes, &total_bytes) );
 	    log_gpu.fatal() << "insufficient memory on gpu " << info->index
 			    << ": " << size << " bytes needed (from -ll:fsize), "
-			    << free_bytes << " (out of " << total_bytes << " available)";
+			    << free_bytes << " (out of " << total_bytes << ") available";
 	  } else {
 	    const char *errstring = "error message not available";
 #if CUDA_VERSION >= 6050
