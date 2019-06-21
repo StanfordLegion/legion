@@ -1844,6 +1844,38 @@ namespace Legion {
                                       VariantID variant_id) const; 
     public:
       //------------------------------------------------------------------------
+      // Methods for registering variants 
+      //------------------------------------------------------------------------
+      template<typename T,
+        T (*TASK_PTR)(const Task*, const std::vector<PhysicalRegion>&,
+                      Context, Runtime*)>
+      VariantID register_task_variant(MapperContext ctx,
+                                      const TaskVariantRegistrar &registrar);
+      template<typename T, typename UDT,
+        T (*TASK_PTR)(const Task*, const std::vector<PhysicalRegion>&,
+                      Context, Runtime*, const UDT&)>
+      VariantID register_task_variant(MapperContext ctx,
+                                      const TaskVariantRegistrar &registrar,
+                                      const UDT &user_data);
+      template<
+        void (*TASK_PTR)(const Task*, const std::vector<PhysicalRegion>&,
+                         Context, Runtime*)>
+      VariantID register_task_variant(MapperContext ctx,
+                                      const TaskVariantRegistrar &registrar);
+      template<typename UDT,
+        void (*TASK_PTR)(const Task*, const std::vector<PhysicalRegion>&,
+                         Context, Runtime*, const UDT&)>
+      VariantID register_task_variant(MapperContext ctx,
+                                      const TaskVariantRegistrar &registrar,
+                                      const UDT &user_data);
+      VariantID register_task_variant(MapperContext ctx, 
+                                      const TaskVariantRegistrar &registrar,
+				      const CodeDescriptor &codedesc,
+				      const void *user_data = NULL,
+				      size_t user_len = 0,
+                                      bool has_return_type = false);
+    public:
+      //------------------------------------------------------------------------
       // Methods for accelerating mapping decisions
       //------------------------------------------------------------------------
       // Filter variants based on the chosen instances

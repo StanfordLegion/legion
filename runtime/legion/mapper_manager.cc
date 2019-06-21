@@ -1568,6 +1568,22 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    VariantID MapperManager::register_task_variant(MappingCallInfo *ctx,
+                                      const TaskVariantRegistrar &registrar,
+				      const CodeDescriptor &codedesc,
+				      const void *user_data, size_t user_len,
+                                      bool has_return_type)
+    //--------------------------------------------------------------------------
+    {
+      pause_mapper_call(ctx);
+      CodeDescriptor *realm_desc = new CodeDescriptor(codedesc);
+      VariantID result = runtime->register_variant(registrar, user_data,
+                                    user_len, realm_desc, has_return_type);
+      resume_mapper_call(ctx);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
     void MapperManager::filter_variants(MappingCallInfo *ctx, const Task &task,
             const std::vector<std::vector<MappingInstance> > &chosen_instances,
                                         std::vector<VariantID> &variants)
