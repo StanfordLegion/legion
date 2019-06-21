@@ -6853,14 +6853,14 @@ namespace Legion {
                   const TaskVariantRegistrar &registrar,
 		  const CodeDescriptor &codedesc,
 		  const void *user_data /*= NULL*/,
-		  size_t user_len /*= 0*/)
+		  size_t user_len /*= 0*/,
+                  bool has_return_type /*= false*/)
     //--------------------------------------------------------------------------
     {
-      // if this needs to be correct, we need two versions...
-      bool has_return = false;
+      // Make a copy of the descriptor here
       CodeDescriptor *realm_desc = new CodeDescriptor(codedesc);
-      return register_variant(registrar, has_return, user_data, user_len,
-                              realm_desc);
+      return runtime->register_variant(registrar, user_data, user_len, 
+                                       realm_desc, has_return_type);
     }
 
     //--------------------------------------------------------------------------
@@ -6870,15 +6870,15 @@ namespace Legion {
 	      const void *user_data /*= NULL*/,
 	      size_t user_len /*= 0*/,
 	      const char *task_name /*= NULL*/,
-              VariantID vid /*=AUTO_GENERATE_ID*/)
+              VariantID vid /*=AUTO_GENERATE_ID*/,
+              bool has_return_type/*=false*/,
+              bool check_task_id/*=true*/)
     //--------------------------------------------------------------------------
     {
-      // if this needs to be correct, we need two versions...
-      bool has_return = false;
+      // Make a copy of the descriptor here
       CodeDescriptor *realm_desc = new CodeDescriptor(codedesc);
-      return preregister_variant(registrar, user_data, user_len,
-				 realm_desc, has_return, task_name,
-                                 vid);
+      return Internal::Runtime::preregister_variant(registrar, user_data, 
+          user_len, realm_desc, has_return_type, task_name, vid, check_task_id);
     }
 
     //--------------------------------------------------------------------------
@@ -6907,29 +6907,6 @@ namespace Legion {
     {
       ctx->end_task(retvalptr, retvalsize, false/*owned*/);
     }
-
-    //--------------------------------------------------------------------------
-    VariantID Runtime::register_variant(const TaskVariantRegistrar &registrar,
-                  bool has_return, const void *user_data, size_t user_data_size,
-                  CodeDescriptor *realm)
-    //--------------------------------------------------------------------------
-    {
-      return runtime->register_variant(registrar, user_data, user_data_size,
-                                       realm, has_return);
-    }
-    
-    //--------------------------------------------------------------------------
-    /*static*/ VariantID Runtime::preregister_variant(
-                                  const TaskVariantRegistrar &registrar,
-                                  const void *user_data, size_t user_data_size,
-                                  CodeDescriptor *realm,
-                                  bool has_return, const char *task_name, 
-                                  VariantID vid, bool check_task_id)
-    //--------------------------------------------------------------------------
-    {
-      return Internal::Runtime::preregister_variant(registrar, user_data, 
-          user_data_size, realm, has_return, task_name, vid, check_task_id);
-    } 
 
     //--------------------------------------------------------------------------
     /*static*/ void Runtime::enable_profiling(void)

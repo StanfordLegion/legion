@@ -13181,7 +13181,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     VariantID Runtime::register_variant(const TaskVariantRegistrar &registrar,
                                   const void *user_data, size_t user_data_size,
-                                  CodeDescriptor *realm,
+                                  CodeDescriptor *realm_code_desc,
                                   bool ret,VariantID vid /*= AUTO_GENERATE_ID*/,
                                   bool check_task_id /*= true*/)
     //--------------------------------------------------------------------------
@@ -13209,7 +13209,7 @@ namespace Legion {
                       "generators.", registrar.task_id)
       // Make our variant and add it to the set of variants
       VariantImpl *impl = new VariantImpl(this, vid, task_impl, 
-                                          registrar, ret, realm,
+                                          registrar, ret, realm_code_desc,
                                           user_data, user_data_size);
       // Add this variant to the owner
       task_impl->add_variant(impl);
