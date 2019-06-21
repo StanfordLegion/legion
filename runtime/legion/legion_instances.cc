@@ -2160,7 +2160,6 @@ namespace Legion {
           Realm::ProfilingMeasurements::InstanceAllocResult>());
 #endif
       Realm::ProfilingMeasurements::InstanceAllocResult result;
-      result.footprint = 0;
       result.success = false; // Need this to avoid compiler warnings
 #ifdef DEBUG_LEGION
 #ifndef NDEBUG
