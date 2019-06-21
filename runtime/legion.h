@@ -6728,6 +6728,7 @@ namespace Legion {
        *  Debugging
        * ------------- 
        * -lg:warn     Enable all verbose runtime warnings
+       * -lg:warn_backtrace Print a backtrace for each warning
        * -lg:ldb <replay_file> Replay the execution of the application
        *              with the associated replay file generted by LegionSpy. 
        *              This will run the application in the Legion debugger.
