@@ -6735,6 +6735,7 @@ namespace Legion {
        *  Debugging
        * ------------- 
        * -lg:warn     Enable all verbose runtime warnings
+       * -lg:warn_backtrace Print a backtrace for each warning
        * -lg:ldb <replay_file> Replay the execution of the application
        *              with the associated replay file generted by LegionSpy. 
        *              This will run the application in the Legion debugger.
@@ -7177,12 +7178,14 @@ namespace Legion {
        * @param user_data pointer to optional user data to associate with the
        * task variant
        * @param user_len size of optional user_data in bytes
+       * @param has_return_type boolean if this has a non-void return type
        * @return variant ID for the task
        */
       VariantID register_task_variant(const TaskVariantRegistrar &registrar,
 				      const CodeDescriptor &codedesc,
 				      const void *user_data = NULL,
-				      size_t user_len = 0);
+				      size_t user_len = 0,
+                                      bool has_return_type = false);
 
       /**
        * Statically register a new task variant with the runtime with
@@ -7269,6 +7272,8 @@ namespace Legion {
        * @param user_data pointer to optional user data to associate with the
        * task variant
        * @param user_len size of optional user_data in bytes
+       * @param has_return_type boolean indicating a non-void return type
+       * @param check_task_id verify validity of the task ID
        * @return variant ID for the task
        */
       static VariantID preregister_task_variant(
@@ -7277,7 +7282,9 @@ namespace Legion {
 	      const void *user_data = NULL,
 	      size_t user_len = 0,
 	      const char *task_name = NULL,
-              VariantID vid = AUTO_GENERATE_ID);
+              VariantID vid = AUTO_GENERATE_ID,
+              bool has_return_type = false,
+              bool check_task_id = true);
 
       /**
        * This is the necessary preamble call to use when registering a 
@@ -7483,15 +7490,6 @@ namespace Legion {
       friend class LegionTaskWrapper;
       friend class LegionSerialization;
       Future from_value(const void *value, size_t value_size, bool owned);
-    private:
-      VariantID register_variant(const TaskVariantRegistrar &registrar,bool ret,
-                                 const void *user_data, size_t user_data_size,
-                                 CodeDescriptor *realm);
-      static VariantID preregister_variant(const TaskVariantRegistrar &reg,
-                                 const void *user_data, size_t user_data_size,
-                                 CodeDescriptor *realm,
-                                 bool has_return, const char *task_name,
-                                 VariantID vid, bool check_task_id = true);
     private:
       static ReductionOpTable& get_reduction_table(void);
       static SerdezOpTable& get_serdez_table(void);

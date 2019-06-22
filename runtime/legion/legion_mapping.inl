@@ -22,6 +22,60 @@ namespace Legion {
   namespace Mapping {
 
     //--------------------------------------------------------------------------
+    template<typename T,
+      T (*TASK_PTR)(const Task*, const std::vector<PhysicalRegion>&,
+                    Context, Runtime*)>
+    VariantID MapperRuntime::register_task_variant(MapperContext ctx,
+                                          const TaskVariantRegistrar &registrar)
+    //--------------------------------------------------------------------------
+    {
+      CodeDescriptor desc(LegionTaskWrapper::legion_task_wrapper<T,TASK_PTR>);
+      return register_task_variant(ctx, registrar, desc, NULL/*UDT*/,
+                                   0/*sizeof(UDT)*/, true/*has return type*/);
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename T, typename UDT,
+      T (*TASK_PTR)(const Task*, const std::vector<PhysicalRegion>&,
+                    Context, Runtime*, const UDT&)>
+    VariantID MapperRuntime::register_task_variant(MapperContext ctx,
+                    const TaskVariantRegistrar &registrar, const UDT &user_data)
+    //--------------------------------------------------------------------------
+    {
+      CodeDescriptor desc(
+          LegionTaskWrapper::legion_udt_task_wrapper<T,UDT,TASK_PTR>);
+      return register_task_variant(ctx, registrar, desc, &user_data, 
+                                   sizeof(UDT), true/*has return type*/);
+    }
+
+    //--------------------------------------------------------------------------
+    template<
+      void (*TASK_PTR)(const Task*, const std::vector<PhysicalRegion>&,
+                       Context, Runtime*)>
+    VariantID MapperRuntime::register_task_variant(MapperContext ctx,
+                                          const TaskVariantRegistrar &registrar)
+    //--------------------------------------------------------------------------
+    {
+      CodeDescriptor desc(LegionTaskWrapper::legion_task_wrapper<TASK_PTR>);
+      return register_task_variant(ctx, registrar, desc, NULL/*UDT*/, 
+                                   0/*sizeof(UDT)*/, false/*has return type*/);
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename UDT,
+      void (*TASK_PTR)(const Task*, const std::vector<PhysicalRegion>&,
+                       Context, Runtime*, const UDT&)>
+    VariantID MapperRuntime::register_task_variant(MapperContext ctx,
+                    const TaskVariantRegistrar &registrar, const UDT &user_data)
+    //--------------------------------------------------------------------------
+    {
+      CodeDescriptor desc(
+          LegionTaskWrapper::legion_udt_task_wrapper<UDT,TASK_PTR>);
+      return register_variant(ctx, registrar, desc, &user_data, sizeof(UDT),
+                              false/*has return type*/);
+    }
+
+    //--------------------------------------------------------------------------
     template<int DIM, typename T>
     inline IndexSpaceT<DIM,T> MapperRuntime::create_index_space(
                                     MapperContext ctx, Rect<DIM,T> bounds) const

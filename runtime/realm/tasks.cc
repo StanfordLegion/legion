@@ -170,7 +170,8 @@ namespace Realm {
 #ifdef REALM_USE_EXCEPTIONS
       // even if exceptions are enabled, we only install handlers if somebody is paying
       //  attention to the OperationStatus
-      if(measurements.wants_measurement<ProfilingMeasurements::OperationStatus>()) {
+      if(measurements.wants_measurement<ProfilingMeasurements::OperationStatus>() ||
+	 measurements.wants_measurement<ProfilingMeasurements::OperationAbnormalStatus>()) {	 
 	try {
 	  Thread::ExceptionHandlerPresence ehp;
 	  thread->start_perf_counters();

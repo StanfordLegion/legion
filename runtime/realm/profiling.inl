@@ -50,10 +50,26 @@ namespace Realm {
 	      (serdez & s.error_details));
     }
 
+    template <typename S>
+    bool serdez(S& serdez, const OperationAbnormalStatus& s)
+    {
+      return ((serdez & s.result) &&
+	      (serdez & s.error_code) &&
+	      (serdez & s.error_details));
+    }
+
     TYPE_IS_SERIALIZABLE(InstanceStatus::Result);
 
     template <typename S>
     bool serdez(S& serdez, const InstanceStatus& s)
+    {
+      return ((serdez & s.result) &&
+	      (serdez & s.error_code) &&
+	      (serdez & s.error_details));
+    }
+
+    template <typename S>
+    bool serdez(S& serdez, const InstanceAbnormalStatus& s)
     {
       return ((serdez & s.result) &&
 	      (serdez & s.error_code) &&
@@ -216,6 +232,8 @@ namespace Realm {
   {
     return((s << pr.response_proc) &&
 	   (s << pr.response_task_id) &&
+	   (s << pr.priority) &&
+	   (s << pr.report_if_empty) &&
 	   (s << pr.user_data) &&
 	   (s << pr.requested_measurements));
   }
@@ -226,9 +244,14 @@ namespace Realm {
     // have to get fields of the reqeuest in order to build it
     Processor p;
     Processor::TaskFuncID fid;
+    int priority;
+    bool report_if_empty;
     if(!(s >> p)) return 0;
     if(!(s >> fid)) return 0;
-    ProfilingRequest *pr = new ProfilingRequest(p, fid);
+    if(!(s >> priority)) return 0;
+    if(!(s >> report_if_empty)) return 0;
+    ProfilingRequest *pr = new ProfilingRequest(p, fid,
+						priority, report_if_empty);
     if(!(s >> pr->user_data) ||
        !(s >> pr->requested_measurements)) {
       delete pr;

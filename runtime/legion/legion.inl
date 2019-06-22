@@ -9027,10 +9027,9 @@ namespace Legion {
                                           const TaskVariantRegistrar &registrar)
     //--------------------------------------------------------------------------
     {
-      CodeDescriptor *realm_desc = new CodeDescriptor(
-           LegionTaskWrapper::legion_task_wrapper<T,TASK_PTR>);
-      return register_variant(registrar, true, NULL/*UDT*/, 0/*sizeof(UDT)*/,
-                              realm_desc);
+      CodeDescriptor desc(LegionTaskWrapper::legion_task_wrapper<T,TASK_PTR>);
+      return register_task_variant(registrar, desc, NULL/*UDT*/,
+                                   0/*sizeof(UDT)*/, true/*has return type*/);
     }
 
     //--------------------------------------------------------------------------
@@ -9041,10 +9040,10 @@ namespace Legion {
                     const TaskVariantRegistrar &registrar, const UDT &user_data)
     //--------------------------------------------------------------------------
     {
-      CodeDescriptor *realm_desc = new CodeDescriptor(
-           LegionTaskWrapper::legion_udt_task_wrapper<T,UDT,TASK_PTR>);
-      return register_variant(registrar, true, &user_data, sizeof(UDT),
-                              realm_desc);
+      CodeDescriptor desc(
+          LegionTaskWrapper::legion_udt_task_wrapper<T,UDT,TASK_PTR>);
+      return register_task_variant(registrar, desc, &user_data, sizeof(UDT),
+                                   true/*has return type*/);
     }
 
     //--------------------------------------------------------------------------
@@ -9055,10 +9054,9 @@ namespace Legion {
                                           const TaskVariantRegistrar &registrar)
     //--------------------------------------------------------------------------
     {
-      CodeDescriptor *realm_desc = new CodeDescriptor(
-            LegionTaskWrapper::legion_task_wrapper<TASK_PTR>);
-      return register_variant(registrar, false, NULL/*UDT*/, 0/*sizeof(UDT)*/,
-                              realm_desc);
+      CodeDescriptor desc(LegionTaskWrapper::legion_task_wrapper<TASK_PTR>);
+      return register_task_variant(registrar, desc, NULL/*UDT*/, 
+                                   0/*sizeof(UDT)*/, false/*has return type*/);
     }
 
     //--------------------------------------------------------------------------
@@ -9069,10 +9067,10 @@ namespace Legion {
                     const TaskVariantRegistrar &registrar, const UDT &user_data)
     //--------------------------------------------------------------------------
     {
-      CodeDescriptor *realm_desc = new CodeDescriptor(
-            LegionTaskWrapper::legion_udt_task_wrapper<UDT,TASK_PTR>);
-      return register_variant(registrar, false, &user_data, sizeof(UDT),
-                              realm_desc);
+      CodeDescriptor desc(
+          LegionTaskWrapper::legion_udt_task_wrapper<UDT,TASK_PTR>);
+      return register_task_variant(registrar, desc, &user_data, sizeof(UDT),
+                                   false/*has return type*/);
     }
 
     //--------------------------------------------------------------------------
@@ -9084,10 +9082,9 @@ namespace Legion {
         const char *task_name /*= NULL*/, VariantID vid /*=AUTO_GENERATE_ID*/)
     //--------------------------------------------------------------------------
     {
-      CodeDescriptor *realm_desc = new CodeDescriptor(
-          LegionTaskWrapper::legion_task_wrapper<T,TASK_PTR>);
-      return preregister_variant(registrar, NULL/*UDT*/, 0/*sizeof(UDT)*/,
-                                 realm_desc, true/*ret*/, task_name, vid);
+      CodeDescriptor desc(LegionTaskWrapper::legion_task_wrapper<T,TASK_PTR>);
+      return preregister_task_variant(registrar, desc, NULL/*UDT*/, 
+          0/*sizeof(UDT)*/, task_name, vid, true/*has return type*/);
     }
 
     //--------------------------------------------------------------------------
@@ -9100,10 +9097,10 @@ namespace Legion {
                     VariantID vid /*=AUTO_GENERATE_ID*/)
     //--------------------------------------------------------------------------
     {
-      CodeDescriptor *realm_desc = new CodeDescriptor(
+      CodeDescriptor desc(
           LegionTaskWrapper::legion_udt_task_wrapper<T,UDT,TASK_PTR>);
-      return preregister_variant(registrar, &user_data, sizeof(UDT),
-                               realm_desc, true/*ret*/, task_name, vid);
+      return preregister_task_variant(registrar, desc, &user_data, sizeof(UDT),
+                                      task_name, vid, true/*has return type*/);
     }
 
     //--------------------------------------------------------------------------
@@ -9115,10 +9112,9 @@ namespace Legion {
         const VariantID vid /*=AUTO_GENERATE_ID*/)
     //--------------------------------------------------------------------------
     {
-      CodeDescriptor *realm_desc = new CodeDescriptor(
-            LegionTaskWrapper::legion_task_wrapper<TASK_PTR>);
-      return preregister_variant(registrar, NULL/*UDT*/,0/*sizeof(UDT)*/,
-                             realm_desc, false/*ret*/, task_name, vid);
+      CodeDescriptor desc(LegionTaskWrapper::legion_task_wrapper<TASK_PTR>);
+      return preregister_task_variant(registrar, desc, NULL/*UDT*/,
+                0/*sizeof(UDT)*/, task_name, vid, false/*has return type*/);
     }
 
     //--------------------------------------------------------------------------
@@ -9131,10 +9127,10 @@ namespace Legion {
                     VariantID vid /*=AUTO_GENERATE_ID*/)
     //--------------------------------------------------------------------------
     {
-      CodeDescriptor *realm_desc = new CodeDescriptor(
-            LegionTaskWrapper::legion_udt_task_wrapper<UDT,TASK_PTR>);
-      return preregister_variant(registrar, &user_data, sizeof(UDT),
-                             realm_desc, false/*ret*/, task_name, vid);
+      CodeDescriptor desc(
+          LegionTaskWrapper::legion_udt_task_wrapper<UDT,TASK_PTR>);
+      return preregister_task_variant(registrar, desc, &user_data, sizeof(UDT),
+                                      task_name, vid, false/*has return type*/);
     }
 
     //--------------------------------------------------------------------------
@@ -9160,10 +9156,9 @@ namespace Legion {
       registrar.set_inner(options.inner);
       registrar.set_idempotent(options.idempotent);
       registrar.add_constraint(ProcessorConstraint(proc_kind));
-      CodeDescriptor *realm_desc = new CodeDescriptor(
-          LegionTaskWrapper::legion_task_wrapper<T,TASK_PTR>);
-      preregister_variant(registrar, NULL/*UDT*/, 0/*sizeof(UDT)*/,
-                        realm_desc, true/*ret*/, task_name, vid, check_task_id);
+      CodeDescriptor desc(LegionTaskWrapper::legion_task_wrapper<T,TASK_PTR>);
+      preregister_task_variant(registrar, desc, NULL/*UDT*/, 0/*sizeof(UDT)*/,
+                               task_name, vid, true/*has ret*/, check_task_id);
       return id;
     }
 
@@ -9190,10 +9185,9 @@ namespace Legion {
       registrar.set_inner(options.inner);
       registrar.set_idempotent(options.idempotent);
       registrar.add_constraint(ProcessorConstraint(proc_kind));
-      CodeDescriptor *realm_desc = new CodeDescriptor(
-            LegionTaskWrapper::legion_task_wrapper<TASK_PTR>);
-      preregister_variant(registrar, NULL/*UDT*/, 0/*sizeof(UDT)*/,
-                      realm_desc, false/*ret*/, task_name, vid, check_task_id);
+      CodeDescriptor desc(LegionTaskWrapper::legion_task_wrapper<TASK_PTR>);
+      preregister_task_variant(registrar, desc, NULL/*UDT*/, 0/*sizeof(UDT)*/,
+                               task_name, vid, false/*has ret*/, check_task_id);
       return id;
     }
 
@@ -9221,10 +9215,10 @@ namespace Legion {
       registrar.set_inner(options.inner);
       registrar.set_idempotent(options.idempotent);
       registrar.add_constraint(ProcessorConstraint(proc_kind));
-      CodeDescriptor *realm_desc = new CodeDescriptor(
-            LegionTaskWrapper::legion_udt_task_wrapper<T,UDT,TASK_PTR>);
-      preregister_variant(registrar, &user_data, sizeof(UDT),
-                        realm_desc, true/*ret*/, task_name, vid, check_task_id);
+      CodeDescriptor desc(
+          LegionTaskWrapper::legion_udt_task_wrapper<T,UDT,TASK_PTR>);
+      preregister_task_variant(registrar, desc, &user_data, sizeof(UDT),
+                               task_name, vid, true/*has ret*/, check_task_id);
       return id;
     }
 
@@ -9252,10 +9246,10 @@ namespace Legion {
       registrar.set_inner(options.inner);
       registrar.set_idempotent(options.idempotent);
       registrar.add_constraint(ProcessorConstraint(proc_kind));
-      CodeDescriptor *realm_desc = new CodeDescriptor(
-            LegionTaskWrapper::legion_udt_task_wrapper<UDT,TASK_PTR>);
-      preregister_variant(registrar, &user_data, sizeof(UDT),
-                      realm_desc, false/*ret*/, task_name, vid, check_task_id);
+      CodeDescriptor desc(
+          LegionTaskWrapper::legion_udt_task_wrapper<UDT,TASK_PTR>);
+      preregister_task_variant(registrar, desc, &user_data, sizeof(UDT),
+                               task_name, vid, false/*has ret*/, check_task_id);
       return id;
     }
 

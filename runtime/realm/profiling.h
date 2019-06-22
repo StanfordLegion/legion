@@ -35,12 +35,14 @@ namespace Realm {
   //  these IDs directly
   enum ProfilingMeasurementID {
     PMID_OP_STATUS,    // completion status of operation
+    PMID_OP_STATUS_ABNORMAL,  // completion status only if abnormal
     PMID_OP_BACKTRACE,  // backtrace of a failed operation
     PMID_OP_TIMELINE,  // when task was ready, started, completed
     PMID_OP_EVENT_WAITS,  // intervals when operation is waiting on events
     PMID_OP_PROC_USAGE, // processor used by task
     PMID_OP_MEM_USAGE, // memories used by a copy
     PMID_INST_STATUS,   // "completion" status of an instance
+    PMID_INST_STATUS_ABNORMAL, // completion status only if abnormal
     PMID_INST_ALLOCRESULT, // success/failure of instance allocation
     PMID_INST_TIMELINE, // timeline for a physical instance
     PMID_INST_MEM_USAGE, // memory and size used by an instance
@@ -76,6 +78,10 @@ namespace Realm {
       Result result;
       int error_code;
       ByteArray error_details;
+    };
+
+    struct OperationAbnormalStatus : public OperationStatus {
+      static const ProfilingMeasurementID ID = PMID_OP_STATUS_ABNORMAL;
     };
 
     struct OperationBacktrace {
@@ -193,12 +199,15 @@ namespace Realm {
       ByteArray error_details;
     };
 
-    // Simple boolean indicating whether or not allocation is expected to
-    //  succeed and footprint size of the allocation required in bytes
+    struct InstanceAbnormalStatus : public InstanceStatus {
+      static const ProfilingMeasurementID ID = PMID_INST_STATUS_ABNORMAL;
+    };
+
+    // simple boolean indicating whether or not allocation is expected to
+    //  succeed
     struct InstanceAllocResult {
       static const ProfilingMeasurementID ID = PMID_INST_ALLOCRESULT;
      
-      size_t footprint;
       bool success;
     };
 
@@ -271,7 +280,7 @@ namespace Realm {
 
   class ProfilingRequest {
   public:
-    ProfilingRequest(Processor _response_proc, Processor::TaskFuncID _response_task_id, int _priority = 0);
+    ProfilingRequest(Processor _response_proc, Processor::TaskFuncID _response_task_id, int _priority = 0, bool _report_if_empty = false);
     ProfilingRequest(const ProfilingRequest& to_copy);
 
     ~ProfilingRequest(void);
@@ -296,6 +305,7 @@ namespace Realm {
     Processor response_proc;
     Processor::TaskFuncID response_task_id;
     int priority;
+    bool report_if_empty;
     ByteArray user_data;
     std::set<ProfilingMeasurementID> requested_measurements;
   };

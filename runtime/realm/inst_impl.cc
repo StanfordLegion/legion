@@ -100,12 +100,22 @@ namespace Realm {
 	//  failure
 	ProfilingMeasurementCollection pmc;
 	pmc.import_requests(prs);
+	bool reported = false;
 	if(pmc.wants_measurement<ProfilingMeasurements::InstanceStatus>()) {
 	  ProfilingMeasurements::InstanceStatus stat;
 	  stat.result = ProfilingMeasurements::InstanceStatus::INSTANCE_COUNT_EXCEEDED;
 	  stat.error_code = 0;
 	  pmc.add_measurement(stat);
-	} else {
+	  reported = true;
+	}
+	if(pmc.wants_measurement<ProfilingMeasurements::InstanceAbnormalStatus>()) {
+	  ProfilingMeasurements::InstanceAbnormalStatus stat;
+	  stat.result = ProfilingMeasurements::InstanceStatus::INSTANCE_COUNT_EXCEEDED;
+	  stat.error_code = 0;
+	  pmc.add_measurement(stat);
+	  reported = true;
+	}
+	if(!reported) {
 	  // fatal error
 	  log_inst.fatal() << "FATAL: instance count exceeded for memory " << memory;
 	  assert(0);
@@ -449,6 +459,7 @@ namespace Realm {
 	// if somebody is listening to profiling measurements, we report
 	//  a failed allocation through that channel - if not, we explode
 	bool report_failure = (measurements.wants_measurement<ProfilingMeasurements::InstanceStatus>() ||
+			       measurements.wants_measurement<ProfilingMeasurements::InstanceAbnormalStatus>() ||
 			       measurements.wants_measurement<ProfilingMeasurements::InstanceAllocResult>());
 	if(report_failure) {
 	  log_inst.info() << "allocation failed: inst=" << me;
@@ -469,9 +480,15 @@ namespace Realm {
 	    measurements.add_measurement(stat);
 	  }
 
+	  if(measurements.wants_measurement<ProfilingMeasurements::InstanceAbnormalStatus>()) {
+	    ProfilingMeasurements::InstanceAbnormalStatus stat;
+	    stat.result = ProfilingMeasurements::InstanceStatus::FAILED_ALLOCATION;
+	    stat.error_code = 0;
+	    measurements.add_measurement(stat);
+	  }
+
 	  if(measurements.wants_measurement<ProfilingMeasurements::InstanceAllocResult>()) {
 	    ProfilingMeasurements::InstanceAllocResult result;
-            result.footprint = footprint;
 	    result.success = false;
 	    measurements.add_measurement(result);
 	  }
@@ -522,7 +539,6 @@ namespace Realm {
 
       if(measurements.wants_measurement<ProfilingMeasurements::InstanceAllocResult>()) {
 	ProfilingMeasurements::InstanceAllocResult result;
-        result.footprint = footprint;
 	result.success = true;
 	measurements.add_measurement(result);
       }
