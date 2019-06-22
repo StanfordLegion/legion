@@ -18,8 +18,17 @@
 #include "realm/hdf5/hdf5_access.h"
 #include "realm/deppart/inst_helper.h"
 #include "realm/machine.h"
+#include "realm/activemsg.h"
+#include "realm/id.h"
+
+#include <errno.h>
+#include <stdlib.h>
+#include <string.h>
 
 namespace Realm {
+
+  extern Logger log_hdf5;
+
 
   template <int N, typename T>
   /*static*/ Event RegionInstance::create_hdf5_instance(RegionInstance& inst,
@@ -30,9 +39,28 @@ namespace Realm {
 							const ProfilingRequestSet& prs,
 							Event wait_on /*= Event::NO_EVENT*/)
   {
-    // look up the local HDF5 memory
+    // TODO: put this somewhere more general so that e.g. POSIX file attach can
+    //  use it too
+    NodeID target_node = my_node_id;
+
+    if(!strncmp(file_name, "rank=", 5)) {
+      const char *pos;
+      errno = 0;
+      long val = strtol(file_name+5, (char **)&pos, 10);
+      if((errno == 0) && (val >= 0) && (val <= max_node_id) && (*pos == ':')) {
+	target_node = val;
+	file_name = pos + 1;
+      } else {
+	log_hdf5.fatal() << "ill-formed rank prefix in filename: \"" << file_name << "\"";
+	abort();
+      }
+    }
+
+    // look up the HDF5 memory on the target node
+    // kinda hacky, but create a proxy processor ID on the target node
+    Processor proxy = ID::make_processor(target_node, 0).convert<Processor>();
     Memory memory = Machine::MemoryQuery(Machine::get_machine())
-      .local_address_space()
+      .same_address_space_as(proxy)
       .only_kind(Memory::HDF_MEM)
       .first();
     assert(memory.exists());
