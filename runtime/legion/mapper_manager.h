@@ -346,6 +346,13 @@ namespace Legion {
       bool is_replicable_variant(MappingCallInfo *ctx,
                                  TaskID task_id, VariantID variant_id);
     public:
+      VariantID register_task_variant(MappingCallInfo *ctx,
+                                      const TaskVariantRegistrar &registrar,
+				      const CodeDescriptor &codedesc,
+				      const void *user_data,
+				      size_t user_len,
+                                      bool has_return_type);
+    public:
       void filter_variants(MappingCallInfo *ctx, const Task &task,
             const std::vector<std::vector<MappingInstance> > &chosen_instances,
                            std::vector<VariantID> &variants);

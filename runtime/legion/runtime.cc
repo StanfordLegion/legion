@@ -10426,6 +10426,7 @@ namespace Legion {
         replay_on_cpus(config.replay_on_cpus),
         verify_disjointness(config.verify_disjointness),
         runtime_warnings(config.runtime_warnings),
+        warnings_backtrace(config.warnings_backtrace),
         separate_runtime_instances(config.separate_runtime_instances),
         record_registration(config.record_registration),
         stealing_disabled(config.stealing_disabled),
@@ -10616,6 +10617,7 @@ namespace Legion {
         replay_on_cpus(rhs.replay_on_cpus),
         verify_disjointness(rhs.verify_disjointness),
         runtime_warnings(rhs.runtime_warnings),
+        warnings_backtrace(rhs.warnings_backtrace),
         separate_runtime_instances(rhs.separate_runtime_instances),
         record_registration(rhs.record_registration),
         stealing_disabled(rhs.stealing_disabled),
@@ -14647,7 +14649,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     VariantID Runtime::register_variant(const TaskVariantRegistrar &registrar,
                                   const void *user_data, size_t user_data_size,
-                                  CodeDescriptor *realm,
+                                  CodeDescriptor *realm_code_desc,
                                   bool ret,VariantID vid /*= AUTO_GENERATE_ID*/,
                                   bool check_task_id /*= true*/)
     //--------------------------------------------------------------------------
@@ -14675,7 +14677,7 @@ namespace Legion {
                       "generators.", registrar.task_id)
       // Make our variant and add it to the set of variants
       VariantImpl *impl = new VariantImpl(this, vid, task_impl, 
-                                          registrar, ret, realm,
+                                          registrar, ret, realm_code_desc,
                                           user_data, user_data_size);
       // Add this variant to the owner
       task_impl->add_variant(impl);
@@ -21563,6 +21565,7 @@ namespace Legion {
       } } while(0)
       for (int i = 1; i < argc; i++)
       {
+        BOOL_ARG("-lg:warn_backtrace",config.warnings_backtrace);
         BOOL_ARG("-lg:warn",config.runtime_warnings);
         BOOL_ARG("-lg:separate",config.separate_runtime_instances);
         BOOL_ARG("-lg:registration",config.record_registration);
@@ -22363,6 +22366,13 @@ namespace Legion {
     {
       log_run.warning(id, "LEGION WARNING: %s (from file %s:%d)",
                       message, file_name, line);
+      if (Runtime::the_runtime->warnings_backtrace)
+      {
+        Realm::Backtrace bt;
+        bt.capture_backtrace();
+        bt.lookup_symbols();
+        log_run.warning() << bt;
+      }
     }
 
 #if defined(PRIVILEGE_CHECKS) || defined(BOUNDS_CHECKS)

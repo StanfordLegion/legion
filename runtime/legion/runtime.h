@@ -1679,6 +1679,7 @@ namespace Legion {
             replay_on_cpus(false),
             verify_disjointness(false),
             runtime_warnings(false),
+            warnings_backtrace(false),
             separate_runtime_instances(false),
             record_registration(false),
             stealing_disabled(false),
@@ -1732,6 +1733,7 @@ namespace Legion {
         bool replay_on_cpus;
         bool verify_disjointness;
         bool runtime_warnings;
+        bool warnings_backtrace;
         bool separate_runtime_instances;
         bool record_registration;
         bool stealing_disabled;
@@ -1874,6 +1876,7 @@ namespace Legion {
       const bool replay_on_cpus;
       const bool verify_disjointness;
       const bool runtime_warnings;
+      const bool warnings_backtrace;
       const bool separate_runtime_instances;
       const bool record_registration;
       const bool stealing_disabled;

@@ -229,6 +229,10 @@ namespace Realm {
       if(measurements.wants_measurement<ProfilingMeasurements::OperationStatus>())
 	measurements.add_measurement(status);
 
+      if(measurements.wants_measurement<ProfilingMeasurements::OperationAbnormalStatus>() &&
+	 (status.result != ProfilingMeasurements::OperationStatus::COMPLETED_SUCCESSFULLY))
+	measurements.add_measurement(reinterpret_cast<ProfilingMeasurements::OperationAbnormalStatus&>(status));
+
       if(measurements.wants_measurement<ProfilingMeasurements::OperationTimeline>())
 	measurements.add_measurement(timeline);
 
