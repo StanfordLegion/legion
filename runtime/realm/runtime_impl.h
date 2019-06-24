@@ -186,6 +186,44 @@ namespace Realm {
 
     REGISTER_REALM_MODULE(CoreModule);
 
+    template <typename K, typename V, typename LT = GASNetHSL>
+    class LockedMap {
+    public:
+      bool exists(const K& key) const
+      {
+	AutoLock<LT> al(mutex);
+	typename std::map<K, V>::const_iterator it = map.find(key);
+	return (it != map.end());
+      }
+
+      bool put(const K& key, const V& value, bool replace = false)
+      {
+	AutoLock<LT> al(mutex);
+	typename std::map<K, V>::iterator it = map.find(key);
+	if(it != map.end()) {
+	  if(replace) it->second = value;
+	  return true;
+	} else {
+	  map.insert(std::make_pair(key, value));
+	  return false;
+	}
+      }
+
+      V get(const K& key, const V& defval) const
+      {
+	AutoLock<LT> al(mutex);
+	typename std::map<K, V>::const_iterator it = map.find(key);
+	if(it != map.end())
+	  return it->second;
+	else
+	  return defval;
+      }
+
+    //protected:
+      mutable LT mutex;
+      std::map<K, V> map;
+    };
+
     class RuntimeImpl {
     public:
       RuntimeImpl(void);
@@ -243,8 +281,8 @@ namespace Realm {
     public:
       MachineImpl *machine;
 
-      std::map<ReductionOpID, ReductionOpUntyped *> reduce_op_table;
-      std::map<CustomSerdezID, CustomSerdezUntyped *> custom_serdez_table;
+      LockedMap<ReductionOpID, ReductionOpUntyped *> reduce_op_table;
+      LockedMap<CustomSerdezID, CustomSerdezUntyped *> custom_serdez_table;
 
 #ifdef NODE_LOGGING
       std::string prefix;

@@ -234,11 +234,11 @@ namespace Realm {
 	src_mem = get_runtime()->get_memory_impl(_src_mem);
 	dst_mem = get_runtime()->get_memory_impl(_dst_mem);
 	if(_src_serdez_id != 0) {
-	  src_serdez_op = get_runtime()->custom_serdez_table[_src_serdez_id];
+	  src_serdez_op = get_runtime()->custom_serdez_table.get(_src_serdez_id, 0);
 	  assert(src_serdez_op != 0);
 	}
 	if(_dst_serdez_id != 0) {
-	  dst_serdez_op = get_runtime()->custom_serdez_table[_dst_serdez_id];
+	  dst_serdez_op = get_runtime()->custom_serdez_table.get(_dst_serdez_id, 0);
 	  assert(dst_serdez_op != 0);
 	}
 	// if we're writing into an IB, the first 'next_max_rw_gap' byte
