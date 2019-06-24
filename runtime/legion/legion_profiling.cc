@@ -1250,7 +1250,7 @@ namespace Legion {
         mem_desc.capacity = it->capacity();
         serializer->serialize(mem_desc);
 	Machine::ProcessorQuery pq(machine);
-	pq.has_affinity_to(*it);
+	pq.best_affinity_to(*it);
         for(Machine::ProcessorQuery::iterator it2 = pq.begin(); it2; ++it2)
 	  {
             LegionProfDesc::ProcMemDesc proc_mem_desc;

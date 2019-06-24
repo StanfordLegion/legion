@@ -692,7 +692,7 @@ class Memory(object):
         if self.affinity is not None:
             return self.affinity.get_short_text()
         else:
-            return self.kind + " Memory " + str(self.mem_in_node)
+            return " [n" + str(self.node_id) + "]" + memory_kinds_abbr[self.kind]
 
     def add_instance(self, inst):
         self.instances.add(inst)
