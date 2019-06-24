@@ -752,6 +752,11 @@ function parser.expr_prefix(p)
 
   elseif p:nextif("preimage") then
     p:expect("(")
+    local disjointness = false
+    if p:is_disjointness_kind() then
+       disjointness = p:disjointness_kind()
+       p:expect(",")
+    end
     local parent = p:expr()
     p:expect(",")
     local partition = p:expr()
@@ -759,6 +764,7 @@ function parser.expr_prefix(p)
     local region = p:expr_region_root()
     p:expect(")")
     return ast.unspecialized.expr.Preimage {
+      disjointness = disjointness,
       parent = parent,
       partition = partition,
       region = region,
@@ -768,6 +774,11 @@ function parser.expr_prefix(p)
 
   elseif p:nextif("restrict") then
     p:expect("(")
+    local disjointness = false
+    if p:is_disjointness_kind() then
+       disjointness = p:disjointness_kind()
+       p:expect(",")
+    end
     local region = p:expr()
     p:expect(",")
     local transform = p:expr()
@@ -777,6 +788,7 @@ function parser.expr_prefix(p)
     local colors = p:expr()
     p:expect(")")
     return ast.unspecialized.expr.PartitionByRestriction {
+      disjointness = disjointness,
       region = region,
       transform = transform,
       extent = extent,
