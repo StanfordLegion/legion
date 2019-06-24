@@ -4819,7 +4819,7 @@ namespace Legion {
               Internal::NT_TemplateHelper::encode_tag<N,T>(), 
               warning_string, silence_warnings, true/*generic accessor*/,
               false/*check field size*/);
-        accessor = Realm::GenericAccessor<FT,N,T>(instance, fid, is.bounds);
+        accessor = A(instance, fid, is.bounds);
       }
     public:
       inline FT read(const Point<N,T> &p) const
@@ -4835,16 +4835,15 @@ namespace Legion {
         {
           return accessor[p];
         }
-      inline ArraySyntax::GenericSyntaxHelper<UnsafeFieldAccessor<FT,N,T,
-              Realm::GenericAccessor<FT,N,T> >,FT,N,T,2,READ_WRITE>
+      inline ArraySyntax::GenericSyntaxHelper<UnsafeFieldAccessor<FT,N,T,A>,
+                                                FT,N,T,2,READ_WRITE>
           operator[](T index) const
         {
-          return ArraySyntax::GenericSyntaxHelper<UnsafeFieldAccessor<FT,N,T,
-              Realm::GenericAccessor<FT,N,T> >,FT,N,T,2,READ_WRITE>(
-                  *this, Point<1,T>(index));
+          return ArraySyntax::GenericSyntaxHelper<UnsafeFieldAccessor<FT,N,T,A>,
+                                  FT,N,T,2,READ_WRITE>(*this, Point<1,T>(index));
         }
     public:
-      mutable Realm::GenericAccessor<FT,N,T> accessor;
+      mutable A accessor;
     };
 
     template<typename FT, typename T>
