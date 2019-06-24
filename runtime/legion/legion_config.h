@@ -177,6 +177,14 @@
 #define LEGION_MAX_APPLICATION_SHARDING_ID    (MAX_APPLICATION_SHARDING_ID)
 #endif
 #endif
+// Maximum ID for an application reduction ID
+#ifndef LEGION_MAX_APPLICATION_REDOP_ID
+#define LEGION_MAX_APPLICATION_REDOP_ID       (1<<20)
+#endif
+// Maximum ID for an application serdez ID
+#ifndef LEGION_MAX_APPLICATION_SERDEZ_ID
+#define LEGION_MAX_APPLICATION_SERDEZ_ID      (1<<20)
+#endif
 // Default number of local fields per field space
 #ifndef DEFAULT_LOCAL_FIELDS // For backwards compatibility
 #ifndef LEGION_DEFAULT_LOCAL_FIELDS

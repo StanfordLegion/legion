@@ -798,6 +798,10 @@ namespace Legion {
       SEND_LIBRARY_SHARDING_RESPONSE,
       SEND_LIBRARY_TASK_REQUEST,
       SEND_LIBRARY_TASK_RESPONSE,
+      SEND_LIBRARY_REDOP_REQUEST,
+      SEND_LIBRARY_REDOP_RESPONSE,
+      SEND_LIBRARY_SERDEZ_REQUEST,
+      SEND_LIBRARY_SERDEZ_RESPONSE,
       SEND_REMOTE_OP_REPORT_UNINIT,
       SEND_REMOTE_OP_PROFILING_COUNT_UPDATE,
       SEND_SHUTDOWN_NOTIFICATION,
@@ -966,6 +970,10 @@ namespace Legion {
         "Send Library Sharding Response",                             \
         "Send Library Task Request",                                  \
         "Send Library Task Response",                                 \
+        "Send Library Redop Request",                                 \
+        "Send Library Redop Response",                                \
+        "Send Library Serdez Request",                                \
+        "Send Library Serdez Response",                               \
         "Remote Op Report Uninitialized",                             \
         "Remote Op Profiling Count Update",                           \
         "Send Shutdown Notification",                                 \

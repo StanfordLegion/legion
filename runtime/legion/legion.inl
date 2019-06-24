@@ -292,52 +292,58 @@ namespace Legion {
 
       template<typename REDOP_RHS, bool HAS_SERDEZ>
       struct SerdezRedopHandler {
-        static inline void register_reduction(SerdezRedopTable &table,
-                                              ReductionOpID redop_id)
+        static inline void register_reduction(ReductionOp *redop,
+                                              ReductionOpID redop_id,
+                                              bool permit_duplicates)
         {
-          // Do nothing in the case where there are no serdez functions
+          Runtime::register_reduction_op(redop_id, redop, NULL, NULL, 
+                                         permit_duplicates);
         }
       };
       // True case of template specialization
       template<typename REDOP_RHS>
       struct SerdezRedopHandler<REDOP_RHS,true> {
-        static inline void register_reduction(SerdezRedopTable &table,
-                                              ReductionOpID redop_id)
+        static inline void register_reduction(ReductionOp *redop,
+                                              ReductionOpID redop_id,
+                                              bool permit_duplicates)
         {
-          // Now we can do the registration
-          SerdezRedopFns &fns = table[redop_id];
-          fns.init_fn = serdez_redop_init<REDOP_RHS>;
-          fns.fold_fn = serdez_redop_fold<REDOP_RHS>;
+          Runtime::register_reduction_op(redop_id, redop,
+              serdez_redop_init<REDOP_RHS>, 
+              serdez_redop_fold<REDOP_RHS>, permit_duplicates);
         }
       };
 
       template<typename REDOP_RHS, bool IS_STRUCT>
       struct StructRedopHandler {
-        static inline void register_reduction(SerdezRedopTable &table,
-                                              ReductionOpID redop_id)
+        static inline void register_reduction(ReductionOp *redop,
+                                              ReductionOpID redop_id,
+                                              bool permit_duplicates)
         {
-          // Do nothing in the case where this isn't a struct
+          Runtime::register_reduction_op(redop_id, redop, NULL, NULL, 
+                                         permit_duplicates);
         }
       };
       // True case of template specialization
       template<typename REDOP_RHS>
       struct StructRedopHandler<REDOP_RHS,true> {
-        static inline void register_reduction(SerdezRedopTable &table,
-                                              ReductionOpID redop_id)
+        static inline void register_reduction(ReductionOp *redop,
+                                              ReductionOpID redop_id,
+                                              bool permit_duplicates)
         {
           SerdezRedopHandler<REDOP_RHS,HasSerialize<REDOP_RHS>::value>::
-            register_reduction(table, redop_id);
+            register_reduction(redop, redop_id, permit_duplicates);
         }
       };
 
       // Register reduction functions if necessary
       template<typename REDOP>
-      static inline void register_reduction(SerdezRedopTable &table,
-                                            ReductionOpID redop_id)
+      static inline void register_reduction(ReductionOpID redop_id,
+                                            bool permit_duplicates)
       {
         StructRedopHandler<typename REDOP::RHS, 
-          IsAStruct<typename REDOP::RHS>::value>::register_reduction(table, 
-                                                                     redop_id);
+          IsAStruct<typename REDOP::RHS>::value>::register_reduction(
+              Realm::ReductionOpUntyped::create_reduction_op<REDOP>(),
+              redop_id, permit_duplicates);
       }
 
     };
@@ -8686,43 +8692,10 @@ namespace Legion {
                                                    bool permit_duplicates)
     //--------------------------------------------------------------------------
     {
-      if (redop_id == 0)
-      {
-        fprintf(stderr,"ERROR: ReductionOpID zero is reserved.\n");
-#ifdef DEBUG_LEGION
-        assert(false);
-#endif
-        exit(ERROR_RESERVED_REDOP_ID);
-      }
-      if (redop_id >= MAX_APPLICATION_REDUCTION_ID)
-      {
-        fprintf(stderr,"ERROR: ReductionOpID %d is greater than or equal "
-                       "tothe MAX_APPLICATION_REDUCTION_ID of %d set in "
-                       "legion_config.h.", redop_id, 
-                       MAX_APPLICATION_REDUCTION_ID); 
-#ifdef DEBUG_LEGION
-        assert(false);
-#endif
-        exit(ERROR_RESERVED_REDOP_ID);
-      }
-      ReductionOpTable &red_table = Runtime::get_reduction_table(); 
-      // Check to make sure we're not overwriting a prior reduction op 
-      if (!permit_duplicates &&
-          (red_table.find(redop_id) != red_table.end()))
-      {
-        fprintf(stderr,"ERROR: ReductionOpID %d has already been used " 
-                       "in the reduction table\n",redop_id);
-#ifdef DEBUG_LEGION
-        assert(false);
-#endif
-        exit(ERROR_DUPLICATE_REDOP_ID);
-      }
-      red_table[redop_id] = 
-        Realm::ReductionOpUntyped::create_reduction_op<REDOP>(); 
       // We also have to check to see if there are explicit serialization
       // and deserialization methods on the RHS type for doing fold reductions
-      SerdezRedopTable &serdez_red_table = Runtime::get_serdez_redop_table();
-      LegionSerialization::register_reduction<REDOP>(serdez_red_table,redop_id);
+      LegionSerialization::register_reduction<REDOP>(redop_id, 
+                                                     permit_duplicates);
     }
 
     //--------------------------------------------------------------------------
@@ -8731,28 +8704,9 @@ namespace Legion {
                                                        bool permit_duplicates)
     //--------------------------------------------------------------------------
     {
-      if (serdez_id == 0)
-      {
-        fprintf(stderr,"ERROR: Custom Serdez ID zero is reserved.\n");
-#ifdef DEBUG_LEGION
-        assert(false);
-#endif
-        exit(ERROR_RESERVED_SERDEZ_ID);
-      }
-      SerdezOpTable &serdez_table = Runtime::get_serdez_table();
-      // Check to make sure we're not overwriting a prior serdez op
-      if (!permit_duplicates &&
-          (serdez_table.find(serdez_id) != serdez_table.end()))
-      {
-        fprintf(stderr,"ERROR: CustomSerdezID %d has already been used "
-                       "in the serdez operation table\n", serdez_id);
-#ifdef DEBUG_LEGION
-        assert(false);
-#endif
-        exit(ERROR_DUPLICATE_SERDEZ_ID);
-      }
-      serdez_table[serdez_id] =
-        Realm::CustomSerdezUntyped::create_custom_serdez<SERDEZ>();
+      Runtime::register_custom_serdez_op(serdez_id,
+        Realm::CustomSerdezUntyped::create_custom_serdez<SERDEZ>(), 
+        permit_duplicates);
     }
 
     namespace Internal {
