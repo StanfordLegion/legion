@@ -2889,6 +2889,16 @@ namespace Legion {
     public:
       InstanceRef create_external_instance(
             const std::vector<FieldID> &fields, RegionNode *node, AttachOp *op);
+      InstanceManager* create_external_manager(PhysicalInstance inst,
+            ApEvent ready_event, size_t instance_footprint, 
+            LayoutConstraintSet &constraints, 
+            const std::vector<FieldID> &field_set,
+            const std::vector<size_t> &field_sizes, const FieldMask &file_mask,
+            const std::vector<unsigned> &mask_index_map,
+            RegionNode *node, const std::vector<CustomSerdezID> &serdez);
+      static void handle_external_create_request(Deserializer &derez,
+                                Runtime *runtime, AddressSpaceID source);
+      static void handle_external_create_response(Deserializer &derez);
     public:
       LayoutDescription* find_layout_description(const FieldMask &field_mask,
                      unsigned num_dims, const LayoutConstraintSet &constraints);

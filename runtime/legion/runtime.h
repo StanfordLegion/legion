@@ -932,7 +932,7 @@ namespace Legion {
     public:
       bool delete_by_size_and_state(const size_t needed_size, 
                                     InstanceState state, bool larger_only); 
-      void attach_external_instance(PhysicalManager *manager);
+      RtEvent attach_external_instance(PhysicalManager *manager);
       RtEvent detach_external_instance(PhysicalManager *manager);
     public:
       // The memory that we are managing
@@ -2573,6 +2573,9 @@ namespace Legion {
                                                  Serializer &rez);
       void send_instance_request(AddressSpaceID target, Serializer &rez);
       void send_instance_response(AddressSpaceID target, Serializer &rez);
+      void send_external_create_request(AddressSpaceID target, Serializer &rez);
+      void send_external_create_response(AddressSpaceID target,Serializer &rez);
+      void send_external_attach(AddressSpaceID target, Serializer &rez);
       void send_external_detach(AddressSpaceID target, Serializer &rez);
       void send_gc_priority_update(AddressSpaceID target, Serializer &rez);
       void send_never_gc_response(AddressSpaceID target, Serializer &rez);
@@ -2806,6 +2809,10 @@ namespace Legion {
                                                    AddressSpaceID source);
       void handle_instance_request(Deserializer &derez, AddressSpaceID source);
       void handle_instance_response(Deserializer &derez,AddressSpaceID source);
+      void handle_external_create_request(Deserializer &derez,
+                                          AddressSpaceID source);
+      void handle_external_create_response(Deserializer &derez);
+      void handle_external_attach(Deserializer &derez);
       void handle_external_detach(Deserializer &derez);
       void handle_gc_priority_update(Deserializer &derez,AddressSpaceID source);
       void handle_never_gc_response(Deserializer &derez);

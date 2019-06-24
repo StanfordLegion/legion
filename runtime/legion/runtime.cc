@@ -5913,12 +5913,28 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MemoryManager::attach_external_instance(PhysicalManager *manager)
+    RtEvent MemoryManager::attach_external_instance(PhysicalManager *manager)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(is_owner);
       assert(manager->is_external_instance());
+#endif
+      if (!manager->is_owner())
+      {
+        // Send a message to the owner node to do the record
+        RtUserEvent result = Runtime::create_rt_user_event();
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(memory);
+          rez.serialize(manager->did);
+          rez.serialize(result);
+        }
+        runtime->send_external_attach(manager->owner_space, rez);
+        return result;
+      }
+#ifdef DEBUG_LEGION
+      assert(is_owner);
 #endif
       // First do the insertion
       // If we're going to add a valid reference, mark this valid early
@@ -5935,6 +5951,7 @@ namespace Legion {
         InstanceInfo &info = insts[manager];
         info.instance_size = instance_size;
       }
+      return RtEvent::NO_RT_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -6063,6 +6080,9 @@ namespace Legion {
         runtime->send_external_detach(manager->owner_space, rez);
         return result;
       }
+#ifdef DEBUG_LEGION
+      assert(is_owner);
+#endif
       // Either delete the instance now or do a deferred deltion
       // that will delete the instance once all operations are
       // done using it
@@ -7335,6 +7355,22 @@ namespace Legion {
           case SEND_INSTANCE_RESPONSE:
             {
               runtime->handle_instance_response(derez, remote_address_space);
+              break;
+            }
+          case SEND_EXTERNAL_CREATE_REQUEST:
+            {
+              runtime->handle_external_create_request(derez, 
+                                                      remote_address_space);
+              break;
+            }
+          case SEND_EXTERNAL_CREATE_RESPONSE:
+            {
+              runtime->handle_external_create_response(derez);
+              break;
+            }
+          case SEND_EXTERNAL_ATTACH:
+            {
+              runtime->handle_external_attach(derez);
               break;
             }
           case SEND_EXTERNAL_DETACH:
@@ -16340,6 +16376,32 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_external_create_request(AddressSpaceID target,
+                                               Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_EXTERNAL_CREATE_REQUEST,
+                                DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_external_create_response(AddressSpaceID target,
+                                                Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_EXTERNAL_CREATE_RESPONSE,
+                    DEFAULT_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_external_attach(AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_EXTERNAL_ATTACH,
+                                DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_external_detach(AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
@@ -17676,6 +17738,42 @@ namespace Legion {
       derez.deserialize(target_memory);
       MemoryManager *manager = find_memory_manager(target_memory);
       manager->process_instance_response(derez, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_external_create_request(Deserializer &derez,
+                                                 AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      FieldSpaceNode::handle_external_create_request(derez, this, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_external_create_response(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      FieldSpaceNode::handle_external_create_response(derez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_external_attach(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      Memory target_memory;
+      derez.deserialize(target_memory);
+      DistributedID did;
+      derez.deserialize(did);
+      RtEvent manager_ready;
+      PhysicalManager *manager = 
+        find_or_request_physical_manager(did, manager_ready);
+      RtUserEvent done_event;
+      derez.deserialize(done_event);
+      MemoryManager *memory_manager = find_memory_manager(target_memory);
+      if (manager_ready.exists() && !manager_ready.has_triggered())
+        manager_ready.wait();
+      RtEvent local_done = memory_manager->attach_external_instance(manager);
+      Runtime::trigger_event(done_event, local_done);
     }
 
     //--------------------------------------------------------------------------

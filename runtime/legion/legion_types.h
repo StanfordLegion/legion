@@ -766,6 +766,9 @@ namespace Legion {
       SEND_EQUIVALENCE_SET_REMOTE_INSTANCES,
       SEND_INSTANCE_REQUEST,
       SEND_INSTANCE_RESPONSE,
+      SEND_EXTERNAL_CREATE_REQUEST,
+      SEND_EXTERNAL_CREATE_RESPONSE,
+      SEND_EXTERNAL_ATTACH,
       SEND_EXTERNAL_DETACH,
       SEND_GC_PRIORITY_UPDATE,
       SEND_NEVER_GC_RESPONSE,
@@ -931,6 +934,9 @@ namespace Legion {
         "Send Equivalence Set Remote Instances",                      \
         "Send Instance Request",                                      \
         "Send Instance Response",                                     \
+        "Send External Create Request",                               \
+        "Send External Create Response",                              \
+        "Send External Attach",                                       \
         "Send External Detach",                                       \
         "Send GC Priority Update",                                    \
         "Send Never GC Response",                                     \
