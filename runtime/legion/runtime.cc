@@ -13417,7 +13417,7 @@ namespace Legion {
             record.result = unique_library_redop_id;
             unique_library_redop_id += count;
 #ifdef DEBUG_LEGION
-            assert(unique_library_redop_id > record.result);
+            assert(unique_library_redop_id > unsigned(record.result));
 #endif
             record.result_set = true;
             return record.result;
@@ -13541,7 +13541,7 @@ namespace Legion {
             record.result = unique_library_serdez_id;
             unique_library_serdez_id += count;
 #ifdef DEBUG_LEGION
-            assert(unique_library_serdez_id > record.result);
+            assert(unique_library_serdez_id > unsigned(record.result));
 #endif
             record.result_set = true;
             return record.result;
