@@ -15045,7 +15045,10 @@ namespace Legion {
           assert(false);
       }
       MemoryManager *memory_manager = external_instance->memory_manager;
-      memory_manager->record_external_instance(external_instance);
+      const RtEvent recorded = 
+        memory_manager->record_external_instance(external_instance);
+      if (recorded.exists())
+        recorded.wait();
       // Tell the parent that we added the restriction
       parent_ctx->add_restriction(this, external_instance, requirement);
     }
@@ -15073,7 +15076,10 @@ namespace Legion {
       // Once we're ready to map we can tell the memory manager that
       // this instance can be safely acquired for use
       MemoryManager *memory_manager = external_instance->memory_manager;
-      memory_manager->attach_external_instance(external_instance);
+      const RtEvent attached = 
+        memory_manager->attach_external_instance(external_instance);
+      if (attached.exists())
+        attached.wait();
       PhysicalTraceInfo trace_info;
       InstanceRef result = runtime->forest->attach_external(this, 0/*idx*/,
                                                         requirement,
