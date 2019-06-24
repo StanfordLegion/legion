@@ -337,7 +337,7 @@ class DomainTransform(object):
 
     @staticmethod
     def create(matrix):
-        matrix = numpy.asarray(matrix)
+        matrix = numpy.asarray(matrix, dtype=numpy.int64)
         transform = ffi.new('legion_transform_{}x{}_t *'.format(*matrix.shape))
         ffi.buffer(transform[0].trans)[:] = matrix
         return DomainTransform(getattr(c, 'legion_domain_transform_from_{}x{}'.format(*matrix.shape))(transform[0]))
