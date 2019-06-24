@@ -6633,6 +6633,153 @@ namespace Legion {
       static void preregister_sharding_functor(ShardingID sid,
                                                ShardingFunctor *functor);
     public:
+      /**
+       * Dynamically generate a unique reduction ID for use across the machine
+       * @return a ReductionOpID that is globally unique across the machine
+       */
+      ReductionOpID generate_dynamic_reduction_id(void);
+
+      /** 
+       * Generate a contiguous set of ReductionOpIDs for use by a library.
+       * This call will always generate the same answer for the same library
+       * name no many how many times it is called or on how many nodes it
+       * is called. If the count passed in to this method differs for the 
+       * same library name the runtime will raise an error.
+       * @param name a unique null-terminated string that names the library
+       * @param count the number of reduction IDs that should be generated
+       * @return the first reduction ID that is allocated to the library
+       */
+      ReductionOpID generate_library_reduction_ids(const char *name, 
+                                                   size_t count);
+
+      /**
+       * Statically generate a unique reduction ID for use across the machine.
+       * This can only be called prior to the runtime starting. It must be
+       * invoked symmetrically across all the nodes in the machine prior
+       * to starting the runtime.
+       * @return a ReductionOpID that is globally unique across the machine
+       */
+      static ReductionOpID generate_static_reduction_id(void);
+
+      /**
+       * Register a reduction operation with the runtime. Note that the
+       * reduction operation template type must conform to the specification
+       * for a reduction operation outlined in the Realm runtime 
+       * interface.  Reduction operations can be used either for reduction
+       * privileges on a region or for performing reduction of values across
+       * index space task launches. The reduction operation ID zero is
+       * reserved for runtime use. Note that even though this method is
+       * a static method it can be called either before or after the runtime
+       * has been started safely.
+       * @param redop_id ID at which to register the reduction operation
+       * @param permit_duplicates will allow a duplicate registration to
+       *        be successful if this reduction ID has been used before
+       */
+      template<typename REDOP>
+      static void register_reduction_op(ReductionOpID redop_id,
+                                        bool permit_duplicates = false);
+
+      /**
+       * Register an untyped reduction operation with the runtime. Note 
+       * that the reduction operation template type must conform to the 
+       * specification for a reduction operation outlined in the Realm runtime 
+       * interface. Reduction operations can be used either for reduction
+       * privileges on a region or for performing reduction of values across
+       * index space task launches. The reduction operation ID zero is
+       * reserved for runtime use. The runtime will take ownership of this
+       * operation and delete it at the end of the program. Note that eventhough
+       * this is a static method it can be called either before or after the
+       * runtime has been started safely.
+       * @param redop_id ID at which to register the reduction opeation
+       * @param op the untyped reduction operator (legion claims ownership)
+       * @param init_fnptr optional function for initializing the reduction
+       *        type of this reduction operator if they also support compression
+       * @pram fold_fnptr optional function for folding reduction types of this
+       *        reduction operator if they also support compression 
+       * @param permit_duplicates will allow a duplicate registration to 
+       *        be successful if this reduction ID has been used before
+       */
+      static void register_reduction_op(ReductionOpID redop_id,
+                                        ReductionOp *op,
+                                        SerdezInitFnptr init_fnptr = NULL,
+                                        SerdezFoldFnptr fold_fnptr = NULL,
+                                        bool permit_duplicates = false);
+
+      /**
+       * Return a pointer to a given reduction operation object.
+       * @param redop_id ID of the reduction operation to find
+       * @return a pointer to the reduction operation object if it exists
+       */
+      static const ReductionOp* get_reduction_op(ReductionOpID redop_id);
+    public:
+      /**
+       * Dynamically generate a unique serdez ID for use across the machine
+       * @return a CustomSerdezID that is globally unique across the machine
+       */
+      CustomSerdezID generate_dynamic_serdez_id(void);
+
+      /** 
+       * Generate a contiguous set of CustomSerdezIDs for use by a library.
+       * This call will always generate the same answer for the same library
+       * name no many how many times it is called or on how many nodes it
+       * is called. If the count passed in to this method differs for the 
+       * same library name the runtime will raise an error.
+       * @param name a unique null-terminated string that names the library
+       * @param count the number of serdez IDs that should be generated
+       * @return the first serdez ID that is allocated to the library
+       */
+      CustomSerdezID generate_library_serdez_ids(const char *name, 
+                                                 size_t count);
+
+      /**
+       * Statically generate a unique serdez ID for use across the machine.
+       * This can only be called prior to the runtime starting. It must be
+       * invoked symmetrically across all the nodes in the machine prior
+       * to starting the runtime.
+       * @return a CustomSerdezID that is globally unique across the machine
+       */
+      static CustomSerdezID generate_static_serdez_id(void);
+      
+      /**
+       * Register custom serialize/deserialize operation with the
+       * runtime. This can be used for providing custom serialization
+       * and deserialization method for fields that are not trivially
+       * copied (e.g. byte-wise copies). The type being registered
+       * must conform to the Realm definition of a CustomSerdez
+       * object (see realm/custom_serdez.h). Note that eventhough 
+       * this is a static method you can safely call it both before 
+       * and after the runtime has been started.
+       * @param serdez_id ID at which to register the serdez operator
+       * @param permit_duplicates will allow a duplicate registration to 
+       *        be successful if this serdez ID has been used before
+       */
+      template<typename SERDEZ>
+      static void register_custom_serdez_op(CustomSerdezID serdez_id,
+                                            bool permit_duplicates = false);
+
+      /**
+       * Register custom serialize/deserialize operation with the
+       * runtime. This can be used for providing custom serialization
+       * and deserialization method for fields that are not trivially
+       * copied (e.g. byte-wise copies). Note that eventhough this is
+       * a static method you can safely call it both before and after
+       * the runtime has been started.
+       * @param serdez_id ID at which to register the serdez operator
+       * @param serdez_op The functor for the serdez op
+       * @param permit_duplicates will allow a duplicate registration to 
+       *        be successful if this serdez ID has been used before
+       */
+      static void register_custom_serdez_op(CustomSerdezID serdez_id,
+                                            SerdezOp *serdez_op, 
+                                            bool permit_duplicates = false);
+
+      /**
+       * Return a pointer to the given custom serdez operation object.
+       * @param serdez_id ID of the serdez operation to find
+       * @return a pointer to the serdez operation object if it exists
+       */
+      static const SerdezOp* get_serdez_op(CustomSerdezID serdez_id);
+    public:
       //------------------------------------------------------------------------
       // Start-up Operations
       // Everything below here is a static function that is used to configure
@@ -6879,75 +7026,6 @@ namespace Legion {
       static MPILegionHandshake create_handshake(bool init_in_MPI = true,
                                                  int mpi_participants = 1,
                                                  int legion_participants = 1);
-
-      /**
-       * Register a reduction operation with the runtime. Note that the
-       * reduction operation template type must conform to the specification
-       * for a reduction operation outlined in the Realm runtime 
-       * interface.  Reduction operations can be used either for reduction
-       * privileges on a region or for performing reduction of values across
-       * index space task launches. The reduction operation ID zero is
-       * reserved for runtime use.
-       * @param redop_id ID at which to register the reduction operation
-       * @param permit_duplicates will allow a duplicate registration to
-       *        be successful if this reduction ID has been used before
-       */
-      template<typename REDOP>
-      static void register_reduction_op(ReductionOpID redop_id,
-                                        bool permit_duplicates = false);
-
-      /**
-       * Register an untyped reduction operation with the runtime. Note 
-       * that the reduction operation template type must conform to the 
-       * specification for a reduction operation outlined in the Realm runtime 
-       * interface. Reduction operations can be used either for reduction
-       * privileges on a region or for performing reduction of values across
-       * index space task launches. The reduction operation ID zero is
-       * reserved for runtime use. The runtime will take ownership of this
-       * operation and delete it at the end of the program.
-       * @param redop_id ID at which to register the reduction opeation
-       * @param op the untyped reduction operator (legion claims ownership)
-       * @param init_fnptr optional function for initializing the reduction
-       *        type of this reduction operator if they also support compression
-       * @pram fold_fnptr optional function for folding reduction types of this
-       *        reduction operator if they also support compression 
-       * @param permit_duplicates will allow a duplicate registration to 
-       *        be successful if this reduction ID has been used before
-       */
-      static void register_reduction_op(ReductionOpID redop_id,
-                                        ReductionOp *op,
-                                        SerdezInitFnptr init_fnptr = NULL,
-                                        SerdezFoldFnptr fold_fnptr = NULL,
-                                        bool permit_duplicates = false);
-
-      /**
-       * Return a pointer to a given reduction operation object.
-       * @param redop_id ID of the reduction operation to find
-       * @return a pointer to the reduction operation object if it exists
-       */
-      static const ReductionOp* get_reduction_op(ReductionOpID redop_id);
-
-      /**
-       * Register custom serialize/deserialize operation with the
-       * runtime. This can be used for providing custom serialization
-       * and deserialization method for fields that are not trivially
-       * copied (e.g. byte-wise copies). The type being registered
-       * must conform to the Realm definition of a CustomSerdez
-       * object (see realm/custom_serdez.h).
-       * @param serdez_id ID at which to register the serdez operator
-       * @param permit_duplicates will allow a duplicate registration to 
-       *        be successful if this serdez ID has been used before
-       */
-      template<typename SERDEZ>
-      static void register_custom_serdez_op(CustomSerdezID serdez_id,
-                                            bool permit_duplicates = false);
-
-      /**
-       * Return a pointer to the given custom serdez operation object.
-       * @param serdez_id ID of the serdez operation to find
-       * @return a pointer to the serdez operation object if it exists
-       */
-      static const SerdezOp* get_serdez_op(CustomSerdezID serdez_id);
 
       /**
        * Register a region projection function that can be used to map
@@ -7495,10 +7573,6 @@ namespace Legion {
       friend class LegionTaskWrapper;
       friend class LegionSerialization;
       Future from_value(const void *value, size_t value_size, bool owned);
-    private:
-      static ReductionOpTable& get_reduction_table(void);
-      static SerdezOpTable& get_serdez_table(void);
-      static SerdezRedopTable& get_serdez_redop_table(void);
     private:
       friend class Mapper;
       Internal::Runtime *runtime;

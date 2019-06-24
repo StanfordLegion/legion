@@ -9255,14 +9255,18 @@ namespace Legion {
         unique_task_id(get_current_static_task_id()+unique),
         unique_mapper_id(get_current_static_mapper_id()+unique),
         unique_projection_id(get_current_static_projection_id()+unique),
+        unique_redop_id(get_current_static_reduction_id()+unique),
+        unique_serdez_id(get_current_static_serdez_id()+unique),
         unique_library_mapper_id(LEGION_INITIAL_LIBRARY_ID_OFFSET),
         unique_library_projection_id(LEGION_INITIAL_LIBRARY_ID_OFFSET),
         unique_library_task_id(LEGION_INITIAL_LIBRARY_ID_OFFSET),
+        unique_library_redop_id(LEGION_INITIAL_LIBRARY_ID_OFFSET),
+        unique_library_serdez_id(LEGION_INITIAL_LIBRARY_ID_OFFSET),
         unique_distributed_id((unique == 0) ? runtime_stride : unique),
         gc_epoch_counter(0)
     //--------------------------------------------------------------------------
     {
-      log_run.debug("Initializing high-level runtime in address space %x",
+      log_run.debug("Initializing Legion runtime in address space %x",
                             address_space);
       // Construct a local utility processor group
       if (local_utils.empty())
@@ -13337,6 +13341,254 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    ReductionOpID Runtime::generate_dynamic_reduction_id(void)
+    //--------------------------------------------------------------------------
+    {
+      ReductionOpID result = 
+        __sync_fetch_and_add(&unique_redop_id, runtime_stride);
+      // Check for hitting the library limit
+      if (result >= LEGION_INITIAL_LIBRARY_ID_OFFSET)
+        REPORT_LEGION_FATAL(LEGION_FATAL_EXCEEDED_LIBRARY_ID_OFFSET,
+            "Dynamic Reduction IDs exceeded library ID offset %d",
+            LEGION_INITIAL_LIBRARY_ID_OFFSET)
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    ReductionOpID Runtime::generate_library_reduction_ids(const char *name,
+                                                          size_t count)
+    //--------------------------------------------------------------------------
+    {
+      // Easy case if the user asks for no IDs
+      if (count == 0)
+        return AUTO_GENERATE_ID;
+      const std::string library_name(name); 
+      // Take the lock in read only mode and see if we can find the result
+      RtEvent wait_on;
+      {
+        AutoLock l_lock(library_lock,1,false/*exclusive*/);
+        std::map<std::string,LibraryRedopIDs>::const_iterator finder = 
+          library_redop_ids.find(library_name);
+        if (finder != library_redop_ids.end())
+        {
+          // First do a check to see if the counts match
+          if (finder->second.count != count)
+            REPORT_LEGION_ERROR(ERROR_LIBRARY_COUNT_MISMATCH,
+                "ReductionOpID generation counts %zd and %zd differ for "
+                "library %s", finder->second.count, count, name)
+          if (finder->second.result_set)
+            return finder->second.result;
+          // This should never happen unless we are on a node other than 0
+#ifdef DEBUG_LEGION
+          assert(address_space > 0);
+#endif
+          wait_on = finder->second.ready;
+        }
+      }
+      RtUserEvent request_event;
+      if (!wait_on.exists())
+      {
+        AutoLock l_lock(library_lock);
+        // Check to make sure we didn't lose the race
+        std::map<std::string,LibraryRedopIDs>::const_iterator finder = 
+          library_redop_ids.find(library_name);
+        if (finder != library_redop_ids.end())
+        {
+          // First do a check to see if the counts match
+          if (finder->second.count != count)
+            REPORT_LEGION_ERROR(ERROR_LIBRARY_COUNT_MISMATCH,
+                "ReductionOpID generation counts %zd and %zd differ for "
+                "library %s", finder->second.count, count, name)
+          if (finder->second.result_set)
+            return finder->second.result;
+          // This should never happen unless we are on a node other than 0
+#ifdef DEBUG_LEGION
+          assert(address_space > 0);
+#endif
+          wait_on = finder->second.ready;
+        }
+        if (!wait_on.exists())
+        {
+          LibraryRedopIDs &record = library_redop_ids[library_name];
+          record.count = count;
+          if (address_space == 0)
+          {
+            // We're going to make the result
+            record.result = unique_library_redop_id;
+            unique_library_redop_id += count;
+#ifdef DEBUG_LEGION
+            assert(unique_library_redop_id > record.result);
+#endif
+            record.result_set = true;
+            return record.result;
+          }
+          else
+          {
+            // We're going to request the result
+            request_event = Runtime::create_rt_user_event();
+            record.ready = request_event;
+            record.result_set = false;
+            wait_on = request_event;
+          }
+        }
+      }
+      // Should only get here on nodes other than 0
+#ifdef DEBUG_LEGION
+      assert(address_space > 0);
+      assert(wait_on.exists());
+#endif
+      if (request_event.exists())
+      {
+        // Include the null terminator in length
+        const size_t string_length = strlen(name) + 1;
+        // Send the request to node 0 for the result
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize<size_t>(string_length);
+          rez.serialize(name, string_length);
+          rez.serialize<size_t>(count);
+          rez.serialize(request_event);
+        }
+        send_library_redop_request(0/*target*/, rez);
+      }
+      wait_on.wait();
+      // When we wake up we should be able to find the result
+      AutoLock l_lock(library_lock,1,false/*exclusive*/);
+      std::map<std::string,LibraryRedopIDs>::const_iterator finder = 
+          library_redop_ids.find(library_name);
+#ifdef DEBUG_LEGION
+      assert(finder != library_redop_ids.end());
+      assert(finder->second.result_set);
+#endif
+      return finder->second.result;
+    }
+
+    //--------------------------------------------------------------------------
+    CustomSerdezID Runtime::generate_dynamic_serdez_id(void)
+    //--------------------------------------------------------------------------
+    {
+      CustomSerdezID result = 
+        __sync_fetch_and_add(&unique_serdez_id, runtime_stride);
+      // Check for hitting the library limit
+      if (result >= LEGION_INITIAL_LIBRARY_ID_OFFSET)
+        REPORT_LEGION_FATAL(LEGION_FATAL_EXCEEDED_LIBRARY_ID_OFFSET,
+            "Dynamic Custom Serdez IDs exceeded library ID offset %d",
+            LEGION_INITIAL_LIBRARY_ID_OFFSET)
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    CustomSerdezID Runtime::generate_library_serdez_ids(const char *name,
+                                                        size_t count)
+    //--------------------------------------------------------------------------
+    {
+      // Easy case if the user asks for no IDs
+      if (count == 0)
+        return AUTO_GENERATE_ID;
+      const std::string library_name(name); 
+      // Take the lock in read only mode and see if we can find the result
+      RtEvent wait_on;
+      {
+        AutoLock l_lock(library_lock,1,false/*exclusive*/);
+        std::map<std::string,LibrarySerdezIDs>::const_iterator finder = 
+          library_serdez_ids.find(library_name);
+        if (finder != library_serdez_ids.end())
+        {
+          // First do a check to see if the counts match
+          if (finder->second.count != count)
+            REPORT_LEGION_ERROR(ERROR_LIBRARY_COUNT_MISMATCH,
+                "CustomSerdezID generation counts %zd and %zd differ for "
+                "library %s", finder->second.count, count, name)
+          if (finder->second.result_set)
+            return finder->second.result;
+          // This should never happen unless we are on a node other than 0
+#ifdef DEBUG_LEGION
+          assert(address_space > 0);
+#endif
+          wait_on = finder->second.ready;
+        }
+      }
+      RtUserEvent request_event;
+      if (!wait_on.exists())
+      {
+        AutoLock l_lock(library_lock);
+        // Check to make sure we didn't lose the race
+        std::map<std::string,LibrarySerdezIDs>::const_iterator finder = 
+          library_serdez_ids.find(library_name);
+        if (finder != library_serdez_ids.end())
+        {
+          // First do a check to see if the counts match
+          if (finder->second.count != count)
+            REPORT_LEGION_ERROR(ERROR_LIBRARY_COUNT_MISMATCH,
+                "CustomSerdezID generation counts %zd and %zd differ for "
+                "library %s", finder->second.count, count, name)
+          if (finder->second.result_set)
+            return finder->second.result;
+          // This should never happen unless we are on a node other than 0
+#ifdef DEBUG_LEGION
+          assert(address_space > 0);
+#endif
+          wait_on = finder->second.ready;
+        }
+        if (!wait_on.exists())
+        {
+          LibrarySerdezIDs &record = library_serdez_ids[library_name];
+          record.count = count;
+          if (address_space == 0)
+          {
+            // We're going to make the result
+            record.result = unique_library_serdez_id;
+            unique_library_serdez_id += count;
+#ifdef DEBUG_LEGION
+            assert(unique_library_serdez_id > record.result);
+#endif
+            record.result_set = true;
+            return record.result;
+          }
+          else
+          {
+            // We're going to request the result
+            request_event = Runtime::create_rt_user_event();
+            record.ready = request_event;
+            record.result_set = false;
+            wait_on = request_event;
+          }
+        }
+      }
+      // Should only get here on nodes other than 0
+#ifdef DEBUG_LEGION
+      assert(address_space > 0);
+      assert(wait_on.exists());
+#endif
+      if (request_event.exists())
+      {
+        // Include the null terminator in length
+        const size_t string_length = strlen(name) + 1;
+        // Send the request to node 0 for the result
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize<size_t>(string_length);
+          rez.serialize(name, string_length);
+          rez.serialize<size_t>(count);
+          rez.serialize(request_event);
+        }
+        send_library_serdez_request(0/*target*/, rez);
+      }
+      wait_on.wait();
+      // When we wake up we should be able to find the result
+      AutoLock l_lock(library_lock,1,false/*exclusive*/);
+      std::map<std::string,LibrarySerdezIDs>::const_iterator finder = 
+          library_serdez_ids.find(library_name);
+#ifdef DEBUG_LEGION
+      assert(finder != library_serdez_ids.end());
+      assert(finder->second.result_set);
+#endif
+      return finder->second.result;
+    }
+
+    //--------------------------------------------------------------------------
     MemoryManager* Runtime::find_memory_manager(Memory mem)
     //--------------------------------------------------------------------------
     {
@@ -14968,6 +15220,42 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_LIBRARY_TASK_RESPONSE,
+                   DEFAULT_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_library_redop_request(AddressSpaceID target, 
+                                             Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_LIBRARY_REDOP_REQUEST,
+                                     DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_library_redop_response(AddressSpaceID target,
+                                              Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_LIBRARY_REDOP_RESPONSE,
+                   DEFAULT_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_library_serdez_request(AddressSpaceID target, 
+                                              Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_LIBRARY_SERDEZ_REQUEST,
+                                     DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_library_serdez_response(AddressSpaceID target,
+                                               Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_LIBRARY_SERDEZ_RESPONSE,
                    DEFAULT_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
     }
 
@@ -19926,13 +20214,13 @@ namespace Legion {
       }
 
       // Lastly do any other registrations we might have
-      const ReductionOpTable& red_table = get_reduction_table();
+      const ReductionOpTable& red_table = get_reduction_table(true/*safe*/);
       for(ReductionOpTable::const_iterator it = red_table.begin();
           it != red_table.end();
           it++)
         realm.register_reduction(it->first, it->second);
 
-      const SerdezOpTable &serdez_table = get_serdez_table();
+      const SerdezOpTable &serdez_table = get_serdez_table(true/*safe*/);
       for (SerdezOpTable::const_iterator it = serdez_table.begin();
             it != serdez_table.end(); it++)
         realm.register_custom_serdez(it->first, it->second);
@@ -20020,47 +20308,90 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ const ReductionOp* Runtime::get_reduction_op(
-                                                        ReductionOpID redop_id)
+                                                        ReductionOpID redop_id,
+                                                        bool has_lock/*=false*/)
     //--------------------------------------------------------------------------
     {
       if (redop_id == 0)
         REPORT_LEGION_ERROR(ERROR_RESERVED_REDOP_ID, 
                       "ReductionOpID zero is reserved.")
-      ReductionOpTable &red_table = Runtime::get_reduction_table();
+      if (!runtime_started || has_lock)
+      {
+        ReductionOpTable &red_table = 
+          Runtime::get_reduction_table(true/*safe*/);
 #ifdef DEBUG_LEGION
-      if (red_table.find(redop_id) == red_table.end())
-        REPORT_LEGION_ERROR(ERROR_INVALID_REDOP_ID, 
-                      "Invalid ReductionOpID %d",redop_id)
+        if (red_table.find(redop_id) == red_table.end())
+          REPORT_LEGION_ERROR(ERROR_INVALID_REDOP_ID, 
+                        "Invalid ReductionOpID %d",redop_id)
 #endif
-      return red_table[redop_id];
+        return red_table[redop_id];
+      }
+      else
+        return the_runtime->get_reduction(redop_id);
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ const SerdezOp* Runtime::get_serdez_op(CustomSerdezID serdez_id)
+    const ReductionOp* Runtime::get_reduction(ReductionOpID redop_id)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock r_lock(redop_lock);
+      return get_reduction_op(redop_id, true/*has lock*/); 
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ const SerdezOp* Runtime::get_serdez_op(CustomSerdezID serdez_id,
+                                                      bool has_lock/*=false*/)
     //--------------------------------------------------------------------------
     {
       if (serdez_id == 0)
         REPORT_LEGION_ERROR(ERROR_RESERVED_SERDEZ_ID, 
                       "CustomSerdezID zero is reserved.")
-      SerdezOpTable &serdez_table = Runtime::get_serdez_table();
+      if (!runtime_started || has_lock)
+      {
+        SerdezOpTable &serdez_table = Runtime::get_serdez_table(true/*safe*/);
 #ifdef DEBUG_LEGION
-      if (serdez_table.find(serdez_id) == serdez_table.end())
-        REPORT_LEGION_ERROR(ERROR_INVALID_SERDEZ_ID, 
-                      "Invalid CustomSerdezOpID %d", serdez_id)
+        if (serdez_table.find(serdez_id) == serdez_table.end())
+          REPORT_LEGION_ERROR(ERROR_INVALID_SERDEZ_ID, 
+                        "Invalid CustomSerdezOpID %d", serdez_id)
 #endif
-      return serdez_table[serdez_id];
+        return serdez_table[serdez_id];
+      }
+      else
+        return the_runtime->get_serdez(serdez_id);
+    }
+
+    //--------------------------------------------------------------------------
+    const SerdezOp* Runtime::get_serdez(CustomSerdezID serdez_id)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock s_lock(serdez_lock);
+      return get_serdez_op(serdez_id, true/*has lock*/);
     }
 
     //--------------------------------------------------------------------------
     /*static*/ const SerdezRedopFns* Runtime::get_serdez_redop_fns(
-                                                         ReductionOpID redop_id)
+                                                       ReductionOpID redop_id,
+                                                       bool has_lock/*= false*/)
     //--------------------------------------------------------------------------
     {
-      SerdezRedopTable &serdez_table = get_serdez_redop_table(); 
-      SerdezRedopTable::const_iterator finder = serdez_table.find(redop_id);
-      if (finder != serdez_table.end())
-        return &(finder->second);
-      return NULL;
+      if (!runtime_started || has_lock)
+      {
+        SerdezRedopTable &serdez_table = get_serdez_redop_table(true/*safe*/); 
+        SerdezRedopTable::const_iterator finder = serdez_table.find(redop_id);
+        if (finder != serdez_table.end())
+          return &(finder->second);
+        return NULL;
+      }
+      else
+        return the_runtime->get_serdez_redop(redop_id);
+    }
+
+    //--------------------------------------------------------------------------
+    const SerdezRedopFns* Runtime::get_serdez_redop(ReductionOpID redop_id)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock r_lock(redop_lock);
+      return get_serdez_redop_fns(redop_id, true/*has lock*/);
     }
 
     //--------------------------------------------------------------------------
@@ -20072,27 +20403,136 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ ReductionOpTable& Runtime::get_reduction_table(void)
+    /*static*/ ReductionOpTable& Runtime::get_reduction_table(bool safe)
     //--------------------------------------------------------------------------
     {
       static ReductionOpTable table;
+      if (!safe && runtime_started)
+        assert(false);
       return table;
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ SerdezOpTable& Runtime::get_serdez_table(void)
+    /*static*/ SerdezOpTable& Runtime::get_serdez_table(bool safe)
     //--------------------------------------------------------------------------
     {
       static SerdezOpTable table;
+      if (!safe && runtime_started)
+        assert(false);
       return table;
     }
     
     //--------------------------------------------------------------------------
-    /*static*/ SerdezRedopTable& Runtime::get_serdez_redop_table(void)
+    /*static*/ SerdezRedopTable& Runtime::get_serdez_redop_table(bool safe)
     //--------------------------------------------------------------------------
     {
       static SerdezRedopTable table;
+      if (!safe && runtime_started)
+        assert(false);
       return table;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void Runtime::register_reduction_op(ReductionOpID redop_id,
+                                                   ReductionOp *redop,
+                                                   SerdezInitFnptr init_fnptr,
+                                                   SerdezFoldFnptr fold_fnptr,
+                                                   bool permit_duplicates,
+                                                   bool has_lock/*= false*/)
+    //--------------------------------------------------------------------------
+    {
+      if (!runtime_started || has_lock)
+      {
+        if (redop_id == 0)
+          REPORT_LEGION_ERROR(ERROR_RESERVED_REDOP_ID, 
+                              "ERROR: ReductionOpID zero is reserved.")
+        ReductionOpTable &red_table = 
+          Runtime::get_reduction_table(true/*safe*/);
+        // Check to make sure we're not overwriting a prior reduction op 
+        if (!permit_duplicates &&
+            (red_table.find(redop_id) != red_table.end()))
+          REPORT_LEGION_ERROR(ERROR_DUPLICATE_REDOP_ID, "ERROR: ReductionOpID "
+              "%d has already been used in the reduction table\n",redop_id)
+        red_table[redop_id] = redop;
+        if ((init_fnptr != NULL) || (fold_fnptr != NULL))
+        {
+#ifdef DEBUG_LEGION
+          assert((init_fnptr != NULL) && (fold_fnptr != NULL));
+#endif
+          SerdezRedopTable &serdez_red_table = 
+            Runtime::get_serdez_redop_table(true/*safe*/);
+          SerdezRedopFns &fns = serdez_red_table[redop_id];
+          fns.init_fn = init_fnptr;
+          fns.fold_fn = fold_fnptr;
+        }
+      }
+      else
+        the_runtime->register_reduction(redop_id, redop, init_fnptr,
+                                        fold_fnptr, permit_duplicates);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::register_reduction(ReductionOpID redop_id,
+                                     ReductionOp *redop,
+                                     SerdezInitFnptr init_fnptr,
+                                     SerdezFoldFnptr fold_fnptr,
+                                     bool permit_duplicates)
+    //--------------------------------------------------------------------------
+    {
+      // Dynamic registration so do it with realm too
+      RealmRuntime realm = RealmRuntime::get_runtime();
+      realm.register_reduction(redop_id, redop);
+      AutoLock r_lock(redop_lock);
+      Runtime::register_reduction_op(redop_id, redop, init_fnptr,
+                fold_fnptr, permit_duplicates, true/*has locks*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::register_serdez(CustomSerdezID serdez_id,
+                                  SerdezOp *serdez_op, bool permit_duplicates)
+    //--------------------------------------------------------------------------
+    {
+      // Dynamic registration so do it with realm too
+      RealmRuntime realm = RealmRuntime::get_runtime();
+      realm.register_custom_serdez(serdez_id, serdez_op);
+      AutoLock s_lock(serdez_lock);
+      Runtime::register_serdez_op(serdez_id, serdez_op, 
+                                  permit_duplicates, true/*has lock*/);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void Runtime::register_serdez_op(CustomSerdezID serdez_id,
+                                                SerdezOp *serdez_op,
+                                                bool permit_duplicates,
+                                                bool has_lock/*= false*/)
+    //--------------------------------------------------------------------------
+    {
+      if (!runtime_started || has_lock)
+      {
+        if (serdez_id == 0)
+        {
+          fprintf(stderr,"ERROR: Custom Serdez ID zero is reserved.\n");
+#ifdef DEBUG_LEGION
+          assert(false);
+#endif
+          exit(ERROR_RESERVED_SERDEZ_ID);
+        }
+        SerdezOpTable &serdez_table = Runtime::get_serdez_table(true/*safe*/);
+        // Check to make sure we're not overwriting a prior serdez op
+        if (!permit_duplicates &&
+            (serdez_table.find(serdez_id) != serdez_table.end()))
+        {
+          fprintf(stderr,"ERROR: CustomSerdezID %d has already been used "
+                         "in the serdez operation table\n", serdez_id);
+#ifdef DEBUG_LEGION
+          assert(false);
+#endif
+          exit(ERROR_DUPLICATE_SERDEZ_ID);
+        }
+        serdez_table[serdez_id] = serdez_op;
+      }
+      else
+        the_runtime->register_serdez(serdez_id, serdez_op, permit_duplicates);
     }
 
     //--------------------------------------------------------------------------
@@ -20141,6 +20581,46 @@ namespace Legion {
                       "Illegal call to 'generate_static_task_id' after "
                       "the runtime has been started!")
       return next_task++;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ ReductionOpID& Runtime::get_current_static_reduction_id(void)
+    //--------------------------------------------------------------------------
+    {
+      static ReductionOpID current_redop_id = LEGION_MAX_APPLICATION_REDOP_ID;
+      return current_redop_id;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ ReductionOpID Runtime::generate_static_reduction_id(void)
+    //--------------------------------------------------------------------------
+    {
+      ReductionOpID &next_redop = get_current_static_reduction_id();
+      if (runtime_started)
+        REPORT_LEGION_ERROR(ERROR_STATIC_CALL_POST_RUNTIME_START, 
+                      "Illegal call to 'generate_static_reduction_id' after "
+                      "the runtime has been started!")
+      return next_redop++;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ CustomSerdezID& Runtime::get_current_static_serdez_id(void)
+    //--------------------------------------------------------------------------
+    {
+      static CustomSerdezID current_serdez_id =LEGION_MAX_APPLICATION_SERDEZ_ID;
+      return current_serdez_id;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ CustomSerdezID Runtime::generate_static_serdez_id(void)
+    //--------------------------------------------------------------------------
+    {
+      CustomSerdezID &next_serdez = get_current_static_serdez_id();
+      if (runtime_started)
+        REPORT_LEGION_ERROR(ERROR_STATIC_CALL_POST_RUNTIME_START, 
+                      "Illegal call to 'generate_static_serdez_id' after "
+                      "the runtime has been started!")
+      return next_serdez++;
     }
 
     //--------------------------------------------------------------------------

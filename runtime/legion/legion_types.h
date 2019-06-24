@@ -735,6 +735,10 @@ namespace Legion {
       SEND_LIBRARY_PROJECTION_RESPONSE,
       SEND_LIBRARY_TASK_REQUEST,
       SEND_LIBRARY_TASK_RESPONSE,
+      SEND_LIBRARY_REDOP_REQUEST,
+      SEND_LIBRARY_REDOP_RESPONSE,
+      SEND_LIBRARY_SERDEZ_REQUEST,
+      SEND_LIBRARY_SERDEZ_RESPONSE,
       SEND_SHUTDOWN_NOTIFICATION,
       SEND_SHUTDOWN_RESPONSE,
       LAST_SEND_KIND, // This one must be last
@@ -879,6 +883,10 @@ namespace Legion {
         "Send Library Projection Response",                           \
         "Send Library Task Request",                                  \
         "Send Library Task Response",                                 \
+        "Send Library Redop Request",                                 \
+        "Send Library Redop Response",                                \
+        "Send Library Serdez Request",                                \
+        "Send Library Serdez Response",                               \
         "Send Shutdown Notification",                                 \
         "Send Shutdown Response",                                     \
       };

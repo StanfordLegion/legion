@@ -6725,26 +6725,8 @@ namespace Legion {
                                                    bool permit_duplicates)
     //--------------------------------------------------------------------------
     {
-      if (redop_id == 0)
-        REPORT_LEGION_ERROR(ERROR_RESERVED_REDOP_ID, 
-                            "ERROR: ReductionOpID zero is reserved.")
-      ReductionOpTable &red_table = Runtime::get_reduction_table(); 
-      // Check to make sure we're not overwriting a prior reduction op 
-      if (!permit_duplicates &&
-          (red_table.find(redop_id) != red_table.end()))
-        REPORT_LEGION_ERROR(ERROR_DUPLICATE_REDOP_ID, "ERROR: ReductionOpID "
-            "%d has already been used in the reduction table\n",redop_id)
-      red_table[redop_id] = redop;
-      if ((init_fnptr != NULL) || (fold_fnptr != NULL))
-      {
-#ifdef DEBUG_LEGION
-        assert((init_fnptr != NULL) && (fold_fnptr != NULL));
-#endif
-        SerdezRedopTable &serdez_red_table = Runtime::get_serdez_redop_table();
-        SerdezRedopFns &fns = serdez_red_table[redop_id];
-        fns.init_fn = init_fnptr;
-        fns.fold_fn = fold_fnptr;
-      }
+      Internal::Runtime::register_reduction_op(redop_id, redop, init_fnptr, 
+                                               fold_fnptr, permit_duplicates);
     }
 
     //--------------------------------------------------------------------------
@@ -6753,6 +6735,16 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return Internal::Runtime::get_reduction_op(redop_id);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void Runtime::register_custom_serdez_op(CustomSerdezID serdez_id,
+                                                       SerdezOp *serdez_op,
+                                                       bool permit_duplicates)
+    //--------------------------------------------------------------------------
+    {
+      Internal::Runtime::register_serdez_op(serdez_id, serdez_op,
+                                            permit_duplicates);
     }
 
     //--------------------------------------------------------------------------
@@ -6805,27 +6797,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return Internal::implicit_context;
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ ReductionOpTable& Runtime::get_reduction_table(void)
-    //--------------------------------------------------------------------------
-    {
-      return Internal::Runtime::get_reduction_table();
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ SerdezOpTable& Runtime::get_serdez_table(void)
-    //--------------------------------------------------------------------------
-    {
-      return Internal::Runtime::get_serdez_table();
-    }
-
-    /*static*/ SerdezRedopTable& Runtime::get_serdez_redop_table(void)
-    //--------------------------------------------------------------------------
-    {
-      return Internal::Runtime::get_serdez_redop_table();
-    }
+    } 
 
     //--------------------------------------------------------------------------
     TaskID Runtime::generate_dynamic_task_id(void)
@@ -6846,6 +6818,50 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return Internal::Runtime::generate_static_task_id();
+    }
+
+    //--------------------------------------------------------------------------
+    ReductionOpID Runtime::generate_dynamic_reduction_id(void)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->generate_dynamic_reduction_id();
+    }
+
+    //--------------------------------------------------------------------------
+    ReductionOpID Runtime::generate_library_reduction_ids(const char *name,
+                                                          size_t count)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->generate_library_reduction_ids(name, count);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ ReductionOpID Runtime::generate_static_reduction_id(void)
+    //--------------------------------------------------------------------------
+    {
+      return Internal::Runtime::generate_static_reduction_id();
+    }
+
+    //--------------------------------------------------------------------------
+    CustomSerdezID Runtime::generate_dynamic_serdez_id(void)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->generate_dynamic_serdez_id();
+    }
+
+    //--------------------------------------------------------------------------
+    CustomSerdezID Runtime::generate_library_serdez_ids(const char *name,
+                                                        size_t count)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->generate_library_serdez_ids(name, count);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ CustomSerdezID Runtime::generate_static_serdez_id(void)
+    //--------------------------------------------------------------------------
+    {
+      return Internal::Runtime::generate_static_serdez_id();
     }
 
     //--------------------------------------------------------------------------
