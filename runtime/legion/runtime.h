@@ -2110,6 +2110,18 @@ namespace Legion {
                                        ProjectionFunctor *func);
       ProjectionFunction* find_projection_function(ProjectionID pid);
     public:
+      void register_reduction(ReductionOpID redop_id,
+                              ReductionOp *redop,
+                              SerdezInitFnptr init_fnptr,
+                              SerdezFoldFnptr fold_fnptr,
+                              bool permit_duplicates);
+      void register_serdez(CustomSerdezID serdez_id,
+                           SerdezOp *serdez_op,
+                           bool permit_duplicates);
+      const ReductionOp* get_reduction(ReductionOpID redop_id);
+      const SerdezOp* get_serdez(CustomSerdezID serdez_id);
+      const SerdezRedopFns* get_serdez_redop(ReductionOpID redop_id);
+    public:
       void attach_semantic_information(TaskID task_id, SemanticTag,
                                    const void *buffer, size_t size, 
                                    bool is_mutable, bool send_to_owner = true);
@@ -2161,6 +2173,13 @@ namespace Legion {
       TaskImpl* find_task_impl(TaskID task_id);
       VariantImpl* find_variant_impl(TaskID task_id, VariantID variant_id,
                                      bool can_fail = false);
+    public:
+      ReductionOpID generate_dynamic_reduction_id(void);
+      ReductionOpID generate_library_reduction_ids(const char *name, 
+                                                   size_t count);
+    public:
+      CustomSerdezID generate_dynamic_serdez_id(void);
+      CustomSerdezID generate_library_serdez_ids(const char *name,size_t count);
     public:
       // Memory manager functions
       MemoryManager* find_memory_manager(Memory mem);
@@ -2381,6 +2400,10 @@ namespace Legion {
                                             Serializer &rez);
       void send_library_task_request(AddressSpaceID target, Serializer &rez);
       void send_library_task_response(AddressSpaceID target, Serializer &rez);
+      void send_library_redop_request(AddressSpaceID target, Serializer &rez);
+      void send_library_redop_response(AddressSpaceID target, Serializer &rez);
+      void send_library_serdez_request(AddressSpaceID target, Serializer &rez);
+      void send_library_serdez_response(AddressSpaceID target, Serializer &rez);
       void send_remote_op_report_uninitialized(AddressSpaceID target,
                                                Serializer &rez);
       void send_remote_op_profiling_count_update(AddressSpaceID target,
@@ -2973,6 +2996,8 @@ namespace Legion {
       unsigned unique_task_id;
       unsigned unique_mapper_id;
       unsigned unique_projection_id;
+      unsigned unique_redop_id;
+      unsigned unique_serdez_id;
     protected:
       mutable LocalLock library_lock;
       struct LibraryMapperIDs {
@@ -3007,6 +3032,31 @@ namespace Legion {
       std::map<std::string,LibraryTaskIDs> library_task_ids;
       // This is only valid on node 0
       unsigned unique_library_task_id;
+    protected:
+      struct LibraryRedopIDs {
+      public:
+        ReductionOpID result;
+        size_t count;
+        RtEvent ready;
+        bool result_set;
+      };
+      std::map<std::string,LibraryRedopIDs> library_redop_ids;
+      // This is only valid on node 0
+      unsigned unique_library_redop_id;
+    protected:
+      struct LibrarySerdezIDs {
+      public:
+        CustomSerdezID result;
+        size_t count;
+        RtEvent ready;
+        bool result_set;
+      };
+      std::map<std::string,LibrarySerdezIDs> library_serdez_ids;
+      // This is only valid on node 0
+      unsigned unique_library_serdez_id;
+    protected:
+      mutable LocalLock redop_lock;
+      mutable LocalLock serdez_lock;
     protected:
       mutable LocalLock projection_lock;
       std::map<ProjectionID,ProjectionFunction*> projection_functions;
@@ -3190,13 +3240,26 @@ namespace Legion {
       static void set_top_level_task_id(TaskID top_id);
       static void configure_MPI_interoperability(int rank);
       static void register_handshake(MPILegionHandshake &handshake);
-      static const ReductionOp* get_reduction_op(ReductionOpID redop_id);
-      static const SerdezOp* get_serdez_op(CustomSerdezID serdez_id);
-      static const SerdezRedopFns* get_serdez_redop_fns(ReductionOpID redop_id);
+      static const ReductionOp* get_reduction_op(ReductionOpID redop_id,
+                                                 bool has_lock = false);
+      static const SerdezOp* get_serdez_op(CustomSerdezID serdez_id,
+                                           bool has_lock = false);
+      static const SerdezRedopFns* get_serdez_redop_fns(ReductionOpID redop_id,
+                                                        bool has_lock = false);
       static void add_registration_callback(RegistrationCallbackFnptr callback);
-      static ReductionOpTable& get_reduction_table(void);
-      static SerdezOpTable& get_serdez_table(void);
-      static SerdezRedopTable& get_serdez_redop_table(void);
+      static ReductionOpTable& get_reduction_table(bool safe);
+      static SerdezOpTable& get_serdez_table(bool safe);
+      static SerdezRedopTable& get_serdez_redop_table(bool safe);
+      static void register_reduction_op(ReductionOpID redop_id,
+                                        ReductionOp *redop,
+                                        SerdezInitFnptr init_fnptr,
+                                        SerdezFoldFnptr fold_fnptr,
+                                        bool permit_duplicates,
+                                        bool has_lock = false);
+      static void register_serdez_op(CustomSerdezID serdez_id,
+                                     SerdezOp *serdez_op,
+                                     bool permit_duplicates,
+                                     bool has_lock = false);
       static std::deque<PendingVariantRegistration*>&
                                 get_pending_variant_table(void);
       static std::map<LayoutConstraintID,LayoutConstraintRegistrar>&
@@ -3210,6 +3273,11 @@ namespace Legion {
                       const void *user_data, size_t user_data_size,
                       CodeDescriptor *realm_desc, bool has_ret, 
                       const char *task_name,VariantID vid,bool check_id = true);
+    public:
+      static ReductionOpID& get_current_static_reduction_id(void);
+      static ReductionOpID generate_static_reduction_id(void);
+      static CustomSerdezID& get_current_static_serdez_id(void);
+      static CustomSerdezID generate_static_serdez_id(void);
     public:
       static void report_fatal_message(int code,
                                        const char *file_name,
