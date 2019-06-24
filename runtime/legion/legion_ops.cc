@@ -14869,7 +14869,10 @@ namespace Legion {
       InstanceManager *external_manager = 
         external_instance.get_manager()->as_instance_manager();
       MemoryManager *memory_manager = external_manager->memory_manager;
-      memory_manager->attach_external_instance(external_manager);
+      const RtEvent attached = 
+        memory_manager->attach_external_instance(external_manager);
+      if (attached.exists())
+        attached.wait();
       const PhysicalTraceInfo trace_info(this);
       InstanceSet external(1);
       external[0] = external_instance;

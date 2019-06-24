@@ -10746,6 +10746,130 @@ namespace Legion {
       PhysicalInstance inst = 
         attach_op->create_instance(node->row_source, field_set, field_sizes, 
                                    constraints, ready_event,instance_footprint);
+      // Check to see if this instance is local or whether we need
+      // to send this request to a remote node to make
+      if (inst.address_space() != context->runtime->address_space)
+      {
+        Serializer rez;
+        volatile DistributedID remote_did = 0;
+        const RtUserEvent wait_for = Runtime::create_rt_user_event();
+        {
+          RezCheck z(rez);
+          rez.serialize(handle);
+          rez.serialize(inst);
+          rez.serialize(ready_event);
+          rez.serialize(instance_footprint);
+          constraints.serialize(rez);
+          rez.serialize(external_mask);
+          rez.serialize<size_t>(field_set.size());
+          for (unsigned idx = 0; idx < field_set.size(); idx++)
+          {
+            rez.serialize(field_set[idx]);
+            rez.serialize(field_sizes[idx]);
+            rez.serialize(mask_index_map[idx]);
+            rez.serialize(serdez[idx]);
+          }
+          rez.serialize(node->handle);
+          rez.serialize(&remote_did);
+          rez.serialize(wait_for);
+        }
+        runtime->send_external_create_request(inst.address_space(), rez);
+        // Wait for the response to come back
+        wait_for.wait();
+        // Now we can request the physical manager
+        RtEvent wait_on;
+        PhysicalManager *result = 
+         context->runtime->find_or_request_physical_manager(remote_did,wait_on);
+        if (wait_on.exists())
+          wait_on.wait();
+        return InstanceRef(result->as_instance_manager(), external_mask);
+      }
+      else // Local so we can just do this call here
+        return InstanceRef(create_external_manager(inst, ready_event, 
+                            instance_footprint, constraints, field_set, 
+                            field_sizes,  external_mask, mask_index_map, 
+                            node, serdez), external_mask);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void FieldSpaceNode::handle_external_create_request(
+                   Deserializer &derez, Runtime *runtime, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      FieldSpace handle;
+      derez.deserialize(handle);
+      FieldSpaceNode *fs = runtime->forest->get_node(handle);
+      PhysicalInstance inst;
+      derez.deserialize(inst);
+      ApEvent ready_event;
+      derez.deserialize(ready_event);
+      size_t footprint;
+      derez.deserialize(footprint);
+      LayoutConstraintSet constraints;
+      constraints.deserialize(derez);
+      FieldMask file_mask;
+      derez.deserialize(file_mask);
+      size_t num_fields;
+      derez.deserialize(num_fields);
+      std::vector<FieldID> field_set(num_fields);
+      std::vector<size_t> field_sizes(num_fields);
+      std::vector<unsigned> mask_index_map(num_fields);
+      std::vector<CustomSerdezID> serdez(num_fields);
+      for (unsigned idx = 0; idx < num_fields; idx++)
+      {
+        derez.deserialize(field_set[idx]);
+        derez.deserialize(field_sizes[idx]);
+        derez.deserialize(mask_index_map[idx]);
+        derez.deserialize(serdez[idx]);
+      }
+      LogicalRegion region_handle;
+      derez.deserialize(region_handle);
+      RegionNode *region_node = runtime->forest->get_node(region_handle);
+      DistributedID *did_ptr;
+      derez.deserialize(did_ptr);
+      RtUserEvent done_event;
+      derez.deserialize(done_event);
+
+      InstanceManager *manager = fs->create_external_manager(inst, ready_event,
+          footprint, constraints, field_set, field_sizes, file_mask,
+          mask_index_map, region_node, serdez);
+      Serializer rez;
+      {
+        RezCheck z2(rez);
+        rez.serialize(did_ptr);
+        rez.serialize(manager->did);
+        rez.serialize(done_event);
+      }
+      runtime->send_external_create_response(source, rez);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void FieldSpaceNode::handle_external_create_response(
+                                                            Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      DistributedID *did_ptr;
+      derez.deserialize(did_ptr);
+      derez.deserialize(*did_ptr);
+      __sync_synchronize();
+      RtUserEvent done_event;
+      derez.deserialize(done_event);
+      Runtime::trigger_event(done_event);
+    }
+
+    //--------------------------------------------------------------------------
+    InstanceManager* FieldSpaceNode::create_external_manager(
+            PhysicalInstance inst, ApEvent ready_event, 
+            size_t instance_footprint, LayoutConstraintSet &constraints, 
+            const std::vector<FieldID> &field_set,
+            const std::vector<size_t> &field_sizes, 
+            const FieldMask &external_mask,
+            const std::vector<unsigned> &mask_index_map,
+            RegionNode *node, const std::vector<CustomSerdezID> &serdez)
+    //--------------------------------------------------------------------------
+    {
       // Pull out the pointer constraint so that we can use it separately
       // and not have it included in the layout constraints
       PointerConstraint pointer_constraint = constraints.pointer_constraint;
@@ -10783,7 +10907,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(result != NULL);
 #endif
-      return InstanceRef(result, external_mask);
+      return result;
     }
 
     //--------------------------------------------------------------------------
