@@ -6932,17 +6932,18 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     VariantID Runtime::register_task_variant(
-                  const TaskVariantRegistrar &registrar,
-		  const CodeDescriptor &codedesc,
-		  const void *user_data /*= NULL*/,
-		  size_t user_len /*= 0*/,
-                  bool has_return_type /*= false*/)
+                                    const TaskVariantRegistrar &registrar,
+                                    const CodeDescriptor &codedesc,
+                                    const void *user_data /*= NULL*/,
+                                    size_t user_len /*= 0*/,
+                                    bool has_return_type /*= false*/,
+                                    VariantID vid /*= AUTO_GENERATE_ID*/)
     //--------------------------------------------------------------------------
     {
       // Make a copy of the descriptor here
       CodeDescriptor *realm_desc = new CodeDescriptor(codedesc);
       return runtime->register_variant(registrar, user_data, user_len, 
-                                       realm_desc, has_return_type);
+                                       realm_desc, has_return_type, vid);
     }
 
     //--------------------------------------------------------------------------

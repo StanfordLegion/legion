@@ -761,9 +761,12 @@ namespace Realm {
 
     EventMerger::~EventMerger(void)
     {
-      assert(!is_active());
-      if(max_preconditions > MAX_INLINE_PRECONDITIONS)
-	delete[] preconditions;
+      // TODO: put this assert back once we've got a better handle on
+      //  shutdown race conditions
+      //assert(!is_active());
+      if(!is_active())
+	if(max_preconditions > MAX_INLINE_PRECONDITIONS)
+	  delete[] preconditions;
     }
 
     bool EventMerger::is_active(void) const

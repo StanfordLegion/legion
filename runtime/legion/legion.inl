@@ -8988,12 +8988,12 @@ namespace Legion {
       T (*TASK_PTR)(const Task*, const std::vector<PhysicalRegion>&,
                     Context, Runtime*)>
     VariantID Runtime::register_task_variant(
-                                          const TaskVariantRegistrar &registrar)
+                           const TaskVariantRegistrar &registrar, VariantID vid)
     //--------------------------------------------------------------------------
     {
       CodeDescriptor desc(LegionTaskWrapper::legion_task_wrapper<T,TASK_PTR>);
       return register_task_variant(registrar, desc, NULL/*UDT*/,
-                                   0/*sizeof(UDT)*/, true/*has return type*/);
+                               0/*sizeof(UDT)*/, true/*has return type*/, vid);
     }
 
     //--------------------------------------------------------------------------
@@ -9001,13 +9001,13 @@ namespace Legion {
       T (*TASK_PTR)(const Task*, const std::vector<PhysicalRegion>&,
                     Context, Runtime*, const UDT&)>
     VariantID Runtime::register_task_variant(
-                    const TaskVariantRegistrar &registrar, const UDT &user_data)
+     const TaskVariantRegistrar &registrar, const UDT &user_data, VariantID vid)
     //--------------------------------------------------------------------------
     {
       CodeDescriptor desc(
           LegionTaskWrapper::legion_udt_task_wrapper<T,UDT,TASK_PTR>);
       return register_task_variant(registrar, desc, &user_data, sizeof(UDT),
-                                   true/*has return type*/);
+                                   true/*has return type*/, vid);
     }
 
     //--------------------------------------------------------------------------
@@ -9015,12 +9015,12 @@ namespace Legion {
       void (*TASK_PTR)(const Task*, const std::vector<PhysicalRegion>&,
                        Context, Runtime*)>
     VariantID Runtime::register_task_variant(
-                                          const TaskVariantRegistrar &registrar)
+                           const TaskVariantRegistrar &registrar, VariantID vid)
     //--------------------------------------------------------------------------
     {
       CodeDescriptor desc(LegionTaskWrapper::legion_task_wrapper<TASK_PTR>);
       return register_task_variant(registrar, desc, NULL/*UDT*/, 
-                                   0/*sizeof(UDT)*/, false/*has return type*/);
+                           0/*sizeof(UDT)*/, false/*has return type*/, vid);
     }
 
     //--------------------------------------------------------------------------
@@ -9028,13 +9028,13 @@ namespace Legion {
       void (*TASK_PTR)(const Task*, const std::vector<PhysicalRegion>&,
                        Context, Runtime*, const UDT&)>
     VariantID Runtime::register_task_variant(
-                    const TaskVariantRegistrar &registrar, const UDT &user_data)
+     const TaskVariantRegistrar &registrar, const UDT &user_data, VariantID vid)
     //--------------------------------------------------------------------------
     {
       CodeDescriptor desc(
           LegionTaskWrapper::legion_udt_task_wrapper<UDT,TASK_PTR>);
       return register_task_variant(registrar, desc, &user_data, sizeof(UDT),
-                                   false/*has return type*/);
+                                   false/*has return type*/, vid);
     }
 
     //--------------------------------------------------------------------------

@@ -258,12 +258,8 @@ task main()
                                        conf.num_workers) 
   regentlib.assert(total_num_edges == conf.num_edges, "Edge numbers do not match")
   var part_nodes = image(all_nodes, part_node_range, node_range)
-  var part_aliased0 = image(pr_score0, part_node_range, node_range)
-  var cs0 = part_aliased0.colors
-  var part_score0 = dynamic_cast(partition(disjoint, pr_score0, cs0), part_aliased0)
-  var part_aliased1 = image(pr_score1, part_node_range, node_range)
-  var cs1 = part_aliased1.colors
-  var part_score1 = dynamic_cast(partition(disjoint, pr_score1, cs1), part_aliased1)
+  var part_score0 = image(disjoint, pr_score0, part_node_range, node_range)
+  var part_score1 = image(disjoint, pr_score1, part_node_range, node_range)
   var part_edges = image(all_edges, part_edge_range, edge_range)
 
   c.printf("Start PageRank computation...\n")

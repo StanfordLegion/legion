@@ -16,6 +16,13 @@
 #include "legion/legion_utilities.h"
 #include "legion/legion_constraint.h"
 
+#define SWAP_HELPER(type, member)   \
+{                                   \
+  type temp = member;               \
+  member = rhs.member;              \
+  rhs.member = temp;                \
+}
+
 namespace Legion {
   
     // some helper methods
@@ -192,6 +199,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
     }
+
+    //--------------------------------------------------------------------------
+    void ISAConstraint::swap(ISAConstraint &rhs)
+    //--------------------------------------------------------------------------
+    {
+      SWAP_HELPER(uint64_t, isa_prop)
+    }
     
     //--------------------------------------------------------------------------
     void ISAConstraint::serialize(Serializer &rez) const
@@ -242,6 +256,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void ProcessorConstraint::swap(ProcessorConstraint &rhs)
+    //--------------------------------------------------------------------------
+    {
+      valid_kinds.swap(rhs.valid_kinds);
+    }
+
+    //--------------------------------------------------------------------------
     void ProcessorConstraint::serialize(Serializer &rez) const
     //--------------------------------------------------------------------------
     {
@@ -282,6 +303,15 @@ namespace Legion {
       : resource_kind(resource), equality_kind(equality), value(val)
     //--------------------------------------------------------------------------
     {
+    }
+
+    //--------------------------------------------------------------------------
+    void ResourceConstraint::swap(ResourceConstraint &rhs)
+    //--------------------------------------------------------------------------
+    {
+      SWAP_HELPER(ResourceKind, resource_kind)
+      SWAP_HELPER(EqualityKind, equality_kind)
+      SWAP_HELPER(size_t, value);
     }
 
     //--------------------------------------------------------------------------
@@ -334,6 +364,21 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void LaunchConstraint::swap(LaunchConstraint &rhs)
+    //--------------------------------------------------------------------------
+    {
+      SWAP_HELPER(LaunchKind, launch_kind)
+      size_t v_temp[3];
+      for (unsigned idx = 0; idx < 3; idx++)
+        v_temp[idx] = values[idx];
+      for (unsigned idx = 0; idx < 3; idx++)
+        values[idx] = rhs.values[idx];
+      for (unsigned idx = 0; idx < 3; idx++)
+        rhs.values[idx] = v_temp[idx];
+      SWAP_HELPER(int, dims)
+    }
+
+    //--------------------------------------------------------------------------
     void LaunchConstraint::serialize(Serializer &rez) const
     //--------------------------------------------------------------------------
     {
@@ -379,6 +424,14 @@ namespace Legion {
       : fields(fids), indexes(idx.begin(), idx.end())
     //--------------------------------------------------------------------------
     {
+    }
+
+    //--------------------------------------------------------------------------
+    void ColocationConstraint::swap(ColocationConstraint &rhs)
+    //--------------------------------------------------------------------------
+    {
+      fields.swap(rhs.fields);
+      indexes.swap(rhs.indexes);
     }
 
     //--------------------------------------------------------------------------
@@ -464,6 +517,17 @@ namespace Legion {
     {
       colocation_constraints.push_back(constraint);
       return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void ExecutionConstraintSet::swap(ExecutionConstraintSet &rhs)
+    //--------------------------------------------------------------------------
+    {
+      isa_constraint.swap(rhs.isa_constraint);
+      processor_constraint.swap(rhs.processor_constraint);
+      resource_constraints.swap(rhs.resource_constraints);
+      launch_constraints.swap(rhs.launch_constraints);
+      colocation_constraints.swap(rhs.colocation_constraints);
     }
 
     //--------------------------------------------------------------------------
@@ -568,6 +632,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void SpecializedConstraint::swap(SpecializedConstraint &rhs)
+    //--------------------------------------------------------------------------
+    {
+      SWAP_HELPER(SpecializedKind, kind)
+      SWAP_HELPER(ReductionOpID, redop)
+      SWAP_HELPER(bool, no_access)
+    }
+
+    //--------------------------------------------------------------------------
     void SpecializedConstraint::serialize(Serializer &rez) const
     //--------------------------------------------------------------------------
     {
@@ -665,6 +738,14 @@ namespace Legion {
       if (kind != other.kind)
         return true;
       return false;
+    }
+
+    //--------------------------------------------------------------------------
+    void MemoryConstraint::swap(MemoryConstraint &rhs)
+    //--------------------------------------------------------------------------
+    {
+      SWAP_HELPER(Memory::Kind, kind)
+      SWAP_HELPER(bool, has_kind)
     }
 
     //--------------------------------------------------------------------------
@@ -888,6 +969,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void FieldConstraint::swap(FieldConstraint &rhs)
+    //--------------------------------------------------------------------------
+    {
+      field_set.swap(rhs.field_set);
+      SWAP_HELPER(bool, contiguous)
+      SWAP_HELPER(bool, inorder)
+    }
+
+    //--------------------------------------------------------------------------
     void FieldConstraint::serialize(Serializer &rez) const
     //--------------------------------------------------------------------------
     {
@@ -1083,6 +1173,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void OrderingConstraint::swap(OrderingConstraint &rhs)
+    //--------------------------------------------------------------------------
+    {
+      ordering.swap(rhs.ordering);
+      SWAP_HELPER(bool, contiguous)
+    }
+
+    //--------------------------------------------------------------------------
     void OrderingConstraint::serialize(Serializer &rez) const
     //--------------------------------------------------------------------------
     {
@@ -1183,6 +1281,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void SplittingConstraint::swap(SplittingConstraint &rhs)
+    //--------------------------------------------------------------------------
+    {
+      SWAP_HELPER(DimensionKind, kind)
+      SWAP_HELPER(size_t, value)
+      SWAP_HELPER(bool, chunks)
+    }
+
+    //--------------------------------------------------------------------------
     void SplittingConstraint::serialize(Serializer &rez) const
     //--------------------------------------------------------------------------
     {
@@ -1240,6 +1347,15 @@ namespace Legion {
       if (bound_conflicts(eqk, value, other.eqk, other.value))
         return true;
       return false;
+    }
+
+    //--------------------------------------------------------------------------
+    void DimensionConstraint::swap(DimensionConstraint &rhs)
+    //--------------------------------------------------------------------------
+    {
+      SWAP_HELPER(DimensionKind, kind)
+      SWAP_HELPER(EqualityKind, eqk)
+      SWAP_HELPER(size_t, value)
     }
 
     //--------------------------------------------------------------------------
@@ -1301,6 +1417,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void AlignmentConstraint::swap(AlignmentConstraint &rhs)
+    //--------------------------------------------------------------------------
+    {
+      SWAP_HELPER(FieldID, fid)
+      SWAP_HELPER(EqualityKind, eqk)
+      SWAP_HELPER(size_t, alignment)
+    }
+
+    //--------------------------------------------------------------------------
     void AlignmentConstraint::serialize(Serializer &rez) const
     //--------------------------------------------------------------------------
     {
@@ -1355,6 +1480,14 @@ namespace Legion {
       if (offset != other.offset)
         return true;
       return false;
+    }
+
+    //--------------------------------------------------------------------------
+    void OffsetConstraint::swap(OffsetConstraint &rhs)
+    //--------------------------------------------------------------------------
+    {
+      SWAP_HELPER(FieldID, fid)
+      SWAP_HELPER(off_t, offset)
     }
 
     //--------------------------------------------------------------------------
@@ -1417,6 +1550,15 @@ namespace Legion {
       if (ptr != other.ptr)
         return true;
       return false;
+    }
+
+    //--------------------------------------------------------------------------
+    void PointerConstraint::swap(PointerConstraint &rhs)
+    //--------------------------------------------------------------------------
+    {
+      SWAP_HELPER(bool, is_valid)
+      SWAP_HELPER(Memory, memory)
+      SWAP_HELPER(uintptr_t, ptr)
     }
 
     //--------------------------------------------------------------------------
@@ -1736,6 +1878,21 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void LayoutConstraintSet::swap(LayoutConstraintSet &rhs)
+    //--------------------------------------------------------------------------
+    {
+      specialized_constraint.swap(rhs.specialized_constraint);
+      field_constraint.swap(rhs.field_constraint);
+      memory_constraint.swap(rhs.memory_constraint);
+      pointer_constraint.swap(rhs.pointer_constraint);
+      ordering_constraint.swap(rhs.ordering_constraint);
+      splitting_constraints.swap(rhs.splitting_constraints);
+      dimension_constraints.swap(rhs.dimension_constraints);
+      alignment_constraints.swap(rhs.alignment_constraints);
+      offset_constraints.swap(rhs.offset_constraints);
+    }
+
+    //--------------------------------------------------------------------------
     void LayoutConstraintSet::serialize(Serializer &rez) const
     //--------------------------------------------------------------------------
     {
@@ -1796,6 +1953,13 @@ namespace Legion {
     {
       layouts.insert(std::pair<unsigned,LayoutConstraintID>(idx, desc));
       return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void TaskLayoutConstraintSet::swap(TaskLayoutConstraintSet &rhs)
+    //--------------------------------------------------------------------------
+    {
+      layouts.swap(rhs.layouts);
     }
 
     //--------------------------------------------------------------------------
