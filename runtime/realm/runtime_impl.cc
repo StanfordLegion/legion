@@ -437,10 +437,14 @@ namespace Realm {
     {
       assert(impl != 0);
 
-      if(((RuntimeImpl *)impl)->reduce_op_table.count(redop_id) > 0)
+      ReductionOpUntyped *cloned = redop->clone();
+      bool conflict = ((RuntimeImpl *)impl)->reduce_op_table.put(redop_id, cloned);
+      if(conflict) {
+	log_runtime.error() << "duplicate registration of reduction op " << redop_id;
+	delete cloned;
 	return false;
+      }
 
-      ((RuntimeImpl *)impl)->reduce_op_table[redop_id] = redop->clone();
       return true;
     }
 
@@ -448,10 +452,14 @@ namespace Realm {
     {
       assert(impl != 0);
 
-      if(((RuntimeImpl *)impl)->custom_serdez_table.count(serdez_id) > 0)
+      CustomSerdezUntyped *cloned = serdez->clone();
+      bool conflict = ((RuntimeImpl *)impl)->custom_serdez_table.put(serdez_id, cloned);
+      if(conflict) {
+	log_runtime.error() << "duplicate registration of custom serdez " << serdez_id;
+	delete cloned;
 	return false;
+      }
 
-      ((RuntimeImpl *)impl)->custom_serdez_table[serdez_id] = serdez->clone();
       return true;
     }
 
@@ -845,8 +853,8 @@ namespace Realm {
       delete core_reservations;
       delete core_map;
 
-      delete_container_contents(reduce_op_table);
-      delete_container_contents(custom_serdez_table);
+      delete_container_contents(reduce_op_table.map);
+      delete_container_contents(custom_serdez_table.map);
     }
 
     Memory RuntimeImpl::next_local_memory_id(void)

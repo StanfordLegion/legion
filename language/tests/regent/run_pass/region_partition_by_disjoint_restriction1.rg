@@ -24,11 +24,10 @@ task f()
   t[{0, 0}] = 1
   var e : rect1d = [rect1d] { lo = [int1d](0), hi = [int1d](0) }
   var colors = ispace(int1d, 3)
-  var p = restrict(r, t, e, colors)
-  var q = dynamic_cast(partition(disjoint, r, colors), p)
+  var p = restrict(disjoint, r, t, e, colors)
 
   for i in colors do
-    var ri = q[i]
+    var ri = p[i]
     for x in ri do
       x.value = (1 + int(i)) * (1 + int(i))
     end

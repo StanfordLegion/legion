@@ -857,6 +857,7 @@ end
 
 function specialize.expr_partition_by_restriction(cx, node, allow_lists)
   return ast.specialized.expr.PartitionByRestriction {
+    disjointness = node.disjointness and specialize.disjointness_kind(cx, node.disjointness),
     region = specialize.expr(cx, node.region),
     transform = specialize.expr(cx, node.transform),
     extent = specialize.expr(cx, node.extent),
@@ -879,6 +880,7 @@ end
 
 function specialize.expr_preimage(cx, node, allow_lists)
   return ast.specialized.expr.Preimage {
+    disjointness = node.disjointness and specialize.disjointness_kind(cx, node.disjointness),
     parent = specialize.expr(cx, node.parent),
     partition = specialize.expr(cx, node.partition),
     region = specialize.expr_region_root(cx, node.region),
