@@ -1,6 +1,17 @@
 This file lists the major changes as they appear in the stable branch.  No
 attempt is made to keep this list accurate for the master branch.
 
+Version 19.06.0 (June ??, 2019)
+  * Realm
+    - Support for building against debug versions of GASNet
+    - Significantly reduced runtime overhead for small Realm tasks
+    - External HDF5 instances work with datasets in groups
+    - Scheduler locking allows spin-waiting for non-reentrant
+        operations (e.g. Python module imports)
+    - Memory size (e.g. "-ll:csize") arguments accept k/m/g/t
+        size suffixes
+    - Better error messages when Realm memory sizes are too large
+
 Version 19.04.0 (April 30, 2019)
   * Legion
     - Support for dimensions > 3. Set MAX_DIM at build time
