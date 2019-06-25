@@ -4,6 +4,8 @@ attempt is made to keep this list accurate for the master branch.
 Version 19.06.0 (June ??, 2019)
   * Legion
     - All tools (Legion Prof, Legion Spy, etc.) now support Python 2 and 3
+    - The flag -lg:warn_backtrace prints a backtrace on each warning
+        to allow easier pinpointing of problematic code
   * Realm
     - Support for building against debug versions of GASNet
     - Significantly reduced runtime overhead for small Realm tasks
@@ -19,6 +21,12 @@ Version 19.06.0 (June ??, 2019)
         disjointness of the resulting partition
     - The address of operator (&) is now supported
     - Support for explicit field maps for HDF5
+  * Python
+    - Support for partitioning operators equal and restriction
+    - Support for bool and complex types
+    - Support for must epoch launches
+    - Support for returning a future out of a fence
+    - Fixes for macOS
 
 Version 19.04.0 (April 30, 2019)
   * Legion
