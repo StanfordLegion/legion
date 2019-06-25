@@ -5698,8 +5698,8 @@ namespace Legion {
           rez.serialize(repl_id);
           rez.serialize<unsigned>(start_idx);
           rez.serialize<unsigned>(locals[idx]);
-          rez.serialize<size_t>(rez.get_used_bytes());
-          rez.serialize(rez.get_buffer(), rez.get_used_bytes());
+          rez.serialize<size_t>(message_size);
+          rez.serialize(message, message_size);
           rez.serialize(next_done);
           runtime->send_control_replicate_resource_update(targets[idx], rez);
           remote_handled.insert(next_done);
