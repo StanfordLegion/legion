@@ -141,6 +141,7 @@ namespace Realm {
     CHECK_LIBC( sigaction(SIGSEGV, &action, 0) );
     CHECK_LIBC( sigaction(SIGFPE, &action, 0) );
     CHECK_LIBC( sigaction(SIGBUS, &action, 0) );
+    CHECK_LIBC( sigaction(SIGILL, &action, 0) );
   }
 
   static void unregister_error_signal_handler(void)
@@ -156,13 +157,14 @@ namespace Realm {
     CHECK_LIBC( sigaction(SIGSEGV, &action, 0) );
     CHECK_LIBC( sigaction(SIGFPE, &action, 0) );
     CHECK_LIBC( sigaction(SIGBUS, &action, 0) );
+    CHECK_LIBC( sigaction(SIGILL, &action, 0) );
   }
 
     static void realm_freeze(int signal)
     {
       assert((signal == SIGINT) || (signal == SIGABRT) ||
              (signal == SIGSEGV) || (signal == SIGFPE) ||
-             (signal == SIGBUS));
+             (signal == SIGBUS) || (signal == SIGILL));
       int process_id = getpid();
       char hostname[128];
       gethostname(hostname, 127);
@@ -2509,7 +2511,7 @@ namespace Realm {
     {
       assert((signal == SIGILL) || (signal == SIGFPE) || 
              (signal == SIGABRT) || (signal == SIGSEGV) ||
-             (signal == SIGBUS));
+             (signal == SIGBUS) || (signal == SIGILL));
 #if 0
       void *bt[256];
       int bt_size = backtrace(bt, 256);
