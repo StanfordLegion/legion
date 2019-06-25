@@ -252,14 +252,8 @@ task main()
 
   var part_edges = image(all_edges, edge_range_part, edge_range)
   var part_nodes = image(all_nodes, part_edges, all_edges.dst)
-  -- image may not output a disjoint partition
-  var part_score0_aliased = image(pr_score0, part_edges, all_edges.dst)
-  var cs0 = part_score0_aliased.colors
-  -- dynamically cast part_score0_aliased to a disjoint partition part_score0
-  var part_score0 = dynamic_cast(partition(disjoint, pr_score0, cs0), part_score0_aliased)
-  var part_score1_aliased = image(pr_score1, part_edges, all_edges.dst)
-  var cs1 = part_score1_aliased.colors
-  var part_score1 = dynamic_cast(partition(disjoint, pr_score1, cs1), part_score1_aliased)
+  var part_score0 = image(disjoint, pr_score0, part_edges, all_edges.dst)
+  var part_score1 = image(disjoint, pr_score1, part_edges, all_edges.dst)
 
   c.printf("Start PageRank computation...\n")
   var ts_start : int64
