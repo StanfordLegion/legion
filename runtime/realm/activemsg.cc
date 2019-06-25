@@ -2223,6 +2223,10 @@ public:
     char filename[80];
     sprintf(filename, "ams_%d.log", gasnet_mynode());
     msgtrace_file = fopen(filename, "w");
+    if(!msgtrace_file) {
+      log_amsg.fatal() << "could not open message trace file '" << filename << "': " << strerror(errno);
+      abort();
+    }
     last_msgtrace_report = (int)(Realm::Clock::current_time()); // just keep the integer seconds
 #endif
 
@@ -2704,6 +2708,8 @@ void EndpointManager::stop_threads(void)
     //assert(false);
   }
 #endif
+
+  delete endpoint_manager;
 }
 
 void EndpointManager::polling_worker_loop(void)
