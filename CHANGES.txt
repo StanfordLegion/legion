@@ -2,6 +2,8 @@ This file lists the major changes as they appear in the stable branch.  No
 attempt is made to keep this list accurate for the master branch.
 
 Version 19.06.0 (June ??, 2019)
+  * Legion
+    - All tools (Legion Prof, Legion Spy, etc.) now support Python 2 and 3
   * Realm
     - Support for building against debug versions of GASNet
     - Significantly reduced runtime overhead for small Realm tasks
@@ -11,6 +13,12 @@ Version 19.06.0 (June ??, 2019)
     - Memory size (e.g. "-ll:csize") arguments accept k/m/g/t
         size suffixes
     - Better error messages when Realm memory sizes are too large
+  * Regent
+    - The image, preimage and restrict partitioning operators now
+        accept an optional disjoint or aliased keyword to specify the
+        disjointness of the resulting partition
+    - The address of operator (&) is now supported
+    - Support for explicit field maps for HDF5
 
 Version 19.04.0 (April 30, 2019)
   * Legion
