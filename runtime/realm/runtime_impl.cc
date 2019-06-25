@@ -141,6 +141,7 @@ namespace Realm {
     CHECK_LIBC( sigaction(SIGSEGV, &action, 0) );
     CHECK_LIBC( sigaction(SIGFPE, &action, 0) );
     CHECK_LIBC( sigaction(SIGBUS, &action, 0) );
+    CHECK_LIBC( sigaction(SIGILL, &action, 0) );
   }
 
   static void unregister_error_signal_handler(void)
@@ -156,13 +157,14 @@ namespace Realm {
     CHECK_LIBC( sigaction(SIGSEGV, &action, 0) );
     CHECK_LIBC( sigaction(SIGFPE, &action, 0) );
     CHECK_LIBC( sigaction(SIGBUS, &action, 0) );
+    CHECK_LIBC( sigaction(SIGILL, &action, 0) );
   }
 
     static void realm_freeze(int signal)
     {
       assert((signal == SIGINT) || (signal == SIGABRT) ||
              (signal == SIGSEGV) || (signal == SIGFPE) ||
-             (signal == SIGBUS));
+             (signal == SIGBUS) || (signal == SIGILL));
       int process_id = getpid();
       char hostname[128];
       gethostname(hostname, 127);
@@ -1163,7 +1165,7 @@ namespace Realm {
       size_t disk_mem_size = 0;
       // Static variable for stack size since we need to 
       // remember it when we launch threads in run 
-      stack_size = 2;
+      stack_size = 2 << 20;
       //unsigned cpu_worker_threads = 1;
       unsigned dma_worker_threads = 1;
       unsigned active_msg_worker_threads = 1;
@@ -2509,7 +2511,7 @@ namespace Realm {
     {
       assert((signal == SIGILL) || (signal == SIGFPE) || 
              (signal == SIGABRT) || (signal == SIGSEGV) ||
-             (signal == SIGBUS));
+             (signal == SIGBUS) || (signal == SIGILL));
 #if 0
       void *bt[256];
       int bt_size = backtrace(bt, 256);
@@ -2572,6 +2574,12 @@ namespace Realm {
       free(buffer);
       free(funcname);
 #endif
+      unregister_error_signal_handler();
+      std::cerr << "Signal " << signal << " received by node " << my_node_id
+		<< ", process " << getpid()
+                << " (thread "  << std::hex << uintptr_t(pthread_self())
+                << std::dec << ") - obtaining backtrace\n" << std::flush;
+
       Backtrace bt;
       bt.capture_backtrace(1 /* skip this handler */);
       bt.lookup_symbols();

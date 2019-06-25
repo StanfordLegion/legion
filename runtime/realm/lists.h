@@ -21,7 +21,7 @@
 namespace Realm {
 
 #ifdef DEBUG_REALM
-#define DEBUG_REALM_LISTS
+//define DEBUG_REALM_LISTS
 #endif
 
   template <typename T>

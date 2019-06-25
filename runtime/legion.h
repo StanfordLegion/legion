@@ -7205,49 +7205,57 @@ namespace Legion {
        * Dynamically register a new task variant with the runtime with
        * a non-void return type.
        * @param registrar the task variant registrar for describing the task
+       * @param vid optional variant ID to use
        * @return variant ID for the task
        */
       template<typename T,
         T (*TASK_PTR)(const Task*, const std::vector<PhysicalRegion>&,
                       Context, Runtime*)>
-      VariantID register_task_variant(const TaskVariantRegistrar &registrar);
+      VariantID register_task_variant(const TaskVariantRegistrar &registrar,
+                                      VariantID vid = AUTO_GENERATE_ID);
 
       /**
        * Dynamically register a new task variant with the runtime with
        * a non-void return type and user data.
        * @param registrar the task variant registrar for describing the task
        * @param user_data the user data to associate with the task variant
+       * @param vid optional variant ID to use
        * @return variant ID for the task
        */
       template<typename T, typename UDT,
         T (*TASK_PTR)(const Task*, const std::vector<PhysicalRegion>&,
                       Context, Runtime*, const UDT&)>
       VariantID register_task_variant(const TaskVariantRegistrar &registrar,
-                                      const UDT &user_data);
+                                      const UDT &user_data,
+                                      VariantID vid = AUTO_GENERATE_ID);
 
       /**
        * Dynamically register a new task variant with the runtime with
        * a void return type.
        * @param registrar the task variant registrar for describing the task
+       * @param vid optional variant ID to use
        * @return variant ID for the task
        */
       template<
         void (*TASK_PTR)(const Task*, const std::vector<PhysicalRegion>&,
                          Context, Runtime*)>
-      VariantID register_task_variant(const TaskVariantRegistrar &registrar);
+      VariantID register_task_variant(const TaskVariantRegistrar &registrar,
+                                      VariantID vid = AUTO_GENERATE_ID);
 
       /**
        * Dynamically register a new task variant with the runtime with
        * a void return type and user data.
        * @param registrar the task variant registrar for describing the task
        * @param user_data the user data to associate with the task variant
+       * @param vid optional variant ID to use
        * @return variant ID for the task
        */
       template<typename UDT,
         void (*TASK_PTR)(const Task*, const std::vector<PhysicalRegion>&,
                          Context, Runtime*, const UDT&)>
       VariantID register_task_variant(const TaskVariantRegistrar &registrar,
-                                      const UDT &user_data);
+                                      const UDT &user_data,
+                                      VariantID vid = AUTO_GENERATE_ID);
 
       /**
        * Dynamically register a new task variant with the runtime that
@@ -7259,13 +7267,15 @@ namespace Legion {
        * task variant
        * @param user_len size of optional user_data in bytes
        * @param has_return_type boolean if this has a non-void return type
+       * @param vid optional variant ID to use
        * @return variant ID for the task
        */
       VariantID register_task_variant(const TaskVariantRegistrar &registrar,
 				      const CodeDescriptor &codedesc,
 				      const void *user_data = NULL,
 				      size_t user_len = 0,
-                                      bool has_return_type = false);
+                                      bool has_return_type = false,
+                                      VariantID vid = AUTO_GENERATE_ID);
 
       /**
        * Statically register a new task variant with the runtime with

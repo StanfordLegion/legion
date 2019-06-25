@@ -64,6 +64,7 @@ namespace Legion {
       bool entails(const ISAConstraint &other) const;
       bool conflicts(const ISAConstraint &other) const;
     public:
+      void swap(ISAConstraint &rhs);
       void serialize(Serializer &rez) const;
       void deserialize(Deserializer &derez);
     public:
@@ -92,6 +93,7 @@ namespace Legion {
       bool entails(const ProcessorConstraint &other) const;
       bool conflicts(const ProcessorConstraint &other) const;
     public:
+      void swap(ProcessorConstraint &rhs);
       void serialize(Serializer &rez) const;
       void deserialize(Deserializer &derez);
     public:
@@ -117,6 +119,7 @@ namespace Legion {
       bool entails(const ResourceConstraint &other) const;
       bool conflicts(const ResourceConstraint &other) const;
     public:
+      void swap(ResourceConstraint &rhs);
       void serialize(Serializer &rez) const;
       void deserialize(Deserializer &derez);
     public:
@@ -145,6 +148,7 @@ namespace Legion {
       bool entails(const LaunchConstraint &other) const;
       bool conflicts(const LaunchConstraint &other) const;
     public:
+      void swap(LaunchConstraint &rhs);
       void serialize(Serializer &rez) const;
       void deserialize(Deserializer &derez);
     public:
@@ -173,6 +177,7 @@ namespace Legion {
       bool entails(const ColocationConstraint &other) const;
       bool conflicts(const ColocationConstraint &other) const;
     public:
+      void swap(ColocationConstraint &rhs);
       void serialize(Serializer &rez) const;
       void deserialize(Deserializer &derez);
     public:
@@ -200,6 +205,7 @@ namespace Legion {
       ExecutionConstraintSet&
         add_constraint(const ColocationConstraint &constraint);
     public:
+      void swap(ExecutionConstraintSet &rhs);
       void serialize(Serializer &rez) const;
       void deserialize(Deserializer &derez);
     public:
@@ -347,6 +353,7 @@ namespace Legion {
       inline SpecializedKind get_kind(void) const { return kind; }
       inline ReductionOpID get_reduction_op(void) const { return redop; }
     public:
+      void swap(SpecializedConstraint &rhs);
       void serialize(Serializer &rez) const;
       void deserialize(Deserializer &derez);
     public:
@@ -382,6 +389,7 @@ namespace Legion {
       bool entails(const MemoryConstraint &other) const;
       bool conflicts(const MemoryConstraint &other) const;
     public:
+      void swap(MemoryConstraint &rhs);
       void serialize(Serializer &rez) const;
       void deserialize(Deserializer &derez);
     public:
@@ -417,6 +425,7 @@ namespace Legion {
       bool entails(const FieldConstraint &other) const;
       bool conflicts(const FieldConstraint &other) const;
     public:
+      void swap(FieldConstraint &rhs);
       void serialize(Serializer &rez) const;
       void deserialize(Deserializer &derez);
     public:
@@ -461,6 +470,7 @@ namespace Legion {
       bool entails(const OrderingConstraint &other, unsigned total_dims) const;
       bool conflicts(const OrderingConstraint &other,unsigned total_dims) const;
     public:
+      void swap(OrderingConstraint &rhs);
       void serialize(Serializer &rez) const;
       void deserialize(Deserializer &derez);
     public:
@@ -493,6 +503,7 @@ namespace Legion {
       bool entails(const SplittingConstraint &other) const;
       bool conflicts(const SplittingConstraint &other) const;
     public:
+      void swap(SplittingConstraint &rhs);
       void serialize(Serializer &rez) const;
       void deserialize(Deserializer &derez);
     public:
@@ -518,6 +529,7 @@ namespace Legion {
       bool entails(const DimensionConstraint &other) const;
       bool conflicts(const DimensionConstraint &other) const;
     public:
+      void swap(DimensionConstraint &rhs);
       void serialize(Serializer &rez) const;
       void deserialize(Deserializer &derez);
     public:
@@ -545,6 +557,7 @@ namespace Legion {
       bool entails(const AlignmentConstraint &other) const;
       bool conflicts(const AlignmentConstraint &other) const;
     public:
+      void swap(AlignmentConstraint &rhs);
       void serialize(Serializer &rez) const;
       void deserialize(Deserializer &derez);
     public:
@@ -569,6 +582,7 @@ namespace Legion {
       bool entails(const OffsetConstraint &other) const;
       bool conflicts(const OffsetConstraint &other) const;
     public:
+      void swap(OffsetConstraint &rhs);
       void serialize(Serializer &rez) const;
       void deserialize(Deserializer &derez);
     public:
@@ -592,6 +606,7 @@ namespace Legion {
       bool entails(const PointerConstraint &other) const;
       bool conflicts(const PointerConstraint &other) const;
     public:
+      void swap(PointerConstraint &rhs);
       void serialize(Serializer &rez) const;
       void deserialize(Deserializer &derez);
     public:
@@ -637,6 +652,7 @@ namespace Legion {
                      unsigned total_dims = 0,
                      const LayoutConstraint **conflict_constraint = NULL) const;
     public:
+      void swap(LayoutConstraintSet &rhs);
       void serialize(Serializer &rez) const;
       void deserialize(Deserializer &derez);
     public:
@@ -665,6 +681,7 @@ namespace Legion {
       TaskLayoutConstraintSet&
         add_layout_constraint(unsigned idx, LayoutConstraintID desc);
     public:
+      void swap(TaskLayoutConstraintSet &rhs);
       void serialize(Serializer &rez) const;
       void deserialize(Deserializer &derez);
     public:

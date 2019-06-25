@@ -774,8 +774,6 @@ namespace Legion {
       SEND_NEVER_GC_RESPONSE,
       SEND_ACQUIRE_REQUEST,
       SEND_ACQUIRE_RESPONSE,
-      SEND_VARIANT_REQUEST,
-      SEND_VARIANT_RESPONSE,
       SEND_VARIANT_BROADCAST,
       SEND_CONSTRAINT_REQUEST,
       SEND_CONSTRAINT_RESPONSE,
@@ -946,8 +944,6 @@ namespace Legion {
         "Send Never GC Response",                                     \
         "Send Acquire Request",                                       \
         "Send Acquire Response",                                      \
-        "Send Task Variant Request",                                  \
-        "Send Task Variant Response",                                 \
         "Send Task Variant Broadcast",                                \
         "Send Constraint Request",                                    \
         "Send Constraint Response",                                   \
