@@ -1879,7 +1879,11 @@ namespace Realm {
 	impl->final_values = 0;
       } else {
 	impl->redop_id = redopid;  // keep the ID too so we can share it
-	impl->redop = get_runtime()->reduce_op_table[redopid];
+	impl->redop = get_runtime()->reduce_op_table.get(redopid, 0);
+	if(impl->redop == 0) {
+	  log_event.fatal() << "no reduction op registered for ID " << redopid;
+	  abort();
+	}
 
 	assert(initial_value != 0);
 	assert(initial_value_size == impl->redop->sizeof_lhs);
@@ -2645,7 +2649,11 @@ static void *bytedup(const void *data, size_t datalen)
 
 	  // TODO: deal with invalidation of previous instance of a barrier
 	  impl->redop_id = args.redop_id;
-	  impl->redop = get_runtime()->reduce_op_table[args.redop_id];
+	  impl->redop = get_runtime()->reduce_op_table.get(args.redop_id, 0);
+	  if(impl->redop == 0) {
+	    log_event.fatal() << "no reduction op registered for ID " << args.redop_id;
+	    abort();
+	  }
 	  impl->first_generation = args.first_generation;
 
 	  int rel_gen = trigger_gen - impl->first_generation;

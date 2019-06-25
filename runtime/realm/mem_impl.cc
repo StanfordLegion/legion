@@ -1106,7 +1106,8 @@ namespace Realm {
 		     << ", offset=" << args.offset << ", size=" << datalen
 		     << ", seq=" << sender << '/' << args.sequence_id;
 
-    const CustomSerdezUntyped *serdez_op = get_runtime()->custom_serdez_table[args.serdez_id];
+    const CustomSerdezUntyped *serdez_op = get_runtime()->custom_serdez_table.get(args.serdez_id, 0);
+    assert(serdez_op != 0);
     size_t field_size = serdez_op->sizeof_field_type;
     char* pos = (char*)get_runtime()->get_memory_impl(args.mem)->get_direct_ptr(args.offset, args.count * serdez_op->sizeof_field_type);
     const char* buffer = (const char*) data;
@@ -1188,7 +1189,8 @@ namespace Realm {
 		   redop_id, (red_fold ? "fold" : "apply"),
 		   sender, args.sequence_id);
 
-    const ReductionOpUntyped *redop = get_runtime()->reduce_op_table[redop_id];
+    const ReductionOpUntyped *redop = get_runtime()->reduce_op_table.get(redop_id, 0);
+    assert(redop != 0);
 
     size_t count = datalen / redop->sizeof_rhs;
 
@@ -1269,7 +1271,8 @@ namespace Realm {
 
     case MemoryImpl::MKIND_GLOBAL:
       {
-	const ReductionOpUntyped *redop = get_runtime()->reduce_op_table[args.redopid];
+	const ReductionOpUntyped *redop = get_runtime()->reduce_op_table.get(args.redopid, 0);
+	assert(redop != 0);
 	assert((datalen % redop->sizeof_list_entry) == 0);
 	impl->apply_reduction_list(args.offset,
 				   redop,
@@ -1634,7 +1637,8 @@ namespace Realm {
                              const void *data, size_t count,
                              unsigned sequence_id)
     {
-      const CustomSerdezUntyped *serdez_op = get_runtime()->custom_serdez_table[serdez_id];
+      const CustomSerdezUntyped *serdez_op = get_runtime()->custom_serdez_table.get(serdez_id, 0);
+      assert(serdez_op != 0);
       size_t field_size = serdez_op->sizeof_field_type;
       log_copy.debug("sending remote serdez request: mem=" IDFMT ", offset=%zd, size=%zdx%zd, serdez_id=%d",
                      mem.id, (ssize_t)offset, field_size, count, serdez_id);
@@ -1707,7 +1711,8 @@ namespace Realm {
 			      unsigned sequence_id,
 			      bool make_copy /*= false*/)
     {
-      const ReductionOpUntyped *redop = get_runtime()->reduce_op_table[redop_id];
+      const ReductionOpUntyped *redop = get_runtime()->reduce_op_table.get(redop_id, 0);
+      assert(redop != 0);
       size_t rhs_size = redop->sizeof_rhs;
 
       log_copy.debug("sending remote reduction request: mem=" IDFMT ", offset=%zd+%zd, size=%zdx%zd, redop=%d(%s)",

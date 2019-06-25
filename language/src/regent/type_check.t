@@ -1675,6 +1675,8 @@ function type_check.expr_partition_by_field(cx, node)
 end
 
 function type_check.expr_partition_by_restriction(cx, node)
+  local disjointness = node.disjointness or std.aliased
+
   local region = type_check.expr(cx, node.region)
   local region_type = std.check_read(cx, region)
 
@@ -1739,7 +1741,7 @@ function type_check.expr_partition_by_restriction(cx, node)
     colors_symbol = std.newsymbol(colors_type)
   end
 
-  local expr_type = std.partition(std.aliased, region_symbol, colors_symbol)
+  local expr_type = std.partition(disjointness, region_symbol, colors_symbol)
 
   -- Hack: Stuff the region type back into the partition's region
   -- argument, if necessary.
@@ -1749,6 +1751,7 @@ function type_check.expr_partition_by_restriction(cx, node)
   assert(expr_type.parent_region_symbol:gettype() == region_type)
 
   return ast.typed.expr.PartitionByRestriction {
+    disjointness = node.disjointness,
     region = region,
     transform = transform,
     extent = extent,
@@ -1944,6 +1947,7 @@ function type_check.expr_image_by_task(cx, node)
 end
 
 function type_check.expr_preimage(cx, node)
+  local disjointness = node.disjointness
   local parent = type_check.expr(cx, node.parent)
   local parent_type = std.check_read(cx, parent)
   local partition = type_check.expr(cx, node.partition)
@@ -2014,9 +2018,10 @@ function type_check.expr_preimage(cx, node)
   else
     parent_symbol = std.newsymbol()
   end
-  local disjointness = partition_type.disjointness
   if std.is_rect_type(field_type) then
-    disjointness = std.aliased
+    disjointness = disjointness or std.aliased
+  else
+    disjointness = disjointness or partition_type.disjointness
   end
   local expr_type = std.partition(disjointness, parent_symbol, partition_type.colors_symbol)
 
@@ -2056,6 +2061,7 @@ function type_check.expr_preimage(cx, node)
   end
 
   return ast.typed.expr.Preimage {
+    disjointness = node.disjointness,
     partition = partition,
     region = region,
     parent = parent,

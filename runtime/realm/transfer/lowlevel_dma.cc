@@ -594,7 +594,7 @@ namespace Realm {
       size_t min_granularity = 1;
       for(OASVec::const_iterator it = oasvec.begin(); it != oasvec.end(); it++) {
 	if(it->serdez_id != 0) {
-	  const CustomSerdezUntyped *serdez_op = get_runtime()->custom_serdez_table[it->serdez_id];
+	  const CustomSerdezUntyped *serdez_op = get_runtime()->custom_serdez_table.get(it->serdez_id, 0);
 	  assert(serdez_op != 0);
 	  ib_elmnt_size += serdez_op->max_serialized_size;
 	  if(serdez_op->max_serialized_size > serdez_pad)
@@ -2111,7 +2111,11 @@ namespace Realm {
 							   srcs[0].inst,
 							   dst_field);
 
-      const ReductionOpUntyped *redop = get_runtime()->reduce_op_table[redop_id];
+      const ReductionOpUntyped *redop = get_runtime()->reduce_op_table.get(redop_id, 0);
+      if(redop == 0) {
+	log_dma.fatal() << "no reduction op registered for ID " << redop_id;
+	abort();
+      }
       size_t src_elem_size = red_fold ? redop->sizeof_rhs : redop->sizeof_lhs;
 
       size_t total_bytes = 0;

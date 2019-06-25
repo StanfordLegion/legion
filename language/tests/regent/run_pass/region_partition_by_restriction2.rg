@@ -29,7 +29,7 @@ task f()
   var q = dynamic_cast(partition(disjoint, r, colors), p)
 
   for i in colors do
-    var ri = p[i]
+    var ri = q[i]
     for x in ri do
       x.value = (1 + int(i)) * (1 + int(i))
     end

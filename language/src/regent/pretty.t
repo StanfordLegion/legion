@@ -449,7 +449,8 @@ end
 function pretty.expr_partition_by_restriction(cx, node)
   return join({
       "restrict(",
-      commas({pretty.expr(cx, node.region),
+      commas({node.disjointness and tostring(node.disjointness),
+	      pretty.expr(cx, node.region),
               pretty.expr(cx, node.transform),
               pretty.expr(cx, node.extent),
               pretty.expr(cx, node.colors)}),
@@ -469,7 +470,8 @@ end
 function pretty.expr_preimage(cx, node)
   return join({
       "preimage(",
-      commas({pretty.expr(cx, node.parent),
+      commas({node.disjointness and tostring(node.disjointness),
+	      pretty.expr(cx, node.parent),
               pretty.expr(cx, node.partition),
               pretty.expr_region_root(cx, node.region)}),
       ")"})

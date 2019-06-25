@@ -17997,6 +17997,10 @@ namespace Legion {
           }
         }
       }
+      // One last really crazy precondition on shutdown, we actually need to
+      // make sure that this task itself is done executing before trying to
+      // shutdown so add our own completion event as a precondition
+      shutdown_events.insert(RtEvent(Processor::get_current_finish_event()));
       // Then tell Realm to shutdown when they are all done
       RtEvent shutdown_precondition = Runtime::merge_events(shutdown_events);
       RealmRuntime realm = RealmRuntime::get_runtime();

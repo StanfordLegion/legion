@@ -335,8 +335,11 @@ namespace Realm {
 	r_impl->request_metadata().wait();
       assert(r_impl->metadata.layout);
       MemoryImpl *mem = get_runtime()->get_memory_impl(r_impl->memory);
-      const ReductionOpUntyped *redop = get_runtime()->reduce_op_table[redop_id];
-      assert(redop);
+      const ReductionOpUntyped *redop = get_runtime()->reduce_op_table.get(redop_id, 0);
+      if(redop == 0) {
+	log_inst.fatal() << "no reduction op registered for ID " << redop_id;
+	abort();
+      }
       // data should match RHS size
       assert(datalen == redop->sizeof_rhs);
       // can we run the reduction op directly on the memory location?
@@ -367,8 +370,11 @@ namespace Realm {
 	r_impl->request_metadata().wait();
       assert(r_impl->metadata.layout);
       MemoryImpl *mem = get_runtime()->get_memory_impl(r_impl->memory);
-      const ReductionOpUntyped *redop = get_runtime()->reduce_op_table[redop_id];
-      assert(redop);
+      const ReductionOpUntyped *redop = get_runtime()->reduce_op_table.get(redop_id, 0);
+      if(redop == 0) {
+	log_inst.fatal() << "no reduction op registered for ID " << redop_id;
+	abort();
+      }
       // data should match RHS size
       assert(datalen == redop->sizeof_rhs);
       // can we run the reduction op directly on the memory location?

@@ -4527,11 +4527,15 @@ function codegen.expr_partition_by_restriction(cx, node)
   local lp = terralib.newsymbol(c.legion_logical_partition_t, "lp")
   actions = quote
     [actions]
+    var disjointness = [(node.disjointness and
+      ((node.disjointness:is(ast.disjointness_kind.Disjoint) and c.DISJOINT_KIND)
+       or c.ALIASED_KIND))
+      or c.COMPUTE_KIND]
     var [ip] = c.legion_index_partition_create_by_restriction(
       [cx.runtime], [cx.context],
       [region.value].impl.index_space,
       [colors.value].impl,
-      [transform.value], [extent.value], c.COMPUTE_KIND, -1)
+      [transform.value], [extent.value], disjointness, -1)
     var [lp] = c.legion_logical_partition_create(
       [cx.runtime], [cx.context], [region.value].impl, [ip])
     [tag_imported(cx, lp)]
@@ -4661,14 +4665,14 @@ function codegen.expr_preimage(cx, node)
     [actions]
     var colors = c.legion_index_partition_get_color_space(
       [cx.runtime], [partition.value].impl.index_partition)
+    var disjointness = [(node.disjointness and
+      ((node.disjointness:is(ast.disjointness_kind.Disjoint) and c.DISJOINT_KIND)
+       or c.ALIASED_KIND))
+      or c.COMPUTE_KIND]
     var [ip] = [create_partition](
       [cx.runtime], [cx.context], [partition.value].impl.index_partition,
       [parent.value].impl, [region_parent].impl, field_id, colors,
-      [(result_type:is_disjoint() and
-        result_type:parent_region():is_opaque() and
-        c.DISJOINT_KIND) or
-       c.COMPUTE_KIND],
-      -1)
+      disjointness, -1)
     var [lp] = c.legion_logical_partition_create(
       [cx.runtime], [cx.context], [region.value].impl, [ip])
     [tag_imported(cx, lp)]
