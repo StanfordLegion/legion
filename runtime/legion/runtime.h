@@ -3280,6 +3280,7 @@ namespace Legion {
       static bool runtime_started;
       static bool runtime_backgrounded;
       static Runtime *the_runtime;
+      static RtUserEvent runtime_started_event;
       // Static member variables for MPI interop
       static int mpi_rank;
       static std::vector<MPILegionHandshake> *pending_handshakes;

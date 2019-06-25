@@ -19471,6 +19471,8 @@ namespace Legion {
     /*static*/ bool Runtime::runtime_started = false;
     /*static*/ bool Runtime::runtime_backgrounded = false;
     /*static*/ Runtime* Runtime::the_runtime = NULL;
+    /*static*/ RtUserEvent Runtime::runtime_started_event = 
+                                              RtUserEvent::NO_RT_USER_EVENT;
     /*static*/ int Runtime::mpi_rank = -1;
     /*static*/ std::vector<MPILegionHandshake>* 
                       Runtime::pending_handshakes = NULL;
@@ -19535,6 +19537,10 @@ namespace Legion {
       // the same values for these static variables
       runtime_started = true;
       runtime_backgrounded = background;
+      // Make a user event that we will trigger once we the 
+      // startup task is done. If we're node 0 then we will use this
+      // as the precondition for launching the top-level task
+      runtime_started_event = Runtime::create_rt_user_event();
 
       // Now that we have everything setup we can tell Realm to
       // start the processors. It is at this point which fork
@@ -19554,24 +19560,20 @@ namespace Legion {
             (config.separate_runtime_instances ? Processor::NO_KIND :
              startup_kind), LG_INITIALIZE_TASK_ID, NULL, 0,
             !config.separate_runtime_instances, tasks_registered)); 
-      // Make a user event that we will trigger once we the 
-      // startup task is done. If we're node 0 then we will use this
-      // as the precondition for launching the top-level task
-      RtUserEvent start_event = Runtime::create_rt_user_event();
       // Now we can do one more spawn call to startup the runtime 
       // across the machine since we know everything is initialized
       const RtEvent runtime_started(realm.collective_spawn_by_kind(
               (config.separate_runtime_instances ? Processor::NO_KIND : 
                startup_kind), LG_STARTUP_TASK_ID, 
-              &start_event, sizeof(start_event),
+              &runtime_started_event, sizeof(runtime_started_event),
               !config.separate_runtime_instances, 
               Runtime::merge_events(realm_initialized, legion_initialized)));
       // Trigger the start event when the runtime is ready
-      Runtime::trigger_event(start_event, runtime_started);
+      Runtime::trigger_event(runtime_started_event, runtime_started);
       // If we are supposed to background this thread, then we wait
       // for the runtime to shutdown, otherwise we can now return
-      if (implicit_top_level_task)
-        start_event.external_wait(); // wait for the runtime to be started
+      if (implicit_top_level_task) // wait for the runtime to be started
+        runtime_started_event.external_wait(); 
       else if (!background)
         return realm.wait_for_shutdown();
       return 0;
@@ -20854,6 +20856,11 @@ namespace Legion {
       // Finalize the runtime and then delete it
       runtime->finalize_runtime();
       delete runtime;
+      // Handle a little shutdown race condition here where the 
+      // runtime_startup_event on nodes other than zero may not 
+      // have triggered yet before shutdown
+      if (!runtime_started_event.has_triggered())
+        runtime_started_event.wait();
     }
 
     //--------------------------------------------------------------------------
