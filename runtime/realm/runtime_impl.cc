@@ -1163,7 +1163,7 @@ namespace Realm {
       size_t disk_mem_size = 0;
       // Static variable for stack size since we need to 
       // remember it when we launch threads in run 
-      stack_size = 2;
+      stack_size = 2 << 20;
       //unsigned cpu_worker_threads = 1;
       unsigned dma_worker_threads = 1;
       unsigned active_msg_worker_threads = 1;
