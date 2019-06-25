@@ -1198,7 +1198,6 @@ namespace Legion {
     private:
       mutable LocalLock task_lock;
       std::map<VariantID,VariantImpl*> variants;
-      std::map<VariantID,RtEvent> outstanding_requests;
       // VariantIDs that we've handed out but haven't registered yet
       std::set<VariantID> pending_variants;
       std::map<SemanticTag,SemanticInfo> semantic_infos;
@@ -1245,15 +1244,11 @@ namespace Legion {
     public:
       bool can_use(Processor::Kind kind, bool warn) const;
     public:
-      void send_variant_response(AddressSpaceID source, RtUserEvent done_event);
       void broadcast_variant(RtUserEvent done, AddressSpaceID origin,
                              AddressSpaceID local);
     public:
       static void handle_variant_broadcast(Runtime *runtime, 
                                            Deserializer &derez);
-      static AddressSpaceID get_owner_space(VariantID vid, Runtime *runtime);
-      static void handle_variant_response(Runtime *runtime, 
-                                          Deserializer &derez);
     public:
       const VariantID vid;
       TaskImpl *const owner;
@@ -2371,8 +2366,6 @@ namespace Legion {
       void send_never_gc_response(AddressSpaceID target, Serializer &rez);
       void send_acquire_request(AddressSpaceID target, Serializer &rez);
       void send_acquire_response(AddressSpaceID target, Serializer &rez);
-      void send_variant_request(AddressSpaceID target, Serializer &rez);
-      void send_variant_response(AddressSpaceID target, Serializer &rez);
       void send_variant_broadcast(AddressSpaceID target, Serializer &rez);
       void send_constraint_request(AddressSpaceID target, Serializer &rez);
       void send_constraint_response(AddressSpaceID target, Serializer &rez);

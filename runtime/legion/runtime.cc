@@ -6587,16 +6587,6 @@ namespace Legion {
               runtime->handle_acquire_response(derez, remote_address_space);
               break;
             }
-          case SEND_VARIANT_REQUEST:
-            {
-              runtime->handle_variant_request(derez, remote_address_space);
-              break;
-            }
-          case SEND_VARIANT_RESPONSE:
-            {
-              runtime->handle_variant_response(derez);
-              break;
-            }
           case SEND_VARIANT_BROADCAST:
             {
               runtime->handle_variant_broadcast(derez);
@@ -7353,8 +7343,6 @@ namespace Legion {
                       "Duplicate variant ID %d registered for task %s (ID %d)",
                       impl->vid, get_name(false/*need lock*/), task_id)
       variants[impl->vid] = impl;
-      // Erase the outstanding request if there is one
-      outstanding_requests.erase(impl->vid);
       // Erase the pending VariantID if there is one
       pending_variants.erase(impl->vid);
     }
@@ -7371,63 +7359,11 @@ namespace Legion {
         if (finder != variants.end())
           return finder->second;
       }
-      // If we don't have it, see if we can go get it
-      AddressSpaceID owner_space = 
-        VariantImpl::get_owner_space(variant_id, runtime); 
-      if (owner_space == runtime->address_space)
-      {
-        if (can_fail)
-          return NULL;
+      if (!can_fail)
         REPORT_LEGION_ERROR(ERROR_UNREGISTERED_VARIANT, 
                             "Unable to find variant %d of task %s!",
                             variant_id, get_name())
-      }
-      // Retake the lock and see if we can send a request
-      RtEvent wait_on;
-      RtUserEvent request_event;
-      {
-        AutoLock t_lock(task_lock);
-        // Check to see if we lost the race
-        std::map<VariantID,VariantImpl*>::const_iterator finder = 
-          variants.find(variant_id);
-        if (finder != variants.end())
-          return finder->second;
-        std::map<VariantID,RtEvent>::const_iterator out_finder = 
-          outstanding_requests.find(variant_id);
-        if (out_finder == outstanding_requests.end())
-        {
-          request_event = Runtime::create_rt_user_event();
-          outstanding_requests[variant_id] = request_event;
-          wait_on = request_event;
-        }
-        else
-          wait_on = out_finder->second;
-      }
-      if (request_event.exists())
-      {
-        // Send a request to the owner node for the variant
-        Serializer rez;
-        {
-          RezCheck z(rez);
-          rez.serialize(task_id);
-          rez.serialize(variant_id);
-          rez.serialize(wait_on);
-          rez.serialize(can_fail);
-        }
-        runtime->send_variant_request(owner_space, rez);
-      }
-      // Wait for the results
-      wait_on.wait();
-      // Now we can re-take the lock and find our variant
-      AutoLock t_lock(task_lock,1,false/*exclusive*/);
-      std::map<VariantID,VariantImpl*>::const_iterator finder = 
-        variants.find(variant_id);
-      if (can_fail && (finder == variants.end()))
-        return NULL;
-#ifdef DEBUG_LEGION
-      assert(finder != variants.end());
-#endif
-      return finder->second;
+      return NULL;
     }
 
     //--------------------------------------------------------------------------
@@ -7817,29 +7753,6 @@ namespace Legion {
       return (task_id % runtime->runtime_stride);
     }
 
-    //--------------------------------------------------------------------------
-    /*static*/ void TaskImpl::handle_variant_request(Runtime *runtime,
-                                     Deserializer &derez, AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      DerezCheck z(derez); 
-      TaskID task_id;
-      derez.deserialize(task_id);
-      VariantID variant_id;
-      derez.deserialize(variant_id);
-      RtUserEvent done_event;
-      derez.deserialize(done_event);
-      bool can_fail;
-      derez.deserialize(can_fail);
-      TaskImpl *task_impl = runtime->find_task_impl(task_id);
-      VariantImpl *var_impl = task_impl->find_variant_impl(variant_id,can_fail);
-      // If we can fail and there is no variant, just trigger the event
-      if (can_fail && (var_impl == NULL))
-        Runtime::trigger_event(done_event);
-      else
-        var_impl->send_variant_response(source, done_event);
-    }
-
     /////////////////////////////////////////////////////////////
     // Variant Impl 
     /////////////////////////////////////////////////////////////
@@ -8086,51 +7999,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void VariantImpl::send_variant_response(AddressSpaceID target, 
-                                            RtUserEvent done)
-    //--------------------------------------------------------------------------
-    {
-      if (!global)
-        REPORT_LEGION_ERROR(ERROR_ILLEGAL_USE_OF_NON_GLOBAL_VARIANT,
-                      "Illegal remote use of variant %s of task %s "
-                      "which was not globally registered.",
-                      variant_name, owner->get_name())
-      // Package up this variant and send it over to the target 
-      Serializer rez;
-      {
-        RezCheck z(rez);
-        rez.serialize(owner->task_id);
-        rez.serialize(vid);
-        // Extra padding to fix a realm bug for now
-        rez.serialize(vid);
-        rez.serialize(done);
-        rez.serialize(has_return_value);
-        // pack the code descriptors 
-        Realm::Serialization::ByteCountSerializer counter;
-        realm_descriptor->serialize(counter, true/*portable*/);
-        const size_t impl_size = counter.bytes_used();
-        rez.serialize(impl_size);
-        {
-          Realm::Serialization::FixedBufferSerializer 
-            serializer(rez.reserve_bytes(impl_size), impl_size);
-          realm_descriptor->serialize(serializer, true/*portable*/);
-        }
-        rez.serialize(user_data_size);
-        if (user_data_size > 0)
-          rez.serialize(user_data, user_data_size);
-        rez.serialize(leaf_variant);
-        rez.serialize(inner_variant);
-        rez.serialize(idempotent_variant);
-        size_t name_size = strlen(variant_name)+1;
-        rez.serialize(variant_name, name_size);
-        // Pack the constraints
-        execution_constraints.serialize(rez);
-        layout_constraints.serialize(rez);
-      }
-      runtime->send_variant_response(target, rez);
-    }
-
-    //--------------------------------------------------------------------------
     void VariantImpl::broadcast_variant(RtUserEvent done, AddressSpaceID origin,
                                         AddressSpaceID local)
     //--------------------------------------------------------------------------
@@ -8159,7 +8027,31 @@ namespace Legion {
             RezCheck z(rez);
             rez.serialize(owner->task_id);
             rez.serialize(vid);
+            // Extra padding to fix a realm bug for now
+            rez.serialize(vid);
             rez.serialize(next_done);
+            rez.serialize(has_return_value);
+            // pack the code descriptors 
+            Realm::Serialization::ByteCountSerializer counter;
+            realm_descriptor->serialize(counter, true/*portable*/);
+            const size_t impl_size = counter.bytes_used();
+            rez.serialize(impl_size);
+            {
+              Realm::Serialization::FixedBufferSerializer 
+                serializer(rez.reserve_bytes(impl_size), impl_size);
+              realm_descriptor->serialize(serializer, true/*portable*/);
+            }
+            rez.serialize(user_data_size);
+            if (user_data_size > 0)
+              rez.serialize(user_data, user_data_size);
+            rez.serialize(leaf_variant);
+            rez.serialize(inner_variant);
+            rez.serialize(idempotent_variant);
+            size_t name_size = strlen(variant_name)+1;
+            rez.serialize(variant_name, name_size);
+            // Pack the constraints
+            execution_constraints.serialize(rez);
+            layout_constraints.serialize(rez);
             rez.serialize(origin);
             rez.serialize(locals[idx]);
           }
@@ -8175,34 +8067,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     /*static*/ void VariantImpl::handle_variant_broadcast(Runtime *runtime,
                                                           Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      DerezCheck z(derez);
-      TaskID tid;
-      derez.deserialize(tid);
-      VariantID vid;
-      derez.deserialize(vid);
-      RtUserEvent done;
-      derez.deserialize(done);
-      AddressSpaceID origin;
-      derez.deserialize(origin);
-      AddressSpaceID local;
-      derez.deserialize(local);
-      VariantImpl *impl = runtime->find_variant_impl(tid, vid);
-      impl->broadcast_variant(done, origin, local);
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ AddressSpaceID VariantImpl::get_owner_space(VariantID vid,
-                                                           Runtime *runtime)
-    //--------------------------------------------------------------------------
-    {
-      return (vid % runtime->runtime_stride);
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void VariantImpl::handle_variant_response(Runtime *runtime,
-                                                         Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
@@ -8260,7 +8124,12 @@ namespace Legion {
       // Ask the runtime to perform the registration 
       runtime->register_variant(registrar, user_data, user_data_size,
               realm_desc, has_return, variant_id, false/*check task*/);
-      Runtime::trigger_event(done);
+      AddressSpaceID origin;
+      derez.deserialize(origin);
+      AddressSpaceID local;
+      derez.deserialize(local);
+      VariantImpl *impl = runtime->find_variant_impl(task_id, variant_id);
+      impl->broadcast_variant(done, origin, local);
     }
 
     /////////////////////////////////////////////////////////////
@@ -15109,22 +14978,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_variant_request(AddressSpaceID target, Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message(rez, SEND_VARIANT_REQUEST,
-                                        VARIANT_VIRTUAL_CHANNEL, true/*flush*/);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::send_variant_response(AddressSpaceID target, Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message(rez, SEND_VARIANT_RESPONSE,
-              VARIANT_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
-    }
-
-    //--------------------------------------------------------------------------
     void Runtime::send_variant_broadcast(AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
@@ -16352,21 +16205,6 @@ namespace Legion {
       derez.deserialize(target_memory);
       MemoryManager *manager = find_memory_manager(target_memory);
       manager->process_acquire_response(derez, source);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_variant_request(Deserializer &derez, 
-                                          AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      TaskImpl::handle_variant_request(this, derez, source);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_variant_response(Deserializer &derez) 
-    //--------------------------------------------------------------------------
-    {
-      VariantImpl::handle_variant_response(this, derez);
     }
 
     //--------------------------------------------------------------------------
