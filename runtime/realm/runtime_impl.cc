@@ -2572,6 +2572,12 @@ namespace Realm {
       free(buffer);
       free(funcname);
 #endif
+      unregister_error_signal_handler();
+      std::cerr << "Signal " << signal << " received by node " << my_node_id
+		<< ", process " << getpid()
+                << " (thread "  << std::hex << uintptr_t(pthread_self())
+                << std::dec << ") - obtaining backtrace\n" << std::flush;
+
       Backtrace bt;
       bt.capture_backtrace(1 /* skip this handler */);
       bt.lookup_symbols();
