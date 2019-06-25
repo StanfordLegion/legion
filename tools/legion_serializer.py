@@ -105,7 +105,7 @@ class LegionProfASCIIDeserializer(LegionDeserializer):
         "IndexSubSpaceDesc": re.compile(prefix + r'Index Sub Space Desc (?P<parent_id>[a-f0-9]+) (?P<unique_id>[0-9]+)'),
         "LogicalRegionDesc": re.compile(prefix + r'Logical Region Desc (?P<ispace_id>[0-9]+) (?P<fspace_id>[0-9]+) (?P<tree_id>[0-9]+) (?P<name>[a-zA-Z0-9_ ]+)'),
         "PhysicalInstRegionDesc": re.compile(prefix + r'Physical Inst Region Desc (?P<op_id>[0-9]+) (?P<inst_id>[a-f0-9]+) (?P<ispace_id>[0-9]+) (?P<fspace_id>[0-9]+) (?P<tree_id>[0-9]+)'),
-        "PhysicalInstLayoutDesc": re.compile(prefix + r'Physical Inst Layout Desc (?P<op_id>[0-9]+) (?P<inst_id>[a-f0-9]+) (?P<field_id>[0-9]+)'),
+        "PhysicalInstLayoutDesc": re.compile(prefix + r'Physical Inst Layout Desc (?P<op_id>[0-9]+) (?P<inst_id>[a-f0-9]+) (?P<field_id>[0-9]+) (?P<fspace_id>[0-9]+)'),
         "TaskKind": re.compile(prefix + r'Prof Task Kind (?P<task_id>[0-9]+) (?P<name>[$()a-zA-Z0-9_<>.]+) (?P<overwrite>[0-1])'),
         "TaskVariant": re.compile(prefix + r'Prof Task Variant (?P<task_id>[0-9]+) (?P<variant_id>[0-9]+) (?P<name>[$()a-zA-Z0-9_<>.]+)'),
         "OperationInstance": re.compile(prefix + r'Prof Operation (?P<op_id>[0-9]+) (?P<kind>[0-9]+)'),

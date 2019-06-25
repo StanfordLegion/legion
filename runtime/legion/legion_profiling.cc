@@ -287,7 +287,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void LegionProfInstance::register_instance_layout(UniqueID op_id,
 						      IDType inst_id,
-						      unsigned field_id)
+						      unsigned field_id,
+						      unsigned field_space)
     //--------------------------------------------------------------------------
     {
       phy_inst_layout_rdesc.push_back(PhysicalInstLayoutDesc());
@@ -295,6 +296,7 @@ namespace Legion {
       pdesc.op_id = op_id;
       pdesc.inst_id = inst_id;
       pdesc.field_id = field_id;
+      pdesc.fspace_id = field_space;
       owner->update_footprint(sizeof(PhysicalInstLayoutDesc), this);
     }
 
@@ -1409,8 +1411,28 @@ namespace Legion {
     {
       if (thread_local_profiling_instance == NULL)
         create_thread_local_profiling_instance();
-      thread_local_profiling_instance->register_logical_region(index_space, 
-                                                  field_space, tree_id, name);
+
+      thread_local_profiling_instance->register_logical_region(index_space,
+							       field_space,
+							       tree_id, name);
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfiler::record_physical_instance_all_regions(
+							  UniqueID op_id,
+							  IDType inst_id,
+						  std::vector<LogicalRegion>& l)
+    //--------------------------------------------------------------------------
+    {
+      if (thread_local_profiling_instance == NULL)
+        create_thread_local_profiling_instance();
+      for (std::vector<LogicalRegion>::const_iterator it = l.begin();
+	   it != l.end(); it++) {
+	thread_local_profiling_instance->register_physical_instance_region(
+								    op_id,
+								    inst_id,
+								    *it);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -1427,16 +1449,19 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void LegionProfiler::record_instance_layout(UniqueID op_id, IDType inst_id,
-						std::vector<FieldID>& fields)
+						std::vector<FieldID>& fields,
+						LogicalRegion handle)
     //--------------------------------------------------------------------------
     {
       if (thread_local_profiling_instance == NULL)
         create_thread_local_profiling_instance();
 
+      unsigned fspace = handle.get_field_space().get_id();
       for (std::vector<FieldID>::const_iterator it = fields.begin();
 	   it != fields.end(); it++) {
 	thread_local_profiling_instance->register_instance_layout(op_id, 
-                                                          inst_id, *it);
+						  inst_id, *it,
+						  fspace);
       }
     }
 

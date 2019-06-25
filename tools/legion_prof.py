@@ -1614,10 +1614,10 @@ class Instance(Base, TimeRange, HasInitiationDependencies):
         self.inst_id = inst_id
         self.mem = None
         self.size = None
-        self.ispace = None
-        self.fspace = None
+        self.ispace = []
+        self.fspace = []
         self.tree_id = None
-        self.fields = []
+        self.fields = {}
 
     def get_owner(self):
         return self.mem
@@ -1678,27 +1678,30 @@ class Instance(Base, TimeRange, HasInitiationDependencies):
         else:
             size_pretty = 'Unknown'
         output_str = ""
-        if self.ispace != None:
-            output_str = self.ispace.get_short_text()
-        if self.fspace != None:
-            output_str = output_str + " x " + str(self.fspace)
-        count = 0
-        max_len = 40
-        for f in self.fields:
-            if count == 0:
-                output_str = output_str + '[' + str(f)
-            else:
-                output_str = output_str + ',' + str(f)
-            count = count + 1
-
-            if len(output_str) > max_len and len(self.fields) > 1:
+        for pos in range(0, len(self.ispace)):
+            output_str = output_str + "Region:" + self.ispace[pos].get_short_text()
+            output_str = output_str + " x " + str(self.fspace[pos])
+            max_len = 40
+            key = self.fspace[pos]
+            fieldlist = []
+            count = 0
+            if key in self.fields:
+                fieldlist = self.fields[key]
+                for f in fieldlist:
+                    if count == 0:
+                        output_str = output_str + '[' + str(f)
+                    else:
+                        output_str = output_str + ',' + str(f)
+                    count = count + 1
+                    if len(output_str) > max_len and len(fieldlist) > 1:
+                        output_str = output_str + '$'
+                        max_len = len(output_str) + 40
+                if (count > 0):
+                    output_str = output_str + ']'
+            pend =len(self.ispace)-1
+            if (pos != pend):
                 output_str = output_str + '$'
-                max_len = len(output_str) + 40
-
-        if (count > 0):
-            output_str = output_str + ']'
-
-        output_str = "Region: " + output_str + " $Inst: {} $Size: {}"
+        output_str = output_str + " $Inst: {} $Size: {}"
         return output_str.format(str(hex(self.inst_id)),size_pretty)
 
 
@@ -2280,16 +2283,21 @@ class State(object):
     def log_physical_inst_region_desc(self, op_id, inst_id, ispace_id, fspace_id, tree_id):
         op = self.find_op(op_id)
         inst = self.create_instance(inst_id, op)
-        inst.ispace = self.find_index_space(ispace_id)
-        inst.fspace = self.find_field_space(fspace_id)
+        fspace = self.find_field_space(fspace_id)
+        inst.ispace.append(self.find_index_space(ispace_id))
+        inst.fspace.append(fspace)
+        if fspace not in inst.fields:
+            inst.fields[fspace] = []
         inst.tree_id = tree_id
 
-    def log_physical_inst_layout_desc(self, op_id, inst_id, field_id):
+    def log_physical_inst_layout_desc(self, op_id, inst_id, field_id, fspace_id):
         op = self.find_op(op_id)
         inst = self.create_instance(inst_id, op)
-        fspace_id = inst.fspace.fspace_id
         field = self.find_field(fspace_id, field_id)
-        inst.fields.append(field)
+        fspace = self.find_field_space(fspace_id)
+        if fspace not in inst.fields:
+            inst.fields[fspace] = []
+        inst.fields[fspace].append(field)
 
     def log_task_info(self, op_id, task_id, variant_id, proc_id,
                       create, ready, start, stop):
