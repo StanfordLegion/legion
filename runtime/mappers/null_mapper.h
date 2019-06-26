@@ -84,6 +84,11 @@ namespace Legion {
       virtual void report_profiling(const MapperContext      ctx,
                                     const Task&              task,
                                     const TaskProfilingInfo& input);
+      virtual void select_sharding_functor(
+                                 const MapperContext                ctx,
+                                 const Task&                        task,
+                                 const SelectShardingFunctorInput&  input,
+                                       SelectShardingFunctorOutput& output);
     public: // Inline mapping calls
       virtual void map_inline(const MapperContext        ctx,
                               const InlineMapping&       inline_op,
@@ -121,6 +126,11 @@ namespace Legion {
       virtual void report_profiling(const MapperContext      ctx,
                                     const Copy&              copy,
                                     const CopyProfilingInfo& input);
+      virtual void select_sharding_functor(
+                                 const MapperContext                ctx,
+                                 const Copy&                        copy,
+                                 const SelectShardingFunctorInput&  input,
+                                       SelectShardingFunctorOutput& output);
     public: // Close mapping calls
       virtual void map_close(const MapperContext       ctx,
                              const Close&              close,
@@ -138,6 +148,11 @@ namespace Legion {
       virtual void report_profiling(const MapperContext       ctx,
                                     const Close&              close,
                                     const CloseProfilingInfo& input);
+      virtual void select_sharding_functor(
+                                 const MapperContext                ctx,
+                                 const Close&                       close,
+                                 const SelectShardingFunctorInput&  input,
+                                       SelectShardingFunctorOutput& output);
     public: // Acquire mapping calls
       virtual void map_acquire(const MapperContext         ctx,
                                const Acquire&              acquire,
@@ -149,6 +164,11 @@ namespace Legion {
       virtual void report_profiling(const MapperContext         ctx,
                                     const Acquire&              acquire,
                                     const AcquireProfilingInfo& input);
+      virtual void select_sharding_functor(
+                                 const MapperContext                ctx,
+                                 const Acquire&                     acquire,
+                                 const SelectShardingFunctorInput&  input,
+                                       SelectShardingFunctorOutput& output);
     public: // Release mapping calls
       virtual void map_release(const MapperContext         ctx,
                                const Release&              release,
@@ -169,6 +189,11 @@ namespace Legion {
       virtual void report_profiling(const MapperContext         ctx,
                                     const Release&              release,
                                     const ReleaseProfilingInfo& input);
+      virtual void select_sharding_functor(
+                                 const MapperContext                ctx,
+                                 const Release&                     release,
+                                 const SelectShardingFunctorInput&  input,
+                                       SelectShardingFunctorOutput& output);
     public: // Partition mapping calls
       virtual void select_partition_projection(const MapperContext  ctx,
                           const Partition&                          partition,
@@ -191,6 +216,17 @@ namespace Legion {
       virtual void report_profiling(const MapperContext              ctx,
                                     const Partition&                 partition,
                                     const PartitionProfilingInfo&    input);
+      virtual void select_sharding_functor(
+                                 const MapperContext                ctx,
+                                 const Partition&                   partition,
+                                 const SelectShardingFunctorInput&  input,
+                                       SelectShardingFunctorOutput& output);
+    public: // Fill mapper calls
+      virtual void select_sharding_functor(
+                                 const MapperContext                ctx,
+                                 const Fill&                        fill,
+                                 const SelectShardingFunctorInput&  input,
+                                       SelectShardingFunctorOutput& output);
     public: // Task execution mapping calls
       virtual void configure_context(const MapperContext         ctx,
                                      const Task&                 task,
@@ -200,6 +236,11 @@ namespace Legion {
                                         const SelectTunableInput&   input,
                                               SelectTunableOutput&  output);
     public: // Must epoch mapping
+      virtual void select_sharding_functor(
+                          const MapperContext                    ctx,
+                          const MustEpoch&                       epoch,
+                          const SelectShardingFunctorInput&      input,
+                                MustEpochShardingFunctorOutput&  output);
       virtual void map_must_epoch(const MapperContext           ctx,
                                   const MapMustEpochInput&      input,
                                         MapMustEpochOutput&     output);
