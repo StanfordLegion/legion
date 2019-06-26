@@ -253,17 +253,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LayoutDescription::record_instance_layout(UniqueID creator_id, 
-                                                   IDType inst_id) const
-    //--------------------------------------------------------------------------
-    {
-      std::vector<FieldID> fields;
-      owner->get_field_ids(allocated_fields, fields);
-      implicit_runtime->profiler->record_instance_layout(creator_id, 
-                                                         inst_id, fields);
-    }
-
-    //--------------------------------------------------------------------------
     void LayoutDescription::compute_copy_offsets(const FieldMask &copy_mask,
                                                  PhysicalManager *manager,
                                            std::vector<CopySrcDstField> &fields)
@@ -2263,18 +2252,17 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(result != NULL);
 #endif
-      if (runtime->profiler) 
+      if (runtime->profiler != NULL)
       {
-        // We'll try to synthesize a logical region but if it's a 
-        // generic index space expression then we're going to have
-        // a hard time.
-        // TODO: handle the case where this isn't actually a logical region
-        IndexSpaceNode *is_node = instance_domain->find_or_create_node(NULL); 
-        const LogicalRegion region_handle(tree_id, is_node->handle, 
-                                          field_space_node->handle); 
-	runtime->profiler->record_physical_instance_region(creator_id, 
-                                        instance.id, region_handle);
-	layout->record_instance_layout(creator_id, instance.id);
+        // Log the logical regions and fields that make up this instance
+        for (std::vector<LogicalRegion>::const_iterator it =
+              regions.begin(); it != regions.end(); it++)
+          runtime->profiler->record_physical_instance_region(creator_id, 
+                                                      instance.id, *it);
+        std::vector<FieldID> fields;
+        layout->owner->get_field_ids(instance_mask, fields);
+        runtime->profiler->record_physical_instance_fields(creator_id, 
+                          instance.id, layout->owner->handle, fields);
       }
       return result;
     }
