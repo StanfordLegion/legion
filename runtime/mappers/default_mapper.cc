@@ -50,10 +50,11 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     DefaultMapper::DefaultMapper(MapperRuntime *rt, Machine m, 
-                                 Processor local, const char *name) 
+                                 Processor local, const char *name, bool own) 
       : Mapper(rt), local_proc(local), local_kind(local.kind()), 
         node_id(local.address_space()), machine(m),
-        mapper_name((name == NULL) ? create_default_name(local) : strdup(name)),
+        mapper_name((name == NULL) ? create_default_name(local) : 
+                      own ? name : strdup(name)),
         next_local_gpu(0), next_local_cpu(0), next_local_io(0),
         next_local_procset(0), next_local_omp(0), next_local_py(0),
         next_global_gpu(Processor::NO_PROC),
