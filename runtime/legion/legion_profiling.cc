@@ -285,9 +285,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LegionProfInstance::register_instance_layout(UniqueID op_id,
-						      IDType inst_id,
-						      unsigned field_id)
+    void LegionProfInstance::register_physical_instance_field(UniqueID op_id,
+						              IDType inst_id,
+						              unsigned field_id,
+						              unsigned field_sp)
     //--------------------------------------------------------------------------
     {
       phy_inst_layout_rdesc.push_back(PhysicalInstLayoutDesc());
@@ -295,6 +296,7 @@ namespace Legion {
       pdesc.op_id = op_id;
       pdesc.inst_id = inst_id;
       pdesc.field_id = field_id;
+      pdesc.fspace_id = field_sp;
       owner->update_footprint(sizeof(PhysicalInstLayoutDesc), this);
     }
 
@@ -1409,8 +1411,10 @@ namespace Legion {
     {
       if (thread_local_profiling_instance == NULL)
         create_thread_local_profiling_instance();
-      thread_local_profiling_instance->register_logical_region(index_space, 
-                                                  field_space, tree_id, name);
+
+      thread_local_profiling_instance->register_logical_region(index_space,
+							       field_space,
+							       tree_id, name);
     }
 
     //--------------------------------------------------------------------------
@@ -1426,18 +1430,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LegionProfiler::record_instance_layout(UniqueID op_id, IDType inst_id,
-						std::vector<FieldID>& fields)
+    void LegionProfiler::record_physical_instance_fields(UniqueID op_id, 
+                                                IDType inst_id, FieldSpace fs,
+                                                std::vector<FieldID> &fields)
     //--------------------------------------------------------------------------
     {
       if (thread_local_profiling_instance == NULL)
         create_thread_local_profiling_instance();
 
-      for (std::vector<FieldID>::const_iterator it = fields.begin();
-	   it != fields.end(); it++) {
-	thread_local_profiling_instance->register_instance_layout(op_id, 
-                                                          inst_id, *it);
-      }
+      for (std::vector<FieldID>::const_iterator it = 
+            fields.begin(); it != fields.end(); it++)
+	thread_local_profiling_instance->register_physical_instance_field(op_id,
+                                                     inst_id, *it, fs.get_id());
     }
 
     //--------------------------------------------------------------------------

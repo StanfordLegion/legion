@@ -125,7 +125,7 @@ namespace Legion {
       };
     public:
       DefaultMapper(MapperRuntime *rt, Machine machine, Processor local, 
-                    const char *mapper_name = NULL);
+                    const char *mapper_name = NULL, bool own_name = false);
       DefaultMapper(const DefaultMapper &rhs);
       virtual ~DefaultMapper(void);
     public:
