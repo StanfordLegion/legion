@@ -232,6 +232,7 @@ namespace Legion {
 	UniqueID op_id;
 	IDType inst_id;
 	unsigned field_id;
+	unsigned fspace_id;
       };
       struct MetaInfo {
       public:
@@ -340,7 +341,7 @@ namespace Legion {
       void register_physical_instance_region(UniqueID op_id, IDType inst_id,
 					     LogicalRegion handle);
       void register_instance_layout(UniqueID op_id, IDType inst_id, 
-                                    unsigned field_id);
+                                    unsigned field_id, unsigned fspace);
     public:
       void process_task(TaskID task_id, VariantID variant_id, UniqueID op_id, 
             const Realm::ProfilingMeasurements::OperationTimeline &timeline,
@@ -537,8 +538,14 @@ namespace Legion {
 				 unsigned tree_id, const char* name);
       void record_physical_instance_region(UniqueID op_id, IDType inst_id, 
                                            LogicalRegion handle);
+      void record_physical_instance_all_regions(
+						UniqueID op_id,
+						IDType inst_id,
+						std::vector
+						<LogicalRegion>& l);
       void record_instance_layout(UniqueID op_id, IDType inst_id, 
-                                  std::vector<FieldID>& f);
+                                  std::vector<FieldID>& f, LogicalRegion
+				  handle);
       void record_index_part(UniqueID id, const char* name);
       void record_index_partition(UniqueID parent_id, UniqueID id, 
                                   bool disjoint, LegionColor c);

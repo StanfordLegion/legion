@@ -182,7 +182,8 @@ namespace Legion {
          << "id:" << PHYSICAL_INST_LAYOUT_ID                  << delim
          << "op_id:UniqueID:"           << sizeof(InstID)     << delim
          << "inst_id:InstID:"           << sizeof(InstID)     << delim
-	 << "field_id:unsigned:"        << sizeof(unsigned)
+	 << "field_id:unsigned:"        << sizeof(unsigned)   << delim
+	 << "fspace_id:unsigned:"       << sizeof(unsigned)
          << "}" << std::endl;
 
       ss << "TaskKind {" 
@@ -638,6 +639,8 @@ namespace Legion {
       lp_fwrite(f, (char*)&(phy_instance_layout_rdesc.op_id),sizeof(UniqueID));
       lp_fwrite(f, (char*)&(phy_instance_layout_rdesc.inst_id),sizeof(InstID));
       lp_fwrite(f, (char*)&(phy_instance_layout_rdesc.field_id),
+                sizeof(unsigned));
+      lp_fwrite(f, (char*)&(phy_instance_layout_rdesc.fspace_id),
                 sizeof(unsigned));
     }
 
@@ -1333,10 +1336,11 @@ namespace Legion {
 					             &phy_instance_layout_rdesc)
     //--------------------------------------------------------------------------
     {
-      log_prof.print("Physical Inst Layout Desc " "%llu " IDFMT " %u",
+      log_prof.print("Physical Inst Layout Desc " "%llu " IDFMT " %u %u",
 		     phy_instance_layout_rdesc.op_id,
 		     phy_instance_layout_rdesc.inst_id,
-		     phy_instance_layout_rdesc.field_id);
+		     phy_instance_layout_rdesc.field_id,
+		     phy_instance_layout_rdesc.fspace_id);
     }
 
     //--------------------------------------------------------------------------
