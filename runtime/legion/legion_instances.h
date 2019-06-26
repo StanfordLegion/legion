@@ -55,8 +55,6 @@ namespace Legion {
       LayoutDescription& operator=(const LayoutDescription &rhs);
     public:
       void log_instance_layout(ApEvent inst_event) const;
-      void record_instance_layout(UniqueID op_id, IDType inst_id,
-				  LogicalRegion l) const;
     public:
       void compute_copy_offsets(const FieldMask &copy_mask, 
                                 PhysicalManager *manager,

@@ -188,18 +188,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LayoutDescription::record_instance_layout(UniqueID creator_id, 
-                                                   IDType inst_id,
-						   LogicalRegion l) const
-    //--------------------------------------------------------------------------
-    {
-      std::vector<FieldID> fields;
-      owner->get_field_ids(allocated_fields, fields);
-      implicit_runtime->profiler->record_instance_layout(creator_id,
-							 inst_id, fields,l);
-    }
-
-    //--------------------------------------------------------------------------
     void LayoutDescription::compute_copy_offsets(const FieldMask &copy_mask,
                                                  PhysicalManager *manager,
                                            std::vector<CopySrcDstField> &fields)
@@ -2142,11 +2130,15 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(result != NULL);
 #endif
-      if (runtime->profiler)  {
+      if (runtime->profiler != NULL)
+      {
+        // Record the regions and fields that make up this instance
 	runtime->profiler->record_physical_instance_region(creator_id, 
                                         instance.id, ancestor->handle);
-	layout->record_instance_layout(creator_id, instance.id,
-				       ancestor->handle);
+        std::vector<FieldID> fields;
+        layout->owner->get_field_ids(instance_mask, fields);
+        runtime->profiler->record_physical_instance_fields(creator_id, 
+                          instance.id, layout->owner->handle, fields);
       }
       return result;
     }
