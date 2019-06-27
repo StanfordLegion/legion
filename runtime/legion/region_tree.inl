@@ -2054,7 +2054,9 @@ namespace Legion {
         {
           for (std::vector<IndexPartNode*>::const_iterator it = 
                 color_map_copy.begin(); it != color_map_copy.end(); it++)
-            (*it)->destroy_node(local_space, false/*top*/, applied, collective);
+            if ((*it)->destroy_node(local_space, false/*top*/, 
+                                    applied, collective))
+              delete (*it);
         }
         if (is_owner())
           return remove_base_valid_ref(APPLICATION_REF, NULL/*mutator*/);
@@ -4658,7 +4660,8 @@ namespace Legion {
         {
           for (std::vector<IndexSpaceNode*>::const_iterator it = 
                 color_map_copy.begin(); it != color_map_copy.end(); it++)
-            (*it)->destroy_node(local_space, applied, collective);
+            if ((*it)->destroy_node(local_space, applied, collective))
+              delete (*it);
         }
         if (is_owner())
           return remove_base_valid_ref(APPLICATION_REF, NULL/*mutator*/);
