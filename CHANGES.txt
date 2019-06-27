@@ -1,7 +1,7 @@
 This file lists the major changes as they appear in the stable branch.  No
 attempt is made to keep this list accurate for the master branch.
 
-Version 19.06.0 (June ??, 2019)
+Version 19.06.0 (June 27, 2019)
   * Legion
     - All tools (Legion Prof, Legion Spy, etc.) now support Python 2 and 3
     - The flag -lg:warn_backtrace prints a backtrace on each warning

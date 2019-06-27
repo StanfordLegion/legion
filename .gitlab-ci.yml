@@ -214,6 +214,9 @@ before_script:
   tags:
     - darwin-slurm
     - power9
+  only:
+    variables:
+      - $RUN_DARWIN_JOBS
 
 # For compute-heavy tests:
 .linux_compute: &linux_compute
