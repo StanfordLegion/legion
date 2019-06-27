@@ -22,14 +22,13 @@ Version 19.06.0 (June 27, 2019)
     - The address of operator (&) is now supported
     - Support for explicit field maps for HDF5
   * Legion Prof
-    - User Interface improvements include
-          - Menu option to select a subset of the profile information
-            for viewing
-          - Grouping of memory channels, utilization and additional
-            details such as source and destination nodes/processors
-            associated with the channels
-          - Physical instances contain additional information
-            about the regions they belong to
+    - Menu option to select a subset of the profile information
+        for viewing
+    - Grouping of memory channels, utilization and additional details
+        such as source and destination nodes/processors associated with
+        the channels
+    - Physical instances contain additional information about the regions
+        they belong to
   * Python
     - Support for partitioning operators equal and restriction
     - Support for bool and complex types
