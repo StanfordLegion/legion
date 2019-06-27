@@ -34,7 +34,6 @@
 #include <vector>
 #include <typeinfo>
 
-#include "bitmask.h"
 #include "legion/legion_config.h"
 #include "legion/legion_template_help.h"
 
@@ -51,6 +50,25 @@
 #define LEGION_DEPRECATED(x)
 #endif
 #endif
+
+// forward declarations from bitmask.h
+template<typename T, unsigned int MAX,
+         unsigned SHIFT, unsigned MASK> class BitMask;
+template<typename T, unsigned int MAX,
+         unsigned SHIFT, unsigned MASK> class TLBitMask;
+#ifdef __SSE2__
+template<unsigned int MAX> class SSEBitMask;
+template<unsigned int MAX> class SSETLBitMask;
+#endif
+#ifdef __AVX__
+template<unsigned int MAX> class AVXBitMask;
+template<unsigned int MAX> class AVXTLBitMask;
+#endif
+#ifdef __ALTIVEC__
+template<unsigned int MAX> class PPCBitMask;
+template<unsigned int MAX> class PPCTLBitMask;
+#endif
+template<typename IT, typename DT, bool BIDIR> class IntegerSet;
 
 namespace BindingLib { class Utility; } // BindingLib namespace
 
@@ -2046,7 +2064,7 @@ namespace Legion {
                     LEGION_NODE_MASK_NODE_MASK> NodeMask;
 #endif
 #endif
-    typedef IntegerSet<AddressSpaceID,NodeMask> NodeSet;
+    typedef IntegerSet<AddressSpaceID,NodeMask,false/*bidir*/> NodeSet;
 
 #undef LEGION_NODE_MASK_NODE_SHIFT
 #undef LEGION_NODE_MASK_NODE_MASK

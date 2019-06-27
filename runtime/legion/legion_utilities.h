@@ -21,8 +21,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "legion/legion_types.h"
 #include "legion.h"
+#include "bitmask.h"
 #include "legion/legion_allocation.h"
 
 // Useful macros
