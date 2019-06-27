@@ -30,12 +30,18 @@ elif _version == 3: # Python 3.x:
 else:
     raise Exception('Incompatible Python version')
 
+# allow the make executable name to be overridden by the environment
+make_exe = os.environ.get('MAKE', 'make')
+
 os_name = platform.system()
 
 if os_name == 'Linux':
     dylib_ext = '.so'
 elif os_name == 'Darwin':
     dylib_ext = '.dylib'
+elif os_name == 'FreeBSD':
+    dylib_ext = '.so'
+    make_exe = os.environ.get('MAKE', 'gmake')  # default needs to be GNU make
 else:
     raise Exception('install.py script does not work on %s' % platform.system())
 
@@ -127,7 +133,7 @@ def build_terra(terra_dir, terra_branch, thread_count, llvm):
         ])
 
     subprocess.check_call(
-        ['make', 'all', '-j', str(thread_count)] + flags,
+        [make_exe, 'all', '-j', str(thread_count)] + flags,
         cwd=terra_dir)
 
 def install_terra(terra_dir, terra_url, terra_branch, external_terra_dir,
@@ -238,7 +244,7 @@ def install_bindings(regent_dir, legion_dir, bindings_dir, runtime_dir,
             [cmake_exe] + flags + [legion_dir],
             cwd=build_dir)
         subprocess.check_call(
-            ['make'] + make_flags + ['-j', str(thread_count)],
+            [make_exe] + make_flags + ['-j', str(thread_count)],
             cwd=build_dir)
     else:
         flags = (
@@ -258,10 +264,10 @@ def install_bindings(regent_dir, legion_dir, bindings_dir, runtime_dir,
 
         if clean_first:
             subprocess.check_call(
-                ['make'] + flags + ['clean'],
+                [make_exe] + flags + ['clean'],
                 cwd=bindings_dir)
         subprocess.check_call(
-            ['make'] + flags + ['-j', str(thread_count)],
+            [make_exe] + flags + ['-j', str(thread_count)],
             cwd=bindings_dir)
         symlink(os.path.join(bindings_dir, 'libregent.so'),
                 os.path.join(bindings_dir, 'libregent%s' % dylib_ext))

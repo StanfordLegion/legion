@@ -2009,6 +2009,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     bool IndexSpaceNodeT<DIM,T>::destroy_node(AddressSpaceID source,
+                                              std::set<RtEvent> &applied,
                                               bool collective)
     //--------------------------------------------------------------------------
     {
@@ -2024,14 +2025,14 @@ namespace Legion {
       if (!is_owner() && !collective)
       {
         if (source != owner_space)
-          runtime->send_index_space_destruction(handle, owner_space);
+          runtime->send_index_space_destruction(handle, owner_space, applied);
         return false;
       }
       else
       {
         if (is_owner() && !collective && has_remote_instances())
         {
-          DestroyNodeFunctor functor(handle, source, runtime);
+          DestroyNodeFunctor functor(handle, source, runtime, applied);
           map_over_remote_instances(functor);
         }
         // Traverse down and destroy all of the child nodes
@@ -2053,7 +2054,7 @@ namespace Legion {
         {
           for (std::vector<IndexPartNode*>::const_iterator it = 
                 color_map_copy.begin(); it != color_map_copy.end(); it++)
-            (*it)->destroy_node(local_space, false/*top*/, collective);
+            (*it)->destroy_node(local_space, false/*top*/, applied, collective);
         }
         if (is_owner())
           return remove_base_valid_ref(APPLICATION_REF, NULL/*mutator*/);
@@ -4600,6 +4601,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     bool IndexPartNodeT<DIM,T>::destroy_node(AddressSpaceID source, bool top,
+                                             std::set<RtEvent> &applied, 
                                              bool collective) 
     //--------------------------------------------------------------------------
     {
@@ -4632,7 +4634,7 @@ namespace Legion {
       // otherwise we can do it here
       if (!is_owner() && !collective)
       {
-        runtime->send_index_partition_destruction(handle, owner_space);
+        runtime->send_index_partition_destruction(handle, owner_space, applied);
         return false;
       }
       else
@@ -4656,7 +4658,7 @@ namespace Legion {
         {
           for (std::vector<IndexSpaceNode*>::const_iterator it = 
                 color_map_copy.begin(); it != color_map_copy.end(); it++)
-            (*it)->destroy_node(local_space, collective);
+            (*it)->destroy_node(local_space, applied, collective);
         }
         if (is_owner())
           return remove_base_valid_ref(APPLICATION_REF, NULL/*mutator*/);

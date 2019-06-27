@@ -558,26 +558,28 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void RegionTreeForest::destroy_index_space(IndexSpace handle,
                                                AddressSpaceID source,
+                                               std::set<RtEvent> &applied,
                                                const bool collective)
     //--------------------------------------------------------------------------
     {
       if (collective && !has_node(handle))
         return;
       IndexSpaceNode *node = get_node(handle);
-      if (node->destroy_node(source, collective))
+      if (node->destroy_node(source, applied, collective))
         delete node;
     }
 
     //--------------------------------------------------------------------------
     void RegionTreeForest::destroy_index_partition(IndexPartition handle,
                                                    AddressSpaceID source,
+                                                   std::set<RtEvent> &applied,
                                                    const bool collective)
     //--------------------------------------------------------------------------
     {
       if (collective && !has_node(handle))
         return;
       IndexPartNode *node = get_node(handle);
-      if (node->destroy_node(source, true/*top*/, collective))
+      if (node->destroy_node(source, true/*top*/, applied, collective))
         delete node;
     }
 
@@ -1112,13 +1114,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void RegionTreeForest::destroy_field_space(FieldSpace handle,
                                                AddressSpaceID source,
+                                               std::set<RtEvent> &applied,
                                                const bool collective)
     //--------------------------------------------------------------------------
     {
       if (collective && !has_node(handle))
         return;
       FieldSpaceNode *node = get_node(handle);
-      if (node->destroy_node(source, collective))
+      if (node->destroy_node(source, applied, collective))
         delete node;
     }
 
@@ -1136,13 +1139,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RegionTreeForest::free_field(FieldSpace handle, FieldID fid,
+                                      std::set<RtEvent> &applied, 
                                       const bool collective) 
     //--------------------------------------------------------------------------
     {
       if (collective && !has_node(handle))
         return;
       FieldSpaceNode *node = get_node(handle);
-      node->free_field(fid, runtime->address_space, collective);
+      node->free_field(fid, runtime->address_space, applied, collective);
     }
 
     //--------------------------------------------------------------------------
@@ -1166,13 +1170,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void RegionTreeForest::free_fields(FieldSpace handle,
                                        const std::vector<FieldID> &to_free,
+                                       std::set<RtEvent> &applied,
                                        const bool collective)
     //--------------------------------------------------------------------------
     {
       if (collective && !has_node(handle))
         return;
       FieldSpaceNode *node = get_node(handle);
-      node->free_fields(to_free, runtime->address_space, collective);
+      node->free_fields(to_free, runtime->address_space, applied, collective);
     }
 
     //--------------------------------------------------------------------------
@@ -1263,19 +1268,21 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void RegionTreeForest::destroy_logical_region(LogicalRegion handle,
                                                   AddressSpaceID source,
+                                                  std::set<RtEvent> &applied,
                                                   const bool collective)
     //--------------------------------------------------------------------------
     {
       if (collective && !has_node(handle))
         return;
       RegionNode *node = get_node(handle);
-      if (node->destroy_node(source, collective))
+      if (node->destroy_node(source, applied, collective))
         delete node;
     }
 
     //--------------------------------------------------------------------------
     void RegionTreeForest::destroy_logical_partition(LogicalPartition handle,
                                                      AddressSpaceID source,
+                                                     std::set<RtEvent> &applied,
                                                      const bool collective)
     //--------------------------------------------------------------------------
     {
@@ -1283,7 +1290,7 @@ namespace Legion {
         return;
       // We're the owner so we know the reference still exists
       PartitionNode *node = get_node(handle);
-      if (node->destroy_node(source, true/*top*/, collective))
+      if (node->destroy_node(source, true/*top*/, applied, collective))
         delete node;
     }
 
@@ -6924,7 +6931,7 @@ namespace Legion {
     {
       if (target == source)
         return;
-      runtime->send_index_space_destruction(handle, target);
+      runtime->send_index_space_destruction(handle, target, applied);
     }
 
     //--------------------------------------------------------------------------
@@ -10366,20 +10373,23 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void FieldSpaceNode::free_field(FieldID fid, AddressSpaceID source,
+                                    std::set<RtEvent> &applied,   
                                     const bool collective)   
     //--------------------------------------------------------------------------
     {
       if (!is_owner() && !collective && (source != owner_space))
       {
+        const RtUserEvent done_event = Runtime::create_rt_user_event();
         Serializer rez;
         {
           RezCheck z(rez);
           rez.serialize(handle);
           rez.serialize<size_t>(1);
           rez.serialize(fid);
-          rez.serialize(RtUserEvent::NO_RT_USER_EVENT);
+          rez.serialize(done_event);
         }
         context->runtime->send_field_free(owner_space, rez);
+        applied.insert(done_event);
         return;
       }
       RtUserEvent remote_freed;
@@ -10425,16 +10435,18 @@ namespace Legion {
         }
         Runtime::trigger_event(remote_freed, 
             Runtime::merge_events(preconditions));
+        applied.insert(remote_freed);
       }
     }
 
     //--------------------------------------------------------------------------
     void FieldSpaceNode::free_fields(const std::vector<FieldID> &to_free,
-                                   AddressSpaceID source, const bool collective)
+       AddressSpaceID source, std::set<RtEvent> &applied, const bool collective)
     //--------------------------------------------------------------------------
     {
       if (!is_owner() && !collective && (source != owner_space))
       {
+        const RtUserEvent done_event = Runtime::create_rt_user_event();
         Serializer rez;
         {
           RezCheck z(rez);
@@ -10442,9 +10454,10 @@ namespace Legion {
           rez.serialize<size_t>(to_free.size());
           for (unsigned idx = 0; idx < to_free.size(); idx++)
             rez.serialize(to_free[idx]);
-          rez.serialize(RtUserEvent::NO_RT_USER_EVENT);
+          rez.serialize(done_event);
         }
         context->runtime->send_field_free(owner_space, rez);
+        applied.insert(done_event);
         return;
       }
       RtUserEvent remote_freed;
@@ -10878,7 +10891,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool FieldSpaceNode::destroy_node(AddressSpaceID source, bool collective)
+    bool FieldSpaceNode::destroy_node(AddressSpaceID source,
+                                    std::set<RtEvent> &applied, bool collective)
     //--------------------------------------------------------------------------
     {
       if (destroyed)
@@ -10889,7 +10903,7 @@ namespace Legion {
       // reference, otherwise if we're remote we do that
       if (!is_owner() && !collective)
       {
-        runtime->send_field_space_destruction(handle, owner_space);
+        runtime->send_field_space_destruction(handle, owner_space, applied);
         return false;
       }
       else if (is_owner())
@@ -11062,9 +11076,16 @@ namespace Legion {
       RtUserEvent done_event;
       derez.deserialize(done_event);
       FieldSpaceNode *node = forest->get_node(handle);
-      node->free_fields(fields, source,false/*not a collective if we're here*/);
+      std::set<RtEvent> applied;
+      node->free_fields(fields, source, applied,
+                        false/*not a collective if we're here*/);
       if (done_event.exists())
-        Runtime::trigger_event(done_event);
+      {
+        if (!applied.empty())
+          Runtime::trigger_event(done_event, Runtime::merge_events(applied));
+        else
+          Runtime::trigger_event(done_event);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -14552,11 +14573,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (target != source)
-        runtime->send_logical_region_destruction(handle, target);
+        runtime->send_logical_region_destruction(handle, target, &applied);
     } 
 
     //--------------------------------------------------------------------------
-    bool RegionNode::destroy_node(AddressSpaceID source, bool collective)
+    bool RegionNode::destroy_node(AddressSpaceID source,
+                                  std::set<RtEvent> &applied, bool collective)
     //--------------------------------------------------------------------------
     {
       if (destroyed)
@@ -14577,12 +14599,13 @@ namespace Legion {
           if (!target_instances.empty())
           {
             // Send deletions to all but the source
-            DestructionFunctor functor(handle, context->runtime, source);
+            DestructionFunctor functor(handle, context->runtime,source,applied);
             target_instances.map(functor);
           }
         }
         else if (source != owner_space)
-          context->runtime->send_logical_region_destruction(handle,owner_space);
+          context->runtime->send_logical_region_destruction(handle, owner_space,
+                                                            &applied);
       }
       std::vector<PartitionNode*> color_map_copy;
       // If we're the owner then we need to traverse down the tree
@@ -14604,7 +14627,7 @@ namespace Legion {
       {
         for (std::vector<PartitionNode*>::const_iterator it = 
               color_map_copy.begin(); it != color_map_copy.end(); it++)
-          if ((*it)->destroy_node(local_space, false/*top*/, collective))
+          if ((*it)->destroy_node(local_space, false/*top*/,applied,collective))
             delete (*it);
       }
       // Invalidate our version managers
@@ -14885,7 +14908,7 @@ namespace Legion {
         }
       }
       if (send_deletion)
-        context->runtime->send_logical_region_destruction(handle, target);
+        context->runtime->send_logical_region_destruction(handle, target, NULL);
     }
 
     //--------------------------------------------------------------------------
@@ -15756,12 +15779,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (target != source)
-        runtime->send_logical_partition_destruction(handle, target);
+        runtime->send_logical_partition_destruction(handle, target, &applied);
     }
 
     //--------------------------------------------------------------------------
-    bool PartitionNode::destroy_node(AddressSpaceID source, bool top, 
-                                     bool collective)
+    bool PartitionNode::destroy_node(AddressSpaceID source, bool top,
+                                    std::set<RtEvent> &applied, bool collective)
     //--------------------------------------------------------------------------
     {
       if (destroyed)
@@ -15787,13 +15810,13 @@ namespace Legion {
           if (!target_instances.empty())
           {
             // Send deletions to all but the source
-            DestructionFunctor functor(handle, context->runtime, source);
+            DestructionFunctor functor(handle, context->runtime,source,applied);
             target_instances.map(functor);
           }
         }
         else if (source != owner_space)
           context->runtime->send_logical_partition_destruction(handle, 
-                                                               owner_space);
+                                               owner_space, &applied);
       }
       std::vector<RegionNode*> color_map_copy;
       // If we're the owner then we need to traverse down the tree
@@ -15815,7 +15838,7 @@ namespace Legion {
       {
         for (std::vector<RegionNode*>::const_iterator it = 
               color_map_copy.begin(); it != color_map_copy.end(); it++)
-          if ((*it)->destroy_node(local_space, collective))
+          if ((*it)->destroy_node(local_space, applied, collective))
             delete (*it);
       }
       // Remove ourselves from the parent to prevent future deletions
@@ -16078,7 +16101,8 @@ namespace Legion {
         }
       }
       if (send_deletion)
-        context->runtime->send_logical_partition_destruction(handle, target);
+        context->runtime->send_logical_partition_destruction(handle, 
+                                                             target, NULL);
     }
 
     //--------------------------------------------------------------------------

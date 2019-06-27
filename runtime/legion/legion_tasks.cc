@@ -67,7 +67,8 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
-    void ResourceTracker::return_resources(ResourceTracker *target)
+    void ResourceTracker::return_resources(ResourceTracker *target,
+                                           std::set<RtEvent> &preconditions)
     //--------------------------------------------------------------------------
     {
       if (!created_regions.empty())
@@ -77,7 +78,7 @@ namespace Legion {
       }
       if (!deleted_regions.empty())
       {
-        target->register_region_deletions(deleted_regions);
+        target->register_region_deletions(deleted_regions, preconditions);
         deleted_regions.clear();
       }
       if (!created_fields.empty())
@@ -87,7 +88,7 @@ namespace Legion {
       }
       if (!deleted_fields.empty())
       {
-        target->register_field_deletions(deleted_fields);
+        target->register_field_deletions(deleted_fields, preconditions);
         deleted_fields.clear();
       }
       if (!created_field_spaces.empty())
@@ -102,7 +103,8 @@ namespace Legion {
       }
       if (!deleted_field_spaces.empty())
       {
-        target->register_field_space_deletions(deleted_field_spaces);
+        target->register_field_space_deletions(deleted_field_spaces,
+                                               preconditions);
         deleted_field_spaces.clear();
       }
       if (!created_index_spaces.empty())
@@ -112,7 +114,8 @@ namespace Legion {
       }
       if (!deleted_index_spaces.empty())
       {
-        target->register_index_space_deletions(deleted_index_spaces);
+        target->register_index_space_deletions(deleted_index_spaces,
+                                               preconditions);
         deleted_index_spaces.clear();
       }
       if (!created_index_partitions.empty())
@@ -122,7 +125,8 @@ namespace Legion {
       }
       if (!deleted_index_partitions.empty())
       {
-        target->register_index_partition_deletions(deleted_index_partitions);
+        target->register_index_partition_deletions(deleted_index_partitions,
+                                                   preconditions);
         deleted_index_partitions.clear();
       }
     }
@@ -242,13 +246,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void ResourceTracker::unpack_resources_return(
+    /*static*/ RtEvent ResourceTracker::unpack_resources_return(
                                    Deserializer &derez, ResourceTracker *target)
     //--------------------------------------------------------------------------
     {
       // Hold the lock while doing the unpack to avoid conflicting
       // with anyone else returning state
       DerezCheck z(derez);
+      std::set<RtEvent> preconditions;
       size_t num_created_regions;
       derez.deserialize(num_created_regions);
       if (num_created_regions > 0)
@@ -269,7 +274,7 @@ namespace Legion {
         std::vector<LogicalRegion> deleted_regions(num_deleted_regions);
         for (unsigned idx = 0; idx < num_deleted_regions; idx++)
           derez.deserialize(deleted_regions[idx]);
-        target->register_region_deletions(deleted_regions);
+        target->register_region_deletions(deleted_regions, preconditions);
       }
       size_t num_created_fields;
       derez.deserialize(num_created_fields);
@@ -297,7 +302,7 @@ namespace Legion {
           derez.deserialize(deleted_fields[idx].first);
           derez.deserialize(deleted_fields[idx].second);
         }
-        target->register_field_deletions(deleted_fields);
+        target->register_field_deletions(deleted_fields, preconditions);
       }
       size_t num_created_field_spaces;
       derez.deserialize(num_created_field_spaces);
@@ -332,7 +337,8 @@ namespace Legion {
         std::vector<FieldSpace> deleted_field_spaces(num_deleted_field_spaces);
         for (unsigned idx = 0; idx < num_deleted_field_spaces; idx++)
           derez.deserialize(deleted_field_spaces[idx]);
-        target->register_field_space_deletions(deleted_field_spaces);
+        target->register_field_space_deletions(deleted_field_spaces,
+                                               preconditions);
       }
       size_t num_created_index_spaces;
       derez.deserialize(num_created_index_spaces);
@@ -354,7 +360,8 @@ namespace Legion {
         std::vector<IndexSpace> deleted_index_spaces(num_deleted_index_spaces);
         for (unsigned idx = 0; idx < num_deleted_index_spaces; idx++)
           derez.deserialize(deleted_index_spaces[idx]);
-        target->register_index_space_deletions(deleted_index_spaces);
+        target->register_index_space_deletions(deleted_index_spaces, 
+                                               preconditions);
       }
       size_t num_created_index_partitions;
       derez.deserialize(num_created_index_partitions);
@@ -377,8 +384,13 @@ namespace Legion {
           deleted_index_partitions(num_deleted_index_partitions);
         for (unsigned idx = 0; idx < num_deleted_index_partitions; idx++)
           derez.deserialize(deleted_index_partitions[idx]);
-        target->register_index_partition_deletions(deleted_index_partitions);
+        target->register_index_partition_deletions(deleted_index_partitions,
+                                                   preconditions);
       }
+      if (!preconditions.empty())
+        return Runtime::merge_events(preconditions);
+      else
+        return RtEvent::NO_RT_EVENT;
     }
 
     /////////////////////////////////////////////////////////////
@@ -5535,15 +5547,18 @@ namespace Legion {
       // returning any created logical state, we can't commit until
       // it is returned or we might prematurely release the references
       // that we hold on the version state objects
+      std::set<RtEvent> completion_preconditions;
       if (!is_remote())
       {
         // Pass back our created and deleted operations
         if (execution_context != NULL)
         {
           if (top_level_task)
-            execution_context->report_leaks_and_duplicates();
+            execution_context->report_leaks_and_duplicates(
+                                  completion_preconditions);
           else
-            execution_context->return_resources(parent_ctx);
+            execution_context->return_resources(parent_ctx, 
+                                  completion_preconditions);
         }
         // The future has already been set so just trigger it
         result.impl->complete_future();
@@ -5560,9 +5575,25 @@ namespace Legion {
       if (!sent_remotely && (execution_context != NULL))
         need_commit = execution_context->attempt_children_commit();
       if (must_epoch != NULL)
+      {
+        if (!completion_preconditions.empty())
+        {
+          const RtEvent wait_on = 
+            Runtime::merge_events(completion_preconditions);
+          if (wait_on.exists() && !wait_on.has_triggered())
+            wait_on.wait();
+        }
         must_epoch->notify_subop_complete(this);
-      // Mark that this operation is complete
-      complete_operation();
+        complete_operation();
+      }
+      else
+      {
+        // Mark that this operation is complete
+        if (!completion_preconditions.empty())
+          complete_operation(Runtime::merge_events(completion_preconditions));
+        else
+          complete_operation();
+      }
       if (need_commit)
         trigger_children_committed();
     }
@@ -5579,8 +5610,14 @@ namespace Legion {
         runtime->send_individual_remote_commit(orig_proc,rez);
       }
       if (must_epoch != NULL)
+      {
+        if (profiling_reported.exists() && !profiling_reported.has_triggered())
+          profiling_reported.wait();
         must_epoch->notify_subop_commit(this);
-      commit_operation(true/*deactivate*/, profiling_reported);
+        commit_operation(true/*deactivate*/);
+      }
+      else
+        commit_operation(true/*deactivate*/, profiling_reported);
     }
 
     //--------------------------------------------------------------------------
@@ -5841,7 +5878,14 @@ namespace Legion {
         start_condition.wait();
       variant->dispatch_inline(current, inline_ctx); 
       // Return any created privilege state
-      inline_ctx->return_resources(enclosing);
+      std::set<RtEvent> preconditions;
+      inline_ctx->return_resources(enclosing, preconditions);
+      if (!preconditions.empty())
+      {
+        const RtEvent wait_on = Runtime::merge_events(preconditions);
+        if (wait_on.exists() && !wait_on.has_triggered())
+          wait_on.wait();
+      }
       // Then delete the inline context
       delete inline_ctx;
     }
@@ -5897,8 +5941,10 @@ namespace Legion {
       // First unpack the privilege state
       bool has_privilege_state;
       derez.deserialize(has_privilege_state);
+      RtEvent resources_returned;
       if (has_privilege_state)
-        ResourceTracker::unpack_resources_return(derez, parent_ctx);
+        resources_returned = 
+          ResourceTracker::unpack_resources_return(derez, parent_ctx);
       // Unpack the future result
       {
         DerezCheck z2(derez);
@@ -5910,7 +5956,7 @@ namespace Legion {
       }
       // Mark that we have both finished executing and that our
       // children are complete
-      complete_execution();
+      complete_execution(resources_returned);
       trigger_children_complete();
     }
 
@@ -6363,9 +6409,10 @@ namespace Legion {
           profiling_reported.exists())
         Runtime::trigger_event(profiling_reported);
       // Pass back our created and deleted operations 
+      std::set<RtEvent> preconditions;
       if (execution_context != NULL)
       {
-        slice_owner->return_privileges(execution_context);
+        slice_owner->return_privileges(execution_context, preconditions);
         if (runtime->legion_spy_enabled)
           execution_context->log_created_requirements();
         // Invalidate any context that we had so that the child
@@ -6381,7 +6428,11 @@ namespace Legion {
       }
       else
         Runtime::trigger_event(point_termination);
-      slice_owner->record_child_complete();
+      if (!preconditions.empty())
+        slice_owner->record_child_complete(
+            Runtime::merge_events(preconditions));
+      else
+        slice_owner->record_child_complete(RtEvent::NO_RT_EVENT);
       // See if we need to trigger that our children are complete
       const bool need_commit = (execution_context != NULL) ? 
         execution_context->attempt_children_commit() : false;
@@ -7040,23 +7091,25 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ShardTask::return_resources(ResourceTracker *target)
+    void ShardTask::return_resources(ResourceTracker *target,
+                                     std::set<RtEvent> &preconditions)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(execution_context != NULL);
 #endif
-      execution_context->return_resources(target);
+      execution_context->return_resources(target, preconditions);
     }
 
     //--------------------------------------------------------------------------
-    void ShardTask::report_leaks_and_duplicates(void)
+    void ShardTask::report_leaks_and_duplicates(
+                                               std::set<RtEvent> &preconditions)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(execution_context != NULL);
 #endif
-      execution_context->report_leaks_and_duplicates();
+      execution_context->report_leaks_and_duplicates(preconditions);
     }
 
     //--------------------------------------------------------------------------
@@ -7108,7 +7161,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ShardTask::handle_resource_update(Deserializer &derez)
+    void ShardTask::handle_resource_update(Deserializer &derez,
+                                           std::set<RtEvent> &applied)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -7120,7 +7174,7 @@ namespace Legion {
       ReplicateContext *repl_ctx = 
         static_cast<ReplicateContext*>(execution_context);
 #endif
-      repl_ctx->handle_resource_update(derez);
+      repl_ctx->handle_resource_update(derez, applied);
     }
 
     //--------------------------------------------------------------------------
@@ -7227,6 +7281,8 @@ namespace Legion {
       // Remove our reference to the reduction future
       reduction_future = Future();
       map_applied_conditions.clear();
+      complete_preconditions.clear();
+      commit_preconditions.clear();
       version_infos.clear();
 #ifdef DEBUG_LEGION
       interfering_requirements.clear();
@@ -7841,7 +7897,15 @@ namespace Legion {
       else
         future_map.impl->complete_all_futures();
       if (must_epoch != NULL)
+      {
+        if (!complete_preconditions.empty())
+        {
+          const RtEvent wait_on = Runtime::merge_events(complete_preconditions);
+          if (wait_on.exists() && !wait_on.has_triggered())
+            wait_on.wait();
+        }
         must_epoch->notify_subop_complete(this);
+      }
       if (!effects_postconditions.empty())
       {
         const PhysicalTraceInfo trace_info(this);
@@ -7849,7 +7913,10 @@ namespace Legion {
           Runtime::merge_events(&trace_info, effects_postconditions);
         request_early_complete(done);
       }
-      complete_operation();
+      if (!complete_preconditions.empty())
+        complete_operation(Runtime::merge_events(complete_preconditions));
+      else
+        complete_operation();
 #ifdef LEGION_SPY
       LegionSpy::log_operation_events(unique_op_id, ApEvent::NO_AP_EVENT,
                                       completion_event);
@@ -7862,9 +7929,25 @@ namespace Legion {
     {
       DETAILED_PROFILER(runtime, INDEX_COMMIT_CALL);
       if (must_epoch != NULL)
+      {
+        if (!commit_preconditions.empty())
+        {
+          const RtEvent wait_on = Runtime::merge_events(commit_preconditions);
+          if (wait_on.exists() && !wait_on.has_triggered())
+            wait_on.wait();
+        }
         must_epoch->notify_subop_commit(this);
-      // Mark that this operation is now committed
-      commit_operation(true/*deactivate*/);
+        commit_operation(true/*deactivate*/);
+      }
+      else
+      {
+        // Mark that this operation is now committed
+        if (!commit_preconditions.empty())
+          commit_operation(true/*deactivate*/, 
+              Runtime::merge_events(commit_preconditions));
+        else
+          commit_operation(true/*deactivate*/);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -7956,7 +8039,14 @@ namespace Legion {
         // parent_ctx = inline_ctx;
         variant->dispatch_inline(current, inline_ctx);
         // Return any created privilege state
-        inline_ctx->return_resources(enclosing);
+        std::set<RtEvent> preconditions;
+        inline_ctx->return_resources(enclosing, preconditions);
+        if (!preconditions.empty())
+        {
+          const RtEvent wait_on = Runtime::merge_events(preconditions);
+          if (wait_on.exists() && !wait_on.has_triggered())
+            wait_on.wait();
+        }
         // Then we can delete the inline context
         delete inline_ctx;
       }
@@ -8170,6 +8260,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void IndexTask::return_slice_complete(unsigned points, 
+                                          RtEvent slice_complete,
                                           ApEvent slice_postcondition)
     //--------------------------------------------------------------------------
     {
@@ -8178,6 +8269,8 @@ namespace Legion {
       bool need_trigger = false;
       {
         AutoLock o_lock(op_lock);
+        if (slice_complete.exists())
+          complete_preconditions.insert(slice_complete);
         complete_points += points;
         // Always add it if we're doing legion spy validation
 #ifndef LEGION_SPY
@@ -8206,13 +8299,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndexTask::return_slice_commit(unsigned points)
+    void IndexTask::return_slice_commit(unsigned points, 
+                                        RtEvent commit_precondition)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, INDEX_RETURN_SLICE_COMMIT_CALL);
       bool need_trigger = false;
       {
         AutoLock o_lock(op_lock);
+        if (commit_precondition.exists())
+          commit_preconditions.insert(commit_precondition);
         committed_points += points;
 #ifdef DEBUG_LEGION
         assert(committed_points <= total_points);
@@ -8270,9 +8366,12 @@ namespace Legion {
       DerezCheck z(derez);
       size_t points;
       derez.deserialize(points);
+      RtEvent complete_precondition;
+      derez.deserialize(complete_precondition);
       ApEvent slice_postcondition;
       derez.deserialize(slice_postcondition);
-      ResourceTracker::unpack_resources_return(derez, parent_ctx);
+      const RtEvent resources_returned =
+        ResourceTracker::unpack_resources_return(derez, parent_ctx);
       if (redop == 0)
       {
         // No reduction so we can unpack these futures directly
@@ -8321,7 +8420,17 @@ namespace Legion {
         // Advance the pointer on the deserializer
         derez.advance_pointer(reduction_state_size);
       }
-      return_slice_complete(points, slice_postcondition);
+      if (resources_returned.exists())
+      {
+        if (complete_precondition.exists())
+          return_slice_complete(points,
+              Runtime::merge_events(complete_precondition, resources_returned),
+              slice_postcondition);
+        else
+          return_slice_complete(points, resources_returned,slice_postcondition);
+      }
+      else
+        return_slice_complete(points,complete_precondition,slice_postcondition);
     }
 
     //--------------------------------------------------------------------------
@@ -8331,7 +8440,9 @@ namespace Legion {
       DerezCheck z(derez);
       size_t points;
       derez.deserialize(points);
-      return_slice_commit(points);
+      RtEvent commit_precondition;
+      derez.deserialize(commit_precondition);
+      return_slice_commit(points, commit_precondition);
     }
 
     //--------------------------------------------------------------------------
@@ -8563,6 +8674,7 @@ namespace Legion {
 #endif
       acquired_instances.clear();
       map_applied_conditions.clear();
+      complete_preconditions.clear();
       commit_preconditions.clear();
       created_regions.clear();
       created_fields.clear();
@@ -9086,15 +9198,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void SliceTask::return_privileges(TaskContext *point_context)
+    void SliceTask::return_privileges(TaskContext *point_context,
+                                      std::set<RtEvent> &preconditions)
     //--------------------------------------------------------------------------
     {
       // If we're remote, pass our privileges back to ourself
       // otherwise pass them directly back to the index owner
       if (is_remote())
-        point_context->return_resources(this);
+        point_context->return_resources(this, preconditions);
       else
-        point_context->return_resources(parent_ctx);
+        point_context->return_resources(parent_ctx, preconditions);
     }
 
     //--------------------------------------------------------------------------
@@ -9121,12 +9234,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void SliceTask::record_child_complete(void)
+    void SliceTask::record_child_complete(RtEvent child_complete)
     //--------------------------------------------------------------------------
     {
       bool needs_trigger = false;
       {
         AutoLock o_lock(op_lock);
+        if (child_complete.exists())
+          complete_preconditions.insert(child_complete);
 #ifdef DEBUG_LEGION
         assert(num_uncomplete_points > 0);
 #endif
@@ -9233,21 +9348,28 @@ namespace Legion {
       }
       ApEvent slice_postcondition = 
         Runtime::merge_events(NULL, slice_postconditions);
+      RtEvent complete_precondition;
+      if (!complete_preconditions.empty())
+        complete_precondition = Runtime::merge_events(complete_preconditions);
       // For remote cases we have to keep track of the events for
       // returning any created logical state, we can't commit until
       // it is returned or we might prematurely release the references
       // that we hold on the version state objects
       if (is_remote())
       {
+#ifdef DEBUG_LEGION
+        // Should have no resource return preconditions
+        assert(complete_preconditions.empty());
+#endif
         // Send back the message saying that this slice is complete
         Serializer rez;
-        pack_remote_complete(rez, slice_postcondition);
+        pack_remote_complete(rez, complete_precondition, slice_postcondition);
         runtime->send_slice_remote_complete(orig_proc, rez);
       }
       else
       {
-        std::set<ApEvent> slice_postconditions;
-        index_owner->return_slice_complete(points.size(), slice_postcondition);
+        index_owner->return_slice_complete(points.size(), 
+                                    complete_precondition, slice_postcondition);
       }
       if (!acquired_instances.empty())
         release_acquired_instances(acquired_instances);
@@ -9259,21 +9381,23 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, SLICE_COMMIT_CALL);
+      RtEvent commit_precondition;
+      if (!commit_preconditions.empty())
+        commit_precondition = Runtime::merge_events(commit_preconditions);
       if (is_remote())
       {
         Serializer rez;
-        pack_remote_commit(rez);
+        pack_remote_commit(rez, commit_precondition);
         runtime->send_slice_remote_commit(orig_proc, rez);
       }
       else
       {
         // created and deleted privilege information already passed back
         // futures already sent back
-        index_owner->return_slice_commit(points.size());
+        index_owner->return_slice_commit(points.size(), commit_precondition);
       }
       if (!commit_preconditions.empty())
-        commit_operation(true/*deactivate*/, 
-            Runtime::merge_events(commit_preconditions));
+        commit_operation(true/*deactivate*/, commit_precondition);
       else
         commit_operation(true/*deactivate*/);
     }
@@ -9313,7 +9437,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void SliceTask::pack_remote_complete(Serializer &rez, 
-                                         ApEvent slice_postcondition)
+                         RtEvent applied_condition, ApEvent slice_postcondition)
     //--------------------------------------------------------------------------
     {
       // Send back any created state that our point tasks made
@@ -9324,6 +9448,7 @@ namespace Legion {
       rez.serialize(index_owner);
       RezCheck z(rez);
       rez.serialize<size_t>(points.size());
+      rez.serialize(applied_condition);
       rez.serialize(slice_postcondition);
       // Serialize the privilege state
       pack_resources_return(rez, target); 
@@ -9366,12 +9491,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void SliceTask::pack_remote_commit(Serializer &rez)
+    void SliceTask::pack_remote_commit(Serializer &rez, 
+                                       RtEvent applied_condition)
     //--------------------------------------------------------------------------
     {
       rez.serialize(index_owner);
       RezCheck z(rez);
       rez.serialize(points.size());
+      rez.serialize(applied_condition);
     }
 
     //--------------------------------------------------------------------------
@@ -9406,7 +9533,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void SliceTask::register_region_deletions(std::vector<LogicalRegion> &regs)
+    void SliceTask::register_region_deletions(std::vector<LogicalRegion> &regs,
+                                              std::set<RtEvent> &preconditions)
     //--------------------------------------------------------------------------
     {
       AutoLock o_lock(op_lock);
@@ -9439,7 +9567,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void SliceTask::register_field_deletions(
-                            std::vector<std::pair<FieldSpace,FieldID> > &fields)
+                            std::vector<std::pair<FieldSpace,FieldID> > &fields,
+                            std::set<RtEvent> &preconditions)
     //--------------------------------------------------------------------------
     {
       AutoLock o_lock(op_lock);
@@ -9494,7 +9623,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void SliceTask::register_field_space_deletions(std::vector<FieldSpace> &sps)
+    void SliceTask::register_field_space_deletions(std::vector<FieldSpace> &sps,
+                                               std::set<RtEvent> &preconditions)
     //--------------------------------------------------------------------------
     {
       AutoLock o_lock(op_lock);
@@ -9526,7 +9656,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void SliceTask::register_index_space_deletions(std::vector<IndexSpace> &sps)
+    void SliceTask::register_index_space_deletions(std::vector<IndexSpace> &sps,
+                                               std::set<RtEvent> &preconditions)
     //--------------------------------------------------------------------------
     {
       AutoLock o_lock(op_lock);
@@ -9561,7 +9692,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void SliceTask::register_index_partition_deletions(
-                                             std::vector<IndexPartition> &parts)
+           std::vector<IndexPartition> &parts, std::set<RtEvent> &preconditions)
     //--------------------------------------------------------------------------
     {
       AutoLock o_lock(op_lock);

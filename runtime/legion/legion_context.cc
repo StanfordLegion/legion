@@ -573,7 +573,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void TaskContext::register_region_deletions(
-                                               std::vector<LogicalRegion> &regs)
+             std::vector<LogicalRegion> &regs, std::set<RtEvent> &preconditions)
     //--------------------------------------------------------------------------
     {
       std::vector<LogicalRegion> delete_now;
@@ -604,7 +604,7 @@ namespace Legion {
             runtime->forest->invalidate_versions(tree_context, delete_now[idx]);
           // Then tell the region tree forest it can destroy the region
           runtime->forest->destroy_logical_region(delete_now[idx],
-                                            runtime->address_space);
+                            runtime->address_space, preconditions);
         }
       }
     }
@@ -747,7 +747,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void TaskContext::register_field_deletions(
-                            std::vector<std::pair<FieldSpace,FieldID> > &fields)
+                            std::vector<std::pair<FieldSpace,FieldID> > &fields, 
+                            std::set<RtEvent> &preconditions)
     //--------------------------------------------------------------------------
     {
       std::map<FieldSpace,std::vector<FieldID> > delete_now;
@@ -784,7 +785,7 @@ namespace Legion {
         // Now we can issue the actual destructions
         for (std::map<FieldSpace,std::vector<FieldID> >::const_iterator it =
               delete_now.begin(); it != delete_now.end(); it++)
-          runtime->forest->free_fields(it->first, it->second);
+          runtime->forest->free_fields(it->first, it->second, preconditions);
       }
     }
 
@@ -920,7 +921,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void TaskContext::register_field_space_deletions(
-                                                std::vector<FieldSpace> &spaces) 
+              std::vector<FieldSpace> &spaces, std::set<RtEvent> &preconditions) 
     //--------------------------------------------------------------------------
     {
       std::vector<FieldSpace> delete_now;
@@ -929,7 +930,8 @@ namespace Legion {
       {
         for (std::vector<FieldSpace>::const_iterator it = 
               delete_now.begin(); it != delete_now.end(); it++)
-          runtime->forest->destroy_field_space(*it, runtime->address_space);
+          runtime->forest->destroy_field_space(*it, runtime->address_space,
+                                               preconditions);
       }
     }
 
@@ -1012,7 +1014,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void TaskContext::register_index_space_deletions(
-                                                std::vector<IndexSpace> &spaces)
+              std::vector<IndexSpace> &spaces, std::set<RtEvent> &preconditions)
     //--------------------------------------------------------------------------
     {
       std::vector<IndexSpace> delete_now;
@@ -1041,7 +1043,8 @@ namespace Legion {
         }
         for (std::vector<IndexSpace>::const_iterator it =
               delete_now.begin(); it != delete_now.end(); it++)
-          runtime->forest->destroy_index_space(*it, runtime->address_space);
+          runtime->forest->destroy_index_space(*it, runtime->address_space,
+                                               preconditions);
       }
     }
 
@@ -1108,7 +1111,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void TaskContext::register_index_partition_deletions(
-                                             std::vector<IndexPartition> &parts)
+           std::vector<IndexPartition> &parts, std::set<RtEvent> &preconditions)
     //--------------------------------------------------------------------------
     {
       std::vector<IndexPartition> delete_now;
@@ -1142,7 +1145,8 @@ namespace Legion {
         // Once the waiting is done we can do the destory calls
         for (std::vector<IndexPartition>::const_iterator it = 
               delete_now.begin(); it != delete_now.end(); it++)
-          runtime->forest->destroy_index_partition(*it, runtime->address_space);
+          runtime->forest->destroy_index_partition(*it, runtime->address_space,
+                                                   preconditions);
       }
     }
 
@@ -1186,7 +1190,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TaskContext::report_leaks_and_duplicates(void)
+    void TaskContext::report_leaks_and_duplicates(
+                                               std::set<RtEvent> &preconditions)
     //--------------------------------------------------------------------------
     {
       if (!created_regions.empty())
@@ -1198,7 +1203,8 @@ namespace Legion {
               "Logical region (%x,%x,%x) was leaked out of task tree rooted "
               "by task %s", it->index_space.id, it->field_space.id, it->tree_id,
               get_task_name())
-          runtime->forest->destroy_logical_region(*it, runtime->address_space);
+          runtime->forest->destroy_logical_region(*it, runtime->address_space,
+                                                  preconditions);
         }
         created_regions.clear();
       }
@@ -1210,7 +1216,7 @@ namespace Legion {
           REPORT_LEGION_WARNING(LEGION_WARNING_LEAKED_RESOURCE,
               "Field %d of field space %x was leaked out of task tree rooted "
               "by task %s", it->second, it->first.id, get_task_name())
-          runtime->forest->free_field(it->first, it->second);
+          runtime->forest->free_field(it->first, it->second, preconditions);
         }
         created_fields.clear();
       }
@@ -1223,7 +1229,8 @@ namespace Legion {
           REPORT_LEGION_WARNING(LEGION_WARNING_LEAKED_RESOURCE,
               "Field space %x was leaked out of task tree rooted by task %s",
               it->id, get_task_name())
-          runtime->forest->destroy_field_space(*it, runtime->address_space);
+          runtime->forest->destroy_field_space(*it, runtime->address_space,
+                                               preconditions);
         }
         created_field_spaces.clear();
       }
@@ -1236,7 +1243,8 @@ namespace Legion {
           REPORT_LEGION_WARNING(LEGION_WARNING_LEAKED_RESOURCE,
               "Index space %x was leaked out of task tree rooted by task %s",
               it->id, get_task_name());
-          runtime->forest->destroy_index_space(*it, runtime->address_space);
+          runtime->forest->destroy_index_space(*it, runtime->address_space,
+                                               preconditions);
         }
         created_index_spaces.clear();
       }
@@ -12216,7 +12224,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplicateContext::handle_resource_update(Deserializer &derez)
+    void ReplicateContext::handle_resource_update(Deserializer &derez,
+                                                  std::set<RtEvent> &applied)
     //--------------------------------------------------------------------------
     {
       ResourceUpdateKind kind;
@@ -12242,7 +12251,7 @@ namespace Legion {
             std::vector<LogicalRegion> regions(size);
             for (unsigned idx = 0; idx < size; idx++)
               derez.deserialize(regions[idx]);
-            perform_replicated_region_deletions(regions);
+            perform_replicated_region_deletions(regions, applied);
             break;
           }
         case FIELD_CREATION_UPDATE:
@@ -12266,7 +12275,7 @@ namespace Legion {
               derez.deserialize(fields[idx].first);
               derez.deserialize(fields[idx].second);
             }
-            perform_replicated_field_deletions(fields);
+            perform_replicated_field_deletions(fields, applied);
             break;
           }
         case FIELD_SPACE_CREATION_UPDATE:
@@ -12298,7 +12307,7 @@ namespace Legion {
             std::vector<FieldSpace> spaces(size);
             for (unsigned idx = 0; idx < size; idx++)
               derez.deserialize(spaces[idx]);
-            perform_replicated_field_space_deletions(spaces);
+            perform_replicated_field_space_deletions(spaces, applied);
             break;
           }
         case INDEX_SPACE_CREATION_UPDATE:
@@ -12318,7 +12327,7 @@ namespace Legion {
             std::vector<IndexSpace> spaces(size);
             for (unsigned idx = 0; idx < size; idx++)
               derez.deserialize(spaces[idx]);
-            perform_replicated_index_space_deletions(spaces);
+            perform_replicated_index_space_deletions(spaces, applied);
             break;
           }
         case INDEX_PARTITION_CREATION_UPDATE:
@@ -12338,7 +12347,7 @@ namespace Legion {
             std::vector<IndexPartition> parts(size);
             for (unsigned idx = 0; idx < size; idx++)
               derez.deserialize(parts[idx]);
-            perform_replicated_index_partition_deletions(parts);
+            perform_replicated_index_partition_deletions(parts, applied);
             break;
           }
         default:
@@ -12368,7 +12377,7 @@ namespace Legion {
     
     //--------------------------------------------------------------------------
     void ReplicateContext::register_region_deletions(
-                                               std::vector<LogicalRegion> &regs)
+                   std::vector<LogicalRegion> &regs, std::set<RtEvent> &applied)
     //--------------------------------------------------------------------------
     {
       Serializer rez;
@@ -12380,15 +12389,15 @@ namespace Legion {
       const RtEvent done = 
         shard_manager->broadcast_resource_update(owner_shard, rez);
       // Now do the base call for our context
-      perform_replicated_region_deletions(regs);
+      perform_replicated_region_deletions(regs, applied);
       // Wait for the remote updates to be done
       if (done.exists() && !done.has_triggered())
-        done.wait();
+        applied.insert(done);
     }
 
     //--------------------------------------------------------------------------
     void ReplicateContext::perform_replicated_region_deletions(
-                                               std::vector<LogicalRegion> &regs)
+                   std::vector<LogicalRegion> &regs, std::set<RtEvent> &applied)
     //--------------------------------------------------------------------------
     {
       std::vector<LogicalRegion> delete_now;
@@ -12424,10 +12433,10 @@ namespace Legion {
           // Then tell the region tree forest it can destroy the region
           if (is_total_sharding && is_first_local_shard)
             runtime->forest->destroy_logical_region(delete_now[idx],
-                        runtime->address_space, true/*collective*/);
+                runtime->address_space, applied, true/*collective*/);
           else if (local_shard_id == 0)
             runtime->forest->destroy_logical_region(delete_now[idx],
-                                            runtime->address_space);
+                                      runtime->address_space, applied);
         }
       }
     }
@@ -12457,7 +12466,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ReplicateContext::register_field_deletions(
-                            std::vector<std::pair<FieldSpace,FieldID> > &fields)
+                            std::vector<std::pair<FieldSpace,FieldID> > &fields,
+                            std::set<RtEvent> &applied)
     //--------------------------------------------------------------------------
     {
       Serializer rez;
@@ -12472,15 +12482,16 @@ namespace Legion {
       const RtEvent done = 
         shard_manager->broadcast_resource_update(owner_shard, rez);
       // Now do the base call for our context
-      perform_replicated_field_deletions(fields);
+      perform_replicated_field_deletions(fields, applied);
       // Wait for the remote updates to be done
       if (done.exists() && !done.has_triggered())
-        done.wait();
+        applied.insert(done);
     }
 
     //--------------------------------------------------------------------------
     void ReplicateContext::perform_replicated_field_deletions(
-                            std::vector<std::pair<FieldSpace,FieldID> > &fields)
+                            std::vector<std::pair<FieldSpace,FieldID> > &fields,
+                            std::set<RtEvent> &applied)
     //--------------------------------------------------------------------------
     {
       std::map<FieldSpace,std::vector<FieldID> > delete_now;
@@ -12524,7 +12535,7 @@ namespace Legion {
           }
           for (std::map<FieldSpace,std::vector<FieldID> >::const_iterator it =
                 delete_now.begin(); it != delete_now.end(); it++)
-            runtime->forest->free_fields(it->first, it->second, 
+            runtime->forest->free_fields(it->first, it->second, applied,
                                          is_total_sharding/*collective*/);
         }
       }
@@ -12575,7 +12586,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ReplicateContext::register_field_space_deletions(
-                                                std::vector<FieldSpace> &spaces) 
+                    std::vector<FieldSpace> &spaces, std::set<RtEvent> &applied) 
     //--------------------------------------------------------------------------
     {
       Serializer rez;
@@ -12587,15 +12598,15 @@ namespace Legion {
       const RtEvent done = 
         shard_manager->broadcast_resource_update(owner_shard, rez);
       // Now do the base call for our context
-      perform_replicated_field_space_deletions(spaces);
+      perform_replicated_field_space_deletions(spaces, applied);
       // Wait for the remote updates to be done
       if (done.exists() && !done.has_triggered())
-        done.wait();
+        applied.insert(done);
     }
 
     //--------------------------------------------------------------------------
     void ReplicateContext::perform_replicated_field_space_deletions(
-                                                std::vector<FieldSpace> &spaces) 
+                    std::vector<FieldSpace> &spaces, std::set<RtEvent> &applied) 
     //--------------------------------------------------------------------------
     {
       std::vector<FieldSpace> delete_now;
@@ -12612,7 +12623,7 @@ namespace Legion {
           for (std::vector<FieldSpace>::const_iterator it = 
                 delete_now.begin(); it != delete_now.end(); it++)
             runtime->forest->destroy_field_space(*it, runtime->address_space,
-                                            is_total_sharding/*collective*/);
+                                    applied, is_total_sharding/*collective*/);
         }
       } 
     }
@@ -12639,7 +12650,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ReplicateContext::register_index_space_deletions(
-                                                std::vector<IndexSpace> &spaces)
+                    std::vector<IndexSpace> &spaces, std::set<RtEvent> &applied)
     //--------------------------------------------------------------------------
     {
       Serializer rez;
@@ -12651,15 +12662,15 @@ namespace Legion {
       const RtEvent done = 
         shard_manager->broadcast_resource_update(owner_shard, rez);
       // Now do the base call for our context
-      perform_replicated_index_space_deletions(spaces);
+      perform_replicated_index_space_deletions(spaces, applied);
       // Wait for the remote updates to be done
       if (done.exists() && !done.has_triggered())
-        done.wait();
+        applied.insert(done);
     }
 
     //--------------------------------------------------------------------------
     void ReplicateContext::perform_replicated_index_space_deletions(
-                                                std::vector<IndexSpace> &spaces)
+                    std::vector<IndexSpace> &spaces, std::set<RtEvent> &applied)
     //--------------------------------------------------------------------------
     {
       std::vector<IndexSpace> delete_now;
@@ -12709,7 +12720,7 @@ namespace Legion {
           for (std::vector<IndexSpace>::const_iterator it =
                 delete_now.begin(); it != delete_now.end(); it++)
             runtime->forest->destroy_index_space(*it, runtime->address_space,
-                                             is_total_sharding/*collective*/);
+                                    applied, is_total_sharding/*collective*/);
         }
       }
     }
@@ -12736,7 +12747,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ReplicateContext::register_index_partition_deletions(
-                                             std::vector<IndexPartition> &parts)
+                 std::vector<IndexPartition> &parts, std::set<RtEvent> &applied)
     //--------------------------------------------------------------------------
     {
       Serializer rez;
@@ -12748,15 +12759,15 @@ namespace Legion {
       const RtEvent done = 
         shard_manager->broadcast_resource_update(owner_shard, rez);
       // Now do the base call for our context
-      perform_replicated_index_partition_deletions(parts);
+      perform_replicated_index_partition_deletions(parts, applied);
       // Wait for the remote updates to be done
       if (done.exists() && !done.has_triggered())
-        done.wait();
+        applied.insert(done);
     }
 
     //--------------------------------------------------------------------------
     void ReplicateContext::perform_replicated_index_partition_deletions(
-                                             std::vector<IndexPartition> &parts)
+                 std::vector<IndexPartition> &parts, std::set<RtEvent> &applied)
     //--------------------------------------------------------------------------
     {
       std::vector<IndexPartition> delete_now;
@@ -12822,7 +12833,7 @@ namespace Legion {
           for (std::vector<IndexPartition>::const_iterator it =
                 delete_now.begin(); it != delete_now.end(); it++)
             runtime->forest->destroy_index_partition(*it,runtime->address_space,
-                                               is_total_sharding/*collective*/);
+                                      applied, is_total_sharding/*collective*/);
         }
       }
     }
@@ -13868,7 +13879,14 @@ namespace Legion {
       log_index.debug("Destroying index space %x in task %s (ID %lld)", 
                       handle.id, get_task_name(), get_unique_id());
 #endif
-      runtime->forest->destroy_index_space(handle, runtime->address_space);
+      std::set<RtEvent> preconditions;
+      runtime->forest->destroy_index_space(handle, runtime->address_space,
+                                           preconditions);
+      if (!preconditions.empty())
+      {
+        const RtEvent wait_on = Runtime::merge_events(preconditions);
+        wait_on.wait();
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -13914,7 +13932,14 @@ namespace Legion {
       log_index.debug("Destroying index partition %x in task %s (ID %lld)",
                       handle.id, get_task_name(), get_unique_id());
 #endif
-      runtime->forest->destroy_index_partition(handle, runtime->address_space);
+      std::set<RtEvent> preconditions;
+      runtime->forest->destroy_index_partition(handle, runtime->address_space,
+                                               preconditions);
+      if (!preconditions.empty())
+      {
+        const RtEvent wait_on = Runtime::merge_events(preconditions);
+        wait_on.wait();
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -14249,7 +14274,14 @@ namespace Legion {
       log_field.debug("Destroying field space %x in task %s (ID %lld)", 
                       handle.id, get_task_name(), get_unique_id());
 #endif
-      runtime->forest->destroy_field_space(handle, runtime->address_space);
+      std::set<RtEvent> preconditions;
+      runtime->forest->destroy_field_space(handle, runtime->address_space,
+                                           preconditions);
+      if (!preconditions.empty())
+      {
+        const RtEvent wait_on = Runtime::merge_events(preconditions);
+        wait_on.wait();
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -14276,7 +14308,13 @@ namespace Legion {
             "lexicographically scoped by the task tree.", fid, space.id,
             get_task_name(), get_unique_id())
       // We can free this field immediately
-      runtime->forest->free_field(space, fid);
+      std::set<RtEvent> preconditions;
+      runtime->forest->free_field(space, fid, preconditions);
+      if (!preconditions.empty())
+      {
+        const RtEvent wait_on = Runtime::merge_events(preconditions);
+        wait_on.wait();
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -14313,8 +14351,14 @@ namespace Legion {
             "lexicographically scoped by the task tree.", bad_fid, space.id,
             get_task_name(), get_unique_id())
       // We can free these fields immediately
+      std::set<RtEvent> preconditions;
       const std::vector<FieldID> field_vec(to_free.begin(), to_free.end());
-      runtime->forest->free_fields(space, field_vec);
+      runtime->forest->free_fields(space, field_vec, preconditions);
+      if (!preconditions.empty())
+      {
+        const RtEvent wait_on = Runtime::merge_events(preconditions);
+        wait_on.wait();
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -14378,7 +14422,14 @@ namespace Legion {
                        handle.index_space.id, handle.field_space.id, 
                        get_task_name(), get_unique_id());
 #endif
-      runtime->forest->destroy_logical_region(handle, runtime->address_space);
+      std::set<RtEvent> preconditions;
+      runtime->forest->destroy_logical_region(handle, runtime->address_space,
+                                              preconditions);
+      if (!preconditions.empty())
+      {
+        const RtEvent wait_on = Runtime::merge_events(preconditions);
+        wait_on.wait();
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -14392,7 +14443,14 @@ namespace Legion {
                        "(ID %lld)", handle.index_partition.id, 
                        handle.field_space.id, get_task_name(), get_unique_id());
 #endif
-      runtime->forest->destroy_logical_partition(handle,runtime->address_space);
+      std::set<RtEvent> preconditions;
+      runtime->forest->destroy_logical_partition(handle,runtime->address_space,
+                                                 preconditions);
+      if (!preconditions.empty())
+      {
+        const RtEvent wait_on = Runtime::merge_events(preconditions);
+        wait_on.wait();
+      }
     }
 
     //--------------------------------------------------------------------------

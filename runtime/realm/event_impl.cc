@@ -2406,21 +2406,24 @@ static void *bytedup(const void *data, size_t datalen)
 	//  subscriptions
 	gen_t previous_subscription;
 	bool send_subscription_request = false;
+        NodeID cur_owner = (NodeID) -1;
 	{
 	  AutoHSLLock a(mutex);
 	  previous_subscription = gen_subscribed;
 	  if(gen_subscribed < needed_gen) {
 	    gen_subscribed = needed_gen;
 	    // test ownership while holding the mutex
-	    if(owner != my_node_id)
+	    if(owner != my_node_id) {
 	      send_subscription_request = true;
+              cur_owner = owner;
+            }
 	  }
 	}
 
 	// if we're not the owner, send subscription if we haven't already
 	if(send_subscription_request) {
 	  log_barrier.info() << "subscribing to barrier " << make_barrier(needed_gen) << " (prev=" << previous_subscription << ")";
-	  BarrierSubscribeMessage::send_request(owner, me.id, needed_gen, my_node_id, false/*!forwarded*/);
+	  BarrierSubscribeMessage::send_request(cur_owner, me.id, needed_gen, my_node_id, false/*!forwarded*/);
 	}
       }
 

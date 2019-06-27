@@ -139,10 +139,15 @@ ifneq (${MARCH},)
 endif
 
 INC_FLAGS	+= -I$(LG_RT_DIR) -I$(LG_RT_DIR)/mappers
-ifneq ($(shell uname -s),Darwin)
+# support libraries are OS specific unfortunately
+ifeq ($(shell uname -s),Linux)
 LEGION_LD_FLAGS	+= -lrt -lpthread
-else
+endif
+ifeq ($(shell uname -s),Darwin)
 LEGION_LD_FLAGS	+= -lpthread
+endif
+ifeq ($(shell uname -s),FreeBSD)
+LEGION_LD_FLAGS	+= -lexecinfo -lpthread
 endif
 
 ifeq ($(strip $(USE_HWLOC)),1)
@@ -172,7 +177,11 @@ ifeq ($(strip $(USE_LIBDL)),1)
 CC_FLAGS += -DUSE_LIBDL
 ifneq ($(shell uname -s),Darwin)
 #CC_FLAGS += -rdynamic
-LEGION_LD_FLAGS += -ldl -rdynamic
+# FreeBSD doesn't actually have a separate libdl
+ifneq ($(shell uname -s),FreeBSD)
+LEGION_LD_FLAGS += -ldl
+endif
+LEGION_LD_FLAGS += -rdynamic
 else
 LEGION_LD_FLAGS += -ldl -Wl,-export_dynamic
 endif

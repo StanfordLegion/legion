@@ -7243,6 +7243,7 @@ namespace Legion {
     {
       // We put these operations in the commit stage to make sure that there
       // is no mis-speculation or faults that could potentially affect them
+      std::set<RtEvent> preconditions;
       std::vector<LogicalRegion> regions_to_destroy;
       switch (kind)
       {
@@ -7252,7 +7253,7 @@ namespace Legion {
               parent_ctx->remove_deleted_requirements(deletion_req_indexes,
                                                       regions_to_destroy);
             runtime->forest->destroy_index_space(index_space,
-                                                 runtime->address_space);
+                                     runtime->address_space, preconditions);
             break;
           }
         case INDEX_PARTITION_DELETION:
@@ -7261,7 +7262,7 @@ namespace Legion {
               parent_ctx->remove_deleted_requirements(deletion_req_indexes,
                                                       regions_to_destroy);
             runtime->forest->destroy_index_partition(index_part,
-                                                     runtime->address_space);
+                                     runtime->address_space, preconditions);
             break;
           }
         case FIELD_SPACE_DELETION:
@@ -7270,7 +7271,7 @@ namespace Legion {
               parent_ctx->remove_deleted_requirements(deletion_req_indexes,
                                                       regions_to_destroy);
             runtime->forest->destroy_field_space(field_space,
-                                                 runtime->address_space);
+                                     runtime->address_space, preconditions);
             break;
           }
         case FIELD_DELETION:
@@ -7279,7 +7280,8 @@ namespace Legion {
               runtime->forest->free_local_fields(field_space, 
                             local_fields, local_field_indexes);
             if (!global_fields.empty())
-              runtime->forest->free_fields(field_space, global_fields); 
+              runtime->forest->free_fields(field_space, global_fields, 
+                                           preconditions);
             parent_ctx->remove_deleted_fields(free_fields, parent_req_indexes);
             if (!local_fields.empty())
               parent_ctx->remove_deleted_local_fields(field_space,local_fields);
@@ -7300,7 +7302,7 @@ namespace Legion {
               // If we had no deletion requirements then we know there is
               // nothing to race with and we can just do our deletion
               runtime->forest->destroy_logical_region(logical_region,
-                                                      runtime->address_space);
+                                runtime->address_space, preconditions);
             break;
           }
         case LOGICAL_PARTITION_DELETION:
@@ -7309,7 +7311,7 @@ namespace Legion {
               parent_ctx->remove_deleted_requirements(deletion_req_indexes,
                                                       regions_to_destroy);
             runtime->forest->destroy_logical_partition(logical_part,
-                                            runtime->address_space);
+                                    runtime->address_space, preconditions);
             break;
           }
         default:
@@ -7319,9 +7321,13 @@ namespace Legion {
       {
         for (std::vector<LogicalRegion>::const_iterator it =
               regions_to_destroy.begin(); it != regions_to_destroy.end(); it++)
-          runtime->forest->destroy_logical_region(*it, runtime->address_space);
+          runtime->forest->destroy_logical_region(*it, runtime->address_space,
+                                                  preconditions);
       }
-      complete_operation();
+      if (!preconditions.empty())
+        complete_operation(Runtime::merge_events(preconditions));
+      else
+        complete_operation();
     }
 
     //--------------------------------------------------------------------------
