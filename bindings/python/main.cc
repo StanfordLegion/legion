@@ -13,6 +13,9 @@
  * limitations under the License.
  */
 
+#include "redop.h"
+#include "redop_config.h"
+
 #include "legion.h"
 #include "realm/python/python_module.h"
 #include "realm/python/python_source.h"
@@ -80,6 +83,48 @@ int main(int argc, char **argv)
   }
 
   Runtime::set_top_level_task_id(MAIN_TASK_ID);
+
+  register_reduction_plus_float(REDOP_PLUS_FLOAT, false);
+  register_reduction_plus_double(REDOP_PLUS_DOUBLE, false);
+  register_reduction_plus_int32(REDOP_PLUS_INT32, false);
+  register_reduction_plus_int64(REDOP_PLUS_INT64, false);
+  register_reduction_plus_uint32(REDOP_PLUS_UINT32, false);
+  register_reduction_plus_uint64(REDOP_PLUS_UINT64, false);
+
+  register_reduction_minus_float(REDOP_MINUS_FLOAT, false);
+  register_reduction_minus_double(REDOP_MINUS_DOUBLE, false);
+  register_reduction_minus_int32(REDOP_MINUS_INT32, false);
+  register_reduction_minus_int64(REDOP_MINUS_INT64, false);
+  register_reduction_minus_uint32(REDOP_MINUS_UINT32, false);
+  register_reduction_minus_uint64(REDOP_MINUS_UINT64, false);
+
+  register_reduction_times_float(REDOP_TIMES_FLOAT, false);
+  register_reduction_times_double(REDOP_TIMES_DOUBLE, false);
+  register_reduction_times_int32(REDOP_TIMES_INT32, false);
+  register_reduction_times_int64(REDOP_TIMES_INT64, false);
+  register_reduction_times_uint32(REDOP_TIMES_UINT32, false);
+  register_reduction_times_uint64(REDOP_TIMES_UINT64, false);
+
+  register_reduction_divide_float(REDOP_DIVIDE_FLOAT, false);
+  register_reduction_divide_double(REDOP_DIVIDE_DOUBLE, false);
+  register_reduction_divide_int32(REDOP_DIVIDE_INT32, false);
+  register_reduction_divide_int64(REDOP_DIVIDE_INT64, false);
+  register_reduction_divide_uint32(REDOP_DIVIDE_UINT32, false);
+  register_reduction_divide_uint64(REDOP_DIVIDE_UINT64, false);
+
+  register_reduction_max_float(REDOP_MAX_FLOAT, false);
+  register_reduction_max_double(REDOP_MAX_DOUBLE, false);
+  register_reduction_max_int32(REDOP_MAX_INT32, false);
+  register_reduction_max_int64(REDOP_MAX_INT64, false);
+  register_reduction_max_uint32(REDOP_MAX_UINT32, false);
+  register_reduction_max_uint64(REDOP_MAX_UINT64, false);
+
+  register_reduction_min_float(REDOP_MIN_FLOAT, false);
+  register_reduction_min_double(REDOP_MIN_DOUBLE, false);
+  register_reduction_min_int32(REDOP_MIN_INT32, false);
+  register_reduction_min_int64(REDOP_MIN_INT64, false);
+  register_reduction_min_uint32(REDOP_MIN_UINT32, false);
+  register_reduction_min_uint64(REDOP_MIN_UINT64, false);
 
   return Runtime::start(argc, argv);
 }

@@ -480,15 +480,17 @@ uint32 = Type(numpy.uint32, 'uint32_t')
 uint64 = Type(numpy.uint64, 'uint64_t')
 
 class Privilege(object):
-    __slots__ = ['read', 'write', 'discard']
+    __slots__ = ['read', 'write', 'discard', 'reduce', 'redop_id']
 
-    def __init__(self, read=False, write=False, discard=False):
+    def __init__(self, read=False, write=False, discard=False, reduce=False, redop_id=None):
         self.read = read
         self.write = write
         self.discard = discard
+        self.reduce = reduce
+        self.redop_id = redop_id
 
     def _fields(self):
-        return (self.read, self.write, self.discard)
+        return (self.read, self.write, self.discard, self.reduce)
 
     def __eq__(self, other):
         return isinstance(other, Privilege) and self._fields() == other._fields()
@@ -508,10 +510,15 @@ class Privilege(object):
         if self.discard:
             assert self.write
             bits |= 2 # WRITE_DISCARD
+        elif self.reduce:
+            assert False
         else:
             if self.write: bits = 7 # READ_WRITE
             elif self.read: bits = 1 # READ_ONLY
         return bits
+
+    def _legion_redop_id(self):
+        return self.redop_id
 
 class PrivilegeFields(Privilege):
     __slots__ = ['read', 'write', 'discard', 'fields']
@@ -526,6 +533,22 @@ R = Privilege(read=True)
 RO = Privilege(read=True)
 RW = Privilege(read=True, write=True)
 WD = Privilege(write=True, discard=True)
+
+_redop_operators = ['+', '-', '*', '/', 'max', 'min']
+_redop_types = [float32, float64, int32, int64, uint32, uint64]
+_redop_ids = {}
+_redop_id_next = 101
+def _fill_redop_ids():
+    global _redop_id_next
+    for operator in _redop_operators:
+        _redop_ids[operator] = {}
+        for type in _redop_types:
+            _redop_ids[operator][type] = _redop_id_next
+            _redop_id_next += 1
+_fill_redop_ids()
+
+def Reduce(operator, type):
+    return Privilege(reduce=operator, redop_id=_redop_ids[operator][type])
 
 class Disjointness(object):
     __slots__ = ['kind', 'value']
@@ -1429,12 +1452,20 @@ class _TaskLauncher(object):
             if isinstance(arg, Region):
                 assert i < len(self.task.privileges)
                 priv = self.task.privileges[i]
-                req = c.legion_task_launcher_add_region_requirement_logical_region(
-                    launcher, arg.handle[0],
-                    priv._legion_privilege(),
-                    0, # EXCLUSIVE
-                    arg.parent.handle[0] if arg.parent is not None else arg.handle[0],
-                    0, False)
+                if priv.reduce:
+                    req = c.legion_task_launcher_add_region_requirement_logical_region_reduction(
+                        launcher, arg.handle[0],
+                        priv._legion_redop_id(),
+                        0, # EXCLUSIVE
+                        arg.parent.handle[0] if arg.parent is not None else arg.handle[0],
+                        0, False)
+                else:
+                    req = c.legion_task_launcher_add_region_requirement_logical_region(
+                        launcher, arg.handle[0],
+                        priv._legion_privilege(),
+                        0, # EXCLUSIVE
+                        arg.parent.handle[0] if arg.parent is not None else arg.handle[0],
+                        0, False)
                 if hasattr(priv, 'fields'):
                     assert set(priv.fields) <= set(arg.fspace.field_ids.keys())
                 for name, fid in arg.fspace.field_ids.items():
