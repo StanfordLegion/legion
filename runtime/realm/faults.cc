@@ -18,11 +18,14 @@
 #include "realm/faults.h"
 #include "realm/profiling.h"
 
+#include <stdlib.h>
+#ifndef __FreeBSD__
+// FreeBSD defines alloca() in stdlib.h
 #include <alloca.h>
+#endif
 #include <assert.h>
 #include <execinfo.h>
 #include <cxxabi.h>
-#include <stdlib.h>
 #include <iomanip>
 
 namespace Realm {

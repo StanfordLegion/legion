@@ -27,9 +27,6 @@
 #include <stddef.h>
 #include <functional>
 #include <stdlib.h>
-#ifndef __MACH__
-#include <malloc.h>
-#endif
 #include "legion/legion_config.h"
 #include "legion/legion_template_help.h" // StaticAssert
 #if __cplusplus >= 201103L

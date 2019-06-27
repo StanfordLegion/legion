@@ -47,6 +47,12 @@ if os.execute("bash -c \"[ `uname` == 'Darwin' ]\"") == 0 then
   else
     error("Unable to determine CPU architecture")
   end
+elseif os.execute("bash -c \"[ `uname` == 'FreeBSD' ]\"") == 0 then
+  if os.execute("sysctl -a | grep -q 'hw.instruction_sse: 1'") == 0 then
+    SIMD_REG_SIZE = 16
+  else
+    error("Unable to determine CPU architecture")
+  end
 else
   if os.execute("grep avx /proc/cpuinfo > /dev/null") == 0 then
     SIMD_REG_SIZE = 32
