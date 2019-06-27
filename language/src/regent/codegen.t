@@ -2837,12 +2837,17 @@ local function make_partition_projection_functor(cx, expr, loop_index, color_spa
 
   assert(expr:is(ast.typed.expr.IndexAccess))
 
-  local index = strip_casts(expr.index)
-
-  if index:is(ast.typed.expr.ID) then
-    assert(index.value == loop_index)
+  -- Strip the index for the purpose of checking if this is the
+  -- identity projection functor.
+  local stripped_index = strip_casts(expr.index)
+  if stripped_index:is(ast.typed.expr.ID) then
+    assert(stripped_index.value == loop_index)
     return 0 -- Identity projection functor.
   end
+
+  -- But keep the unstripped index for all other purposes...
+  local index = expr.index
+  local index_type = std.as_read(index.expr_type)
 
   local point = terralib.newsymbol(c.legion_domain_point_t, "point")
 
@@ -2859,12 +2864,6 @@ local function make_partition_projection_functor(cx, expr, loop_index, color_spa
     symbol_setup = quote
       var [symbol] = [int1d]([point])
     end
-  end
-
-  -- Again, if it's a number it has to be converted back through an index type.
-  local index_type = std.as_read(index.expr_type)
-  if index_type:isintegral() then
-    index_type = int1d
   end
 
   -- Generate a projection functor that evaluates `expr`.
