@@ -159,9 +159,11 @@ namespace Legion {
                                            ApEvent domain_ready);
       void compute_partition_disjointness(IndexPartition handle,
                                           RtUserEvent ready_event);
-      void destroy_index_space(IndexSpace handle, AddressSpaceID source);
+      void destroy_index_space(IndexSpace handle, AddressSpaceID source,
+                               std::set<RtEvent> &preconditions);
       void destroy_index_partition(IndexPartition handle, 
-                                   AddressSpaceID source);
+                                   AddressSpaceID source,
+                                   std::set<RtEvent> &preconditions);
     public:
       ApEvent create_equal_partition(Operation *op, 
                                      IndexPartition pid, 
@@ -265,18 +267,21 @@ namespace Legion {
       bool has_index_partition(IndexSpace parent, Color color);
     public:
       void create_field_space(FieldSpace handle, DistributedID did);
-      void destroy_field_space(FieldSpace handle, AddressSpaceID source);
+      void destroy_field_space(FieldSpace handle, AddressSpaceID source,
+                               std::set<RtEvent> &preconditions);
       // Return true if local is set to true and we actually performed the 
       // allocation.  It is an error if the field already existed and the
       // allocation was not local.
       bool allocate_field(FieldSpace handle, size_t field_size, 
                           FieldID fid, CustomSerdezID serdez_id);
-      void free_field(FieldSpace handle, FieldID fid);
+      void free_field(FieldSpace handle, FieldID fid,
+                      std::set<RtEvent> &preconditions);
       void allocate_fields(FieldSpace handle, const std::vector<size_t> &sizes,
                            const std::vector<FieldID> &resulting_fields,
                            CustomSerdezID serdez_id);
       void free_fields(FieldSpace handle, 
-                       const std::vector<FieldID> &to_free);
+                       const std::vector<FieldID> &to_free,
+                       std::set<RtEvent> &preconditions);
     public:
       bool allocate_local_fields(FieldSpace handle, 
                                  const std::vector<FieldID> &resulting_fields,
@@ -303,9 +308,11 @@ namespace Legion {
     public:
       void create_logical_region(LogicalRegion handle);
       void destroy_logical_region(LogicalRegion handle, 
-                                  AddressSpaceID source);
+                                  AddressSpaceID source,
+                                  std::set<RtEvent> &preconditions);
       void destroy_logical_partition(LogicalPartition handle,
-                                     AddressSpaceID source);
+                                     AddressSpaceID source,
+                                     std::set<RtEvent> &preconditions);
     public:
       LogicalPartition get_logical_partition(LogicalRegion parent, 
                                              IndexPartition handle);
@@ -1575,14 +1582,16 @@ namespace Legion {
       };
       class DestroyNodeFunctor {
       public:
-        DestroyNodeFunctor(IndexSpace h, AddressSpaceID src, Runtime *rt)
-          : handle(h), source(src), runtime(rt) { }
+        DestroyNodeFunctor(IndexSpace h, AddressSpaceID src, Runtime *rt,
+                           std::set<RtEvent> &ap)
+          : handle(h), source(src), runtime(rt), applied(ap) { }
       public:
         void apply(AddressSpaceID target);
       public:
         const IndexSpace handle;
         const AddressSpaceID source;
         Runtime *const runtime;
+        std::set<RtEvent> &applied;
       };
       class DestructionFunctor {
       public:
@@ -1697,7 +1706,8 @@ namespace Legion {
       virtual size_t get_volume(void) = 0;
       virtual size_t get_num_dims(void) const = 0;
       virtual bool contains_point(const void *realm_point,TypeTag type_tag) = 0;
-      virtual bool destroy_node(AddressSpaceID source) = 0;
+      virtual bool destroy_node(AddressSpaceID source,
+                                std::set<RtEvent> &applied) = 0;
     public:
       virtual LegionColor get_max_linearized_color(void) = 0;
       virtual LegionColor linearize_color(const void *realm_color,
@@ -1865,7 +1875,8 @@ namespace Legion {
       virtual size_t get_volume(void);
       virtual size_t get_num_dims(void) const;
       virtual bool contains_point(const void *realm_point, TypeTag type_tag);
-      virtual bool destroy_node(AddressSpaceID source);
+      virtual bool destroy_node(AddressSpaceID source,
+                                std::set<RtEvent> &applied);
     public:
       virtual LegionColor get_max_linearized_color(void);
       virtual LegionColor linearize_color(const void *realm_color,
@@ -2425,7 +2436,8 @@ namespace Legion {
       bool intersects_with(IndexPartNode *other, bool compute = true); 
       bool dominates(IndexSpaceNode *other);
       bool dominates(IndexPartNode *other);
-      virtual bool destroy_node(AddressSpaceID source, bool top) = 0;
+      virtual bool destroy_node(AddressSpaceID source, bool top,
+                                std::set<RtEvent> &applied) = 0;
     public:
       static void handle_disjointness_test(IndexPartNode *parent,
                                            IndexSpaceNode *left,
@@ -2501,7 +2513,8 @@ namespace Legion {
     public:
       IndexPartNodeT& operator=(const IndexPartNodeT &rhs);
     public:
-      virtual bool destroy_node(AddressSpaceID source, bool top); 
+      virtual bool destroy_node(AddressSpaceID source, bool top,
+                                std::set<RtEvent> &applied); 
     };
 
     /**
@@ -2673,9 +2686,10 @@ namespace Legion {
       RtEvent allocate_fields(const std::vector<size_t> &sizes,
                               const std::vector<FieldID> &fids,
                               CustomSerdezID serdez_id);
-      void free_field(FieldID fid, AddressSpaceID source);
+      void free_field(FieldID fid, AddressSpaceID source,
+                      std::set<RtEvent> &applied);
       void free_fields(const std::vector<FieldID> &to_free,
-                       AddressSpaceID source);
+                       AddressSpaceID source, std::set<RtEvent> &applied);
     public:
       bool allocate_local_fields(const std::vector<FieldID> &fields,
                                  const std::vector<size_t> &sizes,
@@ -2705,7 +2719,7 @@ namespace Legion {
       RtEvent add_instance(LogicalRegion inst, AddressSpaceID source);
       bool has_instance(RegionTreeID tid);
       void remove_instance(RegionNode *inst);
-      bool destroy_node(AddressSpaceID source);
+      bool destroy_node(AddressSpaceID source, std::set<RtEvent> &applied);
     public:
       FieldMask get_field_mask(const std::set<FieldID> &fields) const;
       unsigned get_field_index(FieldID fid) const;
@@ -3070,14 +3084,16 @@ namespace Legion {
       };
       class DestructionFunctor {
       public:
-        DestructionFunctor(LogicalRegion h, Runtime *rt, AddressSpaceID src)
-          : handle(h), runtime(rt), source(src) { }
+        DestructionFunctor(LogicalRegion h, Runtime *rt, AddressSpaceID src,
+                           std::set<RtEvent> &ap)
+          : handle(h), runtime(rt), source(src), applied(ap) { }
       public:
         void apply(AddressSpaceID target);
       public:
         const LogicalRegion handle;
         Runtime *const runtime;
         const AddressSpaceID source;
+        std::set<RtEvent> &applied;
       };
     public:
       RegionNode(LogicalRegion r, PartitionNode *par, IndexSpaceNode *row_src,
@@ -3096,7 +3112,7 @@ namespace Legion {
       void add_child(PartitionNode *child);
       void remove_child(const LegionColor p);
     public:
-      bool destroy_node(AddressSpaceID source);
+      bool destroy_node(AddressSpaceID source, std::set<RtEvent> &applied);
     public:
       virtual unsigned get_depth(void) const;
       virtual LegionColor get_color(void) const;
@@ -3206,14 +3222,16 @@ namespace Legion {
       };
       class DestructionFunctor {
       public:
-        DestructionFunctor(LogicalPartition h, Runtime *rt, AddressSpaceID src)
-          : handle(h), runtime(rt), source(src) { }
+        DestructionFunctor(LogicalPartition h, Runtime *rt, AddressSpaceID src,
+                           std::set<RtEvent> &ap)
+          : handle(h), runtime(rt), source(src), applied(ap) { }
       public:
         void apply(AddressSpaceID target);
       public:
         const LogicalPartition handle;
         Runtime *const runtime;
         const AddressSpaceID source;
+        std::set<RtEvent> &applied;
       };
     public:
       PartitionNode(LogicalPartition p, RegionNode *par, 
@@ -3232,7 +3250,8 @@ namespace Legion {
       RegionNode* get_child(const LegionColor c);
       void add_child(RegionNode *child);
       void remove_child(const LegionColor c);
-      bool destroy_node(AddressSpaceID source, bool top);
+      bool destroy_node(AddressSpaceID source, bool top, 
+                        std::set<RtEvent> &applied);
     public:
       virtual unsigned get_depth(void) const;
       virtual LegionColor get_color(void) const;

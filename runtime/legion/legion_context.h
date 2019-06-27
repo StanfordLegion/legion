@@ -398,25 +398,30 @@ namespace Legion {
       virtual void register_region_creations(
                      std::set<LogicalRegion> &regions);
       virtual void register_region_deletions(
-                     std::vector<LogicalRegion> &regions);
+                     std::vector<LogicalRegion> &regions,
+                     std::set<RtEvent> &preconditions);
       virtual void register_field_creations(
             std::set<std::pair<FieldSpace,FieldID> > &fields);
       virtual void register_field_deletions(
-            std::vector<std::pair<FieldSpace,FieldID> > &fields);
+            std::vector<std::pair<FieldSpace,FieldID> > &fields,
+            std::set<RtEvent> &preconditions);
       virtual void register_field_space_creations(
                           std::set<FieldSpace> &spaces);
       virtual void register_latent_field_spaces(
                           std::map<FieldSpace,unsigned> &spaces);
       virtual void register_field_space_deletions(
-                          std::vector<FieldSpace> &spaces);
+                          std::vector<FieldSpace> &spaces,
+                          std::set<RtEvent> &preconditions);
       virtual void register_index_space_creations(
                           std::set<IndexSpace> &spaces);
       virtual void register_index_space_deletions(
-                          std::vector<IndexSpace> &spaces);
+                          std::vector<IndexSpace> &spaces,
+                          std::set<RtEvent> &preconditions);
       virtual void register_index_partition_creations(
                           std::set<IndexPartition> &parts);
       virtual void register_index_partition_deletions(
-                          std::vector<IndexPartition> &parts);
+                          std::vector<IndexPartition> &parts,
+                          std::set<RtEvent> &preconditions);
     public:
       void register_region_creation(LogicalRegion handle, bool task_local);
     public:
@@ -434,7 +439,7 @@ namespace Legion {
       void destroy_user_lock(Reservation r);
       void destroy_user_barrier(ApBarrier b);
     public:
-      void report_leaks_and_duplicates(void);
+      void report_leaks_and_duplicates(std::set<RtEvent> &preconditions);
     public:
       void analyze_destroy_index_space(IndexSpace handle,
                                   std::vector<RegionRequirement> &delete_reqs,

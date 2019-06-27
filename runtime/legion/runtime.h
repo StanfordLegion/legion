@@ -2245,15 +2245,20 @@ namespace Legion {
       void send_top_level_region_return(AddressSpaceID target, Serializer &rez);
       void send_logical_region_node(AddressSpaceID target, Serializer &rez);
       void send_index_space_destruction(IndexSpace handle, 
-                                        AddressSpaceID target);
+                                        AddressSpaceID target,
+                                        std::set<RtEvent> &applied);
       void send_index_partition_destruction(IndexPartition handle, 
-                                            AddressSpaceID target);
+                                            AddressSpaceID target,
+                                            std::set<RtEvent> &applied);
       void send_field_space_destruction(FieldSpace handle, 
-                                        AddressSpaceID target);
+                                        AddressSpaceID target,
+                                        std::set<RtEvent> &applied);
       void send_logical_region_destruction(LogicalRegion handle, 
-                                           AddressSpaceID target);
+                                           AddressSpaceID target,
+                                           std::set<RtEvent> *applied);
       void send_logical_partition_destruction(LogicalPartition handle,
-                                              AddressSpaceID target);
+                                              AddressSpaceID target,
+                                              std::set<RtEvent> *applied);
       void send_individual_remote_complete(Processor target, Serializer &rez);
       void send_individual_remote_commit(Processor target, Serializer &rez);
       void send_slice_remote_mapped(Processor target, Serializer &rez);

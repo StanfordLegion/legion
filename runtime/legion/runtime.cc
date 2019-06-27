@@ -14498,13 +14498,17 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void Runtime::send_index_space_destruction(IndexSpace handle, 
-                                               AddressSpaceID target)
+                                               AddressSpaceID target,
+                                               std::set<RtEvent> &applied)
     //--------------------------------------------------------------------------
     {
       Serializer rez;
       {
         RezCheck z(rez);
         rez.serialize(handle);
+        const RtUserEvent done = create_rt_user_event();
+        rez.serialize(done);
+        applied.insert(done);
       }
       // Put this message on the same virtual channel as the unregister
       // messages for distributed collectables to make sure that they 
@@ -14515,13 +14519,17 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void Runtime::send_index_partition_destruction(IndexPartition handle, 
-                                                   AddressSpaceID target)
+                                                   AddressSpaceID target,
+                                                   std::set<RtEvent> &applied)
     //--------------------------------------------------------------------------
     {
       Serializer rez;
       {
         RezCheck z(rez);
         rez.serialize(handle);
+        const RtUserEvent done = create_rt_user_event();
+        rez.serialize(done);
+        applied.insert(done);
       }
       // Put this message on the same virtual channel as the unregister
       // messages for distributed collectables to make sure that they 
@@ -14533,13 +14541,17 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void Runtime::send_field_space_destruction(FieldSpace handle, 
-                                               AddressSpaceID target)
+                                               AddressSpaceID target,
+                                               std::set<RtEvent> &applied)
     //--------------------------------------------------------------------------
     {
       Serializer rez;
       {
         RezCheck z(rez);
         rez.serialize(handle);
+        const RtUserEvent done = create_rt_user_event();
+        rez.serialize(done);
+        applied.insert(done);
       }
       // Put this message on the same virtual channel as the unregister
       // messages for distributed collectables to make sure that they 
@@ -14551,13 +14563,22 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void Runtime::send_logical_region_destruction(LogicalRegion handle, 
-                                                  AddressSpaceID target)
+                                                  AddressSpaceID target,
+                                                  std::set<RtEvent> *applied)
     //--------------------------------------------------------------------------
     {
       Serializer rez;
       {
         RezCheck z(rez);
         rez.serialize(handle);
+        if (applied != NULL)
+        {
+          const RtUserEvent done = create_rt_user_event();
+          rez.serialize(done);
+          applied->insert(done);
+        }
+        else
+          rez.serialize(RtUserEvent::NO_RT_USER_EVENT);
       }
       // Put this message on the same virtual channel as the unregister
       // messages for distributed collectables to make sure that they 
@@ -14569,13 +14590,22 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void Runtime::send_logical_partition_destruction(
-                              LogicalPartition handle, AddressSpaceID target)
+                              LogicalPartition handle, AddressSpaceID target,
+                              std::set<RtEvent> *applied)
     //--------------------------------------------------------------------------
     {
       Serializer rez;
       {
         RezCheck z(rez);
         rez.serialize(handle);
+        if (applied != NULL)
+        {
+          const RtUserEvent done = create_rt_user_event();
+          rez.serialize(done);
+          applied->insert(done);
+        }
+        else
+          rez.serialize(RtUserEvent::NO_RT_USER_EVENT);
       }
       // Put this message on the same virtual channel as the unregister
       // messages for distributed collectables to make sure that they 
@@ -15821,7 +15851,17 @@ namespace Legion {
       DerezCheck z(derez);
       IndexSpace handle;
       derez.deserialize(handle);
-      forest->destroy_index_space(handle, source);
+      RtUserEvent done;
+      derez.deserialize(done);
+#ifdef DEBUG_LEGION
+      assert(done.exists());
+#endif
+      std::set<RtEvent> applied;
+      forest->destroy_index_space(handle, source, applied);
+      if (!applied.empty())
+        Runtime::trigger_event(done, Runtime::merge_events(applied));
+      else
+        Runtime::trigger_event(done);
     }
 
     //--------------------------------------------------------------------------
@@ -15832,7 +15872,17 @@ namespace Legion {
       DerezCheck z(derez);
       IndexPartition handle;
       derez.deserialize(handle);
-      forest->destroy_index_partition(handle, source);
+      RtUserEvent done;
+      derez.deserialize(done);
+#ifdef DEBUG_LEGION
+      assert(done.exists());
+#endif
+      std::set<RtEvent> applied;
+      forest->destroy_index_partition(handle, source, applied);
+      if (!applied.empty())
+        Runtime::trigger_event(done, Runtime::merge_events(applied));
+      else
+        Runtime::trigger_event(done);
     }
 
     //--------------------------------------------------------------------------
@@ -15843,7 +15893,17 @@ namespace Legion {
       DerezCheck z(derez);
       FieldSpace handle;
       derez.deserialize(handle);
-      forest->destroy_field_space(handle, source);
+      RtUserEvent done;
+      derez.deserialize(done);
+#ifdef DEBUG_LEGION
+      assert(done.exists());
+#endif
+      std::set<RtEvent> applied;
+      forest->destroy_field_space(handle, source, applied);
+      if (!applied.empty())
+        Runtime::trigger_event(done, Runtime::merge_events(applied));
+      else
+        Runtime::trigger_event(done);
     }
 
     //--------------------------------------------------------------------------
@@ -15854,7 +15914,17 @@ namespace Legion {
       DerezCheck z(derez);
       LogicalRegion handle;
       derez.deserialize(handle);
-      forest->destroy_logical_region(handle, source);
+      RtUserEvent done;
+      derez.deserialize(done);
+      std::set<RtEvent> applied;
+      forest->destroy_logical_region(handle, source, applied);
+      if (done.exists())
+      {
+        if (!applied.empty())
+          Runtime::trigger_event(done, Runtime::merge_events(applied));
+        else
+          Runtime::trigger_event(done);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -15865,7 +15935,17 @@ namespace Legion {
       DerezCheck z(derez);
       LogicalPartition handle;
       derez.deserialize(handle);
-      forest->destroy_logical_partition(handle, source);
+      RtUserEvent done;
+      derez.deserialize(done);
+      std::set<RtEvent> applied;
+      forest->destroy_logical_partition(handle, source, applied);
+      if (done.exists())
+      {
+        if (!applied.empty())
+          Runtime::trigger_event(done, Runtime::merge_events(applied));
+        else
+          Runtime::trigger_event(done);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -17791,9 +17871,16 @@ namespace Legion {
             memory_managers.begin(); it != memory_managers.end(); it++)
         it->second->prepare_for_shutdown();
       // Destroy any index slice spaces that we made during execution
+      std::set<RtEvent> applied;
       for (std::map<std::pair<Domain,TypeTag>,IndexSpace>::const_iterator it =
             index_slice_spaces.begin(); it != index_slice_spaces.end(); it++)
-        forest->destroy_index_space(it->second, address_space);
+        forest->destroy_index_space(it->second, address_space, applied);
+      if (!applied.empty())
+      {
+        const RtEvent wait_on = Runtime::merge_events(applied);
+        if (wait_on.exists() && !wait_on.has_triggered())
+          wait_on.wait();
+      }
       prepared_for_shutdown = true;
     }
 

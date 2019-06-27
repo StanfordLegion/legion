@@ -48,34 +48,40 @@ namespace Legion {
       virtual void register_region_creations(
                      std::set<LogicalRegion> &regions) = 0;
       virtual void register_region_deletions(
-                     std::vector<LogicalRegion> &regions) = 0;
+                     std::vector<LogicalRegion> &regions,
+                     std::set<RtEvent> &preconditions) = 0;
     public:
       virtual void register_field_creations(
             std::set<std::pair<FieldSpace,FieldID> > &fields) = 0;
       virtual void register_field_deletions(
-            std::vector<std::pair<FieldSpace,FieldID> > &fields) = 0;
+            std::vector<std::pair<FieldSpace,FieldID> > &fields,
+            std::set<RtEvent> &preconditions) = 0;
     public:
       virtual void register_field_space_creations(
                           std::set<FieldSpace> &spaces) = 0;
       virtual void register_latent_field_spaces(
                           std::map<FieldSpace,unsigned> &spaces) = 0;
       virtual void register_field_space_deletions(
-                          std::vector<FieldSpace> &spaces) = 0;
+                          std::vector<FieldSpace> &spaces,
+                          std::set<RtEvent> &preconditions) = 0;
     public:
       virtual void register_index_space_creations(
                           std::set<IndexSpace> &spaces) = 0;
       virtual void register_index_space_deletions(
-                          std::vector<IndexSpace> &spaces) = 0;
+                          std::vector<IndexSpace> &spaces,
+                          std::set<RtEvent> &preconditions) = 0;
     public:
       virtual void register_index_partition_creations(
                           std::set<IndexPartition> &parts) = 0;
       virtual void register_index_partition_deletions(
-                          std::vector<IndexPartition> &parts) = 0;
+                          std::vector<IndexPartition> &parts,
+                          std::set<RtEvent> &preconditions) = 0;
     public:
-      void return_resources(ResourceTracker *target);
+      void return_resources(ResourceTracker *target,
+                            std::set<RtEvent> &preconditions);
       void pack_resources_return(Serializer &rez, AddressSpaceID target);
-      static void unpack_resources_return(Deserializer &derez,
-                                          ResourceTracker *target);
+      static RtEvent unpack_resources_return(Deserializer &derez,
+                                             ResourceTracker *target);
     protected:
       std::set<LogicalRegion>                       created_regions;
       std::map<LogicalRegion,bool>                  local_regions;
@@ -922,8 +928,9 @@ namespace Legion {
                                RtEvent applied_condition, 
                                ApEvent restrict_postcondition);
       void return_slice_complete(unsigned points,
+                                 RtEvent applied_condition,
                                  ApEvent slice_postcondition);
-      void return_slice_commit(unsigned points);
+      void return_slice_commit(unsigned points, RtEvent applied_condition);
     public:
       void unpack_slice_mapped(Deserializer &derez, AddressSpaceID source);
       void unpack_slice_complete(Deserializer &derez);
@@ -953,6 +960,8 @@ namespace Legion {
       std::deque<SliceTask*> origin_mapped_slices;
     protected:
       std::set<RtEvent> map_applied_conditions;
+      std::set<RtEvent> complete_preconditions;
+      std::set<RtEvent> commit_preconditions;
       std::map<PhysicalManager*,std::pair<unsigned,bool> > acquired_instances;
     protected:
       // Whether we have to do intra-task alias analysis
@@ -1028,10 +1037,11 @@ namespace Legion {
     public:
       virtual void record_reference_mutation_effect(RtEvent event);
     public:
-      void return_privileges(TaskContext *point_context);
-      void record_child_mapped(RtEvent child_complete, 
+      void return_privileges(TaskContext *point_context,
+                             std::set<RtEvent> &preconditions);
+      void record_child_mapped(RtEvent child_mapped, 
                                ApEvent restrict_postcondition);
-      void record_child_complete(void);
+      void record_child_complete(RtEvent child_complete);
       void record_child_committed(RtEvent commit_precondition = 
                                   RtEvent::NO_RT_EVENT);
     protected:
@@ -1040,33 +1050,39 @@ namespace Legion {
       void trigger_slice_commit(void);
     protected:
       void pack_remote_mapped(Serializer &rez, RtEvent applied_condition);
-      void pack_remote_complete(Serializer &rez, ApEvent slice_postcondition); 
-      void pack_remote_commit(Serializer &rez);
+      void pack_remote_complete(Serializer &rez, RtEvent applied_condition,
+                                ApEvent slice_postcondition); 
+      void pack_remote_commit(Serializer &rez, RtEvent applied_condition);
     public:
       static void handle_slice_return(Runtime *rt, Deserializer &derez);
     public: // Privilege tracker methods
       virtual void register_region_creations(
                      std::set<LogicalRegion> &regions);
       virtual void register_region_deletions(
-                     std::vector<LogicalRegion> &regions);
+                     std::vector<LogicalRegion> &regions,
+                     std::set<RtEvent> &preconditions);
       virtual void register_field_creations(
             std::set<std::pair<FieldSpace,FieldID> > &fields);
       virtual void register_field_deletions(
-            std::vector<std::pair<FieldSpace,FieldID> > &fields);
+            std::vector<std::pair<FieldSpace,FieldID> > &fields,
+            std::set<RtEvent> &preconditions);
       virtual void register_field_space_creations(
                           std::set<FieldSpace> &spaces);
       virtual void register_latent_field_spaces(
                           std::map<FieldSpace,unsigned> &spaces);
       virtual void register_field_space_deletions(
-                          std::vector<FieldSpace> &spaces);
+                          std::vector<FieldSpace> &spaces,
+                          std::set<RtEvent> &preconditions);
       virtual void register_index_space_creations(
                           std::set<IndexSpace> &spaces);
       virtual void register_index_space_deletions(
-                          std::vector<IndexSpace> &spaces);
+                          std::vector<IndexSpace> &spaces,
+                          std::set<RtEvent> &preconditions);
       virtual void register_index_partition_creations(
                           std::set<IndexPartition> &parts);
       virtual void register_index_partition_deletions(
-                          std::vector<IndexPartition> &parts);
+                          std::vector<IndexPartition> &parts,
+                          std::set<RtEvent> &preconditions);
     public:
       // From MemoizableOp
       virtual void replay_analysis(void);
@@ -1091,6 +1107,7 @@ namespace Legion {
       std::map<PhysicalManager*,std::pair<unsigned,bool> > acquired_instances;
       std::set<RtEvent> map_applied_conditions;
       std::set<ApEvent> effects_postconditions;
+      std::set<RtEvent> complete_preconditions;
       std::set<RtEvent> commit_preconditions;
     };
 
