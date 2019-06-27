@@ -2708,8 +2708,6 @@ void EndpointManager::stop_threads(void)
     //assert(false);
   }
 #endif
-
-  delete endpoint_manager;
 }
 
 void EndpointManager::polling_worker_loop(void)
@@ -2753,6 +2751,8 @@ void stop_activemsg_threads(void)
   endpoint_manager->stop_threads();
 	
   incoming_message_manager->shutdown();
+
+  delete endpoint_manager;
   delete incoming_message_manager;
 
 #ifdef REALM_PROFILE_AM_HANDLERS
