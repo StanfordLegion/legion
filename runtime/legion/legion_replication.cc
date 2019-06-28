@@ -1983,6 +1983,13 @@ namespace Legion {
       ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
       std::set<RtEvent> applied;
+      // TODO: figure out how to turn collective deletion back on
+      // This is actually very hard given the way that references
+      // have been set up in the region tree and how we call
+      // destroy_node on the region tree. Be very careful turning
+      // this on without changing how destroy_node works for
+      // primitives in the region tree to avoid races.
+#ifdef COLLECTIVE_DELETION
       if (is_total_sharding && is_first_local_shard)
       {
         switch (kind)
@@ -2047,6 +2054,9 @@ namespace Legion {
         }
       }
       else if (repl_ctx->owner_shard->shard_id == 0)
+#else
+      if (repl_ctx->owner_shard->shard_id == 0)
+#endif
       {
         // Shard 0 will handle the actual deletions
         switch (kind)
