@@ -14590,9 +14590,10 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(registered);
 #endif
+      const AddressSpaceID handle_owner_space = get_owner_space();
       if (!collective)
       {
-        if (is_owner())
+        if (handle_owner_space == local_space)
         {
           NodeSet target_instances;
           find_remote_instances(target_instances);
@@ -14603,15 +14604,15 @@ namespace Legion {
             target_instances.map(functor);
           }
         }
-        else if (source != owner_space)
-          context->runtime->send_logical_region_destruction(handle, owner_space,
-                                                            &applied);
+        else if (source != handle_owner_space)
+          context->runtime->send_logical_region_destruction(handle, 
+                                      handle_owner_space, &applied);
       }
       std::vector<PartitionNode*> color_map_copy;
       // If we're the owner then we need to traverse down the tree
       // Need to recurse down the tree and do the same thing for our children
       // We need a copy in case we end up deleting anything
-      if (is_owner() || collective)
+      if ((handle_owner_space == local_space) || collective)
       {
         unsigned index = 0;
         AutoLock n_lock(node_lock,1,false/*exclusive*/);
@@ -15801,9 +15802,10 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(registered);
 #endif
+      const AddressSpaceID handle_owner_space = get_owner_space();
       if (!collective)
       {
-        if (is_owner())
+        if (handle_owner_space == local_space)
         {
           NodeSet target_instances;
           find_remote_instances(target_instances);
@@ -15814,15 +15816,15 @@ namespace Legion {
             target_instances.map(functor);
           }
         }
-        else if (source != owner_space)
+        else if (source != handle_owner_space)
           context->runtime->send_logical_partition_destruction(handle, 
-                                               owner_space, &applied);
+                                         handle_owner_space, &applied);
       }
       std::vector<RegionNode*> color_map_copy;
       // If we're the owner then we need to traverse down the tree
       // Need to recurse down the tree and do the same thing for our children
       // We need a copy in case we end up deleting anything
-      if (is_owner() || collective)
+      if ((handle_owner_space == local_space) || collective)
       {
         unsigned index = 0;
         AutoLock n_lock(node_lock,1,false/*exclusive*/);
