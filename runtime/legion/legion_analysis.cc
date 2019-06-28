@@ -7976,6 +7976,7 @@ namespace Legion {
       std::set<RtEvent> owner_preconditions;
       AutoLock eq(eq_lock); 
 #ifdef DEBUG_LEGION
+      assert(!is_logical_owner());
       assert(valid_instances.empty());
       assert(reduction_instances.empty());
       assert(restricted_instances.empty());
@@ -8223,6 +8224,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock eq(eq_lock);
+#ifdef DEBUG_LEGION
+      // We should never be told that we're the new owner this way
+      assert(new_logical_owner != local_space);
+#endif
       // If we are the owner then we know this update is stale so ignore it
       if (!is_logical_owner())
         logical_owner_space = new_logical_owner;
@@ -9043,7 +9048,8 @@ namespace Legion {
       {
         // Check to see if the request bounced off a stale owner 
         // and we should send the update message
-        if ((eq_source != analysis.previous) && (eq_source != local_space))
+        if ((eq_source != analysis.previous) && (eq_source != local_space) &&
+            (eq_source != logical_owner_space))
         {
           RtUserEvent notification_event = Runtime::create_rt_user_event();
           Serializer rez;
@@ -9208,7 +9214,8 @@ namespace Legion {
         // No need to do the migration in this case
         // Check to see if the request bounced off a stale owner 
         // and we should send the update message
-        if ((eq_source != analysis.previous) && (eq_source != local_space))
+        if ((eq_source != analysis.previous) && (eq_source != local_space) &&
+            (eq_source != logical_owner_space))
         {
           RtUserEvent notification_event = Runtime::create_rt_user_event();
           Serializer rez;
