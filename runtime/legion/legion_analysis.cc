@@ -3597,6 +3597,8 @@ namespace Legion {
     {
       const DeferPerformTraversalArgs *dargs = 
         (const DeferPerformTraversalArgs*)args;
+      // Get this before doing anything
+      const bool on_heap = dargs->analysis->on_heap;
       std::set<RtEvent> deferral_events, applied_events;
       dargs->analysis->perform_traversal(dargs->set, *(dargs->mask), 
           deferral_events, applied_events, NULL/*remove mask*/,
@@ -3611,7 +3613,7 @@ namespace Legion {
             Runtime::merge_events(applied_events));
       else
         Runtime::trigger_event(dargs->applied_event);
-      if (dargs->analysis->on_heap && dargs->analysis->remove_reference())
+      if (on_heap && dargs->analysis->remove_reference())
         delete dargs->analysis;
       delete dargs->mask;
     }
@@ -3634,6 +3636,8 @@ namespace Legion {
     {
       const DeferPerformRemoteArgs *dargs = (const DeferPerformRemoteArgs*)args;
       std::set<RtEvent> applied_events;
+      // Get this before doing anything
+      const bool on_heap = dargs->analysis->on_heap;
       const RtEvent done = dargs->analysis->perform_remote(RtEvent::NO_RT_EVENT,
                                       applied_events, true/*already deferred*/);
       Runtime::trigger_event(dargs->done_event, done);
@@ -3642,7 +3646,7 @@ namespace Legion {
             Runtime::merge_events(applied_events));
       else
         Runtime::trigger_event(dargs->applied_event);
-      if (dargs->analysis->on_heap && dargs->analysis->remove_reference())
+      if (on_heap && dargs->analysis->remove_reference())
         delete dargs->analysis;
     }
 
@@ -3664,15 +3668,17 @@ namespace Legion {
     {
       const DeferPerformUpdateArgs *dargs = (const DeferPerformUpdateArgs*)args;
       std::set<RtEvent> applied_events;
+      // Get this before doing anything
+      const bool on_heap = dargs->analysis->on_heap;
       const RtEvent done =dargs->analysis->perform_updates(RtEvent::NO_RT_EVENT,
-                                      applied_events, true/*already deferred*/);
+                                      applied_events, true/*already deferred*/); 
       Runtime::trigger_event(dargs->done_event, done);
       if (!applied_events.empty())
         Runtime::trigger_event(dargs->applied_event, 
             Runtime::merge_events(applied_events));
       else
         Runtime::trigger_event(dargs->applied_event);
-      if (dargs->analysis->on_heap && dargs->analysis->remove_reference())
+      if (on_heap && dargs->analysis->remove_reference())
         delete dargs->analysis;
     }
 
@@ -3694,15 +3700,17 @@ namespace Legion {
     {
       const DeferPerformOutputArgs *dargs = (const DeferPerformOutputArgs*)args;
       std::set<RtEvent> applied_events;
+      const bool on_heap = dargs->analysis->on_heap;
       const ApEvent effects = dargs->analysis->perform_output(
           RtEvent::NO_RT_EVENT, applied_events, true/*already deferred*/);
+      // Get this before doing anything
       Runtime::trigger_event(dargs->effects_event, effects);
       if (!applied_events.empty())
         Runtime::trigger_event(dargs->applied_event, 
             Runtime::merge_events(applied_events));
       else
         Runtime::trigger_event(dargs->applied_event);
-      if (dargs->analysis->on_heap && dargs->analysis->remove_reference())
+      if (on_heap && dargs->analysis->remove_reference())
         delete dargs->analysis;
     }
 
