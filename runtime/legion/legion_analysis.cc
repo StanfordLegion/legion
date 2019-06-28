@@ -7507,13 +7507,42 @@ namespace Legion {
           rez.serialize(it->first->effects_applied);
       }
       // Pack subsets
+      // We're only allowed to keep the complete subsets on this node
+      // so we need to filter anything that isn't fully refined
+      FieldMask incomplete_refinements;
+      if (!unrefined_remainders.empty())
+        incomplete_refinements = unrefined_remainders.get_valid_mask();
+      if (!disjoint_partition_refinements.empty())
+        incomplete_refinements |= 
+          disjoint_partition_refinements.get_valid_mask();
+      std::vector<EquivalenceSet*> to_delete;
       rez.serialize<size_t>(subsets.size());
-      for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
+      for (FieldMaskSet<EquivalenceSet>::iterator it = 
             subsets.begin(); it != subsets.end(); it++)
       {
         rez.serialize(it->first->did);
         rez.serialize(it->second);
+        if (!!incomplete_refinements)
+        {
+          it.filter(incomplete_refinements);
+          if (!it->second)
+            to_delete.push_back(it->first);
+        }
       }
+      // Remove all the subsets which are not valid here any longer
+      if (!to_delete.empty())
+      {
+        for (std::vector<EquivalenceSet*>::const_iterator it = 
+              to_delete.begin(); it != to_delete.end(); it++)
+        {
+          subsets.erase(*it);
+          if ((*it)->remove_nested_resource_ref(did))
+            delete (*it);
+        }
+      }
+      // Tighten the valid mask for future analyses
+      if (!subsets.empty())
+        subsets.tighten_valid_mask();
       // No need to clear subsets since we can still maintain a copy of it
       // Pack remote subsets
       rez.serialize<size_t>(remote_subsets.size());
