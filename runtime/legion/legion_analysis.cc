@@ -6481,7 +6481,7 @@ namespace Legion {
             // If we're not the logical owner but we are the owner
             // then we have a valid remote lease of the subsets
             is_owner() ? VALID_STATE : INVALID_STATE), 
-        subset_exprs(NULL), sample_count(0)
+        subset_exprs(NULL), sample_count(0), pending_analyses(0)
     //--------------------------------------------------------------------------
     {
       set_expr->add_expression_reference();
@@ -7940,9 +7940,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void EquivalenceSet::unpack_migration(Deserializer &derez, 
-                               ReferenceMutator &mutator, AddressSpaceID source)
+                                  AddressSpaceID source, RtUserEvent done_event)
     //--------------------------------------------------------------------------
     {
+      // All the preconditions before we can make this the owner
+      std::set<RtEvent> owner_preconditions;
+      AutoLock eq(eq_lock); 
 #ifdef DEBUG_LEGION
       assert(valid_instances.empty());
       assert(reduction_instances.empty());
@@ -7954,10 +7957,6 @@ namespace Legion {
       assert(unrefined_remainders.empty());
       assert(disjoint_partition_refinements.empty());
 #endif
-      // We can unpack these data structures because we know that no one
-      // else touching them since we're not the owner yet
-      std::set<RtEvent> deferred_reference_events;
-      std::map<LogicalView*,unsigned> deferred_references;
       size_t num_valid_insts;
       derez.deserialize(num_valid_insts);
       for (unsigned idx = 0; idx < num_valid_insts; idx++)
@@ -7970,13 +7969,6 @@ namespace Legion {
         FieldMask mask;
         derez.deserialize(mask);
         valid_instances.insert(view, mask);
-        if (ready.exists() && !ready.has_triggered())
-        {
-          deferred_reference_events.insert(ready);
-          deferred_references[view] = 1;
-        }
-        else
-          view->add_nested_valid_ref(did, &mutator);
       }
       size_t num_reduc_fields;
       derez.deserialize(num_reduc_fields);
@@ -7997,18 +7989,6 @@ namespace Legion {
             runtime->find_or_request_logical_view(reduc_did, ready);
           ReductionView *reduc_view = static_cast<ReductionView*>(view);
           reduc_views.push_back(reduc_view);
-          if (ready.exists() && !ready.has_triggered())
-          {
-            deferred_reference_events.insert(ready);
-            std::map<LogicalView*,unsigned>::iterator finder = 
-              deferred_references.find(view);
-            if (finder == deferred_references.end())
-              deferred_references[view] = 1;
-            else
-              finder->second++;
-          }
-          else
-            view->add_nested_valid_ref(did, &mutator);
         }
       }
       size_t num_restrict_insts;
@@ -8027,18 +8007,6 @@ namespace Legion {
           FieldMask mask;
           derez.deserialize(mask);
           restricted_instances.insert(inst_view, mask);
-          if (ready.exists() && !ready.has_triggered())
-          {
-            deferred_reference_events.insert(ready);
-            std::map<LogicalView*,unsigned>::iterator finder = 
-              deferred_references.find(view);
-            if (finder == deferred_references.end())
-              deferred_references[view] = 1;
-            else
-              finder->second++;
-          }
-          else
-            view->add_nested_valid_ref(did, &mutator);
         }
       }
       size_t num_versions;
@@ -8051,16 +8019,15 @@ namespace Legion {
       }
       size_t num_guard_events;
       derez.deserialize(num_guard_events);
-      std::set<RtEvent> guard_preconditions;
       for (unsigned idx = 0; idx < num_guard_events; idx++)
       {
         RtEvent guard_event;
         derez.deserialize(guard_event);
-        guard_preconditions.insert(guard_event);
+        owner_preconditions.insert(guard_event);
       }
+      FieldMaskSet<EquivalenceSet> new_subsets;
       size_t num_subsets;
       derez.deserialize(num_subsets);
-      std::vector<EquivalenceSet*> need_ref;
       for (unsigned idx = 0; idx < num_subsets; idx++)
       {
         DistributedID subset_did;
@@ -8069,11 +8036,10 @@ namespace Legion {
         EquivalenceSet *subset = 
           runtime->find_or_request_equivalence_set(subset_did, ready);
         if (ready.exists())
-          deferred_reference_events.insert(ready);
+          owner_preconditions.insert(ready);
         FieldMask subset_mask;
         derez.deserialize(subset_mask);
-        if (subsets.insert(subset, subset_mask))
-          need_ref.push_back(subset);
+        new_subsets.insert(subset, subset_mask);
       }
       size_t num_remote_subsets;
       derez.deserialize(num_remote_subsets);
@@ -8113,9 +8079,8 @@ namespace Legion {
           RtEvent ready;
           dis->children[node] = 
             runtime->find_or_request_equivalence_set(child_did, ready);
-          // No need to worry about the ready event because we know this
-          // equivalence set is in our subsets data structure so we'll
-          // wait for it through there instead
+          if (ready.exists())
+            owner_preconditions.insert(ready);
         }
         FieldMask mask;
         derez.deserialize(mask);
@@ -8133,43 +8098,59 @@ namespace Legion {
           derez.deserialize(user_counts[idx]);
         }
       }
-      // Make all the events we'll need to wait on
-      RtEvent ready_for_references, guards_done;
-      if (!deferred_reference_events.empty())
-        ready_for_references = Runtime::merge_events(deferred_reference_events);
-      if (!guard_preconditions.empty())
-        guards_done = Runtime::merge_events(guard_preconditions);
-      if (ready_for_references.exists() && 
-          !ready_for_references.has_triggered())
-        ready_for_references.wait();
-      // Add our references
-      for (std::map<LogicalView*,unsigned>::const_iterator it = 
-            deferred_references.begin(); it != 
-            deferred_references.end(); it++)
-        it->first->add_nested_valid_ref(did, &mutator, it->second);
-      for (std::vector<EquivalenceSet*>::const_iterator it = 
-            need_ref.begin(); it != need_ref.end(); it++)
-        (*it)->add_nested_resource_ref(did);
-      // Wait for all the guards to be done before we mark that
-      // we are now the new owner
-      if (guards_done.exists() && !guards_done.has_triggered())
+      // If there are any pending anayses we need to wait for them to finish
+      if (pending_analyses > 0)
       {
-        // Defer the call to make this the owner until the event triggers
-        DeferMakeOwnerArgs args(this);
-        RtEvent done = runtime->issue_runtime_meta_task(args, 
-            LG_LATENCY_DEFERRED_PRIORITY, guards_done);
-        mutator.record_reference_mutation_effect(done);
+#ifdef DEBUG_LEGION
+        assert(!transition_event.exists());
+#endif
+        transition_event = Runtime::create_rt_user_event();
+        owner_preconditions.insert(transition_event);
       }
-      else
-        make_owner();
+      if (!owner_preconditions.empty())
+      {
+        const RtEvent pre = Runtime::merge_events(owner_preconditions);
+        if (pre.exists() && !pre.has_triggered())
+        {
+          // We need to defer this until later
+          FieldMaskSet<EquivalenceSet> *owner_subsets = 
+            new FieldMaskSet<EquivalenceSet>();
+          owner_subsets->swap(new_subsets);
+          // Defer the call to make this the owner until the event triggers
+          DeferMakeOwnerArgs args(this, owner_subsets, done_event);
+          runtime->issue_runtime_meta_task(args, 
+              LG_LATENCY_DEFERRED_PRIORITY, pre);
+          return;
+        }
+      }
+      // If we fall through then we get to do the add now
+      make_owner(&new_subsets, done_event, false/*need lock*/);
     }
 
     //--------------------------------------------------------------------------
-    void EquivalenceSet::make_owner(void)
+    bool EquivalenceSet::make_owner(FieldMaskSet<EquivalenceSet> *new_subsets,
+                                    RtUserEvent done_event, bool need_lock)
     //--------------------------------------------------------------------------
     {
+      if (need_lock)
+      {
+        AutoLock eq(eq_lock);
+        // See if we need to defer this because there are outstanding analyses
+        if (pending_analyses > 0)
+        {
+#ifdef DEBUG_LEGION
+          assert(!transition_event.exists());
+#endif
+          transition_event = Runtime::create_rt_user_event();
+          DeferMakeOwnerArgs args(this, new_subsets, done_event);
+          runtime->issue_runtime_meta_task(args, 
+              LG_LATENCY_DEFERRED_PRIORITY, transition_event);
+          return false;
+        }
+        else
+          return make_owner(new_subsets, done_event, false/*need lock*/);
+      }
       // Now we can mark that we are the logical owner
-      AutoLock eq(eq_lock);
 #ifdef DEBUG_LEGION
       assert(!is_logical_owner());
 #endif
@@ -8186,6 +8167,26 @@ namespace Legion {
         transition_event = RtUserEvent::NO_RT_USER_EVENT;
       }
       eq_state = MAPPING_STATE;
+      LocalReferenceMutator mutator;
+      // Add references to all the views that we've loaded
+      for (FieldMaskSet<LogicalView>::const_iterator it =
+            valid_instances.begin(); it != valid_instances.end(); it++)
+        it->first->add_nested_valid_ref(did, &mutator);
+      for (std::map<unsigned,std::vector<ReductionView*> >::const_iterator it1 =
+           reduction_instances.begin(); it1 != reduction_instances.end(); it1++)
+        for (std::vector<ReductionView*>::const_iterator it2 =
+              it1->second.begin(); it2 != it1->second.end(); it2++)
+          (*it2)->add_nested_valid_ref(did, &mutator);
+      for (FieldMaskSet<InstanceView>::const_iterator it =
+           restricted_instances.begin(); it != restricted_instances.end(); it++)
+        it->first->add_nested_valid_ref(did, &mutator);
+      // Update the subsets now that we are officially the owner
+      for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
+            new_subsets->begin(); it != new_subsets->end(); it++)
+        if (subsets.insert(it->first, it->second))
+          it->first->add_nested_resource_ref(did);
+      Runtime::trigger_event(done_event, mutator.get_done_event());
+      return true;
     }
 
     //--------------------------------------------------------------------------
@@ -8343,6 +8344,8 @@ namespace Legion {
             continue;
           to_traverse.insert(it->first, overlap);
         }
+        // Guard to prevent migration while we release the lock
+        pending_analyses++;
         eq.release();
         // Update the user mask and the remove_mask if there is one
         user_mask -= to_traverse.get_valid_mask();
@@ -8351,10 +8354,24 @@ namespace Legion {
           it->first->find_valid_instances(analysis, it->second, 
                                           deferral_events, applied_events);
         eq.reacquire();
+#ifdef DEBUG_LEGION
+        assert(pending_analyses > 0);
+#endif
+        if ((--pending_analyses == 0) && !is_logical_owner() &&
+            transition_event.exists())
+        {
+          // Signal to the migration task that it is safe to unpack
+          Runtime::trigger_event(transition_event);
+          transition_event = RtUserEvent::NO_RT_USER_EVENT;
+        }
         // Return if our user mask is empty
         if (!user_mask)
           return;
       }
+#ifdef DEBUG_LEGION
+      // Should only be here if we're the owner
+      assert(is_logical_owner());
+#endif
       // Lock the analysis so we can perform updates here
       AutoLock a_lock(analysis);
       if (analysis.redop != 0)
@@ -8452,6 +8469,8 @@ namespace Legion {
             continue;
           to_traverse.insert(it->first, overlap);
         }
+        // Guard to prevent migration while we release the lock
+        pending_analyses++;
         eq.release();
         // Update the user mask and the remove_mask if there is one
         user_mask -= to_traverse.get_valid_mask();
@@ -8460,10 +8479,24 @@ namespace Legion {
           it->first->find_invalid_instances(analysis, it->second, 
                                             deferral_events, applied_events);
         eq.reacquire();
+#ifdef DEBUG_LEGION
+        assert(pending_analyses > 0);
+#endif
+        if ((--pending_analyses == 0) && !is_logical_owner() &&
+            transition_event.exists())
+        {
+          // Signal to the migration task that it is safe to unpack
+          Runtime::trigger_event(transition_event);
+          transition_event = RtUserEvent::NO_RT_USER_EVENT;
+        }
         // Return if our user mask is empty
         if (!user_mask)
           return;
       }
+#ifdef DEBUG_LEGION
+      // Should only be here if we're the owner
+      assert(is_logical_owner());
+#endif
       // Lock the analysis so we can perform updates here
       AutoLock a_lock(analysis);
       // See if our instances are valid for any fields we're traversing
@@ -8571,6 +8604,8 @@ namespace Legion {
             continue;
           to_traverse.insert(it->first, overlap);
         }
+        // Guard to prevent migration while we release the lock
+        pending_analyses++;
         eq.release();
         // Remove ourselves if we recursed
         if (!original_set)
@@ -8584,6 +8619,16 @@ namespace Legion {
           it->first->update_set(analysis, it->second, deferral_events,
               applied_events, NULL/*remove mask*/, false/*original set*/);
         eq.reacquire();
+#ifdef DEBUG_LEGION
+        assert(pending_analyses > 0);
+#endif
+        if ((--pending_analyses == 0) && !is_logical_owner() &&
+            transition_event.exists())
+        {
+          // Signal to the migration task that it is safe to unpack
+          Runtime::trigger_event(transition_event);
+          transition_event = RtUserEvent::NO_RT_USER_EVENT;
+        }
         // Return if our user mask is empty
         if (!user_mask)
         {
@@ -8593,6 +8638,10 @@ namespace Legion {
             return false;
         }
       }
+#ifdef DEBUG_LEGION
+      // Should only be here if we're the owner
+      assert(is_logical_owner());
+#endif
       WrapperReferenceMutator mutator(applied_events);
       // Now that we're ready to perform the analysis 
       // we need to lock the analysis 
@@ -8996,7 +9045,9 @@ namespace Legion {
         return;
       }
       // Don't do any migrations if we have any pending refinements
-      if (!pending_refinements.empty() || !!refining_fields)
+      // or we have outstanding analyses that prevent it for now
+      if (!pending_refinements.empty() || !!refining_fields || 
+          (pending_analyses > 0))
       {
         // Reset the data structures for the next run
         user_samples.clear();
@@ -9144,7 +9195,7 @@ namespace Legion {
         return;
       }
       // At this point we've decided to do the migration
-      log_migration.info("Migrating Equivalence Set %lld from %d to %d",
+      log_migration.info("Migrating Equivalence Set %llx from %d to %d",
           did, local_space, new_logical_owner);
       logical_owner_space = new_logical_owner;
       // Add ourselves and remove the new owner from remote subsets
@@ -9220,6 +9271,8 @@ namespace Legion {
             continue;
           to_traverse.insert(it->first, overlap);
         }
+        // Guard to prevent migration while we release the lock
+        pending_analyses++;
         eq.release();
         // Remove ourselves if we recursed
         if (!original_set)
@@ -9233,6 +9286,16 @@ namespace Legion {
           it->first->acquire_restrictions(analysis, it->second, deferral_events,
                     applied_events, NULL/*remove mask*/, false/*original set*/);
         eq.reacquire();
+#ifdef DEBUG_LEGION
+        assert(pending_analyses > 0);
+#endif
+        if ((--pending_analyses == 0) && !is_logical_owner() &&
+            transition_event.exists())
+        {
+          // Signal to the migration task that it is safe to unpack
+          Runtime::trigger_event(transition_event);
+          transition_event = RtUserEvent::NO_RT_USER_EVENT;
+        }
         // Return if our acquire user mask is empty
         if (!acquire_mask)
         {
@@ -9242,6 +9305,10 @@ namespace Legion {
             return false;
         }
       }
+#ifdef DEBUG_LEGION
+      // Should only be here if we're the owner
+      assert(is_logical_owner());
+#endif
       acquire_mask &= restricted_fields;
       if (!acquire_mask)
         return false;
@@ -9317,6 +9384,8 @@ namespace Legion {
             continue;
           to_traverse.insert(it->first, overlap);
         }
+        // Guard to prevent migration while we release the lock
+        pending_analyses++;
         eq.release();
         // Remove ourselves if we recursed
         if (!original_set)
@@ -9330,6 +9399,16 @@ namespace Legion {
           it->first->release_restrictions(analysis, it->second, deferral_events,
                     applied_events, NULL/*remove mask*/, false/*original set*/);
         eq.reacquire();
+#ifdef DEBUG_LEGION
+        assert(pending_analyses > 0);
+#endif
+        if ((--pending_analyses == 0) && !is_logical_owner() &&
+            transition_event.exists())
+        {
+          // Signal to the migration task that it is safe to unpack
+          Runtime::trigger_event(transition_event);
+          transition_event = RtUserEvent::NO_RT_USER_EVENT;
+        }
         // Return if ourt release mask is empty
         if (!release_mask)
         {
@@ -9339,6 +9418,10 @@ namespace Legion {
             return false;
         }
       }
+#ifdef DEBUG_LEGION
+      // Should only be here if we're the owner
+      assert(is_logical_owner());
+#endif
       // At this point we need to lock the analysis
       AutoLock a_lock(analysis);
       // Find our local restricted instances and views and record them
@@ -9448,6 +9531,8 @@ namespace Legion {
             continue;
           to_traverse.insert(it->first, overlap);
         }
+        // Guard to prevent migration while we release the lock
+        pending_analyses++;
         eq.release();
         // Remove ourselves if we recursed
         if (!original_set)
@@ -9468,6 +9553,16 @@ namespace Legion {
               false/*original set*/);
         }
         eq.reacquire();
+#ifdef DEBUG_LEGION
+        assert(pending_analyses > 0);
+#endif
+        if ((--pending_analyses == 0) && !is_logical_owner() &&
+            transition_event.exists())
+        {
+          // Signal to the migration task that it is safe to unpack
+          Runtime::trigger_event(transition_event);
+          transition_event = RtUserEvent::NO_RT_USER_EVENT;
+        }
         // Return if ourt source mask is empty
         if (!src_mask)
         {
@@ -9478,6 +9573,8 @@ namespace Legion {
         }
       }
 #ifdef DEBUG_LEGION
+      // Should only be here if we're the owner
+      assert(is_logical_owner());
       assert(IS_READ_ONLY(analysis.src_usage));
 #endif
       // We need to lock the analysis at this point
@@ -9717,6 +9814,8 @@ namespace Legion {
             continue;
           to_traverse.insert(it->first, overlap);
         }
+        // Guard to prevent migration while we release the lock
+        pending_analyses++;
         eq.release();
         // Remove ourselves if we recursed
         if (!original_set)
@@ -9730,6 +9829,16 @@ namespace Legion {
           it->first->overwrite_set(analysis, it->second, deferral_events,
               applied_events, NULL/*remove mask*/, false/*original_set*/);
         eq.reacquire();
+#ifdef DEBUG_LEGION
+        assert(pending_analyses > 0);
+#endif
+        if ((--pending_analyses == 0) && !is_logical_owner() &&
+            transition_event.exists())
+        {
+          // Signal to the migration task that it is safe to unpack
+          Runtime::trigger_event(transition_event);
+          transition_event = RtUserEvent::NO_RT_USER_EVENT;
+        }
         // Return if ourt mask is empty
         if (!mask)
         {
@@ -9739,6 +9848,10 @@ namespace Legion {
             return false;
         }
       }
+#ifdef DEBUG_LEGION
+      // Should only be here if we're the owner
+      assert(is_logical_owner());
+#endif
       // At this point we need to lock the analysis
       AutoLock a_lock(analysis);
       if (analysis.output_aggregator != NULL)
@@ -9901,6 +10014,8 @@ namespace Legion {
             continue;
           to_traverse.insert(it->first, overlap);
         }
+        // Guard to prevent migration while we release the lock
+        pending_analyses++;
         eq.release();
         // Remove ourselves if we recursed
         if (!original_set)
@@ -9914,6 +10029,16 @@ namespace Legion {
           it->first->filter_set(analysis, it->second, deferral_events,
               applied_events, NULL/*remove mask*/, false/*original set*/);
         eq.reacquire();
+#ifdef DEBUG_LEGION
+        assert(pending_analyses > 0);
+#endif
+        if ((--pending_analyses == 0) && !is_logical_owner() &&
+            transition_event.exists())
+        {
+          // Signal to the migration task that it is safe to unpack
+          Runtime::trigger_event(transition_event);
+          transition_event = RtUserEvent::NO_RT_USER_EVENT;
+        }
         // Return if ourt mask is empty
         if (!mask)
         {
@@ -9923,6 +10048,10 @@ namespace Legion {
             return false;
         }
       }
+#ifdef DEBUG_LEGION
+      // Should only be here if we're the owner
+      assert(is_logical_owner());
+#endif
       // No need to lock the analysis here since we're not going to change it
       FieldMaskSet<LogicalView>::iterator finder = 
         valid_instances.find(analysis.inst_view);
@@ -11360,7 +11489,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       const DeferMakeOwnerArgs *dargs = (const DeferMakeOwnerArgs*)args;
-      dargs->set->make_owner();
+      if (dargs->set->make_owner(dargs->new_subsets, dargs->done, 
+                                 true/*need lock*/))
+        delete dargs->new_subsets;
     }
 
     //--------------------------------------------------------------------------
@@ -11656,8 +11787,7 @@ namespace Legion {
       LocalReferenceMutator mutator; 
       if (ready.exists() && !ready.has_triggered())
         ready.wait();
-      set->unpack_migration(derez, mutator, source);
-      Runtime::trigger_event(done, mutator.get_done_event());
+      set->unpack_migration(derez, source, done);
     }
 
     //--------------------------------------------------------------------------

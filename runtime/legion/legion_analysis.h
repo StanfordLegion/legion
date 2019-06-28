@@ -1637,10 +1637,14 @@ namespace Legion {
       public:
         static const LgTaskID TASK_ID = LG_DEFER_MAKE_OWNER_TASK_ID;
       public:
-        DeferMakeOwnerArgs(EquivalenceSet *s)
-          : LgTaskArgs<DeferMakeOwnerArgs>(implicit_provenance), set(s) { }
+        DeferMakeOwnerArgs(EquivalenceSet *s,
+                           FieldMaskSet<EquivalenceSet> *sub, RtUserEvent d)
+          : LgTaskArgs<DeferMakeOwnerArgs>(implicit_provenance), set(s),
+            new_subsets(sub), done(d) { }
       public:
         EquivalenceSet *const set;
+        FieldMaskSet<EquivalenceSet> *const new_subsets;
+        const RtUserEvent done;
       };
       struct DeferMergeOrForwardArgs : 
         public LgTaskArgs<DeferMergeOrForwardArgs> {
@@ -1886,9 +1890,10 @@ namespace Legion {
           const FieldMaskSet<InstanceView> &new_restrictions,
           const LegionMap<VersionID,FieldMask>::aligned &new_versions);
       void pack_migration(Serializer &rez, RtEvent done_migration);
-      void unpack_migration(Deserializer &derez, 
-                            ReferenceMutator &mutator, AddressSpaceID source);
-      void make_owner(void);
+      void unpack_migration(Deserializer &derez, AddressSpaceID source,
+                            RtUserEvent done_event);
+      bool make_owner(FieldMaskSet<EquivalenceSet> *new_subsets,
+                      RtUserEvent done_event, bool need_lock);
       void update_owner(const AddressSpaceID new_logical_owner);
       bool defer_traversal(AutoTryLock &eq, PhysicalAnalysis &analysis,
                            const FieldMask &mask,
@@ -1987,6 +1992,8 @@ namespace Legion {
       std::vector<AddressSpaceID> user_samples;
       std::vector<unsigned> user_counts;
       unsigned sample_count;
+      // Prevent migration while there are still analyses traversing the set
+      unsigned pending_analyses;
     public:
       static const VersionID init_version = 1;
     };
