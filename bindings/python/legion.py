@@ -479,15 +479,26 @@ uint16 = Type(numpy.uint16, 'uint16_t')
 uint32 = Type(numpy.uint32, 'uint32_t')
 uint64 = Type(numpy.uint64, 'uint64_t')
 
-class Privilege(object):
-    __slots__ = ['read', 'write', 'discard', 'reduce', 'redop_id']
+_redop_ids = {}
+def _fill_redop_ids():
+    operators = ['+', '-', '*', '/', 'max', 'min']
+    types = [float32, float64, int32, int64, uint32, uint64]
+    next_id = 101
+    for operator in operators:
+        _redop_ids[operator] = {}
+        for type in types:
+            _redop_ids[operator][type] = next_id
+            next_id += 1
+_fill_redop_ids()
 
-    def __init__(self, read=False, write=False, discard=False, reduce=False, redop_id=None):
+class Privilege(object):
+    __slots__ = ['read', 'write', 'discard', 'reduce']
+
+    def __init__(self, read=False, write=False, discard=False, reduce=False):
         self.read = read
         self.write = write
         self.discard = discard
         self.reduce = reduce
-        self.redop_id = redop_id
 
     def _fields(self):
         return (self.read, self.write, self.discard, self.reduce)
@@ -517,14 +528,14 @@ class Privilege(object):
             elif self.read: bits = 1 # READ_ONLY
         return bits
 
-    def _legion_redop_id(self):
-        return self.redop_id
+    def _legion_redop_id(self, field_type):
+        return _redop_ids[self.reduce][field_type]
 
 class PrivilegeFields(Privilege):
     __slots__ = ['read', 'write', 'discard', 'fields']
 
     def __init__(self, privilege, fields):
-        Privilege.__init__(self, privilege.read, privilege.write, privilege.discard)
+        super(PrivilegeFields, self).__init__(privilege.read, privilege.write, privilege.discard, privilege.reduce)
         self.fields = fields
 
 # Pre-defined Privileges
@@ -534,21 +545,8 @@ RO = Privilege(read=True)
 RW = Privilege(read=True, write=True)
 WD = Privilege(write=True, discard=True)
 
-_redop_operators = ['+', '-', '*', '/', 'max', 'min']
-_redop_types = [float32, float64, int32, int64, uint32, uint64]
-_redop_ids = {}
-_redop_id_next = 101
-def _fill_redop_ids():
-    global _redop_id_next
-    for operator in _redop_operators:
-        _redop_ids[operator] = {}
-        for type in _redop_types:
-            _redop_ids[operator][type] = _redop_id_next
-            _redop_id_next += 1
-_fill_redop_ids()
-
-def Reduce(operator, type):
-    return Privilege(reduce=operator, redop_id=_redop_ids[operator][type])
+def Reduce(operator):
+    return Privilege(reduce=operator)
 
 class Disjointness(object):
     __slots__ = ['kind', 'value']
@@ -1245,16 +1243,26 @@ class Task (object):
             req = 0
             for i, arg in zip(range(len(args)), args):
                 if isinstance(arg, Region):
-                    assert req < num_regions[0] and req < len(self.privileges)
-                    instance = raw_regions[0][req]
-                    req += 1
-
+                    assert i < len(self.privileges)
                     priv = self.privileges[i]
-                    if hasattr(priv, 'fields'):
-                        assert set(priv.fields) <= set(arg.fspace.field_ids.keys())
-                    for name, fid in arg.fspace.field_ids.items():
-                        if not hasattr(priv, 'fields') or name in priv.fields:
-                            arg._set_instance(name, instance, priv)
+
+                    fields = priv.fields if hasattr(priv, 'fields') else list(arg.fspace.field_ids.keys())
+                    assert set(fields) <= set(arg.fspace.field_ids.keys())
+
+                    if priv.reduce:
+                        for field in fields:
+                            assert req < num_regions[0]
+                            instance = raw_regions[0][req]
+                            req += 1
+
+                            arg._set_instance(field, instance, priv)
+                    else:
+                        assert req < num_regions[0]
+                        instance = raw_regions[0][req]
+                        req += 1
+
+                        for field in fields:
+                            arg._set_instance(field, instance, priv)
             assert req == num_regions[0]
 
         # Build context.
@@ -1452,13 +1460,19 @@ class _TaskLauncher(object):
             if isinstance(arg, Region):
                 assert i < len(self.task.privileges)
                 priv = self.task.privileges[i]
+                fields = priv.fields if hasattr(priv, 'fields') else list(arg.fspace.field_ids.keys())
+                if hasattr(priv, 'fields'):
+                    assert set(fields) <= set(arg.fspace.field_ids.keys())
                 if priv.reduce:
-                    req = c.legion_task_launcher_add_region_requirement_logical_region_reduction(
-                        launcher, arg.handle[0],
-                        priv._legion_redop_id(),
-                        0, # EXCLUSIVE
-                        arg.parent.handle[0] if arg.parent is not None else arg.handle[0],
-                        0, False)
+                    for field in fields:
+                        req = c.legion_task_launcher_add_region_requirement_logical_region_reduction(
+                            launcher, arg.handle[0],
+                            priv._legion_redop_id(arg.fspace.field_types[field]),
+                            0, # EXCLUSIVE
+                            arg.parent.handle[0] if arg.parent is not None else arg.handle[0],
+                            0, False)
+                        c.legion_task_launcher_add_field(
+                            launcher, req, arg.fspace.field_ids[field], True)
                 else:
                     req = c.legion_task_launcher_add_region_requirement_logical_region(
                         launcher, arg.handle[0],
@@ -1466,12 +1480,9 @@ class _TaskLauncher(object):
                         0, # EXCLUSIVE
                         arg.parent.handle[0] if arg.parent is not None else arg.handle[0],
                         0, False)
-                if hasattr(priv, 'fields'):
-                    assert set(priv.fields) <= set(arg.fspace.field_ids.keys())
-                for name, fid in arg.fspace.field_ids.items():
-                    if not hasattr(priv, 'fields') or name in priv.fields:
+                    for field in fields:
                         c.legion_task_launcher_add_field(
-                            launcher, req, fid, True)
+                            launcher, req, arg.fspace.field_ids[field], True)
             elif isinstance(arg, Future):
                 c.legion_task_launcher_add_future(launcher, arg.handle)
             elif self.task.calling_convention is None:

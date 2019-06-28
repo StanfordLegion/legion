@@ -21,21 +21,21 @@ import legion
 from legion import task, Reduce
 import numpy
 
-@task(privileges=[Reduce('+', legion.float64)])
+@task(privileges=[Reduce('+')])
 def inc(R, step):
     numpy.add(R.x, step, out=R.x)
     numpy.add(R.y, step, out=R.y)
 
 @task
 def main():
-    R = legion.Region.create([4, 4], {'x': legion.float64, 'y': legion.float64})
-    legion.fill(R, 'x', 1)
+    R = legion.Region.create([4, 4], {'x': legion.float64, 'y': legion.int32})
+    legion.fill(R, 'x', 1.25)
     legion.fill(R, 'y', 2)
     inc(R, 20)
     print(R.x)
     print(R.y)
-    assert R.x[0, 0] == 21.0
-    assert R.y[0, 0] == 22.0
+    assert R.x[0, 0] == 21.25
+    assert R.y[0, 0] == 22
 
 if __name__ == '__legion_main__':
     main()
