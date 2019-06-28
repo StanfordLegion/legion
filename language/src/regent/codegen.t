@@ -109,6 +109,7 @@ function context:new_local_scope(divergence, must_epoch, must_epoch_point, break
     break_label = break_label,
     context = self.context,
     runtime = self.runtime,
+    result  = self.result,
     ispaces = self.ispaces:new_local_scope(),
     regions = self.regions:new_local_scope(),
     lists_of_regions = self.lists_of_regions:new_local_scope(),
@@ -116,8 +117,8 @@ function context:new_local_scope(divergence, must_epoch, must_epoch_point, break
   }, context)
 end
 
-function context:new_task_scope(expected_return_type, constraints, orderings, leaf, task_meta, task, ctx, runtime)
-  assert(expected_return_type and task and ctx and runtime)
+function context:new_task_scope(expected_return_type, constraints, orderings, leaf, task_meta, task, ctx, runtime, result)
+  assert(expected_return_type and task and ctx and runtime and result)
   return setmetatable({
     variant = self.variant,
     expected_return_type = expected_return_type,
@@ -133,6 +134,7 @@ function context:new_task_scope(expected_return_type, constraints, orderings, le
     break_label = false,
     context = ctx,
     runtime = runtime,
+    result = result,
     ispaces = symbol_table.new_global_scope({}),
     regions = symbol_table.new_global_scope({}),
     lists_of_regions = symbol_table.new_global_scope({}),
@@ -9301,10 +9303,11 @@ function codegen.stat_return(cx, node)
       terralib.attrstore(
         [&result_type](buffer), result,
         { align = [result_type_alignment] })
-      return std.serialized_value {
+      @[cx.result] = std.serialized_value {
         value = buffer,
         size = buffer_size,
       }
+      return
       -- Task wrapper is responsible for calling free.
     end
   end
@@ -10186,8 +10189,9 @@ function codegen.top_task(cx, node)
   local c_num_regions = terralib.newsymbol(uint32, "num_regions")
   local c_context = terralib.newsymbol(c.legion_context_t, "context")
   local c_runtime = terralib.newsymbol(c.legion_runtime_t, "runtime")
+  local c_result = terralib.newsymbol(&std.serialized_value, "result")
   local c_params = terralib.newlist({
-      c_task, c_regions, c_num_regions, c_context, c_runtime })
+      c_task, c_regions, c_num_regions, c_context, c_runtime, c_result })
 
   local params = node.params:map(
     function(param) return param.symbol end)
@@ -10256,7 +10260,7 @@ function codegen.top_task(cx, node)
                                task:get_constraints(),
                                orderings,
                                variant:get_config_options().leaf,
-                               task, c_task, c_context, c_runtime)
+                               task, c_task, c_context, c_runtime, c_result)
 
   -- FIXME: This code should be deduplicated with type_check, no
   -- reason to do it twice....
@@ -10627,14 +10631,13 @@ function codegen.top_task(cx, node)
     body = cleanup_after(cx, codegen.block(cx, node.body))
   end
 
-  local result_type = std.type_size_bucket_type(return_type)
   local guard = quote end
-  if result_type ~= terralib.types.unit then
+  if return_type ~= terralib.types.unit then
     guard = quote
       std.assert_error(false, [get_source_location(node) .. ": missing return statement in task that is expected to return " .. tostring(return_type)])
     end
   end
-  local terra proto([c_params]): result_type
+  local terra proto([c_params])
     do
       [preamble]; -- Semicolon required. This is not an array access.
       [body]

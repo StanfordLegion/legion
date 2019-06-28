@@ -964,35 +964,27 @@ function base.variant:wrapper_sig()
                                         .. ');'
 end
 
+-- This is a type representing a buffer containing a serialized value.
+-- The value owns the buffer.
+struct base.serialized_value {
+  value: &opaque,
+  size: uint64,
+}
+
 local function make_task_wrapper(task_body)
-  local return_type = task_body:gettype().returntype
-  if return_type == terralib.types.unit then
-    return terra(data : &opaque, datalen : c.size_t,
-                 userdata : &opaque, userlen : c.size_t,
-                 proc_id : c.legion_proc_id_t)
-      var task : c.legion_task_t,
-          regions : &c.legion_physical_region_t,
-          num_regions : uint32,
-          ctx : c.legion_context_t,
-          runtime : c.legion_runtime_t
-      c.legion_task_preamble(data, datalen, proc_id, &task, &regions, &num_regions, &ctx, &runtime)
-      task_body(task, regions, num_regions, ctx, runtime)
-      c.legion_task_postamble(runtime, ctx, nil, 0)
-    end
-  else
-    return terra(data : &opaque, datalen : c.size_t,
-                 userdata : &opaque, userlen : c.size_t,
-                 proc_id : c.legion_proc_id_t)
-      var task : c.legion_task_t,
-          regions : &c.legion_physical_region_t,
-          num_regions : uint32,
-          ctx : c.legion_context_t,
-          runtime : c.legion_runtime_t
-      c.legion_task_preamble(data, datalen, proc_id, &task, &regions, &num_regions, &ctx, &runtime)
-      var result = task_body(task, regions, num_regions, ctx, runtime)
-      c.legion_task_postamble(runtime, ctx, result.value, result.size)
-      c.free(result.value)
-    end
+  return terra(data : &opaque, datalen : c.size_t,
+               userdata : &opaque, userlen : c.size_t,
+               proc_id : c.legion_proc_id_t)
+    var task : c.legion_task_t,
+        regions : &c.legion_physical_region_t,
+        num_regions : uint32,
+        ctx : c.legion_context_t,
+        runtime : c.legion_runtime_t
+    c.legion_task_preamble(data, datalen, proc_id, &task, &regions, &num_regions, &ctx, &runtime)
+    var result = base.serialized_value { nil, 0 }
+    task_body(task, regions, num_regions, ctx, runtime, &result)
+    c.legion_task_postamble(runtime, ctx, result.value, result.size)
+    c.free(result.value)
   end
 end
 
