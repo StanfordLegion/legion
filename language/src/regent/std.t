@@ -1472,21 +1472,7 @@ function std.deserialize(value_type, fixed_ptr, data_ptr)
   return actions, result
 end
 
--- This is a type representing a buffer containing a serialized value.
--- The value owns the buffer.
-struct std.serialized_value {
-  value: &opaque,
-  size: uint64,
-}
-
-function std.type_size_bucket_type(value_type)
-  if value_type == terralib.types.unit then
-    return terralib.types.unit
-  else
-    return std.serialized_value
-  end
-end
-
+std.serialized_value = base.serialized_value
 
 -- #####################################
 -- ## Symbols
