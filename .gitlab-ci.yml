@@ -235,6 +235,13 @@ before_script:
   tags:
     - n0003
 
+.p100: &p100
+  tags:
+    - p100
+.cuda_p100: &cuda_p100
+  CUDA: "/usr/local/cuda"
+  USE_CUDA: "1"
+
 ###
 ### Docker Image
 ###
@@ -670,6 +677,10 @@ n0003_gcc48_cxx98_release_legion_cuda:
 #   <<: [*n0003, *image, *tests]
 #   variables:
 #     <<: [*gcc48, *terra38, *release, *cxx98_normal, *cuda, *regent]
+p100_gcc7_cxx11_release_legion_cuda:
+  <<: [*p100, *image, *tests]
+  variables:
+    <<: [*gcc7, *release, *cxx11_normal, *cuda_p100, *legion]
 
 # Darwin Power9 tests:
 darwin_power9_gcc8_cxx17_release_legion:
