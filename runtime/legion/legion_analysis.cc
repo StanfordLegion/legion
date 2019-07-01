@@ -6133,7 +6133,7 @@ namespace Legion {
         // Although they don't have to be the same
         // These assertions are pretty expensive so we'll comment them
         // out for now, but put them back in if you think this invariant
-        // is being invalidated
+        // is being violated
         //assert(runtime->forest->subtract_index_spaces(index_space_node,
         //                                              set_expr)->is_empty());
         //assert(runtime->forest->subtract_index_spaces(set_expr,
@@ -7199,18 +7199,26 @@ namespace Legion {
         AutoLock eq(eq_lock,1,false/*exlcusive*/);
         if (!is_logical_owner())
         {
-          Serializer rez;
-          // No RezCheck because of forwarding
-          rez.serialize(did);
-          rez.serialize(done_event);
-          // Just move the bytes over to the serializer and return
-          const size_t bytes = derez.get_remaining_bytes();
-          rez.serialize(derez.get_current_pointer(), bytes);
-          runtime->send_equivalence_set_remote_refinement(
-                                  logical_owner_space, rez);
-          // Keep the deserializer happy
-          derez.advance_pointer(bytes);
-          return;
+          // Check to see if we've been the owner before, if we have then
+          // that means this is not an initialization case (see 
+          // send_equivalence_set) and therefore we need to forward this
+          // update, otherwise, this is an initialization update and we're
+          // about to become the logical owner
+          if (eq_state != INVALID_STATE)
+          {
+            Serializer rez;
+            // No RezCheck because of forwarding
+            rez.serialize(did);
+            rez.serialize(done_event);
+            // Just move the bytes over to the serializer and return
+            const size_t bytes = derez.get_remaining_bytes();
+            rez.serialize(derez.get_current_pointer(), bytes);
+            runtime->send_equivalence_set_remote_refinement(
+                                    logical_owner_space, rez);
+            // Keep the deserializer happy
+            derez.advance_pointer(bytes);
+            return;
+          }
         }
       }
       // Keep track of ready events
@@ -7331,7 +7339,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock eq(eq_lock);
-      if (is_logical_owner())
+      if (is_logical_owner() || (eq_state == INVALID_STATE))
       {
         // We're the owner so we can do the merge
         LocalReferenceMutator mutator;
@@ -7373,6 +7381,12 @@ namespace Legion {
             finder->second |= it->second;
         }
         Runtime::trigger_event(done_event, mutator.get_done_event());
+        // See if we need to make this the owner now
+        if (!is_logical_owner())
+        {
+          logical_owner_space = local_space;
+          eq_state = MAPPING_STATE;
+        }
       }
       else
       {
@@ -10695,7 +10709,29 @@ namespace Legion {
       {
         RezCheck z(rez);
         rez.serialize(did);
-        rez.serialize(logical_owner_space);
+        // There be dragons here!
+        // In the case where we first make a new equivalence set on a
+        // remote node that is about to be the owner, we can't mark it
+        // as the owner until it receives all an unpack_state or 
+        // unpack_migration message which provides it valid meta-data
+        // Therefore we'll tell it that we're the owner which will 
+        // create a cycle in the forwarding graph. This won't matter for
+        // unpack_migration as it's going to overwrite the data in the
+        // equivalence set anyway, but for upack_state, we'll need to 
+        // recognize when to break the cycle. Effectively whenever we
+        // send an update to a remote node that we can tell has never
+        // been the owner before (and therefore can't have migrated)
+        // we know that we should just do the unpack there. This will
+        // break the cycle and allow forward progress. Analysis messages
+        // may go round and round a few times, but they have lower
+        // priority and therefore shouldn't create an livelock.
+        {
+          AutoLock eq(eq_lock,1,false/*exclusive*/);
+          if (target == logical_owner_space)
+            rez.serialize(local_space);
+          else
+            rez.serialize(logical_owner_space);
+        }
         set_expr->pack_expression(rez, target);
         if (index_space_node != NULL)
           rez.serialize(index_space_node->handle);
