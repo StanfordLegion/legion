@@ -2527,26 +2527,28 @@ namespace Realm {
         if (result == CUDA_ERROR_OPERATING_SYSTEM) {
           log_gpu.error("ERROR: Device side asserts are not supported by the "
                               "CUDA driver for MAC OSX, see NVBugs 1628896.");
-        }
+        } else
 #endif
         if (result == CUDA_ERROR_NO_BINARY_FOR_GPU) {
           log_gpu.error("ERROR: The binary was compiled for the wrong GPU "
                               "architecture. Update the 'GPU_ARCH' flag at the top "
-                              "of runtime/runtime.mk to match your current GPU "
-                              "architecture.");
-        }
-        log_gpu.error("Failed to load CUDA module! Error log: %s", 
-                log_error_buffer);
+                              "of runtime/runtime.mk to match/include your current GPU "
+			      "architecture (%d).",
+			(info->compute_major * 10 + info->compute_minor));
+        } else {
+	  log_gpu.error("Failed to load CUDA module! Error log: %s", 
+			log_error_buffer);
 #if CUDA_VERSION >= 6050
-        const char *name, *str;
-        CHECK_CU( cuGetErrorName(result, &name) );
-        CHECK_CU( cuGetErrorString(result, &str) );
-        fprintf(stderr,"CU: cuModuleLoadDataEx = %d (%s): %s\n",
-                result, name, str);
+	  const char *name, *str;
+	  CHECK_CU( cuGetErrorName(result, &name) );
+	  CHECK_CU( cuGetErrorString(result, &str) );
+	  fprintf(stderr,"CU: cuModuleLoadDataEx = %d (%s): %s\n",
+		  result, name, str);
 #else
-        fprintf(stderr,"CU: cuModuleLoadDataEx = %d\n", result);
+	  fprintf(stderr,"CU: cuModuleLoadDataEx = %d\n", result);
 #endif
-        assert(0);
+	}
+	abort();
       }
       else
         log_gpu.info("Loaded CUDA Module. JIT Output: %s", log_info_buffer);
