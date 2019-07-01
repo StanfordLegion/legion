@@ -52,6 +52,12 @@ enum FieldIDs {
 
 bool generate_disk_file(const char *file_name, int num_elements)
 {
+  // strip off any filename prefix starting with a colon
+  {
+    const char *pos = strchr(file_name, ':');
+    if(pos) file_name = pos + 1;
+  }
+
   // create the file if needed
   int fd = open(file_name, O_CREAT | O_WRONLY, 0666);
   if(fd < 0) {
@@ -75,6 +81,12 @@ bool generate_disk_file(const char *file_name, int num_elements)
 #ifdef USE_HDF
 bool generate_hdf_file(const char *file_name, const char *dataset_name, int num_elements)
 {
+  // strip off any filename prefix starting with a colon
+  {
+    const char *pos = strchr(file_name, ':');
+    if(pos) file_name = pos + 1;
+  }
+
   hid_t file_id = H5Fcreate(file_name, H5F_ACC_TRUNC, H5P_DEFAULT, H5P_DEFAULT);
   if(file_id < 0) {
     printf("H5Fcreate failed: %lld\n", (long long)file_id);

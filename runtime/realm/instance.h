@@ -24,6 +24,7 @@
 
 #include "realm/event.h"
 #include "realm/memory.h"
+#include "realm/point.h"
 
 #include "realm/custom_serdez.h"
 
@@ -166,12 +167,19 @@ namespace Realm {
 
 #ifdef USE_HDF
     template <int N, typename T>
+    struct HDF5FieldInfo {
+      FieldID field_id;
+      size_t field_size;
+      std::string dataset_name;
+      Point<N,T> offset;
+      int dim_order[N];
+    };
+
+    template <int N, typename T>
     static Event create_hdf5_instance(RegionInstance& inst,
 				      const char *file_name,
 				      const IndexSpace<N,T>& space,
-				      const std::vector<FieldID> &field_ids,
-				      const std::vector<size_t> &field_sizes,
-				      const std::vector<const char*> &field_files,
+				      const std::vector<HDF5FieldInfo<N,T> >& field_infos,
 				      bool read_only,
 				      const ProfilingRequestSet& prs,
 				      Event wait_on = Event::NO_EVENT);

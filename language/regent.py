@@ -130,8 +130,13 @@ def regent(args, env = {}, **kwargs):
     cmd_env = dict(os.environ.items())
     cmd_env.update(terra_env)
     cmd_env.update(env)
-    return subprocess.Popen(
-        cmd, env = cmd_env, **kwargs)
+    try:
+        return subprocess.Popen(
+            cmd, env = cmd_env, **kwargs)
+    except OSError:
+        print('Command failed: %s' % cmd, file=sys.stderr)
+        sys.stderr.flush()
+        raise
 
 if __name__ == '__main__':
     sys.exit(regent(sys.argv[1:]).wait())

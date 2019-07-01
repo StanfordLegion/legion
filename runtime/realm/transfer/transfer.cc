@@ -113,7 +113,9 @@ namespace Realm {
 							        const int _dim_order[N],
 								const std::vector<FieldID>& _fields,
 								size_t _extra_elems)
-    : is(_is), field_idx(0), extra_elems(_extra_elems), tentative_valid(false)
+    : is(_is)
+    , inst_layout(0)
+    , field_idx(0), extra_elems(_extra_elems), tentative_valid(false)
   {
     for(int i = 0; i < N; i++) dim_order[i] = _dim_order[i];
 
@@ -126,12 +128,10 @@ namespace Realm {
     // special case - skip a lot of the init if we know the space is empty
     if(!iter_init_deferred && !iter.valid) {
       inst_impl = 0;
-      inst_layout = 0;
     } else {
       cur_point = iter.rect.lo;
 
       inst_impl = get_runtime()->get_instance_impl(inst);
-      inst_layout = checked_cast<const InstanceLayout<N,T> *>(inst.get_layout());
       fields = _fields;
     }
   }
@@ -212,7 +212,16 @@ namespace Realm {
 	fields.clear();
       iter_init_deferred = false;
     }
-    return(field_idx == fields.size());
+
+    if(field_idx == fields.size())
+      return true;
+
+    // if we haven't fetched the layout, now's our last chance
+    if(inst_layout == 0) {
+      assert(inst_impl->metadata.is_valid());
+      inst_layout = checked_cast<const InstanceLayout<N,T> *>(inst_impl->metadata.layout);
+    }
+    return false;
   }
 
   template <int N, typename T>
@@ -409,6 +418,7 @@ namespace Realm {
     if(layout_piece->layout_type == InstanceLayoutPiece<N,T>::HDF5LayoutType) {
       const HDF5LayoutPiece<N,T> *hlp = static_cast<const HDF5LayoutPiece<N,T> *>(layout_piece);
 
+      info.field_id = fields[field_idx];
       info.filename = &hlp->filename;
       info.dsetname = &hlp->dsetname;
 
@@ -441,18 +451,18 @@ namespace Realm {
       }
 
       // translate the target_subrect into the dataset's coordinates
-      // HDF5 uses C-style (row-major) ordering, so invert array indices
+      //   using the dimension order specified in the instance's layout
       info.dset_bounds.resize(N);
       info.offset.resize(N);
       info.extent.resize(N);
       for(int di = 0; di < N; di++) {
 	int d = dim_order[di];
 
-	info.offset[N - 1 - d] = (target_subrect.lo[d] - hlp->bounds.lo[d] + hlp->offset[d]);
-	info.extent[N - 1 - d] = (target_subrect.hi[d] - target_subrect.lo[d] + 1);
-	info.dset_bounds[N - 1 - d] = (hlp->offset[d] +
-				       (hlp->bounds.hi[d] - hlp->bounds.lo[d]) +
-				       1);
+	info.offset[hlp->dim_order[d]] = (target_subrect.lo[d] - hlp->bounds.lo[d] + hlp->offset[d]);
+	info.extent[hlp->dim_order[d]] = (target_subrect.hi[d] - target_subrect.lo[d] + 1);
+	info.dset_bounds[hlp->dim_order[d]] = (hlp->offset[d] +
+					       (hlp->bounds.hi[d] - hlp->bounds.lo[d]) +
+					       1);
       }
     } else {
       assert(0);

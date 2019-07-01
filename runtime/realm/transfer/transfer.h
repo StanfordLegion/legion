@@ -65,6 +65,7 @@ namespace Realm {
     struct AddressInfoHDF5 {
       //hid_t dset_id;
       //hid_t dtype_id;
+      FieldID field_id;  // used to cache open datasets
       const std::string *filename;
       const std::string *dsetname;
       std::vector<hsize_t> dset_bounds;
