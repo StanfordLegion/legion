@@ -7552,32 +7552,31 @@ namespace Legion {
     {
       RtUserEvent done_event;
       derez.deserialize(done_event);
+      bool initial_refinement;
+      derez.deserialize(initial_refinement);
       // Do a quick test to see if we're still the owner, if not
       // then we can just forward this on immediately
       {
         AutoLock eq(eq_lock,1,false/*exlcusive*/);
-        if (!is_logical_owner())
+        // Check to see if we're the initial refinement, if not
+        // then we need to keep forwarding this on to wherever the
+        // owner is, otherwise we can handle it now and make ourselves
+        // the owner once we are ready
+        if (!is_logical_owner() && !initial_refinement)
         {
-          // Check to see if we've been the owner before, if we have then
-          // that means this is not an initialization case (see 
-          // send_equivalence_set) and therefore we need to forward this
-          // update, otherwise, this is an initialization update and we're
-          // about to become the logical owner
-          if (eq_state != INVALID_STATE)
-          {
-            Serializer rez;
-            // No RezCheck because of forwarding
-            rez.serialize(did);
-            rez.serialize(done_event);
-            // Just move the bytes over to the serializer and return
-            const size_t bytes = derez.get_remaining_bytes();
-            rez.serialize(derez.get_current_pointer(), bytes);
-            runtime->send_equivalence_set_remote_refinement(
-                                    logical_owner_space, rez);
-            // Keep the deserializer happy
-            derez.advance_pointer(bytes);
-            return;
-          }
+          Serializer rez;
+          // No RezCheck because of forwarding
+          rez.serialize(did);
+          rez.serialize(done_event);
+          rez.serialize<bool>(false); // initial refinement
+          // Just move the bytes over to the serializer and return
+          const size_t bytes = derez.get_remaining_bytes();
+          rez.serialize(derez.get_current_pointer(), bytes);
+          runtime->send_equivalence_set_remote_refinement(
+                                  logical_owner_space, rez);
+          // Keep the deserializer happy
+          derez.advance_pointer(bytes);
+          return;
         }
       }
       // Keep track of ready events
@@ -7676,8 +7675,8 @@ namespace Legion {
           LegionMap<VersionID,FieldMask>::aligned *version_copy = 
             new LegionMap<VersionID,FieldMask>::aligned();
           version_copy->swap(new_versions);
-          DeferMergeOrForwardArgs args(this, view_copy, reduc_copy,
-              restrict_copy, version_copy, done_event);
+          DeferMergeOrForwardArgs args(this, initial_refinement, view_copy, 
+              reduc_copy, restrict_copy, version_copy, done_event);
           runtime->issue_runtime_meta_task(args, 
               LG_LATENCY_DEFERRED_PRIORITY, wait_on);
           return;
@@ -7685,20 +7684,20 @@ namespace Legion {
         // Otherwise fall through to do the merge or forward now
       }
       // Either merge or forward the update
-      merge_or_forward(done_event, new_valid, new_reductions,
-                       new_restrictions, new_versions);
+      merge_or_forward(done_event, initial_refinement, new_valid, 
+                       new_reductions, new_restrictions, new_versions);
     }
 
     //--------------------------------------------------------------------------
     void EquivalenceSet::merge_or_forward(const RtUserEvent done_event,
-          const FieldMaskSet<LogicalView> &new_views,
+          bool initial_refinement, const FieldMaskSet<LogicalView> &new_views,
           const std::map<unsigned,std::vector<ReductionView*> > &new_reductions,
           const FieldMaskSet<InstanceView> &new_restrictions,
           const LegionMap<VersionID,FieldMask>::aligned &new_versions)
     //--------------------------------------------------------------------------
     {
       AutoLock eq(eq_lock);
-      if (is_logical_owner() || (eq_state == INVALID_STATE))
+      if (is_logical_owner() || initial_refinement)
       {
         // We're the owner so we can do the merge
         LocalReferenceMutator mutator;
@@ -7754,6 +7753,7 @@ namespace Legion {
         // No RezCheck in case of forwarding
         rez.serialize(did);
         rez.serialize(done_event);
+        rez.serialize<bool>(false); // initial refinement
         rez.serialize(new_views.size());
         for (FieldMaskSet<LogicalView>::const_iterator it =
               new_views.begin(); it != new_views.end(); it++)
@@ -8013,6 +8013,8 @@ namespace Legion {
         FieldMask mask;
         derez.deserialize(mask);
         valid_instances.insert(view, mask);
+        if (ready.exists())
+          owner_preconditions.insert(ready);
       }
       size_t num_reduc_fields;
       derez.deserialize(num_reduc_fields);
@@ -8033,6 +8035,8 @@ namespace Legion {
             runtime->find_or_request_logical_view(reduc_did, ready);
           ReductionView *reduc_view = static_cast<ReductionView*>(view);
           reduc_views.push_back(reduc_view);
+          if (ready.exists())
+            owner_preconditions.insert(ready);
         }
       }
       size_t num_restrict_insts;
@@ -8051,6 +8055,8 @@ namespace Legion {
           FieldMask mask;
           derez.deserialize(mask);
           restricted_instances.insert(inst_view, mask);
+          if (ready.exists())
+            owner_preconditions.insert(ready);
         }
       }
       size_t num_versions;
@@ -10603,6 +10609,11 @@ namespace Legion {
             // No RezCheck here because we might need to forward it
             rez.serialize(it->first->did);
             rez.serialize(done_event);
+            // Determine whether this is the inital refinement or not
+            if (subsets.find(it->first) == subsets.end())
+              rez.serialize<bool>(true); // initial refinement
+            else
+              rez.serialize<bool>(false); // not initial refinement
             pack_state(rez, it->second);
             runtime->send_equivalence_set_remote_refinement(
                 it->first->logical_owner_space, rez);
@@ -11572,7 +11583,7 @@ namespace Legion {
     {
       const DeferMergeOrForwardArgs *dargs = 
         (const DeferMergeOrForwardArgs*)args;
-      dargs->set->merge_or_forward(dargs->done, *(dargs->views), 
+      dargs->set->merge_or_forward(dargs->done, dargs->initial, *(dargs->views),
           *(dargs->reductions), *(dargs->restricted), *(dargs->versions));
       delete dargs->views;
       delete dargs->reductions;
