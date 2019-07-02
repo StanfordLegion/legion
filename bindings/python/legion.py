@@ -199,51 +199,55 @@ def _DomainPoint_unpickle(values):
     return DomainPoint.create(values)
 
 class DomainPoint(object):
-    __slots__ = ['handle']
+    __slots__ = [
+        'handle',
+        '_point', # cached properties
+    ]
     def __init__(self, handle, take_ownership=False):
         # Important: Copy handle. Do NOT assume ownership unless explicitly told.
         if take_ownership:
             self.handle = handle
         else:
             self.handle = ffi.new('legion_domain_t *', handle)
+        self._point = None
 
     def __reduce__(self):
         return (_DomainPoint_unpickle,
-                ([self.handle[0].point_data[i] for i in xrange(self.handle[0].dim)],))
+                ([self.handle[0].point_data[i] for i in xrange(self.dim)],))
 
     def __int__(self):
-        assert self.handle[0].dim == 1
+        assert self.dim == 1
         return self.handle[0].point_data[0]
 
     def __index__(self):
-        assert self.handle[0].dim == 1
-        return self.handle[0].point_data[0]
+        return self.__int__()
 
     def __getitem__(self, i):
-        assert 0 <= i < self.handle[0].dim
+        assert 0 <= i < self.dim
         return self.handle[0].point_data[i]
 
     def __eq__(self, other):
         if not isinstance(other, DomainPoint):
             return NotImplemented
-        if self.handle[0].dim != other.handle[0].dim:
-            return False
-        for i in xrange(self.handle[0].dim):
-            if self.handle[0].point_data[i] != other.handle[0].point_data[i]:
-                return False
-        return True
+        return numpy.array_equal(self.point, other.point)
 
     def __str__(self):
-        dim = self.handle[0].dim
-        if dim == 1:
-            return str(self.handle[0].point_data[0])
-        return '({})'.format(
-            ', '.join(str(self.handle[0].point_data[i]) for i in xrange(dim)))
+        if self.dim == 1:
+            return str(int(self))
+        return str(self.point)
 
     def __repr__(self):
-        dim = self.handle[0].dim
-        return 'DomainPoint({})'.format(
-            ', '.join(str(self.handle[0].point_data[i]) for i in xrange(dim)))
+        return 'DomainPoint({})'.format(self.point)
+
+    @property
+    def dim(self):
+        return self.handle[0].dim
+
+    @property
+    def point(self):
+        if self._point is None:
+            self._point = self.asarray()
+        return self._point
 
     @staticmethod
     def create(values):
@@ -275,11 +279,21 @@ class DomainPoint(object):
     def raw_value(self):
         return self.handle[0]
 
+    def asarray(self):
+        return numpy.frombuffer(
+            ffi.buffer(self.handle[0].point_data),
+            count=self.dim,
+            dtype=numpy.int64)
+
 class Domain(object):
-    __slots__ = ['handle']
+    __slots__ = [
+        'handle',
+        '_bounds', # cached properties
+    ]
     def __init__(self, handle):
         # Important: Copy handle. Do NOT assume ownership.
         self.handle = ffi.new('legion_domain_t *', handle)
+        self._bounds = None
 
     @property
     def dim(self):
@@ -288,6 +302,21 @@ class Domain(object):
     @property
     def volume(self):
         return c.legion_domain_get_volume(self.handle[0])
+
+    @property
+    def bounds(self):
+        if self._bounds is None:
+            self._bounds = self.asarray()
+        return self._bounds
+
+    @property
+    def extent(self):
+        bounds = self.bounds
+        return bounds[1] - bounds[0] + 1
+
+    @property
+    def start(self):
+        return self.bounds[0]
 
     @staticmethod
     def create(extent, start=None):
@@ -317,17 +346,23 @@ class Domain(object):
         return value
 
     def __iter__(self):
-        dim = self.handle[0].dim
         return imap(
             DomainPoint.create,
             itertools.product(
                 *[xrange(
                     self.handle[0].rect_data[i],
-                    self.handle[0].rect_data[i+dim] + 1)
-                  for i in xrange(dim)]))
+                    self.handle[0].rect_data[i+self.dim] + 1)
+                  for i in xrange(self.dim)]))
 
     def raw_value(self):
         return self.handle[0]
+
+    def asarray(self):
+        return numpy.frombuffer(
+            ffi.buffer(self.handle[0].rect_data),
+            count=self.dim * 2,
+            dtype=numpy.int64
+        ).reshape((2, self.dim))
 
 class DomainTransform(object):
     __slots__ = ['handle']
@@ -589,6 +624,7 @@ def _Ispace_unpickle(ispace_tid, ispace_id, ispace_type_tag, owned):
 class Ispace(object):
     __slots__ = [
         'handle', 'owned', 'escaped',
+        '_domain', # cached properties
         '__weakref__', # allow weak references
     ]
 
@@ -597,6 +633,7 @@ class Ispace(object):
         self.handle = ffi.new('legion_index_space_t *', handle)
         self.owned = owned
         self.escaped = False
+        self._domain = None
 
         if self.owned:
             _my.ctx.track_object(self)
@@ -617,8 +654,9 @@ class Ispace(object):
 
     @property
     def domain(self):
-        domain = c.legion_index_space_get_domain(_my.ctx.runtime, self.handle[0])
-        return Domain(domain)
+        if self._domain is None:
+            self._domain = Domain(c.legion_index_space_get_domain(_my.ctx.runtime, self.handle[0]))
+        return self._domain
 
     @property
     def dim(self):
@@ -627,6 +665,10 @@ class Ispace(object):
     @property
     def volume(self):
         return self.domain.volume
+
+    @property
+    def bounds(self):
+        return self.domain.bounds
 
     @staticmethod
     def create(extent, start=None):
@@ -876,7 +918,7 @@ class RegionField(numpy.ndarray):
     def _get_base_and_stride(region, field_name, accessor):
         domain = region.ispace.domain
         dim = domain.dim
-        if domain.volume <= 1:
+        if domain.volume < 1:
             return None, None, None
 
         rect = getattr(c, 'legion_domain_get_rect_{}d'.format(dim))(domain.raw_value())

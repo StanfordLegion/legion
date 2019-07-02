@@ -19,38 +19,25 @@ from __future__ import print_function
 
 import legion
 from legion import task, RW
+import numpy as np
 
 @task
 def main():
-    d = legion.Domain.create(10)
+    d1 = legion.DomainPoint.create([1])
+    d2 = legion.DomainPoint.create([1, 2])
+    d3 = legion.DomainPoint.create([1, 2, 3])
 
-    print(d, d.bounds)
+    print(d1, repr(d1), d1.point)
+    print(d2, repr(d2), d2.point)
+    print(d3, repr(d3), d3.point)
 
-    t = 0
-    for x in d:
-        print(x)
-        t += int(x)
-    assert t == 45
+    assert np.array_equal(d1.point, [1])
+    assert np.array_equal(d2.point, [1, 2])
+    assert np.array_equal(d3.point, [1, 2, 3])
 
-    d2 = legion.Domain.create([3, 3], [1, 1])
-
-    print(d2, d2.bounds)
-
-    t2 = 0
-    for x in d2:
-        print(x)
-        t2 += x[0] * x[1]
-    assert t2 == 36
-
-
-    d3 = legion.Domain.create([4, 5, 6], [-1, 0, 1])
-
-    print(d3, d3.bounds)
-
-    t3 = 0
-    for x in d3:
-        t3 += x[0] * x[1] * x[2]
-    assert t3 == 420
+    assert d1 == legion.DomainPoint.create([1])
+    assert d1 != legion.DomainPoint.create([0])
+    assert d1 != legion.DomainPoint.create([1, 2])
 
 if __name__ == '__legion_main__':
     main()
