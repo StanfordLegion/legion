@@ -6477,10 +6477,7 @@ namespace Legion {
           LEGION_DISTRIBUTED_HELP_ENCODE(did, EQUIVALENCE_SET_DC), 
           owner, reg_now), set_expr(expr),
         index_space_node(node), logical_owner_space(logical),
-        eq_state(is_logical_owner() ? MAPPING_STATE : 
-            // If we're not the logical owner but we are the owner
-            // then we have a valid remote lease of the subsets
-            is_owner() ? VALID_STATE : INVALID_STATE), 
+        eq_state(is_logical_owner() ? MAPPING_STATE : INVALID_STATE), 
         subset_exprs(NULL), sample_count(0), pending_analyses(0)
     //--------------------------------------------------------------------------
     {
@@ -6500,8 +6497,6 @@ namespace Legion {
 #endif
         index_space_node->add_nested_resource_ref(did);
       }
-      if (is_logical_owner() && !is_owner())
-        remote_subsets.insert(owner_space);
 #ifdef LEGION_GC
       log_garbage.info("GC Equivalence Set %lld %d", did, local_space);
 #endif
@@ -7882,13 +7877,14 @@ namespace Legion {
       // Pack subsets
       // We're only allowed to keep the complete subsets on this node
       // so we need to filter anything that isn't fully refined
+      // We still keep references to the equivalence sets though
+      // so that they aren't deleted
       FieldMask incomplete_refinements;
       if (!unrefined_remainders.empty())
         incomplete_refinements = unrefined_remainders.get_valid_mask();
       if (!disjoint_partition_refinements.empty())
         incomplete_refinements |= 
           disjoint_partition_refinements.get_valid_mask();
-      std::vector<EquivalenceSet*> to_delete;
       rez.serialize<size_t>(subsets.size());
       for (FieldMaskSet<EquivalenceSet>::iterator it = 
             subsets.begin(); it != subsets.end(); it++)
@@ -7896,25 +7892,10 @@ namespace Legion {
         rez.serialize(it->first->did);
         rez.serialize(it->second);
         if (!!incomplete_refinements)
-        {
           it.filter(incomplete_refinements);
-          if (!it->second)
-            to_delete.push_back(it->first);
-        }
-      }
-      // Remove all the subsets which are not valid here any longer
-      if (!to_delete.empty())
-      {
-        for (std::vector<EquivalenceSet*>::const_iterator it = 
-              to_delete.begin(); it != to_delete.end(); it++)
-        {
-          subsets.erase(*it);
-          if ((*it)->remove_nested_resource_ref(did))
-            delete (*it);
-        }
       }
       // Tighten the valid mask for future analyses
-      if (!subsets.empty())
+      if (!!incomplete_refinements)
         subsets.tighten_valid_mask();
       // No need to clear subsets since we can still maintain a copy of it
       // Pack remote subsets
