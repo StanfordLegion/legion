@@ -3935,7 +3935,7 @@ namespace Legion {
         delete defer_args->effects;
         if (perform_postmap)
         {
-          const PhysicalTraceInfo trace_info(this);
+          const PhysicalTraceInfo trace_info(this, false/*initialize*/);
           perform_post_mapping(trace_info);
         }
       }
@@ -3945,7 +3945,7 @@ namespace Legion {
         shard_manager->extract_event_preconditions(physical_instances);
       if (is_recording())
       {
-        const PhysicalTraceInfo trace_info(this);
+        const PhysicalTraceInfo trace_info(this, false/*initialize*/);
 #ifdef DEBUG_LEGION
         assert(tpl != NULL && tpl->is_recording());
 #endif
