@@ -19,10 +19,13 @@ from __future__ import print_function
 
 import legion
 from legion import task, RW
+import numpy as np
 
 @task(privileges=[RW])
-def hello_subregion(R):
-    print('Subregion has volume %s' % R.ispace.volume)
+def check_subregion(R):
+    print('Subregion has volume %s extent %s bounds %s' % (
+        R.ispace.volume, R.ispace.domain.extent, R.ispace.bounds))
+    assert np.array_equal(R.x.shape, R.ispace.domain.extent)
     return R.ispace.volume
 
 @task
@@ -43,7 +46,7 @@ def main():
 
     print('Parent region has volume %s' % R.ispace.volume)
     assert R.ispace.volume == 16
-    assert hello_subregion(R00).get() == 4
+    assert check_subregion(R00).get() == 4
 
     # Partition the subregion again.
     P00 = legion.Partition.create_equal(R00, [2, 2])
@@ -51,7 +54,7 @@ def main():
     for x in range(2):
         for y in range(2):
             R00xy = P00[x, y]
-            total_volume += hello_subregion(R00xy).get()
+            total_volume += check_subregion(R00xy).get()
     assert total_volume == 4
 
     # An easy way to iterate subregions:

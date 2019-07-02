@@ -199,13 +199,17 @@ def _DomainPoint_unpickle(values):
     return DomainPoint.create(values)
 
 class DomainPoint(object):
-    __slots__ = ['handle']
+    __slots__ = [
+        'handle',
+        '_point', # cached properties
+    ]
     def __init__(self, handle, take_ownership=False):
         # Important: Copy handle. Do NOT assume ownership unless explicitly told.
         if take_ownership:
             self.handle = handle
         else:
             self.handle = ffi.new('legion_domain_t *', handle)
+        self._point = None
 
     def __reduce__(self):
         return (_DomainPoint_unpickle,
@@ -241,7 +245,9 @@ class DomainPoint(object):
 
     @property
     def point(self):
-        return self.asarray()
+        if self._point is None:
+            self._point = self.asarray()
+        return self._point
 
     @staticmethod
     def create(values):
@@ -280,10 +286,14 @@ class DomainPoint(object):
             dtype=numpy.int64)
 
 class Domain(object):
-    __slots__ = ['handle']
+    __slots__ = [
+        'handle',
+        '_bounds', # cached properties
+    ]
     def __init__(self, handle):
         # Important: Copy handle. Do NOT assume ownership.
         self.handle = ffi.new('legion_domain_t *', handle)
+        self._bounds = None
 
     @property
     def dim(self):
@@ -295,7 +305,18 @@ class Domain(object):
 
     @property
     def bounds(self):
-        return self.asarray()
+        if self._bounds is None:
+            self._bounds = self.asarray()
+        return self._bounds
+
+    @property
+    def extent(self):
+        bounds = self.bounds
+        return bounds[1] - bounds[0] + 1
+
+    @property
+    def start(self):
+        return self.bounds[0]
 
     @staticmethod
     def create(extent, start=None):
@@ -603,6 +624,7 @@ def _Ispace_unpickle(ispace_tid, ispace_id, ispace_type_tag, owned):
 class Ispace(object):
     __slots__ = [
         'handle', 'owned', 'escaped',
+        '_domain', # cached properties
         '__weakref__', # allow weak references
     ]
 
@@ -611,6 +633,7 @@ class Ispace(object):
         self.handle = ffi.new('legion_index_space_t *', handle)
         self.owned = owned
         self.escaped = False
+        self._domain = None
 
         if self.owned:
             _my.ctx.track_object(self)
@@ -631,8 +654,9 @@ class Ispace(object):
 
     @property
     def domain(self):
-        domain = c.legion_index_space_get_domain(_my.ctx.runtime, self.handle[0])
-        return Domain(domain)
+        if self._domain is None:
+            self._domain = Domain(c.legion_index_space_get_domain(_my.ctx.runtime, self.handle[0]))
+        return self._domain
 
     @property
     def dim(self):
@@ -894,7 +918,7 @@ class RegionField(numpy.ndarray):
     def _get_base_and_stride(region, field_name, accessor):
         domain = region.ispace.domain
         dim = domain.dim
-        if domain.volume <= 1:
+        if domain.volume < 1:
             return None, None, None
 
         rect = getattr(c, 'legion_domain_get_rect_{}d'.format(dim))(domain.raw_value())

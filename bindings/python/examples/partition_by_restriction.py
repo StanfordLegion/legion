@@ -19,15 +19,20 @@ from __future__ import print_function
 
 import legion
 from legion import task, RW
+import numpy as np
 
 @task(privileges=[RW])
-def hello_subregion(R):
-    print('Subregion has volume %s' % R.ispace.volume)
+def check_subregion(R):
+    print('Subregion has volume %s extent %s bounds %s' % (
+        R.ispace.volume, R.ispace.domain.extent, R.ispace.bounds))
+    assert np.array_equal(R.x.shape, R.ispace.domain.extent)
     return R.ispace.volume
 
 @task
 def main():
     R = legion.Region.create([4, 4], {'x': legion.float64})
+
+    legion.fill(R, 'x', 0)
 
     # Create a partition of R.
     colors = [2, 2]
@@ -49,12 +54,12 @@ def main():
 
     print('Parent region has volume %s' % R.ispace.volume)
     assert R.ispace.volume == 16
-    assert hello_subregion(R00).get() == 4
+    assert check_subregion(R00).get() == 4
     for Rij in P:
-        assert Rij.ispace.volume == 4
-    assert P2[0].ispace.volume == 1
-    assert P2[1].ispace.volume == 4
-    assert P2[2].ispace.volume == 2
+        assert check_subregion(Rij).get() == 4
+    assert check_subregion(P2[0]).get() == 1
+    assert check_subregion(P2[1]).get() == 4
+    assert check_subregion(P2[2]).get() == 2
 
 if __name__ == '__legion_main__':
     main()
