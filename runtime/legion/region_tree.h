@@ -3105,7 +3105,7 @@ namespace Legion {
     public:
       virtual void notify_inactive(ReferenceMutator *mutator);
     public:
-      void record_registered(void);
+      void record_registered(ReferenceMutator *mutator);
     public:
       bool has_color(const LegionColor p);
       PartitionNode* get_child(const LegionColor p);
@@ -3244,7 +3244,7 @@ namespace Legion {
     public:
       virtual void notify_inactive(ReferenceMutator *mutator);
     public:
-      void record_registered(void);
+      void record_registered(ReferenceMutator *mutator);
     public:
       bool has_color(const LegionColor c);
       RegionNode* get_child(const LegionColor c);
