@@ -3221,9 +3221,9 @@ namespace Legion {
         else
           result->add_base_gc_ref(REMOTE_DID_REF, &mutator);
         result->register_with_runtime(&mutator);
+        if (parent != NULL)
+          parent->add_child(result, &mutator);
       } 
-      if (parent != NULL)
-        parent->add_child(result, &mutator);
       // If we had a realm index space issue the tighten now since
       // we know that we'll probably need it later
       // We have to do this after we've added our reference in case
@@ -3277,9 +3277,9 @@ namespace Legion {
         else
           result->add_base_gc_ref(REMOTE_DID_REF, &mutator);
         result->register_with_runtime(&mutator);
+        if (parent != NULL)
+          parent->add_child(result, &mutator);
       } 
-      if (parent != NULL)
-        parent->add_child(result, &mutator);
       // If we had a realm index space issue the tighten now since
       // we know that we'll probably need it later
       // We have to do this after we've added our reference in case
@@ -3342,9 +3342,9 @@ namespace Legion {
           color_space->add_nested_resource_ref(did);
         }
         result->register_with_runtime(&mutator);
+        if (parent != NULL)
+          parent->add_child(result, &mutator);
       }
-      if (parent != NULL)
-        parent->add_child(result, &mutator);
       return result;
     }
 
@@ -3402,9 +3402,9 @@ namespace Legion {
           color_space->add_nested_resource_ref(did);
         }
         result->register_with_runtime(&mutator);
+        if (parent != NULL)
+          parent->add_child(result, &mutator);
       }
-      if (parent != NULL)
-        parent->add_child(result, &mutator);
       return result;
     }
  
@@ -3540,11 +3540,6 @@ namespace Legion {
         }
         result->record_registered(&mutator);
       }
-      if (parent == NULL)
-        col_src->add_instance(result);
-      else
-        parent->add_child(result);
-      row_src->add_instance(result);
       return result;
     }
 
@@ -3590,8 +3585,6 @@ namespace Legion {
         result->add_base_gc_ref(APPLICATION_REF, &mutator);
         result->record_registered(&mutator);
       }
-      row_src->add_instance(result);
-      parent->add_child(result);
       return result;
     }
 
@@ -14141,13 +14134,18 @@ namespace Legion {
 #endif
       if (parent == NULL)
       {
+        column_source->add_instance(this);
         column_source->add_nested_valid_ref(did, mutator);
         column_source->add_nested_resource_ref(did);
       }
       else
+      {
+        parent->add_child(this);
         parent->add_nested_gc_ref(did, mutator);
+      }
       row_source->add_nested_valid_ref(did, mutator);
       row_source->add_nested_resource_ref(did);
+      row_source->add_instance(this);
       registered = true;
     }
 
@@ -15346,9 +15344,11 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(!registered);
 #endif
+      row_source->add_instance(this);
       row_source->add_nested_valid_ref(did, mutator);
       row_source->add_nested_resource_ref(did);
       parent->add_nested_gc_ref(did, mutator);
+      parent->add_child(this);
       registered = true;
     }
 
