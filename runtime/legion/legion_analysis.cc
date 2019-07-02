@@ -10879,8 +10879,10 @@ namespace Legion {
         return;
       }
       // If we arrived back at ourself after we were made the owner
-      // then there is nothing for us to do
-      if (source == local_space)
+      // then there is nothing for us to do, similarly if this is a 
+      // duplicate then there is nothing for us to do
+      if ((source == local_space) ||
+          (remote_subsets.find(source) != remote_subsets.end()))
       {
         if (deferral_event.exists())
           Runtime::trigger_event(deferral_event);
@@ -10898,9 +10900,6 @@ namespace Legion {
             LG_LATENCY_DEFERRED_PRIORITY, refinement_event);
         return;
       }
-#ifdef DEBUG_LEGION
-      assert(remote_subsets.find(source) == remote_subsets.end());
-#endif
       // Record the remote subsets
       remote_subsets.insert(source);
       // Remote copies of the subsets either have to be empty or a 
