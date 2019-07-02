@@ -1838,63 +1838,25 @@ namespace Realm {
 			         dst_mem :
 			         src_mem)->get_direct_ptr(mem_info.base_offset,
 							  mem_info.bytes_per_chunk);
-	  HDFFileInfo *info;
+	  // we'll open datasets on the first touch in this transfer
+	  // (TODO: pre-open at instance attach time, but in thread-safe way)
+	  HDF5::HDF5Dataset *dset;
 	  {
-	    std::map<std::string, HDFFileInfo *>::const_iterator it = file_infos.find(*hdf5_info.filename);
-	    if(it != file_infos.end()) {
-	      info = it->second;
+	    std::map<FieldID, HDF5::HDF5Dataset *>::const_iterator it = datasets.find(hdf5_info.field_id);
+	    if(it != datasets.end()) {
+	      dset = it->second;
 	    } else {
-	      info = new HDFFileInfo;
-	      // have to open the file
-	      CHECK_HDF5( info->file_id = H5Fopen(hdf5_info.filename->c_str(),
-						  ((kind == XferDes::XFER_HDF_READ) ?
-					             H5F_ACC_RDONLY :
-					             H5F_ACC_RDWR),
-						  H5P_DEFAULT) );
-	      log_hdf5.info() << "H5Fopen(\"" << *hdf5_info.filename << "\") = " << info->file_id;
-	      file_infos[*hdf5_info.filename] = info;
+	      dset = HDF5::HDF5Dataset::open(hdf5_info.filename->c_str(),
+					     hdf5_info.dsetname->c_str(),
+					     (kind == XferDes::XFER_HDF_READ));
+	      assert(dset != 0);
+	      assert(hdf5_info.extent.size() == size_t(dset->ndims));
+	      datasets[hdf5_info.field_id] = dset;
 	    }
 	  }
-	  hid_t dset_id;
-	  {
-	    std::map<std::string, hid_t>::const_iterator it = info->dset_ids.find(*hdf5_info.dsetname);
-	    if(it != info->dset_ids.end()) {
-	      dset_id = it->second;
-	    } else {
-	      // follow group path if any /'s are present
-	      hid_t loc_id = info->file_id;
-	      size_t startpos = 0;
-	      // leading slash in dataset path is optional - ignore if present
-	      if((*hdf5_info.dsetname)[0] == '/') startpos++;
-	      while(true) {
-		size_t pos = hdf5_info.dsetname->find_first_of('/', startpos);
-		if(pos == std::string::npos) break;
-		std::string grpname(*hdf5_info.dsetname, startpos, pos-startpos);
-		hid_t grp_id;
-		CHECK_HDF5( grp_id = H5Gopen2(loc_id,
-					      grpname.c_str(),
-					      H5P_DEFAULT) );
-		log_hdf5.info() << "H5Gopen2(" << loc_id << ", \"" << grpname << "\") = " << grp_id;
-		if(loc_id != info->file_id)
-		  CHECK_HDF5( H5Gclose(loc_id) );
-		loc_id = grp_id;
-		startpos = pos + 1;
-	      }
-	      // have to open the dataset
-	      CHECK_HDF5( dset_id = H5Dopen2(loc_id,
-					     hdf5_info.dsetname->c_str()+startpos,
-					     H5P_DEFAULT) );
-	      log_hdf5.info() << "H5Dopen2(" << info->file_id << ", \"" << *hdf5_info.dsetname << "\") = " << dset_id;
-	      info->dset_ids[*hdf5_info.dsetname] = dset_id;
-	      if(loc_id != info->file_id)
-		CHECK_HDF5( H5Gclose(loc_id) );
-	    }
-	  }
-	  hid_t dtype_id;
-	  CHECK_HDF5( dtype_id = H5Dget_type(dset_id) );
 
-	  new_req->dataset_id = dset_id;
-	  new_req->datatype_id = dtype_id;
+	  new_req->dataset_id = dset->dset_id;
+	  new_req->datatype_id = dset->dtype_id;
 
 	  std::vector<hsize_t> mem_dims = hdf5_info.extent;
 	  CHECK_HDF5( new_req->mem_space_id = H5Screate_simple(mem_dims.size(), mem_dims.data(), NULL) );
@@ -1950,19 +1912,11 @@ namespace Realm {
           // }
         }
 
-	for(std::map<std::string, HDFFileInfo *>::const_iterator it = file_infos.begin();
-	    it != file_infos.end();
-	    ++it) {
-	  for(std::map<std::string, hid_t>::const_iterator it2 = it->second->dset_ids.begin();
-	      it2 != it->second->dset_ids.end();
-	      ++it2) {
-	    log_hdf5.info() << "H5Dclose(" << it2->second << " /* \"" << it2->first << "\" */)";
-	    CHECK_HDF5( H5Dclose(it2->second) );
-	  }
-	  log_hdf5.info() << "H5Fclose(" << it->second->file_id << " /* \"" << it->first << "\" */)";
-	  CHECK_HDF5( H5Fclose(it->second->file_id) );
-	  delete it->second;
-	}
+	for(std::map<FieldID, HDF5::HDF5Dataset *>::const_iterator it = datasets.begin();
+	    it != datasets.end();
+	    ++it)
+	  it->second->close();
+	datasets.clear();
       }
 #endif
 

@@ -41,6 +41,7 @@
 
 #ifdef USE_HDF
 #include "realm/hdf5/hdf5_internal.h"
+#include "realm/hdf5/hdf5_access.h"
 #endif
 
 namespace Realm {
@@ -575,14 +576,9 @@ namespace Realm {
       void notify_request_write_done(Request* req);
       void flush();
 
-      struct HDFFileInfo {
-	hid_t file_id;
-	std::map<std::string, hid_t> dset_ids;
-      };
-
     private:
       HDFRequest* hdf_reqs;
-      std::map<std::string, HDFFileInfo *> file_infos;
+      std::map<FieldID, HDF5::HDF5Dataset *> datasets;
       //char *buf_base;
       //const HDF5Memory::HDFMetadata *hdf_metadata;
       //std::vector<OffsetsAndSize>::iterator fit;

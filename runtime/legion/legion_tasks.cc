@@ -1230,12 +1230,20 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RtEvent TaskOp::defer_perform_mapping(RtEvent precondition, MustEpochOp *op)
+    RtEvent TaskOp::defer_perform_mapping(RtEvent precondition, MustEpochOp *op,
+                                          const DeferMappingArgs *defer_args,
+                                          unsigned invocation_count,
+                                          std::vector<unsigned> *performed,
+                                          std::vector<ApEvent> *effects)
     //--------------------------------------------------------------------------
     {
-      DeferMappingArgs args(this, op);
-      return runtime->issue_runtime_meta_task(args,
+      const RtUserEvent done_event = (defer_args == NULL) ? 
+        Runtime::create_rt_user_event() : defer_args->done_event;
+      DeferMappingArgs args(this, op, done_event, invocation_count,
+                            performed, effects);
+      runtime->issue_runtime_meta_task(args,
           LG_THROUGHPUT_DEFERRED_PRIORITY, precondition);
+      return done_event;
     }
 
     //--------------------------------------------------------------------------
@@ -3719,179 +3727,225 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     RtEvent SingleTask::map_all_regions(ApEvent local_termination_event,
-                                        const bool first_invocation, 
-                                        MustEpochOp *must_epoch_op)
+                                        MustEpochOp *must_epoch_op,
+                                        const DeferMappingArgs *defer_args)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, MAP_ALL_REGIONS_CALL);
-      if (request_valid_instances)
+      // Only do this the first or second time through
+      if ((defer_args == NULL) || (defer_args->invocation_count < 2))
       {
-        // If the mapper wants valid instances we first need to do our
-        // versioning analysis and then call the mapper
-        if (first_invocation)
+        if (request_valid_instances)
         {
-          const RtEvent version_ready_event = 
-            perform_versioning_analysis(false/*post mapper*/);
-          if (version_ready_event.exists() && 
-              !version_ready_event.has_triggered())
-          return defer_perform_mapping(version_ready_event, must_epoch_op);
-        }
-        // Now do the mapping call
-        if (is_replicated())
-          invoke_mapper_replicated(must_epoch_op);
-        else
-          invoke_mapper(must_epoch_op);
-      }
-      else
-      {
-        // If the mapper doesn't need valid instances, we do the mapper
-        // call first and then see if we need to do any versioning analysis
-        if (first_invocation)
-        {
+          // If the mapper wants valid instances we first need to do our
+          // versioning analysis and then call the mapper
+          if (defer_args == NULL/*first invocation*/)
+          {
+            const RtEvent version_ready_event = 
+              perform_versioning_analysis(false/*post mapper*/);
+            if (version_ready_event.exists() && 
+                !version_ready_event.has_triggered())
+            return defer_perform_mapping(version_ready_event, must_epoch_op,
+                                         defer_args, 1/*invocation count*/);
+          }
+          // Now do the mapping call
           if (is_replicated())
             invoke_mapper_replicated(must_epoch_op);
           else
             invoke_mapper(must_epoch_op);
-          const RtEvent version_ready_event = 
-            perform_versioning_analysis(true/*post mapper*/);
-          if (version_ready_event.exists() && 
-              !version_ready_event.has_triggered())
-          return defer_perform_mapping(version_ready_event, must_epoch_op);
-        }
-      }
-      const PhysicalTraceInfo trace_info(this);
-      ApEvent init_precondition = compute_init_precondition(trace_info);
-#ifdef LEGION_SPY
-      {
-        ApEvent local_completion = get_completion_event();
-        // Yes, these events actually trigger in the opposite order, but
-        // it is the logical entailement that is important here
-        if (local_completion != local_termination_event)
-          LegionSpy::log_event_dependence(local_completion, 
-                                          local_termination_event);
-      }
-#endif
-      // After we've got our results, apply the state to the region tree
-      if (!regions.empty())
-      {
-        const bool track_effects = 
-          (!atomic_locks.empty() || !arrive_barriers.empty());
-        if (regions.size() == 1)
-        {
-          if (early_mapped_regions.empty() && 
-              !no_access_regions[0] && !virtual_mapped[0])
-          {
-            // Set the current mapping index before doing anything
-            // that sould result in a copy
-            set_current_mapping_index(0);
-            const bool record_valid = (untracked_valid_regions.find(0) == 
-                                       untracked_valid_regions.end());
-            const ApEvent effects = 
-              runtime->forest->physical_perform_updates_and_registration(
-                  regions[0], version_infos[0], this, 0, 
-                  init_precondition, local_termination_event,
-                  physical_instances[0], trace_info, map_applied_conditions,
-#ifdef DEBUG_LEGION
-                                        get_logging_name(),
-                                        unique_op_id,
-#endif
-                                        track_effects, record_valid);
-            if (effects.exists())
-              effects_postconditions.insert(effects);
-#ifdef DEBUG_LEGION
-            dump_physical_state(&regions[0], 0);
-#endif
-          }
         }
         else
         {
-          std::vector<unsigned> performed_regions;
-          std::set<RtEvent> registration_postconditions;
-          std::vector<UpdateAnalysis*> analyses(regions.size(), NULL);
-          std::vector<ApEvent> effects(regions.size(), ApEvent::NO_AP_EVENT);
-          std::vector<RtEvent> reg_pre(regions.size(), RtEvent::NO_RT_EVENT);
-          for (unsigned idx = 0; idx < regions.size(); idx++)
+          // If the mapper doesn't need valid instances, we do the mapper
+          // call first and then see if we need to do any versioning analysis
+          if (defer_args == NULL/*first invocation*/)
           {
-            if (early_mapped_regions.find(idx) != early_mapped_regions.end())
-            {
-              if (runtime->legion_spy_enabled)
-                LegionSpy::log_task_premapping(unique_op_id, idx);
-              continue;
-            }
-            if (no_access_regions[idx])
-              continue;
-            VersionInfo &local_info = get_version_info(idx);
-            // If we virtual mapped it, there is nothing to do
-            if (virtual_mapped[idx])
-              continue;
-            performed_regions.push_back(idx);
-            // Set the current mapping index before doing anything
-            // that sould result in a copy
-            set_current_mapping_index(idx);
-            const bool record_valid = (untracked_valid_regions.find(idx) ==
-                                       untracked_valid_regions.end());
-            // apply the results of the mapping to the tree
-            reg_pre[idx] = runtime->forest->physical_perform_updates(
-                                        regions[idx], local_info, 
-                                        this, idx, init_precondition,
-                                        local_termination_event,
-                                        physical_instances[idx],
-                                        trace_info,
-                                        map_applied_conditions,
-                                        analyses[idx],
-#ifdef DEBUG_LEGION
-                                        get_logging_name(),
-                                        unique_op_id,
-#endif
-                                        track_effects, record_valid);
+            if (is_replicated())
+              invoke_mapper_replicated(must_epoch_op);
+            else
+              invoke_mapper(must_epoch_op);
+            const RtEvent version_ready_event = 
+              perform_versioning_analysis(true/*post mapper*/);
+            if (version_ready_event.exists() && 
+                !version_ready_event.has_triggered())
+            return defer_perform_mapping(version_ready_event, must_epoch_op,
+                                         defer_args, 1/*invocation count*/);
           }
-          for (std::vector<unsigned>::const_iterator it = 
-                performed_regions.begin(); it != performed_regions.end(); it++)
+        }
+        const PhysicalTraceInfo trace_info(this);
+        ApEvent init_precondition = compute_init_precondition(trace_info);
+#ifdef LEGION_SPY
+        {
+          ApEvent local_completion = get_completion_event();
+          // Yes, these events actually trigger in the opposite order, but
+          // it is the logical entailement that is important here
+          if (local_completion != local_termination_event)
+            LegionSpy::log_event_dependence(local_completion, 
+                                            local_termination_event);
+        }
+#endif
+        // After we've got our results, apply the state to the region tree
+        if (!regions.empty())
+        {
+          const bool track_effects = 
+            (!atomic_locks.empty() || !arrive_barriers.empty());
+          if (regions.size() == 1)
           {
-            // If we have updates for either copy launcher then defer it
-            // in order to avoid blocking here, otherwise we can just do
-            // it here as we know that we won't block
-            if (reg_pre[*it].exists() || analyses[*it]->has_output_updates())
+            if (early_mapped_regions.empty() && 
+                !no_access_regions[0] && !virtual_mapped[0])
             {
-              const RtEvent registration_post = 
-                runtime->forest->defer_physical_perform_registration(
+              // Set the current mapping index before doing anything
+              // that sould result in a copy
+              set_current_mapping_index(0);
+              const bool record_valid = (untracked_valid_regions.find(0) == 
+                                         untracked_valid_regions.end());
+              const ApEvent effects = 
+                runtime->forest->physical_perform_updates_and_registration(
+                    regions[0], version_infos[0], this, 0, 
+                    init_precondition, local_termination_event,
+                    physical_instances[0], trace_info, map_applied_conditions,
+#ifdef DEBUG_LEGION
+                                          get_logging_name(),
+                                          unique_op_id,
+#endif
+                                          track_effects, record_valid);
+              if (effects.exists())
+                effects_postconditions.insert(effects);
+#ifdef DEBUG_LEGION
+              dump_physical_state(&regions[0], 0);
+#endif
+            }
+          }
+          else
+          {
+            std::vector<unsigned> performed_regions;
+            std::set<RtEvent> registration_postconditions;
+            std::vector<UpdateAnalysis*> analyses(regions.size(), NULL);
+            std::vector<ApEvent> effects(regions.size(), ApEvent::NO_AP_EVENT);
+            std::vector<RtEvent> reg_pre(regions.size(), RtEvent::NO_RT_EVENT);
+            for (unsigned idx = 0; idx < regions.size(); idx++)
+            {
+              if (early_mapped_regions.find(idx) != early_mapped_regions.end())
+              {
+                if (runtime->legion_spy_enabled)
+                  LegionSpy::log_task_premapping(unique_op_id, idx);
+                continue;
+              }
+              if (no_access_regions[idx])
+                continue;
+              VersionInfo &local_info = get_version_info(idx);
+              // If we virtual mapped it, there is nothing to do
+              if (virtual_mapped[idx])
+                continue;
+              performed_regions.push_back(idx);
+              // Set the current mapping index before doing anything
+              // that sould result in a copy
+              set_current_mapping_index(idx);
+              const bool record_valid = (untracked_valid_regions.find(idx) ==
+                                         untracked_valid_regions.end());
+              // apply the results of the mapping to the tree
+              reg_pre[idx] = runtime->forest->physical_perform_updates(
+                                          regions[idx], local_info, 
+                                          this, idx, init_precondition,
+                                          local_termination_event,
+                                          physical_instances[idx],
+                                          trace_info,
+                                          map_applied_conditions,
+                                          analyses[idx],
+#ifdef DEBUG_LEGION
+                                          get_logging_name(),
+                                          unique_op_id,
+#endif
+                                          track_effects, record_valid);
+            }
+            for (std::vector<unsigned>::const_iterator it = 
+                 performed_regions.begin(); it != performed_regions.end(); it++)
+            {
+              // If we have updates for either copy launcher then defer it
+              // in order to avoid blocking here, otherwise we can just do
+              // it here as we know that we won't block
+              if (reg_pre[*it].exists() || analyses[*it]->has_output_updates())
+              {
+                const RtEvent registration_post = 
+                  runtime->forest->defer_physical_perform_registration(
                                           reg_pre[*it], analyses[*it],
                                           physical_instances[*it],
                                           map_applied_conditions, effects[*it]);
-              registration_postconditions.insert(registration_post);
-            }
-            else
-              effects[*it] = runtime->forest->physical_perform_registration(
+                registration_postconditions.insert(registration_post);
+              }
+              else
+                effects[*it] = runtime->forest->physical_perform_registration(
                                           analyses[*it],physical_instances[*it],
                                           trace_info, map_applied_conditions);
-          }
-          // Wait for all the registrations to be done
-          if (!registration_postconditions.empty())
-          {
-            const RtEvent wait_on = 
-              Runtime::merge_events(registration_postconditions);
-            wait_on.wait();
-          }
-          // Now we can do the registrations
-          for (std::vector<unsigned>::const_iterator it =
-                performed_regions.begin(); it != performed_regions.end(); it++)
-          {
-            if (effects[*it].exists())
-              effects_postconditions.insert(effects[*it]);
+            }
+            // Wait for all the registrations to be done
+            if (!registration_postconditions.empty())
+            {
+              const RtEvent registration_post = 
+                Runtime::merge_events(registration_postconditions);
+              if (registration_post.exists() && 
+                  !registration_post.has_triggered())
+              {
+                std::vector<unsigned> *performed_copy = 
+                  new std::vector<unsigned>();
+                performed_copy->swap(performed_regions);
+                std::vector<ApEvent> *effects_copy = 
+                  new std::vector<ApEvent>();
+                effects_copy->swap(effects);
+                // We'll restart down below with the second invocation
+                return defer_perform_mapping(registration_post, must_epoch_op,
+                                            defer_args, 2/*invocation count*/, 
+                                            performed_copy, effects_copy);
+              }
+            }
+            // Now we can do the registrations
+            for (std::vector<unsigned>::const_iterator it =
+                 performed_regions.begin(); it != performed_regions.end(); it++)
+            {
+              if (effects[*it].exists())
+                effects_postconditions.insert(effects[*it]);
 #ifdef DEBUG_LEGION
-            dump_physical_state(&regions[*it], *it);
+              dump_physical_state(&regions[*it], *it);
 #endif
+            }
           }
+          if (perform_postmap)
+            perform_post_mapping(trace_info);
+        } // if (!regions.empty())
+      }
+      else // second invocation
+      {
+#ifdef DEBUG_LEGION
+        assert(defer_args->invocation_count == 2);
+        assert(defer_args->performed_regions != NULL);
+        assert(defer_args->effects != NULL);
+#endif
+        // This is in case we had to defer the second part of the invocation
+        for (std::vector<unsigned>::const_iterator it =
+              defer_args->performed_regions->begin(); it !=
+              defer_args->performed_regions->end(); it++)
+        {
+          if ((*(defer_args->effects))[*it].exists())
+            effects_postconditions.insert((*(defer_args->effects))[*it]);
+#ifdef DEBUG_LEGION
+          dump_physical_state(&regions[*it], *it);
+#endif
         }
+        delete defer_args->performed_regions;
+        delete defer_args->effects;
         if (perform_postmap)
+        {
+          const PhysicalTraceInfo trace_info(this);
           perform_post_mapping(trace_info);
-      } // if (!regions.empty())
+        }
+      }
       // If we are replicating the task then we have to extract the conditions
       // under which each of the instances will be ready to be used
       if (shard_manager != NULL)
         shard_manager->extract_event_preconditions(physical_instances);
       if (is_recording())
       {
+        const PhysicalTraceInfo trace_info(this);
 #ifdef DEBUG_LEGION
         assert(tpl != NULL && tpl->is_recording());
 #endif
@@ -3905,7 +3959,7 @@ namespace Legion {
         tpl->record_complete_replay(this, ready_event);
       } 
       return RtEvent::NO_RT_EVENT;
-    }  
+    }
 
     //--------------------------------------------------------------------------
     void SingleTask::perform_post_mapping(const PhysicalTraceInfo &trace_info)
@@ -5376,7 +5430,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     RtEvent IndividualTask::perform_mapping(
-         MustEpochOp *must_epoch_owner/*=NULL*/, bool first_invocation/*=true*/)
+                                        MustEpochOp *must_epoch_owner/*=NULL*/, 
+                                        const DeferMappingArgs *args/* =NULL*/)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, INDIVIDUAL_PERFORM_MAPPING_CALL);
@@ -5384,7 +5439,7 @@ namespace Legion {
       // event since we know this task will object will be active
       // throughout the duration of the computation
       const RtEvent deferred = map_all_regions(get_task_completion(), 
-                                  first_invocation, must_epoch_owner);
+                                               must_epoch_owner, args);
       if (deferred.exists())
         return deferred; 
       // If we mapped, then we are no longer stealable
@@ -6267,7 +6322,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     RtEvent PointTask::perform_mapping(MustEpochOp *must_epoch_owner/*=NULL*/,
-                                       bool first_invocation/*=true*/)
+                                       const DeferMappingArgs *args/*=NULL*/)
     //--------------------------------------------------------------------------
     {
       // For point tasks we use the point termination event which as the
@@ -6275,7 +6330,7 @@ namespace Legion {
       // the completion event is therefore not guaranteed to survive
       // the length of the task's execution
       const RtEvent deferred = 
-        map_all_regions(point_termination, first_invocation, must_epoch_owner);
+        map_all_regions(point_termination, must_epoch_owner, args);
       if (deferred.exists())
         return deferred;
       RtEvent applied_condition;
@@ -6805,7 +6860,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RtEvent ShardTask::perform_mapping(MustEpochOp *owner,bool first_invocation)
+    RtEvent ShardTask::perform_mapping(MustEpochOp *owner, 
+                                       const DeferMappingArgs *args)
     //--------------------------------------------------------------------------
     {
       assert(false);
@@ -7802,7 +7858,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     RtEvent IndexTask::perform_mapping(MustEpochOp *owner/*=NULL*/,
-                                       bool first_invocation/*=true*/)
+                                       const DeferMappingArgs *args/*=NULL*/)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, INDEX_PERFORM_MAPPING_CALL);
@@ -7810,7 +7866,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(!slices.empty());
       // Should never get duplicate invocations here
-      assert(first_invocation);
+      assert(args == NULL);
 #endif
       for (std::list<SliceTask*>::iterator it = slices.begin();
             it != slices.end(); /*nothing*/)
@@ -8769,13 +8825,13 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     RtEvent SliceTask::perform_mapping(MustEpochOp *epoch_owner/*=NULL*/,
-                                       bool first_invocation/*=true*/)
+                                       const DeferMappingArgs *args/*=NULL*/)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, SLICE_PERFORM_MAPPING_CALL);
 #ifdef DEBUG_LEGION
       // Should never get duplicate invocations here
-      assert(first_invocation);
+      assert(args == NULL);
 #endif
       // Check to see if we already enumerated all the points, if
       // not then do so now
