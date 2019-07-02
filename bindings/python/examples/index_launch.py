@@ -18,12 +18,16 @@
 from __future__ import print_function
 
 import legion
-from legion import task, ID
+from legion import task, ID, R
 
 @task
 def hi(i):
     print("hello %s" % i)
     return i
+
+@task(privileges=[R])
+def hello(R, i):
+    print("hello from point %s (region %s)" % (i, R.ispace.bounds))
 
 @task
 def main():
@@ -46,6 +50,13 @@ def main():
     futures = legion.index_launch([3, 3], hi, ID)
     for point in legion.Domain.create([3, 3]):
         assert futures[point].get() == point
+
+    R = legion.Region.create([4, 4], {'x': legion.float64})
+    P = legion.Partition.create_equal(R, [2, 2])
+    legion.fill(R, 'x', 0)
+
+    legion.index_launch([2, 2], hello, R, ID)
+    legion.index_launch([2, 2], hello, P[ID], ID)
 
 if __name__ == '__legion_main__':
     main()
