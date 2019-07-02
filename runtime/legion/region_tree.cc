@@ -10335,7 +10335,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void FieldSpaceNode::add_instance(RegionNode *inst)
+    void FieldSpaceNode::add_instance(RegionNode *inst, 
+                                      ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
       RtEvent wait_on = add_instance(inst->handle, 
@@ -10347,8 +10348,11 @@ namespace Legion {
 #endif
         local_trees.insert(inst);
       }
+#ifdef DEBUG_LEGION
+      assert(mutator != NULL);
+#endif
       if (wait_on.exists())
-        wait_on.wait();
+        mutator->record_reference_mutation_effect(wait_on);
     }
 
     //--------------------------------------------------------------------------
@@ -14134,7 +14138,7 @@ namespace Legion {
 #endif
       if (parent == NULL)
       {
-        column_source->add_instance(this);
+        column_source->add_instance(this, mutator);
         column_source->add_nested_valid_ref(did, mutator);
         column_source->add_nested_resource_ref(did);
       }

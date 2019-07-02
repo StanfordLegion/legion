@@ -2715,7 +2715,7 @@ namespace Legion {
       void get_field_set(const FieldMask &mask, const std::set<FieldID> &basis,
                          std::set<FieldID> &to_set);
     public:
-      void add_instance(RegionNode *inst);
+      void add_instance(RegionNode *inst, ReferenceMutator *mutator);
       RtEvent add_instance(LogicalRegion inst, AddressSpaceID source);
       bool has_instance(RegionTreeID tid);
       void remove_instance(RegionNode *inst);
