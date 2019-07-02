@@ -18,7 +18,7 @@
 from __future__ import print_function
 
 import legion
-from legion import task
+from legion import task, ID
 
 global_var = 123 # Kids: Don't do this at home
 
@@ -51,6 +51,14 @@ def main():
     legion.execution_fence(block=True)
 
     assert global_var == 4456
+
+    global_var = 789
+
+    with legion.MustEpochLaunch([global_procs]):
+        legion.index_launch([global_procs], hi, ID)
+    legion.execution_fence(block=True)
+
+    assert global_var == 4789
 
 if __name__ == '__legion_main__':
     main()
