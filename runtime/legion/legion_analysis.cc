@@ -6218,6 +6218,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void EquivalenceSet::trigger_pending_analysis_event(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(transition_event.exists());
+#endif
+      Runtime::trigger_event(transition_event);
+      transition_event = RtUserEvent::NO_RT_USER_EVENT;
+    }
+
+    //--------------------------------------------------------------------------
     void EquivalenceSet::notify_active(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
@@ -8005,6 +8016,8 @@ namespace Legion {
         }
         // Otherwise we fall through and record our subsets
       }
+      // Guard to prevent migration while we may release the lock
+      increment_pending_analyses();
       // If we've been refined, we need to get the names of 
       // the sub equivalence sets to try
       while (is_refined(user_mask))
@@ -8020,8 +8033,6 @@ namespace Legion {
             continue;
           to_traverse.insert(it->first, overlap);
         }
-        // Guard to prevent migration while we release the lock
-        pending_analyses++;
         eq.release();
         // Update the user mask and the remove_mask if there is one
         user_mask -= to_traverse.get_valid_mask();
@@ -8030,20 +8041,14 @@ namespace Legion {
           it->first->find_valid_instances(analysis, it->second, 
                                           deferral_events, applied_events);
         eq.reacquire();
-#ifdef DEBUG_LEGION
-        assert(pending_analyses > 0);
-#endif
-        if ((--pending_analyses == 0) && !is_logical_owner() &&
-            transition_event.exists())
-        {
-          // Signal to the migration task that it is safe to unpack
-          Runtime::trigger_event(transition_event);
-          transition_event = RtUserEvent::NO_RT_USER_EVENT;
-        }
         // Return if our user mask is empty
         if (!user_mask)
+        {
+          decrement_pending_analyses();
           return;
+        }
       }
+      decrement_pending_analyses();
 #ifdef DEBUG_LEGION
       // Should only be here if we're the owner
       assert(is_logical_owner());
@@ -8130,6 +8135,8 @@ namespace Legion {
         }
         // Otherwise we fall through and record our subsets
       }
+      // Guard to prevent migration while we may release the lock
+      increment_pending_analyses();
       // If we've been refined, we need to get the names of 
       // the sub equivalence sets to try
       while (is_refined(user_mask))
@@ -8145,8 +8152,6 @@ namespace Legion {
             continue;
           to_traverse.insert(it->first, overlap);
         }
-        // Guard to prevent migration while we release the lock
-        pending_analyses++;
         eq.release();
         // Update the user mask and the remove_mask if there is one
         user_mask -= to_traverse.get_valid_mask();
@@ -8155,20 +8160,14 @@ namespace Legion {
           it->first->find_invalid_instances(analysis, it->second, 
                                             deferral_events, applied_events);
         eq.reacquire();
-#ifdef DEBUG_LEGION
-        assert(pending_analyses > 0);
-#endif
-        if ((--pending_analyses == 0) && !is_logical_owner() &&
-            transition_event.exists())
-        {
-          // Signal to the migration task that it is safe to unpack
-          Runtime::trigger_event(transition_event);
-          transition_event = RtUserEvent::NO_RT_USER_EVENT;
-        }
         // Return if our user mask is empty
         if (!user_mask)
+        {
+          decrement_pending_analyses();
           return;
+        }
       }
+      decrement_pending_analyses();
 #ifdef DEBUG_LEGION
       // Should only be here if we're the owner
       assert(is_logical_owner());
@@ -8265,6 +8264,8 @@ namespace Legion {
         }
         // Otherwise we fall through and record our subsets
       }
+      // Guard to prevent migration while we may release the lock
+      increment_pending_analyses();
       // If we've been refined, we need to get the names of 
       // the sub equivalence sets to try
       while (is_refined(user_mask))
@@ -8280,8 +8281,6 @@ namespace Legion {
             continue;
           to_traverse.insert(it->first, overlap);
         }
-        // Guard to prevent migration while we release the lock
-        pending_analyses++;
         eq.release();
         // Remove ourselves if we recursed
         if (!original_set)
@@ -8295,25 +8294,17 @@ namespace Legion {
           it->first->update_set(analysis, it->second, deferral_events,
               applied_events, NULL/*remove mask*/, false/*original set*/);
         eq.reacquire();
-#ifdef DEBUG_LEGION
-        assert(pending_analyses > 0);
-#endif
-        if ((--pending_analyses == 0) && !is_logical_owner() &&
-            transition_event.exists())
-        {
-          // Signal to the migration task that it is safe to unpack
-          Runtime::trigger_event(transition_event);
-          transition_event = RtUserEvent::NO_RT_USER_EVENT;
-        }
         // Return if our user mask is empty
         if (!user_mask)
         {
+          decrement_pending_analyses();
           if (remove_mask != NULL)
             return !!(*remove_mask);
           else
             return false;
         }
       }
+      decrement_pending_analyses();
 #ifdef DEBUG_LEGION
       // Should only be here if we're the owner
       assert(is_logical_owner());
@@ -8934,6 +8925,8 @@ namespace Legion {
           }
         }
       }
+      // Guard to prevent migration while we may release the lock
+      increment_pending_analyses();
       // If we've been refined, we need to get the names of 
       // the sub equivalence sets to try
       while (is_refined(acquire_mask))
@@ -8949,8 +8942,6 @@ namespace Legion {
             continue;
           to_traverse.insert(it->first, overlap);
         }
-        // Guard to prevent migration while we release the lock
-        pending_analyses++;
         eq.release();
         // Remove ourselves if we recursed
         if (!original_set)
@@ -8964,25 +8955,17 @@ namespace Legion {
           it->first->acquire_restrictions(analysis, it->second, deferral_events,
                     applied_events, NULL/*remove mask*/, false/*original set*/);
         eq.reacquire();
-#ifdef DEBUG_LEGION
-        assert(pending_analyses > 0);
-#endif
-        if ((--pending_analyses == 0) && !is_logical_owner() &&
-            transition_event.exists())
-        {
-          // Signal to the migration task that it is safe to unpack
-          Runtime::trigger_event(transition_event);
-          transition_event = RtUserEvent::NO_RT_USER_EVENT;
-        }
         // Return if our acquire user mask is empty
         if (!acquire_mask)
         {
+          decrement_pending_analyses();
           if (remove_mask != NULL)
             return !!(*remove_mask);
           else
             return false;
         }
       }
+      decrement_pending_analyses();
 #ifdef DEBUG_LEGION
       // Should only be here if we're the owner
       assert(is_logical_owner());
@@ -9047,6 +9030,8 @@ namespace Legion {
           }
         }
       }
+      // Guard to prevent migration while we may release the lock
+      increment_pending_analyses();
       // If we've been refined, we need to get the names of 
       // the sub equivalence sets to try
       while (is_refined(release_mask))
@@ -9062,8 +9047,6 @@ namespace Legion {
             continue;
           to_traverse.insert(it->first, overlap);
         }
-        // Guard to prevent migration while we release the lock
-        pending_analyses++;
         eq.release();
         // Remove ourselves if we recursed
         if (!original_set)
@@ -9077,25 +9060,17 @@ namespace Legion {
           it->first->release_restrictions(analysis, it->second, deferral_events,
                     applied_events, NULL/*remove mask*/, false/*original set*/);
         eq.reacquire();
-#ifdef DEBUG_LEGION
-        assert(pending_analyses > 0);
-#endif
-        if ((--pending_analyses == 0) && !is_logical_owner() &&
-            transition_event.exists())
-        {
-          // Signal to the migration task that it is safe to unpack
-          Runtime::trigger_event(transition_event);
-          transition_event = RtUserEvent::NO_RT_USER_EVENT;
-        }
         // Return if ourt release mask is empty
         if (!release_mask)
         {
+          decrement_pending_analyses();
           if (remove_mask != NULL)
             return !!(*remove_mask);
           else
             return false;
         }
       }
+      decrement_pending_analyses();
 #ifdef DEBUG_LEGION
       // Should only be here if we're the owner
       assert(is_logical_owner());
@@ -9194,6 +9169,8 @@ namespace Legion {
           }
         }
       }
+      // Guard to prevent migration while we may release the lock
+      increment_pending_analyses();
       // If we've been refined, we need to get the names of 
       // the sub equivalence sets to try
       while (is_refined(src_mask))
@@ -9209,8 +9186,6 @@ namespace Legion {
             continue;
           to_traverse.insert(it->first, overlap);
         }
-        // Guard to prevent migration while we release the lock
-        pending_analyses++;
         eq.release();
         // Remove ourselves if we recursed
         if (!original_set)
@@ -9231,25 +9206,17 @@ namespace Legion {
               false/*original set*/);
         }
         eq.reacquire();
-#ifdef DEBUG_LEGION
-        assert(pending_analyses > 0);
-#endif
-        if ((--pending_analyses == 0) && !is_logical_owner() &&
-            transition_event.exists())
-        {
-          // Signal to the migration task that it is safe to unpack
-          Runtime::trigger_event(transition_event);
-          transition_event = RtUserEvent::NO_RT_USER_EVENT;
-        }
         // Return if ourt source mask is empty
         if (!src_mask)
         {
+          decrement_pending_analyses();
           if (remove_mask != NULL)
             return !!(*remove_mask);
           else
             return false;
         }
       }
+      decrement_pending_analyses();
 #ifdef DEBUG_LEGION
       // Should only be here if we're the owner
       assert(is_logical_owner());
@@ -9478,6 +9445,8 @@ namespace Legion {
           }
         }
       }
+      // Guard to prevent migration while we may release the lock
+      increment_pending_analyses();
       // If we've been refined, we need to get the names of 
       // the sub equivalence sets to try
       while (is_refined(mask))
@@ -9492,8 +9461,6 @@ namespace Legion {
             continue;
           to_traverse.insert(it->first, overlap);
         }
-        // Guard to prevent migration while we release the lock
-        pending_analyses++;
         eq.release();
         // Remove ourselves if we recursed
         if (!original_set)
@@ -9507,25 +9474,17 @@ namespace Legion {
           it->first->overwrite_set(analysis, it->second, deferral_events,
               applied_events, NULL/*remove mask*/, false/*original_set*/);
         eq.reacquire();
-#ifdef DEBUG_LEGION
-        assert(pending_analyses > 0);
-#endif
-        if ((--pending_analyses == 0) && !is_logical_owner() &&
-            transition_event.exists())
-        {
-          // Signal to the migration task that it is safe to unpack
-          Runtime::trigger_event(transition_event);
-          transition_event = RtUserEvent::NO_RT_USER_EVENT;
-        }
         // Return if ourt mask is empty
         if (!mask)
         {
+          decrement_pending_analyses();
           if (remove_mask != NULL)
             return !!(*remove_mask);
           else
             return false;
         }
       }
+      decrement_pending_analyses();
 #ifdef DEBUG_LEGION
       // Should only be here if we're the owner
       assert(is_logical_owner());
@@ -9678,6 +9637,8 @@ namespace Legion {
           }
         }
       }
+      // Guard to prevent migration while we may release the lock
+      increment_pending_analyses();
       // If we've been refined, we need to get the names of 
       // the sub equivalence sets to try
       while (is_refined(mask))
@@ -9692,8 +9653,6 @@ namespace Legion {
             continue;
           to_traverse.insert(it->first, overlap);
         }
-        // Guard to prevent migration while we release the lock
-        pending_analyses++;
         eq.release();
         // Remove ourselves if we recursed
         if (!original_set)
@@ -9707,25 +9666,17 @@ namespace Legion {
           it->first->filter_set(analysis, it->second, deferral_events,
               applied_events, NULL/*remove mask*/, false/*original set*/);
         eq.reacquire();
-#ifdef DEBUG_LEGION
-        assert(pending_analyses > 0);
-#endif
-        if ((--pending_analyses == 0) && !is_logical_owner() &&
-            transition_event.exists())
-        {
-          // Signal to the migration task that it is safe to unpack
-          Runtime::trigger_event(transition_event);
-          transition_event = RtUserEvent::NO_RT_USER_EVENT;
-        }
         // Return if ourt mask is empty
         if (!mask)
         {
+          decrement_pending_analyses();
           if (remove_mask != NULL)
             return !!(*remove_mask);
           else
             return false;
         }
       }
+      decrement_pending_analyses();
 #ifdef DEBUG_LEGION
       // Should only be here if we're the owner
       assert(is_logical_owner());
