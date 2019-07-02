@@ -3534,6 +3534,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(result != NULL);
 #endif
+      LocalReferenceMutator mutator;
       // Check to see if someone else has already made it
       {
         // Hold the lookup lock while modifying the lookup table
@@ -3550,30 +3551,24 @@ namespace Legion {
         }
         index_nodes[sp] = result;
         index_space_requests.erase(sp);
-        // Hold a resource reference to prevent deletion until we can
-        // add our other references while not holding the lock
-        result->add_base_resource_ref(REGION_TREE_REF);
-      }
-      LocalReferenceMutator mutator;
-      // If we're the owner add a valid reference that will be removed
-      // when we are deleted, otherwise we're remote so we add a gc 
-      // reference that will be removed by the owner when we can be
-      // safely collected
-      if (result->is_owner())
-        result->add_base_valid_ref(APPLICATION_REF, &mutator);
-      else
-        result->add_base_gc_ref(REMOTE_DID_REF, &mutator);
-      result->register_with_runtime(&mutator, notify_remote);
-      if (parent != NULL)
-        parent->add_child(result, &mutator);
+        // If we're the owner add a valid reference that will be removed
+        // when we are deleted, otherwise we're remote so we add a gc 
+        // reference that will be removed by the owner when we can be
+        // safely collected
+        if (result->is_owner())
+          result->add_base_valid_ref(APPLICATION_REF, &mutator);
+        else
+          result->add_base_gc_ref(REMOTE_DID_REF, &mutator);
+        result->register_with_runtime(&mutator, notify_remote);
+        if (parent != NULL)
+          parent->add_child(result, &mutator);
+      } 
       // If we had a realm index space issue the tighten now since
       // we know that we'll probably need it later
       // We have to do this after we've added our reference in case
       // the tighten gets done and tries to delete the node
       if (realm_is != NULL)
         result->tighten_index_space();
-      // Now we can remove our resource reference
-      result->remove_base_resource_ref(REGION_TREE_REF);
       return result;
     }
 
@@ -3594,6 +3589,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(result != NULL);
 #endif
+      LocalReferenceMutator mutator;
       // Check to see if someone else has already made it
       {
         // Hold the lookup lock while modifying the lookup table
@@ -3612,30 +3608,24 @@ namespace Legion {
         }
         index_nodes[sp] = result;
         index_space_requests.erase(sp);
-        // Hold a resource reference to prevent deletion until we can
-        // add our other references while not holding the lock
-        result->add_base_resource_ref(REGION_TREE_REF);
-      }
-      LocalReferenceMutator mutator;
-      // If we're the owner add a valid reference that will be removed
-      // when we are deleted, otherwise we're remote so we add a gc 
-      // reference that will be removed by the owner when we can be
-      // safely collected
-      if (result->is_owner())
-        result->add_base_valid_ref(APPLICATION_REF, &mutator);
-      else
-        result->add_base_gc_ref(REMOTE_DID_REF, &mutator);
-      result->register_with_runtime(&mutator, notify_remote);
-      if (parent != NULL)
-        parent->add_child(result, &mutator);
+        // If we're the owner add a valid reference that will be removed
+        // when we are deleted, otherwise we're remote so we add a gc 
+        // reference that will be removed by the owner when we can be
+        // safely collected
+        if (result->is_owner())
+          result->add_base_valid_ref(APPLICATION_REF, &mutator);
+        else
+          result->add_base_gc_ref(REMOTE_DID_REF, &mutator);
+        result->register_with_runtime(&mutator, notify_remote);
+        if (parent != NULL)
+          parent->add_child(result, &mutator);
+      } 
       // If we had a realm index space issue the tighten now since
       // we know that we'll probably need it later
       // We have to do this after we've added our reference in case
       // the tighten gets done and tries to delete the node
       if (realm_is != NULL)
         result->tighten_index_space();
-      // Now we can remove our resource reference
-      result->remove_base_resource_ref(REGION_TREE_REF);
       return result;
     }
 
@@ -3659,6 +3649,7 @@ namespace Legion {
       assert(parent != NULL);
       assert(result != NULL);
 #endif
+      LocalReferenceMutator mutator;
       // Check to see if someone else has already made it
       {
         // Hold the lookup lock while modifying the lookup table
@@ -3675,35 +3666,29 @@ namespace Legion {
         }
         index_parts[p] = result;
         index_part_requests.erase(p);
-        // Hold a resource reference to prevent deletion until we can
-        // add our other references while not holding the lock
-        result->add_base_resource_ref(REGION_TREE_REF);
+        // If we're the owner add a valid reference that will be removed
+        // when we are deleted, otherwise we're remote so we add a gc 
+        // reference that will be removed by the owner when we can be
+        // safely collected
+        if (result->is_owner())
+        {
+          result->add_base_valid_ref(APPLICATION_REF, &mutator);
+          // Also add references to our color space
+          color_space->add_nested_valid_ref(did, &mutator);
+          color_space->add_nested_resource_ref(did);
+        }
+        else
+        {
+          result->add_base_gc_ref(REMOTE_DID_REF, &mutator);
+          color_space->add_nested_resource_ref(did);
+        }
+        if (shard_mapping != NULL)
+          result->register_with_runtime(&mutator, false/*notify remote*/);
+        else
+          result->register_with_runtime(&mutator);
+        if (parent != NULL)
+          parent->add_child(result, &mutator);
       }
-      LocalReferenceMutator mutator;
-      // If we're the owner add a valid reference that will be removed
-      // when we are deleted, otherwise we're remote so we add a gc 
-      // reference that will be removed by the owner when we can be
-      // safely collected
-      if (result->is_owner())
-      {
-        result->add_base_valid_ref(APPLICATION_REF, &mutator);
-        // Also add references to our color space
-        color_space->add_nested_valid_ref(did, &mutator);
-        color_space->add_nested_resource_ref(did);
-      }
-      else
-      {
-        result->add_base_gc_ref(REMOTE_DID_REF, &mutator);
-        color_space->add_nested_resource_ref(did);
-      }
-      if (shard_mapping != NULL)
-        result->register_with_runtime(&mutator, false/*notify remote*/);
-      else
-        result->register_with_runtime(&mutator);
-      if (parent != NULL)
-        parent->add_child(result, &mutator);
-      // Now we can remove our resource reference
-      result->remove_base_resource_ref(REGION_TREE_REF); 
       return result;
     }
 
@@ -3728,6 +3713,7 @@ namespace Legion {
       assert(parent != NULL);
       assert(result != NULL);
 #endif
+      LocalReferenceMutator mutator;
       // Check to see if someone else has already made it
       {
         // Hold the lookup lock while modifying the lookup table
@@ -3744,35 +3730,29 @@ namespace Legion {
         }
         index_parts[p] = result;
         index_part_requests.erase(p);
-        // Hold a resource reference to prevent deletion until we can
-        // add our other references while not holding the lock
-        result->add_base_resource_ref(REGION_TREE_REF);
+        // If we're the owner add a valid reference that will be removed
+        // when we are deleted, otherwise we're remote so we add a gc 
+        // reference that will be removed by the owner when we can be
+        // safely collected
+        if (result->is_owner())
+        {
+          result->add_base_valid_ref(APPLICATION_REF, &mutator);
+          // Also add references to our color space
+          color_space->add_nested_valid_ref(did, &mutator);
+          color_space->add_nested_resource_ref(did);
+        }
+        else
+        {
+          result->add_base_gc_ref(REMOTE_DID_REF, &mutator);
+          color_space->add_nested_resource_ref(did);
+        }
+        if (shard_mapping != NULL)
+          result->register_with_runtime(&mutator, false/*notify remote*/);
+        else
+          result->register_with_runtime(&mutator);
+        if (parent != NULL)
+          parent->add_child(result, &mutator);
       }
-      LocalReferenceMutator mutator;
-      // If we're the owner add a valid reference that will be removed
-      // when we are deleted, otherwise we're remote so we add a gc 
-      // reference that will be removed by the owner when we can be
-      // safely collected
-      if (result->is_owner())
-      {
-        result->add_base_valid_ref(APPLICATION_REF, &mutator);
-        // Also add references to our color space
-        color_space->add_nested_valid_ref(did, &mutator);
-        color_space->add_nested_resource_ref(did);
-      }
-      else
-      {
-        result->add_base_gc_ref(REMOTE_DID_REF, &mutator);
-        color_space->add_nested_resource_ref(did);
-      }
-      if (shard_mapping != NULL)
-        result->register_with_runtime(&mutator, false/*notify remote*/);
-      else
-        result->register_with_runtime(&mutator);
-      if (parent != NULL)
-        parent->add_child(result, &mutator);
-      // Now we can remove our resource reference
-      result->remove_base_resource_ref(REGION_TREE_REF);
       return result;
     }
  
@@ -3786,6 +3766,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(result != NULL);
 #endif
+      LocalReferenceMutator mutator;
       // Hold the lookup lock while modifying the lookup table
       {
         AutoLock l_lock(lookup_lock);
@@ -3801,22 +3782,16 @@ namespace Legion {
         }
         field_nodes[space] = result;
         field_space_requests.erase(space);
-        // Hold a resource reference to prevent deletion until we can
-        // add our other references while not holding the lock
-        result->add_base_resource_ref(REGION_TREE_REF);
+        // If we're the owner add a valid reference that will be removed
+        // when we are deleted, otherwise we're remote so we add a gc 
+        // reference that will be removed by the owner when we can be
+        // safely collected
+        if (result->is_owner())
+          result->add_base_valid_ref(APPLICATION_REF, &mutator);
+        else
+          result->add_base_gc_ref(REMOTE_DID_REF, &mutator);
+        result->register_with_runtime(&mutator, notify_remote);
       }
-      LocalReferenceMutator mutator;
-      // If we're the owner add a valid reference that will be removed
-      // when we are deleted, otherwise we're remote so we add a gc 
-      // reference that will be removed by the owner when we can be
-      // safely collected
-      if (result->is_owner())
-        result->add_base_valid_ref(APPLICATION_REF, &mutator);
-      else
-        result->add_base_gc_ref(REMOTE_DID_REF, &mutator);
-      result->register_with_runtime(&mutator, notify_remote);
-      // Now we can remove our resource reference
-      result->remove_base_resource_ref(REGION_TREE_REF);
       return result;
     }
 
@@ -3830,6 +3805,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(result != NULL);
 #endif
+      LocalReferenceMutator mutator;
       // Hold the lookup lock while modifying the lookup table
       {
         AutoLock l_lock(lookup_lock);
@@ -3845,22 +3821,16 @@ namespace Legion {
         }
         field_nodes[space] = result;
         field_space_requests.erase(space);
-        // Hold a resource reference to prevent deletion until we can
-        // add our other references while not holding the lock
-        result->add_base_resource_ref(REGION_TREE_REF);
+        // If we're the owner add a valid reference that will be removed
+        // when we are deleted, otherwise we're remote so we add a gc 
+        // reference that will be removed by the owner when we can be
+        // safely collected
+        if (result->is_owner())
+          result->add_base_valid_ref(APPLICATION_REF, &mutator);
+        else
+          result->add_base_gc_ref(REMOTE_DID_REF, &mutator);
+        result->register_with_runtime(&mutator);
       }
-      LocalReferenceMutator mutator;
-      // If we're the owner add a valid reference that will be removed
-      // when we are deleted, otherwise we're remote so we add a gc 
-      // reference that will be removed by the owner when we can be
-      // safely collected
-      if (result->is_owner())
-        result->add_base_valid_ref(APPLICATION_REF, &mutator);
-      else
-        result->add_base_gc_ref(REMOTE_DID_REF, &mutator);
-      result->register_with_runtime(&mutator);
-      // Now we can remove our resource reference
-      result->remove_base_resource_ref(REGION_TREE_REF);
       return result;
     }
 
@@ -3884,6 +3854,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(result != NULL);
 #endif
+      LocalReferenceMutator mutator;
       // Special case here in case multiple clients attempt to
       // make the node at the same time
       {
@@ -3917,11 +3888,10 @@ namespace Legion {
           tree_nodes[r.tree_id] = result;
           region_tree_requests.erase(r.tree_id);
         }
+        // At some point in the future we might actually want to 
+        // register these things with the runtime here
+        result->record_registered(&mutator);
       }
-      // At some point in the future we might actually want to 
-      // register these things with the runtime here
-      result->record_registered();
-
       return result;
     }
 
@@ -3942,6 +3912,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(result != NULL);
 #endif
+      LocalReferenceMutator mutator;
       // Special case here in case multiple clients attempt
       // to make the node at the same time
       {
@@ -3963,12 +3934,11 @@ namespace Legion {
         // Record a resource reference on it that we'll remove later
         result->add_base_resource_ref(REGION_TREE_REF);
         // Add a reference that will be moved when we're destroyed
-        result->add_base_gc_ref(APPLICATION_REF);
+        result->add_base_gc_ref(APPLICATION_REF, &mutator);
+        // At some point in the future we might actually want to 
+        // register these things with the runtime here
+        result->record_registered(&mutator);
       }
-      // At some point in the future we might actually want to 
-      // register these things with the runtime here
-      result->record_registered();
-      
       return result;
     }
 
@@ -14488,27 +14458,26 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RegionNode::record_registered(void)
+    void RegionNode::record_registered(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(!registered);
 #endif
-      LocalReferenceMutator mutator;
       if (parent == NULL)
       {
-        column_source->add_nested_valid_ref(did, &mutator);
-        column_source->add_nested_resource_ref(did);
         column_source->add_instance(this);
+        column_source->add_nested_valid_ref(did, mutator);
+        column_source->add_nested_resource_ref(did);
       }
       else
       {
-        parent->add_nested_gc_ref(did, &mutator);
         parent->add_child(this);
+        parent->add_nested_gc_ref(did, mutator);
       }
-      row_source->add_nested_valid_ref(did, &mutator);
+      row_source->add_nested_valid_ref(did, mutator);
       row_source->add_nested_resource_ref(did);
-      row_source->add_instance(this); 
+      row_source->add_instance(this);
       registered = true;
     }
 
@@ -15704,18 +15673,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PartitionNode::record_registered(void)
+    void PartitionNode::record_registered(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(!registered);
 #endif
-      LocalReferenceMutator mutator;
-      row_source->add_nested_valid_ref(did, &mutator);
-      row_source->add_nested_resource_ref(did);
       row_source->add_instance(this);
-      parent->add_nested_gc_ref(did, &mutator);
-      parent->add_child(this); 
+      row_source->add_nested_valid_ref(did, mutator);
+      row_source->add_nested_resource_ref(did);
+      parent->add_nested_gc_ref(did, mutator);
+      parent->add_child(this);
       registered = true;
     }
 
