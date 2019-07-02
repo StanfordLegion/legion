@@ -18,7 +18,7 @@
 from __future__ import print_function
 
 import legion
-from legion import task
+from legion import task, ID
 
 @task
 def hi(i):
@@ -40,6 +40,12 @@ def main():
         futures.append(hi(point))
     for i, point in enumerate(legion.Domain.create([3, 3])):
         assert futures[i].get() == point
+
+    # Again (in 2 dimensions), with a more explicit syntax.
+    # ID is the name of the (implicit) loop variable.
+    futures = legion.index_launch([3, 3], hi, ID)
+    for point in legion.Domain.create([3, 3]):
+        assert futures[point].get() == point
 
 if __name__ == '__legion_main__':
     main()

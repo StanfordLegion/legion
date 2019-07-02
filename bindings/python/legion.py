@@ -208,7 +208,7 @@ class DomainPoint(object):
         if take_ownership:
             self.handle = handle
         else:
-            self.handle = ffi.new('legion_domain_t *', handle)
+            self.handle = ffi.new('legion_domain_point_t *', handle)
         self._point = None
 
     def __reduce__(self):
@@ -1263,17 +1263,23 @@ class Task (object):
             task, raw_regions, num_regions, context, runtime)
 
         # Decode arguments from Pickle format.
-        if c.legion_task_get_is_index_space(task[0]):
+        arg_ptr = ffi.cast('char *', c.legion_task_get_args(task[0]))
+        arg_size = c.legion_task_get_arglen(task[0])
+        if c.legion_task_get_is_index_space(task[0]) and arg_size == 0:
             arg_ptr = ffi.cast('char *', c.legion_task_get_local_args(task[0]))
             arg_size = c.legion_task_get_local_arglen(task[0])
-        else:
-            arg_ptr = ffi.cast('char *', c.legion_task_get_args(task[0]))
-            arg_size = c.legion_task_get_arglen(task[0])
 
         if arg_size > 0 and c.legion_task_get_depth(task[0]) > 0:
             args = pickle.loads(ffi.unpack(arg_ptr, arg_size))
         else:
             args = ()
+
+        # Postprocess arguments.
+        point = DomainPoint(c.legion_task_get_index_point(task[0]))
+        args = tuple(
+            arg._legion_postprocess_task_argument(point)
+            if hasattr(arg, '_legion_postprocess_task_argument') else arg
+            for arg in args)
 
         # Unpack regions.
         regions = []
@@ -1547,11 +1553,12 @@ class _TaskLauncher(object):
         return future
 
 class _IndexLauncher(_TaskLauncher):
-    __slots__ = ['task', 'domain', 'local_args', 'future_args', 'future_map']
+    __slots__ = ['task', 'domain', 'global_args', 'local_args', 'future_args', 'future_map']
 
     def __init__(self, task, domain):
         super(_IndexLauncher, self).__init__(task)
         self.domain = domain
+        self.global_args = None
         self.local_args = c.legion_argument_map_create()
         self.future_args = []
         self.future_map = None
@@ -1567,14 +1574,21 @@ class _IndexLauncher(_TaskLauncher):
         c.legion_argument_map_set_point(
             self.local_args, index.value.raw_value(), task_args[0], False)
 
+    def attach_global_args(self, *args):
+        assert self.global_args is None
+        self.global_args = args
+
     def attach_future_args(self, *args):
         self.future_args = args
 
     def launch(self):
-        # All arguments are passed as local, so global is NULL.
-        global_args = ffi.new('legion_task_argument_t *')
-        global_args[0].args = ffi.NULL
-        global_args[0].arglen = 0
+        # Encode global args (if any).
+        if self.global_args is not None:
+            global_args, global_args_root = self.encode_args(self.global_args)
+        else:
+            global_args = ffi.new('legion_task_argument_t *')
+            global_args[0].args = ffi.NULL
+            global_args[0].arglen = 0
 
         # Construct the task launcher.
         launcher = c.legion_index_launcher_create(
@@ -1669,6 +1683,38 @@ class _FuturePoint(object):
         del self.point
 
         return self.future.get()
+
+class SymbolicExpr(object):
+    pass
+
+class SymbolicLoopIndex(SymbolicExpr):
+    __slots__ = ['name']
+    def __init__(self, name):
+        self.name = name
+    def __str__(self):
+        return self.name
+    def __repr__(self):
+        return self.name
+    def _legion_postprocess_task_argument(self, point):
+        return point
+
+ID = SymbolicLoopIndex('ID')
+
+def index_launch(domain, task, *args):
+    if isinstance(domain, Domain):
+        domain = domain
+    elif isinstance(domain, Ispace):
+        domain = ispace.domain
+    else:
+        domain = Domain.create(domain)
+    launcher = _IndexLauncher(task=task, domain=domain)
+    args = launcher.preprocess_args(args)
+    args, futures = launcher.gather_futures(args)
+    launcher.attach_global_args(*args)
+    launcher.attach_future_args(*futures)
+    # TODO: attach region args
+    launcher.launch()
+    return launcher.future_map
 
 class IndexLaunch(object):
     __slots__ = ['domain', 'launcher', 'point',
