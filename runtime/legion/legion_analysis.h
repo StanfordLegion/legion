@@ -1617,13 +1617,14 @@ namespace Legion {
       public:
         static const LgTaskID TASK_ID = LG_DEFER_MERGE_OR_FORWARD_TASK_ID;
       public:
-        DeferMergeOrForwardArgs(EquivalenceSet *s, FieldMaskSet<LogicalView> *v,
+        DeferMergeOrForwardArgs(EquivalenceSet *s, bool init,
+            FieldMaskSet<LogicalView> *v,
             std::map<unsigned,std::vector<ReductionView*> > *r,
             FieldMaskSet<InstanceView> *t, 
             LegionMap<VersionID,FieldMask>::aligned *u, RtUserEvent d)
           : LgTaskArgs<DeferMergeOrForwardArgs>(implicit_provenance),
             set(s), views(v), reductions(r), restricted(t), 
-            versions(u), done(d) { }
+            versions(u), done(d), initial(init) { }
       public:
         EquivalenceSet *const set;
         FieldMaskSet<LogicalView> *const views;
@@ -1631,6 +1632,7 @@ namespace Legion {
         FieldMaskSet<InstanceView> *const restricted;
         LegionMap<VersionID,FieldMask>::aligned *const versions;
         const RtUserEvent done;
+        const bool initial;
       };
       struct DeferResponseArgs : public LgTaskArgs<DeferResponseArgs> {
       public:
@@ -1851,7 +1853,7 @@ namespace Legion {
       void pack_state(Serializer &rez, const FieldMask &mask) const;
       void unpack_state(Deserializer &derez); 
       void merge_or_forward(const RtUserEvent done_event,
-          const FieldMaskSet<LogicalView> &new_views,
+          bool initial_refinement, const FieldMaskSet<LogicalView> &new_views,
           const std::map<unsigned,std::vector<ReductionView*> > &new_reductions,
           const FieldMaskSet<InstanceView> &new_restrictions,
           const LegionMap<VersionID,FieldMask>::aligned &new_versions);
