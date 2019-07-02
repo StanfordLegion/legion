@@ -208,7 +208,7 @@ class DomainPoint(object):
         if take_ownership:
             self.handle = handle
         else:
-            self.handle = ffi.new('legion_domain_t *', handle)
+            self.handle = ffi.new('legion_domain_point_t *', handle)
         self._point = None
 
     def __reduce__(self):
@@ -1007,6 +1007,8 @@ class Ipartition(object):
                 (self.handle[0].id, self.parent, self.color_space))
 
     def __getitem__(self, point):
+        if isinstance(point, SymbolicExpr):
+            return SymbolicIndexAccess(self, point)
         point = DomainPoint.coerce(point)
         subspace = c.legion_index_partition_get_index_subspace_domain_point(
             _my.ctx.runtime, self.handle[0], point.raw_value())
@@ -1077,6 +1079,8 @@ class Partition(object):
                  self.ipartition))
 
     def __getitem__(self, point):
+        if isinstance(point, SymbolicExpr):
+            return SymbolicIndexAccess(self, point)
         point = DomainPoint.coerce(point)
         subspace = self.ipartition[point]
         subregion = c.legion_logical_partition_get_logical_subregion_by_color_domain_point(
@@ -1205,6 +1209,11 @@ def get_qualname(fn):
 
     return [fn.__name__]
 
+def _postprocess(arg, point):
+    if hasattr(arg, '_legion_postprocess_task_argument'):
+        return arg._legion_postprocess_task_argument(point)
+    return arg
+
 class Task (object):
     __slots__ = ['body', 'privileges', 'return_type',
                  'leaf', 'inner', 'idempotent', 'replicable',
@@ -1263,12 +1272,11 @@ class Task (object):
             task, raw_regions, num_regions, context, runtime)
 
         # Decode arguments from Pickle format.
-        if c.legion_task_get_is_index_space(task[0]):
+        arg_ptr = ffi.cast('char *', c.legion_task_get_args(task[0]))
+        arg_size = c.legion_task_get_arglen(task[0])
+        if c.legion_task_get_is_index_space(task[0]) and arg_size == 0:
             arg_ptr = ffi.cast('char *', c.legion_task_get_local_args(task[0]))
             arg_size = c.legion_task_get_local_arglen(task[0])
-        else:
-            arg_ptr = ffi.cast('char *', c.legion_task_get_args(task[0]))
-            arg_size = c.legion_task_get_arglen(task[0])
 
         if arg_size > 0 and c.legion_task_get_depth(task[0]) > 0:
             args = pickle.loads(ffi.unpack(arg_ptr, arg_size))
@@ -1279,6 +1287,25 @@ class Task (object):
         regions = []
         for i in xrange(num_regions[0]):
             regions.append(raw_regions[0][i])
+
+        # Build context.
+        ctx = Context(context, runtime, task, regions)
+
+        # Ensure that we're not getting tangled up in another
+        # thread. There should be exactly one thread per task.
+        try:
+            _my.ctx
+        except AttributeError:
+            pass
+        else:
+            raise Exception('thread-local context already set')
+
+        # Store context in thread-local storage.
+        _my.ctx = ctx
+
+        # Postprocess arguments.
+        point = DomainPoint(c.legion_task_get_index_point(task[0]))
+        args = tuple(_postprocess(arg, point) for arg in args)
 
         # Unpack physical regions.
         if self.privileges is not None:
@@ -1306,21 +1333,6 @@ class Task (object):
                         for field in fields:
                             arg._set_instance(field, instance, priv)
             assert req == num_regions[0]
-
-        # Build context.
-        ctx = Context(context, runtime, task, regions)
-
-        # Ensure that we're not getting tangled up in another
-        # thread. There should be exactly one thread per task.
-        try:
-            _my.ctx
-        except AttributeError:
-            pass
-        else:
-            raise Exception('thread-local context already set')
-
-        # Store context in thread-local storage.
-        _my.ctx = ctx
 
         # Execute task body.
         result = self.body(*args)
@@ -1478,6 +1490,81 @@ class _TaskLauncher(object):
         # WARNING: Need to return the interior buffer or else it will be GC'd
         return task_args, task_args_buffer
 
+    def attach_region_requirements(self, launcher, args, is_index_launch):
+        if is_index_launch:
+            def add_region_normal(launcher, handle, *args):
+                return c.legion_index_launcher_add_region_requirement_logical_region(
+                    launcher, handle, 0, # projection
+                    *args)
+            def add_region_reduction(launcher, handle, *args):
+                return c.legion_index_launcher_add_region_requirement_logical_region_reduction(
+                    launcher, handle, 0, # projection
+                    *args)
+            add_partition_normal = c.legion_index_launcher_add_region_requirement_logical_partition
+            add_partition_reduction = c.legion_index_launcher_add_region_requirement_logical_partition_reduction
+            add_field = c.legion_index_launcher_add_field
+        else:
+            add_region_normal = c.legion_task_launcher_add_region_requirement_logical_region
+            add_region_reduction = c.legion_task_launcher_add_region_requirement_logical_region_reduction
+            add_field = c.legion_task_launcher_add_field
+
+        for i, arg in zip(range(len(args)), args):
+            if isinstance(arg, Region) or (isinstance(arg, SymbolicExpr) and arg.is_region()):
+                if self.task.privileges is None or i >= len(self.task.privileges):
+                    raise Exception('Privileges are required on all Region arguments')
+                priv = self.task.privileges[i]
+                fields = priv.fields if hasattr(priv, 'fields') else list(arg.fspace.field_ids.keys())
+                if hasattr(priv, 'fields'):
+                    assert set(fields) <= set(arg.fspace.field_ids.keys())
+                if isinstance(arg, Region):
+                    if priv.reduce:
+                        for field in fields:
+                            req = add_region_reduction(
+                                launcher, arg.handle[0],
+                                priv._legion_redop_id(arg.fspace.field_types[field]),
+                                0, # EXCLUSIVE
+                                arg.parent.handle[0] if arg.parent is not None else arg.handle[0],
+                                0, False)
+                            add_field(
+                                launcher, req, arg.fspace.field_ids[field], True)
+                    else:
+                        req = add_region_normal(
+                            launcher, arg.handle[0],
+                            priv._legion_privilege(),
+                            0, # EXCLUSIVE
+                            arg.parent.handle[0] if arg.parent is not None else arg.handle[0],
+                            0, False)
+                        for field in fields:
+                            add_field(
+                                launcher, req, arg.fspace.field_ids[field], True)
+                elif isinstance(arg, SymbolicExpr):
+                    # FIXME: Support non-trivial projection functors
+                    assert isinstance(arg, SymbolicIndexAccess) and isinstance(arg.index, SymbolicLoopIndex)
+                    proj_id = 0
+
+                    if priv.reduce:
+                        for field in fields:
+                            req = add_partition_reduction(
+                                launcher, arg.handle[0], proj_id,
+                                priv._legion_redop_id(arg.fspace.field_types[field]),
+                                0, # EXCLUSIVE
+                                arg.parent.handle[0] if arg.parent is not None else arg.handle[0],
+                                0, False)
+                            add_field(
+                                launcher, req, arg.fspace.field_ids[field], True)
+                    else:
+                        req = add_partition_normal(
+                            launcher, arg.handle[0], proj_id,
+                            priv._legion_privilege(),
+                            0, # EXCLUSIVE
+                            arg.parent.handle[0] if arg.parent is not None else arg.handle[0],
+                            0, False)
+                        for field in fields:
+                            add_field(
+                                launcher, req, arg.fspace.field_ids[field], True)
+            elif self.task.privileges is not None and i < len(self.task.privileges) and self.task.privileges[i]:
+                raise TypeError('Privileges can only be specified for Region arguments, got %s' % type(arg))
+
     def spawn_task(self, *args, **kwargs):
         # Hack: workaround for Python 2 not having keyword-only arguments
         def validate_spawn_task_args(point=None):
@@ -1496,35 +1583,12 @@ class _TaskLauncher(object):
         if point is not None:
             point = DomainPoint.coerce(point)
             c.legion_task_launcher_set_point(launcher, point.raw_value())
+        self.attach_region_requirements(launcher, args, False)
         for i, arg in zip(range(len(args)), args):
             if self.task.privileges is not None and i < len(self.task.privileges) and self.task.privileges[i] and not isinstance(arg, Region):
                 raise TypeError('Privileges can only be specified for Region arguments, got %s' % type(arg))
             if isinstance(arg, Region):
-                assert i < len(self.task.privileges)
-                priv = self.task.privileges[i]
-                fields = priv.fields if hasattr(priv, 'fields') else list(arg.fspace.field_ids.keys())
-                if hasattr(priv, 'fields'):
-                    assert set(fields) <= set(arg.fspace.field_ids.keys())
-                if priv.reduce:
-                    for field in fields:
-                        req = c.legion_task_launcher_add_region_requirement_logical_region_reduction(
-                            launcher, arg.handle[0],
-                            priv._legion_redop_id(arg.fspace.field_types[field]),
-                            0, # EXCLUSIVE
-                            arg.parent.handle[0] if arg.parent is not None else arg.handle[0],
-                            0, False)
-                        c.legion_task_launcher_add_field(
-                            launcher, req, arg.fspace.field_ids[field], True)
-                else:
-                    req = c.legion_task_launcher_add_region_requirement_logical_region(
-                        launcher, arg.handle[0],
-                        priv._legion_privilege(),
-                        0, # EXCLUSIVE
-                        arg.parent.handle[0] if arg.parent is not None else arg.handle[0],
-                        0, False)
-                    for field in fields:
-                        c.legion_task_launcher_add_field(
-                            launcher, req, arg.fspace.field_ids[field], True)
+                pass # Already attached above
             elif isinstance(arg, Future):
                 c.legion_task_launcher_add_future(launcher, arg.handle)
             elif self.task.calling_convention is None:
@@ -1547,11 +1611,12 @@ class _TaskLauncher(object):
         return future
 
 class _IndexLauncher(_TaskLauncher):
-    __slots__ = ['task', 'domain', 'local_args', 'future_args', 'future_map']
+    __slots__ = ['task', 'domain', 'global_args', 'local_args', 'future_args', 'future_map']
 
     def __init__(self, task, domain):
         super(_IndexLauncher, self).__init__(task)
         self.domain = domain
+        self.global_args = None
         self.local_args = c.legion_argument_map_create()
         self.future_args = []
         self.future_map = None
@@ -1567,14 +1632,22 @@ class _IndexLauncher(_TaskLauncher):
         c.legion_argument_map_set_point(
             self.local_args, index.value.raw_value(), task_args[0], False)
 
+    def attach_global_args(self, *args):
+        assert self.global_args is None
+        self.global_args = args
+
     def attach_future_args(self, *args):
         self.future_args = args
 
     def launch(self):
-        # All arguments are passed as local, so global is NULL.
-        global_args = ffi.new('legion_task_argument_t *')
-        global_args[0].args = ffi.NULL
-        global_args[0].arglen = 0
+        # Encode global args (if any).
+        if self.global_args is not None:
+            global_args, global_args_root = self.encode_args(self.global_args)
+        else:
+            global_args = ffi.new('legion_task_argument_t *')
+            global_args[0].args = ffi.NULL
+            global_args[0].arglen = 0
+            global_args_root = None
 
         # Construct the task launcher.
         launcher = c.legion_index_launcher_create(
@@ -1582,10 +1655,18 @@ class _IndexLauncher(_TaskLauncher):
             global_args[0], self.local_args,
             c.legion_predicate_true(), False, 0, 0)
 
+        # FIXME: Handle region requirements for non-global args.
+        if self.global_args is not None:
+            self.attach_region_requirements(launcher, self.global_args, True)
+
         for arg in self.future_args:
             c.legion_index_launcher_add_future(launcher, arg.handle)
 
         # Launch the task.
+        if _my.ctx.current_launch is not None:
+            return _my.ctx.current_launch.attach_index_launcher(
+                launcher, root=global_args_root)
+
         result = c.legion_index_launcher_execute(
             _my.ctx.runtime, _my.ctx.context, launcher)
         c.legion_index_launcher_destroy(launcher)
@@ -1619,6 +1700,13 @@ class _MustEpochLauncher(object):
             self.roots.append(root)
         c.legion_must_epoch_launcher_add_single_task(
             self.launcher, point.raw_value(), task_launcher)
+        self.has_sublaunchers = True
+
+    def attach_index_launcher(self, index_launcher, root=None):
+        if root is not None:
+            self.roots.append(root)
+        c.legion_must_epoch_launcher_add_index_task(
+            self.launcher, index_launcher)
         self.has_sublaunchers = True
 
     def launch(self):
@@ -1669,6 +1757,72 @@ class _FuturePoint(object):
         del self.point
 
         return self.future.get()
+
+class SymbolicExpr(object):
+    def is_region(self):
+        return False
+
+class SymbolicIndexAccess(SymbolicExpr):
+    __slots__ = ['value', 'index']
+    def __init__(self, value, index):
+        self.value = value
+        self.index = index
+    def __str__(self):
+        return '%s[%s]' % (self.value, self.index)
+    def __repr__(self):
+        return '%s[%s]' % (self.value, self.index)
+    def _legion_postprocess_task_argument(self, point):
+        result = _postprocess(self.value, point)[_postprocess(self.index, point)]
+        # FIXME: Clear parent field of regions being used as projection requirements
+        if isinstance(result, Region):
+            result.parent = None
+        return result
+    def is_region(self):
+        return isinstance(self.value, Partition)
+    @property
+    def parent(self):
+        if self.is_region():
+            return self.value.parent
+        assert False
+    @property
+    def fspace(self):
+        if self.is_region():
+            return self.value.parent.fspace
+        assert False
+    @property
+    def handle(self):
+        if self.is_region():
+            return self.value.handle
+        assert False
+
+class SymbolicLoopIndex(SymbolicExpr):
+    __slots__ = ['name']
+    def __init__(self, name):
+        self.name = name
+    def __str__(self):
+        return self.name
+    def __repr__(self):
+        return self.name
+    def _legion_postprocess_task_argument(self, point):
+        return point
+
+ID = SymbolicLoopIndex('ID')
+
+def index_launch(domain, task, *args):
+    if isinstance(domain, Domain):
+        domain = domain
+    elif isinstance(domain, Ispace):
+        domain = ispace.domain
+    else:
+        domain = Domain.create(domain)
+    launcher = _IndexLauncher(task=task, domain=domain)
+    args = launcher.preprocess_args(args)
+    args, futures = launcher.gather_futures(args)
+    launcher.attach_global_args(*args)
+    launcher.attach_future_args(*futures)
+    # TODO: attach region args
+    launcher.launch()
+    return launcher.future_map
 
 class IndexLaunch(object):
     __slots__ = ['domain', 'launcher', 'point',
@@ -1760,8 +1914,9 @@ class MustEpochLaunch(object):
 
     def __exit__(self, exc_type, exc_value, tb):
         _my.ctx.end_launch(self)
-        self.launch()
-        del self.launcher
+        if exc_value is None:
+            self.launch()
+            del self.launcher
 
     def spawn_task(self, *args, **kwargs):
         # TODO: Support index launches
@@ -1771,6 +1926,9 @@ class MustEpochLaunch(object):
 
     def attach_task_launcher(self, *args, **kwargs):
         self.launcher.attach_task_launcher(*args, **kwargs)
+
+    def attach_index_launcher(self, *args, **kwargs):
+        self.launcher.attach_index_launcher(*args, **kwargs)
 
     def launch(self):
         self.launcher.launch()
