@@ -1740,6 +1740,21 @@ namespace Legion {
           return (!subsets.empty() && !(subsets.get_valid_mask() * mask)) ||
                   !(refining_fields * mask);
         }
+    protected:
+      inline void increment_pending_analyses(void)
+        { pending_analyses++; }
+      inline void decrement_pending_analyses(void)
+        {
+#ifdef DEBUG_LEGION
+          assert(pending_analyses > 0);
+#endif
+          if ((--pending_analyses == 0) && !is_logical_owner() &&
+              transition_event.exists())
+            // Signal to the migration task that it is safe to unpack
+            trigger_pending_analysis_event();
+        }
+      // Need a separte function because Runtime::trigger_event is not included
+      void trigger_pending_analysis_event(void);
     public:
       // From distributed collectable
       virtual void notify_active(ReferenceMutator *mutator);
