@@ -209,41 +209,39 @@ class DomainPoint(object):
 
     def __reduce__(self):
         return (_DomainPoint_unpickle,
-                ([self.handle[0].point_data[i] for i in xrange(self.handle[0].dim)],))
+                ([self.handle[0].point_data[i] for i in xrange(self.dim)],))
 
     def __int__(self):
-        assert self.handle[0].dim == 1
+        assert self.dim == 1
         return self.handle[0].point_data[0]
 
     def __index__(self):
-        assert self.handle[0].dim == 1
-        return self.handle[0].point_data[0]
+        return self.__int__()
 
     def __getitem__(self, i):
-        assert 0 <= i < self.handle[0].dim
+        assert 0 <= i < self.dim
         return self.handle[0].point_data[i]
 
     def __eq__(self, other):
         if not isinstance(other, DomainPoint):
             return NotImplemented
-        if self.handle[0].dim != other.handle[0].dim:
-            return False
-        for i in xrange(self.handle[0].dim):
-            if self.handle[0].point_data[i] != other.handle[0].point_data[i]:
-                return False
-        return True
+        return numpy.array_equal(self.point, other.point)
 
     def __str__(self):
-        dim = self.handle[0].dim
-        if dim == 1:
-            return str(self.handle[0].point_data[0])
-        return '({})'.format(
-            ', '.join(str(self.handle[0].point_data[i]) for i in xrange(dim)))
+        if self.dim == 1:
+            return str(int(self))
+        return str(self.point)
 
     def __repr__(self):
-        dim = self.handle[0].dim
-        return 'DomainPoint({})'.format(
-            ', '.join(str(self.handle[0].point_data[i]) for i in xrange(dim)))
+        return 'DomainPoint({})'.format(self.point)
+
+    @property
+    def dim(self):
+        return self.handle[0].dim
+
+    @property
+    def point(self):
+        return self.asarray()
 
     @staticmethod
     def create(values):
@@ -275,6 +273,12 @@ class DomainPoint(object):
     def raw_value(self):
         return self.handle[0]
 
+    def asarray(self):
+        return numpy.frombuffer(
+            ffi.buffer(self.handle[0].point_data),
+            count=self.dim,
+            dtype=numpy.int64)
+
 class Domain(object):
     __slots__ = ['handle']
     def __init__(self, handle):
@@ -288,6 +292,10 @@ class Domain(object):
     @property
     def volume(self):
         return c.legion_domain_get_volume(self.handle[0])
+
+    @property
+    def bounds(self):
+        return self.asarray()
 
     @staticmethod
     def create(extent, start=None):
@@ -317,17 +325,23 @@ class Domain(object):
         return value
 
     def __iter__(self):
-        dim = self.handle[0].dim
         return imap(
             DomainPoint.create,
             itertools.product(
                 *[xrange(
                     self.handle[0].rect_data[i],
-                    self.handle[0].rect_data[i+dim] + 1)
-                  for i in xrange(dim)]))
+                    self.handle[0].rect_data[i+self.dim] + 1)
+                  for i in xrange(self.dim)]))
 
     def raw_value(self):
         return self.handle[0]
+
+    def asarray(self):
+        return numpy.frombuffer(
+            ffi.buffer(self.handle[0].rect_data),
+            count=self.dim * 2,
+            dtype=numpy.int64
+        ).reshape((2, self.dim))
 
 class DomainTransform(object):
     __slots__ = ['handle']
@@ -627,6 +641,10 @@ class Ispace(object):
     @property
     def volume(self):
         return self.domain.volume
+
+    @property
+    def bounds(self):
+        return self.domain.bounds
 
     @staticmethod
     def create(extent, start=None):
