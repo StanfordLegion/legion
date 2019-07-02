@@ -154,12 +154,21 @@ namespace Legion {
       public:
         static const LgTaskID TASK_ID = LG_DEFER_PERFORM_MAPPING_TASK_ID;
       public:
-        DeferMappingArgs(TaskOp *op, MustEpochOp *owner)
+        DeferMappingArgs(TaskOp *op, MustEpochOp *owner,
+                         RtUserEvent done, unsigned cnt,
+                         std::vector<unsigned> *performed,
+                         std::vector<ApEvent> *eff)
           : LgTaskArgs<DeferMappingArgs>(op->get_unique_op_id()),
-            proxy_this(op), must_op(owner) { }
+            proxy_this(op), must_op(owner), done_event(done), 
+            invocation_count(cnt), performed_regions(performed), 
+            effects(eff) { }
       public:
         TaskOp *const proxy_this;
         MustEpochOp *const must_op;
+        const RtUserEvent done_event;
+        const unsigned invocation_count;
+        std::vector<unsigned> *const performed_regions;
+        std::vector<ApEvent> *const effects;
       };
       struct DeferLaunchArgs : public LgTaskArgs<DeferLaunchArgs> {
       public:
@@ -280,7 +289,7 @@ namespace Legion {
       virtual void early_map_task(void) = 0;
       virtual bool distribute_task(void) = 0;
       virtual RtEvent perform_mapping(MustEpochOp *owner = NULL,
-                                      bool first_invocation = true) = 0;
+                                      const DeferMappingArgs *args = NULL) = 0;
       virtual void launch_task(void) = 0;
       virtual bool is_stealable(void) const = 0;
     public:
@@ -297,7 +306,11 @@ namespace Legion {
                                    size_t result_size, bool owned);
     public:
       RtEvent defer_distribute_task(RtEvent precondition);
-      RtEvent defer_perform_mapping(RtEvent precondition, MustEpochOp *op);
+      RtEvent defer_perform_mapping(RtEvent precondition, MustEpochOp *op,
+                                    const DeferMappingArgs *args,
+                                    unsigned invocation_count,
+                                    std::vector<unsigned> *performed = NULL,
+                                    std::vector<ApEvent> *effects = NULL);
       RtEvent defer_launch_task(RtEvent precondition);
     protected:
       void enqueue_ready_task(bool use_target_processor,
@@ -476,8 +489,8 @@ namespace Legion {
                     VariantImpl *impl, const char *call_name) const;
     protected:
       void invoke_mapper(MustEpochOp *must_epoch_owner);
-      RtEvent map_all_regions(ApEvent user_event, const bool first_invocation,
-                              MustEpochOp *must_epoch_owner);
+      RtEvent map_all_regions(ApEvent user_event, MustEpochOp *must_epoch_owner,
+                              const DeferMappingArgs *defer_args);
       void perform_post_mapping(const PhysicalTraceInfo &trace_info);
     protected:
       void pack_single_task(Serializer &rez, AddressSpaceID target);
@@ -500,7 +513,7 @@ namespace Legion {
       virtual void early_map_task(void) = 0;
       virtual bool distribute_task(void) = 0; 
       virtual RtEvent perform_mapping(MustEpochOp *owner = NULL,
-                                      bool first_invocation = true) = 0;
+                                      const DeferMappingArgs *args = NULL) = 0;
       virtual bool is_stealable(void) const = 0;
       virtual bool can_early_complete(ApUserEvent &chain_event) = 0; 
     public:
@@ -601,7 +614,7 @@ namespace Legion {
       virtual void early_map_task(void) = 0;
       virtual bool distribute_task(void) = 0;
       virtual RtEvent perform_mapping(MustEpochOp *owner = NULL,
-                                      bool first_invocation = true) = 0;
+                                      const DeferMappingArgs *args = NULL) = 0;
       virtual void launch_task(void) = 0;
       virtual bool is_stealable(void) const = 0;
       virtual void map_and_launch(void) = 0;
@@ -695,7 +708,7 @@ namespace Legion {
       virtual void early_map_task(void);
       virtual bool distribute_task(void);
       virtual RtEvent perform_mapping(MustEpochOp *owner = NULL,
-                                      bool first_invocation = true);
+                                      const DeferMappingArgs *args = NULL);
       virtual bool is_stealable(void) const;
       virtual bool can_early_complete(ApUserEvent &chain_event);
       virtual VersionInfo& get_version_info(unsigned idx);
@@ -793,7 +806,7 @@ namespace Legion {
       virtual void early_map_task(void);
       virtual bool distribute_task(void);
       virtual RtEvent perform_mapping(MustEpochOp *owner = NULL,
-                                      bool first_invocation = true);
+                                      const DeferMappingArgs *args = NULL);
       virtual bool is_stealable(void) const;
       virtual bool can_early_complete(ApUserEvent &chain_event);
       virtual VersionInfo& get_version_info(unsigned idx);
@@ -890,7 +903,7 @@ namespace Legion {
       virtual void early_map_task(void);
       virtual bool distribute_task(void);
       virtual RtEvent perform_mapping(MustEpochOp *owner = NULL,
-                                      bool first_invocation = true);
+                                      const DeferMappingArgs *args = NULL);
       virtual void launch_task(void);
       virtual bool is_stealable(void) const;
       virtual void map_and_launch(void);
@@ -1003,7 +1016,7 @@ namespace Legion {
       virtual void early_map_task(void);
       virtual bool distribute_task(void);
       virtual RtEvent perform_mapping(MustEpochOp *owner = NULL,
-                                      bool first_invocation = true);
+                                      const DeferMappingArgs *args = NULL);
       virtual void launch_task(void);
       virtual bool is_stealable(void) const;
       virtual void map_and_launch(void);

@@ -21676,10 +21676,12 @@ namespace Legion {
           {
             const TaskOp::DeferMappingArgs *margs = 
               (const TaskOp::DeferMappingArgs*)args;
-            RtEvent wait_on = margs->proxy_this->perform_mapping(
-                        margs->must_op, false/*first invocation*/);
-            if (wait_on.exists())
-              wait_on.wait();
+            const RtEvent deferred = 
+              margs->proxy_this->perform_mapping(margs->must_op, margs);
+            // Once we've no longer been deferred then we can trigger
+            // the done event to signal we are done
+            if (!deferred.exists())
+              Runtime::trigger_event(margs->done_event);
             break;
           }
         case LG_DEFER_LAUNCH_TASK_ID:
