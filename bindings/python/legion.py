@@ -1647,6 +1647,7 @@ class _IndexLauncher(_TaskLauncher):
             global_args = ffi.new('legion_task_argument_t *')
             global_args[0].args = ffi.NULL
             global_args[0].arglen = 0
+            global_args_root = None
 
         # Construct the task launcher.
         launcher = c.legion_index_launcher_create(
@@ -1662,6 +1663,10 @@ class _IndexLauncher(_TaskLauncher):
             c.legion_index_launcher_add_future(launcher, arg.handle)
 
         # Launch the task.
+        if _my.ctx.current_launch is not None:
+            return _my.ctx.current_launch.attach_index_launcher(
+                launcher, root=global_args_root)
+
         result = c.legion_index_launcher_execute(
             _my.ctx.runtime, _my.ctx.context, launcher)
         c.legion_index_launcher_destroy(launcher)
@@ -1695,6 +1700,13 @@ class _MustEpochLauncher(object):
             self.roots.append(root)
         c.legion_must_epoch_launcher_add_single_task(
             self.launcher, point.raw_value(), task_launcher)
+        self.has_sublaunchers = True
+
+    def attach_index_launcher(self, index_launcher, root=None):
+        if root is not None:
+            self.roots.append(root)
+        c.legion_must_epoch_launcher_add_index_task(
+            self.launcher, index_launcher)
         self.has_sublaunchers = True
 
     def launch(self):
@@ -1902,8 +1914,9 @@ class MustEpochLaunch(object):
 
     def __exit__(self, exc_type, exc_value, tb):
         _my.ctx.end_launch(self)
-        self.launch()
-        del self.launcher
+        if exc_value is None:
+            self.launch()
+            del self.launcher
 
     def spawn_task(self, *args, **kwargs):
         # TODO: Support index launches
@@ -1913,6 +1926,9 @@ class MustEpochLaunch(object):
 
     def attach_task_launcher(self, *args, **kwargs):
         self.launcher.attach_task_launcher(*args, **kwargs)
+
+    def attach_index_launcher(self, *args, **kwargs):
+        self.launcher.attach_index_launcher(*args, **kwargs)
 
     def launch(self):
         self.launcher.launch()
