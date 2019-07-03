@@ -47,9 +47,19 @@ namespace Realm {
 
     // flag bits to control iterators
     enum {
-      PARTIAL_OK   = (1 << 0),
-      LINES_OK     = (1 << 1),
-      PLANES_OK    = (1 << 2),
+      SRC_PARTIAL_OK   = (1 << 0),
+      SRC_LINES_OK     = (1 << 1),
+      SRC_PLANES_OK    = (1 << 2),
+      SRC_FLAGMASK     = 0xff,
+
+      DST_PARTIAL_OK   = (1 << 8),
+      DST_LINES_OK     = (1 << 9),
+      DST_PLANES_OK    = (1 << 10),
+      DST_FLAGMASK     = 0xff00,
+
+      PARTIAL_OK       = SRC_PARTIAL_OK | DST_PARTIAL_OK,
+      LINES_OK         = SRC_LINES_OK   | DST_LINES_OK,
+      PLANES_OK        = SRC_PLANES_OK  | DST_PLANES_OK,
     };
 
     struct AddressInfo {
