@@ -405,7 +405,8 @@ namespace Realm {
 
 	    size_t max_bytes = max_req_size;
 
-	    size_t src_bytes = src_iter->step(max_bytes, src_info, flags,
+	    size_t src_bytes = src_iter->step(max_bytes, src_info,
+					      flags & TransferIterator::SRC_FLAGMASK,
 					      true /*tentative*/);
 
 	    size_t num_elems = src_bytes / src_serdez_op->sizeof_field_type;
@@ -427,7 +428,8 @@ namespace Realm {
 	      dst_bytes_avail = act_elems * src_serdez_op->max_serialized_size;
 	      size_t new_src_bytes = act_elems * src_serdez_op->sizeof_field_type;
 	      src_iter->cancel_step();
-	      src_bytes = src_iter->step(new_src_bytes, src_info, flags,
+	      src_bytes = src_iter->step(new_src_bytes, src_info,
+					 flags & TransferIterator::SRC_FLAGMASK,
 					 false /*!tentative*/);
 	      // this can come up shorter than we expect if the source
 	      //  iterator is 2-D or 3-D - if that happens, re-adjust the
@@ -491,7 +493,8 @@ namespace Realm {
 
 	    size_t max_bytes = max_req_size;
 
-	    size_t dst_bytes = dst_iter->step(max_bytes, dst_info, flags,
+	    size_t dst_bytes = dst_iter->step(max_bytes, dst_info,
+					      flags & TransferIterator::DST_FLAGMASK,
 					      !input_data_done);
 
 	    size_t num_elems = dst_bytes / dst_serdez_op->sizeof_field_type;
@@ -521,7 +524,8 @@ namespace Realm {
 		src_bytes_avail = act_elems * dst_serdez_op->max_serialized_size;
 		size_t new_dst_bytes = act_elems * dst_serdez_op->sizeof_field_type;
 		dst_iter->cancel_step();
-		dst_bytes = dst_iter->step(new_dst_bytes, dst_info, flags,
+		dst_bytes = dst_iter->step(new_dst_bytes, dst_info,
+					   flags & TransferIterator::SRC_FLAGMASK,
 					   false /*!tentative*/);
 		// this can come up shorter than we expect if the destination
 		//  iterator is 2-D or 3-D - if that happens, re-adjust the
@@ -601,7 +605,7 @@ namespace Realm {
 
 	    // tentatively get as much as we can from the source iterator
 	    size_t src_bytes = src_iter->step(max_bytes, src_info,
-					      flags,
+					      flags & TransferIterator::SRC_FLAGMASK,
 					      true /*tentative*/);
 	    if(src_bytes == 0) {
 	      // not enough space for even one element
@@ -616,7 +620,7 @@ namespace Realm {
 						((flags & TransferIterator::LINES_OK) != 0));
 
 	    size_t dst_bytes = dst_iter->step(src_bytes, dst_info,
-					      flags,
+					      flags & TransferIterator::DST_FLAGMASK,
 					      dimension_mismatch_possible);
 	    if(dst_bytes == 0) {
 	      // not enough space for even one element
@@ -654,7 +658,8 @@ namespace Realm {
 	      src_iter->cancel_step();
 	      // this step must still be tentative if a dimension mismatch is
 	      //  posisble
-	      src_bytes = src_iter->step(dst_bytes, src_info, flags,
+	      src_bytes = src_iter->step(dst_bytes, src_info,
+					 flags & TransferIterator::SRC_FLAGMASK,
 					 dimension_mismatch_possible);
 	      if(src_bytes == 0) {
 		// corner case that should occur only with a destination 
@@ -688,7 +693,8 @@ namespace Realm {
 	      if(src_bytes < dst_bytes) {
 		assert(dimension_mismatch_possible);
 		dst_iter->cancel_step();
-		dst_bytes = dst_iter->step(src_bytes, dst_info, flags,
+		dst_bytes = dst_iter->step(src_bytes, dst_info,
+					   flags & TransferIterator::DST_FLAGMASK,
 					   true /*tentative*/);
 	      }
 	      // byte counts now must match
@@ -790,11 +796,13 @@ namespace Realm {
 		//log_request.info() << "dimension mismatch! " << act_bytes << " < " << src_bytes << " (" << bytes_total << ")";
 		TransferIterator::AddressInfo dummy_info;
 		src_iter->cancel_step();
-		src_bytes = src_iter->step(act_bytes, dummy_info, flags,
+		src_bytes = src_iter->step(act_bytes, dummy_info,
+					   flags & TransferIterator::SRC_FLAGMASK,
 					   false /*!tentative*/);
 		assert(src_bytes == act_bytes);
 		dst_iter->cancel_step();
-		dst_bytes = dst_iter->step(act_bytes, dummy_info, flags,
+		dst_bytes = dst_iter->step(act_bytes, dummy_info,
+					   flags & TransferIterator::DST_FLAGMASK,
 					   false /*!tentative*/);
 		assert(dst_bytes == act_bytes);
 	      }
@@ -1467,9 +1475,8 @@ namespace Realm {
       {
         pthread_mutex_lock(&xd_lock);
         RemoteWriteRequest** reqs = (RemoteWriteRequest**) requests;
-	// remote writes allow 2D on source, but not destination - figure
-	//  out how to communicate that to the iterators?
-	unsigned flags = TransferIterator::LINES_OK;
+	// remote writes allow 2D on source, but not destination
+	unsigned flags = TransferIterator::SRC_LINES_OK;
         long new_nr = default_get_requests(requests, nr, flags);
         for (long i = 0; i < new_nr; i++)
         {
