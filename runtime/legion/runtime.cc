@@ -19188,7 +19188,7 @@ namespace Legion {
         if (it->second.diff_allocations == 0)
           continue;
         log_allocation.info("%s on %d: "
-            "total=%d total_bytes=%ld diff=%d diff_bytes=%lld",
+            "total=%d total_bytes=%ld diff=%d diff_bytes=%ld",
             get_allocation_name(it->first), address_space,
             it->second.total_allocations, it->second.total_bytes,
             it->second.diff_allocations, it->second.diff_bytes);
@@ -19388,8 +19388,6 @@ namespace Legion {
           return "Physical State";
         case EQUIVALENCE_SET_ALLOC:
           return "Equivalence Set";
-        case VERSION_STATE_ALLOC:
-          return "Version State";
         case AGGREGATE_VERSION_ALLOC:
           return "Aggregate Version";
         case TASK_IMPL_ALLOC:
