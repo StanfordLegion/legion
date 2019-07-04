@@ -15191,7 +15191,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_EQUIVALENCE_SET_MIGRATION,
-          UPDATE_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
+          MIGRATION_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
     }
 
     //--------------------------------------------------------------------------
@@ -15201,7 +15201,7 @@ namespace Legion {
     {
       find_messenger(target)->send_message(rez, 
           SEND_EQUIVALENCE_SET_OWNER_UPDATE,
-          UPDATE_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
+          MIGRATION_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
     }
 
     //--------------------------------------------------------------------------
@@ -15211,7 +15211,7 @@ namespace Legion {
     {
       find_messenger(target)->send_message(rez,
           SEND_EQUIVALENCE_SET_REMOTE_REFINEMENT, 
-          UPDATE_VIRTUAL_CHANNEL, true/*flush*/);
+          MIGRATION_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
