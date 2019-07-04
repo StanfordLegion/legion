@@ -3374,14 +3374,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock r_lock(replicated_lock);
+      // Check to see if we lost the race to this update
+      if (remote_added_users < user_cache_timeout)
+        return;
 #ifdef DEBUG_LEGION
       assert(!is_logical_owner());
       assert(!!replicated_fields);
       assert(current_users != NULL);
 #endif
-      // Check to see if we lost the race to this update
-      if (remote_added_users < user_cache_timeout)
-        return;
       // We can reset the counter now
       remote_added_users = 0;
       // See what fields haven't been sampled recently and therefore
