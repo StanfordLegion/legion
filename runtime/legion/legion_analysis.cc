@@ -9057,7 +9057,7 @@ namespace Legion {
       }
       // Don't do any migrations if we have any pending refinements
       // or we have outstanding analyses that prevent it or we have 
-      // update guards which we can't track on remote nodes for now
+      // update guards that we can't track on remote nodes for now
       if (!pending_refinements.empty() || !!refining_fields || 
           (pending_analyses > 0) || !update_guards.empty())
       {
