@@ -6719,16 +6719,6 @@ namespace Legion {
         Runtime::trigger_event(transition_event);
         transition_event = RtUserEvent::NO_RT_USER_EVENT;
       }
-      else if (!is_logical_owner() && update_guards.empty())
-      {
-        // This is the case when we were migrated away, trigger the
-        // transition event to signal that the last guard is removed
-#ifdef DEBUG_LEGION
-        assert(transition_event.exists());
-#endif
-        Runtime::trigger_event(transition_event);
-        transition_event = RtUserEvent::NO_RT_USER_EVENT;
-      }
     }
 
     //--------------------------------------------------------------------------
@@ -7811,6 +7801,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
+      assert(update_guards.empty());
       assert(pending_refinements.empty());
 #endif
       std::map<LogicalView*,unsigned> *late_references = NULL;
@@ -7886,18 +7877,6 @@ namespace Legion {
         }
         version_numbers.clear();
       }
-      // Pack an event to wait on before we can become the owner that
-      // represents when all the update guards have been removed
-      if (!update_guards.empty())
-      {
-#ifdef DEBUG_LEGION
-        assert(!transition_event.exists());
-#endif
-        transition_event = Runtime::create_rt_user_event();
-        rez.serialize<RtEvent>(transition_event); 
-      }
-      else
-        rez.serialize(RtEvent::NO_RT_EVENT);
       // Pack subsets
       // We're only allowed to keep the complete subsets on this node
       // so we need to filter anything that isn't fully refined
@@ -8072,10 +8051,6 @@ namespace Legion {
         derez.deserialize(vid);
         derez.deserialize(version_numbers[vid]);
       }
-      RtEvent guard_event;
-      derez.deserialize(guard_event);
-      if (guard_event.exists())
-        owner_preconditions.insert(guard_event);
       FieldMaskSet<EquivalenceSet> new_subsets;
       size_t num_subsets;
       derez.deserialize(num_subsets);
@@ -9081,9 +9056,10 @@ namespace Legion {
         return;
       }
       // Don't do any migrations if we have any pending refinements
-      // or we have outstanding analyses that prevent it for now
+      // or we have outstanding analyses that prevent it or we have 
+      // update guards which we can't track on remote nodes for now
       if (!pending_refinements.empty() || !!refining_fields || 
-          (pending_analyses > 0))
+          (pending_analyses > 0) || !update_guards.empty())
       {
         // Reset the data structures for the next run
         user_samples.clear();
