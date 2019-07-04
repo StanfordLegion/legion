@@ -6222,10 +6222,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(transition_event.exists());
+      assert(waiting_event.exists());
 #endif
-      Runtime::trigger_event(transition_event);
-      transition_event = RtUserEvent::NO_RT_USER_EVENT;
+      Runtime::trigger_event(waiting_event);
+      waiting_event = RtUserEvent::NO_RT_USER_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -6377,9 +6377,9 @@ namespace Legion {
         if (!first_pass)
         {
 #ifdef DEBUG_LEGION
-          assert(refinement_event.exists());
+          assert(waiting_event.exists());
 #endif
-          const RtEvent wait_on = refinement_event;
+          const RtEvent wait_on = waiting_event;
           eq.release();
           if (!wait_on.has_triggered())
             wait_on.wait();
@@ -6632,9 +6632,9 @@ namespace Legion {
                     if (!refinement_done.exists())
                     {
 #ifdef DEBUG_LEGION
-                      assert(refinement_event.exists());
+                      assert(waiting_event.exists());
 #endif
-                      refinement_done = refinement_event;
+                      refinement_done = waiting_event;
                     }
                     // Record this child for the future
                     it->first->children[node] = child; 
@@ -6678,9 +6678,9 @@ namespace Legion {
                           if (!refinement_done.exists())
                           {
 #ifdef DEBUG_LEGION
-                            assert(refinement_event.exists());
+                            assert(waiting_event.exists());
 #endif
-                            refinement_done = refinement_event;
+                            refinement_done = waiting_event;
                           }
                         }
                       }
@@ -6702,9 +6702,9 @@ namespace Legion {
                       if (!refinement_done.exists())
                       {
 #ifdef DEBUG_LEGION
-                        assert(refinement_event.exists());
+                        assert(waiting_event.exists());
 #endif
-                        refinement_done = refinement_event;
+                        refinement_done = waiting_event;
                       }
                       // Record that we refined these fields
                       overlap.clear();
@@ -6764,9 +6764,9 @@ namespace Legion {
               if (!refinement_done.exists())
               {
 #ifdef DEBUG_LEGION
-                assert(refinement_event.exists());
+                assert(waiting_event.exists());
 #endif
-                refinement_done = refinement_event;
+                refinement_done = waiting_event;
               }
             }
           }
@@ -6815,9 +6815,9 @@ namespace Legion {
                   if (!refinement_done.exists())
                   {
 #ifdef DEBUG_LEGION
-                    assert(refinement_event.exists());
+                    assert(waiting_event.exists());
 #endif
-                    refinement_done = refinement_event;
+                    refinement_done = waiting_event;
                   }
                   // We need to subtract this off any unrefined remainders
                   // or add the difference of it with the original set
@@ -6859,9 +6859,9 @@ namespace Legion {
                 if (!refinement_done.exists())
                 {
 #ifdef DEBUG_LEGION
-                  assert(refinement_event.exists());
+                  assert(waiting_event.exists());
 #endif
-                  refinement_done = refinement_event;
+                  refinement_done = waiting_event;
                 }
                 // Subtract from any unrefined remainders
                 FieldMask to_filter = first->second;
@@ -6928,9 +6928,9 @@ namespace Legion {
                 if (!refinement_done.exists())
                 {
 #ifdef DEBUG_LEGION
-                  assert(refinement_event.exists());
+                  assert(waiting_event.exists());
 #endif
-                  refinement_done = refinement_event;
+                  refinement_done = waiting_event;
                 }
                 // Save this for the future
                 dis->children[node] = child; 
@@ -6956,9 +6956,9 @@ namespace Legion {
             if (!refinement_done.exists())
             {
 #ifdef DEBUG_LEGION
-              assert(refinement_event.exists());
+              assert(waiting_event.exists());
 #endif
-              refinement_done = refinement_event;
+              refinement_done = waiting_event;
             }
             // Subtract from any unrefined remainders
             filter_unrefined_remainders(ray_mask, expr);
@@ -7785,10 +7785,10 @@ namespace Legion {
       if (pending_analyses > 0)
       {
 #ifdef DEBUG_LEGION
-        assert(!transition_event.exists());
+        assert(!waiting_event.exists());
 #endif
-        transition_event = Runtime::create_rt_user_event();
-        owner_preconditions.insert(transition_event);
+        waiting_event = Runtime::create_rt_user_event();
+        owner_preconditions.insert(waiting_event);
       }
       if (!owner_preconditions.empty())
       {
@@ -7822,12 +7822,12 @@ namespace Legion {
         if (pending_analyses > 0)
         {
 #ifdef DEBUG_LEGION
-          assert(!transition_event.exists());
+          assert(!waiting_event.exists());
 #endif
-          transition_event = Runtime::create_rt_user_event();
+          waiting_event = Runtime::create_rt_user_event();
           DeferMakeOwnerArgs args(this, new_subsets, done_event);
           runtime->issue_runtime_meta_task(args, 
-              LG_LATENCY_DEFERRED_PRIORITY, transition_event);
+              LG_LATENCY_DEFERRED_PRIORITY, waiting_event);
           return false;
         }
         else
@@ -10201,7 +10201,7 @@ namespace Legion {
         AutoLock eq(eq_lock);
 #ifdef DEBUG_LEGION
         assert(is_logical_owner());
-        assert(refinement_event.exists());
+        assert(waiting_event.exists());
         assert(eq_state == REFINING_STATE);
 #endif
         // Add any new refinements to our set and record any
@@ -10466,8 +10466,8 @@ namespace Legion {
         {
           // Go back to the mapping state and trigger our done event
           eq_state = MAPPING_STATE;
-          to_trigger = refinement_event;
-          refinement_event = RtUserEvent::NO_RT_USER_EVENT;
+          to_trigger = waiting_event;
+          waiting_event = RtUserEvent::NO_RT_USER_EVENT;
         }
         else // there are more refinements to do so we go around again
         {
@@ -10753,10 +10753,10 @@ namespace Legion {
       {
 #ifdef DEBUG_LEGION
         assert(!transition_event.exists());
-        assert(!refinement_event.exists());
+        assert(!waiting_event.exists());
         assert(!refining_fields); // should be empty
 #endif
-        refinement_event = Runtime::create_rt_user_event();
+        waiting_event = Runtime::create_rt_user_event();
         eq_state = REFINING_STATE;
         // Launch the refinement task to be performed
         RefinementTaskArgs args(this);
@@ -10844,11 +10844,11 @@ namespace Legion {
       if (eq_state == REFINING_STATE)
       {
 #ifdef DEBUG_LEGION
-        assert(refinement_event.exists());
+        assert(waiting_event.exists());
 #endif
         DeferSubsetRequestArgs args(this, source, deferral_event);       
         runtime->issue_runtime_meta_task(args,
-            LG_LATENCY_DEFERRED_PRIORITY, refinement_event);
+            LG_LATENCY_DEFERRED_PRIORITY, waiting_event);
         return;
       }
       // Record the remote subsets
