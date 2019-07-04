@@ -1749,7 +1749,7 @@ namespace Legion {
           assert(pending_analyses > 0);
 #endif
           if ((--pending_analyses == 0) && !is_logical_owner() &&
-              transition_event.exists())
+              waiting_event.exists())
             // Signal to the migration task that it is safe to unpack
             trigger_pending_analysis_event();
         }
@@ -1979,8 +1979,9 @@ namespace Legion {
       FieldMaskSet<EquivalenceSet> pending_refinements;
       // Keep an event to track when the refinements are ready
       RtUserEvent transition_event;
-      // An event to track when the refinement task is done
-      RtUserEvent refinement_event;
+      // An event to track when the refinement task is done on the owner
+      // and when analyses are done on remote nodes for migration
+      RtUserEvent waiting_event;
       // An event to order to deferral tasks
       RtEvent next_deferral_precondition;
     protected:
