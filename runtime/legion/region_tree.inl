@@ -4089,7 +4089,6 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(registered_with_runtime);
-      assert(partition_ready.has_triggered());
 #endif
       if (destroyed)
       {
@@ -4113,6 +4112,9 @@ namespace Legion {
       }
       else
       {
+#ifdef DEBUG_LEGION
+        assert(partition_ready.has_triggered());
+#endif
         // Traverse down and destroy all of the child nodes
         // Need to make a copy of this in case the children
         // end up being deleted and removing themselves
