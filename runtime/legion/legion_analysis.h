@@ -642,13 +642,66 @@ namespace Legion {
     };
 
     /**
+     * \class CopyFillGuard
+     * This is the base class for copy fill guards. It serves as a way to
+     * ensure that multiple readers that can race to update an equivalence
+     * set observe each others changes before performing their copies.
+     */
+    class CopyFillGuard {
+    private:
+      struct CopyFillDeletion : public LgTaskArgs<CopyFillDeletion> {
+      public:
+        static const LgTaskID TASK_ID = LG_COPY_FILL_DELETION_TASK_ID;
+      public:
+        CopyFillDeletion(CopyFillGuard *g, UniqueID uid, RtUserEvent r)
+          : LgTaskArgs<CopyFillDeletion>(uid), guard(g), released(r) { }
+      public:
+        CopyFillGuard *const guard;
+        const RtUserEvent released;
+      };
+    public:
+#ifndef NON_AGGRESSIVE_AGGREGATORS
+      CopyFillGuard(RtUserEvent post, RtUserEvent applied); 
+#else
+      CopyFillGuard(RtUserEvent applied); 
+#endif
+      CopyFillGuard(const CopyFillGuard &rhs);
+      virtual ~CopyFillGuard(void);
+    public:
+      CopyFillGuard& operator=(const CopyFillGuard &rhs);
+    public:
+      void pack_guard(Serializer &rez);
+      static CopyFillGuard* unpack_guard(Deserializer &derez, Runtime *rt);
+    public:
+      bool record_guard_set(EquivalenceSet *set);
+      bool release_guards(Runtime *runtime, std::set<RtEvent> &applied);
+      static void handle_deletion(const void *args); 
+    private:
+      void release_guarded_sets(std::set<RtEvent> &released);
+    public:
+#ifndef NON_AGGRESSIVE_AGGREGATORS
+      const RtUserEvent guard_postcondition;
+#endif
+      const RtUserEvent effects_applied;
+    private:
+      mutable LocalLock guard_lock;     
+      // Record equivalence classes for which we need to remove guards
+      std::set<EquivalenceSet*> guarded_sets;
+      // Keep track of any events for remote releases
+      std::vector<RtEvent> remote_release_events;
+      // Track whether we are releasing or not
+      bool releasing_guards;
+    };
+
+    /**
      * \class CopyFillAggregator
      * The copy aggregator class is one that records the copies
      * that needs to be done for different equivalence classes and
      * then merges them together into the biggest possible copies
      * that can be issued together.
      */
-    class CopyFillAggregator : public WrapperReferenceMutator,
+    class CopyFillAggregator : public WrapperReferenceMutator, 
+                               public CopyFillGuard,
                                public LegionHeapify<CopyFillAggregator> {
     public:
       struct CopyFillAggregation : public LgTaskArgs<CopyFillAggregation> {
@@ -665,18 +718,7 @@ namespace Legion {
         const ApEvent pre;
         const bool has_src;
         const bool has_dst;
-      };
-      struct CopyFillDeletion : public LgTaskArgs<CopyFillDeletion> {
-      public:
-        static const LgTaskID TASK_ID = LG_COPY_FILL_DELETION_TASK_ID;
-      public:
-        CopyFillDeletion(CopyFillAggregator *a, UniqueID uid, bool remove)
-          : LgTaskArgs<CopyFillDeletion>(uid), aggregator(a), 
-            remove_guards(remove) { }
-      public:
-        CopyFillAggregator *const aggregator;
-        const bool remove_guards;
-      };
+      }; 
     public:
       typedef LegionMap<InstanceView*,
                FieldMaskSet<IndexSpaceExpression> >::aligned InstanceFieldExprs;
@@ -811,9 +853,7 @@ namespace Legion {
                          // to indicate when we already know preconditions
                          const bool has_src_preconditions = false,
                          const bool has_dst_preconditions = false,
-                         const bool need_deferral = false);
-      void record_guard_set(EquivalenceSet *set);
-      bool release_guards(std::set<RtEvent> &applied);
+                         const bool need_deferral = false); 
       ApEvent summarize(const PhysicalTraceInfo &trace_info) const;
     protected:
       void record_view(LogicalView *new_view);
@@ -834,7 +874,6 @@ namespace Legion {
                         ApEvent precondition, const FieldMask &copy_mask,
                         const PhysicalTraceInfo &trace_info,
                         const bool has_dst_preconditions);
-      void release_guarded_sets(void);
     public:
       inline void clear_update_fields(void) 
         { update_fields.clear(); } 
@@ -844,7 +883,6 @@ namespace Legion {
         { return update_fields; }
     public:
       static void handle_aggregation(const void *args);
-      static void handle_deletion(const void *args);
     public:
       RegionTreeForest *const forest;
       const AddressSpaceID local_space;
@@ -852,10 +890,6 @@ namespace Legion {
       const unsigned src_index;
       const unsigned dst_index;
       const RtEvent guard_precondition;
-#ifndef NON_AGGRESSIVE_AGGREGATORS
-      const RtUserEvent guard_postcondition;
-#endif
-      const RtUserEvent effects_applied;
       const PredEvent predicate_guard;
       const bool track_events;
     protected:
@@ -873,9 +907,7 @@ namespace Legion {
       std::map<InstanceView*,EventFieldExprs> dst_pre, src_pre;
     protected:
       // Runtime mapping effects that we create
-      std::set<RtEvent> effects;
-      // Record equivalence classes for which we need to remove guards
-      std::set<EquivalenceSet*> guarded_sets;
+      std::set<RtEvent> effects; 
       // Events for the completion of our copies if we are supposed
       // to be tracking them
       std::set<ApEvent> events;
@@ -1730,7 +1762,7 @@ namespace Legion {
     public:
       AddressSpaceID clone_from(const EquivalenceSet *parent, 
                                 const FieldMask &clone_mask);
-      void remove_update_guard(CopyFillAggregator *aggregator);
+      void remove_update_guard(CopyFillGuard *guard);
       void ray_trace_equivalence_sets(RayTracer *target,
                                       IndexSpaceExpression *expr, 
                                       FieldMask ray_mask,
@@ -1940,7 +1972,7 @@ namespace Legion {
       // Fields that are being refined
       FieldMask refining_fields;
       // This tracks the most recent copy-fill aggregator for each field
-      FieldMaskSet<CopyFillAggregator> update_guards;
+      FieldMaskSet<CopyFillGuard> update_guards;
       // Keep track of the refinements that need to be done
       FieldMaskSet<EquivalenceSet> pending_refinements;
       // Keep an event to track when the refinements are ready

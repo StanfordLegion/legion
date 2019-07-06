@@ -21798,7 +21798,7 @@ namespace Legion {
           }
         case LG_COPY_FILL_DELETION_TASK_ID:
           {
-            CopyFillAggregator::handle_deletion(args);
+            CopyFillGuard::handle_deletion(args);
             break;
           }
         case LG_FINALIZE_EQ_SETS_TASK_ID:
