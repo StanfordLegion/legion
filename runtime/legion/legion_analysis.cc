@@ -1917,7 +1917,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ CopyFillGuard* CopyFillGuard::unpack_guard(Deserializer &derez,
-                                                          Runtime *runtime)
+                                          Runtime *runtime, EquivalenceSet *set)
     //--------------------------------------------------------------------------
     {
       RtUserEvent effects_applied;
@@ -1932,14 +1932,16 @@ namespace Legion {
 #else
       CopyFillGuard *result = new CopyFillGuard(effects_applied);
 #endif
+#ifdef DEBUG_LEGION
+      if (!result->record_guard_set(set))
+        assert(false);
+#else
+      result->record_guard_set(set);
+#endif
       RtUserEvent remote_release;
       derez.deserialize(remote_release);
       std::set<RtEvent> release_preconditions;
-      if (result->release_guards(runtime, release_preconditions))
-      {
-        delete result;
-        result = NULL;
-      }
+      result->release_guards(runtime, release_preconditions, true/*defer*/);
       if (!release_preconditions.empty())
         Runtime::trigger_event(remote_release,
             Runtime::merge_events(release_preconditions));
@@ -1963,10 +1965,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool CopyFillGuard::release_guards(Runtime *rt, std::set<RtEvent> &applied)
+    bool CopyFillGuard::release_guards(Runtime *rt, std::set<RtEvent> &applied,
+                                       bool force_deferral /*=false*/)
     //--------------------------------------------------------------------------
     {
-      if (!effects_applied.has_triggered())
+      if (force_deferral || !effects_applied.has_triggered())
       {
         RtUserEvent released = Runtime::create_rt_user_event();
         // Meta-task will take responsibility for deletion
@@ -7482,13 +7485,20 @@ namespace Legion {
       }
       size_t num_guards;
       derez.deserialize(num_guards);
-      for (unsigned idx = 0; idx < num_guards; idx++)
+      if (num_guards > 0)
       {
-        CopyFillGuard *guard = CopyFillGuard::unpack_guard(derez, runtime);
-        FieldMask guard_mask;
-        derez.deserialize(guard_mask);
-        if (guard != NULL)
-          update_guards.insert(guard, guard_mask);
+        // Need to hold the lock here to prevent copy fill guard
+        // deletions from removing this before we've registered it
+        AutoLock eq(eq_lock);
+        for (unsigned idx = 0; idx < num_guards; idx++)
+        {
+          CopyFillGuard *guard = 
+            CopyFillGuard::unpack_guard(derez, runtime, this);
+          FieldMask guard_mask;
+          derez.deserialize(guard_mask);
+          if (guard != NULL)
+            update_guards.insert(guard, guard_mask);
+        }
       }
       // If we have events to wait for then we need to defer this
       if (!ready_events.empty())
@@ -7894,7 +7904,7 @@ namespace Legion {
       derez.deserialize(num_guards);
       for (unsigned idx = 0; idx < num_guards; idx++)
       {
-        CopyFillGuard *guard = CopyFillGuard::unpack_guard(derez, runtime);
+        CopyFillGuard *guard = CopyFillGuard::unpack_guard(derez, runtime,this);
         FieldMask guard_mask;
         derez.deserialize(guard_mask);
         if (guard != NULL)

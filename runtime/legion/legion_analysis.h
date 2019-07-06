@@ -671,10 +671,12 @@ namespace Legion {
       CopyFillGuard& operator=(const CopyFillGuard &rhs);
     public:
       void pack_guard(Serializer &rez);
-      static CopyFillGuard* unpack_guard(Deserializer &derez, Runtime *rt);
+      static CopyFillGuard* unpack_guard(Deserializer &derez, Runtime *rt,
+                                         EquivalenceSet *set);
     public:
       bool record_guard_set(EquivalenceSet *set);
-      bool release_guards(Runtime *runtime, std::set<RtEvent> &applied);
+      bool release_guards(Runtime *runtime, std::set<RtEvent> &applied,
+                          bool force_deferral = false);
       static void handle_deletion(const void *args); 
     private:
       void release_guarded_sets(std::set<RtEvent> &released);
