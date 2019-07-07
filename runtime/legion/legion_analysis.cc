@@ -6510,9 +6510,11 @@ namespace Legion {
       // ourselves but haven't become the owner yet, in which case we still
       // need to prune ourselves out of the list
       FieldMaskSet<CopyFillGuard>::iterator finder = update_guards.find(guard);
-#ifdef DEBUG_LEGION
-      assert(finder != update_guards.end());
-#endif
+      // It's also possible that the equivalence set is migrated away and
+      // then migrated back before this guard is removed in which case we
+      // won't find it in the update guards and can safely ignore it
+      if (finder == update_guards.end())
+        return;
       const bool should_tighten = !!finder->second;
       update_guards.erase(finder);
       if (should_tighten)
