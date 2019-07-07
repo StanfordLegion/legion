@@ -45,6 +45,7 @@ enum TaskIDs {
   CHECK_TASK_ID,
   WRAPPED_CPP_TASK_ID,
   WRAPPED_C_TASK_ID,
+  CLASS_METHOD_TASK_ID,
 #ifdef REALM_USE_LLVM
   WRAPPED_LLVM_TASK_ID,
 #endif
@@ -104,6 +105,30 @@ void wrapped_c_task(const void *data, size_t datalen,
 	 (int)userlen, (const char *)userdata);
   legion_task_postamble(runtime, ctx, 0, 0);
 }
+
+class ClassWithTaskMethods {
+public:
+  ClassWithTaskMethods(int _x) : x(_x) {}
+
+  void method_task(const Task *task,
+		   const std::vector<PhysicalRegion> &regions,
+		   Context ctx, Runtime *runtime)
+  {
+    printf("hello from class method: this=%p x=%d\n", this, x);
+  }
+
+  static void static_entry_method(const Task *task,
+				  const std::vector<PhysicalRegion> &regions,
+				  Context ctx, Runtime *runtime,
+				  ClassWithTaskMethods * const & _this)
+  {
+    // just call through to actual class method
+    _this->method_task(task, regions, ctx, runtime);
+  }
+
+protected:
+  int x;
+};
 
 #ifdef REALM_USE_LLVM
 const char llvm_ir[] = 
@@ -224,6 +249,16 @@ void top_level_task(const Task *task,
 				 CodeDescriptor(wrapped_c_task),
 				 c_msg, sizeof(c_msg));
 
+  ClassWithTaskMethods object_with_task_methods(22);
+  TaskVariantRegistrar class_method_registrar(CLASS_METHOD_TASK_ID,
+					      "class_method_variant",
+					      false /*can't be global*/);
+  class_method_registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
+  runtime->register_task_variant<ClassWithTaskMethods *,
+				 ClassWithTaskMethods::static_entry_method>
+    (class_method_registrar,
+     &object_with_task_methods /*pointer to object passed as 'user_data'*/);
+
 #ifdef REALM_USE_LLVM
   // LLVM IR is portable, so we can do global registration even without libdl
   TaskVariantRegistrar wrapped_llvm_registrar(WRAPPED_LLVM_TASK_ID,
@@ -275,6 +310,15 @@ void top_level_task(const Task *task,
     f.get_void_result();
   }
 #endif
+
+  {
+    int val = 88;
+    TaskLauncher l(CLASS_METHOD_TASK_ID, TaskArgument(&val, sizeof(val)));
+    // task uses locally allocated object, so must stay local
+    l.tag |= Legion::Mapping::DefaultMapper::SAME_ADDRESS_SPACE;
+    Future f = runtime->execute_task(ctx, l);
+    f.get_void_result();
+  }
 
   int num_elements = 1024;
   int num_subregions = 4;
