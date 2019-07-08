@@ -2910,7 +2910,7 @@ namespace Legion {
                                        const bool has_src_preconditions,
                                        const bool has_dst_preconditions,
                                        const bool need_deferral, unsigned pass,
-                                       bool has_pass_preconditions)
+                                       bool need_pass_preconditions)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -2921,7 +2921,7 @@ namespace Legion {
       {
         CopyFillAggregation args(this, trace_info, precondition, 
                     has_src_preconditions, has_dst_preconditions, 
-                    op->get_unique_op_id(), pass, has_pass_preconditions);
+                    op->get_unique_op_id(), pass, need_pass_preconditions);
         op->runtime->issue_runtime_meta_task(args, 
                            LG_THROUGHPUT_DEFERRED_PRIORITY, guard_precondition);
         return;
@@ -2938,12 +2938,12 @@ namespace Legion {
           const RtEvent deferral_event = 
             perform_updates(sources, trace_info, precondition,
                 has_src_preconditions, has_dst_preconditions, 
-                has_pass_preconditions);
+                need_pass_preconditions);
           if (deferral_event.exists())
           {
             CopyFillAggregation args(this, trace_info, precondition, 
                         has_src_preconditions, has_dst_preconditions,
-                        op->get_unique_op_id(), pass, has_pass_preconditions);
+                        op->get_unique_op_id(), pass, false/*need pre*/);
             op->runtime->issue_runtime_meta_task(args, 
                              LG_THROUGHPUT_DEFERRED_PRIORITY, deferral_event);
             return;
@@ -2951,7 +2951,7 @@ namespace Legion {
         }
         // We made it through the first pass
         pass++;
-        has_pass_preconditions = false;
+        need_pass_preconditions = true;
       }
       // Then apply any reductions that we might have
       if (!reductions.empty())
@@ -2965,19 +2965,19 @@ namespace Legion {
           const RtEvent deferral_event = 
             perform_updates(reductions[idx], trace_info, precondition,
                             has_src_preconditions, has_dst_preconditions, 
-                            has_pass_preconditions);
+                            need_pass_preconditions);
           if (deferral_event.exists())
           {
             CopyFillAggregation args(this, trace_info, precondition, 
                         has_src_preconditions, has_dst_preconditions,
-                        op->get_unique_op_id(), pass, has_pass_preconditions);
+                        op->get_unique_op_id(), pass, false/*need pre*/);
             op->runtime->issue_runtime_meta_task(args, 
                              LG_THROUGHPUT_DEFERRED_PRIORITY, deferral_event);
             return;
           }
           // Made it through this pass
           pass++;
-          has_pass_preconditions = false;
+          need_pass_preconditions = true;
         }
       }
 #ifndef NON_AGGRESSIVE_AGGREGATORS
@@ -3680,7 +3680,7 @@ namespace Legion {
       const CopyFillAggregation *cfargs = (const CopyFillAggregation*)args;
       cfargs->aggregator->issue_updates(cfargs->info, cfargs->pre,
           cfargs->has_src, cfargs->has_dst, false/*needs deferral*/, 
-          cfargs->pass, cfargs->has_pass_preconditions);
+          cfargs->pass, cfargs->need_pass_preconditions);
     } 
 
     /////////////////////////////////////////////////////////////
