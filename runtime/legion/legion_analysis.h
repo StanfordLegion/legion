@@ -744,15 +744,19 @@ namespace Legion {
         static const LgTaskID TASK_ID = LG_COPY_FILL_AGGREGATION_TASK_ID;
       public:
         CopyFillAggregation(CopyFillAggregator *a, const PhysicalTraceInfo &i,
-                      ApEvent p, const bool src, const bool dst, UniqueID uid)
+                      ApEvent p, const bool src, const bool dst, UniqueID uid,
+                      unsigned ps, const bool has_pass_pre)
           : LgTaskArgs<CopyFillAggregation>(uid), 
-            aggregator(a), info(i), pre(p), has_src(src), has_dst(dst) { }
+            aggregator(a), info(i), pre(p), pass(ps), has_src(src), 
+            has_dst(dst), has_pass_preconditions(has_pass_pre) { }
       public:
         CopyFillAggregator *const aggregator;
         const PhysicalTraceInfo info;
         const ApEvent pre;
+        const unsigned pass;
         const bool has_src;
         const bool has_dst;
+        const bool has_pass_preconditions;
       }; 
     public:
       typedef LegionMap<InstanceView*,
@@ -888,16 +892,18 @@ namespace Legion {
                          // to indicate when we already know preconditions
                          const bool has_src_preconditions = false,
                          const bool has_dst_preconditions = false,
-                         const bool need_deferral = false); 
+                         const bool need_deferral = false, unsigned pass = 0, 
+                         bool has_pass_preconditions = false);
       ApEvent summarize(const PhysicalTraceInfo &trace_info) const;
     protected:
       void record_view(LogicalView *new_view);
-      void perform_updates(const LegionMap<InstanceView*,
+      RtEvent perform_updates(const LegionMap<InstanceView*,
                             FieldMaskSet<Update> >::aligned &updates,
                            const PhysicalTraceInfo &trace_info,
                            ApEvent precondition,
                            const bool has_src_preconditions,
-                           const bool has_dst_preconditions);
+                           const bool has_dst_preconditions,
+                           const bool needs_preconditions);
       void issue_fills(InstanceView *target,
                        const std::vector<FillUpdate*> &fills,
                        ApEvent precondition, const FieldMask &fill_mask,
