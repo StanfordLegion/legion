@@ -2563,10 +2563,11 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void CopyFillAggregator::issue_updates(const PhysicalTraceInfo &trace_info,
-                                           ApEvent precondition,
-                                           const bool has_src_preconditions,
-                                           const bool has_dst_preconditions,
-                                           const bool need_deferral)
+                                       ApEvent precondition,
+                                       const bool has_src_preconditions,
+                                       const bool has_dst_preconditions,
+                                       const bool need_deferral, unsigned pass,
+                                       bool has_pass_preconditions)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -2576,7 +2577,8 @@ namespace Legion {
           (guard_precondition.exists() && !guard_precondition.has_triggered()))
       {
         CopyFillAggregation args(this, trace_info, precondition, 
-          has_src_preconditions, has_dst_preconditions, op->get_unique_op_id());
+                    has_src_preconditions, has_dst_preconditions, 
+                    op->get_unique_op_id(), pass, has_pass_preconditions);
         op->runtime->issue_runtime_meta_task(args, 
                            LG_THROUGHPUT_DEFERRED_PRIORITY, guard_precondition);
         return;
@@ -2585,18 +2587,55 @@ namespace Legion {
       assert(!guard_precondition.exists() || 
               guard_precondition.has_triggered());
 #endif
-      // Perform updates from any sources first
-      if (!sources.empty())
-        perform_updates(sources, trace_info, precondition,
-                        has_src_preconditions, has_dst_preconditions);
+      if (pass == 0)
+      {
+        // Perform updates from any sources first
+        if (!sources.empty())
+        {
+          const RtEvent deferral_event = 
+            perform_updates(sources, trace_info, precondition,
+                has_src_preconditions, has_dst_preconditions, 
+                has_pass_preconditions);
+          if (deferral_event.exists())
+          {
+            CopyFillAggregation args(this, trace_info, precondition, 
+                        has_src_preconditions, has_dst_preconditions,
+                        op->get_unique_op_id(), pass, has_pass_preconditions);
+            op->runtime->issue_runtime_meta_task(args, 
+                             LG_THROUGHPUT_DEFERRED_PRIORITY, deferral_event);
+            return;
+          }
+        }
+        // We made it through the first pass
+        pass++;
+        has_pass_preconditions = false;
+      }
       // Then apply any reductions that we might have
       if (!reductions.empty())
       {
-        for (std::vector<LegionMap<InstanceView*,
-                   FieldMaskSet<Update> >::aligned>::const_iterator it =
-              reductions.begin(); it != reductions.end(); it++)
-          perform_updates(*it, trace_info, precondition,
-                          has_src_preconditions, has_dst_preconditions);
+#ifdef DEBUG_LEGION
+        assert(pass > 0);
+#endif
+        // Skip any passes that we might have already done
+        for (unsigned idx = pass-1; idx < reductions.size(); idx++)
+        {
+          const RtEvent deferral_event = 
+            perform_updates(reductions[idx], trace_info, precondition,
+                            has_src_preconditions, has_dst_preconditions, 
+                            has_pass_preconditions);
+          if (deferral_event.exists())
+          {
+            CopyFillAggregation args(this, trace_info, precondition, 
+                        has_src_preconditions, has_dst_preconditions,
+                        op->get_unique_op_id(), pass, has_pass_preconditions);
+            op->runtime->issue_runtime_meta_task(args, 
+                             LG_THROUGHPUT_DEFERRED_PRIORITY, deferral_event);
+            return;
+          }
+          // Made it through this pass
+          pass++;
+          has_pass_preconditions = false;
+        }
       }
 #ifndef NON_AGGRESSIVE_AGGREGATORS
       Runtime::trigger_event(guard_postcondition);
@@ -2633,13 +2672,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void CopyFillAggregator::perform_updates(
+    RtEvent CopyFillAggregator::perform_updates(
          const LegionMap<InstanceView*,FieldMaskSet<Update> >::aligned &updates,
          const PhysicalTraceInfo &trace_info, ApEvent precondition,
-         const bool has_src_preconditions, const bool has_dst_preconditions)
+         const bool has_src_preconditions, const bool has_dst_preconditions,
+         const bool needs_preconditions)
     //--------------------------------------------------------------------------
     {
-      if (!has_src_preconditions || !has_dst_preconditions)
+      if (needs_preconditions && 
+          (!has_src_preconditions || !has_dst_preconditions))
       {
         // First compute the access expressions for all the copies
         InstanceFieldExprs dst_exprs, src_exprs;
@@ -2755,9 +2796,9 @@ namespace Legion {
         // If necessary wait until all we have all the preconditions
         if (!preconditions_ready.empty())
         {
-          RtEvent wait_on = Runtime::merge_events(preconditions_ready);
+          const RtEvent wait_on = Runtime::merge_events(preconditions_ready);
           if (wait_on.exists())
-            wait_on.wait();
+            return wait_on;
         }
       }
       // Iterate over the destinations and compute updates that have the
@@ -2938,6 +2979,7 @@ namespace Legion {
           }
         }
       } // iterate over dst instances
+      return RtEvent::NO_RT_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -3294,7 +3336,8 @@ namespace Legion {
     {
       const CopyFillAggregation *cfargs = (const CopyFillAggregation*)args;
       cfargs->aggregator->issue_updates(cfargs->info, cfargs->pre,
-                cfargs->has_src, cfargs->has_dst, false/*needs deferral*/);
+          cfargs->has_src, cfargs->has_dst, false/*needs deferral*/, 
+          cfargs->pass, cfargs->has_pass_preconditions);
     } 
 
     /////////////////////////////////////////////////////////////
