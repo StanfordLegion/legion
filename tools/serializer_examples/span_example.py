@@ -77,7 +77,21 @@ callbacks = {
     "MetaDesc": log_meta_desc,
     "OpDesc": noop,
     "ProcDesc": noop,
+    "ProcMDesc": noop,
     "MemDesc": noop,
+    "MaxDimDesc": noop,
+    "IndexSpacePointDesc": noop,
+    "IndexSpaceRectDesc": noop,
+    "IndexSpaceEmptyDesc": noop,
+    "FieldDesc": noop,
+    "FieldSpaceDesc": noop,
+    "IndexSpaceDesc": noop,
+    "PartDesc": noop,
+    "IndexPartitionDesc": noop,
+    "IndexSubSpaceDesc": noop,
+    "LogicalRegionDesc": noop,
+    "PhysicalInstRegionDesc": noop,
+    "PhysicalInstLayoutDesc": noop,
     "TaskKind": log_kind,
     "TaskVariant": log_variant,
     "OperationInstance": noop,
@@ -97,21 +111,9 @@ callbacks = {
     "MessageInfo": noop,
     "MapperCallInfo": noop,
     "RuntimeCallInfo": noop,
-    "ProfTaskInfo": noop
-    "ProcMDesc": noop,
-    "IndexSpacePointDesc": noop,
-    "IndexSpaceRectDesc": noop,
-    "PartDesc": noop,
-    "IndexPartitionDesc": noop,
-    "IndexSpaceEmptyDesc": noop,
-    "FieldDesc": noop,
-    "FieldSpaceDesc": noop,
-    "IndexSpaceDesc": noop,
-    "IndexSubSpaceDesc": noop,
-    "LogicalRegionDesc": noop,
-    "PhysicalInstRegionDesc": noop,
-    "PhysicalInstLayoutDesc": noop
+    "ProfTaskInfo": noop,
 }
+
 
 class Dummy(object):
     def __init__(self):
@@ -161,7 +163,7 @@ def main():
     matching_tasks0 = []
     matching_tasks1 = []
     
-    for task_name in task_spans.iterkeys():
+    for task_name in task_spans.keys():
         if re.search(task0, task_name):
             matching_tasks0.append(task_name)
         if re.search(task1, task_name):
