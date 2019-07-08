@@ -38,21 +38,6 @@ LEGION_LIBS     := -L. -llegion -lrealm
 
 # Handle some of the common machines we frequent
 
-ifeq ($(shell uname -n),sapling)
-CONDUIT ?= ibv
-endif
-ifeq ($(shell uname -n),n0000)
-CONDUIT ?= ibv
-endif
-ifeq ($(shell uname -n),n0001)
-CONDUIT ?= ibv
-endif
-ifeq ($(shell uname -n),n0002)
-CONDUIT ?= ibv
-endif
-ifeq ($(shell uname -n),n0003)
-CONDUIT ?= ibv
-endif
 ifeq ($(findstring xs,$(shell uname -n)), xs)
 GPU_ARCH ?= k80
 GASNET ?= /home/stanford/aaiken/users/zhihao/tools/gasnet/release/
@@ -88,7 +73,7 @@ CONDUIT ?= ibv #not sure if this is true
 endif
 
 # defaults for GASNet
-CONDUIT ?= udp
+CONDUIT ?= auto
 ifdef GASNET_ROOT
 GASNET ?= $(GASNET_ROOT)
 endif
@@ -382,6 +367,20 @@ else
 endif
 
 ifeq ($(strip $(USE_GASNET)),1)
+  # Detect conduit, if requested
+  ifeq ($(strip $(CONDUIT)),auto)
+    GASNET_PREFERRED_CONDUITS = ibv aries gemini pami mpi udp ofi psm mxm portals4 smp
+    GASNET_LIBS_FOUND := $(wildcard $(GASNET_PREFERRED_CONDUITS:%=$(GASNET)/lib/libgasnet-%-par.*))
+    ifeq ($(strip $(GASNET_LIBS_FOUND)),)
+      $(error No multi-threaded GASNet conduits found in $(GASNET)/lib!)
+    endif
+    override CONDUIT=$(patsubst libgasnet-%-par,%,$(basename $(notdir $(firstword $(GASNET_LIBS_FOUND)))))
+    # double-check that we got an actual conduit name
+    ifeq ($(findstring $(CONDUIT),$(GASNET_PREFERRED_CONDUITS)),)
+      $(error Problem parsing GASNet conduit name: got "$(CONDUIT)" instead of one of: $(GASNET_PREFERRED_CONDUITS))
+    endif
+  endif
+
   # General GASNET variables
   INC_FLAGS	+= -I$(GASNET)/include
   ifeq ($(strip $(DARWIN)),1)
