@@ -712,10 +712,10 @@ namespace Legion {
       public:
         CopyFillAggregation(CopyFillAggregator *a, const PhysicalTraceInfo &i,
                       ApEvent p, const bool src, const bool dst, UniqueID uid,
-                      unsigned ps, const bool has_pass_pre)
+                      unsigned ps, const bool need_pass_pre)
           : LgTaskArgs<CopyFillAggregation>(uid), 
             aggregator(a), info(i), pre(p), pass(ps), has_src(src), 
-            has_dst(dst), has_pass_preconditions(has_pass_pre) { }
+            has_dst(dst), need_pass_preconditions(need_pass_pre) { }
       public:
         CopyFillAggregator *const aggregator;
         const PhysicalTraceInfo info;
@@ -723,7 +723,7 @@ namespace Legion {
         const unsigned pass;
         const bool has_src;
         const bool has_dst;
-        const bool has_pass_preconditions;
+        const bool need_pass_preconditions;
       }; 
     public:
       typedef LegionMap<InstanceView*,
@@ -860,7 +860,7 @@ namespace Legion {
                          const bool has_src_preconditions = false,
                          const bool has_dst_preconditions = false,
                          const bool need_deferral = false, unsigned pass = 0, 
-                         bool has_pass_preconditions = false);
+                         bool need_pass_preconditions = true);
       ApEvent summarize(const PhysicalTraceInfo &trace_info) const;
     protected:
       void record_view(LogicalView *new_view);
