@@ -28,7 +28,7 @@ import sys
 
 # Helper methods for python 2/3 foolishness
 def iteritems(obj):
-    return obj.items() if sys.version_info > (3,) else obj.viewitems()
+    return obj.items() if sys.version_info > (3,) else obj.iteritems()
 
 long_type = int if sys.version_info > (3,) else eval("long")
 
@@ -72,7 +72,6 @@ def read_max_dim(string):
 
 decimal_pat = re.compile("\-?[0-9]+")
 def read_array(string):
-    global max_dim_val
     values = decimal_pat.findall(string)
     return values
 
@@ -93,7 +92,7 @@ class LegionProfASCIIDeserializer(LegionDeserializer):
         "ProcDesc": re.compile(prefix + r'Prof Proc Desc (?P<proc_id>[a-f0-9]+) (?P<kind>[0-9]+)'),
         "MemDesc": re.compile(prefix + r'Prof Mem Desc (?P<mem_id>[a-f0-9]+) (?P<kind>[0-9]+) (?P<capacity>[0-9]+)'),
         "ProcMDesc": re.compile(prefix + r'Prof Mem Proc Affinity Desc (?P<proc_id>[a-f0-9]+) (?P<mem_id>[a-f0-9]+)'),
-        "MaxDimDesc": re.compile(prefix + r'Max Dim (?P<maxdim>[0-9]+)'),
+        "MaxDimDesc": re.compile(prefix + r'Max Dim Desc (?P<max_dim>[0-9]+)'),
         "IndexSpacePointDesc": re.compile(prefix + r'Index Space Point Desc (?P<unique_id>[0-9]+) (?P<dim>[0-9]+) (?P<rem>.*)'),
         "IndexSpaceRectDesc": re.compile(prefix + r'Index Space Rect Desc (?P<unique_id>[0-9]+) (?P<dim>[0-9]+) (?P<rem>.*)'),
         "IndexSpaceEmptyDesc": re.compile(prefix + r'Index Space Empty Desc (?P<unique_id>[0-9]+)'),
@@ -152,7 +151,7 @@ class LegionProfASCIIDeserializer(LegionDeserializer):
         "unique_id": long_type,
         "disjoint": bool,
         "tree_id": int,
-        "maxdim": read_max_dim,
+        "max_dim": read_max_dim,
         "rem": read_array,
         "proc_id": lambda x: int(x, 16),
         "mem_id": lambda x: int(x, 16),
@@ -187,7 +186,7 @@ class LegionProfASCIIDeserializer(LegionDeserializer):
     def parse_regex_matches(self, m):
         kwargs = m.groupdict()
 
-        for key, arg in iteritems(kwargs.items()):
+        for key, arg in iteritems(kwargs):
             kwargs[key] = LegionProfASCIIDeserializer.parse_callbacks[key](arg)
         return kwargs
 
@@ -207,6 +206,7 @@ class LegionProfASCIIDeserializer(LegionDeserializer):
             first_time = 0
             last_time = 0
             for line in log:
+                line = line.decode('utf-8')
                 if not self.state.has_spy_data and \
                     (legion_spy.config_pat.match(line) or \
                      legion_spy.detailed_config_pat.match(line)):

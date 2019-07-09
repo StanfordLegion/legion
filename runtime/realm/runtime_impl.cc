@@ -210,7 +210,8 @@ namespace Realm {
 	    pos;
 	    pos = pos->ew_list_link.next)
 	  clw_size++;
-	os << "Event " << e->me <<": gen=" << e->generation
+	EventImpl::gen_t gen = e->generation.load();
+	os << "Event " << e->me <<": gen=" << gen
 	   << " subscr=" << e->gen_subscribed
 	   << " local=" << clw_size //e->current_local_waiters.size()
 	   << "+" << e->future_local_waiters.size()
@@ -218,7 +219,7 @@ namespace Realm {
 	for(EventWaiter *pos = e->current_local_waiters.head.next;
 	    pos;
 	    pos = pos->ew_list_link.next) {
-	  os << "  [" << (e->generation+1) << "] L:" << pos/*(*it)*/ << " - ";
+	  os << "  [" << (gen+1) << "] L:" << pos/*(*it)*/ << " - ";
 	  pos/*(*it)*/->print(os);
 	  os << "\n";
 	}

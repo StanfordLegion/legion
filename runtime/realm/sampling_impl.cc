@@ -119,7 +119,7 @@ namespace Realm {
 				    typename ProfilingGauges::AbsoluteGauge<T>::Sample &sample)
   {
     // simple copy is all we need
-    sample.value = gauge.curval;
+    sample.value = gauge.curval.load();
   }
 
   template <typename T>
@@ -127,13 +127,9 @@ namespace Realm {
 				    typename ProfilingGauges::AbsoluteRangeGauge<T>::Sample &sample)
   {
     // want a consistent sample of current/min/max, and then reset min/max to current
-    sample.value = gauge.curval;
-    do {
-      sample.minval = gauge.minval;
-    } while(!__sync_bool_compare_and_swap(&gauge.minval, sample.minval, sample.value));
-    do {
-      sample.maxval = gauge.maxval;
-    } while(!__sync_bool_compare_and_swap(&gauge.maxval, sample.maxval, sample.value));
+    sample.value = gauge.curval.load();
+    sample.minval = gauge.minval.exchange(sample.value);
+    sample.maxval = gauge.maxval.exchange(sample.value);
   }
 
   template <typename T>
@@ -141,7 +137,7 @@ namespace Realm {
 				    typename ProfilingGauges::EventCounter<T>::Sample &sample)
   {
     // need to atomically read the value and write 0 back
-    sample.count = __sync_fetch_and_and(&gauge.events, 0);
+    sample.count = gauge.events.exchange(0);
   }
 
 

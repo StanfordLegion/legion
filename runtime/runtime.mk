@@ -38,26 +38,6 @@ LEGION_LIBS     := -L. -llegion -lrealm
 
 # Handle some of the common machines we frequent
 
-ifeq ($(shell uname -n),sapling)
-CONDUIT ?= ibv
-GPU_ARCH ?= fermi
-endif
-ifeq ($(shell uname -n),n0000)
-CONDUIT ?= ibv
-GPU_ARCH ?= fermi
-endif
-ifeq ($(shell uname -n),n0001)
-CONDUIT ?= ibv
-GPU_ARCH ?= fermi
-endif
-ifeq ($(shell uname -n),n0002)
-CONDUIT ?= ibv
-GPU_ARCH ?= fermi
-endif
-ifeq ($(shell uname -n),n0003)
-CONDUIT ?= ibv
-GPU_ARCH ?= fermi
-endif
 ifeq ($(findstring xs,$(shell uname -n)), xs)
 GPU_ARCH ?= k80
 GASNET ?= /home/stanford/aaiken/users/zhihao/tools/gasnet/release/
@@ -93,18 +73,13 @@ CONDUIT ?= ibv #not sure if this is true
 endif
 
 # defaults for GASNet
-CONDUIT ?= udp
+CONDUIT ?= auto
 ifdef GASNET_ROOT
 GASNET ?= $(GASNET_ROOT)
 endif
 
 # defaults for CUDA
-#GPU_ARCH ?= fermi
-GPU_ARCH ?= kepler
-#GPU_ARCH ?= k20
-#GPU_ARCH ?= pascal
-#GPU_ARCH ?= volta
-#GPU_ARCH ?= turing
+GPU_ARCH ?= auto
 
 # if CUDA is not set, but CUDATOOLKIT_HOME or CUDA_HOME is, use that
 ifdef CUDATOOLKIT_HOME
@@ -314,6 +289,7 @@ endif
 
 # General CUDA variables
 ifeq ($(strip $(USE_CUDA)),1)
+NVCC	        ?= $(CUDA)/bin/nvcc
 # Latter is preferred, former is for backwards compatability
 CC_FLAGS        += -DUSE_CUDA -DREALM_USE_CUDA -DLEGION_USE_CUDA
 # Latter is preferred, former is for backwards compatability
@@ -331,39 +307,53 @@ else
 LEGION_LD_FLAGS	+= -L$(CUDA)/lib64 -L$(CUDA)/lib64/stubs -lcuda -Xlinker -rpath=$(CUDA)/lib64
 endif
 # CUDA arch variables
+
+# translate legacy arch names into numbers
 ifeq ($(strip $(GPU_ARCH)),fermi)
-NVCC_FLAGS	+= -arch=compute_20 -code=sm_20
+override GPU_ARCH = 20
 NVCC_FLAGS	+= -DFERMI_ARCH
 endif
 ifeq ($(strip $(GPU_ARCH)),kepler)
-NVCC_FLAGS	+= -arch=compute_30 -code=sm_30
+override GPU_ARCH = 30
 NVCC_FLAGS	+= -DKEPLER_ARCH
 endif
 ifeq ($(strip $(GPU_ARCH)),k20)
-NVCC_FLAGS	+= -arch=compute_35 -code=sm_35
+override GPU_ARCH = 35
 NVCC_FLAGS	+= -DK20_ARCH
 endif
 ifeq ($(strip $(GPU_ARCH)),k80)
-NVCC_FLAGS	+= -arch=compute_37 -code=sm_37
+override GPU_ARCH = 37
 NVCC_FLAGS	+= -DK80_ARCH
 endif
 ifeq ($(strip $(GPU_ARCH)),maxwell)
-NVCC_FLAGS	+= -arch=compute_52 -code=sm_52
+override GPU_ARCH = 52
 NVCC_FLAGS	+= -DMAXWELL_ARCH
 endif
 ifeq ($(strip $(GPU_ARCH)),pascal)
-NVCC_FLAGS	+= -arch=compute_60 -code=sm_60
+override GPU_ARCH = 60
 NVCC_FLAGS	+= -DPASCAL_ARCH
 endif
 ifeq ($(strip $(GPU_ARCH)),volta)
-NVCC_FLAGS	+= -arch=compute_70 -code=sm_70
+override GPU_ARCH = 70
 NVCC_FLAGS	+= -DVOLTA_ARCH
 endif
 ifeq ($(strip $(GPU_ARCH)),turing)
-NVCC_FLAGS	+= -arch=compute_75 -code=sm_75
+override GPU_ARCH = 75
 NVCC_FLAGS	+= -DTURING_ARCH
 endif
-NVCC_FLAGS	+= -Xptxas "-v" #-abi=no"
+
+ifeq ($(strip $(GPU_ARCH)),auto)
+  # detect based on what nvcc supports
+  ALL_ARCHES = 20 30 32 35 37 50 52 53 60 61 62 70 72 75
+  override GPU_ARCH = $(shell for X in $(ALL_ARCHES) ; do \
+    $(NVCC) -gencode arch=compute_$$X,code=sm_$$X -cuda -x c++ /dev/null -o /dev/null 2> /dev/null && echo $$X; \
+  done)
+endif
+
+# finally, convert space-or-comma separated list of architectures (e.g. 35,50)
+#  into nvcc -gencode arguments
+COMMA=,
+NVCC_FLAGS += $(foreach X,$(subst $(COMMA), ,$(GPU_ARCH)),-gencode arch=compute_$(X)$(COMMA)code=sm_$(X))
 endif
 
 # Realm uses GASNet if requested
@@ -377,6 +367,20 @@ else
 endif
 
 ifeq ($(strip $(USE_GASNET)),1)
+  # Detect conduit, if requested
+  ifeq ($(strip $(CONDUIT)),auto)
+    GASNET_PREFERRED_CONDUITS = ibv aries gemini pami mpi udp ofi psm mxm portals4 smp
+    GASNET_LIBS_FOUND := $(wildcard $(GASNET_PREFERRED_CONDUITS:%=$(GASNET)/lib/libgasnet-%-par.*))
+    ifeq ($(strip $(GASNET_LIBS_FOUND)),)
+      $(error No multi-threaded GASNet conduits found in $(GASNET)/lib!)
+    endif
+    override CONDUIT=$(patsubst libgasnet-%-par,%,$(basename $(notdir $(firstword $(GASNET_LIBS_FOUND)))))
+    # double-check that we got an actual conduit name
+    ifeq ($(findstring $(CONDUIT),$(GASNET_PREFERRED_CONDUITS)),)
+      $(error Problem parsing GASNet conduit name: got "$(CONDUIT)" instead of one of: $(GASNET_PREFERRED_CONDUITS))
+    endif
+  endif
+
   # General GASNET variables
   INC_FLAGS	+= -I$(GASNET)/include
   ifeq ($(strip $(DARWIN)),1)
@@ -608,9 +612,6 @@ SED	:= sed
 ECHO	:= echo
 TOUCH	:= touch
 MAKE	:= make
-ifndef NVCC
-NVCC	:= $(CUDA)/bin/nvcc
-endif
 SSH	:= ssh
 SCP	:= scp
 

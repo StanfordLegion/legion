@@ -273,8 +273,8 @@ namespace Realm {
   {
     // common case is that we'll bump the counter and nobody cares, so do this without a lock
     // use __sync_* though to make sure memory ordering is preserved
-    long long old_value = __sync_fetch_and_add(&counter, 1);
-    long long wv_snapshot = __sync_fetch_and_add(&wait_value, 0);
+    long long old_value = counter.fetch_add(1);
+    long long wv_snapshot = wait_value.load();
 
 //define DEBUG_WORK_COUNTER
 #ifdef DEBUG_WORK_COUNTER
@@ -294,22 +294,31 @@ namespace Realm {
     //  broadcast (and associated syscall) if it has changed
     {
       AutoHSLLock al(mutex);
-      long long wv_reread = __sync_fetch_and_add(&wait_value, 0);
+      long long wv_reread = wait_value.load();
       if(old_value == wv_reread) {
 #ifdef DEBUG_WORK_COUNTER
 	printf("WC(%p) broadcast(1) %lld\n", this, old_value);
 #endif
 	condvar.broadcast();
-	__sync_bool_compare_and_swap(&wait_value, wv_reread, -1);
+#ifdef DEBUG_REALM
+	long long wv_expected = wv_reread;
+	bool ok = wait_value.compare_exchange(wv_expected, -1);
+	assert(ok);
+#else
+	// blind store - nobody's allowed to change wait_value outside the lock
+	wait_value.store(-1);
+#endif
       }
     }
 
+#ifdef DEBUG_REALM
     // sanity-check: a wait value earlier than the number we just incremented
     //  from should not be possible
 #ifndef NDEBUG
-    long long wv_check = __sync_fetch_and_add(&wait_value, 0);
+    long long wv_check = wait_value.load();
 #endif
     assert((wv_check == -1) || (wv_check > old_value));
+#endif
   }
 
   // waits until new work arrives - this will possibly take the counter lock and 
@@ -322,12 +331,12 @@ namespace Realm {
 
     // an early out is still needed to make sure the counter hasn't moved on and somebody
     //  isn't trying to wait on a later value
-    if(counter != old_counter)
+    if(counter.load_acquire() != old_counter)
       return;
 
     // first, see if we catch anybody waiting on an older version of the counter - they can
     //  definitely be awakened
-    long long wv_read = wait_value;
+    long long wv_read = wait_value.load();
     if((wv_read >= 0) && (wv_read < old_counter)) {
 #ifdef DEBUG_WORK_COUNTER
       printf("WC(%p) broadcast(2) %lld\n", this, wv_read);
@@ -335,24 +344,31 @@ namespace Realm {
       condvar.broadcast();
     }
     assert(wv_read <= old_counter);
-#ifndef NDEBUG
-    bool ok =
+#ifdef DEBUG_REALM
+    long long wv_expected = wv_read;
+    bool ok = wait_value.compare_exchange(wv_expected, old_counter);
+    assert(ok);
+#else
+    // blind store - nobody's allowed to change wait_value outside the lock
+    wait_value.store(old_counter);
 #endif
-      __sync_bool_compare_and_swap(&wait_value, wv_read, old_counter);
-    assert(ok); // swap should never fail
+
+    // the re-load of counter below needs to happen, and c++98's version of
+    //  atomics aren't strong enough to force it, so use the big hammer here -
+    // not a huge deal since we're probably going to sleep anyway
+    __sync_synchronize();
 
     // now that people know we're waiting, wait until the counter updates - check before
     //  each wait
-    while(__sync_fetch_and_add(&counter, 0) == old_counter) {
+    while(counter.load_acquire() == old_counter) {
       // sanity-check
 #ifndef NDEBUG
-      long long wv_check =
-#endif
-	__sync_fetch_and_add(&wait_value, 0);
-#ifdef DEBUG_WORK_COUNTER
-      printf("WC(%p) wait %lld (%lld)\n", this, old_counter, wv_check);
-#endif
+      long long wv_check = wait_value.load();
       assert(wv_check == old_counter);
+#endif
+#ifdef DEBUG_WORK_COUNTER
+      printf("WC(%p) wait %lld (%lld)\n", this, old_counter, wait_value.load());
+#endif
       condvar.wait();
       //while(counter == old_counter) { mutex.unlock(); Thread::yield(); mutex.lock(); }
 #ifdef DEBUG_WORK_COUNTER
@@ -361,7 +377,7 @@ namespace Realm {
     }
 
     // once we're done, clear the wait value, but only if it's for us
-    __sync_bool_compare_and_swap(&wait_value, old_counter, -1);
+    wait_value.compare_exchange(old_counter, -1);
   }
 
 

@@ -91,26 +91,20 @@ namespace Realm {
 
   inline Thread::State Thread::get_state(void)
   {
-    return state;
+    return state.load();
   }
 
   // atomically updates the thread's state, returning the old state
   inline Thread::State Thread::update_state(Thread::State new_state)
   {
-    // strangely, there's no standard exchange - just compare-and-exchange
-    State old_state;
-    do {
-      old_state = state;
-    } while(!__sync_bool_compare_and_swap(&state, old_state, new_state));
-    return old_state;
+    return state.exchange(new_state);
   }
 
   // updates the thread's state, but only if it's in the specified 'old_state' (i.e. an
   //  atomic compare and swap) - returns true on success and false on failure
   inline bool Thread::try_update_state(Thread::State old_state, Thread::State new_state)
   {
-    // this one maps directly to compiler atomics
-    return __sync_bool_compare_and_swap(&state, old_state, new_state);
+    return state.compare_exchange(old_state, new_state);
   }
 
   // use compiler-provided TLS for quickly finding our thread - stick this in another

@@ -41,7 +41,8 @@ namespace Realm {
 #ifdef REALM_USE_STD_ATOMIC
     return value.load(std::memory_order_relaxed);
 #else
-    return __sync_fetch_and_add(const_cast<T *>(&value), 0);
+    return *static_cast<volatile const T*>(&value);
+    //return __sync_fetch_and_add(const_cast<T *>(&value), 0);
 #endif
   }
 
@@ -51,7 +52,8 @@ namespace Realm {
 #ifdef REALM_USE_STD_ATOMIC
     return value.load(std::memory_order_acquire);
 #else
-    T val = __sync_fetch_and_add(const_cast<T *>(&value), 0);
+    T val = *static_cast<volatile const T*>(&value);
+    //T val = __sync_fetch_and_add(const_cast<T *>(&value), 0);
     __sync_synchronize();  // full memory fence is all we've got
     return val;
 #endif
@@ -63,7 +65,12 @@ namespace Realm {
 #ifdef REALM_USE_STD_ATOMIC
     value.store(newval, std::memory_order_relaxed);
 #else
+#ifdef TSAN_ENABLED
+    // use an exchange to keep tsan happy
+    this->exchange(newval);
+#else
     value = newval;
+#endif
 #endif
   }
 
@@ -73,8 +80,13 @@ namespace Realm {
 #ifdef REALM_USE_STD_ATOMIC
     value.store(newval, std::memory_order_release);
 #else
+#ifdef TSAN_ENABLED
+    // use an exchange to keep tsan happy
+    this->exchange(newval);
+#else
     __sync_synchronize();  // full memory fence is all we've got
     value = newval;
+#endif
 #endif
   }
 
@@ -85,8 +97,13 @@ namespace Realm {
     return value.exchange(newval);
 #else
     while(true) {
+#ifdef TSAN_ENABLED
+      // thread sanitizer doesn't like the naked read even with the CAS after
+      T oldval = __sync_val_compare_and_swap(&value, newval, newval);
+#else
       T oldval = value;
-      if(__sync_vool_compare_and_swap(&value, oldval, newval))
+#endif
+      if(__sync_bool_compare_and_swap(&value, oldval, newval))
 	return oldval;
     }
 #endif
