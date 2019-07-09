@@ -52,7 +52,7 @@ namespace Realm {
   inline Event GenEventImpl::current_event(void) const
   {
     ID id(me);
-    id.event_generation() = this->generation + 1;
+    id.event_generation() = this->generation.load() + 1;
     return id.convert<Event>();
   }
 

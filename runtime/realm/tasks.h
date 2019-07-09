@@ -27,6 +27,7 @@
 #include "realm/threads.h"
 #include "realm/pri_queue.h"
 #include "realm/bytearray.h"
+#include "realm/atomics.h"
 
 namespace Realm {
 
@@ -180,8 +181,8 @@ namespace Realm {
 
       protected:
 	// 64-bit counters are used to avoid dealing with wrap-around cases
-	volatile long long counter;
-	volatile long long wait_value;
+	// consider trying to fit in 32 to use futexes?
+	atomic<long long> counter, wait_value;
 	GASNetHSL mutex;
 	GASNetCondVar condvar;
       };
@@ -219,7 +220,7 @@ namespace Realm {
     inline long long ThreadedTaskScheduler::WorkCounter::read_counter(void) const
     {
       // just return the counter value
-      return counter;
+      return counter.load_acquire();
     }
 
     // returns true if there is new work since the old_counter value was read
@@ -227,7 +228,7 @@ namespace Realm {
     inline bool ThreadedTaskScheduler::WorkCounter::check_for_work(long long old_counter)
     {
       // test the counter value without synchronization
-      return (counter > old_counter);
+      return (counter.load_acquire() > old_counter);
     }
 
 

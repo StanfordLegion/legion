@@ -773,7 +773,7 @@ namespace Realm {
   
   PartitioningOpQueue::~PartitioningOpQueue(void)
   {
-    assert(shutdown_flag);
+    assert(shutdown_flag.load());
     delete rsrv;
   }
 
@@ -808,7 +808,7 @@ namespace Realm {
   {
     assert(op_queue != 0);
 
-    op_queue->shutdown_flag = true;
+    op_queue->shutdown_flag.store(true);
     {
       AutoHSLLock al(op_queue->mutex);
       op_queue->condvar.broadcast();
@@ -847,13 +847,13 @@ namespace Realm {
   {
     log_part.info() << "worker " << Thread::self() << " started for op queue " << this;
 
-    while(!shutdown_flag) {
+    while(!shutdown_flag.load()) {
       void *op = 0;
-      int priority;
-      while(!op && !shutdown_flag) {
+      int priority = -1; /*invalid value*/
+      while(!op && !shutdown_flag.load()) {
 	AutoHSLLock al(mutex);
 	op = queued_ops.get(&priority);
-	if(!op && !shutdown_flag) {
+	if(!op && !shutdown_flag.load()) {
           if(DeppartConfig::cfg_worker_threads_sleep) {
 	    condvar.wait();
           } else {

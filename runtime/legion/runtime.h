@@ -3594,6 +3594,10 @@ namespace Legion {
                                 get_pending_projection_table(void);
       static std::map<ShardingID,ShardingFunctor*>&
                                 get_pending_sharding_table(void);
+      static std::vector<MPILegionHandshake>&
+                                get_pending_handshake_table(void);
+      static std::vector<RegistrationCallbackFnptr>&
+                                get_pending_registration_callbacks(void);
       static TaskID& get_current_static_task_id(void);
       static TaskID generate_static_task_id(void);
       static VariantID preregister_variant(
@@ -3639,7 +3643,6 @@ namespace Legion {
       static RtUserEvent runtime_started_event;
       // Static member variables for MPI interop
       static int mpi_rank;
-      static std::vector<MPILegionHandshake> *pending_handshakes;
     public:
       static inline ApEvent merge_events(const PhysicalTraceInfo *info,
                                          ApEvent e1, ApEvent e2);

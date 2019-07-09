@@ -11341,12 +11341,14 @@ namespace Legion {
           }
 #endif
           // Now ask the application what it wants to do
-          if (!Runtime::registration_callbacks.empty())
+          const std::vector<RegistrationCallbackFnptr> &registration_callbacks
+            = get_pending_registration_callbacks();
+          if (registration_callbacks.empty())
           {
             log_run.info("Invoking mapper registration callback functions...");
             for (std::vector<RegistrationCallbackFnptr>::const_iterator it = 
-                  Runtime::registration_callbacks.begin(); it !=
-                  Runtime::registration_callbacks.end(); it++)
+                  registration_callbacks.begin(); it !=
+                  registration_callbacks.end(); it++)
               (**it)(machine, external, local_procs);
             log_run.info("Finished execution of mapper registration callbacks");
           }
@@ -21621,8 +21623,6 @@ namespace Legion {
     }
 
     /*static*/ TaskID Runtime::legion_main_id = 0;
-    /*static*/ std::vector<RegistrationCallbackFnptr> 
-                                             Runtime::registration_callbacks;
     /*static*/ bool Runtime::runtime_initialized = false;
     /*static*/ bool Runtime::runtime_started = false;
     /*static*/ bool Runtime::runtime_backgrounded = false;
@@ -21630,8 +21630,6 @@ namespace Legion {
     /*static*/ RtUserEvent Runtime::runtime_started_event = 
                                               RtUserEvent::NO_RT_USER_EVENT;
     /*static*/ int Runtime::mpi_rank = -1;
-    /*static*/ std::vector<MPILegionHandshake>* 
-                      Runtime::pending_handshakes = NULL;
 
     //--------------------------------------------------------------------------
     /*static*/ int Runtime::start(int argc, char **argv, bool background)
@@ -21677,7 +21675,9 @@ namespace Legion {
       if (config.legion_spy_enabled)
         LegionSpy::log_legion_spy_config();
       // Configure MPI Interoperability
-      if ((mpi_rank >= 0) || (pending_handshakes != NULL))
+      const std::vector<MPILegionHandshake> &pending_handshakes =
+        get_pending_handshake_table();
+      if ((mpi_rank >= 0) || (!pending_handshakes.empty()))
         configure_mpi_interoperability(config.separate_runtime_instances);
       // Construct our runtime objects 
       Processor::Kind startup_kind = Processor::NO_KIND;
@@ -22182,13 +22182,13 @@ namespace Legion {
             "Legion detected the presence of Legion-MPI handshake objects "
             "without a set MPI rank. An MPI rank must be set to use any "
             "Legion-MPI handhshake objects")
-      if (pending_handshakes != NULL)
+      const std::vector<MPILegionHandshake> &pending_handshakes = 
+        get_pending_handshake_table();
+      if (!pending_handshakes.empty())
       {
         for (std::vector<MPILegionHandshake>::const_iterator it = 
-             pending_handshakes->begin(); it != pending_handshakes->end(); it++)
+              pending_handshakes.begin(); it != pending_handshakes.end(); it++)
           it->impl->initialize();
-        delete pending_handshakes;
-        pending_handshakes = NULL;
       }
     }
 
@@ -22467,9 +22467,9 @@ namespace Legion {
       }
       else
       {
-        if (pending_handshakes == NULL)
-          pending_handshakes = new std::vector<MPILegionHandshake>();
-        pending_handshakes->push_back(handshake);
+        std::vector<MPILegionHandshake> &pending_handshakes = 
+          get_pending_handshake_table();
+        pending_handshakes.push_back(handshake);
       }
     }
 
@@ -22566,6 +22566,8 @@ namespace Legion {
                                             RegistrationCallbackFnptr callback)
     //--------------------------------------------------------------------------
     {
+      std::vector<RegistrationCallbackFnptr> &registration_callbacks = 
+        get_pending_registration_callbacks();
       registration_callbacks.push_back(callback);
     }
 
@@ -22739,6 +22741,24 @@ namespace Legion {
     {
       static std::map<ShardingID,ShardingFunctor*> pending_sharding_table;
       return pending_sharding_table;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ std::vector<MPILegionHandshake>& 
+                                      Runtime::get_pending_handshake_table(void)
+    //--------------------------------------------------------------------------
+    {
+      static std::vector<MPILegionHandshake> pending_handshakes_table;
+      return pending_handshakes_table;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ std::vector<RegistrationCallbackFnptr>&
+                               Runtime::get_pending_registration_callbacks(void)
+    //--------------------------------------------------------------------------
+    {
+      static std::vector<RegistrationCallbackFnptr> pending_callbacks;
+      return pending_callbacks;
     }
 
     //--------------------------------------------------------------------------

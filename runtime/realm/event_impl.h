@@ -125,7 +125,7 @@ namespace Realm {
       GenEventImpl *event_impl;
       EventImpl::gen_t finish_gen;
       bool ignore_faults;
-      int count_needed;
+      atomic<int> count_needed;
       int faults_observed;
 
       static const size_t MAX_INLINE_PRECONDITIONS = 6;
@@ -179,7 +179,8 @@ namespace Realm {
     public: //protected:
       // these state variables are monotonic, so can be checked without a lock for
       //  early-out conditions
-      gen_t generation, gen_subscribed;
+      atomic<gen_t> generation;
+      gen_t gen_subscribed;
       int num_poisoned_generations;
       bool has_local_triggers;
 
