@@ -22615,12 +22615,15 @@ namespace Legion {
         if (redop_id == 0)
           REPORT_LEGION_ERROR(ERROR_RESERVED_REDOP_ID, 
                               "ERROR: ReductionOpID zero is reserved.")
+        // TODO: figure out a way to make this safe with dynamic registration
+#if 0
         if (redop_id >= LEGION_MAX_APPLICATION_REDOP_ID)
           REPORT_LEGION_ERROR(ERROR_RESERVED_REDOP_ID,
                          "ERROR: ReductionOpID %d is greater than or equal "
                          "to the LEGION_MAX_APPLICATION_REDOP_ID of %d "
                          "set in legion_config.h.", redop_id, 
                          LEGION_MAX_APPLICATION_REDOP_ID)
+#endif
         ReductionOpTable &red_table = 
           Runtime::get_reduction_table(true/*safe*/);
         // Check to make sure we're not overwriting a prior reduction op 
@@ -22687,12 +22690,15 @@ namespace Legion {
         if (serdez_id == 0)
           REPORT_LEGION_ERROR(ERROR_RESERVED_SERDEZ_ID,
                               "ERROR: Custom Serdez ID zero is reserved.\n")
+        // TODO: figure out a way to make this safe with dynamic registration
+#if 0
         if (serdez_id >= LEGION_MAX_APPLICATION_SERDEZ_ID)
           REPORT_LEGION_ERROR(ERROR_RESERVED_SERDEZ_ID,
                          "ERROR: ReductionOpID %d is greater than or equal "
                          "to the LEGION_MAX_APPLICATION_SERDEZ_ID of %d set "
                          "in legion_config.h.", serdez_id, 
                          LEGION_MAX_APPLICATION_SERDEZ_ID)
+#endif
         SerdezOpTable &serdez_table = Runtime::get_serdez_table(true/*safe*/);
         // Check to make sure we're not overwriting a prior serdez op
         if (!permit_duplicates &&
