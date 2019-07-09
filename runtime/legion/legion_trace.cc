@@ -1104,7 +1104,7 @@ namespace Legion {
     void TraceCaptureOp::initialize_capture(TaskContext *ctx, bool has_block)
     //--------------------------------------------------------------------------
     {
-      initialize(ctx, MIXED_FENCE);
+      initialize(ctx, EXECUTION_FENCE);
 #ifdef DEBUG_LEGION
       assert(trace != NULL);
       assert(trace->is_dynamic_trace());
@@ -1234,7 +1234,7 @@ namespace Legion {
     void TraceCompleteOp::initialize_complete(TaskContext *ctx, bool has_block)
     //--------------------------------------------------------------------------
     {
-      initialize(ctx, MIXED_FENCE);
+      initialize(ctx, EXECUTION_FENCE);
 #ifdef DEBUG_LEGION
       assert(trace != NULL);
 #endif
