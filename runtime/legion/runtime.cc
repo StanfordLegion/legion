@@ -10385,7 +10385,7 @@ namespace Legion {
           // Now ask the application what it wants to do
           const std::vector<RegistrationCallbackFnptr> &registration_callbacks
             = get_pending_registration_callbacks();
-          if (registration_callbacks.empty())
+          if (!registration_callbacks.empty())
           {
             log_run.info("Invoking mapper registration callback functions...");
             for (std::vector<RegistrationCallbackFnptr>::const_iterator it = 
