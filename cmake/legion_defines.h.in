@@ -30,10 +30,6 @@
 #cmakedefine MAX_FIELDS @MAX_FIELDS@
 #endif
 
-#ifndef LEGION_DEFAULT_LOCAL_FIELDS
-#cmakedefine LEGION_DEFAULT_LOCAL_FIELDS @MAX_LOCAL_FIELDS@
-#endif
-
 #ifndef ENABLE_LEGION_TLS
 #cmakedefine ENABLE_LEGION_TLS
 #endif
