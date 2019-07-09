@@ -302,6 +302,13 @@ mark_as_advanced(Legion_MAX_FIELDS)
 # define variable for legion_defines.h
 set(MAX_FIELDS ${Legion_MAX_FIELDS})
 
+set(Legion_DEFAULT_LOCAL_FIELDS 4 CACHE STRING "Maximum number of local fields allocated to a single field space")
+set_property(CACHE Legion_DEFAULT_LOCAL_FIELDS PROPERTY STRINGS 0 1 2 4 8 16)
+mark_as_advanced(Legion_DEFAULT_LOCAL_FIELDS)
+
+# define variable for legion_defines.h
+set(LEGION_DEFAULT_LOCAL_FIELDS ${Legion_DEFAULT_LOCAL_FIELDS})
+
 option(Legion_ENABLE_TLS "Enable support for TLS storage of Legion context" OFF)
 mark_as_advanced(Legion_ENABLE_TLS)
 
