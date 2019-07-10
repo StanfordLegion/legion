@@ -19,6 +19,7 @@ from __future__ import print_function
 
 from collections import OrderedDict
 import legion
+from legion import task, R
 
 # FIXME: Need a better way to determine task IDs.
 hello = legion.extern_task(
@@ -33,7 +34,13 @@ saxpy = legion.extern_task(
     privileges=[legion.RW],
     calling_convention='regent')
 
-@legion.task(task_id=2)
+@task(privileges=[R])
+def check(r):
+    assert (r.x == 3.5).all()
+    print('results validated successfully')
+
+# This task needs an explicit ID so that Regent knows what to call.
+@task(task_id=2)
 def main():
     print('hello from Python')
     x = hello(1234, 3.14)
@@ -46,13 +53,12 @@ def main():
     print('creating a region with 12 elements')
     r = legion.Region.create([12], fs)
 
-    r.x.fill(1)
-    r.y.fill(2)
+    legion.fill(r, 'x', 1)
+    legion.fill(r, 'y', 2)
 
     a = 1.5
 
     print('calling SAXPY task in Regent')
     saxpy(r, a)
 
-    assert (r.x == 3.5).all()
-    print('results validated successfully')
+    check(r)
