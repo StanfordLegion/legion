@@ -551,7 +551,7 @@ class Privilege(object):
     def __hash__(self):
         return hash(self._fields())
 
-    def __call__(self, fields):
+    def __call__(self, *fields):
         return PrivilegeFields(self, fields)
 
     def _legion_privilege(self):
