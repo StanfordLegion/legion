@@ -11168,9 +11168,9 @@ namespace Legion {
       }
       ReplIndividualTask *task = 
         runtime->get_available_repl_individual_task();
+      Future result = task->initialize_task(this, launcher);
 #ifdef DEBUG_LEGION
-      Future result = 
-        task->initialize_task(this, launcher, runtime->check_privileges);
+      
       if (owner_shard->shard_id == 0)
         log_task.debug("Registering new single task with unique id %lld "
                         "and task %s (ID %lld) with high level runtime in "
@@ -11179,9 +11179,6 @@ namespace Legion {
                         task->get_unique_id(), runtime->address_space);
       task->set_sharding_collective(new ShardingGatherCollective(this, 
                                     0/*owner shard*/, COLLECTIVE_LOC_43));
-#else
-      Future result = task->initialize_task(this, launcher,
-                                            false/*check privileges*/);
 #endif
       // Now initialize the particular information for replication 
       task->initialize_replication(this);
@@ -11289,9 +11286,8 @@ namespace Legion {
       if (!launch_space.exists())
         launch_space = find_index_launch_space(launcher.launch_domain);
       ReplIndexTask *task = runtime->get_available_repl_index_task();
+      FutureMap result = task->initialize_task(this, launcher, launch_space);
 #ifdef DEBUG_LEGION
-      FutureMap result = task->initialize_task(this, launcher, launch_space,
-                                               runtime->check_privileges);
       if (owner_shard->shard_id == 0)
         log_task.debug("Registering new index space task with unique id "
                        "%lld and task %s (ID %lld) with high level runtime in "
@@ -11300,9 +11296,6 @@ namespace Legion {
                        task->get_unique_id(), runtime->address_space);
       task->set_sharding_collective(new ShardingGatherCollective(this, 
                                     0/*owner shard*/, COLLECTIVE_LOC_44));
-#else
-      FutureMap result = task->initialize_task(this, launcher, launch_space,
-                                               false/*check privileges*/);
 #endif
       task->initialize_replication(this);
       execute_task_launch(task, true/*index*/, current_trace, 
@@ -11366,9 +11359,9 @@ namespace Legion {
       if (!launch_space.exists())
         launch_space = find_index_launch_space(launcher.launch_domain);
       ReplIndexTask *task = runtime->get_available_repl_index_task();
+      Future result = task->initialize_task(this, launcher, launch_space, 
+                                            redop, deterministic);
 #ifdef DEBUG_LEGION
-      Future result = task->initialize_task(this, launcher, launch_space, redop,
-                                      deterministic, runtime->check_privileges);
       if (owner_shard->shard_id == 0)
         log_task.debug("Registering new index space task with unique id "
                        "%lld and task %s (ID %lld) with high level runtime in "
@@ -11377,9 +11370,6 @@ namespace Legion {
                        task->get_unique_id(), runtime->address_space);
       task->set_sharding_collective(new ShardingGatherCollective(this, 
                                     0/*owner shard*/, COLLECTIVE_LOC_45));
-#else
-      Future result = task->initialize_task(this, launcher, launch_space, redop,
-                                      deterministic, false/*check privileges*/);
 #endif
       task->initialize_replication(this);
       execute_task_launch(task, true/*index*/, current_trace, 
