@@ -695,6 +695,9 @@ class Ispace(object):
         # Clear out references. Technically unnecessary but avoids abuse.
         del self.handle
 
+    def raw_value(self):
+        return self.handle[0]
+
 # Hack: Can't pickle static methods.
 def _Fspace_unpickle(fspace_id, field_ids, field_types, owned):
     handle = ffi.new('legion_field_space_t *')
