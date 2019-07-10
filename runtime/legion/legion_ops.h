@@ -1246,15 +1246,15 @@ namespace Legion {
      * in the same context which may become important when
      * certain updates to the region tree are desired to be
      * observed before a later operation either maps or 
-     * runs.  To support these two kinds of guarantees, we
-     * provide both mapping and executing fences.
+     * runs. All fences are mapping fences for correctness.
+     * Fences all support the optional ability to be an 
+     * execution fence.
      */
     class FenceOp : public Operation, public LegionHeapify<FenceOp> {
     public:
       enum FenceKind {
         MAPPING_FENCE,
         EXECUTION_FENCE,
-        MIXED_FENCE,
       };
     public:
       static const AllocationType alloc_type = FENCE_OP_ALLOC;

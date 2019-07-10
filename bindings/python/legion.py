@@ -486,6 +486,9 @@ class FutureMap(object):
             c.legion_future_map_get_future(self.handle, point.raw_value()),
             value_type=self.value_type)
 
+    def wait_all_results(self):
+        c.legion_future_map_wait_all_results(self.handle)
+
 class Type(object):
     __slots__ = ['numpy_type', 'cffi_type', 'size']
 
