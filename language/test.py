@@ -272,14 +272,6 @@ def get_test_specs(legion_dir, use_run, use_spy, use_prof, use_hdf5, use_openmp,
         'MAX_DIM': str(max_dim),
         'REALM_BACKTRACE': '1',
     }
-    py_env = {
-        'MAX_DIM': str(max_dim),
-        'PYTHONPATH': ':'.join(
-            os.environ.get('PYTHONPATH', '').split(':') + [
-                os.path.join(legion_dir, 'bindings', 'python'),
-                '.',
-            ]),
-    }
 
     base = [
         # FIXME: Move this flag into a per-test parameter so we don't use it everywhere.
@@ -355,7 +347,7 @@ def get_test_specs(legion_dir, use_run, use_spy, use_prof, use_hdf5, use_openmp,
          )),
     ]
     python = [
-        ('run_pass', (test_run_pass, ([] + extra_flags, py_env)),
+        ('run_pass', (test_run_pass, ([] + extra_flags, run_env)),
          (os.path.join('tests', 'python', 'run_pass'),
          )),
     ]
