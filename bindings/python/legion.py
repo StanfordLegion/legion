@@ -1043,6 +1043,26 @@ class Ipartition(object):
             parent.handle[0], color_space.handle[0], transform.raw_value(), extent.raw_value(), part_kind.value, color)
         return Ipartition(handle, parent, color_space)
 
+    @staticmethod
+    def create_pending(parent, color_space,
+                       part_kind=compute, color=AUTO_GENERATE_ID):
+        assert isinstance(parent, Ispace)
+        assert isinstance(part_kind, Disjointness)
+        color_space = Ispace.coerce(color_space)
+        handle = c.legion_index_partition_create_pending_partition(
+            _my.ctx.runtime, _my.ctx.context,
+            parent.handle[0], color_space.handle[0], part_kind.value, color)
+        return Ipartition(handle, parent, color_space)
+
+    # The following methods are for pending partitions only:
+    def create_union(self, color, ispaces):
+        color = DomainPoint.coerce(color)
+
+        handles = ffi.new('legion_index_space_t[]', [ispace.raw_value() for ispace in ispaces])
+        c.legion_index_partition_create_index_space_union_spaces(
+            _my.ctx.runtime, _my.ctx.context,
+            self.handle[0], color.raw_value(), handles, len(ispaces))
+
     def destroy(self):
         # This is not something you want to have happen in a
         # destructor, since partitions may outlive the lifetime of the handle.
@@ -1120,6 +1140,17 @@ class Partition(object):
         ipartition = Ipartition.create_by_restriction(
             parent.ispace, color_space, transform, extent, part_kind, color)
         return Partition.create(parent, ipartition)
+
+    @staticmethod
+    def create_pending(parent, color_space, part_kind=compute, color=AUTO_GENERATE_ID):
+        assert isinstance(parent, Region)
+        ipartition = Ipartition.create_pending(
+            parent.ispace, color_space, part_kind, color)
+        return Partition.create(parent, ipartition)
+
+    def create_union(self, color, regions):
+        ispaces = [region.ispace for region in regions]
+        self.ipartition.create_union(color, ispaces)
 
     def destroy(self):
         # This is not something you want to have happen in a
