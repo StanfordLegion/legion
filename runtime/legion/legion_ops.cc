@@ -6488,11 +6488,6 @@ namespace Legion {
     void FenceOp::initialize(InnerContext *ctx, FenceKind kind)
     //--------------------------------------------------------------------------
     {
-#ifdef LEGION_SPY
-      // Legion Spy thinks all fences are mapping fences right now
-      if (kind == EXECUTION_FENCE)
-        kind = MIXED_FENCE;
-#endif
       initialize_operation(ctx, true/*track*/);
       fence_kind = kind;
       if (runtime->legion_spy_enabled)
@@ -6551,31 +6546,19 @@ namespace Legion {
             complete_execution();
             break;
           }
-        case MIXED_FENCE:
+        case EXECUTION_FENCE:
           {
             // Mark that we finished our mapping now
             complete_mapping();
-            // Intentionally fall through
-          }
-        case EXECUTION_FENCE:
-          {
             // We can always trigger the completion event when these are done
             request_early_complete(execution_precondition);
             if (!execution_precondition.has_triggered())
             {
               RtEvent wait_on = Runtime::protect_event(execution_precondition);
-              // Was already handled above
-              if (fence_kind != MIXED_FENCE)
-                complete_mapping(wait_on);
               complete_execution(wait_on);
             }
             else
-            {
-              // Was already handled above
-              if (fence_kind != MIXED_FENCE)
-                complete_mapping();
               complete_execution();
-            }
             break;
           }
         default:
@@ -6597,14 +6580,6 @@ namespace Legion {
             break;
           }
         case EXECUTION_FENCE:
-          {
-            execution_precondition = 
-              parent_ctx->perform_fence_analysis(this, false, true);
-            if (update_fence)
-              parent_ctx->update_current_fence(this, false, true);
-            break;
-          }
-        case MIXED_FENCE:
           {
             execution_precondition =
               parent_ctx->perform_fence_analysis(this, true, true);
@@ -6629,11 +6604,6 @@ namespace Legion {
             break;
           }
         case EXECUTION_FENCE:
-          {
-            parent_ctx->update_current_fence(this, false, true);
-            break;
-          }
-        case MIXED_FENCE:
           {
             parent_ctx->update_current_fence(this, true, true);
             break;
@@ -6682,7 +6652,7 @@ namespace Legion {
     void FrameOp::initialize(InnerContext *ctx)
     //--------------------------------------------------------------------------
     {
-      FenceOp::initialize(ctx, MIXED_FENCE);
+      FenceOp::initialize(ctx, EXECUTION_FENCE);
       parent_ctx->issue_frame(this, completion_event); 
     }
 
