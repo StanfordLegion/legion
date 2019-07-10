@@ -1192,8 +1192,6 @@ class ExternTask(object):
     def __init__(self, task_id, argument_types=None, privileges=None,
                  return_type=void, calling_convention=None):
         self.argument_types = argument_types
-        if privileges is not None:
-            privileges = [(x if x is not None else N) for x in privileges]
         self.privileges = privileges
         self.return_type = return_type
         self.calling_convention = calling_convention
@@ -1258,8 +1256,6 @@ class Task (object):
                  leaf=False, inner=False, idempotent=False, replicable=False,
                  register=True, task_id=None, top_level=False):
         self.body = body
-        if privileges is not None:
-            privileges = [(x if x is not None else N) for x in privileges]
         self.privileges = privileges
         self.return_type = return_type
         self.leaf = bool(leaf)
