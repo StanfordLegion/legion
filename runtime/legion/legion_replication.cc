@@ -3803,14 +3803,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       initialize(ctx, k);
-#ifdef DEBUG_LEGION
-      // Execution fences alone can lead to hangs in control replication
-      // contexts because of how the distributed schedulers for each shard
-      // work, so we either need mapping fences or mixed fences
-      assert(fence_kind != EXECUTION_FENCE);
-#endif
       mapping_fence_barrier = ctx->get_next_mapping_fence_barrier();
-      if (fence_kind == MIXED_FENCE)
+      if (fence_kind == EXECUTION_FENCE)
         execution_fence_barrier = ctx->get_next_execution_fence_barrier();
     }
 
@@ -3829,16 +3823,12 @@ namespace Legion {
             complete_execution();
             break;
           }
-        case MIXED_FENCE:
+        case EXECUTION_FENCE:
           {
             // Do our arrival on our mapping fence, we're mapped when
             // everyone is mapped
             Runtime::phase_barrier_arrive(mapping_fence_barrier, 1/*count*/);
             complete_mapping(mapping_fence_barrier);
-            // Intentionally fall through
-          }
-        case EXECUTION_FENCE:
-          {
             // We arrive on our barrier when all our previous operations
             // have finished executing
             Runtime::phase_barrier_arrive(execution_fence_barrier, 1/*count*/,
@@ -3848,18 +3838,10 @@ namespace Legion {
             if (!execution_fence_barrier.has_triggered())
             {
               RtEvent wait_on = Runtime::protect_event(execution_fence_barrier);
-              // Was already handled above
-              if (fence_kind != MIXED_FENCE)
-                complete_mapping(wait_on);
               complete_execution(wait_on);
             }
             else
-            {
-              // Was already handled above
-              if (fence_kind != MIXED_FENCE)
-                complete_mapping();
               complete_execution();
-            }
             break;
           }
         default:

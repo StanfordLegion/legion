@@ -11833,11 +11833,7 @@ namespace Legion {
                       get_task_name(), get_unique_id());
 #endif
       ReplFenceOp *fence_op = runtime->get_available_repl_fence_op();
-      // This has to be a mixed fence because we always need a mapping
-      // fence to ensure that things map in the proper order in control
-      // replication contexts or else we can get hangs in the scheduling
-      // logic when two things that dependend on each other map out of order
-      fence_op->initialize_repl_fence(this, FenceOp::MIXED_FENCE);
+      fence_op->initialize_repl_fence(this, FenceOp::EXECUTION_FENCE);
       runtime->add_to_dependence_queue(this, executing_processor, fence_op);
     }
 
