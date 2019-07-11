@@ -554,6 +554,9 @@ class Privilege(object):
         self.reduce = reduce
         self.fields = fields
 
+        if self.fields is not None:
+            assert len(self.fields) > 0
+
         if self.discard:
             assert self.write
 
@@ -573,7 +576,7 @@ class Privilege(object):
 
     def __call__(self, *fields):
         assert self.fields is None
-        return Privilege(self.read, self.write, self.reduce, self.discard, fields)
+        return Privilege(self.read, self.write, self.discard, self.reduce, fields)
 
     def __add__(self, other):
         return PrivilegeComposite([self, other])
@@ -582,14 +585,14 @@ class Privilege(object):
         return self.__str__()
 
     def __str__(self):
-        if self.discard:
-            priv = 'WD'
+        if self.read:
+            priv = 'R'
         elif self.write:
             priv = 'RW'
-        elif self.read:
-            priv = 'R'
+        elif self.discard:
+            priv = 'WD'
         elif self.reduce:
-            priv = 'Reduce(%s' % self.reduce
+            priv = 'Reduce(%s)' % self.reduce
         else:
             priv = 'N'
         if self.fields is not None:
@@ -632,21 +635,33 @@ class PrivilegeComposite(object):
         fields = collections.OrderedDict()
         read_set = set()
         write_set = set()
-        reduce_sets = collections.OrderedDict()
         discard_set = set()
+        reduce_sets = collections.OrderedDict()
 
         for privilege in privileges:
-            fields.update([(x, True) for x in privilege.fields])
+            privilege_fields = privilege.fields if privilege.fields is not None else [None]
+            fields.update([(x, True) for x in privilege_fields])
             if privilege.read:
-                read_set.update(privilege.fields)
+                read_set.update(privilege_fields)
             if privilege.write:
-                write_set.update(privilege.fields)
+                write_set.update(privilege_fields)
+            if privilege.discard:
+                discard_set.update(privilege_fields)
             if privilege.reduce:
                 if privilege.reduce not in reduce_sets:
                     reduce_sets[privilege.reduce] = set()
-                reduce_sets[privilege.reduce].update(privilege.fields)
-            if privilege.discard:
-                discard_set.update(privilege.fields)
+                reduce_sets[privilege.reduce].update(privilege_fields)
+
+        # Reductions combine with read/reduce privileges to upgrade to read-write.
+        for op, reduce_set in reduce_sets.items():
+            write_set.update(reduce_set & read_set)
+            if None in read_set:
+                write_set.update(reduce_set)
+            for op2, reduce_set2 in reduce_sets.items():
+                if op != op2:
+                    write_set.update(reduce_set & reduce_set2)
+                    if None in reduce_set2:
+                        write_set.update(reduce_set)
 
         # Read/write/discard shadow reduction privileges.
         if None in read_set or None in write_set or None in discard_set:
@@ -659,6 +674,7 @@ class PrivilegeComposite(object):
         if None in discard_set:
             read_set = set()
             write_set = set()
+            discard_set = set([None])
         else:
             read_set -= discard_set
             write_set -= discard_set
@@ -666,14 +682,20 @@ class PrivilegeComposite(object):
         # Write shadows read.
         if None in write_set:
             read_set = set()
+            write_set = set([None])
         else:
             read_set -= write_set
 
+        def filter_set(ctor, field_set):
+            if None in field_set:
+                return ctor
+            return ctor(*filter(lambda x: x in field_set, fields.keys()))
+
         return tuple(
-            ([R(*filter(lambda x: x in read_set, fields.keys()))] if len(read_set) > 0 else []) +
-            ([RW(*filter(lambda x: x in write_set, fields.keys()))] if len(write_set) > 0 else []) +
-            ([WD(*filter(lambda x: x in discard_set, fields.keys()))] if len(discard_set) > 0 else []) +
-            [Reduce(op)(*filter(lambda x: x in reduce_set, fields.keys())) for op, reduce_set in reduce_sets.items()])
+            ([filter_set(R, read_set)] if len(read_set) > 0 else []) +
+            ([filter_set(RW, write_set)] if len(write_set) > 0 else []) +
+            ([filter_set(WD, discard_set)] if len(discard_set) > 0 else []) +
+            [filter_set(Reduce(op), reduce_set) for op, reduce_set in reduce_sets.items()])
 
     def __eq__(self, other):
         if len(self.privileges) == 1:
@@ -709,7 +731,7 @@ RW = Privilege(read=True, write=True)
 WD = Privilege(write=True, discard=True)
 
 def Reduce(operator, *fields):
-    return Privilege(reduce=operator, fields=fields)
+    return Privilege(reduce=operator, fields=fields if len(fields) > 0 else None)
 
 class Disjointness(object):
     __slots__ = ['kind', 'value']

@@ -38,11 +38,21 @@ def main():
     assert R('x') != R('y')
     assert R('x') != R
 
+    assert R + R == R
+    assert R + RW == RW
+    assert R + WD == WD
+
     assert R('x') + R('y') == R('x', 'y')
     assert R('x') + R('y') != R('y', 'x')
 
     assert R('x', 'y') + RW('y') == R('x') + RW('y')
     assert R('x') + RW('x', 'y') == RW('x', 'y')
+
+    assert R + Reduce('+') == RW
+    assert Reduce('+') + Reduce('*') == RW
+    assert Reduce('+') + WD == WD
+
+    assert R('x', 'y') + Reduce('+', 'y', 'z') == R('x') + RW('y') + Reduce('+', 'z')
 
     print(R('x'))
     print(R('x') + RW('y'))
