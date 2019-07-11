@@ -781,6 +781,9 @@ class Fspace(object):
         del self.field_ids
         del self.field_types
 
+    def raw_value(self):
+        return self.handle[0]
+
     def keys(self):
         return self.field_ids.keys()
 
@@ -839,7 +842,7 @@ class Region(object):
         ispace = Ispace.coerce(ispace)
         fspace = Fspace.coerce(fspace)
         handle = c.legion_logical_region_create(
-            _my.ctx.runtime, _my.ctx.context, ispace.handle[0], fspace.handle[0], False)
+            _my.ctx.runtime, _my.ctx.context, ispace.raw_value(), fspace.raw_value(), False)
         return Region(handle, ispace, fspace, owned=True)
 
     def destroy(self):
@@ -856,6 +859,9 @@ class Region(object):
         del self.handle
         del self.ispace
         del self.fspace
+
+    def raw_value(self):
+        return self.handle[0]
 
     def keys(self):
         return self.fspace.keys()
@@ -993,7 +999,7 @@ def fill(region, field_name, value):
     raw_value = ffi.new('{} *'.format(field_type.cffi_type), value)
     c.legion_runtime_fill_field(
         _my.ctx.runtime, _my.ctx.context,
-        region.handle[0], region.parent.handle[0] if region.parent is not None else region.handle[0],
+        region.raw_value(), region.parent.raw_value() if region.parent is not None else region.raw_value(),
         field_id, raw_value, field_type.size,
         c.legion_predicate_true())
 
@@ -1001,8 +1007,8 @@ def fill(region, field_name, value):
 def _Ipartition_unpickle(id, parent, color_space):
     handle = ffi.new('legion_index_partition_t *')
     handle[0].id = id
-    handle[0].tid = parent.handle[0].tid
-    handle[0].type_tag = parent.handle[0].type_tag
+    handle[0].tid = parent.raw_value().tid
+    handle[0].type_tag = parent.raw_value().type_tag
 
     return Ipartition(handle[0], parent, color_space)
 
@@ -1037,49 +1043,65 @@ class Ipartition(object):
             yield self[point]
 
     @staticmethod
-    def create_equal(parent, color_space, granularity=1, color=AUTO_GENERATE_ID):
-        assert isinstance(parent, Ispace)
+    def create_equal(ispace, color_space, granularity=1, color=AUTO_GENERATE_ID):
+        assert isinstance(ispace, Ispace)
         color_space = Ispace.coerce(color_space)
         handle = c.legion_index_partition_create_equal(
             _my.ctx.runtime, _my.ctx.context,
-            parent.handle[0], color_space.handle[0], granularity, color)
-        return Ipartition(handle, parent, color_space)
+            ispace.raw_value(), color_space.raw_value(), granularity, color)
+        return Ipartition(handle, ispace, color_space)
 
     @staticmethod
-    def create_by_field(parent, field, color_space, color=AUTO_GENERATE_ID):
-        assert isinstance(parent, Region)
+    def create_by_field(region, field, color_space, color=AUTO_GENERATE_ID):
+        assert isinstance(region, Region)
         color_space = Ispace.coerce(color_space)
         handle = c.legion_index_partition_create_by_field(
             _my.ctx.runtime, _my.ctx.context,
-            parent.handle[0],
-            parent.parent.handle[0] if parent.parent is not None else parent.handle[0],
+            region.raw_value(),
+            region.parent.raw_value() if region.parent is not None else region.raw_value(),
+            region.fspace.field_ids[field],
+            color_space.raw_value(), color)
+        return Ipartition(handle, region.ispace, color_space)
+
+    @staticmethod
+    def create_by_image(ispace, projection, field, color_space,
+                        part_kind=compute, color=AUTO_GENERATE_ID):
+        assert isinstance(ispace, Ispace)
+        assert isinstance(projection, Partition)
+        assert isinstance(part_kind, Disjointness)
+        color_space = Ispace.coerce(color_space)
+        parent = projection.parent
+        handle = c.legion_index_partition_create_by_image(
+            _my.ctx.runtime, _my.ctx.context,
+            ispace.raw_value(), projection.raw_value(),
+            parent.parent.raw_value() if parent.parent is not None else parent.raw_value(),
             parent.fspace.field_ids[field],
-            color_space.handle[0], color)
+            color_space.raw_value(), part_kind.value, color)
         return Ipartition(handle, parent.ispace, color_space)
 
     @staticmethod
-    def create_by_restriction(parent, color_space, transform, extent,
+    def create_by_restriction(ispace, color_space, transform, extent,
                               part_kind=compute, color=AUTO_GENERATE_ID):
-        assert isinstance(parent, Ispace)
+        assert isinstance(ispace, Ispace)
         assert isinstance(part_kind, Disjointness)
         color_space = Ispace.coerce(color_space)
         transform = DomainTransform.coerce(transform)
         extent = Domain.coerce(extent)
         handle = c.legion_index_partition_create_by_restriction(
             _my.ctx.runtime, _my.ctx.context,
-            parent.handle[0], color_space.handle[0], transform.raw_value(), extent.raw_value(), part_kind.value, color)
-        return Ipartition(handle, parent, color_space)
+            ispace.raw_value(), color_space.raw_value(), transform.raw_value(), extent.raw_value(), part_kind.value, color)
+        return Ipartition(handle, ispace, color_space)
 
     @staticmethod
-    def create_pending(parent, color_space,
+    def create_pending(ispace, color_space,
                        part_kind=compute, color=AUTO_GENERATE_ID):
-        assert isinstance(parent, Ispace)
+        assert isinstance(ispace, Ispace)
         assert isinstance(part_kind, Disjointness)
         color_space = Ispace.coerce(color_space)
         handle = c.legion_index_partition_create_pending_partition(
             _my.ctx.runtime, _my.ctx.context,
-            parent.handle[0], color_space.handle[0], part_kind.value, color)
-        return Ipartition(handle, parent, color_space)
+            ispace.raw_value(), color_space.raw_value(), part_kind.value, color)
+        return Ipartition(handle, ispace, color_space)
 
     # The following methods are for pending partitions only:
     def create_union(self, color, ispaces):
@@ -1100,12 +1122,15 @@ class Ipartition(object):
         del self.parent
         del self.color_space
 
+    def raw_value(self):
+        return self.handle[0]
+
 # Hack: Can't pickle static methods.
 def _Partition_unpickle(parent, ipartition):
     handle = ffi.new('legion_logical_partition_t *')
-    handle[0].tree_id = parent.handle[0].tree_id
-    handle[0].index_partition = ipartition.handle[0]
-    handle[0].field_space = parent.fspace.handle[0]
+    handle[0].tree_id = parent.raw_value().tree_id
+    handle[0].index_partition = ipartition.raw_value()
+    handle[0].field_space = parent.fspace.raw_value()
 
     return Partition(handle[0], parent, ipartition)
 
@@ -1151,36 +1176,44 @@ class Partition(object):
         assert isinstance(parent, Region)
         assert isinstance(ipartition, Ipartition)
         handle = c.legion_logical_partition_create(
-            _my.ctx.runtime, _my.ctx.context, parent.handle[0], ipartition.handle[0])
+            _my.ctx.runtime, _my.ctx.context, parent.raw_value(), ipartition.raw_value())
         return Partition(handle, parent, ipartition)
 
     @staticmethod
-    def create_equal(parent, color_space, granularity=1, color=AUTO_GENERATE_ID):
-        assert isinstance(parent, Region)
-        ipartition = Ipartition.create_equal(parent.ispace, color_space, granularity, color)
-        return Partition.create(parent, ipartition)
+    def create_equal(region, color_space, granularity=1, color=AUTO_GENERATE_ID):
+        assert isinstance(region, Region)
+        ipartition = Ipartition.create_equal(region.ispace, color_space, granularity, color)
+        return Partition.create(region, ipartition)
 
     @staticmethod
-    def create_by_field(parent, field, color_space, color=AUTO_GENERATE_ID):
-        assert isinstance(parent, Region)
+    def create_by_field(region, field, color_space, color=AUTO_GENERATE_ID):
+        assert isinstance(region, Region)
         ipartition = Ipartition.create_by_field(
-            parent, field, color_space, color)
-        return Partition.create(parent, ipartition)
+            region, field, color_space, color)
+        return Partition.create(region, ipartition)
 
     @staticmethod
-    def create_by_restriction(parent, color_space, transform, extent,
+    def create_by_image(region, projection, field, color_space,
+                        part_kind=compute, color=AUTO_GENERATE_ID):
+        assert isinstance(region, Region)
+        ipartition = Ipartition.create_by_image(
+            region.ispace, projection, field, color_space, part_kind, color)
+        return Partition.create(region, ipartition)
+
+    @staticmethod
+    def create_by_restriction(region, color_space, transform, extent,
                               part_kind=compute, color=AUTO_GENERATE_ID):
-        assert isinstance(parent, Region)
+        assert isinstance(region, Region)
         ipartition = Ipartition.create_by_restriction(
-            parent.ispace, color_space, transform, extent, part_kind, color)
-        return Partition.create(parent, ipartition)
+            region.ispace, color_space, transform, extent, part_kind, color)
+        return Partition.create(region, ipartition)
 
     @staticmethod
-    def create_pending(parent, color_space, part_kind=compute, color=AUTO_GENERATE_ID):
-        assert isinstance(parent, Region)
+    def create_pending(region, color_space, part_kind=compute, color=AUTO_GENERATE_ID):
+        assert isinstance(region, Region)
         ipartition = Ipartition.create_pending(
-            parent.ispace, color_space, part_kind, color)
-        return Partition.create(parent, ipartition)
+            region.ispace, color_space, part_kind, color)
+        return Partition.create(region, ipartition)
 
     def create_union(self, color, regions):
         ispaces = [region.ispace for region in regions]
@@ -1195,6 +1228,9 @@ class Partition(object):
         del self.handle
         del self.parent
         del self.ipartition
+
+    def raw_value(self):
+        return self.handle[0]
 
 def define_regent_argument_struct(task_id, argument_types, privileges, return_type, arguments):
     if argument_types is None:
@@ -1537,7 +1573,7 @@ class _TaskLauncher(object):
                 arg_name = '__arg_%s' % i
                 arg_value = arg
                 if hasattr(arg, 'handle'):
-                    arg_value = arg.handle[0]
+                    arg_value = arg.raw_value()
                 setattr(task_args_buffer, arg_name, arg_value)
             for i, arg in enumerate(args):
                 if isinstance(arg, Region):
@@ -1584,19 +1620,19 @@ class _TaskLauncher(object):
                     if priv.reduce:
                         for field in fields:
                             req = add_region_reduction(
-                                launcher, arg.handle[0],
+                                launcher, arg.raw_value(),
                                 priv._legion_redop_id(arg.fspace.field_types[field]),
                                 0, # EXCLUSIVE
-                                arg.parent.handle[0] if arg.parent is not None else arg.handle[0],
+                                arg.parent.raw_value() if arg.parent is not None else arg.raw_value(),
                                 0, False)
                             add_field(
                                 launcher, req, arg.fspace.field_ids[field], True)
                     else:
                         req = add_region_normal(
-                            launcher, arg.handle[0],
+                            launcher, arg.raw_value(),
                             priv._legion_privilege(),
                             0, # EXCLUSIVE
-                            arg.parent.handle[0] if arg.parent is not None else arg.handle[0],
+                            arg.parent.raw_value() if arg.parent is not None else arg.raw_value(),
                             0, False)
                         for field in fields:
                             add_field(
@@ -1609,19 +1645,19 @@ class _TaskLauncher(object):
                     if priv.reduce:
                         for field in fields:
                             req = add_partition_reduction(
-                                launcher, arg.handle[0], proj_id,
+                                launcher, arg.raw_value(), proj_id,
                                 priv._legion_redop_id(arg.fspace.field_types[field]),
                                 0, # EXCLUSIVE
-                                arg.parent.handle[0] if arg.parent is not None else arg.handle[0],
+                                arg.parent.raw_value() if arg.parent is not None else arg.raw_value(),
                                 0, False)
                             add_field(
                                 launcher, req, arg.fspace.field_ids[field], True)
                     else:
                         req = add_partition_normal(
-                            launcher, arg.handle[0], proj_id,
+                            launcher, arg.raw_value(), proj_id,
                             priv._legion_privilege(),
                             0, # EXCLUSIVE
-                            arg.parent.handle[0] if arg.parent is not None else arg.handle[0],
+                            arg.parent.raw_value() if arg.parent is not None else arg.raw_value(),
                             0, False)
                         for field in fields:
                             add_field(

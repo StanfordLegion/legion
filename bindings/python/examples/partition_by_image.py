@@ -23,29 +23,32 @@ import numpy as np
 
 @task(privileges=[WD])
 def init_field(R):
-    coloring = np.array(
-        [[([0, 1],), ([1, 0],), ([0, 1],), ([1, 0],)],
-         [([1, 1],), ([1, 0],), ([0, 1],), ([1, 1],)],
-         [([0, 0],), ([1, 1],), ([1, 1],), ([0, 0],)],
-         [([0, 0],), ([1, 1],), ([1, 1],), ([0, 0],)]],
-        dtype=R.color.dtype)
-    np.copyto(R.color, coloring, casting='no')
+    points = np.array(
+        [[([0, 0],), ([0, 0],), ([2, 1],), ([1, 2],)],
+         [([1, 1],), ([1, 1],), ([3, 1],), ([1, 3],)],
+         [([0, 1],), ([2, 0],), ([3, 0],), ([0, 0],)],
+         [([1, 0],), ([2, 0],), ([3, 2],), ([0, 1],)]],
+        dtype=R.point.dtype)
+    np.copyto(R.point, points, casting='no')
 
 @task
 def main():
-    R = legion.Region.create([4, 4], {'color': legion.int2d})
+    R = legion.Region.create([4, 4], {'point': legion.int2d})
     init_field(R)
 
-    P = legion.Partition.create_by_field(R, 'color', [2, 2])
+    P = legion.Partition.create_by_restriction(R, [2, 2], np.eye(2)*2, [2, 2])
+    Q = legion.Partition.create_by_image(R, P, 'point', [2, 2])
 
     assert P.color_space.volume == 4
-
-    print('Parent region has volume %s' % R.ispace.volume)
-    assert R.ispace.volume == 16
     assert P[0, 0].ispace.volume == 4
-    assert P[0, 1].ispace.volume == 3
-    assert P[1, 0].ispace.volume == 3
-    assert P[1, 1].ispace.volume == 6
+    assert P[0, 1].ispace.volume == 4
+    assert P[1, 0].ispace.volume == 4
+    assert P[1, 1].ispace.volume == 4
+
+    assert Q[0, 0].ispace.volume == 2
+    assert Q[0, 1].ispace.volume == 4
+    assert Q[1, 0].ispace.volume == 3
+    assert Q[1, 1].ispace.volume == 4
 
 if __name__ == '__legion_main__':
     main()
