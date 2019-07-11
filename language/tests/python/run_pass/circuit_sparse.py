@@ -180,9 +180,9 @@ def main():
     launch_domain = Ispace.create([num_superpieces])
 
     private_part = Partition.create_by_restriction(
-        all_private, launch_domain, np.eye(1)*pnpp*pps, Domain.create([pnpp*pps], [num_shared_nodes]))
+        all_private, launch_domain, np.eye(1)*pnpp*pps, Domain.create([pnpp*pps], [num_shared_nodes]), disjoint_complete)
     shared_part = Partition.create_by_restriction(
-        all_shared, launch_domain, np.eye(1)*snpp*pps, [snpp*pps])
+        all_shared, launch_domain, np.eye(1)*snpp*pps, [snpp*pps], disjoint_complete)
 
     wires_part = Partition.create_equal(all_wires, launch_domain)
 
