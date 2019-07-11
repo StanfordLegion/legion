@@ -18,41 +18,34 @@
 from __future__ import print_function
 
 import legion
-from legion import task, RW, R, WD, N
+from legion import task, R, RW, WD, N, Reduce
 import numpy
-
-@task(privileges=[RW('x')])
-def init_x(R):
-    R.x.fill(123)
-
-@task(privileges=[RW('y')])
-def init_y(R):
-    R.y.fill(456)
-
-@task(privileges=[RW('x')])
-def inc(R, step):
-    numpy.add(R.x, step, out=R.x)
-
-@task(privileges=[R('x', 'y')])
-def check(R):
-    assert numpy.all(R.x == 2035)
-    assert numpy.all(R.y == 456)
-    print('Test passed')
-
-@task(privileges=[RW('x') + R('y')])
-def saxpy(R, a):
-    numpy.add(R.x, a * R.y, out=R.x)
 
 @task
 def main():
-    R = legion.Region.create([4, 4], {'x': legion.float64, 'y': legion.float64})
-    legion.fill(R, 'x', 101)
-    legion.fill(R, 'y', 102)
-    init_x(R)
-    init_y(R)
-    inc(R, 1000)
-    saxpy(R, 2)
-    check(R)
+    assert R == R
+    assert RW == RW
+    assert WD == WD
+    assert N == N
+    assert Reduce('+') == Reduce('+')
+
+    assert R != RW
+    assert R != WD
+    assert R != N
+    assert Reduce('+') != Reduce('*')
+
+    assert R('x') == R('x')
+    assert R('x') != R('y')
+    assert R('x') != R
+
+    assert R('x') + R('y') == R('x', 'y')
+    assert R('x') + R('y') != R('y', 'x')
+
+    assert R('x', 'y') + RW('y') == R('x') + RW('y')
+    assert R('x') + RW('x', 'y') == RW('x', 'y')
+
+    print(R('x'))
+    print(R('x') + RW('y'))
 
 if __name__ == '__legion_main__':
     main()

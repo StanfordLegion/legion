@@ -545,34 +545,60 @@ def _fill_redop_ids():
 _fill_redop_ids()
 
 class Privilege(object):
-    __slots__ = ['read', 'write', 'discard', 'reduce']
+    __slots__ = ['read', 'write', 'discard', 'reduce', 'fields']
 
-    def __init__(self, read=False, write=False, discard=False, reduce=False):
+    def __init__(self, read=False, write=False, discard=False, reduce=False, fields=None):
         self.read = read
         self.write = write
         self.discard = discard
         self.reduce = reduce
+        self.fields = fields
+
+        if self.discard:
+            assert self.write
 
     def _fields(self):
-        return (self.read, self.write, self.discard, self.reduce)
+        return (self.read, self.write, self.discard, self.reduce, self.fields)
 
     def __eq__(self, other):
-        return isinstance(other, Privilege) and self._fields() == other._fields()
+        if not isinstance(other, Privilege):
+            return NotImplemented
+        return self._fields() == other._fields()
 
-    def __cmp__(self, other):
-        assert isinstance(other, Privilege)
-        return self._fields().__cmp__(other._fields())
+    def __ne__(self, other):
+        return not (self == other)
 
     def __hash__(self):
         return hash(self._fields())
 
     def __call__(self, *fields):
-        return PrivilegeFields(self, fields)
+        assert self.fields is None
+        return Privilege(self.read, self.write, self.reduce, self.discard, fields)
+
+    def __add__(self, other):
+        return PrivilegeComposite([self, other])
+
+    def __repr__(self):
+        return self.__str__()
+
+    def __str__(self):
+        if self.discard:
+            priv = 'WD'
+        elif self.write:
+            priv = 'RW'
+        elif self.read:
+            priv = 'R'
+        elif self.reduce:
+            priv = 'Reduce(%s' % self.reduce
+        else:
+            priv = 'N'
+        if self.fields is not None:
+            return '%s(%s)' % (priv, ', '.join(self.fields))
+        return priv
 
     def _legion_privilege(self):
         bits = 0
         if self.discard:
-            assert self.write
             bits |= 2 # WRITE_DISCARD
         elif self.reduce:
             assert False
@@ -581,15 +607,99 @@ class Privilege(object):
             elif self.read: bits = 1 # READ_ONLY
         return bits
 
+    def _legion_grouped_privileges(self, fspace):
+        if self.fields:
+            assert set(self.fields) <= set(fspace.keys())
+        fields = fspace.keys() if self.fields is None else self.fields
+        if self.reduce:
+            return [
+                (self, self._legion_privilege(), self._legion_redop_id(fspace.field_types[field_name]), (field_name,))
+                for field_name in fields]
+        else:
+            return [(self, self._legion_privilege(), None, fields)]
+
     def _legion_redop_id(self, field_type):
         return _redop_ids[self.reduce][field_type]
 
-class PrivilegeFields(Privilege):
-    __slots__ = ['read', 'write', 'discard', 'fields']
+class PrivilegeComposite(object):
+    __slots__ = ['privileges']
 
-    def __init__(self, privilege, fields):
-        super(PrivilegeFields, self).__init__(privilege.read, privilege.write, privilege.discard, privilege.reduce)
-        self.fields = fields
+    def __init__(self, privileges):
+        self.privileges = self.normalize(privileges)
+
+    @staticmethod
+    def normalize(privileges):
+        fields = collections.OrderedDict()
+        read_set = set()
+        write_set = set()
+        reduce_sets = collections.OrderedDict()
+        discard_set = set()
+
+        for privilege in privileges:
+            fields.update([(x, True) for x in privilege.fields])
+            if privilege.read:
+                read_set.update(privilege.fields)
+            if privilege.write:
+                write_set.update(privilege.fields)
+            if privilege.reduce:
+                if privilege.reduce not in reduce_sets:
+                    reduce_sets[privilege.reduce] = set()
+                reduce_sets[privilege.reduce].update(privilege.fields)
+            if privilege.discard:
+                discard_set.update(privilege.fields)
+
+        # Read/write/discard shadow reduction privileges.
+        if None in read_set or None in write_set or None in discard_set:
+            reduce_sets = collections.OrderedDict()
+        else:
+            for reduce_set in reduce_sets.values():
+                reduce_set.difference_update(read_set, write_set, discard_set)
+
+        # Discard shadows read/write.
+        if None in discard_set:
+            read_set = set()
+            write_set = set()
+        else:
+            read_set -= discard_set
+            write_set -= discard_set
+
+        # Write shadows read.
+        if None in write_set:
+            read_set = set()
+        else:
+            read_set -= write_set
+
+        return tuple(
+            ([R(*filter(lambda x: x in read_set, fields.keys()))] if len(read_set) > 0 else []) +
+            ([RW(*filter(lambda x: x in write_set, fields.keys()))] if len(write_set) > 0 else []) +
+            ([WD(*filter(lambda x: x in discard_set, fields.keys()))] if len(discard_set) > 0 else []) +
+            [Reduce(op)(*filter(lambda x: x in reduce_set, fields.keys())) for op, reduce_set in reduce_sets.items()])
+
+    def __eq__(self, other):
+        if len(self.privileges) == 1:
+            return other == self.privileges[0]
+
+        if not isinstance(other, PrivilegeComposite):
+            return NotImplemented
+        return self.privileges == other.privileges
+
+    def __ne__(self, other):
+        return not (self == other)
+
+    def __hash__(self):
+        return hash(self.privileges)
+
+    def __add__(self, other):
+        return PrivilegeComposite(self.privileges + [other])
+
+    def __repr__(self):
+        return self.__str__()
+
+    def __str__(self):
+        return ' + '.join(map(str, self.privileges))
+
+    def _legion_grouped_privileges(self, fspace):
+        return [x for privilege in self.privileges for x in privilege._legion_grouped_privileges(fspace)]
 
 # Pre-defined Privileges
 N = Privilege()
@@ -908,6 +1018,7 @@ class Region(object):
     def __getattr__(self, field_name):
         if field_name in self.fspace.field_ids:
             if field_name not in self.instances:
+                print(self.privileges, repr(field_name))
                 if self.privileges[field_name] is None:
                     raise Exception('Invalid attempt to access field "%s" without privileges' % field_name)
                 self._map_inline()
@@ -1451,19 +1562,8 @@ class Task (object):
             for i, arg in zip(range(len(args)), args):
                 if isinstance(arg, Region):
                     assert i < len(self.privileges)
-                    priv = self.privileges[i]
-
-                    fields = priv.fields if hasattr(priv, 'fields') else list(arg.fspace.field_ids.keys())
-                    assert set(fields) <= set(arg.fspace.field_ids.keys())
-
-                    if priv.reduce:
-                        for field in fields:
-                            assert req < num_regions[0]
-                            instance = raw_regions[0][req]
-                            req += 1
-
-                            arg._set_instance(field, instance, priv)
-                    else:
+                    groups = self.privileges[i]._legion_grouped_privileges(arg.fspace)
+                    for priv, _, _, fields in groups:
                         assert req < num_regions[0]
                         instance = raw_regions[0][req]
                         req += 1
@@ -1650,28 +1750,23 @@ class _TaskLauncher(object):
             if isinstance(arg, Region) or (isinstance(arg, SymbolicExpr) and arg.is_region()):
                 if self.task.privileges is None or i >= len(self.task.privileges):
                     raise Exception('Privileges are required on all Region arguments')
-                priv = self.task.privileges[i]
-                fields = priv.fields if hasattr(priv, 'fields') else list(arg.fspace.field_ids.keys())
-                if hasattr(priv, 'fields'):
-                    assert set(fields) <= set(arg.fspace.field_ids.keys())
+                groups = self.task.privileges[i]._legion_grouped_privileges(arg.fspace)
                 if isinstance(arg, Region):
-                    if priv.reduce:
-                        for field in fields:
-                            req = add_region_reduction(
+                    for _, priv, redop, fields in groups:
+                        if redop is None:
+                            req = add_region_normal(
                                 launcher, arg.raw_value(),
-                                priv._legion_redop_id(arg.fspace.field_types[field]),
+                                priv,
                                 0, # EXCLUSIVE
                                 arg.parent.raw_value() if arg.parent is not None else arg.raw_value(),
                                 0, False)
-                            add_field(
-                                launcher, req, arg.fspace.field_ids[field], True)
-                    else:
-                        req = add_region_normal(
-                            launcher, arg.raw_value(),
-                            priv._legion_privilege(),
-                            0, # EXCLUSIVE
-                            arg.parent.raw_value() if arg.parent is not None else arg.raw_value(),
-                            0, False)
+                        else:
+                            req = add_region_reduction(
+                                launcher, arg.raw_value(),
+                                redop,
+                                0, # EXCLUSIVE
+                                arg.parent.raw_value() if arg.parent is not None else arg.raw_value(),
+                                0, False)
                         for field in fields:
                             add_field(
                                 launcher, req, arg.fspace.field_ids[field], True)
@@ -1680,23 +1775,21 @@ class _TaskLauncher(object):
                     assert isinstance(arg, SymbolicIndexAccess) and isinstance(arg.index, SymbolicLoopIndex)
                     proj_id = 0
 
-                    if priv.reduce:
-                        for field in fields:
-                            req = add_partition_reduction(
+                    for _, priv, redop, fields in groups:
+                        if redop is None:
+                            req = add_partition_normal(
                                 launcher, arg.raw_value(), proj_id,
-                                priv._legion_redop_id(arg.fspace.field_types[field]),
+                                priv,
                                 0, # EXCLUSIVE
                                 arg.parent.raw_value() if arg.parent is not None else arg.raw_value(),
                                 0, False)
-                            add_field(
-                                launcher, req, arg.fspace.field_ids[field], True)
-                    else:
-                        req = add_partition_normal(
-                            launcher, arg.raw_value(), proj_id,
-                            priv._legion_privilege(),
-                            0, # EXCLUSIVE
-                            arg.parent.raw_value() if arg.parent is not None else arg.raw_value(),
-                            0, False)
+                        else:
+                            req = add_partition_reduction(
+                                launcher, arg.raw_value(), proj_id,
+                                redop,
+                                0, # EXCLUSIVE
+                                arg.parent.raw_value() if arg.parent is not None else arg.raw_value(),
+                                0, False)
                         for field in fields:
                             add_field(
                                 launcher, req, arg.fspace.field_ids[field], True)
