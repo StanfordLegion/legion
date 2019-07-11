@@ -613,7 +613,7 @@ class Privilege(object):
         fields = fspace.keys() if self.fields is None else self.fields
         if self.reduce:
             return [
-                (self, self._legion_privilege(), self._legion_redop_id(fspace.field_types[field_name]), (field_name,))
+                (self, None, self._legion_redop_id(fspace.field_types[field_name]), (field_name,))
                 for field_name in fields]
         else:
             return [(self, self._legion_privilege(), None, fields)]
@@ -690,7 +690,7 @@ class PrivilegeComposite(object):
         return hash(self.privileges)
 
     def __add__(self, other):
-        return PrivilegeComposite(self.privileges + [other])
+        return PrivilegeComposite(self.privileges + (other,))
 
     def __repr__(self):
         return self.__str__()
@@ -708,8 +708,8 @@ RO = Privilege(read=True)
 RW = Privilege(read=True, write=True)
 WD = Privilege(write=True, discard=True)
 
-def Reduce(operator):
-    return Privilege(reduce=operator)
+def Reduce(operator, *fields):
+    return Privilege(reduce=operator, fields=fields)
 
 class Disjointness(object):
     __slots__ = ['kind', 'value']
@@ -1018,7 +1018,6 @@ class Region(object):
     def __getattr__(self, field_name):
         if field_name in self.fspace.field_ids:
             if field_name not in self.instances:
-                print(self.privileges, repr(field_name))
                 if self.privileges[field_name] is None:
                     raise Exception('Invalid attempt to access field "%s" without privileges' % field_name)
                 self._map_inline()
