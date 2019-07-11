@@ -49,10 +49,7 @@ def main():
 
     # Make a region with the custom struct type.
     R = legion.Region.create([4], {'myvalue': mystruct})
-
-    # Hack: This is what we need to do to coerce a CFFI value into a NumPy value.
-    R.myvalue[0] = legion.ffi.buffer(myvalue_root)
-
+    R.myvalue[0] = (123, 3.14, 65)
     print(R.myvalue[0])
 
 if __name__ == '__legion_main__':

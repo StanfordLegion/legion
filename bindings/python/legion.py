@@ -904,9 +904,13 @@ class RegionField(numpy.ndarray):
         accessor = RegionField._get_accessor(region, field_name)
         initializer = RegionField._get_array_initializer(region, field_name, accessor)
         if initializer is None:
-            obj = numpy.empty(tuple(0 for i in xrange(region.ispace.dim))).view(cls)
+            obj = numpy.empty(tuple(0 for i in xrange(region.ispace.dim))).view(
+                dtype=region.fspace.field_types[field_name].numpy_type,
+                type=cls)
         else:
-            obj = numpy.asarray(initializer).view(cls)
+            obj = numpy.asarray(initializer).view(
+                dtype=region.fspace.field_types[field_name].numpy_type,
+                type=cls)
 
         obj.accessor = accessor
         return obj
