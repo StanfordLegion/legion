@@ -517,6 +517,14 @@ uint16 = Type(numpy.uint16, 'uint16_t')
 uint32 = Type(numpy.uint32, 'uint32_t')
 uint64 = Type(numpy.uint64, 'uint64_t')
 
+for dim in xrange(1, _max_dim + 1):
+    globals()["int{}d".format(dim)] = Type(
+        numpy.dtype([('x', numpy.int64, dim)], align=True),
+        'legion_point_{}d_t'.format(dim))
+    globals()["rect{}d".format(dim)] = Type(
+        numpy.dtype([('lo', numpy.int64, dim), ('hi', numpy.int64, dim)], align=True),
+        'legion_rect_{}d_t'.format(dim))
+
 _redop_ids = {}
 def _fill_redop_ids():
     operators = ['+', '-', '*', '/', 'max', 'min']
@@ -1038,6 +1046,18 @@ class Ipartition(object):
         return Ipartition(handle, parent, color_space)
 
     @staticmethod
+    def create_by_field(parent, field, color_space, color=AUTO_GENERATE_ID):
+        assert isinstance(parent, Region)
+        color_space = Ispace.coerce(color_space)
+        handle = c.legion_index_partition_create_by_field(
+            _my.ctx.runtime, _my.ctx.context,
+            parent.handle[0],
+            parent.parent.handle[0] if parent.parent is not None else parent.handle[0],
+            parent.fspace.field_ids[field],
+            color_space.handle[0], color)
+        return Ipartition(handle, parent.ispace, color_space)
+
+    @staticmethod
     def create_by_restriction(parent, color_space, transform, extent,
                               part_kind=compute, color=AUTO_GENERATE_ID):
         assert isinstance(parent, Ispace)
@@ -1138,6 +1158,13 @@ class Partition(object):
     def create_equal(parent, color_space, granularity=1, color=AUTO_GENERATE_ID):
         assert isinstance(parent, Region)
         ipartition = Ipartition.create_equal(parent.ispace, color_space, granularity, color)
+        return Partition.create(parent, ipartition)
+
+    @staticmethod
+    def create_by_field(parent, field, color_space, color=AUTO_GENERATE_ID):
+        assert isinstance(parent, Region)
+        ipartition = Ipartition.create_by_field(
+            parent, field, color_space, color)
         return Partition.create(parent, ipartition)
 
     @staticmethod
