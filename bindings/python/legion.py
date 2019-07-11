@@ -1078,7 +1078,7 @@ class Ipartition(object):
         assert isinstance(part_kind, Disjointness)
         color_space = Ispace.coerce(color_space)
         parent = projection.parent
-        if is_rect_type(projection.parent.fspace.field_types[field]):
+        if is_rect_type(parent.fspace.field_types[field]):
             create_by_image = c.legion_index_partition_create_by_image_range
         else:
             create_by_image = c.legion_index_partition_create_by_image
@@ -1089,6 +1089,25 @@ class Ipartition(object):
             parent.fspace.field_ids[field],
             color_space.raw_value(), part_kind.value, color)
         return Ipartition(handle, parent.ispace, color_space)
+
+    @staticmethod
+    def create_by_preimage(projection, region, field, color_space,
+                           part_kind=compute, color=AUTO_GENERATE_ID):
+        assert isinstance(projection, Ipartition)
+        assert isinstance(region, Region)
+        assert isinstance(part_kind, Disjointness)
+        color_space = Ispace.coerce(color_space)
+        if is_rect_type(region.fspace.field_types[field]):
+            create_by_preimage = c.legion_index_partition_create_by_preimage_range
+        else:
+            create_by_preimage = c.legion_index_partition_create_by_preimage
+        handle = create_by_preimage(
+            _my.ctx.runtime, _my.ctx.context,
+            projection.raw_value(), region.raw_value(),
+            region.parent.raw_value() if region.parent is not None else region.raw_value(),
+            region.fspace.field_ids[field],
+            color_space.raw_value(), part_kind.value, color)
+        return Ipartition(handle, region.ispace, color_space)
 
     @staticmethod
     def create_by_restriction(ispace, color_space, transform, extent,
@@ -1209,6 +1228,14 @@ class Partition(object):
         assert isinstance(region, Region)
         ipartition = Ipartition.create_by_image(
             region.ispace, projection, field, color_space, part_kind, color)
+        return Partition.create(region, ipartition)
+
+    @staticmethod
+    def create_by_preimage(projection, region, field, color_space,
+                           part_kind=compute, color=AUTO_GENERATE_ID):
+        assert isinstance(projection, Partition)
+        ipartition = Ipartition.create_by_preimage(
+            projection.ipartition, region, field, color_space, part_kind, color)
         return Partition.create(region, ipartition)
 
     @staticmethod
