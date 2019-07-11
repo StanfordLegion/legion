@@ -189,12 +189,12 @@ def main():
     ghost_ranges = Region.create([num_superpieces], OrderedDict([('rect', legion.rect1d)]))
     ghost_ranges_part = Partition.create_equal(ghost_ranges, launch_domain)
 
-    for i in launch_domain: # FIXME: IndexLaunch(launch_domain):
+    for i in IndexLaunch(launch_domain):
         init_piece(int(i), conf[0], ghost_ranges_part[i], private_part[i], shared_part[i], all_shared, wires_part[i])
 
     ghost_part = Partition.create_by_image(all_shared, ghost_ranges_part, 'rect', launch_domain)
 
-    for i in launch_domain: # FIXME: IndexLaunch(launch_domain):
+    for i in IndexLaunch(launch_domain):
         init_pointers(private_part[i], shared_part[i], ghost_part[i], wires_part[i])
 
     steps = conf.steps
@@ -202,11 +202,11 @@ def main():
     num_loops = conf.num_loops + 2*prune
 
     for j in range(num_loops):
-        for i in launch_domain: # FIXME: IndexLaunch(launch_domain):
+        for i in IndexLaunch(launch_domain):
             calculate_new_currents(j == prune, steps, private_part[i], shared_part[i], ghost_part[i], wires_part[i])
-        for i in launch_domain: # FIXME: IndexLaunch(launch_domain):
+        for i in IndexLaunch(launch_domain):
             distribute_charge(private_part[i], shared_part[i], ghost_part[i], wires_part[i])
-        for i in launch_domain: # FIXME: IndexLaunch(launch_domain):
+        for i in IndexLaunch(launch_domain):
             update_voltages(j == num_loops - prune - 1, private_part[i], shared_part[i])
 
 if __name__ == '__legion_main__':

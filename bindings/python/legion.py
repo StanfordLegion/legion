@@ -263,14 +263,6 @@ class DomainPoint(object):
         return DomainPoint(handle, take_ownership=True)
 
     @staticmethod
-    def create_from_index(value):
-        assert(isinstance(value, _IndexValue))
-        handle = ffi.new('legion_domain_point_t *')
-        handle[0].dim = 1
-        handle[0].point_data[0] = int(value)
-        return DomainPoint(handle, take_ownership=True)
-
-    @staticmethod
     def coerce(value):
         if not isinstance(value, DomainPoint):
             return DomainPoint.create(value)
@@ -1773,44 +1765,39 @@ class _TaskLauncher(object):
                     raise Exception('Privileges are required on all Region arguments')
                 groups = self.task.privileges[i]._legion_grouped_privileges(arg.fspace)
                 if isinstance(arg, Region):
+                    parent = arg.parent if arg.parent is not None else arg
                     for _, priv, redop, fields in groups:
                         if redop is None:
                             req = add_region_normal(
                                 launcher, arg.raw_value(),
-                                priv,
-                                0, # EXCLUSIVE
-                                arg.parent.raw_value() if arg.parent is not None else arg.raw_value(),
-                                0, False)
+                                priv, 0, # EXCLUSIVE
+                                parent.raw_value(), 0, False)
                         else:
                             req = add_region_reduction(
                                 launcher, arg.raw_value(),
-                                redop,
-                                0, # EXCLUSIVE
-                                arg.parent.raw_value() if arg.parent is not None else arg.raw_value(),
-                                0, False)
+                                redop, 0, # EXCLUSIVE
+                                parent.raw_value(), 0, False)
                         for field in fields:
                             add_field(
                                 launcher, req, arg.fspace.field_ids[field], True)
                 elif isinstance(arg, SymbolicExpr):
                     # FIXME: Support non-trivial projection functors
-                    assert isinstance(arg, SymbolicIndexAccess) and isinstance(arg.index, SymbolicLoopIndex)
+                    assert isinstance(arg, SymbolicIndexAccess) and (isinstance(arg.index, SymbolicLoopIndex) or isinstance(arg.index, ConcreteLoopIndex))
                     proj_id = 0
 
+                    parent = arg.parent if arg.parent is not None else arg
+                    parent = parent.parent if parent.parent is not None else parent
                     for _, priv, redop, fields in groups:
                         if redop is None:
                             req = add_partition_normal(
                                 launcher, arg.raw_value(), proj_id,
-                                priv,
-                                0, # EXCLUSIVE
-                                arg.parent.raw_value() if arg.parent is not None else arg.raw_value(),
-                                0, False)
+                                priv, 0, # EXCLUSIVE
+                                parent.raw_value(), 0, False)
                         else:
                             req = add_partition_reduction(
                                 launcher, arg.raw_value(), proj_id,
-                                redop,
-                                0, # EXCLUSIVE
-                                arg.parent.raw_value() if arg.parent is not None else arg.raw_value(),
-                                0, False)
+                                redop, 0, # EXCLUSIVE
+                                parent.raw_value(), 0, False)
                         for field in fields:
                             add_field(
                                 launcher, req, arg.fspace.field_ids[field], True)
@@ -1825,8 +1812,8 @@ class _TaskLauncher(object):
 
         assert(isinstance(_my.ctx, Context))
 
-        args = self.preprocess_args(args)
         args, futures = self.gather_futures(args)
+        args = self.preprocess_args(args)
         task_args, task_args_root = self.encode_args(args)
 
         # Construct the task launcher.
@@ -1863,13 +1850,14 @@ class _TaskLauncher(object):
         return future
 
 class _IndexLauncher(_TaskLauncher):
-    __slots__ = ['task', 'domain', 'global_args', 'local_args', 'future_args', 'future_map']
+    __slots__ = ['task', 'domain', 'global_args', 'local_args', 'region_args', 'future_args', 'future_map']
 
     def __init__(self, task, domain):
         super(_IndexLauncher, self).__init__(task)
         self.domain = domain
         self.global_args = None
         self.local_args = c.legion_argument_map_create()
+        self.region_args = None
         self.future_args = []
         self.future_map = None
 
@@ -1880,7 +1868,7 @@ class _IndexLauncher(_TaskLauncher):
         raise Exception('IndexLaunch does not support spawn_task')
 
     def attach_local_args(self, index, *args):
-        task_args, _ = self.encode_args(args)
+        task_args, _ = self.encode_args(self.preprocess_args(args))
         c.legion_argument_map_set_point(
             self.local_args, index.value.raw_value(), task_args[0], False)
 
@@ -1888,13 +1876,16 @@ class _IndexLauncher(_TaskLauncher):
         assert self.global_args is None
         self.global_args = args
 
+    def attach_region_args(self, *args):
+        self.region_args = args
+
     def attach_future_args(self, *args):
         self.future_args = args
 
     def launch(self):
         # Encode global args (if any).
         if self.global_args is not None:
-            global_args, global_args_root = self.encode_args(self.global_args)
+            global_args, global_args_root = self.encode_args(self.preprocess_args(self.global_args))
         else:
             global_args = ffi.new('legion_task_argument_t *')
             global_args[0].args = ffi.NULL
@@ -1907,9 +1898,11 @@ class _IndexLauncher(_TaskLauncher):
             global_args[0], self.local_args,
             c.legion_predicate_true(), False, 0, 0)
 
-        # FIXME: Handle region requirements for non-global args.
+        assert (self.global_args is not None) != (self.region_args is not None)
         if self.global_args is not None:
             self.attach_region_requirements(launcher, self.global_args, True)
+        if self.region_args is not None:
+            self.attach_region_requirements(launcher, self.region_args, True)
 
         for arg in self.future_args:
             c.legion_index_launcher_add_future(launcher, arg.handle)
@@ -1974,21 +1967,6 @@ class TaskLaunch(object):
         launcher = _TaskLauncher(task=task)
         return launcher.spawn_task(*args, **kwargs)
 
-class _IndexValue(object):
-    __slots__ = ['value']
-    def __init__(self, value):
-        self.value = value
-    def __int__(self):
-        return self.value.__int__()
-    def __index__(self):
-        return self.value.__index__()
-    def __str__(self):
-        return str(self.value)
-    def __repr__(self):
-        return repr(self.value)
-    def _legion_preprocess_task_argument(self):
-        return self.value
-
 class _FuturePoint(object):
     __slots__ = ['launcher', 'point', 'future']
     def __init__(self, launcher, point):
@@ -2023,6 +2001,10 @@ class SymbolicIndexAccess(SymbolicExpr):
         return '%s[%s]' % (self.value, self.index)
     def __repr__(self):
         return '%s[%s]' % (self.value, self.index)
+    def _legion_preprocess_task_argument(self):
+        if isinstance(self.index, ConcreteLoopIndex):
+            return self.value[self.index._legion_preprocess_task_argument()]
+        return self
     def _legion_postprocess_task_argument(self, point):
         result = _postprocess(self.value, point)[_postprocess(self.index, point)]
         # FIXME: Clear parent field of regions being used as projection requirements
@@ -2059,6 +2041,21 @@ class SymbolicLoopIndex(SymbolicExpr):
 
 ID = SymbolicLoopIndex('ID')
 
+class ConcreteLoopIndex(SymbolicExpr):
+    __slots__ = ['value']
+    def __init__(self, value):
+        self.value = value
+    def __int__(self):
+        return self.value.__int__()
+    def __index__(self):
+        return self.value.__index__()
+    def __str__(self):
+        return str(self.value)
+    def __repr__(self):
+        return repr(self.value)
+    def _legion_preprocess_task_argument(self):
+        return self.value
+
 def index_launch(domain, task, *args):
     if isinstance(domain, Domain):
         domain = domain
@@ -2067,11 +2064,9 @@ def index_launch(domain, task, *args):
     else:
         domain = Domain.create(domain)
     launcher = _IndexLauncher(task=task, domain=domain)
-    args = launcher.preprocess_args(args)
     args, futures = launcher.gather_futures(args)
     launcher.attach_global_args(*args)
     launcher.attach_future_args(*futures)
-    # TODO: attach region args
     launcher.launch()
     return launcher.future_map
 
@@ -2093,7 +2088,7 @@ class IndexLaunch(object):
 
     def __iter__(self):
         _my.ctx.begin_launch(self)
-        self.point = _IndexValue(None)
+        self.point = ConcreteLoopIndex(None)
         for i in self.domain:
             self.point.value = i
             yield self.point
@@ -2127,7 +2122,8 @@ class IndexLaunch(object):
         for arg, saved_arg in zip_longest(args, self.saved_args):
             # TODO: Add support for region arguments
             if isinstance(arg, Region) or isinstance(arg, RegionField):
-                raise Exception('TODO: Support region arguments to an IndexLaunch')
+                if arg != saved_arg:
+                    raise Exception('Region argument to IndexLaunch does not match previous value at this position')
             elif isinstance(arg, Future):
                 if arg != saved_arg:
                     raise Exception('Future argument to IndexLaunch does not match previous value at this position')
@@ -2135,11 +2131,10 @@ class IndexLaunch(object):
     def spawn_task(self, task, *args):
         self.ensure_launcher(task)
         self.check_compatibility(task, *args)
-        args = self.launcher.preprocess_args(args)
         args, futures = self.launcher.gather_futures(args)
         self.launcher.attach_local_args(self.point, *args)
+        self.launcher.attach_region_args(*args)
         self.launcher.attach_future_args(*futures)
-        # TODO: attach region args
         return _FuturePoint(self.launcher, self.point.value)
 
     def launch(self):
