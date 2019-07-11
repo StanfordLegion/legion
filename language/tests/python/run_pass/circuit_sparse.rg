@@ -14,7 +14,7 @@
 
 -- runs-with:
 -- [
---   ["-ll:cpu", "4", "-ll:py", "1", "-ll:pyimport", "circuit_sparse"],
+--   ["-ll:cpu", "4", "-ll:py", "1", "-ll:pyimport", "circuit_sparse"]
 -- ]
 
 import "regent"
