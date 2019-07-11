@@ -1611,7 +1611,7 @@ class _TaskLauncher(object):
                 arg_name = '__arg_%s' % i
                 arg_value = arg
                 if hasattr(arg, 'handle'):
-                    arg_value = arg.raw_value()
+                    arg_value = arg.handle[0]
                 setattr(task_args_buffer, arg_name, arg_value)
             for i, arg in enumerate(args):
                 if isinstance(arg, Region):
@@ -1950,7 +1950,7 @@ def index_launch(domain, task, *args):
     if isinstance(domain, Domain):
         domain = domain
     elif isinstance(domain, Ispace):
-        domain = ispace.domain
+        domain = domain.domain
     else:
         domain = Domain.create(domain)
     launcher = _IndexLauncher(task=task, domain=domain)
@@ -1970,7 +1970,7 @@ class IndexLaunch(object):
         if isinstance(domain, Domain):
             self.domain = domain
         elif isinstance(domain, Ispace):
-            self.domain = ispace.domain
+            self.domain = domain.domain
         else:
             self.domain = Domain.create(domain)
         self.launcher = None
