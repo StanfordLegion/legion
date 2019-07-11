@@ -517,13 +517,20 @@ uint16 = Type(numpy.uint16, 'uint16_t')
 uint32 = Type(numpy.uint32, 'uint32_t')
 uint64 = Type(numpy.uint64, 'uint64_t')
 
+_rect_types = []
 for dim in xrange(1, _max_dim + 1):
     globals()["int{}d".format(dim)] = Type(
         numpy.dtype([('x', numpy.int64, dim)], align=True),
         'legion_point_{}d_t'.format(dim))
-    globals()["rect{}d".format(dim)] = Type(
+    rtype = Type(
         numpy.dtype([('lo', numpy.int64, dim), ('hi', numpy.int64, dim)], align=True),
         'legion_rect_{}d_t'.format(dim))
+    globals()["rect{}d".format(dim)] = rtype
+    _rect_types.append(rtype)
+_rect_types = frozenset(_rect_types)
+
+def is_rect_type(t):
+    return t in _rect_types
 
 _redop_ids = {}
 def _fill_redop_ids():
@@ -1071,7 +1078,11 @@ class Ipartition(object):
         assert isinstance(part_kind, Disjointness)
         color_space = Ispace.coerce(color_space)
         parent = projection.parent
-        handle = c.legion_index_partition_create_by_image(
+        if is_rect_type(projection.parent.fspace.field_types[field]):
+            create_by_image = c.legion_index_partition_create_by_image_range
+        else:
+            create_by_image = c.legion_index_partition_create_by_image
+        handle = create_by_image(
             _my.ctx.runtime, _my.ctx.context,
             ispace.raw_value(), projection.raw_value(),
             parent.parent.raw_value() if parent.parent is not None else parent.raw_value(),

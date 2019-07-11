@@ -102,6 +102,7 @@ legion_python_cxx_tests = [
     ['bindings/python/legion_python', ['examples/partition.py', '-ll:py', '1', '-ll:cpu', '0']],
     ['bindings/python/legion_python', ['examples/partition_by_field.py', '-ll:py', '1', '-ll:cpu', '0']],
     ['bindings/python/legion_python', ['examples/partition_by_image.py', '-ll:py', '1', '-ll:cpu', '0']],
+    ['bindings/python/legion_python', ['examples/partition_by_image_range.py', '-ll:py', '1', '-ll:cpu', '0']],
     ['bindings/python/legion_python', ['examples/partition_by_restriction.py', '-ll:py', '1', '-ll:cpu', '0']],
     ['bindings/python/legion_python', ['examples/reduction.py', '-ll:py', '1', '-ll:cpu', '0']],
     ['bindings/python/legion_python', ['examples/region.py', '-ll:py', '1', '-ll:cpu', '0']],
