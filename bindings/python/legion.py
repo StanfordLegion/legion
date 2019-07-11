@@ -1927,10 +1927,9 @@ class SymbolicIndexAccess(SymbolicExpr):
         if self.is_region():
             return self.value.parent.fspace
         assert False
-    @property
-    def handle(self):
+    def raw_value(self):
         if self.is_region():
-            return self.value.handle
+            return self.value.raw_value()
         assert False
 
 class SymbolicLoopIndex(SymbolicExpr):
