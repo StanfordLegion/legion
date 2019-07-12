@@ -439,14 +439,62 @@ function base.find_task_privileges(region_type, task)
   local field_paths, field_types = base.types.flatten_struct_fields(
     region_type:fspace())
 
-  local privilege_index = data.newmap()
-  local privilege_next_index = 1
+  local fields_by_mode = data.new_recursive_map(1)
+  local field_type_by_field = data.newmap()
   for i, field_path in ipairs(field_paths) do
     local field_type = field_types[i]
     local privilege, coherence, flag = find_field_privilege(
       privileges, coherence_modes, flags, region_type, field_path, field_type)
     local mode = data.newtuple(privilege, coherence, flag)
     if privilege ~= "none" then
+      fields_by_mode[mode][field_path] = true
+      field_type_by_field[field_path] = field_type
+    end
+  end
+
+  -- Sort by mode so we get a stable ordering of the privilege groups.
+  local privilege_order = {reads = 1, reads_writes = 2}
+  local coherence_order = {exclusive = 1, atomic = 2, simultaneous = 3, relaxed = 4}
+
+  local modes = terralib.newlist()
+  for _, mode in fields_by_mode:keys() do
+    modes:insert(mode)
+  end
+  modes:sort(
+    function(x, y)
+      local px = privilege_order[x[1]]
+      local py = privilege_order[y[1]]
+      if px and py then
+        return px < py
+      elseif px then
+        return true
+      elseif py then
+        return false
+      elseif x[1] ~= y[1] then
+        return x[1] < y[1]
+      end
+
+      local cx = coherence_order[x[2]]
+      local cy = coherence_order[y[2]]
+      if cx and cy then
+        return cx < cy
+      elseif cx then
+        return true
+      elseif cy then
+        return false
+      elseif x[2] ~= y[2] then
+        return x[2] < y[2]
+      end
+
+      return x[3] < y[3]
+    end)
+
+  local privilege_index = data.newmap()
+  local privilege_next_index = 1
+  for mode, fields in fields_by_mode:items() do
+    local privilege, coherence, flag = unpack(mode)
+    for _, field_path in fields:keys() do
+      local field_type = field_type_by_field[field_path]
       local index = privilege_index[mode]
       if not index then
         index = privilege_next_index
