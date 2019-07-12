@@ -45,15 +45,21 @@ def main():
     for i, point in enumerate(legion.Domain.create([3, 3])):
         assert futures[i].get() == point
 
-    # Again (in 2 dimensions), with a more explicit syntax.
+    R = legion.Region.create([4, 4], {'x': legion.float64})
+    P = legion.Partition.create_equal(R, [2, 2])
+    legion.fill(R, 'x', 0)
+
+    for i in legion.IndexLaunch([2, 2]):
+        hello(R, i)
+
+    for i in legion.IndexLaunch([2, 2]):
+        hello(P[i], i)
+
+    # Again, with a more explicit syntax.
     # ID is the name of the (implicit) loop variable.
     futures = legion.index_launch([3, 3], hi, ID)
     for point in legion.Domain.create([3, 3]):
         assert futures[point].get() == point
-
-    R = legion.Region.create([4, 4], {'x': legion.float64})
-    P = legion.Partition.create_equal(R, [2, 2])
-    legion.fill(R, 'x', 0)
 
     legion.index_launch([2, 2], hello, R, ID)
     legion.index_launch([2, 2], hello, P[ID], ID)

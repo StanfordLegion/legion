@@ -263,14 +263,6 @@ class DomainPoint(object):
         return DomainPoint(handle, take_ownership=True)
 
     @staticmethod
-    def create_from_index(value):
-        assert(isinstance(value, _IndexValue))
-        handle = ffi.new('legion_domain_point_t *')
-        handle[0].dim = 1
-        handle[0].point_data[0] = int(value)
-        return DomainPoint(handle, take_ownership=True)
-
-    @staticmethod
     def coerce(value):
         if not isinstance(value, DomainPoint):
             return DomainPoint.create(value)
@@ -489,8 +481,17 @@ class FutureMap(object):
     def wait_all_results(self):
         c.legion_future_map_wait_all_results(self.handle)
 
+_type_cache = {}
+
 class Type(object):
     __slots__ = ['numpy_type', 'cffi_type', 'size']
+
+    def __new__(cls, numpy_type, cffi_type):
+        if cffi_type in _type_cache:
+            return _type_cache[cffi_type]
+        obj = super(Type, cls).__new__(cls)
+        _type_cache[cffi_type] = obj
+        return obj
 
     def __init__(self, numpy_type, cffi_type):
         assert (numpy_type is None) == (cffi_type is None)
@@ -517,6 +518,21 @@ uint16 = Type(numpy.uint16, 'uint16_t')
 uint32 = Type(numpy.uint32, 'uint32_t')
 uint64 = Type(numpy.uint64, 'uint64_t')
 
+_rect_types = []
+for dim in xrange(1, _max_dim + 1):
+    globals()["int{}d".format(dim)] = Type(
+        numpy.dtype([('x', numpy.int64, dim)], align=True),
+        'legion_point_{}d_t'.format(dim))
+    rtype = Type(
+        numpy.dtype([('lo', numpy.int64, dim), ('hi', numpy.int64, dim)], align=True),
+        'legion_rect_{}d_t'.format(dim))
+    globals()["rect{}d".format(dim)] = rtype
+    _rect_types.append(rtype)
+_rect_types = frozenset(_rect_types)
+
+def is_rect_type(t):
+    return t in _rect_types
+
 _redop_ids = {}
 def _fill_redop_ids():
     operators = ['+', '-', '*', '/', 'max', 'min']
@@ -530,34 +546,63 @@ def _fill_redop_ids():
 _fill_redop_ids()
 
 class Privilege(object):
-    __slots__ = ['read', 'write', 'discard', 'reduce']
+    __slots__ = ['read', 'write', 'discard', 'reduce', 'fields']
 
-    def __init__(self, read=False, write=False, discard=False, reduce=False):
+    def __init__(self, read=False, write=False, discard=False, reduce=False, fields=None):
         self.read = read
         self.write = write
         self.discard = discard
         self.reduce = reduce
+        self.fields = fields
+
+        if self.fields is not None:
+            assert len(self.fields) > 0
+
+        if self.discard:
+            assert self.write
 
     def _fields(self):
-        return (self.read, self.write, self.discard, self.reduce)
+        return (self.read, self.write, self.discard, self.reduce, self.fields)
 
     def __eq__(self, other):
-        return isinstance(other, Privilege) and self._fields() == other._fields()
+        if not isinstance(other, Privilege):
+            return NotImplemented
+        return self._fields() == other._fields()
 
-    def __cmp__(self, other):
-        assert isinstance(other, Privilege)
-        return self._fields().__cmp__(other._fields())
+    def __ne__(self, other):
+        return not (self == other)
 
     def __hash__(self):
         return hash(self._fields())
 
-    def __call__(self, fields):
-        return PrivilegeFields(self, fields)
+    def __call__(self, *fields):
+        assert self.fields is None
+        return Privilege(self.read, self.write, self.discard, self.reduce, fields)
+
+    def __add__(self, other):
+        return PrivilegeComposite([self, other])
+
+    def __repr__(self):
+        return self.__str__()
+
+    def __str__(self):
+        if self.read:
+            priv = 'R'
+        elif self.write:
+            priv = 'RW'
+        elif self.discard:
+            priv = 'WD'
+        elif self.reduce:
+            priv = 'Reduce(%s)' % self.reduce
+        else:
+            priv = 'N'
+        if self.fields is not None:
+            return '%s(%s)' % (priv, ', '.join(self.fields))
+        return priv
 
     def _legion_privilege(self):
         bits = 0
         if self.discard:
-            assert self.write
             bits |= 2 # WRITE_DISCARD
         elif self.reduce:
             assert False
@@ -566,15 +611,118 @@ class Privilege(object):
             elif self.read: bits = 1 # READ_ONLY
         return bits
 
+    def _legion_grouped_privileges(self, fspace):
+        if self.fields:
+            assert set(self.fields) <= set(fspace.keys())
+        fields = fspace.keys() if self.fields is None else self.fields
+        if self.reduce:
+            return [
+                (self, None, self._legion_redop_id(fspace.field_types[field_name]), (field_name,))
+                for field_name in fields]
+        else:
+            return [(self, self._legion_privilege(), None, fields)]
+
     def _legion_redop_id(self, field_type):
         return _redop_ids[self.reduce][field_type]
 
-class PrivilegeFields(Privilege):
-    __slots__ = ['read', 'write', 'discard', 'fields']
+class PrivilegeComposite(object):
+    __slots__ = ['privileges']
 
-    def __init__(self, privilege, fields):
-        super(PrivilegeFields, self).__init__(privilege.read, privilege.write, privilege.discard, privilege.reduce)
-        self.fields = fields
+    def __init__(self, privileges):
+        self.privileges = self.normalize(privileges)
+
+    @staticmethod
+    def normalize(privileges):
+        fields = collections.OrderedDict()
+        read_set = set()
+        write_set = set()
+        discard_set = set()
+        reduce_sets = collections.OrderedDict()
+
+        for privilege in privileges:
+            privilege_fields = privilege.fields if privilege.fields is not None else [None]
+            fields.update([(x, True) for x in privilege_fields])
+            if privilege.read:
+                read_set.update(privilege_fields)
+            if privilege.write:
+                write_set.update(privilege_fields)
+            if privilege.discard:
+                discard_set.update(privilege_fields)
+            if privilege.reduce:
+                if privilege.reduce not in reduce_sets:
+                    reduce_sets[privilege.reduce] = set()
+                reduce_sets[privilege.reduce].update(privilege_fields)
+
+        # Reductions combine with read/reduce privileges to upgrade to read-write.
+        for op, reduce_set in reduce_sets.items():
+            write_set.update(reduce_set & read_set)
+            if None in read_set:
+                write_set.update(reduce_set)
+            for op2, reduce_set2 in reduce_sets.items():
+                if op != op2:
+                    write_set.update(reduce_set & reduce_set2)
+                    if None in reduce_set2:
+                        write_set.update(reduce_set)
+
+        # Read/write/discard shadow reduction privileges.
+        if None in read_set or None in write_set or None in discard_set:
+            reduce_sets = collections.OrderedDict()
+        else:
+            for reduce_set in reduce_sets.values():
+                reduce_set.difference_update(read_set, write_set, discard_set)
+
+        # Discard shadows read/write.
+        if None in discard_set:
+            read_set = set()
+            write_set = set()
+            discard_set = set([None])
+        else:
+            read_set -= discard_set
+            write_set -= discard_set
+
+        # Write shadows read.
+        if None in write_set:
+            read_set = set()
+            write_set = set([None])
+        else:
+            read_set -= write_set
+
+        def filter_set(ctor, field_set):
+            if None in field_set:
+                return ctor
+            return ctor(*filter(lambda x: x in field_set, fields.keys()))
+
+        return tuple(
+            ([filter_set(R, read_set)] if len(read_set) > 0 else []) +
+            ([filter_set(RW, write_set)] if len(write_set) > 0 else []) +
+            ([filter_set(WD, discard_set)] if len(discard_set) > 0 else []) +
+            [filter_set(Reduce(op), reduce_set) for op, reduce_set in reduce_sets.items()])
+
+    def __eq__(self, other):
+        if len(self.privileges) == 1:
+            return other == self.privileges[0]
+
+        if not isinstance(other, PrivilegeComposite):
+            return NotImplemented
+        return self.privileges == other.privileges
+
+    def __ne__(self, other):
+        return not (self == other)
+
+    def __hash__(self):
+        return hash(self.privileges)
+
+    def __add__(self, other):
+        return PrivilegeComposite(self.privileges + (other,))
+
+    def __repr__(self):
+        return self.__str__()
+
+    def __str__(self):
+        return ' + '.join(map(str, self.privileges))
+
+    def _legion_grouped_privileges(self, fspace):
+        return [x for privilege in self.privileges for x in privilege._legion_grouped_privileges(fspace)]
 
 # Pre-defined Privileges
 N = Privilege()
@@ -583,8 +731,8 @@ RO = Privilege(read=True)
 RW = Privilege(read=True, write=True)
 WD = Privilege(write=True, discard=True)
 
-def Reduce(operator):
-    return Privilege(reduce=operator)
+def Reduce(operator, *fields):
+    return Privilege(reduce=operator, fields=fields if len(fields) > 0 else None)
 
 class Disjointness(object):
     __slots__ = ['kind', 'value']
@@ -695,6 +843,9 @@ class Ispace(object):
         # Clear out references. Technically unnecessary but avoids abuse.
         del self.handle
 
+    def raw_value(self):
+        return self.handle[0]
+
 # Hack: Can't pickle static methods.
 def _Fspace_unpickle(fspace_id, field_ids, field_types, owned):
     handle = ffi.new('legion_field_space_t *')
@@ -770,6 +921,9 @@ class Fspace(object):
         del self.field_ids
         del self.field_types
 
+    def raw_value(self):
+        return self.handle[0]
+
     def keys(self):
         return self.field_ids.keys()
 
@@ -828,7 +982,7 @@ class Region(object):
         ispace = Ispace.coerce(ispace)
         fspace = Fspace.coerce(fspace)
         handle = c.legion_logical_region_create(
-            _my.ctx.runtime, _my.ctx.context, ispace.handle[0], fspace.handle[0], False)
+            _my.ctx.runtime, _my.ctx.context, ispace.raw_value(), fspace.raw_value(), False)
         return Region(handle, ispace, fspace, owned=True)
 
     def destroy(self):
@@ -845,6 +999,9 @@ class Region(object):
         del self.handle
         del self.ispace
         del self.fspace
+
+    def raw_value(self):
+        return self.handle[0]
 
     def keys(self):
         return self.fspace.keys()
@@ -901,9 +1058,13 @@ class RegionField(numpy.ndarray):
         accessor = RegionField._get_accessor(region, field_name)
         initializer = RegionField._get_array_initializer(region, field_name, accessor)
         if initializer is None:
-            obj = numpy.empty(tuple(0 for i in xrange(region.ispace.dim))).view(cls)
+            obj = numpy.empty(tuple(0 for i in xrange(region.ispace.dim))).view(
+                dtype=region.fspace.field_types[field_name].numpy_type,
+                type=cls)
         else:
-            obj = numpy.asarray(initializer).view(cls)
+            obj = numpy.asarray(initializer).view(
+                dtype=region.fspace.field_types[field_name].numpy_type,
+                type=cls)
 
         obj.accessor = accessor
         return obj
@@ -978,7 +1139,7 @@ def fill(region, field_name, value):
     raw_value = ffi.new('{} *'.format(field_type.cffi_type), value)
     c.legion_runtime_fill_field(
         _my.ctx.runtime, _my.ctx.context,
-        region.handle[0], region.parent.handle[0] if region.parent is not None else region.handle[0],
+        region.raw_value(), region.parent.raw_value() if region.parent is not None else region.raw_value(),
         field_id, raw_value, field_type.size,
         c.legion_predicate_true())
 
@@ -986,8 +1147,8 @@ def fill(region, field_name, value):
 def _Ipartition_unpickle(id, parent, color_space):
     handle = ffi.new('legion_index_partition_t *')
     handle[0].id = id
-    handle[0].tid = parent.handle[0].tid
-    handle[0].type_tag = parent.handle[0].type_tag
+    handle[0].tid = parent.raw_value().tid
+    handle[0].type_tag = parent.raw_value().type_tag
 
     return Ipartition(handle[0], parent, color_space)
 
@@ -1022,26 +1183,97 @@ class Ipartition(object):
             yield self[point]
 
     @staticmethod
-    def create_equal(parent, color_space, granularity=1, color=AUTO_GENERATE_ID):
-        assert isinstance(parent, Ispace)
+    def create_equal(ispace, color_space, granularity=1, color=AUTO_GENERATE_ID):
+        assert isinstance(ispace, Ispace)
         color_space = Ispace.coerce(color_space)
         handle = c.legion_index_partition_create_equal(
             _my.ctx.runtime, _my.ctx.context,
-            parent.handle[0], color_space.handle[0], granularity, color)
-        return Ipartition(handle, parent, color_space)
+            ispace.raw_value(), color_space.raw_value(), granularity, color)
+        return Ipartition(handle, ispace, color_space)
 
     @staticmethod
-    def create_by_restriction(parent, color_space, transform, extent,
+    def create_by_field(region, field, color_space, color=AUTO_GENERATE_ID):
+        assert isinstance(region, Region)
+        color_space = Ispace.coerce(color_space)
+        handle = c.legion_index_partition_create_by_field(
+            _my.ctx.runtime, _my.ctx.context,
+            region.raw_value(),
+            region.parent.raw_value() if region.parent is not None else region.raw_value(),
+            region.fspace.field_ids[field],
+            color_space.raw_value(), color)
+        return Ipartition(handle, region.ispace, color_space)
+
+    @staticmethod
+    def create_by_image(ispace, projection, field, color_space,
+                        part_kind=compute, color=AUTO_GENERATE_ID):
+        assert isinstance(ispace, Ispace)
+        assert isinstance(projection, Partition)
+        assert isinstance(part_kind, Disjointness)
+        color_space = Ispace.coerce(color_space)
+        parent = projection.parent
+        if is_rect_type(parent.fspace.field_types[field]):
+            create_by_image = c.legion_index_partition_create_by_image_range
+        else:
+            create_by_image = c.legion_index_partition_create_by_image
+        handle = create_by_image(
+            _my.ctx.runtime, _my.ctx.context,
+            ispace.raw_value(), projection.raw_value(),
+            parent.parent.raw_value() if parent.parent is not None else parent.raw_value(),
+            parent.fspace.field_ids[field],
+            color_space.raw_value(), part_kind.value, color)
+        return Ipartition(handle, parent.ispace, color_space)
+
+    @staticmethod
+    def create_by_preimage(projection, region, field, color_space,
+                           part_kind=compute, color=AUTO_GENERATE_ID):
+        assert isinstance(projection, Ipartition)
+        assert isinstance(region, Region)
+        assert isinstance(part_kind, Disjointness)
+        color_space = Ispace.coerce(color_space)
+        if is_rect_type(region.fspace.field_types[field]):
+            create_by_preimage = c.legion_index_partition_create_by_preimage_range
+        else:
+            create_by_preimage = c.legion_index_partition_create_by_preimage
+        handle = create_by_preimage(
+            _my.ctx.runtime, _my.ctx.context,
+            projection.raw_value(), region.raw_value(),
+            region.parent.raw_value() if region.parent is not None else region.raw_value(),
+            region.fspace.field_ids[field],
+            color_space.raw_value(), part_kind.value, color)
+        return Ipartition(handle, region.ispace, color_space)
+
+    @staticmethod
+    def create_by_restriction(ispace, color_space, transform, extent,
                               part_kind=compute, color=AUTO_GENERATE_ID):
-        assert isinstance(parent, Ispace)
+        assert isinstance(ispace, Ispace)
         assert isinstance(part_kind, Disjointness)
         color_space = Ispace.coerce(color_space)
         transform = DomainTransform.coerce(transform)
         extent = Domain.coerce(extent)
         handle = c.legion_index_partition_create_by_restriction(
             _my.ctx.runtime, _my.ctx.context,
-            parent.handle[0], color_space.handle[0], transform.raw_value(), extent.raw_value(), part_kind.value, color)
-        return Ipartition(handle, parent, color_space)
+            ispace.raw_value(), color_space.raw_value(), transform.raw_value(), extent.raw_value(), part_kind.value, color)
+        return Ipartition(handle, ispace, color_space)
+
+    @staticmethod
+    def create_pending(ispace, color_space,
+                       part_kind=compute, color=AUTO_GENERATE_ID):
+        assert isinstance(ispace, Ispace)
+        assert isinstance(part_kind, Disjointness)
+        color_space = Ispace.coerce(color_space)
+        handle = c.legion_index_partition_create_pending_partition(
+            _my.ctx.runtime, _my.ctx.context,
+            ispace.raw_value(), color_space.raw_value(), part_kind.value, color)
+        return Ipartition(handle, ispace, color_space)
+
+    # The following methods are for pending partitions only:
+    def create_union(self, color, ispaces):
+        color = DomainPoint.coerce(color)
+
+        handles = ffi.new('legion_index_space_t[]', [ispace.raw_value() for ispace in ispaces])
+        c.legion_index_partition_create_index_space_union_spaces(
+            _my.ctx.runtime, _my.ctx.context,
+            self.handle[0], color.raw_value(), handles, len(ispaces))
 
     def destroy(self):
         # This is not something you want to have happen in a
@@ -1053,12 +1285,15 @@ class Ipartition(object):
         del self.parent
         del self.color_space
 
+    def raw_value(self):
+        return self.handle[0]
+
 # Hack: Can't pickle static methods.
 def _Partition_unpickle(parent, ipartition):
     handle = ffi.new('legion_logical_partition_t *')
-    handle[0].tree_id = parent.handle[0].tree_id
-    handle[0].index_partition = ipartition.handle[0]
-    handle[0].field_space = parent.fspace.handle[0]
+    handle[0].tree_id = parent.raw_value().tree_id
+    handle[0].index_partition = ipartition.raw_value()
+    handle[0].field_space = parent.fspace.raw_value()
 
     return Partition(handle[0], parent, ipartition)
 
@@ -1104,22 +1339,56 @@ class Partition(object):
         assert isinstance(parent, Region)
         assert isinstance(ipartition, Ipartition)
         handle = c.legion_logical_partition_create(
-            _my.ctx.runtime, _my.ctx.context, parent.handle[0], ipartition.handle[0])
+            _my.ctx.runtime, _my.ctx.context, parent.raw_value(), ipartition.raw_value())
         return Partition(handle, parent, ipartition)
 
     @staticmethod
-    def create_equal(parent, color_space, granularity=1, color=AUTO_GENERATE_ID):
-        assert isinstance(parent, Region)
-        ipartition = Ipartition.create_equal(parent.ispace, color_space, granularity, color)
-        return Partition.create(parent, ipartition)
+    def create_equal(region, color_space, granularity=1, color=AUTO_GENERATE_ID):
+        assert isinstance(region, Region)
+        ipartition = Ipartition.create_equal(region.ispace, color_space, granularity, color)
+        return Partition.create(region, ipartition)
 
     @staticmethod
-    def create_by_restriction(parent, color_space, transform, extent,
+    def create_by_field(region, field, color_space, color=AUTO_GENERATE_ID):
+        assert isinstance(region, Region)
+        ipartition = Ipartition.create_by_field(
+            region, field, color_space, color)
+        return Partition.create(region, ipartition)
+
+    @staticmethod
+    def create_by_image(region, projection, field, color_space,
+                        part_kind=compute, color=AUTO_GENERATE_ID):
+        assert isinstance(region, Region)
+        ipartition = Ipartition.create_by_image(
+            region.ispace, projection, field, color_space, part_kind, color)
+        return Partition.create(region, ipartition)
+
+    @staticmethod
+    def create_by_preimage(projection, region, field, color_space,
+                           part_kind=compute, color=AUTO_GENERATE_ID):
+        assert isinstance(projection, Partition)
+        ipartition = Ipartition.create_by_preimage(
+            projection.ipartition, region, field, color_space, part_kind, color)
+        return Partition.create(region, ipartition)
+
+    @staticmethod
+    def create_by_restriction(region, color_space, transform, extent,
                               part_kind=compute, color=AUTO_GENERATE_ID):
-        assert isinstance(parent, Region)
+        assert isinstance(region, Region)
         ipartition = Ipartition.create_by_restriction(
-            parent.ispace, color_space, transform, extent, part_kind, color)
-        return Partition.create(parent, ipartition)
+            region.ispace, color_space, transform, extent, part_kind, color)
+        return Partition.create(region, ipartition)
+
+    @staticmethod
+    def create_pending(region, color_space, part_kind=compute, color=AUTO_GENERATE_ID):
+        assert isinstance(region, Region)
+        ipartition = Ipartition.create_pending(
+            region.ispace, color_space, part_kind, color)
+        return Partition.create(region, ipartition)
+
+    def create_union(self, color, regions):
+        ispaces = [region.ispace for region in regions]
+        self.ipartition.create_union(color, ispaces)
 
     def destroy(self):
         # This is not something you want to have happen in a
@@ -1130,6 +1399,9 @@ class Partition(object):
         del self.handle
         del self.parent
         del self.ipartition
+
+    def raw_value(self):
+        return self.handle[0]
 
 def define_regent_argument_struct(task_id, argument_types, privileges, return_type, arguments):
     if argument_types is None:
@@ -1161,8 +1433,6 @@ class ExternTask(object):
     def __init__(self, task_id, argument_types=None, privileges=None,
                  return_type=void, calling_convention=None):
         self.argument_types = argument_types
-        if privileges is not None:
-            privileges = [(x if x is not None else N) for x in privileges]
         self.privileges = privileges
         self.return_type = return_type
         self.calling_convention = calling_convention
@@ -1227,8 +1497,6 @@ class Task (object):
                  leaf=False, inner=False, idempotent=False, replicable=False,
                  register=True, task_id=None, top_level=False):
         self.body = body
-        if privileges is not None:
-            privileges = [(x if x is not None else N) for x in privileges]
         self.privileges = privileges
         self.return_type = return_type
         self.leaf = bool(leaf)
@@ -1316,19 +1584,8 @@ class Task (object):
             for i, arg in zip(range(len(args)), args):
                 if isinstance(arg, Region):
                     assert i < len(self.privileges)
-                    priv = self.privileges[i]
-
-                    fields = priv.fields if hasattr(priv, 'fields') else list(arg.fspace.field_ids.keys())
-                    assert set(fields) <= set(arg.fspace.field_ids.keys())
-
-                    if priv.reduce:
-                        for field in fields:
-                            assert req < num_regions[0]
-                            instance = raw_regions[0][req]
-                            req += 1
-
-                            arg._set_instance(field, instance, priv)
-                    else:
+                    groups = self.privileges[i]._legion_grouped_privileges(arg.fspace)
+                    for priv, _, _, fields in groups:
                         assert req < num_regions[0]
                         instance = raw_regions[0][req]
                         req += 1
@@ -1515,53 +1772,41 @@ class _TaskLauncher(object):
             if isinstance(arg, Region) or (isinstance(arg, SymbolicExpr) and arg.is_region()):
                 if self.task.privileges is None or i >= len(self.task.privileges):
                     raise Exception('Privileges are required on all Region arguments')
-                priv = self.task.privileges[i]
-                fields = priv.fields if hasattr(priv, 'fields') else list(arg.fspace.field_ids.keys())
-                if hasattr(priv, 'fields'):
-                    assert set(fields) <= set(arg.fspace.field_ids.keys())
+                groups = self.task.privileges[i]._legion_grouped_privileges(arg.fspace)
                 if isinstance(arg, Region):
-                    if priv.reduce:
-                        for field in fields:
+                    parent = arg.parent if arg.parent is not None else arg
+                    for _, priv, redop, fields in groups:
+                        if redop is None:
+                            req = add_region_normal(
+                                launcher, arg.raw_value(),
+                                priv, 0, # EXCLUSIVE
+                                parent.raw_value(), 0, False)
+                        else:
                             req = add_region_reduction(
-                                launcher, arg.handle[0],
-                                priv._legion_redop_id(arg.fspace.field_types[field]),
-                                0, # EXCLUSIVE
-                                arg.parent.handle[0] if arg.parent is not None else arg.handle[0],
-                                0, False)
-                            add_field(
-                                launcher, req, arg.fspace.field_ids[field], True)
-                    else:
-                        req = add_region_normal(
-                            launcher, arg.handle[0],
-                            priv._legion_privilege(),
-                            0, # EXCLUSIVE
-                            arg.parent.handle[0] if arg.parent is not None else arg.handle[0],
-                            0, False)
+                                launcher, arg.raw_value(),
+                                redop, 0, # EXCLUSIVE
+                                parent.raw_value(), 0, False)
                         for field in fields:
                             add_field(
                                 launcher, req, arg.fspace.field_ids[field], True)
                 elif isinstance(arg, SymbolicExpr):
                     # FIXME: Support non-trivial projection functors
-                    assert isinstance(arg, SymbolicIndexAccess) and isinstance(arg.index, SymbolicLoopIndex)
+                    assert isinstance(arg, SymbolicIndexAccess) and (isinstance(arg.index, SymbolicLoopIndex) or isinstance(arg.index, ConcreteLoopIndex))
                     proj_id = 0
 
-                    if priv.reduce:
-                        for field in fields:
+                    parent = arg.parent if arg.parent is not None else arg
+                    parent = parent.parent if parent.parent is not None else parent
+                    for _, priv, redop, fields in groups:
+                        if redop is None:
+                            req = add_partition_normal(
+                                launcher, arg.raw_value(), proj_id,
+                                priv, 0, # EXCLUSIVE
+                                parent.raw_value(), 0, False)
+                        else:
                             req = add_partition_reduction(
-                                launcher, arg.handle[0], proj_id,
-                                priv._legion_redop_id(arg.fspace.field_types[field]),
-                                0, # EXCLUSIVE
-                                arg.parent.handle[0] if arg.parent is not None else arg.handle[0],
-                                0, False)
-                            add_field(
-                                launcher, req, arg.fspace.field_ids[field], True)
-                    else:
-                        req = add_partition_normal(
-                            launcher, arg.handle[0], proj_id,
-                            priv._legion_privilege(),
-                            0, # EXCLUSIVE
-                            arg.parent.handle[0] if arg.parent is not None else arg.handle[0],
-                            0, False)
+                                launcher, arg.raw_value(), proj_id,
+                                redop, 0, # EXCLUSIVE
+                                parent.raw_value(), 0, False)
                         for field in fields:
                             add_field(
                                 launcher, req, arg.fspace.field_ids[field], True)
@@ -1576,8 +1821,8 @@ class _TaskLauncher(object):
 
         assert(isinstance(_my.ctx, Context))
 
-        args = self.preprocess_args(args)
         args, futures = self.gather_futures(args)
+        args = self.preprocess_args(args)
         task_args, task_args_root = self.encode_args(args)
 
         # Construct the task launcher.
@@ -1614,13 +1859,14 @@ class _TaskLauncher(object):
         return future
 
 class _IndexLauncher(_TaskLauncher):
-    __slots__ = ['task', 'domain', 'global_args', 'local_args', 'future_args', 'future_map']
+    __slots__ = ['task', 'domain', 'global_args', 'local_args', 'region_args', 'future_args', 'future_map']
 
     def __init__(self, task, domain):
         super(_IndexLauncher, self).__init__(task)
         self.domain = domain
         self.global_args = None
         self.local_args = c.legion_argument_map_create()
+        self.region_args = None
         self.future_args = []
         self.future_map = None
 
@@ -1631,7 +1877,7 @@ class _IndexLauncher(_TaskLauncher):
         raise Exception('IndexLaunch does not support spawn_task')
 
     def attach_local_args(self, index, *args):
-        task_args, _ = self.encode_args(args)
+        task_args, _ = self.encode_args(self.preprocess_args(args))
         c.legion_argument_map_set_point(
             self.local_args, index.value.raw_value(), task_args[0], False)
 
@@ -1639,13 +1885,16 @@ class _IndexLauncher(_TaskLauncher):
         assert self.global_args is None
         self.global_args = args
 
+    def attach_region_args(self, *args):
+        self.region_args = args
+
     def attach_future_args(self, *args):
         self.future_args = args
 
     def launch(self):
         # Encode global args (if any).
         if self.global_args is not None:
-            global_args, global_args_root = self.encode_args(self.global_args)
+            global_args, global_args_root = self.encode_args(self.preprocess_args(self.global_args))
         else:
             global_args = ffi.new('legion_task_argument_t *')
             global_args[0].args = ffi.NULL
@@ -1658,9 +1907,11 @@ class _IndexLauncher(_TaskLauncher):
             global_args[0], self.local_args,
             c.legion_predicate_true(), False, 0, 0)
 
-        # FIXME: Handle region requirements for non-global args.
+        assert (self.global_args is not None) != (self.region_args is not None)
         if self.global_args is not None:
             self.attach_region_requirements(launcher, self.global_args, True)
+        if self.region_args is not None:
+            self.attach_region_requirements(launcher, self.region_args, True)
 
         for arg in self.future_args:
             c.legion_index_launcher_add_future(launcher, arg.handle)
@@ -1725,21 +1976,6 @@ class TaskLaunch(object):
         launcher = _TaskLauncher(task=task)
         return launcher.spawn_task(*args, **kwargs)
 
-class _IndexValue(object):
-    __slots__ = ['value']
-    def __init__(self, value):
-        self.value = value
-    def __int__(self):
-        return self.value.__int__()
-    def __index__(self):
-        return self.value.__index__()
-    def __str__(self):
-        return str(self.value)
-    def __repr__(self):
-        return repr(self.value)
-    def _legion_preprocess_task_argument(self):
-        return self.value
-
 class _FuturePoint(object):
     __slots__ = ['launcher', 'point', 'future']
     def __init__(self, launcher, point):
@@ -1774,6 +2010,10 @@ class SymbolicIndexAccess(SymbolicExpr):
         return '%s[%s]' % (self.value, self.index)
     def __repr__(self):
         return '%s[%s]' % (self.value, self.index)
+    def _legion_preprocess_task_argument(self):
+        if isinstance(self.index, ConcreteLoopIndex):
+            return self.value[self.index._legion_preprocess_task_argument()]
+        return self
     def _legion_postprocess_task_argument(self, point):
         result = _postprocess(self.value, point)[_postprocess(self.index, point)]
         # FIXME: Clear parent field of regions being used as projection requirements
@@ -1792,10 +2032,9 @@ class SymbolicIndexAccess(SymbolicExpr):
         if self.is_region():
             return self.value.parent.fspace
         assert False
-    @property
-    def handle(self):
+    def raw_value(self):
         if self.is_region():
-            return self.value.handle
+            return self.value.raw_value()
         assert False
 
 class SymbolicLoopIndex(SymbolicExpr):
@@ -1811,19 +2050,32 @@ class SymbolicLoopIndex(SymbolicExpr):
 
 ID = SymbolicLoopIndex('ID')
 
+class ConcreteLoopIndex(SymbolicExpr):
+    __slots__ = ['value']
+    def __init__(self, value):
+        self.value = value
+    def __int__(self):
+        return self.value.__int__()
+    def __index__(self):
+        return self.value.__index__()
+    def __str__(self):
+        return str(self.value)
+    def __repr__(self):
+        return repr(self.value)
+    def _legion_preprocess_task_argument(self):
+        return self.value
+
 def index_launch(domain, task, *args):
     if isinstance(domain, Domain):
         domain = domain
     elif isinstance(domain, Ispace):
-        domain = ispace.domain
+        domain = domain.domain
     else:
         domain = Domain.create(domain)
     launcher = _IndexLauncher(task=task, domain=domain)
-    args = launcher.preprocess_args(args)
     args, futures = launcher.gather_futures(args)
     launcher.attach_global_args(*args)
     launcher.attach_future_args(*futures)
-    # TODO: attach region args
     launcher.launch()
     return launcher.future_map
 
@@ -1835,7 +2087,7 @@ class IndexLaunch(object):
         if isinstance(domain, Domain):
             self.domain = domain
         elif isinstance(domain, Ispace):
-            self.domain = ispace.domain
+            self.domain = domain.domain
         else:
             self.domain = Domain.create(domain)
         self.launcher = None
@@ -1845,7 +2097,7 @@ class IndexLaunch(object):
 
     def __iter__(self):
         _my.ctx.begin_launch(self)
-        self.point = _IndexValue(None)
+        self.point = ConcreteLoopIndex(None)
         for i in self.domain:
             self.point.value = i
             yield self.point
@@ -1879,7 +2131,8 @@ class IndexLaunch(object):
         for arg, saved_arg in zip_longest(args, self.saved_args):
             # TODO: Add support for region arguments
             if isinstance(arg, Region) or isinstance(arg, RegionField):
-                raise Exception('TODO: Support region arguments to an IndexLaunch')
+                if arg != saved_arg:
+                    raise Exception('Region argument to IndexLaunch does not match previous value at this position')
             elif isinstance(arg, Future):
                 if arg != saved_arg:
                     raise Exception('Future argument to IndexLaunch does not match previous value at this position')
@@ -1887,11 +2140,10 @@ class IndexLaunch(object):
     def spawn_task(self, task, *args):
         self.ensure_launcher(task)
         self.check_compatibility(task, *args)
-        args = self.launcher.preprocess_args(args)
         args, futures = self.launcher.gather_futures(args)
         self.launcher.attach_local_args(self.point, *args)
+        self.launcher.attach_region_args(*args)
         self.launcher.attach_future_args(*futures)
-        # TODO: attach region args
         return _FuturePoint(self.launcher, self.point.value)
 
     def launch(self):

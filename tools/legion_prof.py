@@ -2410,7 +2410,7 @@ class State(object):
             self.task_kinds[task_id].name = name
 
     def log_variant(self, task_id, variant_id, name):
-        assert task_id in self.task_kinds
+        self.log_kind(task_id,name,0)
         task_kind = self.task_kinds[task_id]
         key = (task_id, variant_id)
         if key not in self.variants:
