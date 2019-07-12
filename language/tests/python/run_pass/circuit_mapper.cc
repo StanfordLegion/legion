@@ -52,8 +52,8 @@ public:
 private:
   // std::vector<Processor>& procs_list;
   // std::vector<Memory>& sysmems_list;
-  std::map<Memory, std::vector<Processor> >& sysmem_local_procs;
-  std::map<Processor, Memory>& proc_sysmems;
+  // std::map<Memory, std::vector<Processor> >& sysmem_local_procs;
+  // std::map<Processor, Memory>& proc_sysmems;
   // std::map<Processor, Memory>& proc_regmems;
 };
 
@@ -67,8 +67,8 @@ CircuitMapper::CircuitMapper(MapperRuntime *rt, Machine machine, Processor local
   : DefaultMapper(rt, machine, local, mapper_name),
     // procs_list(*_procs_list),
     // sysmems_list(*_sysmems_list),
-    sysmem_local_procs(*_sysmem_local_procs),
-    proc_sysmems(*_proc_sysmems)// ,
+    // sysmem_local_procs(*_sysmem_local_procs),
+    // proc_sysmems(*_proc_sysmems)// ,
     // proc_regmems(*_proc_regmems)
 {
 }
