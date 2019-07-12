@@ -151,8 +151,8 @@ def main():
     all_nodes = Region.create([num_circuit_nodes], node)
     all_wires = Region.create([num_circuit_wires], wire)
 
-    node_size = np.dtype(map(lambda (x, y): (x, y.numpy_type), node.field_types.items()), align=True).itemsize
-    wire_size = np.dtype(map(lambda (x, y): (x, y.numpy_type), wire.field_types.items()), align=True).itemsize
+    node_size = np.dtype(list(map(lambda x: (x[0], x[1].numpy_type), node.field_types.items())), align=True).itemsize
+    wire_size = np.dtype(list(map(lambda x: (x[0], x[1].numpy_type), wire.field_types.items())), align=True).itemsize
     print("Circuit memory usage:")
     print("  Nodes : %10d * %4d bytes = %12d bytes" % (num_circuit_nodes, node_size, num_circuit_nodes * node_size))
     print("  Wires : %10d * %4d bytes = %12d bytes" % (num_circuit_wires, wire_size, num_circuit_wires * wire_size))
