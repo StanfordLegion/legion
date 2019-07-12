@@ -1678,7 +1678,7 @@ terra create_colorings(runtime : c.legion_runtime_t,
 end
 create_colorings:compile()
 
-task test()
+task toplevel()
   c.printf("Running test (t=%.1f)...\n", c.legion_get_current_time_in_micros()/1.e6)
 
   var conf : config = read_config()
@@ -1791,9 +1791,6 @@ task test()
   -- write_output(conf, rz_all, rp_all, rs_all)
 end
 
-task toplevel()
-  test()
-end
 if os.getenv('SAVEOBJ') == '1' then
   local root_dir = arg[0]:match(".*/") or "./"
   local out_dir = (os.getenv('OBJNAME') and os.getenv('OBJNAME'):match('.*/')) or root_dir

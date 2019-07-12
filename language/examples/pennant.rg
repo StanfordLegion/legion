@@ -1360,7 +1360,7 @@ end
 
 terra unwrap(x : mesh_colorings) return x end
 
-task test()
+task toplevel()
   c.printf("Running test (t=%.1f)...\n", c.legion_get_current_time_in_micros()/1.e6)
 
   var conf : config = read_config()
@@ -1473,9 +1473,5 @@ task test()
   end
 
   -- write_output(conf, rz_all, rp_all, rs_all)
-end
-
-task toplevel()
-  test()
 end
 regentlib.start(toplevel, cpennant.register_mappers)
