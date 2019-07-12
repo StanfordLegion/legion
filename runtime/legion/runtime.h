@@ -3203,6 +3203,7 @@ namespace Legion {
                                     const char *task_name,
                                     bool control_replicable);
       static void set_top_level_task_id(TaskID top_id);
+      static void set_top_level_task_mapper_id(MapperID mapper_id);
       static void configure_MPI_interoperability(int rank);
       static void register_handshake(MPILegionHandshake &handshake);
       static const ReductionOp* get_reduction_op(ReductionOpID redop_id,
@@ -3272,6 +3273,7 @@ namespace Legion {
     public:
       // Static member variables
       static TaskID legion_main_id;
+      static MapperID legion_main_mapper_id;
       static std::vector<RegistrationCallbackFnptr> registration_callbacks;
       static bool runtime_initialized;
       static bool runtime_started;

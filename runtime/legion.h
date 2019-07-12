@@ -6995,6 +6995,14 @@ namespace Legion {
       static void set_top_level_task_id(TaskID top_id);
 
       /**
+       * Set the mapper ID for the runtime to use when starting the 
+       * top-level task. This can be called either before the runtime
+       * is started, or during the registration callback, but will
+       * have no effect after the top-level task is started.
+       */
+      static void set_top_level_task_mapper_id(MapperID mapper_id);
+
+      /**
        * Return the maximum number of dimensions that Legion was
        * configured to support in this build.
        * @return the maximum number of dimensions that Legion supports

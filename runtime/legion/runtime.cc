@@ -19305,6 +19305,7 @@ namespace Legion {
     }
 
     /*static*/ TaskID Runtime::legion_main_id = 0;
+    /*static*/ MapperID Runtime::legion_main_mapper_id = 0;
     /*static*/ bool Runtime::runtime_initialized = false;
     /*static*/ bool Runtime::runtime_started = false;
     /*static*/ bool Runtime::runtime_backgrounded = false;
@@ -19511,7 +19512,8 @@ namespace Legion {
         assert(proxy.exists());
 #endif
         top_context->set_executing_processor(proxy);
-        TaskLauncher launcher(legion_main_id, TaskArgument());
+        TaskLauncher launcher(legion_main_id, TaskArgument(),
+                              Predicate::TRUE_PRED, legion_main_mapper_id);
         // Mark that this task is the top-level task
         top_task->set_top_level();
         top_task->initialize_task(top_context, launcher, 
@@ -20103,6 +20105,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       legion_main_id = top_id;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void Runtime::set_top_level_task_mapper_id(MapperID mapper_id)
+    //--------------------------------------------------------------------------
+    {
+      legion_main_mapper_id = mapper_id;
     }
 
     //--------------------------------------------------------------------------
