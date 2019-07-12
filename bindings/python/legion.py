@@ -481,8 +481,17 @@ class FutureMap(object):
     def wait_all_results(self):
         c.legion_future_map_wait_all_results(self.handle)
 
+_type_cache = {}
+
 class Type(object):
     __slots__ = ['numpy_type', 'cffi_type', 'size']
+
+    def __new__(cls, numpy_type, cffi_type):
+        if cffi_type in _type_cache:
+            return _type_cache[cffi_type]
+        obj = super(Type, cls).__new__(cls)
+        _type_cache[cffi_type] = obj
+        return obj
 
     def __init__(self, numpy_type, cffi_type):
         assert (numpy_type is None) == (cffi_type is None)
