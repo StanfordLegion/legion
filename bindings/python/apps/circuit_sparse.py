@@ -19,9 +19,9 @@ from __future__ import absolute_import, division, print_function
 
 import argparse
 from collections import OrderedDict
-import os
 import math
 import numpy as np
+import os
 import subprocess
 
 import legion
