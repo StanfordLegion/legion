@@ -1,0 +1,1 @@
+../../../language/examples/stencil_common.rg

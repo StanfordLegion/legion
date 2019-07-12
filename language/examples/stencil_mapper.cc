@@ -94,18 +94,20 @@ void StencilMapper::default_policy_rank_processor_kinds(MapperContext ctx,
   const char* prefix = "shard_";
   if (strncmp(task_name, prefix, strlen(prefix)) == 0) {
     // Put shard tasks on IO processors.
-    ranking.resize(4);
+    ranking.resize(5);
     ranking[0] = Processor::TOC_PROC;
     ranking[1] = Processor::PROC_SET;
     ranking[2] = Processor::IO_PROC;
     ranking[3] = Processor::LOC_PROC;
+    ranking[4] = Processor::PY_PROC;
   } else {
 #endif
-    ranking.resize(4);
+    ranking.resize(5);
     ranking[0] = Processor::TOC_PROC;
     ranking[1] = Processor::PROC_SET;
     ranking[2] = Processor::LOC_PROC;
     ranking[3] = Processor::IO_PROC;
+    ranking[4] = Processor::PY_PROC;
 #if SPMD_SHARD_USE_IO_PROC
   }
 #endif
