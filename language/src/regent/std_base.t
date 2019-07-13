@@ -491,9 +491,9 @@ function base.find_task_privileges(region_type, task)
 
   local privilege_index = data.newmap()
   local privilege_next_index = 1
-  for mode, fields in fields_by_mode:items() do
+  for _, mode in ipairs(modes) do
     local privilege, coherence, flag = unpack(mode)
-    for _, field_path in fields:keys() do
+    for _, field_path in fields_by_mode[mode]:keys() do
       local field_type = field_type_by_field[field_path]
       local index = privilege_index[mode]
       if not index then
