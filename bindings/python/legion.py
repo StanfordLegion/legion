@@ -1932,7 +1932,7 @@ class _IndexLauncher(_TaskLauncher):
         c.legion_index_launcher_destroy(launcher)
 
         # Build future (map) of result.
-        self.future_map = FutureMap(result)
+        self.future_map = FutureMap(result, value_type=self.task.return_type)
         c.legion_future_map_destroy(result)
 
 class _MustEpochLauncher(object):
