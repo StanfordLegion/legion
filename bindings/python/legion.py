@@ -613,7 +613,10 @@ class Privilege(object):
 
     def _legion_grouped_privileges(self, fspace):
         if self.fields:
-            assert set(self.fields) <= set(fspace.keys())
+            if not set(self.fields) <= set(fspace.keys()):
+                raise Exception(
+                    'Privilege fields ({}) are not a subset of fspace fields ({})'.format(
+                        ' '.join(self.fields), ' '.join(fspace.keys())))
         fields = fspace.keys() if self.fields is None else self.fields
         if self.reduce:
             return [
