@@ -583,15 +583,15 @@ class Privilege(object):
         return PrivilegeComposite([self, other])
 
     def __repr__(self):
-        return self.__str__()
+        return str(self)
 
     def __str__(self):
-        if self.read:
-            priv = 'R'
+        if self.discard:
+            priv = 'WD'
         elif self.write:
             priv = 'RW'
-        elif self.discard:
-            priv = 'WD'
+        elif self.read:
+            priv = 'R'
         elif self.reduce:
             priv = 'Reduce(%s)' % self.reduce
         else:
@@ -716,7 +716,7 @@ class PrivilegeComposite(object):
         return PrivilegeComposite(self.privileges + (other,))
 
     def __repr__(self):
-        return self.__str__()
+        return str(self)
 
     def __str__(self):
         return ' + '.join(map(str, self.privileges))

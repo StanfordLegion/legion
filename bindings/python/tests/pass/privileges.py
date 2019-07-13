@@ -29,10 +29,20 @@ def main():
     assert N == N
     assert Reduce('+') == Reduce('+')
 
+    assert not (R == RW)
+    assert not (R == WD)
+    assert not (R == N)
+    assert not (R == Reduce('+'))
+
     assert R != RW
     assert R != WD
     assert R != N
     assert Reduce('+') != Reduce('*')
+
+    assert not (R != R)
+    assert not (RW != RW)
+    assert not (WD != WD)
+    assert not (N != N)
 
     assert R('x') == R('x')
     assert R('x') != R('y')
@@ -41,6 +51,8 @@ def main():
     assert R + R == R
     assert R + RW == RW
     assert R + WD == WD
+
+    assert not (R + RW == R)
 
     assert R('x') + R('y') == R('x', 'y')
     assert R('x') + R('y') != R('y', 'x')
@@ -56,6 +68,7 @@ def main():
 
     print(R('x'))
     print(R('x') + RW('y'))
+    print(RW('x') + RW('y'))
 
 if __name__ == '__legion_main__':
     main()
