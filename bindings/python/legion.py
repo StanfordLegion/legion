@@ -452,6 +452,9 @@ class Future(object):
             value_size = c.legion_future_get_untyped_size(self.handle)
             assert value_size == expected_size
             value = ffi.cast(ffi.getctype(self.value_type.cffi_type, '*'), value_ptr)[0]
+            # Hack: Use closure to keep self alive as long as the value is live.
+            if isinstance(value, ffi.CData):
+                return ffi.gc(value, lambda x: self)
             return value
 
     def get_buffer(self):
