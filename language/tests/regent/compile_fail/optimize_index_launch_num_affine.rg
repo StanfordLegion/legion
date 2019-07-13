@@ -14,7 +14,7 @@
 
 -- fails-with:
 -- optimize_index_launch_num_affine.rg:39: loop optimization failed: argument 1 interferes with itself
---     g(p[i * 2])
+--     g(p[i * 2 - i - i])
 --      ^
 
 import "regent"
@@ -36,7 +36,7 @@ task main()
 
   __demand(__index_launch)
   for i = 0, 2 do
-    g(p[i * 2])
+    g(p[i * 2 - i - i])
   end
 end
 regentlib.start(main)

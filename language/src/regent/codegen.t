@@ -2835,16 +2835,16 @@ local function strip_casts(node)
   return node
 end
 
-local function make_partition_projection_functor(cx, expr, loop_index, color_space)
-  -- We assume that there's only one variable, and that it's the loop index.
-
+local function make_partition_projection_functor(cx, expr, loop_index, color_space,
+                                                 free_vars_setup, requirement)
   assert(expr:is(ast.typed.expr.IndexAccess))
 
   -- Strip the index for the purpose of checking if this is the
   -- identity projection functor.
   local stripped_index = strip_casts(expr.index)
-  if stripped_index:is(ast.typed.expr.ID) then
-    assert(stripped_index.value == loop_index)
+  if stripped_index:is(ast.typed.expr.ID) and
+    stripped_index.value == loop_index
+  then
     return 0 -- Identity projection functor.
   end
 
@@ -2875,19 +2875,46 @@ local function make_partition_projection_functor(cx, expr, loop_index, color_spa
 
   -- Generate a projection functor that evaluates `expr`.
   local value = codegen.expr(cx, index):read(cx)
-  local terra partition_functor(runtime : c.legion_runtime_t,
-                                parent : c.legion_logical_partition_t,
-                                [point],
-                                launch : c.legion_domain_t)
-    [symbol_setup];
-    [value.actions];
-    var index : index_type = [value.value];
-    var subregion = c.legion_logical_partition_get_logical_subregion_by_color_domain_point(
-      runtime, parent, index)
-    return subregion
-  end
 
-  return std.register_projection_functor(false, true, 0, nil, partition_functor)
+  if requirement and free_vars_setup then
+    free_vars_setup:insert(quote
+      [value.actions];
+    end)
+
+    local terra partition_functor(runtime : c.legion_runtime_t,
+                                  mappable : c.legion_mappable_t,
+                                  idx : uint,
+                                  parent : c.legion_logical_partition_t,
+                                  [point])
+      var task = c.legion_mappable_as_task(mappable)
+      var [requirement] = c.legion_task_get_region(task, idx)
+      [symbol_setup];
+      [free_vars_setup];
+      var index : index_type = [value.value];
+      var subregion = c.legion_logical_partition_get_logical_subregion_by_color_domain_point(
+        runtime, parent, index)
+      return subregion
+    end
+
+    return std.register_projection_functor(false, false, 0, nil, partition_functor)
+
+  -- create fill projection functor without mappable
+  -- create projection functors with no preamble or free variables without mappable
+  else
+    local terra partition_functor(runtime : c.legion_runtime_t,
+                                  parent : c.legion_logical_partition_t,
+                                  [point],
+                                  launch : c.legion_domain_t)
+      [symbol_setup];
+      [value.actions];
+      var index : index_type = [value.value];
+      var subregion = c.legion_logical_partition_get_logical_subregion_by_color_domain_point(
+        runtime, parent, index)
+      return subregion
+    end
+
+    return std.register_projection_functor(false, true, 0, nil, partition_functor)
+  end
 end
 
 local function add_region_fields(cx, arg_type, field_paths, field_types, launcher, index)
@@ -3165,13 +3192,59 @@ local function expr_call_setup_list_of_regions_arg(
   end
 end
 
+local function index_launch_free_var_setup(free_vars)
+  local free_vars_struct = terralib.types.newstruct()
+  free_vars_struct.entries = terralib.newlist()
+  for i, symbol in ipairs(free_vars) do
+    free_vars_struct.entries:insert({
+      field = tostring(symbol),
+      type = symbol:gettype(),
+    })
+  end
+
+  local free_vars_setup = terralib.newlist()
+  local get_args = c.legion_index_launcher_get_projection_args
+  local proj_args_get = terralib.newsymbol(free_vars_struct, "proj_args")
+  local reg_requirement = terralib.newsymbol(c.legion_region_requirement_t, "requirement")
+  free_vars_setup:insert(
+    quote
+      var [proj_args_get] = @[&free_vars_struct]([get_args]([reg_requirement], nil))
+    end)
+  for i, symbol in ipairs(free_vars) do
+    free_vars_setup:insert(
+      quote
+        var [symbol:getsymbol()] = [proj_args_get].[tostring(symbol)]
+      end)
+  end
+  return free_vars_setup, free_vars_struct, reg_requirement
+end
+
 local function expr_call_setup_partition_arg(
-    cx, task, arg_value, arg_type, param_type, partition, loop_index, launcher, index, args_setup)
+    cx, task, arg_value, arg_type, param_type, partition, loop_index, launcher, index, args_setup, free_vars, loop_vars_setup)
   assert(index)
   local privileges, privilege_field_paths, privilege_field_types, coherences, flags =
     std.find_task_privileges(param_type, task)
   local privilege_modes = privileges:map(std.privilege_mode)
   local coherence_modes = coherences:map(std.coherence_mode)
+
+  local set_args = c.legion_index_launcher_set_projection_args
+  local free_vars_setup, free_vars_struct, reg_requirement =
+    index_launch_free_var_setup(free_vars)
+
+  free_vars_setup:insertall(loop_vars_setup)
+
+  local proj_args_set = terralib.newsymbol(free_vars_struct, "proj_args")
+  args_setup:insert(
+    quote
+      var [proj_args_set]
+    end)
+  for i, symbol in ipairs(free_vars) do
+    args_setup:insert(
+      quote
+        [proj_args_set].[tostring(symbol)] = [symbol:getsymbol()]
+      end)
+  end
+
   local parent_region =
     cx:region(cx:region(arg_type).root_region_type).logical_region
 
@@ -3202,7 +3275,7 @@ local function expr_call_setup_partition_arg(
     end
     assert(add_requirement)
 
-    local projection_functor = make_partition_projection_functor(cx, arg_value, loop_index)
+    local projection_functor = make_partition_projection_functor(cx, arg_value, loop_index, false, free_vars_setup, reg_requirement)
 
     local requirement = terralib.newsymbol(uint, "requirement")
     local requirement_args = terralib.newlist({
@@ -3223,6 +3296,7 @@ local function expr_call_setup_partition_arg(
         var [requirement] = [add_requirement]([requirement_args])
         [add_fields]([launcher], [requirement], &[cx:region(arg_type).field_id_array])
         c.legion_index_launcher_add_flags([launcher], [requirement], [flag])
+        [set_args]([launcher], [requirement], [&opaque](&[proj_args_set]), terralib.sizeof(free_vars_struct), false)
       end)
   end
 end
@@ -8818,6 +8892,7 @@ local function stat_index_launch_setup(cx, node, domain, actions)
   local symbol = node.symbol:getsymbol()
   local cx = cx:new_local_scope()
   local preamble = node.preamble:map(function(stat) return codegen.stat(cx, stat) end)
+  local loop_vars = node.loop_vars:map(function(stat) return codegen.stat(cx, stat) end)
   local has_preamble = #preamble > 0
 
   local fn = codegen.expr(cx, node.call.fn):read(cx)
@@ -8994,7 +9069,7 @@ local function stat_index_launch_setup(cx, node, domain, actions)
       assert(partition)
       expr_call_setup_partition_arg(
         cx, fn.value, node.call.args[i], arg_type, param_type, partition.value, node.symbol, launcher, true,
-        args_setup)
+        args_setup, node.free_vars[i], loop_vars)
     end
   end
 

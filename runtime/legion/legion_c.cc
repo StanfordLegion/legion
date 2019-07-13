@@ -2877,6 +2877,25 @@ legion_task_launcher_add_field(legion_task_launcher_t launcher_,
   launcher->add_field(idx, fid, inst);
 }
 
+const void*
+legion_index_launcher_get_projection_args(legion_region_requirement_t requirement_,
+					  size_t *size)
+{
+  return CObjectWrapper::unwrap(requirement_)->get_projection_args(size);
+}
+
+void
+legion_index_launcher_set_projection_args(legion_index_launcher_t launcher_,
+					  unsigned idx,
+					  const void *args,
+					  size_t size,
+					  bool own)
+{
+  IndexTaskLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+
+  launcher->region_requirements[idx].set_projection_args(args, size, own);
+}
+
 void
 legion_task_launcher_add_flags(legion_task_launcher_t launcher_,
                                unsigned idx,
@@ -5028,6 +5047,14 @@ legion_context_get_unique_id(legion_context_t ctx_)
   Task* task =
     reinterpret_cast<Task*>(CObjectWrapper::unwrap(ctx_)->context());
   return task->get_unique_id();
+}
+
+legion_task_t
+legion_mappable_as_task(legion_mappable_t task_)
+{
+  Task* task = const_cast<Task*>(CObjectWrapper::unwrap(task_)->as_task());
+
+  return CObjectWrapper::wrap(task);
 }
 
 legion_unique_id_t
