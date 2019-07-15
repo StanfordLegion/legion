@@ -26,6 +26,7 @@ local std = require("regent/std")
 local symbol_table = require("regent/symbol_table")
 
 local log_codegen = log.make_logger("codegen")
+local log_privileges = log.make_logger("privileges")
 
 -- Configuration Variables
 
@@ -10346,6 +10347,8 @@ function codegen.top_task(cx, node)
   -- Unpack field IDs passed by-value to the task.
   local param_field_id_labels = task:get_field_id_param_labels()
 
+  log_privileges:info('task ' .. tostring(task.name))
+
   -- Unpack the region requirements.
   local physical_region_i = 0
   local fn_type = task:get_type()
@@ -10361,6 +10364,15 @@ function codegen.top_task(cx, node)
 
     local privileges, privilege_field_paths, privilege_field_types, coherences, flags =
       std.find_task_privileges(region_type, task)
+
+    log_privileges:info('  region ' .. tostring(region_i))
+    for i, field_paths in ipairs(privilege_field_paths) do
+      local privilege = privileges[i]
+      log_privileges:info('    physical region ' .. tostring(physical_region_i) .. ' (privilege ' .. tostring(privilege) .. ')')
+      for _, field_path in ipairs(field_paths) do
+        log_privileges:info('      ' .. tostring(field_path))
+      end
+    end
 
     local privileges_by_field_path = std.group_task_privileges_by_field_path(
       privileges, privilege_field_paths)
