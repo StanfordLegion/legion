@@ -2370,6 +2370,10 @@ namespace Legion {
       initialize_operation(ctx, true/*track*/, 1/*regions*/);
       parent_task = ctx->get_task();
       requirement = reg.impl->get_requirement();
+      // If this was a write-discard privilege, change it to read-write
+      // so that we don't lose any data
+      if (HAS_WRITE_DISCARD(requirement))
+        requirement.privilege = READ_WRITE;
       map_id = reg.impl->map_id;
       tag = reg.impl->tag;
       region = reg;
@@ -14686,6 +14690,7 @@ namespace Legion {
       resource = launcher.resource;
       footprint = launcher.footprint;
       restricted = launcher.restricted;
+      mapping = launcher.mapped;
       local_files = launcher.local_files;
       switch (resource)
       {
@@ -14762,7 +14767,7 @@ namespace Legion {
           assert(false); // should never get here
       }
       region = PhysicalRegion(new PhysicalRegionImpl(requirement,
-                              completion_event, true/*mapped*/, ctx,
+                              completion_event, launcher.mapped, ctx,
                               0/*map id*/, 0/*tag*/, false/*leaf*/, 
                               false/*virtual mapped*/, runtime)); 
       if (runtime->legion_spy_enabled)
@@ -14935,9 +14940,15 @@ namespace Legion {
       assert(external_views.size() == 1);
 #endif
       InstanceView *ext_view = external_views[0];
+      ApUserEvent termination_event;
+      if (mapping)
+        termination_event = Runtime::create_ap_user_event();
       ApEvent attach_event = runtime->forest->attach_external(this, 0/*idx*/,
                                                         requirement,
                                                         ext_view, ext_view,
+                                                        mapping ?
+                                                          termination_event :
+                                                          completion_event,
                                                         version_info,
                                                         trace_info,
                                                         map_applied_conditions,
@@ -14945,8 +14956,14 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(external_instance.has_ref());
 #endif
-      // This operation is ready once the file is attached
-      region.impl->set_reference(external_instance);
+      if (mapping)
+      {
+        external[0].set_ready_event(attach_event);
+        region.impl->reset_references(external,termination_event,attach_event);
+      }
+      else
+        // This operation is ready once the file is attached
+        region.impl->set_reference(external_instance);
       // Once we have created the instance, then we are done
       if (!map_applied_conditions.empty())
         complete_mapping(Runtime::merge_events(map_applied_conditions));

@@ -32,8 +32,6 @@ typedef struct mystruct {
 mystruct_np = numpy.dtype([('x', numpy.intc), ('y', numpy.double), ('z', numpy.byte)], align=True)
 mystruct = legion.Type(mystruct_np, 'mystruct')
 
-print(mystruct.size)
-
 @task
 def main():
     myvalue_root = legion.ffi.new('mystruct *')

@@ -709,6 +709,11 @@ terra read_config()
 
   return conf
 end
+
+-- This is in a task so that it can be called from Python.
+task read_config_task()
+  return read_config()
+end
 end
 
 -- #####################################
@@ -1380,6 +1385,11 @@ terra read_partitions(conf : config) : mesh_colorings
 end
 read_partitions:compile()
 
+-- This is in a task so that it can be called from Python.
+task read_partitions_task(conf : config) : mesh_colorings
+  return read_partitions(conf)
+end
+
 local terra get_zone_position(conf : config, pcx : int64, pcy : int64, z : int64)
   var first_zx, last_zx, stride_zx = block_zx(conf, pcx)
   var first_zy, last_zy, stride_zy = block_zy(conf, pcy)
@@ -1544,8 +1554,7 @@ task initialize_topology(conf : config,
 where reads writes(rz.znump,
                    rpp.{px, has_bcx, has_bcy},
                    rps.{px, has_bcx, has_bcy},
-                   rs.{mapsz, mapsp1, mapsp2, mapss3, mapss4}),
-  reads(rpg.{px0}) -- Hack: Work around runtime bug with no-acccess regions.
+                   rs.{mapsz, mapsp1, mapsp2, mapss3, mapss4})
 do
   regentlib.assert(
     conf.meshtype == MESH_RECT,

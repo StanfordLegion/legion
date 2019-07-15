@@ -1419,6 +1419,8 @@ namespace Legion {
       virtual void trigger_mapping(void);
     protected:
       RtBarrier resource_barrier;
+      ApBarrier broadcast_barrier;
+      ApBarrier reduce_barrier;
       RtUserEvent repl_mapping_applied;
       InstanceRef external_instance;
       ShardedMappingExchange *exchange; 
@@ -1645,6 +1647,8 @@ namespace Legion {
       RtBarrier external_resource_barrier;
       RtBarrier mapping_fence_barrier;
       ApBarrier execution_fence_barrier;
+      ApBarrier attach_broadcast_barrier;
+      ApBarrier attach_reduce_barrier;
 #ifdef DEBUG_LEGION_COLLECTIVES
       RtBarrier collective_check_barrier;
       RtBarrier close_check_barrier;

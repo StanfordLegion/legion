@@ -452,6 +452,9 @@ class Future(object):
             value_size = c.legion_future_get_untyped_size(self.handle)
             assert value_size == expected_size
             value = ffi.cast(ffi.getctype(self.value_type.cffi_type, '*'), value_ptr)[0]
+            # Hack: Use closure to keep self alive as long as the value is live.
+            if isinstance(value, ffi.CData):
+                return ffi.gc(value, lambda x: self)
             return value
 
     def get_buffer(self):
@@ -583,15 +586,15 @@ class Privilege(object):
         return PrivilegeComposite([self, other])
 
     def __repr__(self):
-        return self.__str__()
+        return str(self)
 
     def __str__(self):
-        if self.read:
-            priv = 'R'
+        if self.discard:
+            priv = 'WD'
         elif self.write:
             priv = 'RW'
-        elif self.discard:
-            priv = 'WD'
+        elif self.read:
+            priv = 'R'
         elif self.reduce:
             priv = 'Reduce(%s)' % self.reduce
         else:
@@ -613,7 +616,10 @@ class Privilege(object):
 
     def _legion_grouped_privileges(self, fspace):
         if self.fields:
-            assert set(self.fields) <= set(fspace.keys())
+            if not set(self.fields) <= set(fspace.keys()):
+                raise Exception(
+                    'Privilege fields ({}) are not a subset of fspace fields ({})'.format(
+                        ' '.join(self.fields), ' '.join(fspace.keys())))
         fields = fspace.keys() if self.fields is None else self.fields
         if self.reduce:
             return [
@@ -716,7 +722,7 @@ class PrivilegeComposite(object):
         return PrivilegeComposite(self.privileges + (other,))
 
     def __repr__(self):
-        return self.__str__()
+        return str(self)
 
     def __str__(self):
         return ' + '.join(map(str, self.privileges))
@@ -1926,7 +1932,7 @@ class _IndexLauncher(_TaskLauncher):
         c.legion_index_launcher_destroy(launcher)
 
         # Build future (map) of result.
-        self.future_map = FutureMap(result)
+        self.future_map = FutureMap(result, value_type=self.task.return_type)
         c.legion_future_map_destroy(result)
 
 class _MustEpochLauncher(object):

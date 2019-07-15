@@ -4340,7 +4340,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ReplAttachOp::initialize_replication(ReplicateContext *ctx,
-                                              RtBarrier &resource_bar)
+                                              RtBarrier &resource_bar,
+                                              ApBarrier &broadcast_bar,
+                                              ApBarrier &reduce_bar)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -4351,6 +4353,8 @@ namespace Legion {
 #endif
       resource_barrier = resource_bar;
       ctx->advance_replicate_barrier(resource_bar, ctx->total_shards);
+      broadcast_barrier = broadcast_bar;
+      ctx->advance_replicate_barrier(broadcast_bar, 1/*arrivals*/);
       // No matter what we're going to need a view broadcast either to make
       // an instance which everyone has the name of or a sharded view
       did_broadcast = 
@@ -4372,6 +4376,11 @@ namespace Legion {
           // then broadcast the result out so the other nodes can grab it
           did_broadcast->broadcast(sharded_view->did);
         }
+      }
+      else
+      {
+        reduce_barrier = reduce_bar;
+        ctx->advance_replicate_barrier(reduce_bar, ctx->total_shards);
       }
     }
 
@@ -4488,10 +4497,14 @@ namespace Legion {
         MemoryManager *memory_manager = external_manager->memory_manager;
         memory_manager->attach_external_instance(external_manager);
         RegionNode *node = runtime->forest->get_node(requirement.region);
+        ApUserEvent termination_event;
+        if (mapping)
+          termination_event = Runtime::create_ap_user_event();
         UpdateAnalysis *analysis = new UpdateAnalysis(runtime, this, 0/*index*/,
           &version_info, requirement, node, attach_instances, attach_views,
-          ApEvent::NO_AP_EVENT, completion_event, false/*track effects*/,
-          false/*check initialized*/, true/*record valid*/,true/*skip output*/);
+          ApEvent::NO_AP_EVENT, mapping ? termination_event : completion_event, 
+          false/*track effects*/, false/*check initialized*/, 
+          true/*record valid*/, true/*skip output*/);
         analysis->add_reference();
         const PhysicalTraceInfo trace_info(this);
         // Have each operation do its own registration
@@ -4526,7 +4539,14 @@ namespace Legion {
         assert(external_instance.has_ref());
 #endif
         // This operation is ready once the file is attached
-        region.impl->set_reference(external_instance);
+        if (mapping)
+        {
+          external[0].set_ready_event(attach_event);
+          region.impl->reset_references(external, termination_event,
+                                        attach_event);
+        }
+        else
+          region.impl->set_reference(external_instance);
         // Also set the sharded view in this case
         region.impl->set_sharded_view(sharded_view);
         // Make sure that all the attach operations are done mapping

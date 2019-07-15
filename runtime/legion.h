@@ -1888,7 +1888,8 @@ namespace Legion {
     public:
       AttachLauncher(ExternalResource resource, 
                      LogicalRegion handle, LogicalRegion parent,
-                     const bool restricted = true);
+                     const bool restricted = true,
+                     const bool mapped = true);
     public:
       inline void attach_file(const char *file_name,
                               const std::vector<FieldID> &fields,
@@ -1911,7 +1912,9 @@ namespace Legion {
       LogicalRegion                                 handle;
       LogicalRegion                                 parent;
       // Whether this instance will be restricted when attached
-      bool                                          restricted;
+      bool                                          restricted /*= true*/;
+      // Whether this region should be mapped by the calling task
+      bool                                          mapped; /*= true*/
     public:
       // Data for files
       const char                                    *file_name;

@@ -4189,6 +4189,15 @@ legion_attach_launcher_set_restricted(legion_attach_launcher_t handle_,
 }
 
 void
+legion_attach_launcher_set_mapped(legion_attach_launcher_t handle_,
+                                  bool mapped)
+{
+  AttachLauncher *handle = CObjectWrapper::unwrap(handle_);
+
+  handle->mapped = mapped;
+}
+
+void
 legion_attach_launcher_destroy(legion_attach_launcher_t handle_)
 {
   AttachLauncher *handle = CObjectWrapper::unwrap(handle_);
