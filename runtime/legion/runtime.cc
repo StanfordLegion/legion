@@ -1634,9 +1634,6 @@ namespace Legion {
     void PhysicalRegionImpl::set_reference(const InstanceRef &ref)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(ref.has_ref());
-#endif
       references.add_instance(ref);
       ref.add_valid_reference(PHYSICAL_REGION_REF);
     }
@@ -1646,9 +1643,6 @@ namespace Legion {
                                        ApUserEvent term_event, ApEvent wait_for)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(mapped);
-#endif
       if (!references.empty())
         references.remove_valid_references(PHYSICAL_REGION_REF);
       references = refs;
