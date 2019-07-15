@@ -1314,7 +1314,7 @@ namespace Legion {
     {
       if (valid)
         return true;
-      if (mapped && ready_event.has_triggered())
+      if (ready_event.has_triggered())
       {
         std::set<ApEvent> wait_on;
         references.update_wait_on_events(wait_on);
@@ -1565,9 +1565,6 @@ namespace Legion {
                                        ApUserEvent term_event, ApEvent wait_for)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(mapped);
-#endif
       if (!references.empty())
         references.remove_valid_references(PHYSICAL_REGION_REF);
       references = refs;
