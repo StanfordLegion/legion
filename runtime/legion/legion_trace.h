@@ -541,20 +541,15 @@ namespace Legion {
       };
     public:
       struct ViewUser {
-        ViewUser(bool r, unsigned u, unsigned p, EquivalenceSet *e)
-          : read(r), user(u), parent(p), eq(e)
+        ViewUser(const RegionUsage &r,
+                 unsigned u, unsigned p,
+                 EquivalenceSet *e)
+          : usage(r), user(u), parent(p), eq(e)
         { }
-        bool read;
+        const RegionUsage usage;
         unsigned user;
         unsigned parent;
-        EquivalenceSet *eq;
-      };
-      struct Condition {
-        Condition(unsigned p, EquivalenceSet *e)
-          : parent(p), eq(e)
-        { }
-        unsigned parent;
-        EquivalenceSet *eq;
+        EquivalenceSet * const eq;
       };
       struct CachedMapping
       {
@@ -569,6 +564,7 @@ namespace Legion {
                         FieldMaskSet<ViewUser> >::aligned            Conditions;
       typedef LegionMap<InstanceView*,
                         FieldMaskSet<IndexSpaceExpression> >::aligned ViewExprs;
+      typedef std::map<RegionTreeID, std::set<InstanceView*> >       ViewGroups;
     public:
       PhysicalTemplate(PhysicalTrace *trace, ApEvent fence_event);
       PhysicalTemplate(const PhysicalTemplate &rhs);
@@ -701,6 +697,9 @@ namespace Legion {
                                const FieldMask &user_mask);
       bool is_precondition(ViewUser *user);
     private:
+      static bool is_compatible(const RegionUsage &u1,
+                                const RegionUsage &u2);
+    private:
       void record_views(Memoizable *memo,
                         unsigned idx,
                         unsigned entry,
@@ -767,6 +766,7 @@ namespace Legion {
     public:
       Conditions                                         pre, post;
       Conditions                                         reductions_in_trace;
+      ViewGroups                                         view_groups;
       std::set<ViewUser*>                                pre_users;
       LegionVector<FieldMaskSet<InstanceView> >::aligned pre_views;
       std::vector<IndexSpaceExpression*>                 pre_exprs;
@@ -776,6 +776,7 @@ namespace Legion {
       std::vector<IndexSpaceExpression*>                 post_exprs;
       std::vector<unsigned>                              post_parent_indices;
       LegionVector<VersionInfo>::aligned                 post_version_infos;
+      std::set<ViewUser*>                                all_users;
     public:
       FieldMaskSet<FillView>                             pre_fill_views;
       FieldMaskSet<FillView>                             post_fill_views;

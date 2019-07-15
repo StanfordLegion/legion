@@ -2064,17 +2064,8 @@ namespace Legion {
     {
       {
         AutoLock tpl_lock(template_lock);
-        std::set<ViewUser*> to_delete;
-        for (Conditions::iterator it = pre.begin(); it != pre.end(); ++it)
-          for (FieldMaskSet<ViewUser>::iterator uit = it->second.begin(); uit !=
-               it->second.end(); ++uit)
-            to_delete.insert(uit->first);
-        for (Conditions::iterator it = post.begin(); it != post.end(); ++it)
-          for (FieldMaskSet<ViewUser>::iterator uit = it->second.begin(); uit !=
-               it->second.end(); ++uit)
-            to_delete.insert(uit->first);
-        for (std::set<ViewUser*>::iterator uit = to_delete.begin(); uit !=
-             to_delete.end(); ++uit)
+        for (std::set<ViewUser*>::iterator uit = all_users.begin(); uit !=
+             all_users.end(); ++uit)
           delete (*uit);
         for (std::vector<Instruction*>::iterator it = instructions.begin();
              it != instructions.end(); ++it)
@@ -2196,11 +2187,17 @@ namespace Legion {
 
       for (Conditions::const_iterator it = pre.begin(); it != pre.end(); ++it)
       {
-        if (it->first->is_reduction_view()) return false;
+        if (it->first->is_reduction_view())
+        {
+          return false;
+        }
 
         for (FieldMaskSet<ViewUser>::const_iterator uit = it->second.begin();
              uit != it->second.end(); ++uit)
-          if (uit->first->eq->has_refinements(uit->second)) return false;
+          if (uit->first->eq->has_refinements(uit->second))
+          {
+            return false;
+          }
       }
 
       for (Conditions::const_iterator it = post.begin(); it != post.end(); ++it)
@@ -2210,27 +2207,38 @@ namespace Legion {
           Conditions::const_iterator finder =
             reductions_in_trace.find(it->first);
 
-          if (finder == reductions_in_trace.end()) return false;
+          if (finder == reductions_in_trace.end())
+          {
+            return false;
+          }
 
           const FieldMaskSet<ViewUser> &known_reductions = finder->second;
           for (FieldMaskSet<ViewUser>::const_iterator uit = it->second.begin();
                uit != it->second.end(); ++uit)
           {
-            if (uit->first->eq->has_refinements(uit->second)) return false;
+            if (uit->first->eq->has_refinements(uit->second))
+            {
+              return false;
+            }
 
             FieldMaskSet<ViewUser>::const_iterator finder =
               known_reductions.find(uit->first);
 
             if (finder == known_reductions.end() ||
                 !!(uit->second - finder->second))
+            {
               return false;
+            }
           }
         }
         else
         {
           for (FieldMaskSet<ViewUser>::const_iterator uit = it->second.begin();
                uit != it->second.end(); ++uit)
-            if (uit->first->eq->has_refinements(uit->second)) return false;
+            if (uit->first->eq->has_refinements(uit->second))
+            {
+              return false;
+            }
         }
       }
       return true;
@@ -2243,20 +2251,27 @@ namespace Legion {
       for (Conditions::const_iterator it = pre.begin(); it != pre.end(); ++it)
       {
         Conditions::const_iterator finder = post.find(it->first);
-        if (finder == post.end()) return false;
-        for (FieldMaskSet<ViewUser>::const_iterator uit = it->second.begin();
-             uit != it->second.end(); ++uit)
+        if (finder == post.end())
         {
-          ViewUser *user = uit->first;
-          FieldMask non_dominated = uit->second;
-          for (FieldMaskSet<ViewUser>::const_iterator uit =
-               finder->second.begin(); uit != finder->second.end(); ++uit)
+          return false;
+        }
+        for (FieldMaskSet<ViewUser>::const_iterator pre_uit= it->second.begin();
+             pre_uit != it->second.end(); ++pre_uit)
+        {
+          ViewUser *user = pre_uit->first;
+          FieldMask non_dominated = pre_uit->second;
+          for (FieldMaskSet<ViewUser>::const_iterator post_uit =
+               finder->second.begin(); post_uit !=
+               finder->second.end(); ++post_uit)
           {
-            if (user->eq == uit->first->eq)
-              non_dominated -= uit->second;
+            if (user->eq == post_uit->first->eq)
+              non_dominated -= post_uit->second;
             if (!non_dominated) break;
           }
-          if (!!non_dominated) return false;
+          if (!!non_dominated)
+          {
+            return false;
+          }
         }
       }
       return true;
@@ -3394,6 +3409,7 @@ namespace Legion {
            it != frontiers.end(); ++it)
         std::cerr << "  events[" << it->second << "] = events["
                   << it->first << "]" << std::endl;
+      RegionTreeForest *forest = trace->runtime->forest;
       std::cerr << "[Preconditions]" << std::endl;
       for (unsigned idx = 0; idx < pre_views.size(); ++idx)
       {
@@ -3402,12 +3418,18 @@ namespace Legion {
              vit != views.end(); ++vit)
         {
           char *mask = vit->second.to_string();
+          LogicalRegion lr =
+            forest->get_tree(vit->first->get_manager()->tree_id)->handle;
+          const void *name = NULL; size_t name_size = 0;
+          trace->runtime->retrieve_semantic_information(lr, NAME_SEMANTIC_TAG,
+              name, name_size, true, true);
           std::cerr << "    "
                     << (vit->first->is_reduction_view()
                         ? "Reduction" : "Materialized")
                     << " view: " << vit->first << ", Inst: " << std::hex
                     << vit->first->get_manager()->get_instance().id << std::dec
                     << ", Index expr: " << pre_exprs[idx]->expr_id
+                    << ", Name: " << (name_size > 0 ? (const char*)name : "")
                     << ", Field Mask: " << mask << std::endl;
           free(mask);
         }
@@ -3428,12 +3450,18 @@ namespace Legion {
              vit != views.end(); ++vit)
         {
           char *mask = vit->second.to_string();
+          LogicalRegion lr =
+            forest->get_tree(vit->first->get_manager()->tree_id)->handle;
+          const void *name = NULL; size_t name_size = 0;
+          trace->runtime->retrieve_semantic_information(lr, NAME_SEMANTIC_TAG,
+              name, name_size, true, true);
           std::cerr << "    "
                     << (vit->first->is_reduction_view()
                         ? "Reduction" : "Materialized")
                     << " view: " << vit->first << ", Inst: " << std::hex
                     << vit->first->get_manager()->get_instance().id << std::dec
                     << ", Index expr: " << post_exprs[idx]->expr_id
+                    << ", Name: " << (name_size > 0 ? (const char*)name : "")
                     << ", Field Mask: " << mask << std::endl;
           free(mask);
         }
@@ -3742,7 +3770,7 @@ namespace Legion {
           tracing_srcs, false);
       record_copy_views(lhs_, expr, tracing_srcs);
       record_views(memo, idx, lhs_, expr,
-          RegionUsage(WRITE_DISCARD, EXCLUSIVE, 0), tracing_dsts, false);
+          RegionUsage(WRITE_ONLY, EXCLUSIVE, 0), tracing_dsts, false);
       record_copy_views(lhs_, expr, tracing_dsts);
     }
 
@@ -3775,7 +3803,6 @@ namespace Legion {
       LegionList<FieldSet<EquivalenceSet*> >::aligned eqs;
       info.get_equivalence_sets().compute_field_sets(user_mask, eqs);
 
-      bool read_only = IS_READ_ONLY(usage);
       unsigned entry = find_memo_entry(memo);
 
       AutoLock tpl_lock(template_lock);
@@ -3785,7 +3812,7 @@ namespace Legion {
         for (std::set<EquivalenceSet*>::iterator eit = it->elements.begin();
              eit != it->elements.end(); ++eit)
         {
-          ViewUser *view_user = new ViewUser(read_only, entry, parent, (*eit));
+          ViewUser *view_user = new ViewUser(usage, entry, parent, (*eit));
           record_view_user(memo, idx, view, view_user, usage,
               it->set_mask & user_mask, true);
         }
@@ -3918,7 +3945,7 @@ namespace Legion {
 #endif
       record_fill_views(tracing_srcs);
       record_views(memo, idx, lhs_, expr,
-          RegionUsage(WRITE_DISCARD, EXCLUSIVE, 0), tracing_dsts, true);
+          RegionUsage(WRITE_ONLY, EXCLUSIVE, 0), tracing_dsts, true);
       record_copy_views(lhs_, expr, tracing_dsts);
     }
 
@@ -4076,6 +4103,25 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    /*static*/ bool PhysicalTemplate::is_compatible(const RegionUsage &u1,
+                                                    const RegionUsage &u2)
+    //--------------------------------------------------------------------------
+    {
+      if (IS_READ_ONLY(u1) && IS_READ_ONLY(u2))
+      {
+        return true;
+      }
+      else if (IS_REDUCE(u1) && IS_REDUCE(u2))
+      {
+        return u1.redop == u2.redop;
+      }
+      else
+      {
+        return false;
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void PhysicalTemplate::record_views(Memoizable *memo,
                                         unsigned idx,
                                         unsigned entry,
@@ -4087,7 +4133,6 @@ namespace Legion {
     {
       unsigned parent = memo->get_operation()->find_parent_index(idx);
       const VersionInfo &info = memo->get_version_info(idx);
-      bool read_only = IS_READ_ONLY(usage);
       for (FieldMaskSet<InstanceView>::const_iterator vit = views.begin();
            vit != views.end(); ++vit)
       {
@@ -4098,7 +4143,8 @@ namespace Legion {
           for (std::set<EquivalenceSet*>::iterator eit = it->elements.begin();
                eit != it->elements.end(); ++eit)
           {
-            ViewUser *user = new ViewUser(read_only, entry, parent, (*eit));
+            if ((*eit)->set_expr != expr) continue;
+            ViewUser *user = new ViewUser(usage, entry, parent, (*eit));
             record_view_user(memo, idx, vit->first, user, usage,
                 it->set_mask & vit->second, invalidates);
           }
@@ -4115,6 +4161,11 @@ namespace Legion {
                                             bool invalidates)
     //--------------------------------------------------------------------------
     {
+      std::set<InstanceView*> &views= view_groups[view->get_manager()->tree_id];
+      views.insert(view);
+
+      all_users.insert(user);
+
       // invalidates == false <==> (the user is a realm copy)
 
       if (user->eq->set_expr->is_empty())
@@ -4126,58 +4177,130 @@ namespace Legion {
       }
 
       RegionTreeForest *forest = trace->runtime->forest;
-      Conditions::iterator finder = post.find(view);
-      if (finder == post.end())
-      {
-        if (HAS_READ(usage))
-          record_precondition(view, user, user_mask);
-        post[view].insert(user, user_mask);
-      }
-      else
-      {
-        FieldMaskSet<ViewUser> &users = finder->second;
-        FieldMask dominated;
-        FieldMaskSet<ViewUser> invalidated;
 
-        for (FieldMaskSet<ViewUser>::iterator uit = users.begin();
-             uit != users.end(); ++uit)
+      // If the view is read, we should identify the part that
+      // is not yet valid, which joins the precondition.
+      if (HAS_READ(usage))
+      {
+        Conditions::iterator finder = post.find(view);
+        // If the view has showed up for the first time,
+        // it definitely needs to be added to the precondition.
+        if (finder == post.end())
         {
-          FieldMask overlap = user_mask & uit->second;
-          // If the previous user accesses disjoint fields, there's nothing
-          // we need to do
-          if (!overlap) continue;
-          // First check the easy case of dominance where the previous user's
-          // expression is the same as the new user's.
-          if (user->eq->set_expr == uit->first->eq->set_expr)
+          record_precondition(view, user, user_mask);
+        }
+        // Otherwise, we find the fields that are already valid
+        else
+        {
+          FieldMask valid;
+          for (FieldMaskSet<ViewUser>::iterator uit = finder->second.begin();
+               uit != finder->second.end(); ++uit)
           {
-            dominated |= overlap;
-            if ((invalidates && HAS_WRITE(usage)) ||
-                // Realm copies invalidate their sources when
-                // the sources are reduction views.
-                (!invalidates && view->is_reduction_view()))
-              invalidated.insert(uit->first, overlap);
-          }
-          // Then fall back to the slower case that needs an index space
-          // subtraction.
-          else
-          {
-            IndexSpaceExpression *subtract =
-              forest->subtract_index_spaces(user->eq->set_expr,
-                                            uit->first->eq->set_expr);
-            if (subtract->is_empty())
+            FieldMask overlap = user_mask & uit->second;
+
+            if (!overlap) continue;
+
+            if (user->eq->set_expr == uit->first->eq->set_expr)
             {
-              dominated |= overlap;
-              if ((invalidates && HAS_WRITE(usage)) ||
-                  // Realm copies invalidate their sources when
-                  // the sources are reduction views.
-                  (!invalidates && view->is_reduction_view()))
+              valid |= overlap;
+            }
+            else
+            {
+              IndexSpaceExpression *subtract =
+                forest->subtract_index_spaces(user->eq->set_expr,
+                                              uit->first->eq->set_expr);
+              if (subtract->is_empty())
+              {
+                valid |= overlap;
+              }
+            }
+          }
+
+          FieldMask invalid = user_mask - valid;
+          if (!!invalid)
+          {
+            record_precondition(view, user, invalid);
+          }
+        }
+      }
+
+      // If the view is written, we should find the other views that are
+      // invalidated by this change.
+      Conditions all_invalidated;
+      if (invalidates)
+      {
+        for (std::set<InstanceView*>::iterator vit = views.begin();
+             vit != views.end(); ++vit)
+        {
+          Conditions::iterator finder = post.find(*vit);
+          if (finder == post.end()) continue;
+
+          FieldMaskSet<ViewUser> &invalidated = all_invalidated[*vit];
+          FieldMaskSet<ViewUser> &users = finder->second;
+          for (FieldMaskSet<ViewUser>::iterator uit = users.begin();
+               uit != users.end(); ++uit)
+          {
+            if (is_compatible(uit->first->usage, user->usage))
+            {
+              continue;
+            }
+
+            FieldMask overlap = user_mask & uit->second;
+            if (!overlap) continue;
+
+            if (user->eq->set_expr == uit->first->eq->set_expr)
+            {
+              invalidated.insert(uit->first, overlap);
+            }
+            else
+            {
+              IndexSpaceExpression *subtract =
+                forest->subtract_index_spaces(uit->first->eq->set_expr,
+                                              user->eq->set_expr);
+              if (subtract->is_empty())
+              {
                 invalidated.insert(uit->first, overlap);
+              }
             }
           }
         }
+      }
+      else
+      {
+        Conditions::iterator finder = post.find(view);
+        if (finder != post.end())
+        {
+          FieldMaskSet<ViewUser> &invalidated = all_invalidated[view];
+          FieldMaskSet<ViewUser> &users = finder->second;
+          for (FieldMaskSet<ViewUser>::iterator uit = users.begin();
+               uit != users.end(); ++uit)
+          {
+            if (!(IS_REDUCE(uit->first->usage) && IS_READ_ONLY(user->usage)))
+            {
+              continue;
+            }
 
-        for (FieldMaskSet<ViewUser>::iterator uit = invalidated.begin();
-             uit != invalidated.end(); ++uit)
+            FieldMask overlap = user_mask & uit->second;
+            if (!overlap) continue;
+
+            if (user->eq->set_expr == uit->first->eq->set_expr)
+            {
+              invalidated.insert(uit->first, overlap);
+            }
+          }
+        }
+      }
+
+      for (Conditions::iterator it = all_invalidated.begin();
+           it != all_invalidated.end(); ++it)
+      {
+        Conditions::iterator finder = post.find(it->first);
+#ifdef DEBUG_LEGION
+        assert(finder != post.end());
+#endif
+        FieldMaskSet<ViewUser> &users = finder->second;
+        for (FieldMaskSet<ViewUser>::iterator uit = it->second.begin();
+             uit != it->second.end(); ++uit)
         {
           FieldMaskSet<ViewUser>::iterator finder = users.find(uit->first);
 #ifdef DEBUG_LEGION
@@ -4186,19 +4309,15 @@ namespace Legion {
           finder.filter(uit->second);
           if (!finder->second)
           {
-            ViewUser *user = finder->first;
             users.erase(finder);
-            if (!is_precondition(user)) delete user;
           }
         }
+      }
 
-        users.insert(user, user_mask);
-        if (!invalidates && view->is_reduction_view())
-          reductions_in_trace[view].insert(user, user_mask);
-
-        FieldMask non_dominated = user_mask - dominated;
-        if (HAS_READ(usage) && !!non_dominated)
-          record_precondition(view, user, user_mask);
+      post[view].insert(user, user_mask);
+      if (!invalidates && view->is_reduction_view())
+      {
+        reductions_in_trace[view].insert(user, user_mask);
       }
 
       TraceLocalID op_key = find_trace_local_id(memo);
