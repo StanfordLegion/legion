@@ -14807,6 +14807,7 @@ namespace Legion {
                            launcher.static_dependences);
       resource = launcher.resource;
       footprint = launcher.footprint;
+      mapping = launcher.mapped;
       switch (resource)
       {
         case EXTERNAL_POSIX_FILE:
@@ -14882,7 +14883,7 @@ namespace Legion {
           assert(false); // should never get here
       }
       region = PhysicalRegion(new PhysicalRegionImpl(requirement,
-                              completion_event, true/*mapped*/, ctx,
+                              completion_event, launcher.mapped, ctx,
                               0/*map id*/, 0/*tag*/, false/*leaf*/, 
                               false/*virtual mapped*/, runtime));
       if (check_privileges)
@@ -14901,6 +14902,7 @@ namespace Legion {
       file_name = NULL;
       external_instance = NULL;
       footprint = 0;
+      mapping = true;
     }
 
     //--------------------------------------------------------------------------
@@ -15051,9 +15053,15 @@ namespace Legion {
       if (attached.exists())
         attached.wait();
       PhysicalTraceInfo trace_info;
+      ApUserEvent termination_event;
+      if (mapping)
+        termination_event = Runtime::create_ap_user_event();
       InstanceRef result = runtime->forest->attach_external(this, 0/*idx*/,
                                                         requirement,
                                                         external_instance,
+                                                        mapping ? 
+                                                          termination_event :
+                                                          completion_event,
                                                         version_info,
                                                         map_applied_conditions,
                                                         trace_info);
@@ -15061,14 +15069,20 @@ namespace Legion {
       assert(result.has_ref());
 #endif
       version_info.apply_mapping(map_applied_conditions);
-      // This operation is ready once the file is attached
-      region.impl->set_reference(result);
+      ApEvent attach_event = result.get_ready_event();
+      if (mapping)
+      {
+        InstanceSet instances;
+        instances.add_instance(result);
+        region.impl->reset_references(instances,termination_event,attach_event);
+      }
+      else
+        region.impl->set_reference(result);
       // Once we have created the instance, then we are done
       if (!map_applied_conditions.empty())
         complete_mapping(Runtime::merge_events(map_applied_conditions));
       else
         complete_mapping();
-      ApEvent attach_event = result.get_ready_event();
       request_early_complete(attach_event);
       complete_execution(Runtime::protect_event(attach_event));
     }
@@ -15218,8 +15232,8 @@ namespace Legion {
         et = parent_ctx->check_privilege(requirement, bad_field, bad_index);
       switch (et)
       {
-          // Not there is no such things as bad privileges for
-          // acquires and releases because they are controlled by the runtime
+        // No there is no such things as bad privileges for
+        // acquires and releases because they are controlled by the runtime
         case NO_ERROR:
         case ERROR_BAD_REGION_PRIVILEGES:
           break;
@@ -15400,16 +15414,15 @@ namespace Legion {
     Future DetachOp::initialize_detach(TaskContext *ctx, PhysicalRegion region)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(region.is_valid());
+#endif
       initialize_operation(ctx, true/*track*/);
       requirement = region.impl->get_requirement();
       // Make sure that the privileges are read-write so that we wait for
       // all prior users of this particular region
       requirement.privilege = READ_WRITE;
       requirement.prop = EXCLUSIVE;
-      // Delay getting a reference until trigger_mapping().  This means we
-      //  have to keep region
-      if (!region.is_valid())
-        region.wait_until_valid();
       this->region = region; 
       // Check to see if this is a valid detach operation
       if (!region.impl->is_external_region())

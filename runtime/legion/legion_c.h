@@ -3356,6 +3356,13 @@ extern "C" {
     legion_external_resource_t resource);
 
   /**
+   * @see Legion::AttachLauncher::AttachLauncher()
+   */
+  void
+  legion_attach_launcher_set_mapped(legion_attach_launcher_t handle,
+                                    bool mapped);
+
+  /**
    * @param handle Caller must have ownership of parameter `handle`.
    *
    * @see Legion::AttachLauncher::~AttachLauncher()

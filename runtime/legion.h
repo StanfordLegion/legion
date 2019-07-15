@@ -1908,6 +1908,8 @@ namespace Legion {
       ExternalResource                              resource;
       LogicalRegion                                 handle;
       LogicalRegion                                 parent;
+      // Whether this region should be mapped by the calling task
+      bool                                          mapped; /*= true*/
     public:
       // Data for files
       const char                                    *file_name;

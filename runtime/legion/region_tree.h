@@ -489,6 +489,7 @@ namespace Legion {
       InstanceRef attach_external(AttachOp *attach_op, unsigned index,
                                   const RegionRequirement &req,
                                   InstanceManager *ext_instance,
+                                  ApEvent termination_event,
                                   VersionInfo &version_info,
                                   std::set<RtEvent> &map_applied_events,
                                   PhysicalTraceInfo &trace_info);
@@ -2708,6 +2709,7 @@ namespace Legion {
                                   const FieldMask &attach_mask,
                                   const RegionRequirement &req, 
                                   InstanceManager *manager, 
+                                  ApEvent termination_event,
                                   VersionInfo &version_info,
                                   std::set<RtEvent> &map_applied_events,
                                   PhysicalTraceInfo &trace_info);

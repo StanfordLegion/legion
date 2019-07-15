@@ -3153,6 +3153,7 @@ namespace Legion {
                                                  unsigned index,
                                                  const RegionRequirement &req,
                                                  InstanceManager *ext_instance,
+                                                 ApEvent termination_event,
                                                  VersionInfo &version_info,
                                                  std::set<RtEvent> &map_applied,
                                                  PhysicalTraceInfo &trace_info)
@@ -3165,13 +3166,14 @@ namespace Legion {
       InnerContext *context = attach_op->find_physical_context(index);
       RegionTreeContext ctx = context->get_context();
       RegionNode *attach_node = get_node(req.region);
+      const FieldMask attach_mask = 
+        attach_node->column_source->get_field_mask(req.privilege_fields);
       UniqueID logical_ctx_uid = attach_op->get_context()->get_context_uid();
       // Perform the attachment
       return attach_node->attach_external(ctx.get_id(), attach_op, index,
-                                        context,logical_ctx_uid,
-                                        ext_instance->layout->allocated_fields, 
-                                        req, ext_instance, version_info, 
-                                        map_applied, trace_info);
+                                        context,logical_ctx_uid, attach_mask,
+                                        req, ext_instance, termination_event,
+                                        version_info, map_applied, trace_info);
     }
 
     //--------------------------------------------------------------------------
@@ -15458,6 +15460,7 @@ namespace Legion {
                                           const FieldMask &attach_mask,
                                           const RegionRequirement &req,
                                           InstanceManager *instance_manager,
+                                          ApEvent term_event,
                                           VersionInfo &version_info,
                                           std::set<RtEvent> &map_applied_events,
                                           PhysicalTraceInfo &trace_info)
@@ -15482,7 +15485,6 @@ namespace Legion {
       // we are now making this the only valid copy of the data
       update_valid_views(state, attach_mask, true/*dirty*/, view);
       const RegionUsage usage(req);
-      const ApEvent term_event = attach_op->get_completion_event();
       ApEvent ready = view->add_user_fused(usage, term_event, attach_mask,
                                            attach_op, index, &version_info,
                                            context->runtime->address_space,

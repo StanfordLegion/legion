@@ -2922,6 +2922,7 @@ namespace Legion {
       InstanceManager *external_instance;
       LayoutConstraintSet layout_constraint_set;
       size_t footprint;
+      bool mapping;
     };
 
     /**
