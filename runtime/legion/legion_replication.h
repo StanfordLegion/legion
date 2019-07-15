@@ -1411,7 +1411,9 @@ namespace Legion {
       ReplAttachOp& operator=(const ReplAttachOp &rhs);
     public:
       void initialize_replication(ReplicateContext *ctx,
-                                  RtBarrier &resource_bar);
+                                  RtBarrier &resource_bar,
+                                  ApBarrier &broadcast_bar,
+                                  ApBarrier &reduce_bar);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -1536,6 +1538,10 @@ namespace Legion {
         { return mapping_fence_barrier; }
       inline ApBarrier get_execution_fence_barrier(void) const
         { return execution_fence_barrier; }
+      inline ApBarrier get_attach_broadcast_barrier(void) const
+        { return attach_broadcast_barrier; }
+      inline ApBarrier get_attach_reduce_barrier(void) const
+        { return attach_reduce_barrier; }
 #ifdef DEBUG_LEGION_COLLECTIVES
       inline RtBarrier get_collective_check_barrier(void) const
         { return collective_check_barrier; }

@@ -1717,6 +1717,8 @@ namespace Legion {
       RtBarrier external_resource_barrier;
       RtBarrier mapping_fence_barrier;
       ApBarrier execution_fence_barrier;
+      ApBarrier attach_broadcast_barrier;
+      ApBarrier attach_reduce_barrier;
 #ifdef DEBUG_LEGION_COLLECTIVES
     protected:
       RtBarrier collective_check_barrier;

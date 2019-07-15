@@ -4523,16 +4523,17 @@ namespace Legion {
         }
         else
           Runtime::phase_barrier_arrive(resource_barrier, 1/*count*/);
-        ApEvent attach_event;
         if (is_owner_shard)
         {
           // Wait for all the other shards to be done mapping first
           resource_barrier.wait();
           // Now we can do the replacement
-          attach_event = 
+          const ApEvent attach_event = 
             runtime->forest->overwrite_sharded(this, 0/*index*/, requirement,
                         sharded_view, version_info, ApEvent::NO_AP_EVENT,
                         map_applied_conditions, true/*restrict*/);
+          Runtime::phase_barrier_arrive(broadcast_barrier, 1/*count*/, 
+                                        attach_event);
         }
         Runtime::advance_barrier(resource_barrier);
 #ifdef DEBUG_LEGION
@@ -4541,9 +4542,9 @@ namespace Legion {
         // This operation is ready once the file is attached
         if (mapping)
         {
-          external[0].set_ready_event(attach_event);
-          region.impl->reset_references(external, termination_event,
-                                        attach_event);
+          attach_instances[0].set_ready_event(broadcast_barrier);
+          region.impl->reset_references(attach_instances, termination_event,
+                                        broadcast_barrier);
         }
         else
           region.impl->set_reference(external_instance);
@@ -4557,11 +4558,18 @@ namespace Legion {
         else
           Runtime::phase_barrier_arrive(resource_barrier, 1/*count*/);
         complete_mapping(resource_barrier);
-        request_early_complete(attach_event);
-        complete_execution(Runtime::protect_event(attach_event));
+        request_early_complete(broadcast_barrier);
+        complete_execution(Runtime::protect_event(broadcast_barrier));
       }
       else
       {
+        ApUserEvent termination_event;
+        if (mapping)
+        {
+          termination_event = Runtime::create_ap_user_event();
+          Runtime::phase_barrier_arrive(reduce_barrier, 1/*count*/,
+                                        termination_event);
+        }
         if (is_owner_shard)
         {
           // Make our instance now and send out the DID
@@ -4602,6 +4610,9 @@ namespace Legion {
                                                         requirement,
                                                         attach_views[0],
                                                         attach_views[0],
+                                                        mapping ?
+                                                         (ApEvent)reduce_barrier
+                                                         : completion_event,
                                                         version_info,
                                                         trace_info,
                                                         map_applied_conditions,
@@ -4609,8 +4620,17 @@ namespace Legion {
 #ifdef DEBUG_LEGION
           assert(external_instance.has_ref());
 #endif
+          Runtime::phase_barrier_arrive(broadcast_barrier, 1/*count*/,
+                                        attach_event);
           // Save the instance information out to region
-          region.impl->set_reference(external_instance);
+          if (mapping)
+          {
+            attach_instances[0].set_ready_event(broadcast_barrier);
+            region.impl->reset_references(attach_instances, termination_event,
+                                          broadcast_barrier);
+          }
+          else
+            region.impl->set_reference(external_instance);
           // This operation is ready once the file is attached
           // Make sure that all the attach operations are done mapping
           // before we consider this attach operation done
@@ -4620,8 +4640,8 @@ namespace Legion {
           else
             Runtime::phase_barrier_arrive(resource_barrier, 1/*count*/);
           complete_mapping(resource_barrier);
-          request_early_complete(attach_event);
-          complete_execution(Runtime::protect_event(attach_event));
+          request_early_complete(broadcast_barrier);
+          complete_execution(Runtime::protect_event(broadcast_barrier));
         }
         else
         {
@@ -4639,11 +4659,20 @@ namespace Legion {
             ready.wait();
           external_instance = InstanceRef(manager, instance_fields);
           // Save the instance information out to region
-          region.impl->set_reference(external_instance);
+          if (mapping)
+          {
+            InstanceSet attach_instances(1);
+            attach_instances[0] = external_instance;
+            attach_instances[0].set_ready_event(broadcast_barrier);
+            region.impl->reset_references(attach_instances, termination_event,
+                                          broadcast_barrier);
+          }
+          else
+            region.impl->set_reference(external_instance);
           // Record that we're mapped once everyone else does
           Runtime::phase_barrier_arrive(resource_barrier, 1/*count*/);
           complete_mapping(resource_barrier);
-          complete_execution();
+          complete_execution(Runtime::protect_event(broadcast_barrier));
         }
       }
     }
@@ -4950,6 +4979,10 @@ namespace Legion {
           RtBarrier(Realm::Barrier::create_barrier(total_shards));
         execution_fence_barrier = 
           ApBarrier(Realm::Barrier::create_barrier(total_shards));
+        attach_broadcast_barrier = 
+          ApBarrier(Realm::Barrier::create_barrier(1));
+        attach_reduce_barrier = 
+          ApBarrier(Realm::Barrier::create_barrier(total_shards));
 #ifdef DEBUG_LEGION_COLLECTIVES
         collective_check_barrier = 
           RtBarrier(Realm::Barrier::create_barrier(total_shards,
@@ -5004,6 +5037,8 @@ namespace Legion {
           external_resource_barrier.destroy_barrier();
           mapping_fence_barrier.destroy_barrier();
           execution_fence_barrier.destroy_barrier();
+          attach_broadcast_barrier.destroy_barrier();
+          attach_reduce_barrier.destroy_barrier();
 #ifdef DEBUG_LEGION_COLLECTIVES
           collective_check_barrier.destroy_barrier();
           close_check_barrier.destroy_barrier();
@@ -5151,6 +5186,8 @@ namespace Legion {
           assert(external_resource_barrier.exists());
           assert(mapping_fence_barrier.exists());
           assert(execution_fence_barrier.exists());
+          assert(attach_broadcast_barrier.exists());
+          assert(attach_reduce_barrier.exists());
           assert(shard_mapping.size() == total_shards);
 #endif
           rez.serialize(pending_partition_barrier);
@@ -5161,6 +5198,8 @@ namespace Legion {
           rez.serialize(external_resource_barrier);
           rez.serialize(mapping_fence_barrier);
           rez.serialize(execution_fence_barrier);
+          rez.serialize(attach_broadcast_barrier);
+          rez.serialize(attach_reduce_barrier);
 #ifdef DEBUG_LEGION_COLLECTIVES
           assert(collective_check_barrier.exists());
           rez.serialize(collective_check_barrier);
@@ -5205,6 +5244,8 @@ namespace Legion {
         derez.deserialize(external_resource_barrier);
         derez.deserialize(mapping_fence_barrier);
         derez.deserialize(execution_fence_barrier);
+        derez.deserialize(attach_broadcast_barrier);
+        derez.deserialize(attach_reduce_barrier);
 #ifdef DEBUG_LEGION_COLLECTIVES
         derez.deserialize(collective_check_barrier);
         derez.deserialize(close_check_barrier);

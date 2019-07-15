@@ -8367,6 +8367,8 @@ namespace Legion {
       external_resource_barrier = manager->get_external_resource_barrier();
       mapping_fence_barrier = manager->get_mapping_fence_barrier();
       execution_fence_barrier = manager->get_execution_fence_barrier();
+      attach_broadcast_barrier = manager->get_attach_broadcast_barrier();
+      attach_reduce_barrier = manager->get_attach_reduce_barrier();
 #ifdef DEBUG_LEGION_COLLECTIVES
       collective_check_barrier = manager->get_collective_check_barrier();
       close_check_barrier = manager->get_close_check_barrier();
@@ -11665,7 +11667,8 @@ namespace Legion {
             get_task_name(), get_unique_id());
       ReplAttachOp *attach_op = runtime->get_available_repl_attach_op();
       PhysicalRegion result = attach_op->initialize(this, launcher);
-      attach_op->initialize_replication(this, external_resource_barrier);
+      attach_op->initialize_replication(this, external_resource_barrier,
+                        attach_broadcast_barrier, attach_reduce_barrier);
 
       bool parent_conflict = false, inline_conflict = false;
       int index = has_conflicting_regions(attach_op, 
