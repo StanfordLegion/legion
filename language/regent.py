@@ -104,23 +104,24 @@ def regent(args, env={}, cwd=None, **kwargs):
         python_path = []
 
     normal_args = [arg for arg in args if not arg.startswith('-')]
-    first_arg = os.path.realpath(
-        os.path.join(cwd, normal_args[0]) if cwd is not None else normal_args[0])
+    first_arg = None
+    if len(normal_args) >= 1:
+        first_arg = os.path.realpath(
+            os.path.join(cwd, normal_args[0]) if cwd is not None else normal_args[0])
     terra_path += (
         ['?.t', '?.rg'] +
         ([os.path.join(os.path.dirname(first_arg), '?.t'),
           os.path.join(os.path.dirname(first_arg), '?.rg')]
-          if len(normal_args) >= 1 and os.path.exists(first_arg) else []) +
+          if first_arg is not None and os.path.exists(first_arg) else []) +
         [os.path.join(regent_dir, 'src', '?.t'),
          os.path.join(regent_dir, 'src', 'rdir', 'plugin', 'src', '?.t'),
          os.path.join(terra_dir, 'tests', 'lib', '?.t'),
          os.path.join(terra_dir, 'release', 'include', '?.t'),
          os.path.join(bindings_dir, '?.t')])
 
-    python_path += [
-        os.path.dirname(first_arg),
-        python_dir,
-    ]
+    if first_arg is not None:
+        python_path.append(os.path.dirname(first_arg))
+    python_path.append(python_dir)
 
     terra_env = {
         'TERRA_PATH': ';'.join(terra_path),

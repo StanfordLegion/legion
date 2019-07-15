@@ -2953,6 +2953,7 @@ namespace Legion {
       LayoutConstraintSet layout_constraint_set;
       size_t footprint;
       bool restricted;
+      bool mapping;
     };
 
     /**

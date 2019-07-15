@@ -2106,8 +2106,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     AttachLauncher::AttachLauncher(ExternalResource r, 
                                    LogicalRegion h, LogicalRegion p,
-                                   const bool restr/*= true*/)
-      : resource(r), handle(h), parent(p), restricted(restr),
+                                   const bool restr/*= true*/,
+                                   const bool map/*= true*/)
+      : resource(r), handle(h), parent(p), restricted(restr), mapped(map),
         file_name(NULL), mode(LEGION_FILE_READ_ONLY), footprint(0),
         static_dependences(NULL)
     //--------------------------------------------------------------------------

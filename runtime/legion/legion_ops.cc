@@ -14626,6 +14626,7 @@ namespace Legion {
       resource = launcher.resource;
       footprint = launcher.footprint;
       restricted = launcher.restricted;
+      mapping = launcher.mapped;
       switch (resource)
       {
         case EXTERNAL_POSIX_FILE:
@@ -14701,7 +14702,7 @@ namespace Legion {
           assert(false); // should never get here
       }
       region = PhysicalRegion(new PhysicalRegionImpl(requirement,
-                              completion_event, true/*mapped*/, ctx,
+                              completion_event, launcher.mapped, ctx,
                               0/*map id*/, 0/*tag*/, false/*leaf*/, 
                               false/*virtual mapped*/, runtime)); 
       if (runtime->legion_spy_enabled)
@@ -14859,9 +14860,15 @@ namespace Legion {
       assert(external_views.size() == 1);
 #endif
       InstanceView *ext_view = external_views[0];
+      ApUserEvent termination_event;
+      if (mapping)
+        termination_event = Runtime::create_ap_user_event();
       ApEvent attach_event = runtime->forest->attach_external(this, 0/*idx*/,
                                                         requirement,
                                                         ext_view, ext_view,
+                                                        mapping ?
+                                                          termination_event :
+                                                          completion_event,
                                                         version_info,
                                                         trace_info,
                                                         map_applied_conditions,
@@ -14869,8 +14876,14 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(external_instance.has_ref());
 #endif
-      // This operation is ready once the file is attached
-      region.impl->set_reference(external_instance);
+      if (mapping)
+      {
+        external[0].set_ready_event(attach_event);
+        region.impl->reset_references(external,termination_event,attach_event);
+      }
+      else
+        // This operation is ready once the file is attached
+        region.impl->set_reference(external_instance);
       // Once we have created the instance, then we are done
       if (!map_applied_conditions.empty())
         complete_mapping(Runtime::merge_events(map_applied_conditions));

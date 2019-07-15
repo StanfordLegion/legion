@@ -1351,9 +1351,6 @@ namespace Legion {
               context->get_task_name(), context->get_unique_id(),
               (warning_string == NULL) ? "" : warning_string)
       }
-#ifdef DEBUG_LEGION
-      assert(mapped); // should only be waiting on mapped regions
-#endif
       // If we've already gone through this process we're good
       if (valid)
         return;

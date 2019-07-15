@@ -4915,6 +4915,9 @@ namespace Legion {
       // if it is then we are done
       if (region.is_mapped())
         return ApEvent::NO_AP_EVENT;
+      // Make sure this region is valid before trying to remap it
+      if (!region.is_valid())
+        region.wait_until_valid(true/*silence warnings*/);
       MapOp *map_op = runtime->get_available_map_op();
       map_op->initialize(this, region);
       register_inline_mapped_region(region);
@@ -4930,8 +4933,9 @@ namespace Legion {
       AutoRuntimeCall call(this);
       if (!region.is_mapped())
         return;
-      unregister_inline_mapped_region(region);
+      // Do this first to make sure it is valid
       region.impl->unmap_region();
+      unregister_inline_mapped_region(region);
     }
 
     //--------------------------------------------------------------------------
@@ -5207,6 +5211,9 @@ namespace Legion {
                       launcher.handle.field_space.id, 
                       launcher.handle.tree_id, get_task_name(), 
                       get_unique_id(), launcher.file_name)
+      // If we're counting this region as mapped we need to register it
+      if (launcher.mapped)
+        register_inline_mapped_region(result);
       runtime->add_to_dependence_queue(this, executing_processor, attach_op);
       return result;
     }
@@ -5216,6 +5223,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
+      // Make sure this region is valid before we try to detach it
+      if (!region.is_valid())
+        region.wait_until_valid(true/*silence warnings*/);
       DetachOp *detach_op = runtime->get_available_detach_op();
       Future result = detach_op->initialize_detach(this, region, flush);
       // If the region is still mapped, then unmap it

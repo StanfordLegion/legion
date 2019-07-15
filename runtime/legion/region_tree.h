@@ -515,6 +515,7 @@ namespace Legion {
                               // in cases of control replication
                               InstanceView *local_view,
                               LogicalView *registration_view,
+                              const ApEvent termination_event,
                               VersionInfo &version_info,
                               const PhysicalTraceInfo &trace_info,
                               std::set<RtEvent> &map_applied_events,

@@ -2662,6 +2662,7 @@ namespace Legion {
                                           const RegionRequirement &req,
                                           InstanceView *local_view,
                                           LogicalView *registration_view,
+                                          const ApEvent termination_event,
                                           VersionInfo &version_info,
                                           const PhysicalTraceInfo &trace_info,
                                           std::set<RtEvent> &map_applied_events,
@@ -2673,7 +2674,6 @@ namespace Legion {
       assert(req.handle_type == SINGULAR);
 #endif
       const RegionUsage usage(req);
-      const ApEvent term_event = attach_op->get_completion_event();
       RegionNode *region_node = get_node(req.region);
       FieldSpaceNode *fs_node = region_node->column_source;
       const FieldMask ext_mask = fs_node->get_field_mask(req.privilege_fields);
@@ -2682,7 +2682,7 @@ namespace Legion {
       std::set<RtEvent> registration_applied;
       const UniqueID op_id = attach_op->get_unique_op_id();
       const ApEvent ready = local_view->register_user(usage, ext_mask,
-                  region_node->row_source, op_id, index, term_event,
+                  region_node->row_source, op_id, index, termination_event,
                   registration_applied, trace_info, runtime->address_space);
       RtEvent guard_event;
       if (!registration_applied.empty())
