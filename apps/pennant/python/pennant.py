@@ -364,6 +364,16 @@ def main():
         for field in ['start', 'stop']:
             legion.fill(region, field, 0)
 
+    if old_seq_init:
+        # FIXME: These fields are actually never used, fill them here
+        # just to avoid validation errors later.
+        legion.fill(points, 'pap_x', 0)
+        legion.fill(points, 'pap_y', 0)
+        legion.fill(sides, 'svolp', 0)
+        legion.fill(sides, 'svol', 0)
+        legion.fill(sides, 'ssurfp_x', 0)
+        legion.fill(sides, 'ssurfp_y', 0)
+
     if conf.par_init:
         for i in IndexLaunch(pieces):
             initialize_topology(
