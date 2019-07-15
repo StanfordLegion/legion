@@ -2308,6 +2308,10 @@ namespace Legion {
       initialize_operation(ctx, true/*track*/, 1/*regions*/);
       parent_task = ctx->get_task();
       requirement = reg.impl->get_requirement();
+      // If this was a write-discard privilege, change it to read-write
+      // so that we don't lose any data
+      if (HAS_WRITE_DISCARD(requirement))
+        requirement.privilege = READ_WRITE;
       map_id = reg.impl->map_id;
       tag = reg.impl->tag;
       region = reg;
