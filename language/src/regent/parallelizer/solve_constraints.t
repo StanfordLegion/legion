@@ -395,6 +395,7 @@ local function create_preimage_partition(variable, region_symbol, src_partition,
       symbol = variable,
       type = partition_type,
       value = ast.typed.expr.Preimage {
+        disjointness = src_partition_type.disjointness,
         expr_type = partition_type,
         parent = ast.typed.expr.ID {
           value = region_symbol,
@@ -687,6 +688,7 @@ local function create_image_partition(variable, region_symbol, src_partition, in
       symbol = variable,
       type = partition_type,
       value = ast.typed.expr.Image {
+        disjointness = false,
         expr_type = partition_type,
         parent = ast.typed.expr.ID {
           value = region_symbol,
