@@ -1666,7 +1666,7 @@ namespace Legion {
     {
       if (valid)
         return true;
-      if (mapped && ready_event.has_triggered())
+      if (ready_event.has_triggered())
       {
         std::set<ApEvent> wait_on;
         references.update_wait_on_events(wait_on);
@@ -1905,6 +1905,9 @@ namespace Legion {
     void PhysicalRegionImpl::set_reference(const InstanceRef &ref)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(ref.has_ref());
+#endif
       references.add_instance(ref);
       ref.add_valid_reference(PHYSICAL_REGION_REF);
     }
