@@ -4446,6 +4446,18 @@ legion_runtime_disable_scheduler_lock()
   Processor::disable_scheduler_lock();
 }
 
+void
+legion_runtime_print_once(legion_runtime_t runtime_,
+                          legion_context_t ctx_,
+                          FILE *f,
+                          const char *message)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+
+  runtime->print_once(ctx, f, message);
+}
+
 // -----------------------------------------------------------------------
 // Physical Data Operations
 // -----------------------------------------------------------------------
