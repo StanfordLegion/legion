@@ -2406,7 +2406,7 @@ class State(object):
     def log_kind(self, task_id, name, overwrite):
         if task_id not in self.task_kinds:
             self.task_kinds[task_id] = TaskKind(task_id, name)
-        elif overwrite == 1:
+        elif overwrite == 1 or self.task_kinds[task_id].name is None:
             self.task_kinds[task_id].name = name
 
     def log_variant(self, task_id, variant_id, name):
