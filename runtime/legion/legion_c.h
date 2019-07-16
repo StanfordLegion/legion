@@ -3581,6 +3581,14 @@ extern "C" {
                             legion_context_t ctx,
                             FILE *f,
                             const char *message);
+  /**
+   * @see Legion::Runtime::print_once()
+   */
+  void
+  legion_runtime_print_once_fd(legion_runtime_t runtime,
+                            legion_context_t ctx,
+                            int fd, const char *mode,
+                            const char *message);
 
   // -----------------------------------------------------------------------
   // Physical Data Operations
