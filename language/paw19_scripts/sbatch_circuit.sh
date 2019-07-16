@@ -1,6 +1,6 @@
 #!/bin/sh
 #SBATCH --constraint=gpu
-#SBATCH --time=00:40:00
+#SBATCH --time=01:00:00
 #SBATCH --mail-type=ALL
 
 root_dir="$PWD"
