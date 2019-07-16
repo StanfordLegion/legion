@@ -163,11 +163,9 @@ def main():
         for f in ['input', 'output']:
             legion.fill(r, f, init)
 
-    tsteps = conf.tsteps
+    tsteps = conf.tsteps + 2 * conf.tprune
     tprune = conf.tprune
 
-    start_time = 0
-    stop_time = 0
     for t in range(tsteps):
         if t == tprune:
             legion.execution_fence(block=True)
