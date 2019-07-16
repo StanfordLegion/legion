@@ -25,7 +25,7 @@ import os
 import subprocess
 
 import legion
-from legion import disjoint_complete, index_launch, task, Domain, Fspace, Ispace, IndexLaunch, ID, Partition, N, R, Reduce, Region, RW, WD
+from legion import disjoint_complete, index_launch, print_once, task, Domain, Fspace, Ispace, IndexLaunch, ID, Partition, N, R, Reduce, Region, RW, Trace, WD
 
 root_dir = os.path.dirname(__file__)
 circuit_header = subprocess.check_output(

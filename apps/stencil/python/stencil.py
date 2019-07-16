@@ -22,7 +22,7 @@ from collections import OrderedDict
 import numpy as np
 
 import legion
-from legion import disjoint, disjoint_incomplete, disjoint_complete, print_once, task, Fspace, IndexLaunch, Ispace, N, Partition, R, Region, RW
+from legion import disjoint, disjoint_incomplete, disjoint_complete, print_once, task, Fspace, IndexLaunch, Ispace, N, Partition, R, Region, RW, Trace
 
 DTYPE = legion.float64
 RADIUS = 2
