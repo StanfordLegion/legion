@@ -36,7 +36,7 @@ def parse_args(argv):
     parser.add_argument('-tsteps', type=int, default=20)
     parser.add_argument('-tprune', type=int, default=5)
     parser.add_argument('-init', type=int, default=1000)
-    return parser.parse_args(argv[2:])
+    return parser.parse_args(argv[1:])
 
 def make_colors_part(tiles):
     colors = Region.create(tiles, {'rect': legion.rect2d})
