@@ -203,20 +203,22 @@ def main():
     prune = conf.prune
     num_loops = conf.num_loops + 2*prune
 
+    trace = Trace()
     for j in range(num_loops):
         if j == prune:
             legion.execution_fence(block=True)
             start_time = legion.c.legion_get_current_time_in_nanos()
-        for i in IndexLaunch(launch_domain):
-            calculate_new_currents(
-                False, # j == prune,
-                steps, private_part[i], shared_part[i], ghost_part[i], wires_part[i])
-        for i in IndexLaunch(launch_domain):
-            distribute_charge(private_part[i], shared_part[i], ghost_part[i], wires_part[i])
-        for i in IndexLaunch(launch_domain):
-            update_voltages(
-                False, # j == num_loops - prune - 1,
-                private_part[i], shared_part[i])
+        with trace:
+            for i in IndexLaunch(launch_domain):
+                calculate_new_currents(
+                    False, # j == prune,
+                    steps, private_part[i], shared_part[i], ghost_part[i], wires_part[i])
+            for i in IndexLaunch(launch_domain):
+                distribute_charge(private_part[i], shared_part[i], ghost_part[i], wires_part[i])
+            for i in IndexLaunch(launch_domain):
+                update_voltages(
+                    False, # j == num_loops - prune - 1,
+                    private_part[i], shared_part[i])
         if j == num_loops - prune - 1:
             legion.execution_fence(block=True)
             stop_time = legion.c.legion_get_current_time_in_nanos()

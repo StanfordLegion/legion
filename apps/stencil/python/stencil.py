@@ -166,14 +166,16 @@ def main():
     tsteps = conf.tsteps + 2 * conf.tprune
     tprune = conf.tprune
 
+    trace = Trace()
     for t in range(tsteps):
         if t == tprune:
             legion.execution_fence(block=True)
             start_time = legion.c.legion_get_current_time_in_nanos()
-        for i in IndexLaunch(tiles):
-            stencil(private[i], interior[i], pxm_in[i], pxp_in[i], pym_in[i], pyp_in[i], False) # t == tprune)
-        for i in IndexLaunch(tiles):
-            increment(private[i], exterior[i], pxm_out[i], pxp_out[i], pym_out[i], pyp_out[i], False) # t == tsteps - tprune - 1)
+        with trace:
+            for i in IndexLaunch(tiles):
+                stencil(private[i], interior[i], pxm_in[i], pxp_in[i], pym_in[i], pyp_in[i], False) # t == tprune)
+            for i in IndexLaunch(tiles):
+                increment(private[i], exterior[i], pxm_out[i], pxp_out[i], pym_out[i], pyp_out[i], False) # t == tsteps - tprune - 1)
         if t == tsteps - tprune - 1:
             legion.execution_fence(block=True)
             stop_time = legion.c.legion_get_current_time_in_nanos()
