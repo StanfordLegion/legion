@@ -36,16 +36,18 @@ def main():
     P = legion.Partition.create_equal(R, [2, 2])
     legion.fill(R, 'x', 0)
 
+    trace1 = legion.Trace()
     for t in range(5):
-        with legion.Trace():
+        with trace1:
             for i in legion.IndexLaunch([2, 2]):
                 look(R, i)
 
             for i in legion.IndexLaunch([2, 2]):
                 incr(P[i], i)
 
+    trace2 = legion.Trace()
     for t in range(5):
-        with legion.Trace():
+        with trace2:
             legion.index_launch([2, 2], look, R, ID)
             legion.index_launch([2, 2], incr, P[ID], ID)
 
