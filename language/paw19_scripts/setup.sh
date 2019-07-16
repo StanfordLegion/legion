@@ -25,4 +25,4 @@ if [[ ! -f $PYTHON_LIB ]]; then
     exit 1
 fi
 
-USE_CUDA=1 CUDA_HOME=$CUDATOOLKIT_HOME USE_PYTHON=1 HOST_CC=gcc HOST_CXX=g++ "$root_dir"/scripts/setup_env.py --llvm-version 38
+USE_CUDA=0 CUDA_HOME=$CUDATOOLKIT_HOME USE_PYTHON=1 HOST_CC=gcc HOST_CXX=g++ "$root_dir"/scripts/setup_env.py --llvm-version 38
