@@ -237,7 +237,7 @@ namespace Realm {
 
     // find the layout piece the current point is in
     const InstanceLayoutPiece<N,T> *layout_piece;
-    int field_rel_offset;
+    size_t field_rel_offset;
     size_t field_size;
     size_t total_bytes = 0;
     {

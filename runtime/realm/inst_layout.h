@@ -80,7 +80,7 @@ namespace Realm {
     //  indirectly reference a piece list
     struct FieldLayout {
       int list_idx;
-      int rel_offset;
+      size_t rel_offset;
       int size_in_bytes;
     };
 
@@ -261,7 +261,7 @@ namespace Realm {
     //  piece list and relative offset of the field we're interested in
     RegionInstance inst;
     const InstancePieceList<N,T> *piece_list;
-    int rel_offset;
+    size_t rel_offset;
     // cache the most recently-used piece
     const InstanceLayoutPiece<N,T> *prev_piece;
 

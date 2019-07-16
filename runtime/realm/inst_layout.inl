@@ -138,7 +138,7 @@ namespace Realm {
       size_t galign = 1;
       // we can't set field offsets in a single pass because we don't know
       //  the whole group's alignment until we look at every field
-      std::map<FieldID, int> field_offsets;
+      std::map<FieldID, size_t> field_offsets;
       std::map<FieldID, int> field_sizes;
       for(std::vector<InstanceLayoutConstraints::FieldInfo>::const_iterator it2 = fg.begin();
 	  it2 != fg.end();
@@ -227,7 +227,7 @@ namespace Realm {
       
       // now that the we know which piece list we are using, we can set the
       //  actual field offsets
-      for(std::map<FieldID, int>::const_iterator it2 = field_offsets.begin();
+      for(std::map<FieldID, size_t>::const_iterator it2 = field_offsets.begin();
 	  it2 != field_offsets.end();
 	  ++it2) {
 	// should not have seen this field before
