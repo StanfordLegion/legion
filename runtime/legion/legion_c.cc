@@ -4458,6 +4458,16 @@ legion_runtime_print_once(legion_runtime_t runtime_,
   runtime->print_once(ctx, f, message);
 }
 
+void
+legion_runtime_print_once_fd(legion_runtime_t runtime_,
+                             legion_context_t ctx_,
+                             int fd, const char *mode,
+                             const char *message)
+{
+  FILE *f = fdopen(fd, mode);
+  legion_runtime_print_once(runtime_, ctx_, f, message);
+}
+
 // -----------------------------------------------------------------------
 // Physical Data Operations
 // -----------------------------------------------------------------------
