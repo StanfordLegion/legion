@@ -54,6 +54,8 @@ try:
 except:
     zip_longest = itertools.zip_longest # Python 3
 
+from io import StringIO
+
 _pickle_version = pickle.HIGHEST_PROTOCOL # Use latest Pickle protocol
 
 _max_dim = int(os.environ.get('MAX_DIM', 3))
@@ -2206,6 +2208,13 @@ def execution_fence(block=False, future=False):
             f.get()
         if future:
             return f
+
+def print_once(*args, **kwargs):
+    fd = (kwargs['file'] if 'file' in kwargs else sys.stdout).fileno()
+    message = StringIO()
+    kwargs['file'] = message
+    print(*args, **kwargs)
+    c.legion_runtime_print_once_fd(_my.ctx.runtime, _my.ctx.context, fd, 'w'.encode('utf-8'), message.getvalue().encode('utf-8'))
 
 class Tunable(object):
     # FIXME: Deduplicate this with DefaultMapper::DefaultTunables
