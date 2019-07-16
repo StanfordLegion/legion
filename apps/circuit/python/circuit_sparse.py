@@ -25,7 +25,7 @@ import os
 import subprocess
 
 import legion
-from legion import disjoint_complete, index_launch, task, Domain, Fspace, Ispace, IndexLaunch, ID, Partition, N, R, Reduce, Region, RW, WD
+from legion import disjoint_complete, index_launch, print_once, task, Domain, Fspace, Ispace, IndexLaunch, ID, Partition, N, R, Reduce, Region, RW, Trace, WD
 
 root_dir = os.path.dirname(__file__)
 circuit_header = subprocess.check_output(
@@ -39,6 +39,8 @@ ffi.cdef(circuit_header)
 Config = legion.Type(
     np.dtype([('bytes', np.void, ffi.sizeof('Config'))]),
     'Config')
+
+WIRE_SEGMENTS = 10
 
 def parse_args(argv):
     parser = argparse.ArgumentParser(argv[0])
@@ -143,9 +145,9 @@ def main():
         ('resistance', legion.float32),
         ('wire_cap', legion.float32),
     ] + [
-        ('current_%d' % i, legion.float32) for i in range(10)
+        ('current_%d' % i, legion.float32) for i in range(WIRE_SEGMENTS)
     ] + [
-        ('voltage_%d' % i, legion.float32) for i in range(9)
+        ('voltage_%d' % i, legion.float32) for i in range(WIRE_SEGMENTS - 1)
     ]))
 
     all_nodes = Region.create([num_circuit_nodes], node)
@@ -201,13 +203,44 @@ def main():
     prune = conf.prune
     num_loops = conf.num_loops + 2*prune
 
+    trace = Trace()
     for j in range(num_loops):
-        for i in IndexLaunch(launch_domain):
-            calculate_new_currents(j == prune, steps, private_part[i], shared_part[i], ghost_part[i], wires_part[i])
-        for i in IndexLaunch(launch_domain):
-            distribute_charge(private_part[i], shared_part[i], ghost_part[i], wires_part[i])
-        for i in IndexLaunch(launch_domain):
-            update_voltages(j == num_loops - prune - 1, private_part[i], shared_part[i])
+        if j == prune:
+            legion.execution_fence(block=True)
+            start_time = legion.c.legion_get_current_time_in_nanos()
+        with trace:
+            for i in IndexLaunch(launch_domain):
+                calculate_new_currents(
+                    False, # j == prune,
+                    steps, private_part[i], shared_part[i], ghost_part[i], wires_part[i])
+            for i in IndexLaunch(launch_domain):
+                distribute_charge(private_part[i], shared_part[i], ghost_part[i], wires_part[i])
+            for i in IndexLaunch(launch_domain):
+                update_voltages(
+                    False, # j == num_loops - prune - 1,
+                    private_part[i], shared_part[i])
+        if j == num_loops - prune - 1:
+            legion.execution_fence(block=True)
+            stop_time = legion.c.legion_get_current_time_in_nanos()
+
+    sim_time = (stop_time - start_time)/1e9
+    print_once('ELAPSED TIME = %7.3f s' % sim_time)
+
+    # Compute the floating point operations per second
+    num_circuit_nodes = conf.num_pieces * conf.nodes_per_piece
+    num_circuit_wires = conf.num_pieces * conf.wires_per_piece
+    # calculate currents
+    operations = num_circuit_wires * (WIRE_SEGMENTS*6 + (WIRE_SEGMENTS-1)*4) * conf.steps
+    # distribute charge
+    operations += (num_circuit_wires * 4)
+    # update voltages
+    operations += (num_circuit_nodes * 4)
+    # multiply by the number of loops
+    operations *= conf.num_loops
+
+    # Compute the number of gflops
+    gflops = (1e-9*operations)/sim_time
+    print_once("GFLOPS = %7.3f GFLOPS" % gflops)
 
 if __name__ == '__legion_main__':
     main()

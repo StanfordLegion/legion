@@ -22,7 +22,7 @@ from collections import OrderedDict
 import numpy as np
 
 import legion
-from legion import disjoint, disjoint_incomplete, disjoint_complete, task, Fspace, IndexLaunch, Ispace, N, Partition, R, Region, RW
+from legion import disjoint, disjoint_incomplete, disjoint_complete, print_once, task, Fspace, IndexLaunch, Ispace, N, Partition, R, Region, RW, Trace
 
 DTYPE = legion.float64
 RADIUS = 2
@@ -36,7 +36,7 @@ def parse_args(argv):
     parser.add_argument('-tsteps', type=int, default=20)
     parser.add_argument('-tprune', type=int, default=5)
     parser.add_argument('-init', type=int, default=1000)
-    return parser.parse_args(argv[2:])
+    return parser.parse_args(argv[1:])
 
 def make_colors_part(tiles):
     colors = Region.create(tiles, {'rect': legion.rect2d})
@@ -163,17 +163,27 @@ def main():
         for f in ['input', 'output']:
             legion.fill(r, f, init)
 
-    tsteps = conf.tsteps
+    tsteps = conf.tsteps + 2 * conf.tprune
     tprune = conf.tprune
 
+    trace = Trace()
     for t in range(tsteps):
-        for i in IndexLaunch(tiles):
-            stencil(private[i], interior[i], pxm_in[i], pxp_in[i], pym_in[i], pyp_in[i], t == tprune)
-        for i in IndexLaunch(tiles):
-            increment(private[i], exterior[i], pxm_out[i], pxp_out[i], pym_out[i], pyp_out[i], t == tsteps - tprune - 1)
+        if t == tprune:
+            legion.execution_fence(block=True)
+            start_time = legion.c.legion_get_current_time_in_nanos()
+        with trace:
+            for i in IndexLaunch(tiles):
+                stencil(private[i], interior[i], pxm_in[i], pxp_in[i], pym_in[i], pyp_in[i], False) # t == tprune)
+            for i in IndexLaunch(tiles):
+                increment(private[i], exterior[i], pxm_out[i], pxp_out[i], pym_out[i], pyp_out[i], False) # t == tsteps - tprune - 1)
+        if t == tsteps - tprune - 1:
+            legion.execution_fence(block=True)
+            stop_time = legion.c.legion_get_current_time_in_nanos()
 
     for i in IndexLaunch(tiles):
         check(private[i], interior[i], tsteps, init)
+
+    print_once('ELAPSED TIME = %7.3f s' % ((stop_time - start_time)/1e9))
 
 if __name__ == '__legion_main__':
     main()
