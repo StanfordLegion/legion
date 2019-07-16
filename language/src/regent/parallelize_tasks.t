@@ -88,7 +88,9 @@ end
 
 function parallelize_tasks.entry(node)
   if node:is(ast.typed.top.Task) then
-    if node.annotations.parallel:is(ast.annotation.Demand) then
+    if not node.body then
+      return node
+    elseif node.annotations.parallel:is(ast.annotation.Demand) then
       assert(node.config_options.leaf)
       assert(node.metadata)
       infer_constraints.top_task(node)
