@@ -176,7 +176,7 @@ global_task_registration_barrier = None
 class Context(object):
     __slots__ = ['context_root', 'context', 'runtime_root', 'runtime',
                  'task_root', 'task', 'regions',
-                 'owned_objects', 'current_launch']
+                 'owned_objects', 'current_launch', 'next_trace_id']
     def __init__(self, context_root, runtime_root, task_root, regions):
         self.context_root = context_root
         self.context = self.context_root[0]
@@ -187,6 +187,7 @@ class Context(object):
         self.regions = regions
         self.owned_objects = []
         self.current_launch = None
+        self.next_trace_id = 0
     def track_object(self, obj):
         self.owned_objects.append(weakref.ref(obj))
     def begin_launch(self, launch):
@@ -2237,6 +2238,19 @@ class Tunable(object):
         future = Future.from_cdata(result, value_type=uint64)
         c.legion_future_destroy(result)
         return future
+
+class Trace(object):
+    __slots__ = ['trace_id']
+
+    def __init__(self):
+        self.trace_id = _my.ctx.next_trace_id
+        _my.ctx.next_trace_id += 1
+
+    def __enter__(self):
+        c.legion_runtime_begin_trace(_my.ctx.runtime, _my.ctx.context, self.trace_id, True)
+
+    def __exit__(self, exc_type, exc_value, tb):
+        c.legion_runtime_end_trace(_my.ctx.runtime, _my.ctx.context, self.trace_id)
 
 if is_script:
     # We can't use runpy for this since runpy is aggressive about
