@@ -22,7 +22,7 @@ from collections import OrderedDict
 import numpy as np
 
 import legion
-from legion import disjoint, disjoint_incomplete, disjoint_complete, task, Fspace, IndexLaunch, Ispace, N, Partition, R, Region, RW
+from legion import disjoint, disjoint_incomplete, disjoint_complete, print_once, task, Fspace, IndexLaunch, Ispace, N, Partition, R, Region, RW
 
 DTYPE = legion.float64
 RADIUS = 2
@@ -166,14 +166,24 @@ def main():
     tsteps = conf.tsteps
     tprune = conf.tprune
 
+    start_time = 0
+    stop_time = 0
     for t in range(tsteps):
+        if t == tprune:
+            legion.execution_fence(block=True)
+            start_time = legion.c.legion_get_current_time_in_nanos()
         for i in IndexLaunch(tiles):
-            stencil(private[i], interior[i], pxm_in[i], pxp_in[i], pym_in[i], pyp_in[i], t == tprune)
+            stencil(private[i], interior[i], pxm_in[i], pxp_in[i], pym_in[i], pyp_in[i], False) # t == tprune)
         for i in IndexLaunch(tiles):
-            increment(private[i], exterior[i], pxm_out[i], pxp_out[i], pym_out[i], pyp_out[i], t == tsteps - tprune - 1)
+            increment(private[i], exterior[i], pxm_out[i], pxp_out[i], pym_out[i], pyp_out[i], False) # t == tsteps - tprune - 1)
+        if t == tsteps - tprune - 1:
+            legion.execution_fence(block=True)
+            stop_time = legion.c.legion_get_current_time_in_nanos()
 
     for i in IndexLaunch(tiles):
         check(private[i], interior[i], tsteps, init)
+
+    print_once('ELAPSED TIME = %7.3f s' % ((stop_time - start_time)/1e9))
 
 if __name__ == '__legion_main__':
     main()
