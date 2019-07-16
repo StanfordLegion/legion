@@ -349,7 +349,7 @@ def get_test_specs(legion_dir, use_run, use_spy, use_prof, use_hdf5, use_openmp,
     python = [
         ('run_pass', (test_run_pass, ([] + extra_flags, run_env)),
          (os.path.join('tests', 'python', 'run_pass'),
-          os.path.join('..', 'bindings', 'python', 'apps'),
+          os.path.join('..', 'apps'),
          )),
     ]
     def max_dim_tests(dim):

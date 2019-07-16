@@ -57,7 +57,7 @@ do
 end
 
 -- Also copy input files into the destination directory.
-if os.getenv('OBJNAME') then
+if os.getenv('STANDALONE') == '1' and os.getenv('OBJNAME') then
   local root_dir = arg[0]:match(".*/") or "./"
   local out_dir = os.getenv('OBJNAME'):match('.*/')
   if out_dir then

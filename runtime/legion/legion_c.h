@@ -34,6 +34,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 #endif // LEGION_USE_PYTHON_CFFI
 
 #ifdef __cplusplus
@@ -3571,7 +3572,16 @@ extern "C" {
 
   void
   legion_runtime_disable_scheduler_lock();
-  
+
+  /**
+   * @see Legion::Runtime::print_once()
+   */
+  void
+  legion_runtime_print_once(legion_runtime_t runtime,
+                            legion_context_t ctx,
+                            FILE *f,
+                            const char *message);
+
   // -----------------------------------------------------------------------
   // Physical Data Operations
   // -----------------------------------------------------------------------
