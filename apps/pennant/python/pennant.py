@@ -296,7 +296,6 @@ apply_boundary_conditions = legion.extern_task(
 
 adv_pos_full = legion.extern_task(
     task_id=10026,
-    task_name='adv_pos_full',
     argument_types=[Region, legion.float64, legion.bool_],
     privileges=[
         R('px0_x', 'px0_y', 'pu0_x', 'pu0_y', 'pf_x', 'pf_y', 'pmaswt') + RW('px_x', 'px_y', 'pu_x', 'pu_y')],
@@ -305,7 +304,6 @@ adv_pos_full = legion.extern_task(
 
 calc_centers_full = legion.extern_task(
     task_id=10027,
-    task_name='calc_centers_full',
     argument_types=[Region, Region, Region, Region, legion.bool_],
     privileges=[
         R('znump') + RW('zx_x', 'zx_y'),
