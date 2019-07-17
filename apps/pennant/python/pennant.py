@@ -571,13 +571,13 @@ def main():
         for i in IndexLaunch(pieces):
             init_step_zones(zones_part[i], True)
 
-        dt = calc_global_dt(dt.get(), conf.dtfac, conf.dtinit, conf.dtmax, dthydro, time, conf.tstop, cycle)
+        dt = calc_global_dt(dt, conf.dtfac, conf.dtinit, conf.dtmax, dthydro, time, conf.tstop, cycle)
 
         for i in IndexLaunch(pieces):
-            adv_pos_half(private_part[i], dt.get(), True)
+            adv_pos_half(private_part[i], dt, True)
 
         for i in IndexLaunch(pieces):
-            adv_pos_half(shared_part[i], dt.get(), True)
+            adv_pos_half(shared_part[i], dt, True)
 
         for i in IndexLaunch(pieces):
             calc_centers(
@@ -617,7 +617,7 @@ def main():
         for i in IndexLaunch(pieces):
             calc_state_at_half(
                 zones_part[i],
-                conf.gamma, conf.ssmin, dt.get(),
+                conf.gamma, conf.ssmin, dt,
                 True)
 
         for i in IndexLaunch(pieces):
@@ -686,10 +686,10 @@ def main():
             apply_boundary_conditions(shared_part[i], True)
 
         for i in IndexLaunch(pieces):
-            adv_pos_full(private_part[i], dt.get(), True)
+            adv_pos_full(private_part[i], dt, True)
 
         for i in IndexLaunch(pieces):
-            adv_pos_full(shared_part[i], dt.get(), True)
+            adv_pos_full(shared_part[i], dt, True)
 
         for i in IndexLaunch(pieces):
             calc_centers_full(
@@ -713,13 +713,13 @@ def main():
                 private_part[i],
                 ghost_part[i],
                 sides_part[i],
-                dt.get(),
+                dt,
                 True)
 
         for i in IndexLaunch(pieces):
             calc_work_rate_energy_rho_full(
                 zones_part[i],
-                dt.get(),
+                dt,
                 True)
 
         futures = []
@@ -727,7 +727,7 @@ def main():
             futures.append(
                 calc_dt_hydro(
                     zones_part[i],
-                    dt.get(), conf.dtmax, conf.cfl, conf.cflv, True))
+                    dt, conf.dtmax, conf.cfl, conf.cflv, True))
 
         dthydro = conf.dtmax
         dthydro = min(dthydro, *list(map(lambda x: x.get(), futures)))

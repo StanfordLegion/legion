@@ -458,7 +458,7 @@ def main():
     dt = Future(conf.dtmax, legion.float64)
     dthydro = conf.dtmax
     while cycle < cstop and time < conf.tstop:
-        dt = calc_global_dt(dt.get(), conf.dtfac, conf.dtinit, conf.dtmax, dthydro, time, conf.tstop, cycle)
+        dt = calc_global_dt(dt, conf.dtfac, conf.dtinit, conf.dtmax, dthydro, time, conf.tstop, cycle)
 
         print_ts = conf.print_ts and cycle == prune
 
@@ -466,13 +466,13 @@ def main():
             adv_pos_half(
                 private_part[i],
                 private_spans_part[i],
-                dt.get(), True, print_ts)
+                dt, True, print_ts)
 
         for i in IndexLaunch(pieces):
             adv_pos_half(
                 shared_part[i],
                 shared_spans_part[i],
-                dt.get(), True, print_ts)
+                dt, True, print_ts)
 
         for i in IndexLaunch(pieces):
             calc_everything(
@@ -482,19 +482,19 @@ def main():
                 sides_part[i],
                 zone_spans_part[i],
                 side_spans_part[i],
-                conf.alfa, conf.gamma, conf.ssmin, dt.get(), conf.q1, conf.q2, True)
+                conf.alfa, conf.gamma, conf.ssmin, dt, conf.q1, conf.q2, True)
 
         for i in IndexLaunch(pieces):
             adv_pos_full(
                 private_part[i],
                 private_spans_part[i],
-                dt.get(), True)
+                dt, True)
 
         for i in IndexLaunch(pieces):
             adv_pos_full(
                 shared_part[i],
                 shared_spans_part[i],
-                dt.get(), True)
+                dt, True)
 
         for i in IndexLaunch(pieces):
             calc_everything_full(
@@ -504,7 +504,7 @@ def main():
                 sides_part[i],
                 zone_spans_part[i],
                 side_spans_part[i],
-                dt.get(), True)
+                dt, True)
 
         print_ts = conf.print_ts and cycle == cstop - 1 - prune
 
@@ -514,7 +514,7 @@ def main():
                 calc_dt_hydro(
                     zones_part[i],
                     zone_spans_part[i],
-                    dt.get(), conf.dtmax, conf.cfl, conf.cflv, True, print_ts))
+                    dt, conf.dtmax, conf.cfl, conf.cflv, True, print_ts))
 
         dthydro = conf.dtmax
         dthydro = min(dthydro, *list(map(lambda x: x.get(), futures)))

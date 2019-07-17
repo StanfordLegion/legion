@@ -1734,14 +1734,17 @@ class _TaskLauncher(object):
         elif self.task.calling_convention == 'regent':
             arg_struct = self.task.argument_struct(args)
             task_args_buffer = ffi.new('%s*' % arg_struct)
-            # FIXME: Correct for > 64 arguments.
-            getattr(task_args_buffer, '__map')[0] = 0 # Currently we never pass futures.
+            # Note: ffi.new returns zeroed memory
             for i, arg in enumerate(args):
-                arg_name = '__arg_%s' % i
-                arg_value = arg
-                if hasattr(arg, 'handle'):
-                    arg_value = arg.handle[0]
-                setattr(task_args_buffer, arg_name, arg_value)
+                if isinstance(arg, Future):
+                    getattr(task_args_buffer, '__map')[i // 64] |= 1 << (i % 64)
+            for i, arg in enumerate(args):
+                if not isinstance(arg, Future):
+                    arg_name = '__arg_%s' % i
+                    arg_value = arg
+                    if hasattr(arg, 'handle'):
+                        arg_value = arg.handle[0]
+                    setattr(task_args_buffer, arg_name, arg_value)
             for i, arg in enumerate(args):
                 if isinstance(arg, Region):
                     arg_name = '__arg_%s_fields' % i
