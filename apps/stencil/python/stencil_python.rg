@@ -17,7 +17,7 @@
 --   ["-ll:cpu", "4", "-ll:py", "1", "-ll:pyimport", "stencil"]
 -- ]
 
-package.terrapath = package.terrapath .. ";" .. arg[0]:match(".*/") .. "../../../language/examples/?.rg"
+package.terrapath = package.terrapath .. ";" .. (arg[0]:match(".*/") or "./") .. "../../../language/examples/?.rg"
 
 stencil_use_python_main = true
 require("stencil_fast")

@@ -26,7 +26,7 @@
 --    "-ll:py", "1", "-ll:pyimport", "pennant"]
 -- ]
 
-package.terrapath = package.terrapath .. ";" .. arg[0]:match(".*/") .. "../../../language/examples/?.rg"
+package.terrapath = package.terrapath .. ";" .. (arg[0]:match(".*/") or "./") .. "../../../language/examples/?.rg"
 
 pennant_use_python_main = true
 require("pennant")

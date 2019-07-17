@@ -17,7 +17,7 @@
 --   ["-ll:cpu", "4", "-ll:py", "1", "-ll:pyimport", "circuit_sparse"]
 -- ]
 
-package.terrapath = package.terrapath .. ";" .. arg[0]:match(".*/") .. "../../../language/examples/?.rg"
+package.terrapath = package.terrapath .. ";" .. (arg[0]:match(".*/") or "./") .. "../../../language/examples/?.rg"
 
 circuit_use_python_main = true
 require("circuit_sparse")
