@@ -19,25 +19,27 @@
 
 import "regent"
 
--- Compile and link circuit.cc
-local ccircuit
+-- Compile and link circuit_mapper.cc
+local cmapper
+local cconfig
 do
   local root_dir = arg[0]:match(".*/") or "./"
   local runtime_dir = os.getenv('LG_RT_DIR') .. "/"
-  local circuit_cc = root_dir .. "circuit.cc"
-  local circuit_so
+  local mapper_cc = root_dir .. "circuit_mapper.cc"
+  local mapper_so
   if os.getenv('OBJNAME') then
     local out_dir = os.getenv('OBJNAME'):match('.*/') or './'
-    circuit_so = out_dir .. "libcircuit.so"
+    mapper_so = out_dir .. "libcircuit_mapper.so"
   elseif os.getenv('SAVEOBJ') == '1' then
-    circuit_so = root_dir .. "libcircuit.so"
+    mapper_so = root_dir .. "libcircuit_mapper.so"
   else
-    circuit_so = os.tmpname() .. ".so" -- root_dir .. "circuit.so"
+    mapper_so = os.tmpname() .. ".so" -- root_dir .. "circuit_mapper.so"
   end
   local cxx = os.getenv('CXX') or 'c++'
+  local max_dim = os.getenv('MAX_DIM') or '3'
 
   local cxx_flags = os.getenv('CC_FLAGS') or ''
-  cxx_flags = cxx_flags .. " -O2 -Wall -Werror"
+  cxx_flags = cxx_flags .. " -O2 -Wall -Werror -DLEGION_MAX_DIM=" .. max_dim .. " -DREALM_MAX_DIM=" .. max_dim
   if os.execute('test "$(uname)" = Darwin') == 0 then
     cxx_flags =
       (cxx_flags ..
@@ -47,13 +49,14 @@ do
   end
 
   local cmd = (cxx .. " " .. cxx_flags .. " -I " .. runtime_dir .. " " ..
-                 circuit_cc .. " -o " .. circuit_so)
+                 mapper_cc .. " -o " .. mapper_so)
   if os.execute(cmd) ~= 0 then
-    print("Error: failed to compile " .. circuit_cc)
+    print("Error: failed to compile " .. mapper_cc)
     assert(false)
   end
-  terralib.linklibrary(circuit_so)
-  ccircuit = terralib.includec("circuit.h", {"-I", root_dir, "-I", runtime_dir})
+  terralib.linklibrary(mapper_so)
+  cmapper = terralib.includec("circuit_mapper.h", {"-I", root_dir, "-I", runtime_dir})
+  cconfig = terralib.includec("circuit_config.h", {"-I", root_dir, "-I", runtime_dir})
 end
 
 local c = regentlib.c
@@ -74,25 +77,7 @@ struct Colorings {
   shared_node_map : c.legion_point_coloring_t,
 }
 
-struct Config {
-  num_loops : uint,
-  num_pieces : uint,
-  pieces_per_superpiece : uint,
-  nodes_per_piece : uint,
-  wires_per_piece : uint,
-  pct_wire_in_piece : uint,
-  random_seed : uint,
-  steps : uint,
-  sync : uint,
-  prune : uint,
-  perform_checks : bool,
-  dump_values : bool,
-  pct_shared_nodes : double,
-  shared_nodes_per_piece : uint,
-  density : uint,
-  num_neighbors : uint,
-  window : int,
-}
+local Config = cconfig.Config
 
 fspace node {
   node_cap : float,
@@ -629,14 +614,14 @@ end
 if os.getenv('SAVEOBJ') == '1' then
   local root_dir = arg[0]:match(".*/") or "./"
   local out_dir = (os.getenv('OBJNAME') and os.getenv('OBJNAME'):match('.*/')) or root_dir
-  local link_flags = terralib.newlist({"-L" .. out_dir, "-lcircuit", "-lm"})
+  local link_flags = terralib.newlist({"-L" .. out_dir, "-lcircuit_mapper", "-lm"})
 
   if os.getenv('STANDALONE') == '1' then
     os.execute('cp ' .. os.getenv('LG_RT_DIR') .. '/../bindings/regent/libregent.so ' .. out_dir)
   end
 
   local exe = os.getenv('OBJNAME') or "circuit"
-  regentlib.saveobj(toplevel, exe, "executable", ccircuit.register_mappers, link_flags)
+  regentlib.saveobj(toplevel, exe, "executable", cmapper.register_mappers, link_flags)
 else
-  regentlib.start(toplevel, ccircuit.register_mappers)
+  regentlib.start(toplevel, cmapper.register_mappers)
 end
