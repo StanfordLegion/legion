@@ -562,6 +562,10 @@ def main():
     dt = Future(conf.dtmax, legion.float64)
     dthydro = conf.dtmax
     while cycle < cstop and time < conf.tstop:
+        if cycle == conf.prune:
+            legion.execution_fence(block=True)
+            start_time = legion.c.legion_get_current_time_in_nanos()
+
         for i in IndexLaunch(pieces):
             init_step_points(private_part[i], True)
 
@@ -735,10 +739,16 @@ def main():
         cycle += 1
         time += dt.get()
 
+        if cycle == conf.cstop - conf.prune:
+            legion.execution_fence(block=True)
+            stop_time = legion.c.legion_get_current_time_in_nanos()
+
     if conf.seq_init:
         validate_output_sequential(zones, points, sides, conf)
     else:
-        print("Warning: Skipping sequential validation")
+        print_once("Warning: Skipping sequential validation")
+
+    print_once("ELAPSED TIME = %7.3f s" % ((stop_time - start_time)/1e9))
 
 if __name__ == '__legion_main__':
     main()
