@@ -23,7 +23,7 @@ import os
 import subprocess
 
 import legion
-from legion import task, Fspace, Future, IndexLaunch, Ispace, N, Partition, R, Reduce, Region, RW
+from legion import task, print_once, Fspace, Future, IndexLaunch, Ispace, N, Partition, R, Reduce, Region, RW
 
 root_dir = os.path.dirname(__file__)
 pennant_header = subprocess.check_output(
@@ -221,6 +221,8 @@ validate_output_sequential = legion.extern_task(
 
 @task(task_id=2) # , inner=True
 def main():
+    print_once('Running pennant_fast.py')
+
     conf = read_config().get()
 
     zone = Fspace.create(OrderedDict([
