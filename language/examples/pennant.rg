@@ -210,12 +210,15 @@ task calc_centers(rz : region(zone), rpp : region(point), rpg : region(point),
                   enable : bool)
 where
   reads(rz.znump, rpp.pxp, rpg.pxp, rs.{mapsz, mapsp1, mapsp2}),
-  writes(rz.zxp, rs.exp)
+  writes(rs.exp),
+  reads writes(rz.zxp)
 do
   if not enable then return end
+  for z in rz do
+    var init = vec2 {x = 0.0, y = 0.0}
+    rz[z].zxp = init
+  end
 
-  var zxp = vec2 { x = 0.0, y = 0.0 }
-  var nside = 1
   for s in rs do
     var z = s.mapsz
     var p1 = s.mapsp1
@@ -225,14 +228,11 @@ do
     var p1_pxp = p1.pxp
     e.exp = 0.5*(p1_pxp + p2.pxp)
 
-    zxp += p1_pxp
+    var znump = rz[z].znump
+    var zxp = (1 / double(znump)) * p1_pxp
 
-    if nside == z.znump then
-      z.zxp = (1/double(z.znump)) * zxp
-      zxp = vec2 { x = 0.0, y = 0.0 }
-      nside = 0
-    end
-    nside += 1
+    z.zxp.x += zxp.x
+    z.zxp.y += zxp.y
   end
 end
 
@@ -243,13 +243,17 @@ task calc_volumes(rz : region(zone), rpp : region(point), rpg : region(point),
                   enable : bool)
 where
   reads(rz.{zxp, znump}, rpp.pxp, rpg.pxp, rs.{mapsz, mapsp1, mapsp2}),
-  writes(rz.{zareap, zvolp}, rs.{sareap, elen})
+  writes(rs.{sareap, elen}),
+  reads writes(rz.{zareap, zvolp})
 do
-  if not enable then return end
+  for z in rz do
+    var zero = 0.0
+    rz[z].zareap = zero
+    rz[z].zvolp = zero
+  end
 
-  var zareap = 0.0
-  var zvolp = 0.0
-  var nside = 1
+  var num_negatives = 0
+
   for s in rs do
     var z = s.mapsz
     var p1 = s.mapsp1
@@ -263,20 +267,14 @@ do
     -- s.svolp = sv
     s.elen = length(p2_pxp - p1_pxp)
 
-    zareap += sa
-    zvolp += sv
+    rz[z].zareap += sa
+    var zvolp = (1.0 / 3.0) * sv
+    rz[z].zvolp += zvolp
 
-    if nside == z.znump then
-      z.zareap = zareap
-      z.zvolp = (1.0 / 3.0) * zvolp
-      zareap = 0.0
-      zvolp = 0.0
-      nside = 0
-    end
-    nside += 1
-
-    regentlib.assert(sv > 0.0, "sv negative")
+    num_negatives += [int](sv <= 0.0)
   end
+
+  return num_negatives
 end
 
 -- Compute zone characteristic lengths.
@@ -285,12 +283,15 @@ task calc_char_len(rz : region(zone), rpp : region(point), rpg : region(point),
                    enable : bool)
 where
   reads(rz.znump, rs.{mapsz, sareap, elen}),
-  writes(rz.zdl)
+  reads writes(rz.zdl)
 do
   if not enable then return end
 
-  var zdl = 1e99
-  var nside = 1
+  for z in rz do
+    var init = [double](1.0e99)
+    rz[z].zdl = init
+  end
+
   for s in rs do
     var z = s.mapsz
     var e = s
@@ -304,14 +305,8 @@ do
       fac = 4.0
     end
     var sdl = fac * area / base
-    zdl = min(zdl, sdl)
 
-    if nside == z.znump then
-      z.zdl = zdl
-      zdl = 1e99
-      nside = 0
-    end
-    nside += 1
+    z.zdl min= sdl
   end
 end
 
@@ -433,24 +428,22 @@ task qcs_zone_center_velocity(rz : region(zone), rpp : region(point), rpg : regi
                               enable : bool)
 where
   reads(rz.znump, rpp.pu, rpg.pu, rs.{mapsz, mapsp1}),
-  writes(rz.zuc)
+  reads writes(rz.zuc)
 do
   if not enable then return end
+  for z in rz do
+    var init = vec2 { x = 0.0, y = 0.0 }
+    rz[z].zuc = init
+  end
 
-  var zuc = vec2 { x = 0.0, y = 0.0 }
-  var nside = 1
   for s in rs do
     var z = s.mapsz
     var p1 = s.mapsp1
 
-    zuc += (1.0 / double(z.znump))*p1.pu
+    var zuc = (1.0 / double(z.znump))*p1.pu
 
-    if nside == z.znump then
-      z.zuc = zuc
-      zuc = vec2 { x = 0.0, y = 0.0 }
-      nside = 0
-    end
-    nside += 1
+    z.zuc.x += zuc.x
+    z.zuc.y += zuc.y
   end
 end
 
@@ -629,8 +622,6 @@ where
         rs.{mapsp1, mapsp2, mapsz, elen}),
   writes(rz.{zdu, z0tmp})
 do
-  if not enable then return end
-
   for z in rz do
     z.z0tmp = 0.0
   end
@@ -650,7 +641,7 @@ do
     else
       dux = 0.0
     end
-    z.z0tmp = max(z.z0tmp, dux)
+    z.z0tmp max= dux
   end
 
   for z in rz do
@@ -691,8 +682,8 @@ where
 do
   if not enable then return end
 
-  var vfixx = {x = 1.0, y = 0.0}
-  var vfixy = {x = 0.0, y = 1.0}
+  var vfixx = vec2 {x = 1.0, y = 0.0}
+  var vfixy = vec2 {x = 0.0, y = 1.0}
   for p in rp do
     if p.has_bcx then
       p.pu0 = project(p.pu0, vfixx)
@@ -753,12 +744,14 @@ task calc_centers_full(rz : region(zone), rpp : region(point), rpg : region(poin
                        enable : bool)
 where
   reads(rz.znump, rpp.px, rpg.px, rs.{mapsz, mapsp1, mapsp2}),
-  writes(rz.zx, rs.ex)
+  reads writes(rz.zx, rs.ex)
 do
   if not enable then return end
+  for z in rz do
+    var init = vec2 {x = 0.0, y = 0.0}
+    rz[z].zx = init
+  end
 
-  var zx = vec2 { x = 0.0, y = 0.0 }
-  var nside = 1
   for s in rs do
     var z = s.mapsz
     var p1 = s.mapsp1
@@ -768,14 +761,10 @@ do
     var p1_px = p1.px
     e.ex = 0.5*(p1_px + p2.px)
 
-    zx += p1_px
-
-    if nside == z.znump then
-      z.zx = (1/double(z.znump)) * zx
-      zx = vec2 { x = 0.0, y = 0.0 }
-      nside = 0
-    end
-    nside += 1
+    var znump = rz[z].znump
+    var zx = (1 / double(znump)) * p1_px
+    z.zx.x += zx.x
+    z.zx.y += zx.y
   end
 end
 
@@ -787,13 +776,17 @@ task calc_volumes_full(rz : region(zone), rpp : region(point), rpg : region(poin
                        enable : bool)
 where
   reads(rz.{zx, znump}, rpp.px, rpg.px, rs.{mapsz, mapsp1, mapsp2}),
-  writes(rz.{zarea, zvol}, rs.{sarea})
+  writes(rs.{sarea}),
+  reads writes(rz.{zarea, zvol})
 do
-  if not enable then return end
+  for z in rz do
+    var zero = 0.0
+    rz[z].zarea = zero
+    rz[z].zvol = zero
+  end
 
-  var zarea = 0.0
-  var zvol = 0.0
-  var nside = 1
+  var num_negatives = 0
+
   for s in rs do
     var z = s.mapsz
     var p1 = s.mapsp1
@@ -806,20 +799,15 @@ do
     s.sarea = sa
     -- s.svol = sv
 
-    zarea += sa
-    zvol += sv
+    rz[z].zarea += sa
 
-    if nside == z.znump then
-      z.zarea = zarea
-      z.zvol = (1.0 / 3.0) * zvol
-      zarea = 0.0
-      zvol = 0.0
-      nside = 0
-    end
-    nside += 1
+    var zvol = (1.0 / 3.0) * sv
+    rz[z].zvol += zvol
 
-    regentlib.assert(sv > 0.0, "sv negative")
+    num_negatives += [int](sv <= 0)
   end
+
+  return num_negatives
 end
 
 --
@@ -833,12 +821,15 @@ task calc_work(rz : region(zone), rpp : region(point), rpg : region(point),
 where
   reads(rz.{zetot, znump}, rpp.{pxp, pu0, pu}, rpg.{pxp, pu0, pu},
         rs.{mapsz, mapsp1, mapsp2, sfp, sfq}),
-  writes(rz.{zw, zetot})
+  reads writes(rz.{zw, zetot})
 do
   if not enable then return end
 
-  var zdwork = 0.0
-  var nside = 1
+  for z in rz do
+    var zero = 0.0
+    rz[z].zw = zero
+  end
+
   for s in rs do
     var z = s.mapsz
     var p1 = s.mapsp1
@@ -849,15 +840,8 @@ do
     var sd2 = dot(-1.0*sftot, p2.pu0 + p2.pu)
     var dwork = -0.5 * dt * (sd1 * p1.pxp.x + sd2 * p2.pxp.x)
 
-    zdwork += dwork
-
-    if nside == z.znump then
-      z.zetot += zdwork
-      z.zw = zdwork
-      zdwork = 0.0
-      nside = 0
-    end
-    nside += 1
+    z.zetot += dwork
+    z.zw += dwork
   end
 end
 
@@ -986,6 +970,32 @@ task continue_simulation(cycle : int64, cstop : int64,
   return (cycle < cstop and time < tstop)
 end
 
+task verify_calc_volumes(value : int)
+  regentlib.assert(value == 0, "sv negative in calc_volumes")
+end
+
+task verify_calc_volumes_full(value : int)
+  regentlib.assert(value == 0, "sv negative in calc_volumes_full")
+end
+
+task output0(fmt : regentlib.string)
+  c.printf(fmt)
+end
+
+task output1(fmt : regentlib.string, arg0 : double)
+  c.printf(fmt, arg0)
+end
+
+task output5(fmt : regentlib.string,
+             arg0 : int64,
+             arg1 : double,
+             arg2 : double,
+             arg3 : double,
+             arg4 : double)
+  c.printf(fmt, arg0, arg1, arg2, arg3, arg4)
+end
+
+__demand(__inline)
 task simulate(rz_all : region(zone), rz_all_p : partition(disjoint, rz_all),
               rp_all : region(point),
               rp_all_private : region(point),
@@ -1000,10 +1010,12 @@ where
   reads writes(rz_all, rp_all_private, rp_all_ghost, rs_all),
   rp_all_private * rp_all_ghost
 do
+  var prune = conf.prune
+
   var alfa = conf.alfa
   var cfl = conf.cfl
   var cflv = conf.cflv
-  var cstop = conf.cstop
+  var cstop = conf.cstop + 2*prune
   var dtfac = conf.dtfac
   var dtinit = conf.dtinit
   var dtmax = conf.dtmax
@@ -1026,9 +1038,9 @@ do
   var cycle : int64 = 0
   var dt = dtmax
   var dthydro = dtmax
+  var ts_start = c.legion_get_current_time_in_micros()
+  var ts_end = ts_start
   while continue_simulation(cycle, cstop, time, tstop) do
-    c.legion_runtime_begin_trace(__runtime(), __context(), 0, false)
-
     __demand(__parallel)
     for i = 0, conf.npieces do
       init_step_points(rp_all_private_p[i], enable)
@@ -1047,9 +1059,14 @@ do
 
     if cycle > 0 and cycle % interval == 0 then
       var current_time = c.legion_get_current_time_in_micros()/1.e6
-      c.printf("cycle %4ld    sim time %.3e    dt %.3e    time %.3e (per iteration) %.3e (total)\n",
+      output5("cycle %4ld    sim time %.3e    dt %.3e    time %.3e (per iteration) %.3e (total)\n",
                cycle, time, dt, (current_time - last_time)/interval, current_time - start_time)
       last_time = current_time
+    end
+    if cycle == prune then
+      ts_start = c.legion_get_current_time_in_micros()
+    elseif cycle == cstop - prune then
+      ts_end = c.legion_get_current_time_in_micros()
     end
 
     __demand(__parallel)
@@ -1070,14 +1087,17 @@ do
                    enable)
     end
 
+    var num_negatives = 0
     __demand(__parallel)
     for i = 0, conf.npieces do
-      calc_volumes(rz_all_p[i],
-                   rp_all_private_p[i],
-                   rp_all_ghost_p[i],
-                   rs_all_p[i],
-                   enable)
+      num_negatives +=
+        calc_volumes(rz_all_p[i],
+                     rp_all_private_p[i],
+                     rp_all_ghost_p[i],
+                     rs_all_p[i],
+                     enable)
     end
+    verify_calc_volumes(num_negatives)
 
     __demand(__parallel)
     for i = 0, conf.npieces do
@@ -1205,14 +1225,17 @@ do
                         enable)
     end
 
+    var num_negatives_full = 0
     __demand(__parallel)
     for i = 0, conf.npieces do
-      calc_volumes_full(rz_all_p[i],
-                        rp_all_private_p[i],
-                        rp_all_ghost_p[i],
-                        rs_all_p[i],
-                        enable)
+      num_negatives_full +=
+        calc_volumes_full(rz_all_p[i],
+                          rp_all_private_p[i],
+                          rp_all_ghost_p[i],
+                          rs_all_p[i],
+                          enable)
     end
+    verify_calc_volumes_full(num_negatives_full)
 
     __demand(__parallel)
     for i = 0, conf.npieces do
@@ -1236,11 +1259,14 @@ do
 
     cycle += 1
     time += dt
-
-    c.legion_runtime_end_trace(__runtime(), __context(), 0)
   end
+  if prune == 0 then
+    ts_end = c.legion_get_current_time_in_micros()
+  end
+  output1("ELAPSED TIME = %7.3f s\n", 1e-6 * (ts_end - ts_start))
 end
 
+__demand(__inline)
 task initialize(rz_all : region(zone), rz_all_p : partition(disjoint, rz_all),
                 rp_all : region(point),
                 rp_all_private : region(point),
@@ -1283,13 +1309,16 @@ do
                       enable)
   end
 
+  var num_negatives_full = 0
   for i = 0, conf.npieces do
-    calc_volumes_full(rz_all_p[i],
-                      rp_all_private_p[i],
-                      rp_all_ghost_p[i],
-                      rs_all_p[i],
-                      enable)
+    num_negatives_full +=
+      calc_volumes_full(rz_all_p[i],
+                        rp_all_private_p[i],
+                        rp_all_ghost_p[i],
+                        rs_all_p[i],
+                        enable)
   end
+  verify_calc_volumes_full(num_negatives_full)
 
   for i = 0, conf.npieces do
     init_side_fracs(rz_all_p[i],
@@ -1308,28 +1337,6 @@ do
     init_radial_velocity(rp_all_private_p[i], uinitradial)
     init_radial_velocity(rp_all_shared_p[i], uinitradial)
   end
-
-  if conf.warmup then
-    -- Do one iteration to warm up the runtime.
-    var conf_warmup = conf
-    conf_warmup.cstop = 1
-    conf_warmup.enable = false
-    simulate(rz_all, rz_all_p,
-             rp_all,
-             rp_all_private, rp_all_private_p,
-             rp_all_ghost, rp_all_ghost_p, rp_all_shared_p,
-             rs_all, rs_all_p,
-             conf_warmup)
-  end
-end
-
-task dummy(rz : region(zone)) : int
-where reads(rz) do
-  return 1
-end
-
-terra wait_for(x : int)
-  return x
 end
 
 task read_input_sequential(rz_all : region(zone),
@@ -1360,8 +1367,12 @@ end
 
 terra unwrap(x : mesh_colorings) return x end
 
+read_config.replicable = true
+read_partitions.replicable = true
+
+__demand(__inner, __replicable)
 task toplevel()
-  c.printf("Running test (t=%.1f)...\n", c.legion_get_current_time_in_micros()/1.e6)
+  output1("Running test (t=%.1f)...\n", c.legion_get_current_time_in_micros()/1.e6)
 
   var conf : config = read_config()
 
@@ -1376,8 +1387,7 @@ task toplevel()
 
   if conf.seq_init then
     -- Hack: This had better run on the same node...
-    colorings = unwrap(read_input_sequential(
-      rz_all, rp_all, rs_all, conf))
+    colorings = read_input_sequential(rz_all, rp_all, rs_all, conf)
   end
 
   if conf.par_init then
@@ -1430,23 +1440,16 @@ task toplevel()
     end
   end
 
-  c.printf("Initializing (t=%.1f)...\n", c.legion_get_current_time_in_micros()/1.e6)
+  output1("Initializing (t=%.1f)...\n", c.legion_get_current_time_in_micros()/1.e6)
   initialize(rz_all, rz_all_p,
              rp_all,
              rp_all_private, rp_all_private_p,
              rp_all_ghost, rp_all_ghost_p, rp_all_shared_p,
              rs_all, rs_all_p,
              conf)
-  -- Hack: Force main task to wait for initialization to finish.
-  do
-    var _ = 0
-    for i = 0, conf.npieces do
-      _ += dummy(rz_all_p[i])
-    end
-    wait_for(_)
-  end
+  __fence(__execution, __block)
 
-  c.printf("Starting simulation (t=%.1f)...\n", c.legion_get_current_time_in_micros()/1.e6)
+  output1("Starting simulation (t=%.1f)...\n", c.legion_get_current_time_in_micros()/1.e6)
   var start_time = c.legion_get_current_time_in_micros()/1.e6
   simulate(rz_all, rz_all_p,
            rp_all,
@@ -1454,24 +1457,30 @@ task toplevel()
            rp_all_ghost, rp_all_ghost_p, rp_all_shared_p,
            rs_all, rs_all_p,
            conf)
-  -- Hack: Force main task to wait for simulation to finish.
-  do
-    var _ = 0
-    for i = 0, conf.npieces do
-      _ += dummy(rz_all_p[i])
-    end
-    wait_for(_)
-  end
   var stop_time = c.legion_get_current_time_in_micros()/1.e6
-  c.printf("Elapsed time = %.6e\n", stop_time - start_time)
+  output1("Elapsed time = %.6e (total)\n", stop_time - start_time)
 
   if conf.seq_init then
     validate_output_sequential(
       rz_all, rp_all, rs_all, conf)
   else
-    c.printf("Warning: Skipping sequential validation\n")
+    output0("Warning: Skipping sequential validation\n")
   end
 
   -- write_output(conf, rz_all, rp_all, rs_all)
 end
-regentlib.start(toplevel, cpennant.register_mappers)
+
+if os.getenv('SAVEOBJ') == '1' then
+  local root_dir = arg[0]:match(".*/") or "./"
+  local out_dir = (os.getenv('OBJNAME') and os.getenv('OBJNAME'):match('.*/')) or root_dir
+  local link_flags = {"-L" .. out_dir, "-lpennant", "-lm"}
+
+  if os.getenv('STANDALONE') == '1' then
+    os.execute('cp ' .. os.getenv('LG_RT_DIR') .. '/../bindings/regent/libregent.so ' .. out_dir)
+  end
+
+  local exe = os.getenv('OBJNAME') or "pennant"
+  regentlib.saveobj(toplevel, exe, "executable", cpennant.register_mappers, link_flags)
+else
+  regentlib.start(toplevel, cpennant.register_mappers)
+end

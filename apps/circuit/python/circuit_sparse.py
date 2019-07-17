@@ -15,7 +15,7 @@
 # limitations under the License.
 #
 
-from __future__ import absolute_import, division, print_function
+from __future__ import absolute_import, division, print_function, unicode_literals
 
 import argparse
 from collections import OrderedDict
@@ -115,7 +115,7 @@ update_voltages = legion.extern_task(
     return_type=legion.void,
     calling_convention='regent')
 
-@task(task_id=2) # , inner=True
+@task(task_id=2, replicable=True) # , inner=True
 def main():
     conf = parse_args(legion.input_args(True))
 
