@@ -1426,9 +1426,7 @@ def define_regent_argument_struct(task_id, argument_types, privileges, return_ty
         fields.append('%s %s;' % (arg_type.cffi_type, arg_name))
     for i, arg in enumerate(arguments):
         if isinstance(arg, Region):
-            for j, field_type in enumerate(arg.fspace.field_types.values()):
-                arg_name = '__arg_%s_field_%s' % (i, j)
-                fields.append('legion_field_id_t %s;' % arg_name)
+            fields.append('legion_field_id_t __arg_%s_fields[%s];' % (i, len(arg.fspace.field_types)))
 
     struct = 'typedef struct %s { %s } %s;' % (struct_name, ' '.join(fields), struct_name)
     ffi.cdef(struct)
@@ -1736,19 +1734,23 @@ class _TaskLauncher(object):
         elif self.task.calling_convention == 'regent':
             arg_struct = self.task.argument_struct(args)
             task_args_buffer = ffi.new('%s*' % arg_struct)
-            # FIXME: Correct for > 64 arguments.
-            getattr(task_args_buffer, '__map')[0] = 0 # Currently we never pass futures.
+            # Note: ffi.new returns zeroed memory
             for i, arg in enumerate(args):
-                arg_name = '__arg_%s' % i
-                arg_value = arg
-                if hasattr(arg, 'handle'):
-                    arg_value = arg.handle[0]
-                setattr(task_args_buffer, arg_name, arg_value)
+                if isinstance(arg, Future):
+                    getattr(task_args_buffer, '__map')[i // 64] |= 1 << (i % 64)
+            for i, arg in enumerate(args):
+                if not isinstance(arg, Future):
+                    arg_name = '__arg_%s' % i
+                    arg_value = arg
+                    if hasattr(arg, 'handle'):
+                        arg_value = arg.handle[0]
+                    setattr(task_args_buffer, arg_name, arg_value)
             for i, arg in enumerate(args):
                 if isinstance(arg, Region):
+                    arg_name = '__arg_%s_fields' % i
+                    arg_slot = getattr(task_args_buffer, arg_name)
                     for j, field_id in enumerate(arg.fspace.field_ids.values()):
-                        arg_name = '__arg_%s_field_%s' % (i, j)
-                        setattr(task_args_buffer, arg_name, field_id)
+                        arg_slot[j] = field_id
             task_args[0].args = task_args_buffer
             task_args[0].arglen = ffi.sizeof(arg_struct)
         else:

@@ -1,1 +1,0 @@
-../../../language/examples/pennant_common.rg
