@@ -28,6 +28,8 @@ local DTYPE = double
 local RADIUS = 2
 local USE_FOREIGN = (os.getenv('USE_FOREIGN') or '1') == '1'
 
+local use_python_main = rawget(_G, "stencil_use_python_main") == true
+
 local c = regentlib.c
 
 -- Compile and link stencil.cc
@@ -128,6 +130,8 @@ fspace point {
   input : DTYPE,
   output : DTYPE,
 }
+
+if not use_python_main then
 
 terra to_rect(lo : int2d, hi : int2d) : c.legion_rect_2d_t
   return c.legion_rect_2d_t {
@@ -275,6 +279,8 @@ function make_ghost_y_partition(is_complete)
   end
   return ghost_y_partition
 end
+
+end -- not use_python_main
 
 local function off(i, x, y)
   return rexpr int2d { x = i.x + x, y = i.y + y } end
@@ -466,6 +472,8 @@ where reads writes(r.{input, output}) do
   for x in r do x.output = v end
 end
 
+if not use_python_main then
+
 task main()
   var conf = common.read_config()
 
@@ -547,6 +555,14 @@ task main()
     end
   end
 end
+
+else -- not use_python_main
+
+extern task main()
+main:set_task_id(2)
+
+end -- not use_python_main
+
 if os.getenv('SAVEOBJ') == '1' then
   local root_dir = arg[0]:match(".*/") or "./"
   local out_dir = (os.getenv('OBJNAME') and os.getenv('OBJNAME'):match('.*/')) or root_dir
