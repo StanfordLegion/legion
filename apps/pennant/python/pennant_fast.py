@@ -338,7 +338,7 @@ def main():
 
     zones_part = create_partition(True, zones, colorings.rz_all_c, pieces)
 
-    points_part = create_partition(True, points, colorings.rp_all_c, Ispace.create([2]))
+    points_part = create_partition(True, points, colorings.rp_all_c, [2])
     private = points_part[0]
     ghost = points_part[1]
 
@@ -451,10 +451,11 @@ def main():
             conf.uinitradial)
 
     cycle = 0
+    cstop = conf.cstop + 2*conf.prune
     time = 0.0
     dt = Future(conf.dtmax, legion.float64)
     dthydro = conf.dtmax
-    while cycle < conf.cstop and time < conf.tstop:
+    while cycle < cstop and time < conf.tstop:
         dt = calc_global_dt(dt.get(), conf.dtfac, conf.dtinit, conf.dtmax, dthydro, time, conf.tstop, cycle)
 
         print_ts = conf.print_ts and cycle == prune
