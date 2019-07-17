@@ -23,7 +23,7 @@ import os
 import subprocess
 
 import legion
-from legion import task, Fspace, Future, IndexLaunch, Ispace, N, Partition, R, Reduce, Region, RW
+from legion import task, print_once, Fspace, Future, IndexLaunch, Ispace, N, Partition, R, Reduce, Region, RW
 
 root_dir = os.path.dirname(__file__)
 pennant_header = subprocess.check_output(
@@ -221,6 +221,8 @@ validate_output_sequential = legion.extern_task(
 
 @task(task_id=2) # , inner=True
 def main():
+    print_once('Running pennant_fast.py')
+
     conf = read_config().get()
 
     zone = Fspace.create(OrderedDict([
@@ -338,7 +340,7 @@ def main():
 
     zones_part = create_partition(True, zones, colorings.rz_all_c, pieces)
 
-    points_part = create_partition(True, points, colorings.rp_all_c, Ispace.create([2]))
+    points_part = create_partition(True, points, colorings.rp_all_c, [2])
     private = points_part[0]
     ghost = points_part[1]
 
@@ -451,25 +453,28 @@ def main():
             conf.uinitradial)
 
     cycle = 0
+    cstop = conf.cstop + 2*conf.prune
     time = 0.0
     dt = Future(conf.dtmax, legion.float64)
     dthydro = conf.dtmax
-    while cycle < conf.cstop and time < conf.tstop:
-        dt = calc_global_dt(dt.get(), conf.dtfac, conf.dtinit, conf.dtmax, dthydro, time, conf.tstop, cycle)
+    while cycle < cstop and time < conf.tstop:
+        if cycle == conf.prune:
+            legion.execution_fence(block=True)
+            start_time = legion.c.legion_get_current_time_in_nanos()
 
-        print_ts = conf.print_ts and cycle == prune
+        dt = calc_global_dt(dt, conf.dtfac, conf.dtinit, conf.dtmax, dthydro, time, conf.tstop, cycle)
 
         for i in IndexLaunch(pieces):
             adv_pos_half(
                 private_part[i],
                 private_spans_part[i],
-                dt.get(), True, print_ts)
+                dt, True, False)
 
         for i in IndexLaunch(pieces):
             adv_pos_half(
                 shared_part[i],
                 shared_spans_part[i],
-                dt.get(), True, print_ts)
+                dt, True, False)
 
         for i in IndexLaunch(pieces):
             calc_everything(
@@ -479,19 +484,19 @@ def main():
                 sides_part[i],
                 zone_spans_part[i],
                 side_spans_part[i],
-                conf.alfa, conf.gamma, conf.ssmin, dt.get(), conf.q1, conf.q2, True)
+                conf.alfa, conf.gamma, conf.ssmin, dt, conf.q1, conf.q2, True)
 
         for i in IndexLaunch(pieces):
             adv_pos_full(
                 private_part[i],
                 private_spans_part[i],
-                dt.get(), True)
+                dt, True)
 
         for i in IndexLaunch(pieces):
             adv_pos_full(
                 shared_part[i],
                 shared_spans_part[i],
-                dt.get(), True)
+                dt, True)
 
         for i in IndexLaunch(pieces):
             calc_everything_full(
@@ -501,9 +506,7 @@ def main():
                 sides_part[i],
                 zone_spans_part[i],
                 side_spans_part[i],
-                dt.get(), True)
-
-        print_ts = conf.print_ts and cycle == cstop - 1 - prune
+                dt, True)
 
         futures = []
         for i in IndexLaunch(pieces):
@@ -511,7 +514,7 @@ def main():
                 calc_dt_hydro(
                     zones_part[i],
                     zone_spans_part[i],
-                    dt.get(), conf.dtmax, conf.cfl, conf.cflv, True, print_ts))
+                    dt, conf.dtmax, conf.cfl, conf.cflv, True, False))
 
         dthydro = conf.dtmax
         dthydro = min(dthydro, *list(map(lambda x: x.get(), futures)))
@@ -519,10 +522,16 @@ def main():
         cycle += 1
         time += dt.get()
 
+        if cycle == conf.cstop - conf.prune:
+            legion.execution_fence(block=True)
+            stop_time = legion.c.legion_get_current_time_in_nanos()
+
     if old_seq_init:
         validate_output_sequential(zones, points, sides, conf)
     else:
-        print("Warning: Skipping sequential validation")
+        print_once("Warning: Skipping sequential validation")
+
+    print_once("ELAPSED TIME = %7.3f s" % ((stop_time - start_time)/1e9))
 
 if __name__ == '__legion_main__':
     main()

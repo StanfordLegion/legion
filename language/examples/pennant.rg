@@ -29,6 +29,8 @@ import "regent"
 
 require("pennant_common")
 
+local use_python_main = rawget(_G, "pennant_use_python_main") == true
+
 local c = regentlib.c
 
 -- #####################################
@@ -1365,6 +1367,8 @@ where reads(rz_all, rp_all, rs_all) do
     conf)
 end
 
+if not use_python_main then
+
 terra unwrap(x : mesh_colorings) return x end
 
 read_config.replicable = true
@@ -1469,6 +1473,13 @@ task toplevel()
 
   -- write_output(conf, rz_all, rp_all, rs_all)
 end
+
+else -- not use_python_main
+
+extern task toplevel()
+toplevel:set_task_id(2)
+
+end -- not use_python_main
 
 if os.getenv('SAVEOBJ') == '1' then
   local root_dir = arg[0]:match(".*/") or "./"

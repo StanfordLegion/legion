@@ -121,6 +121,8 @@ check = legion.extern_task(
 
 @task(task_id=2, replicable=True) # , inner=True
 def main():
+    print_once('Running stencil.py')
+
     conf = parse_args(legion.input_args(True))
 
     nbloated = np.array([conf.nx, conf.ny])
