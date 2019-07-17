@@ -117,6 +117,8 @@ update_voltages = legion.extern_task(
 
 @task(task_id=2, replicable=True) # , inner=True
 def main():
+    print_once('Running circuit_sparse.py')
+
     conf = parse_args(legion.input_args(True))
 
     assert conf.num_pieces % conf.pieces_per_superpiece == 0, "pieces should be evenly distributed to superpieces"

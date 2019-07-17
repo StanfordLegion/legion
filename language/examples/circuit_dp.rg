@@ -14,17 +14,27 @@
 
 import "regent"
 
--- Compile and link circuit.cc
-local ccircuit
+-- Compile and link circuit_mapper.cc
+local cmapper
+local cconfig
 do
   local root_dir = arg[0]:match(".*/") or "./"
-  local runtime_dir = root_dir .. "../../runtime"
-  local circuit_cc = root_dir .. "circuit.cc"
-  local circuit_so = os.tmpname() .. ".so" -- root_dir .. "circuit.so"
+  local runtime_dir = os.getenv('LG_RT_DIR') .. "/"
+  local mapper_cc = root_dir .. "circuit_mapper.cc"
+  local mapper_so
+  if os.getenv('OBJNAME') then
+    local out_dir = os.getenv('OBJNAME'):match('.*/') or './'
+    mapper_so = out_dir .. "libcircuit_mapper.so"
+  elseif os.getenv('SAVEOBJ') == '1' then
+    mapper_so = root_dir .. "libcircuit_mapper.so"
+  else
+    mapper_so = os.tmpname() .. ".so" -- root_dir .. "circuit_mapper.so"
+  end
   local cxx = os.getenv('CXX') or 'c++'
   local max_dim = os.getenv('MAX_DIM') or '3'
 
-  local cxx_flags = "-O2 -std=c++0x -Wall -Werror -DLEGION_MAX_DIM=" .. max_dim .. " -DREALM_MAX_DIM=" .. max_dim
+  local cxx_flags = os.getenv('CC_FLAGS') or ''
+  cxx_flags = cxx_flags .. " -O2 -Wall -Werror -DLEGION_MAX_DIM=" .. max_dim .. " -DREALM_MAX_DIM=" .. max_dim
   if os.execute('test "$(uname)" = Darwin') == 0 then
     cxx_flags =
       (cxx_flags ..
@@ -34,13 +44,14 @@ do
   end
 
   local cmd = (cxx .. " " .. cxx_flags .. " -I " .. runtime_dir .. " " ..
-                 circuit_cc .. " -o " .. circuit_so)
+                 mapper_cc .. " -o " .. mapper_so)
   if os.execute(cmd) ~= 0 then
-    print("Error: failed to compile " .. circuit_cc)
+    print("Error: failed to compile " .. mapper_cc)
     assert(false)
   end
-  terralib.linklibrary(circuit_so)
-  ccircuit = terralib.includec("circuit.h", {"-I", root_dir, "-I", runtime_dir})
+  terralib.linklibrary(mapper_so)
+  cmapper = terralib.includec("circuit_mapper.h", {"-I", root_dir, "-I", runtime_dir})
+  cconfig = terralib.includec("circuit_config.h", {"-I", root_dir, "-I", runtime_dir})
 end
 
 local c = regentlib.c
@@ -1118,5 +1129,5 @@ task toplevel()
   end
   c.free(colorings.first_wires)
 end
-ccircuit.register_mappers()
+cmapper.register_mappers()
 regentlib.start(toplevel)
