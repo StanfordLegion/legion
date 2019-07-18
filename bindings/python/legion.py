@@ -629,7 +629,7 @@ class Privilege(object):
                 (self, None, self._legion_redop_id(fspace.field_types[field_name]), (field_name,))
                 for field_name in fields]
         else:
-            return [(self, self._legion_privilege(), None, fields)]
+            return [(self, self._legion_privilege(), None, fields if self.read or self.write or self.reduce else [])]
 
     def _legion_redop_id(self, field_type):
         return _redop_ids[self.reduce][field_type]
@@ -1153,11 +1153,11 @@ def fill(region, field_name, value):
         c.legion_predicate_true())
 
 # Hack: Can't pickle static methods.
-def _Ipartition_unpickle(id, parent, color_space):
+def _Ipartition_unpickle(tid, id, type_tag, parent, color_space):
     handle = ffi.new('legion_index_partition_t *')
+    handle[0].tid = tid
     handle[0].id = id
-    handle[0].tid = parent.raw_value().tid
-    handle[0].type_tag = parent.raw_value().type_tag
+    handle[0].type_tag = type_tag
 
     return Ipartition(handle[0], parent, color_space)
 
@@ -1177,7 +1177,7 @@ class Ipartition(object):
 
     def __reduce__(self):
         return (_Ipartition_unpickle,
-                (self.handle[0].id, self.parent, self.color_space))
+                (self.handle[0].tid, self.handle[0].id, self.handle[0].type_tag, self.parent, self.color_space))
 
     def __getitem__(self, point):
         if isinstance(point, SymbolicExpr):
@@ -1464,6 +1464,26 @@ class ExternTask(object):
 def extern_task(**kwargs):
     return ExternTask(**kwargs)
 
+class ExternTaskWrapper(object):
+    __slots__ = ['thunk', '__name__', '__qualname__']
+    def __init__(self, thunk, name):
+        self.thunk = thunk
+        self.__name__ = name
+        self.__qualname__ = name
+    def __call__(self, *args, **kwargs):
+        return self.thunk(*args, **kwargs)
+
+_next_wrapper_id = 1000
+def extern_task_wrapper(privileges=None, return_type=void, **kwargs):
+    global _next_wrapper_id
+    extern = extern_task(privileges=privileges, return_type=return_type, **kwargs)
+    wrapper_name = str('wrapper_task_%s' % _next_wrapper_id)
+    _next_wrapper_id += 1
+    wrapper = ExternTaskWrapper(extern, wrapper_name)
+    task_wrapper = task(wrapper, privileges=privileges, return_type=return_type, inner=True)
+    setattr(sys.modules[__name__], wrapper_name, task_wrapper)
+    return task_wrapper
+
 def get_qualname(fn):
     # Python >= 3.3 only
     try:
@@ -1742,7 +1762,7 @@ class _TaskLauncher(object):
                 if not isinstance(arg, Future):
                     arg_name = '__arg_%s' % i
                     arg_value = arg
-                    if hasattr(arg, 'handle'):
+                    if hasattr(arg, 'handle') and not isinstance(arg, DomainPoint):
                         arg_value = arg.handle[0]
                     setattr(task_args_buffer, arg_name, arg_value)
             for i, arg in enumerate(args):

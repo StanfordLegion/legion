@@ -200,9 +200,13 @@ namespace Legion {
       if (owner == NULL)
       {
         owner = own;
+        // Only record the version number the first time we record
+        // an equivalence set which will be the earliest version number
+        // for this owner that we could ever record. We may record 
+        // other equivalence sets later which are for later version 
+        // numbers, but it will be unsafe for us to update them here
         version_number = ver_num;
       }
-      version_number = ver_num;
       equivalence_sets.insert(set, set_mask);
     }
 
@@ -3956,9 +3960,6 @@ namespace Legion {
                                            std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(version_info != NULL);
-#endif
       if (parallel_traversals)
       {
         // Need the lock in this case
@@ -4034,9 +4035,10 @@ namespace Legion {
                        const FieldMask &mask, std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(version_info != NULL);
-#endif
+      // If we don't have a version info then we can skip this because 
+      // we know we don't record anything if version_info is NULL
+      if (version_info == NULL)
+        return;
       if (parallel_traversals)
       {
         // Lock needed if we're doing parallel traversals
@@ -4071,10 +4073,10 @@ namespace Legion {
       // No need for the lock here since we know there are no 
       // races because there are no more traversals being performed
 #ifdef DEBUG_LEGION
-      assert(version_info != NULL);
       assert(!alt_sets.empty() || !delete_sets.empty());
 #endif
-      version_info->update_equivalence_sets(alt_sets, delete_sets);
+      if (version_info != NULL)
+        version_info->update_equivalence_sets(alt_sets, delete_sets);
     }
 
     //--------------------------------------------------------------------------
@@ -8844,7 +8846,7 @@ namespace Legion {
       if (!eq.has_lock())
         return defer_traversal(eq, analysis, user_mask, deferral_events,
                                applied_events, already_deferred);
-      if (original_set && 
+      if (!original_set && 
           analysis.update_alt_sets(this, user_mask, applied_events))
         return false;
       if (!is_logical_owner())
@@ -9526,7 +9528,7 @@ namespace Legion {
       if (!eq.has_lock())
         return defer_traversal(eq, analysis, acquire_mask, deferral_events,
                                applied_events, already_deferred);
-      if (original_set && 
+      if (!original_set && 
           analysis.update_alt_sets(this, acquire_mask, applied_events))
         return false;
       if (!is_logical_owner())
@@ -9631,7 +9633,7 @@ namespace Legion {
       if (!eq.has_lock())
         return defer_traversal(eq, analysis, release_mask, deferral_events,
                                applied_events, already_deferred);
-      if (original_set && 
+      if (!original_set && 
           analysis.update_alt_sets(this, release_mask, applied_events))
         return false;
       if (!is_logical_owner())
@@ -9775,7 +9777,7 @@ namespace Legion {
       if (!eq.has_lock())
         return defer_traversal(eq, analysis, src_mask, deferral_events,
                                applied_events, already_deferred);
-      if (original_set && 
+      if (!original_set && 
           analysis.update_alt_sets(this, src_mask, applied_events))
         return false;
       if (!is_logical_owner())
@@ -10052,7 +10054,7 @@ namespace Legion {
       if (!eq.has_lock())
         return defer_traversal(eq, analysis, mask, deferral_events,
                                applied_events, already_deferred);
-      if (original_set && analysis.update_alt_sets(this, mask, applied_events))
+      if (!original_set && analysis.update_alt_sets(this, mask, applied_events))
         return false;
       if (!is_logical_owner())
       {
@@ -10249,7 +10251,7 @@ namespace Legion {
       if (!eq.has_lock())
         return defer_traversal(eq, analysis, mask, deferral_events,
                                applied_events, already_deferred);
-      if (original_set && analysis.update_alt_sets(this, mask, applied_events))
+      if (!original_set && analysis.update_alt_sets(this, mask, applied_events))
         return false;
       if (!is_logical_owner())
       {
