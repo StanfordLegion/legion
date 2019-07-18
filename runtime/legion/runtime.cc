@@ -10097,7 +10097,8 @@ namespace Legion {
         top_context->add_reference();
         // Set the executing processor
         top_context->set_executing_processor(target);
-        TaskLauncher launcher(Runtime::legion_main_id, TaskArgument());
+        TaskLauncher launcher(Runtime::legion_main_id, TaskArgument(),
+                              Predicate::TRUE_PRED, legion_main_mapper_id);
         // Mark that this task is the top-level task
         top_task->set_top_level();
         top_task->initialize_task(top_context, launcher, 
