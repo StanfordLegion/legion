@@ -25,7 +25,7 @@ import os
 import subprocess
 
 import legion
-from legion import disjoint_complete, index_launch, print_once, task, Domain, Fspace, Ispace, IndexLaunch, ID, Partition, N, R, Reduce, Region, RW, Trace, WD
+from legion import disjoint_complete, index_launch, print_once, task, Domain, Fspace, Future, Ispace, IndexLaunch, ID, Partition, N, R, Reduce, Region, RW, Trace, WD
 
 root_dir = os.path.dirname(__file__)
 circuit_header = subprocess.check_output(
@@ -67,21 +67,27 @@ def parse_args(argv):
         setattr(conf, field, value)
     return conf
 
-init_piece = legion.extern_task(
+_constant_time_launches = True
+if _constant_time_launches:
+    extern_task = legion.extern_task_wrapper
+else:
+    extern_task = legion.extern_task
+
+init_piece = extern_task(
     task_id=10002,
     argument_types=[legion.int32, Config, Region, Region, Region, Region, Region],
     privileges=[None, None, WD, WD, WD, N, WD],
     return_type=legion.void,
     calling_convention='regent')
 
-init_pointers = legion.extern_task(
+init_pointers = extern_task(
     task_id=10003,
     argument_types=[Region, Region, Region, Region],
     privileges=[N, N, N, RW('in_ptr', 'in_ptr_r', 'out_ptr', 'out_ptr_r')],
     return_type=legion.void,
     calling_convention='regent')
 
-calculate_new_currents = legion.extern_task(
+calculate_new_currents = extern_task(
     task_id=10004,
     argument_types=[legion.bool_, legion.uint32, Region, Region, Region, Region],
     privileges=[
@@ -94,7 +100,7 @@ calculate_new_currents = legion.extern_task(
     return_type=legion.void,
     calling_convention='regent')
 
-distribute_charge = legion.extern_task(
+distribute_charge = extern_task(
     task_id=10005,
     argument_types=[Region, Region, Region, Region],
     privileges=[
@@ -105,7 +111,7 @@ distribute_charge = legion.extern_task(
     return_type=legion.void,
     calling_convention='regent')
 
-update_voltages = legion.extern_task(
+update_voltages = extern_task(
     task_id=10006,
     argument_types=[legion.bool_, Region, Region],
     privileges=[
@@ -193,13 +199,20 @@ def main():
     ghost_ranges = Region.create([num_superpieces], OrderedDict([('rect', legion.rect1d)]))
     ghost_ranges_part = Partition.create_equal(ghost_ranges, launch_domain)
 
-    for i in IndexLaunch(launch_domain):
-        init_piece(int(i), conf[0], ghost_ranges_part[i], private_part[i], shared_part[i], all_shared, wires_part[i])
+    if _constant_time_launches:
+        c = Future(conf[0], value_type=Config)
+        index_launch(launch_domain, init_piece, ID, c, ghost_ranges_part[ID], private_part[ID], shared_part[ID], all_shared, wires_part[ID])
+    else:
+        for i in IndexLaunch(launch_domain):
+            init_piece(i, conf[0], ghost_ranges_part[i], private_part[i], shared_part[i], all_shared, wires_part[i])
 
     ghost_part = Partition.create_by_image(all_shared, ghost_ranges_part, 'rect', launch_domain)
 
-    for i in IndexLaunch(launch_domain):
-        init_pointers(private_part[i], shared_part[i], ghost_part[i], wires_part[i])
+    if _constant_time_launches:
+        index_launch(launch_domain, init_pointers, private_part[ID], shared_part[ID], ghost_part[ID], wires_part[ID])
+    else:
+        for i in IndexLaunch(launch_domain):
+            init_pointers(private_part[i], shared_part[i], ghost_part[i], wires_part[i])
 
     steps = conf.steps
     prune = conf.prune
@@ -211,16 +224,22 @@ def main():
             legion.execution_fence(block=True)
             start_time = legion.c.legion_get_current_time_in_nanos()
         with trace:
-            for i in IndexLaunch(launch_domain):
-                calculate_new_currents(
-                    False, # j == prune,
-                    steps, private_part[i], shared_part[i], ghost_part[i], wires_part[i])
-            for i in IndexLaunch(launch_domain):
-                distribute_charge(private_part[i], shared_part[i], ghost_part[i], wires_part[i])
-            for i in IndexLaunch(launch_domain):
-                update_voltages(
-                    False, # j == num_loops - prune - 1,
-                    private_part[i], shared_part[i])
+            if _constant_time_launches:
+                index_launch(
+                    launch_domain, calculate_new_currents, False, steps, private_part[ID], shared_part[ID], ghost_part[ID], wires_part[ID])
+                index_launch(
+                    launch_domain, distribute_charge, private_part[ID], shared_part[ID], ghost_part[ID], wires_part[ID])
+                index_launch(
+                    launch_domain, update_voltages, False, private_part[ID], shared_part[ID])
+            else:
+                for i in IndexLaunch(launch_domain):
+                    calculate_new_currents(
+                        False, steps, private_part[i], shared_part[i], ghost_part[i], wires_part[i])
+                for i in IndexLaunch(launch_domain):
+                    distribute_charge(private_part[i], shared_part[i], ghost_part[i], wires_part[i])
+                for i in IndexLaunch(launch_domain):
+                    update_voltages(
+                        False, private_part[i], shared_part[i])
         if j == num_loops - prune - 1:
             legion.execution_fence(block=True)
             stop_time = legion.c.legion_get_current_time_in_nanos()
