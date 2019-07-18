@@ -3713,7 +3713,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void PhysicalTemplate::record_issue_copy(Memoizable *memo,
-                                             unsigned idx,
+                                             unsigned src_idx,
+                                             unsigned dst_idx,
                                              ApEvent &lhs,
                                              IndexSpaceExpression *expr,
                                  const std::vector<CopySrcDstField>& src_fields,
@@ -3766,11 +3767,11 @@ namespace Legion {
       assert(instructions.size() == events.size());
 #endif
 
-      record_views(memo, idx, lhs_, expr, RegionUsage(READ_ONLY, EXCLUSIVE, 0),
-          tracing_srcs, false);
+      record_views(memo, src_idx, lhs_, expr,
+          RegionUsage(READ_ONLY, EXCLUSIVE, 0), tracing_srcs);
       record_copy_views(lhs_, expr, tracing_srcs);
-      record_views(memo, idx, lhs_, expr,
-          RegionUsage(WRITE_ONLY, EXCLUSIVE, 0), tracing_dsts, false);
+      record_views(memo, dst_idx, lhs_, expr,
+          RegionUsage(WRITE_ONLY, EXCLUSIVE, 0), tracing_dsts);
       record_copy_views(lhs_, expr, tracing_dsts);
     }
 
@@ -3798,26 +3799,36 @@ namespace Legion {
                                           const FieldMask &user_mask)
     //--------------------------------------------------------------------------
     {
-      unsigned parent = memo->get_operation()->find_parent_index(idx);
-      const VersionInfo &info = memo->get_version_info(idx);
-      LegionList<FieldSet<EquivalenceSet*> >::aligned eqs;
-      info.get_equivalence_sets().compute_field_sets(user_mask, eqs);
-
+      TraceLocalID op_key = find_trace_local_id(memo);
       unsigned entry = find_memo_entry(memo);
 
-      AutoLock tpl_lock(template_lock);
+      unsigned parent = -1U;
+      LegionList<FieldSet<EquivalenceSet*> >::aligned eqs;
+      if (idx != -1U)
+      {
+        parent = memo->get_operation()->find_parent_index(idx);
+        memo->get_version_info(idx).get_equivalence_sets()
+          .compute_field_sets(user_mask, eqs);
+      }
 
+      AutoLock tpl_lock(template_lock);
+      FieldMaskSet<IndexSpaceExpression> &views = op_views[op_key][view];
       for (LegionList<FieldSet<EquivalenceSet*> >::aligned::iterator it =
            eqs.begin(); it != eqs.end(); ++it)
+      {
+        FieldMask mask = it->set_mask & user_mask;
         for (std::set<EquivalenceSet*>::iterator eit = it->elements.begin();
              eit != it->elements.end(); ++eit)
         {
-          ViewUser *view_user = new ViewUser(usage, entry, parent, (*eit));
-          record_view_user(memo, idx, view, view_user, usage,
-              it->set_mask & user_mask, true);
+          views.insert((*eit)->set_expr, mask);
+          if (idx != -1U)
+          {
+            ViewUser *view_user = new ViewUser(usage, entry, parent, (*eit));
+            update_valid_views(memo, view, view_user, usage, mask, true);
+          }
         }
+      }
     }
-
     //--------------------------------------------------------------------------
     void PhysicalTemplate::record_set_op_sync_event(ApEvent &lhs, Operation *op)
     //--------------------------------------------------------------------------
@@ -3945,7 +3956,7 @@ namespace Legion {
 #endif
       record_fill_views(tracing_srcs);
       record_views(memo, idx, lhs_, expr,
-          RegionUsage(WRITE_ONLY, EXCLUSIVE, 0), tracing_dsts, true);
+          RegionUsage(WRITE_ONLY, EXCLUSIVE, 0), tracing_dsts);
       record_copy_views(lhs_, expr, tracing_dsts);
     }
 
@@ -4090,7 +4101,6 @@ namespace Legion {
                                                const FieldMask &user_mask)
     //--------------------------------------------------------------------------
     {
-      assert(!view->is_reduction_view());
       pre[view].insert(user, user_mask);
       pre_users.insert(user);
     }
@@ -4127,10 +4137,12 @@ namespace Legion {
                                         unsigned entry,
                                         IndexSpaceExpression *expr,
                                         const RegionUsage &usage,
-                                        const FieldMaskSet<InstanceView> &views,
-                                        bool invalidates)
+                                        const FieldMaskSet<InstanceView> &views)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(idx != -1U);
+#endif
       unsigned parent = memo->get_operation()->find_parent_index(idx);
       const VersionInfo &info = memo->get_version_info(idx);
       for (FieldMaskSet<InstanceView>::const_iterator vit = views.begin();
@@ -4145,20 +4157,19 @@ namespace Legion {
           {
             if ((*eit)->set_expr != expr) continue;
             ViewUser *user = new ViewUser(usage, entry, parent, (*eit));
-            record_view_user(memo, idx, vit->first, user, usage,
-                it->set_mask & vit->second, invalidates);
+            update_valid_views(memo, vit->first, user, usage,
+                it->set_mask & vit->second, false);
           }
       }
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::record_view_user(Memoizable *memo,
-                                            unsigned idx,
-                                            InstanceView *view,
-                                            ViewUser *user,
-                                            const RegionUsage &usage,
-                                            const FieldMask &user_mask,
-                                            bool invalidates)
+    void PhysicalTemplate::update_valid_views(Memoizable *memo,
+                                              InstanceView *view,
+                                              ViewUser *user,
+                                              const RegionUsage &usage,
+                                              const FieldMask &user_mask,
+                                              bool invalidates)
     //--------------------------------------------------------------------------
     {
       std::set<InstanceView*> &views= view_groups[view->get_manager()->tree_id];
@@ -4170,9 +4181,8 @@ namespace Legion {
 
       if (user->eq->set_expr->is_empty())
       {
-        TraceLocalID op_key = find_trace_local_id(memo);
-        op_views[op_key][view].insert(user->eq->set_expr, user_mask);
-        post[view].insert(user, user_mask);
+        if (view->is_reduction_view())
+          reductions_in_trace[view].insert(user, user_mask);
         return;
       }
 
@@ -4315,13 +4325,10 @@ namespace Legion {
       }
 
       post[view].insert(user, user_mask);
-      if (!invalidates && view->is_reduction_view())
+      if (view->is_reduction_view())
       {
         reductions_in_trace[view].insert(user, user_mask);
       }
-
-      TraceLocalID op_key = find_trace_local_id(memo);
-      op_views[op_key][view].insert(user->eq->set_expr, user_mask);
     }
 
     //--------------------------------------------------------------------------

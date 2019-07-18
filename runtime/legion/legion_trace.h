@@ -635,7 +635,9 @@ namespace Legion {
                                ApEvent e3, Operation *owner);
       void record_merge_events(ApEvent &lhs, const std::set<ApEvent>& rhs,
                                Operation *owner);
-      void record_issue_copy(Memoizable *memo, unsigned idx,
+      void record_issue_copy(Memoizable *memo,
+                             unsigned src_idx,
+                             unsigned dst_idx,
                              ApEvent &lhs,
                              IndexSpaceExpression *expr,
                              const std::vector<CopySrcDstField>& src_fields,
@@ -705,15 +707,13 @@ namespace Legion {
                         unsigned entry,
                         IndexSpaceExpression *expr,
                         const RegionUsage &usage,
-                        const FieldMaskSet<InstanceView> &views,
-                        bool invalidates);
-      void record_view_user(Memoizable *memo,
-                            unsigned idx,
-                            InstanceView *view,
-                            ViewUser *user,
-                            const RegionUsage &usage,
-                            const FieldMask &user_mask,
-                            bool invalidates);
+                        const FieldMaskSet<InstanceView> &views);
+      void update_valid_views(Memoizable *memo,
+                              InstanceView *view,
+                              ViewUser *user,
+                              const RegionUsage &usage,
+                              const FieldMask &user_mask,
+                              bool invalidates);
       void record_copy_views(unsigned copy_id,
                              IndexSpaceExpression *expr,
                              const FieldMaskSet<InstanceView> &views);

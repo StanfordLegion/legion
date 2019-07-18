@@ -126,6 +126,9 @@ namespace Legion {
       explicit PhysicalTraceInfo(Operation *op, unsigned index = -1U,
                                  bool initialize = false);
       PhysicalTraceInfo(const PhysicalTraceInfo &info, unsigned index);
+      // Special case for copy across operations
+      PhysicalTraceInfo(const PhysicalTraceInfo &info, unsigned src_idx,
+                        unsigned dst_idx);
       PhysicalTraceInfo(Operation *op, Memoizable &memo);
       PhysicalTraceInfo(const PhysicalTraceInfo &rhs);
     public:
@@ -171,14 +174,10 @@ namespace Legion {
       void record_op_view(const RegionUsage &usage,
                           const FieldMask &user_mask,
                           InstanceView *view) const;
-#if 0
-      void record_empty_copy(DeferredView *view,
-                             const FieldMask &copy_mask,
-                             MaterializedView *dst) const;
-#endif
     public:
       Operation *const op;
       const unsigned index;
+      const unsigned dst_index;
       PhysicalTemplate *const tpl;
       const bool recording;
     };

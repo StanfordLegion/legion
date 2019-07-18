@@ -257,7 +257,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     PhysicalTraceInfo::PhysicalTraceInfo(Operation *o, unsigned idx, bool init)
     //--------------------------------------------------------------------------
-      : op(o), index(idx), tpl((op == NULL) ? NULL :
+      : op(o), index(idx), dst_index(idx), tpl((op == NULL) ? NULL :
           (op->get_memoizable() == NULL) ? NULL :
             op->get_memoizable()->get_template()),
         recording((tpl == NULL) ? false : tpl->is_recording())
@@ -269,14 +269,25 @@ namespace Legion {
     //--------------------------------------------------------------------------
     PhysicalTraceInfo::PhysicalTraceInfo(
                                     const PhysicalTraceInfo &info, unsigned idx)
-      : op(info.op), index(idx), tpl(info.tpl), recording(info.recording)
+      : op(info.op), index(idx), dst_index(idx), tpl(info.tpl),
+        recording(info.recording)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    PhysicalTraceInfo::PhysicalTraceInfo(const PhysicalTraceInfo &info,
+                                         unsigned src_idx,
+                                         unsigned dst_idx)
+      : op(info.op), index(src_idx), dst_index(dst_idx), tpl(info.tpl),
+        recording(info.recording)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     PhysicalTraceInfo::PhysicalTraceInfo(Operation *o, Memoizable &memo)
-      : op(o), index(-1U), tpl(memo.get_template()),
+      : op(o), index(-1U), dst_index(-1U), tpl(memo.get_template()),
         recording((tpl == NULL) ? false : tpl->is_recording())
     //--------------------------------------------------------------------------
     {
@@ -284,7 +295,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     PhysicalTraceInfo::PhysicalTraceInfo(const PhysicalTraceInfo &rhs)
-      : op(rhs.op), index(rhs.index), tpl(rhs.tpl), recording(rhs.recording)
+      : op(rhs.op), index(rhs.index), dst_index(rhs.dst_index), tpl(rhs.tpl),
+        recording(rhs.recording)
     //--------------------------------------------------------------------------
     {
     }
@@ -366,7 +378,8 @@ namespace Legion {
       assert(tracing_srcs != NULL);
       assert(tracing_dsts != NULL);
 #endif
-      tpl->record_issue_copy(memo, index, result, expr, src_fields, dst_fields,
+      tpl->record_issue_copy(memo, index, dst_index,
+                             result, expr, src_fields, dst_fields,
 #ifdef LEGION_SPY
                              handle, src_tree_id, dst_tree_id,
 #endif
@@ -437,28 +450,15 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(memo != NULL);
       assert(recording);
-      assert(index != -1U);
+      assert(index != -1U ||
+             op->get_operation_kind() == Operation::COPY_OP_KIND);
       assert(tpl != NULL);
       assert(tpl->is_recording());
 #endif
+      // Don't track views of copy across operations when they get registered,
+      // as they will do later when the realm copies are recorded.
       tpl->record_op_view(memo, index, view, usage, user_mask);
     }
-
-#if 0
-    //--------------------------------------------------------------------------
-    void PhysicalTraceInfo::record_empty_copy(DeferredView *view,
-                                              const FieldMask &copy_mask,
-                                              MaterializedView *dst) const
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(recording);
-      assert(tpl != NULL);
-      assert(tpl->is_recording());
-#endif
-      tpl->record_empty_copy(view, copy_mask, dst);
-    }
-#endif
 
     /////////////////////////////////////////////////////////////
     // ProjectionInfo 
@@ -12090,7 +12090,11 @@ namespace Legion {
       assert(previous_number <= version_number);
 #endif
       if (previous_number < version_number)
+      {
+        fprintf(stderr, "hit the shortcut: %p, version_number: %u, previous_number: %u\n",
+            this, version_number, previous_number);
         return;
+      }
       // Increment the version number so that we don't get stale updates
       version_number++;
       // Remove any sets from the old set that aren't in the new one

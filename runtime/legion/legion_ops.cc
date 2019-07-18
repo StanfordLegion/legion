@@ -4438,14 +4438,15 @@ namespace Legion {
       {
         if (gather_targets == NULL)
         {
+          unsigned dst_index = index + src_requirements.size();
           // Normal copy across
           copy_done = runtime->forest->copy_across( 
               src_requirements[index], dst_requirements[index],
               src_versions[index], dst_versions[index],
-              src_targets, dst_targets, this, index, 
-              index + src_requirements.size(),
+              src_targets, dst_targets, this, index, dst_index,
               local_init_precondition, predication_guard, 
-              trace_info, applied_conditions);
+              PhysicalTraceInfo(trace_info, index, dst_index),
+              applied_conditions);
         }
         else
         {
