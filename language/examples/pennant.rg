@@ -1346,12 +1346,25 @@ task read_input_sequential(rz_all : region(zone),
                            rs_all : region(side(wild, wild, wild, wild)),
                            conf : config)
 where reads writes(rz_all, rp_all, rs_all) do
-  return read_input(
+  var colorings = read_input(
     __runtime(), __context(),
     __physical(rz_all), __fields(rz_all),
     __physical(rp_all), __fields(rp_all),
     __physical(rs_all), __fields(rs_all),
     conf)
+  -- If par_init is true we don't actually need to pass this back, just free it here.
+  if conf.par_init then
+    c.legion_coloring_destroy(colorings.rz_all_c)
+    c.legion_coloring_destroy(colorings.rz_spans_c)
+    c.legion_coloring_destroy(colorings.rp_all_c)
+    c.legion_coloring_destroy(colorings.rp_all_private_c)
+    c.legion_coloring_destroy(colorings.rp_all_ghost_c)
+    c.legion_coloring_destroy(colorings.rp_all_shared_c)
+    c.legion_coloring_destroy(colorings.rp_spans_c)
+    c.legion_coloring_destroy(colorings.rs_all_c)
+    c.legion_coloring_destroy(colorings.rs_spans_c)
+  end
+  return colorings
 end
 
 task validate_output_sequential(rz_all : region(zone),
@@ -1391,21 +1404,11 @@ task toplevel()
 
   if conf.seq_init then
     -- Hack: This had better run on the same node...
+    -- (if -par_init 0)
     colorings = read_input_sequential(rz_all, rp_all, rs_all, conf)
   end
 
   if conf.par_init then
-    if conf.seq_init then
-      c.legion_coloring_destroy(colorings.rz_all_c)
-      c.legion_coloring_destroy(colorings.rz_spans_c)
-      c.legion_coloring_destroy(colorings.rp_all_c)
-      c.legion_coloring_destroy(colorings.rp_all_private_c)
-      c.legion_coloring_destroy(colorings.rp_all_ghost_c)
-      c.legion_coloring_destroy(colorings.rp_all_shared_c)
-      c.legion_coloring_destroy(colorings.rp_spans_c)
-      c.legion_coloring_destroy(colorings.rs_all_c)
-      c.legion_coloring_destroy(colorings.rs_spans_c)
-    end
     colorings = read_partitions(conf)
   end
 
