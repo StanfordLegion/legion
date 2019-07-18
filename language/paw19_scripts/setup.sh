@@ -26,3 +26,5 @@ if [[ ! -f $PYTHON_LIB ]]; then
 fi
 
 USE_CUDA=1 CUDA_HOME=$CUDATOOLKIT_HOME USE_PYTHON=1 HOST_CC=gcc HOST_CXX=g++ "$root_dir"/scripts/setup_env.py --llvm-version 38
+LG_RT_DIR="$root_dir"/../runtime make -C "$root_dir"/../bindings/python clean
+LG_RT_DIR="$root_dir"/../runtime make -C "$root_dir"/../bindings/python cached_legion.h
