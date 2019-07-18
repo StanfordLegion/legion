@@ -1762,7 +1762,7 @@ class _TaskLauncher(object):
                 if not isinstance(arg, Future):
                     arg_name = '__arg_%s' % i
                     arg_value = arg
-                    if hasattr(arg, 'handle'):
+                    if hasattr(arg, 'handle') and not isinstance(arg, DomainPoint):
                         arg_value = arg.handle[0]
                     setattr(task_args_buffer, arg_name, arg_value)
             for i, arg in enumerate(args):
