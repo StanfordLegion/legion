@@ -123,7 +123,7 @@ def main():
 
     assert conf.num_pieces % conf.pieces_per_superpiece == 0, "pieces should be evenly distributed to superpieces"
     conf.shared_nodes_per_piece = int(math.ceil(conf.nodes_per_piece * conf.pct_shared_nodes / 100.0))
-    print("circuit settings: loops=%d prune=%d pieces=%d (pieces/superpiece=%d) nodes/piece=%d (nodes/piece=%d) wires/piece=%d pct_in_piece=%d seed=%d" % (
+    print_once("circuit settings: loops=%d prune=%d pieces=%d (pieces/superpiece=%d) nodes/piece=%d (nodes/piece=%d) wires/piece=%d pct_in_piece=%d seed=%d" % (
         conf.num_loops, conf.prune, conf.num_pieces, conf.pieces_per_superpiece, conf.nodes_per_piece,
         conf.shared_nodes_per_piece, conf.wires_per_piece, conf.pct_wire_in_piece, conf.random_seed))
 
@@ -157,11 +157,11 @@ def main():
 
     node_size = np.dtype(list(map(lambda x: (x[0], x[1].numpy_type), node.field_types.items())), align=True).itemsize
     wire_size = np.dtype(list(map(lambda x: (x[0], x[1].numpy_type), wire.field_types.items())), align=True).itemsize
-    print("Circuit memory usage:")
-    print("  Nodes : %10d * %4d bytes = %12d bytes" % (num_circuit_nodes, node_size, num_circuit_nodes * node_size))
-    print("  Wires : %10d * %4d bytes = %12d bytes" % (num_circuit_wires, wire_size, num_circuit_wires * wire_size))
+    print_once("Circuit memory usage:")
+    print_once("  Nodes : %10d * %4d bytes = %12d bytes" % (num_circuit_nodes, node_size, num_circuit_nodes * node_size))
+    print_once("  Wires : %10d * %4d bytes = %12d bytes" % (num_circuit_wires, wire_size, num_circuit_wires * wire_size))
     total = ((num_circuit_nodes * node_size) + (num_circuit_wires * wire_size))
-    print("  Total                             %12d bytes" % total)
+    print_once("  Total                             %12d bytes" % total)
 
     snpp = conf.shared_nodes_per_piece
     pnpp = conf.nodes_per_piece - conf.shared_nodes_per_piece
