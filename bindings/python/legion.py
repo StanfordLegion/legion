@@ -1465,7 +1465,8 @@ def extern_task(**kwargs):
     return ExternTask(**kwargs)
 
 class ExternTaskWrapper(object):
-    __slots__ = ['thunk', '__name__', '__qualname__']
+    # Note: Can't use __slots__ for this class because __qualname__
+    # conflicts with the class variable.
     def __init__(self, thunk, name):
         self.thunk = thunk
         self.__name__ = name
