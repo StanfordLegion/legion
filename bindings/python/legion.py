@@ -629,7 +629,7 @@ class Privilege(object):
                 (self, None, self._legion_redop_id(fspace.field_types[field_name]), (field_name,))
                 for field_name in fields]
         else:
-            return [(self, self._legion_privilege(), None, fields)]
+            return [(self, self._legion_privilege(), None, fields if self.read or self.write or self.reduce else [])]
 
     def _legion_redop_id(self, field_type):
         return _redop_ids[self.reduce][field_type]
