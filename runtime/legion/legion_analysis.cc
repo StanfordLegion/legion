@@ -9418,9 +9418,8 @@ namespace Legion {
       if (!eq.has_lock())
         return defer_traversal(eq, analysis, src_mask, deferral_events,
                                applied_events, already_deferred);
-      if (!original_set && 
-          analysis.update_alt_sets(this, src_mask, applied_events))
-        return false;
+      // No alt-set tracking here for copy across because we might
+      // need to to traverse this multiple times with different expressions
       if (!is_logical_owner())
       {
         // First check to see if our subsets are up to date
@@ -9461,9 +9460,7 @@ namespace Legion {
           to_traverse.insert(it->first, overlap);
         }
         eq.release();
-        // Remove ourselves if we recursed
-        if (!original_set)
-          analysis.filter_alt_sets(this, to_traverse.get_valid_mask());
+        // No alt-set tracking here, see comment above
         // Update the release mask and the remove_mask if there is one
         src_mask -= to_traverse.get_valid_mask();
         if (remove_mask != NULL)
