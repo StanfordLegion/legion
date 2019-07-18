@@ -22,7 +22,7 @@ from collections import OrderedDict
 import numpy as np
 
 import legion
-from legion import disjoint, disjoint_incomplete, disjoint_complete, print_once, task, Fspace, IndexLaunch, Ispace, N, Partition, R, Region, RW, Trace
+from legion import disjoint, disjoint_incomplete, disjoint_complete, index_launch, print_once, task, Fspace, ID, IndexLaunch, Ispace, N, Partition, R, Region, RW, Trace
 
 DTYPE = legion.float64
 RADIUS = 2
@@ -98,21 +98,27 @@ def make_ghost_y_partition(points, tiles, n, nt, direction):
     kind = disjoint_complete if direction == 0 else disjoint_incomplete
     return Partition.create_by_image(points, colors_part, 'rect', tiles, kind)
 
-stencil = legion.extern_task(
+_constant_time_launches = True
+if _constant_time_launches:
+    extern_task = legion.extern_task_wrapper
+else:
+    extern_task = legion.extern_task
+
+stencil = extern_task(
     task_id=10001,
     argument_types=[Region, Region, Region, Region, Region, Region, legion.bool_],
     privileges=[RW, N, R('input'), R('input'), R('input'), R('input')],
     return_type=legion.void,
     calling_convention='regent')
 
-increment = legion.extern_task(
+increment = extern_task(
     task_id=10002,
     argument_types=[Region, Region, Region, Region, Region, Region, legion.bool_],
     privileges=[RW('input'), N, RW('input'), RW('input'), RW('input'), RW('input')],
     return_type=legion.void,
     calling_convention='regent')
 
-check = legion.extern_task(
+check = extern_task(
     task_id=10003,
     argument_types=[Region, Region, legion.int64, legion.int64],
     privileges=[R, N],
@@ -174,16 +180,23 @@ def main():
             legion.execution_fence(block=True)
             start_time = legion.c.legion_get_current_time_in_nanos()
         with trace:
-            for i in IndexLaunch(tiles):
-                stencil(private[i], interior[i], pxm_in[i], pxp_in[i], pym_in[i], pyp_in[i], False) # t == tprune)
-            for i in IndexLaunch(tiles):
-                increment(private[i], exterior[i], pxm_out[i], pxp_out[i], pym_out[i], pyp_out[i], False) # t == tsteps - tprune - 1)
+            if _constant_time_launches:
+                index_launch(tiles, stencil, private[ID], interior[ID], pxm_in[ID], pxp_in[ID], pym_in[ID], pyp_in[ID], False)
+                index_launch(tiles, increment, private[ID], exterior[ID], pxm_out[ID], pxp_out[ID], pym_out[ID], pyp_out[ID], False)
+            else:
+                for i in IndexLaunch(tiles):
+                    stencil(private[i], interior[i], pxm_in[i], pxp_in[i], pym_in[i], pyp_in[i], False)
+                for i in IndexLaunch(tiles):
+                    increment(private[i], exterior[i], pxm_out[i], pxp_out[i], pym_out[i], pyp_out[i], False)
         if t == tsteps - tprune - 1:
             legion.execution_fence(block=True)
             stop_time = legion.c.legion_get_current_time_in_nanos()
 
-    for i in IndexLaunch(tiles):
-        check(private[i], interior[i], tsteps, init)
+    if _constant_time_launches:
+        index_launch(tiles, check, private[ID], interior[ID], tsteps, init)
+    else:
+        for i in IndexLaunch(tiles):
+            check(private[i], interior[i], tsteps, init)
 
     print_once('ELAPSED TIME = %7.3f s' % ((stop_time - start_time)/1e9))
 
