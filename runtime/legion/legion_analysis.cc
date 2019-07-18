@@ -8489,7 +8489,7 @@ namespace Legion {
       if (!eq.has_lock())
         return defer_traversal(eq, analysis, user_mask, deferral_events,
                                applied_events, already_deferred);
-      if (original_set && 
+      if (!original_set && 
           analysis.update_alt_sets(this, user_mask, applied_events))
         return false;
       if (!is_logical_owner())
@@ -9171,7 +9171,7 @@ namespace Legion {
       if (!eq.has_lock())
         return defer_traversal(eq, analysis, acquire_mask, deferral_events,
                                applied_events, already_deferred);
-      if (original_set && 
+      if (!original_set && 
           analysis.update_alt_sets(this, acquire_mask, applied_events))
         return false;
       if (!is_logical_owner())
@@ -9276,7 +9276,7 @@ namespace Legion {
       if (!eq.has_lock())
         return defer_traversal(eq, analysis, release_mask, deferral_events,
                                applied_events, already_deferred);
-      if (original_set && 
+      if (!original_set && 
           analysis.update_alt_sets(this, release_mask, applied_events))
         return false;
       if (!is_logical_owner())
@@ -9420,7 +9420,7 @@ namespace Legion {
       if (!eq.has_lock())
         return defer_traversal(eq, analysis, src_mask, deferral_events,
                                applied_events, already_deferred);
-      if (original_set && 
+      if (!original_set && 
           analysis.update_alt_sets(this, src_mask, applied_events))
         return false;
       if (!is_logical_owner())
@@ -9697,7 +9697,7 @@ namespace Legion {
       if (!eq.has_lock())
         return defer_traversal(eq, analysis, mask, deferral_events,
                                applied_events, already_deferred);
-      if (original_set && analysis.update_alt_sets(this, mask, applied_events))
+      if (!original_set && analysis.update_alt_sets(this, mask, applied_events))
         return false;
       if (!is_logical_owner())
       {
@@ -9894,7 +9894,7 @@ namespace Legion {
       if (!eq.has_lock())
         return defer_traversal(eq, analysis, mask, deferral_events,
                                applied_events, already_deferred);
-      if (original_set && analysis.update_alt_sets(this, mask, applied_events))
+      if (!original_set && analysis.update_alt_sets(this, mask, applied_events))
         return false;
       if (!is_logical_owner())
       {
