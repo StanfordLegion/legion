@@ -92,8 +92,13 @@ def find_legion_header():
 
     raise Exception('Unable to locate legion.h header file')
 
-prefix_dir, legion_h_path = find_legion_header()
-header = subprocess.check_output(['gcc', '-I', prefix_dir, '-DLEGION_USE_PYTHON_CFFI', '-DLEGION_MAX_DIM=%s' % _max_dim, '-DREALM_MAX_DIM=%s' % _max_dim, '-E', '-P', legion_h_path]).decode('utf-8')
+try:
+    with open(os.path.join(os.path.dirname(os.path.realpath(__file__)), 'cached_legion.h'), 'r') as f:
+        header = f.read()
+except IOError as e:
+    print('Unable to find cached_legion.h, falling back to reading legion.h')
+    prefix_dir, legion_h_path = find_legion_header()
+    header = subprocess.check_output(['gcc', '-I', prefix_dir, '-DLEGION_USE_PYTHON_CFFI', '-DLEGION_MAX_DIM=%s' % _max_dim, '-DREALM_MAX_DIM=%s' % _max_dim, '-E', '-P', legion_h_path]).decode('utf-8')
 
 ffi = cffi.FFI()
 ffi.cdef(header)
