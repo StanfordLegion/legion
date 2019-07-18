@@ -15,18 +15,13 @@
 -- runs-with:
 -- [
 --   ["pennant.tests/sedovsmall/sedovsmall.pnt",
---    "-npieces", "1", "-seq_init", "1", "-par_init", "1", "-interior", "0",
---    "-flegion-replicable", "0"],
+--    "-npieces", "1", "-seq_init", "1", "-par_init", "1", "-interior", "0"],
 --   ["pennant.tests/sedov/sedov.pnt",
 --    "-npieces", "3", "-ll:cpu", "3", "-seq_init", "1", "-par_init", "1", "-interior", "0",
---    "-absolute", "2e-6", "-relative", "1e-8", "-relative_absolute", "1e-10",
---    "-flegion-replicable", "0"],
+--    "-absolute", "2e-6", "-relative", "1e-8", "-relative_absolute", "1e-10"],
 --   ["pennant.tests/leblanc/leblanc.pnt",
---    "-npieces", "2", "-ll:cpu", "2", "-seq_init", "1", "-par_init", "1", "-interior", "0",
---    "-flegion-replicable", "0"]
+--    "-npieces", "2", "-ll:cpu", "2", "-seq_init", "1", "-par_init", "1", "-interior", "0"]
 -- ]
-
--- FIXME: -seq_init 1 is incompatible with DCR so we need to set -flegion-replicable 0 to disable it.
 
 -- Inspired by https://github.com/losalamos/PENNANT
 
@@ -1351,12 +1346,25 @@ task read_input_sequential(rz_all : region(zone),
                            rs_all : region(side(wild, wild, wild, wild)),
                            conf : config)
 where reads writes(rz_all, rp_all, rs_all) do
-  return read_input(
+  var colorings = read_input(
     __runtime(), __context(),
     __physical(rz_all), __fields(rz_all),
     __physical(rp_all), __fields(rp_all),
     __physical(rs_all), __fields(rs_all),
     conf)
+  -- If par_init is true we don't actually need to pass this back, just free it here.
+  if conf.par_init then
+    c.legion_coloring_destroy(colorings.rz_all_c)
+    c.legion_coloring_destroy(colorings.rz_spans_c)
+    c.legion_coloring_destroy(colorings.rp_all_c)
+    c.legion_coloring_destroy(colorings.rp_all_private_c)
+    c.legion_coloring_destroy(colorings.rp_all_ghost_c)
+    c.legion_coloring_destroy(colorings.rp_all_shared_c)
+    c.legion_coloring_destroy(colorings.rp_spans_c)
+    c.legion_coloring_destroy(colorings.rs_all_c)
+    c.legion_coloring_destroy(colorings.rs_spans_c)
+  end
+  return colorings
 end
 
 task validate_output_sequential(rz_all : region(zone),
@@ -1396,21 +1404,11 @@ task toplevel()
 
   if conf.seq_init then
     -- Hack: This had better run on the same node...
+    -- (if -par_init 0)
     colorings = read_input_sequential(rz_all, rp_all, rs_all, conf)
   end
 
   if conf.par_init then
-    if conf.seq_init then
-      c.legion_coloring_destroy(colorings.rz_all_c)
-      c.legion_coloring_destroy(colorings.rz_spans_c)
-      c.legion_coloring_destroy(colorings.rp_all_c)
-      c.legion_coloring_destroy(colorings.rp_all_private_c)
-      c.legion_coloring_destroy(colorings.rp_all_ghost_c)
-      c.legion_coloring_destroy(colorings.rp_all_shared_c)
-      c.legion_coloring_destroy(colorings.rp_spans_c)
-      c.legion_coloring_destroy(colorings.rs_all_c)
-      c.legion_coloring_destroy(colorings.rs_spans_c)
-    end
     colorings = read_partitions(conf)
   end
 
