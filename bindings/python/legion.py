@@ -1464,6 +1464,26 @@ class ExternTask(object):
 def extern_task(**kwargs):
     return ExternTask(**kwargs)
 
+class ExternTaskWrapper(object):
+    __slots__ = ['thunk', '__name__', '__qualname__']
+    def __init__(self, thunk, name):
+        self.thunk = thunk
+        self.__name__ = name
+        self.__qualname__ = name
+    def __call__(self, *args, **kwargs):
+        return self.thunk(*args, **kwargs)
+
+_next_wrapper_id = 1000
+def extern_task_wrapper(privileges=None, return_type=void, **kwargs):
+    global _next_wrapper_id
+    extern = extern_task(privileges=privileges, return_type=return_type, **kwargs)
+    wrapper_name = str('wrapper_task_%s' % _next_wrapper_id)
+    _next_wrapper_id += 1
+    wrapper = ExternTaskWrapper(extern, wrapper_name)
+    task_wrapper = task(wrapper, privileges=privileges, return_type=return_type, inner=True)
+    setattr(sys.modules[__name__], wrapper_name, task_wrapper)
+    return task_wrapper
+
 def get_qualname(fn):
     # Python >= 3.3 only
     try:
