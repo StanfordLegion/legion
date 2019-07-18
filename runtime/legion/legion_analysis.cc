@@ -199,9 +199,13 @@ namespace Legion {
       if (owner == NULL)
       {
         owner = own;
+        // Only record the version number the first time we record
+        // an equivalence set which will be the earliest version number
+        // for this owner that we could ever record. We may record 
+        // other equivalence sets later which are for later version 
+        // numbers, but it will be unsafe for us to update them here
         version_number = ver_num;
       }
-      version_number = ver_num;
       equivalence_sets.insert(set, set_mask);
     }
 
