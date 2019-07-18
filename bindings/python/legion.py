@@ -1153,11 +1153,11 @@ def fill(region, field_name, value):
         c.legion_predicate_true())
 
 # Hack: Can't pickle static methods.
-def _Ipartition_unpickle(id, parent, color_space):
+def _Ipartition_unpickle(tid, id, type_tag, parent, color_space):
     handle = ffi.new('legion_index_partition_t *')
+    handle[0].tid = tid
     handle[0].id = id
-    handle[0].tid = parent.raw_value().tid
-    handle[0].type_tag = parent.raw_value().type_tag
+    handle[0].type_tag = type_tag
 
     return Ipartition(handle[0], parent, color_space)
 
@@ -1177,7 +1177,7 @@ class Ipartition(object):
 
     def __reduce__(self):
         return (_Ipartition_unpickle,
-                (self.handle[0].id, self.parent, self.color_space))
+                (self.handle[0].tid, self.handle[0].id, self.handle[0].type_tag, self.parent, self.color_space))
 
     def __getitem__(self, point):
         if isinstance(point, SymbolicExpr):
