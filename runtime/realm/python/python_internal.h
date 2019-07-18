@@ -183,7 +183,7 @@ namespace Realm {
 
     std::map<Processor::TaskFuncID, TaskTableEntry> task_table;
 
-    PriorityQueue<Task *, GASNetHSL> task_queue;
+    TaskQueue task_queue; // ready tasks
     ProfilingGauges::AbsoluteRangeGauge<int> ready_task_count;
   };
 

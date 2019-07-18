@@ -40,6 +40,10 @@ namespace Realm {
       before_event(_before_event), priority(_priority),
       executing_thread(0)
   {
+    // clamp task priority to "finite" range
+    if(priority < TaskQueue::PRI_MIN_FINITE) priority = TaskQueue::PRI_MIN_FINITE;
+    if(priority > TaskQueue::PRI_MAX_FINITE) priority = TaskQueue::PRI_MAX_FINITE;
+
     arglen = _arglen;
     if(arglen <= SHORT_ARGLEN_MAX) {
       if(arglen) {

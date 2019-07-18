@@ -95,6 +95,8 @@ namespace Realm {
       Thread *executing_thread;
     };
 
+    typedef PriorityQueue<Task *, GASNetHSL> TaskQueue;
+
     // a task scheduler in which one or more worker threads execute tasks from one
     //  or more task queues
     // once given a task, a worker must complete it before taking on new work
@@ -106,8 +108,6 @@ namespace Realm {
       ThreadedTaskScheduler(void);
 
       virtual ~ThreadedTaskScheduler(void);
-
-      typedef PriorityQueue<Task *, GASNetHSL> TaskQueue;
 
       virtual void add_task_queue(TaskQueue *queue);
 

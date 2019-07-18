@@ -116,7 +116,7 @@ namespace Realm {
       void set_scheduler(ThreadedTaskScheduler *_sched);
 
       ThreadedTaskScheduler *sched;
-      PriorityQueue<Task *, GASNetHSL> task_queue;
+      TaskQueue task_queue; // ready tasks
       ProfilingGauges::AbsoluteRangeGauge<int> ready_task_count;
 
       struct TaskTableEntry {
@@ -222,7 +222,7 @@ namespace Realm {
 
       void request_group_members(void);
 
-      PriorityQueue<Task *, GASNetHSL> task_queue;
+      TaskQueue task_queue; // ready tasks
       ProfilingGauges::AbsoluteRangeGauge<int> *ready_task_count;
     };
     
