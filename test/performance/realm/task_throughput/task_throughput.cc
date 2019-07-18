@@ -35,6 +35,7 @@ namespace TestConfig {
   bool with_profiling = false;
   bool skip_launch_procs = false;
   bool use_posttriger_barrier = false;
+  bool group_procs = false;
 };
 
 // TASK IDs
@@ -182,6 +183,15 @@ void task_launcher(const void *args, size_t arglen,
   for(Machine::ProcessorQuery::iterator it = pq.begin(); it != pq.end(); ++it)
     if(!(TestConfig::skip_launch_procs && ((*it) == p)))
       targets.push_back(*it);
+
+  if(TestConfig::group_procs && !targets.empty()) {
+    Processor p = Processor::create_group(targets);
+    la.instances[p] = la.instances[targets[0]];
+    if(targets.size() > 1)
+      la.finish_barrier.arrive(targets.size() - 1);
+    targets.clear();
+    targets.push_back(p);
+  }
 
   // round-robin tasks across target processors in case barrier trigger
   //  is slower than task execution rate
@@ -343,7 +353,8 @@ int main(int argc, char **argv)
     .add_option_bool("-chain", TestConfig::chain_tasks)
     .add_option_bool("-noself", TestConfig::skip_launch_procs)
     .add_option_bool("-post", TestConfig::use_posttriger_barrier)
-    .add_option_bool("-prof", TestConfig::with_profiling);
+    .add_option_bool("-prof", TestConfig::with_profiling)
+    .add_option_bool("-group", TestConfig::group_procs);
   ok = cp.parse_command_line(argc, (const char **)argv);
   assert(ok);
 
