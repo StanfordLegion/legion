@@ -625,6 +625,7 @@ namespace Legion {
       void record_get_term_event(Memoizable* memo);
       void record_create_ap_user_event(ApUserEvent lhs, Operation *owner);
       void record_trigger_event(ApUserEvent lhs, ApEvent rhs);
+    public:
       void record_merge_events(ApEvent &lhs, ApEvent rhs, Operation *owner);
       void record_merge_events(ApEvent &lhs, ApEvent e1, ApEvent e2,
                                Operation *owner);
@@ -632,6 +633,7 @@ namespace Legion {
                                ApEvent e3, Operation *owner);
       void record_merge_events(ApEvent &lhs, const std::set<ApEvent>& rhs,
                                Operation *owner);
+    public:
       void record_issue_copy(Memoizable *memo,
                              unsigned src_idx,
                              unsigned dst_idx,
@@ -649,17 +651,12 @@ namespace Legion {
                              bool reduction_fold,
                              const FieldMaskSet<InstanceView> &tracing_srcs,
                              const FieldMaskSet<InstanceView> &tracing_dsts);
-      void record_summary_info(const RegionRequirement &region,
-                               const InstanceSet &instance_set,
-                               unsigned parent_idx);
-      void record_op_view(Memoizable *memo,
-                          unsigned idx,
-                          InstanceView *view,
-                          const RegionUsage &usage,
-                          const FieldMask &user_mask,
-                          bool update_validity);
-      void record_set_op_sync_event(ApEvent &lhs, Operation *op);
-      void record_complete_replay(Operation *op, ApEvent rhs);
+      void record_issue_indirect(Memoizable *memo, ApEvent &lhs,
+                             IndexSpaceExpression *expr,
+                             const std::vector<CopySrcDstField>& src_fields,
+                             const std::vector<CopySrcDstField>& dst_fields,
+                             const std::vector<void*> &indirections,
+                             ApEvent precondition);
       void record_issue_fill(Memoizable *memo, unsigned idx,
                              ApEvent &lhs,
                              IndexSpaceExpression *expr,
@@ -673,32 +670,18 @@ namespace Legion {
                              ApEvent precondition,
                              const FieldMaskSet<FillView> &tracing_srcs,
                              const FieldMaskSet<InstanceView> &tracing_dsts);
+    public:
+      void record_summary_info(const RegionRequirement &region,
+                               const InstanceSet &instance_set,
+                               unsigned parent_idx);
+    public:
+      void record_op_view(Memoizable *memo,
+                          unsigned idx,
+                          InstanceView *view,
+                          const RegionUsage &usage,
+                          const FieldMask &user_mask,
+                          bool update_validity);
       void record_fill_view(FillView *view, const FieldMask &user_mask);
-      void record_outstanding_gc_event(CollectableView *view, 
-                                       ApEvent term_event);
-      void record_issue_indirect(Memoizable *memo, ApEvent &lhs,
-                             IndexSpaceExpression *expr,
-                             const std::vector<CopySrcDstField>& src_fields,
-                             const std::vector<CopySrcDstField>& dst_fields,
-                             const std::vector<void*> &indirections,
-                             ApEvent precondition);
-    public:
-      RtEvent defer_template_deletion(void);
-    public:
-      static void handle_replay_slice(const void *args);
-      static void handle_delete_template(const void *args);
-    private:
-      TraceLocalID find_trace_local_id(Memoizable *memo);
-      unsigned find_memo_entry(Memoizable *memo);
-      unsigned find_memo_entry(TraceLocalID op_key);
-    private:
-      void record_precondition(InstanceView *view,
-                               ViewUser *user,
-                               const FieldMask &user_mask);
-      bool is_precondition(ViewUser *user);
-    private:
-      static bool is_compatible(const RegionUsage &u1,
-                                const RegionUsage &u2);
     private:
       void record_views(Memoizable *memo,
                         unsigned idx,
@@ -716,6 +699,33 @@ namespace Legion {
                              IndexSpaceExpression *expr,
                              const FieldMaskSet<InstanceView> &views);
       void record_fill_views(const FieldMaskSet<FillView> &views);
+    public:
+      void record_set_op_sync_event(ApEvent &lhs, Operation *op);
+      void record_complete_replay(Operation *op, ApEvent rhs);
+    public:
+      void record_outstanding_gc_event(CollectableView *view, 
+                                       ApEvent term_event);
+    public:
+      RtEvent defer_template_deletion(void);
+    public:
+      static void handle_replay_slice(const void *args);
+      static void handle_delete_template(const void *args);
+    private:
+      TraceLocalID find_trace_local_id(Memoizable *memo);
+      unsigned find_memo_entry(Memoizable *memo);
+      TraceLocalID record_memo_entry(Memoizable *memo, unsigned entry);
+    private:
+      unsigned convert_event(const ApEvent &event);
+      unsigned find_event(const ApEvent &event) const;
+      void insert_instruction(Instruction *inst);
+    private:
+      void record_precondition(InstanceView *view,
+                               ViewUser *user,
+                               const FieldMask &user_mask);
+      bool is_precondition(ViewUser *user);
+    private:
+      static bool is_compatible(const RegionUsage &u1,
+                                const RegionUsage &u2);
     private:
       void find_all_last_users(ViewExprs &view_exprs,
                                std::set<unsigned> &users);
@@ -765,7 +775,6 @@ namespace Legion {
       Conditions                                         pre, post;
       Conditions                                         reductions_in_trace;
       ViewGroups                                         view_groups;
-      std::set<ViewUser*>                                pre_users;
       LegionVector<FieldMaskSet<InstanceView> >::aligned pre_views;
       std::vector<IndexSpaceExpression*>                 pre_exprs;
       std::vector<unsigned>                              pre_parent_indices;
@@ -1035,9 +1044,8 @@ namespace Legion {
      * \class IssueFill
      * This instruction has the following semantics:
      *
-     *   events[lhs] = domain.fill(fields, requests,
-     *                             fill_buffer, fill_size,
-     *                             events[precondition_idx]);
+     *   events[lhs] = expr->fill(fields, fill_value, fill_size,
+     *                            events[precondition_idx]);
      */
     struct IssueFill : public Instruction {
       IssueFill(PhysicalTemplate& tpl,
@@ -1097,10 +1105,9 @@ namespace Legion {
     /**
      * \class IssueCopy
      * This instruction has the following semantics:
-     *   events[lhs] = node->issue_copy(operations[op_key],
-     *                                  src_fields, dst_fields,
+     *   events[lhs] = expr->issue_copy(src_fields, dst_fields,
      *                                  events[precondition_idx],
-     *                                  predicate_guard, intersect,
+     *                                  predicate_guard,
      *                                  redop, reduction_fold);
      */
     struct IssueCopy : public Instruction {

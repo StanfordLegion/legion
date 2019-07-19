@@ -3497,25 +3497,9 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(is_recording());
 #endif
-      unsigned lhs_ = events.size();
-      events.push_back(lhs);
-#ifdef DEBUG_LEGION
-      assert(event_map.find(lhs) == event_map.end());
-#endif
-      event_map[lhs] = lhs_;
-
-      TraceLocalID key = memo->get_trace_local_id();
-#ifdef DEBUG_LEGION
-      assert(operations.find(key) == operations.end());
-      assert(memo_entries.find(key) == memo_entries.end());
-#endif
-      operations[key] = memo;
-      memo_entries[key] = instructions.size();
-
-      instructions.push_back(new GetTermEvent(*this, lhs_, key));
-#ifdef DEBUG_LEGION
-      assert(instructions.size() == events.size());
-#endif
+      unsigned lhs_ = convert_event(lhs);
+      TraceLocalID key = record_memo_entry(memo, lhs_);
+      insert_instruction(new GetTermEvent(*this, lhs_, key));
     }
 
     //--------------------------------------------------------------------------
@@ -3531,24 +3515,16 @@ namespace Legion {
       assert(is_recording());
 #endif
 
-      unsigned lhs_ = events.size();
+      unsigned lhs_ = convert_event(lhs);
       user_events.resize(events.size());
-      events.push_back(lhs);
       user_events.push_back(lhs);
-#ifdef DEBUG_LEGION
-      assert(event_map.find(lhs) == event_map.end());
-#endif
-      event_map[lhs] = lhs_;
 
-      Memoizable *memoizable = owner->get_memoizable();
+      Memoizable *memo = owner->get_memoizable();
 #ifdef DEBUG_LEGION
-      assert(memoizable != NULL);
+      assert(memo != NULL);
 #endif
-      instructions.push_back(new CreateApUserEvent(*this, lhs_,
-            memoizable->get_trace_local_id()));
-#ifdef DEBUG_LEGION
-      assert(instructions.size() == events.size());
-#endif
+      insert_instruction(new CreateApUserEvent(*this, lhs_,
+            find_trace_local_id(memo)));
     }
 
     //--------------------------------------------------------------------------
@@ -3565,19 +3541,9 @@ namespace Legion {
 #endif
 
       events.push_back(ApEvent());
-      std::map<ApEvent, unsigned>::iterator lhs_finder = event_map.find(lhs);
-      std::map<ApEvent, unsigned>::iterator rhs_finder = event_map.find(rhs);
-#ifdef DEBUG_LEGION
-      assert(lhs_finder != event_map.end());
-      assert(rhs_finder != event_map.end());
-#endif
-      unsigned lhs_ = lhs_finder->second;
-      unsigned rhs_ = rhs_finder->second;
-      instructions.push_back(new TriggerEvent(*this, lhs_, rhs_,
+      unsigned lhs_ = find_event(lhs);
+      insert_instruction(new TriggerEvent(*this, lhs_, find_event(rhs),
             instructions[lhs_]->owner));
-#ifdef DEBUG_LEGION
-      assert(instructions.size() == events.size());
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -3648,22 +3614,12 @@ namespace Legion {
       }
 #endif
 
-      unsigned lhs_ = events.size();
-      events.push_back(lhs);
+      Memoizable *memo = owner->get_memoizable();
 #ifdef DEBUG_LEGION
-      assert(event_map.find(lhs) == event_map.end());
+      assert(memo != NULL);
 #endif
-      event_map[lhs] = lhs_;
-
-      Memoizable *memoizable = owner->get_memoizable();
-#ifdef DEBUG_LEGION
-      assert(memoizable != NULL);
-#endif
-      instructions.push_back(new MergeEvent(*this, lhs_, rhs_,
-            memoizable->get_trace_local_id()));
-#ifdef DEBUG_LEGION
-      assert(instructions.size() == events.size());
-#endif
+      insert_instruction(new MergeEvent(*this, convert_event(lhs), rhs_,
+            memo->get_trace_local_id()));
     }
 
     //--------------------------------------------------------------------------
@@ -3692,35 +3648,20 @@ namespace Legion {
         rename.trigger();
         lhs = ApEvent(rename);
       }
+
       AutoLock tpl_lock(template_lock);
 #ifdef DEBUG_LEGION
       assert(is_recording());
 #endif
 
-      unsigned lhs_ = events.size();
-      events.push_back(lhs);
-#ifdef DEBUG_LEGION
-      assert(event_map.find(lhs) == event_map.end());
-#endif
-      event_map[lhs] = lhs_;
-
-      std::map<ApEvent, unsigned>::iterator pre_finder =
-        event_map.find(precondition);
-#ifdef DEBUG_LEGION
-      assert(pre_finder != event_map.end());
-#endif
-
-      unsigned precondition_idx = pre_finder->second;
-      TraceLocalID op_key = find_trace_local_id(memo);
-      instructions.push_back(new IssueCopy(
-            *this, lhs_, expr, op_key, src_fields, dst_fields,
+      unsigned lhs_ = convert_event(lhs);
+      insert_instruction(new IssueCopy(
+            *this, lhs_, expr, find_trace_local_id(memo),
+            src_fields, dst_fields,
 #ifdef LEGION_SPY
             handle, src_tree_id, dst_tree_id,
 #endif
-            precondition_idx, redop, reduction_fold));
-#ifdef DEBUG_LEGION
-      assert(instructions.size() == events.size());
-#endif
+            find_event(precondition), redop, reduction_fold));
 
       record_views(memo, src_idx, lhs_, expr,
           RegionUsage(READ_ONLY, EXCLUSIVE, 0), tracing_srcs);
@@ -3729,6 +3670,64 @@ namespace Legion {
           RegionUsage(WRITE_ONLY, EXCLUSIVE, 0), tracing_dsts);
       record_copy_views(lhs_, expr, tracing_dsts);
     }
+
+    //--------------------------------------------------------------------------
+    void PhysicalTemplate::record_issue_indirect(Memoizable *memo, ApEvent &lhs,
+                             IndexSpaceExpression *expr,
+                             const std::vector<CopySrcDstField>& src_fields,
+                             const std::vector<CopySrcDstField>& dst_fields,
+                             const std::vector<void*> &indirections,
+                             ApEvent precondition)
+    //--------------------------------------------------------------------------
+    {
+      // TODO: support for tracing of gather/scatter/indirect operations
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalTemplate::record_issue_fill(Memoizable *memo,
+                                             unsigned idx,
+                                             ApEvent &lhs,
+                                             IndexSpaceExpression *expr,
+                                 const std::vector<CopySrcDstField> &fields,
+                                             const void *fill_value, 
+                                             size_t fill_size,
+#ifdef LEGION_SPY
+                                             UniqueID fill_uid,
+                                             FieldSpace handle,
+                                             RegionTreeID tree_id,
+#endif
+                                             ApEvent precondition,
+                                 const FieldMaskSet<FillView> &tracing_srcs,
+                                 const FieldMaskSet<InstanceView> &tracing_dsts)
+    //--------------------------------------------------------------------------
+    {
+      if (!lhs.exists())
+      {
+        Realm::UserEvent rename(Realm::UserEvent::create_user_event());
+        rename.trigger();
+        lhs = ApEvent(rename);
+      }
+      AutoLock tpl_lock(template_lock);
+#ifdef DEBUG_LEGION
+      assert(is_recording());
+#endif
+
+      unsigned lhs_ = convert_event(lhs);
+      insert_instruction(new IssueFill(*this, lhs_, expr,
+                                       find_trace_local_id(memo),
+                                       fields, fill_value, fill_size, 
+#ifdef LEGION_SPY
+                                       fill_uid, handle, tree_id,
+#endif
+                                       find_event(precondition)));
+
+      record_fill_views(tracing_srcs);
+      record_views(memo, idx, lhs_, expr,
+          RegionUsage(WRITE_ONLY, EXCLUSIVE, 0), tracing_dsts);
+      record_copy_views(lhs_, expr, tracing_dsts);
+    }
+
 
     //--------------------------------------------------------------------------
     void PhysicalTemplate::record_summary_info(const RegionRequirement &region,
@@ -3785,148 +3784,6 @@ namespace Legion {
         }
       }
     }
-    //--------------------------------------------------------------------------
-    void PhysicalTemplate::record_set_op_sync_event(ApEvent &lhs, Operation *op)
-    //--------------------------------------------------------------------------
-    {
-      if (!lhs.exists())
-      {
-        Realm::UserEvent rename(Realm::UserEvent::create_user_event());
-        rename.trigger();
-        lhs = ApEvent(rename);
-      }
-#ifdef DEBUG_LEGION
-      assert(op->is_memoizing());
-#endif
-      AutoLock tpl_lock(template_lock);
-#ifdef DEBUG_LEGION
-      assert(is_recording());
-#endif
-
-      unsigned lhs_ = events.size();
-      events.push_back(lhs);
-#ifdef DEBUG_LEGION
-      assert(event_map.find(lhs) == event_map.end());
-#endif
-      event_map[lhs] = lhs_;
-
-#ifdef DEBUG_LEGION
-      assert(op->get_memoizable() != NULL);
-#endif
-      TraceLocalID key = op->get_memoizable()->get_trace_local_id();
-#ifdef DEBUG_LEGION
-      assert(operations.find(key) != operations.end());
-      assert(memo_entries.find(key) != memo_entries.end());
-#endif
-      instructions.push_back(new SetOpSyncEvent(*this, lhs_, key));
-#ifdef DEBUG_LEGION
-      assert(instructions.size() == events.size());
-#endif
-    }
-
-    //--------------------------------------------------------------------------
-    void PhysicalTemplate::record_complete_replay(Operation* op, ApEvent rhs)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(op->is_memoizing());
-#endif
-      AutoLock tpl_lock(template_lock);
-#ifdef DEBUG_LEGION
-      assert(is_recording());
-#endif
-
-      events.push_back(ApEvent());
-#ifdef DEBUG_LEGION
-      assert(op->get_memoizable() != NULL);
-#endif
-      TraceLocalID lhs_ = op->get_memoizable()->get_trace_local_id();
-#ifdef DEBUG_LEGION
-      assert(event_map.find(rhs) != event_map.end());
-#endif
-      unsigned rhs_ = event_map[rhs];
-
-#ifdef DEBUG_LEGION
-      assert(operations.find(lhs_) != operations.end());
-      assert(memo_entries.find(lhs_) != memo_entries.end());
-#endif
-      instructions.push_back(new CompleteReplay(*this, lhs_, rhs_));
-
-#ifdef DEBUG_LEGION
-      assert(instructions.size() == events.size());
-#endif
-    }
-
-    //--------------------------------------------------------------------------
-    void PhysicalTemplate::record_issue_fill(Memoizable *memo,
-                                             unsigned idx,
-                                             ApEvent &lhs,
-                                             IndexSpaceExpression *expr,
-                                 const std::vector<CopySrcDstField> &fields,
-                                             const void *fill_value, 
-                                             size_t fill_size,
-#ifdef LEGION_SPY
-                                             UniqueID fill_uid,
-                                             FieldSpace handle,
-                                             RegionTreeID tree_id,
-#endif
-                                             ApEvent precondition,
-                                 const FieldMaskSet<FillView> &tracing_srcs,
-                                 const FieldMaskSet<InstanceView> &tracing_dsts)
-    //--------------------------------------------------------------------------
-    {
-      if (!lhs.exists())
-      {
-        Realm::UserEvent rename(Realm::UserEvent::create_user_event());
-        rename.trigger();
-        lhs = ApEvent(rename);
-      }
-      AutoLock tpl_lock(template_lock);
-#ifdef DEBUG_LEGION
-      assert(is_recording());
-#endif
-
-      unsigned lhs_ = events.size();
-      events.push_back(lhs);
-#ifdef DEBUG_LEGION
-      assert(event_map.find(lhs) == event_map.end());
-#endif
-      event_map[lhs] = lhs_;
-
-      TraceLocalID key = find_trace_local_id(memo);
-      std::map<ApEvent, unsigned>::iterator pre_finder =
-        event_map.find(precondition);
-#ifdef DEBUG_LEGION
-      assert(pre_finder != event_map.end());
-#endif
-      unsigned precondition_idx = pre_finder->second;
-
-      instructions.push_back(new IssueFill(*this, lhs_, expr, key,
-                                           fields, fill_value, fill_size, 
-#ifdef LEGION_SPY
-                                           fill_uid, handle, tree_id,
-#endif
-                                           precondition_idx));
-#ifdef DEBUG_LEGION
-      assert(instructions.size() == events.size());
-#endif
-      record_fill_views(tracing_srcs);
-      record_views(memo, idx, lhs_, expr,
-          RegionUsage(WRITE_ONLY, EXCLUSIVE, 0), tracing_dsts);
-      record_copy_views(lhs_, expr, tracing_dsts);
-    }
-
-    //--------------------------------------------------------------------------
-    void PhysicalTemplate::record_copy_views(unsigned copy_id,
-                                             IndexSpaceExpression *expr,
-                                        const FieldMaskSet<InstanceView> &views)
-    //--------------------------------------------------------------------------
-    {
-      ViewExprs &cviews = copy_views[copy_id];
-      for (FieldMaskSet<InstanceView>::const_iterator it = views.begin();
-           it != views.end(); ++it)
-        cviews[it->first].insert(expr, it->second);
-    }
 
     //--------------------------------------------------------------------------
     void PhysicalTemplate::record_fill_view(
@@ -3938,153 +3795,6 @@ namespace Legion {
       assert(is_recording());
 #endif
       post_fill_views.insert(view, user_mask);
-    }
-
-    //--------------------------------------------------------------------------
-    void PhysicalTemplate::record_fill_views(const FieldMaskSet<FillView>&views)
-    //--------------------------------------------------------------------------
-    {
-      for (FieldMaskSet<FillView>::const_iterator it = views.begin();
-           it != views.end(); ++it)
-      {
-        FieldMaskSet<FillView>::iterator finder =
-          post_fill_views.find(it->first);
-        if (finder == post_fill_views.end())
-          pre_fill_views.insert(it->first, it->second);
-        else
-        {
-          FieldMask non_dominated = it->second - finder->second;
-          if (!!non_dominated)
-            pre_fill_views.insert(it->first, non_dominated);
-        }
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void PhysicalTemplate::record_outstanding_gc_event(
-                                      CollectableView *view, ApEvent term_event)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock tpl_lock(template_lock);
-#ifdef DEBUG_LEGION
-      assert(is_recording());
-#endif
-      std::map<CollectableView*, std::set<ApEvent> >::iterator finder =
-        outstanding_gc_events.find(view);
-      if (finder == outstanding_gc_events.end())
-      {
-        IgnoreReferenceMutator mutator;
-        view->add_collectable_reference(&mutator);
-        outstanding_gc_events[view].insert(term_event);
-      }
-      else
-        finder->second.insert(term_event);
-    }
-
-    //--------------------------------------------------------------------------
-    void PhysicalTemplate::record_issue_indirect(Memoizable *memo, ApEvent &lhs,
-                             IndexSpaceExpression *expr,
-                             const std::vector<CopySrcDstField>& src_fields,
-                             const std::vector<CopySrcDstField>& dst_fields,
-                             const std::vector<void*> &indirections,
-                             ApEvent precondition)
-    //--------------------------------------------------------------------------
-    {
-      // TODO: support for tracing of gather/scatter/indirect operations
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    RtEvent PhysicalTemplate::defer_template_deletion(void)
-    //--------------------------------------------------------------------------
-    {
-      ApEvent wait_on = get_completion_for_deletion();
-      DeleteTemplateArgs args(this);
-      return implicit_runtime->issue_runtime_meta_task(args, LG_LOW_PRIORITY,
-          Runtime::protect_event(wait_on));
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void PhysicalTemplate::handle_replay_slice(const void *args)
-    //--------------------------------------------------------------------------
-    {
-      const ReplaySliceArgs *pargs = (const ReplaySliceArgs*)args;
-      pargs->tpl->execute_slice(pargs->slice_index);
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void PhysicalTemplate::handle_delete_template(const void *args)
-    //--------------------------------------------------------------------------
-    {
-      const DeleteTemplateArgs *pargs = (const DeleteTemplateArgs*)args;
-      delete pargs->tpl;
-    }
-
-    //--------------------------------------------------------------------------
-    TraceLocalID PhysicalTemplate::find_trace_local_id(Memoizable *memo)
-    //--------------------------------------------------------------------------
-    {
-      TraceLocalID op_key = memo->get_trace_local_id();
-#ifdef DEBUG_LEGION
-      assert(operations.find(op_key) != operations.end());
-#endif
-      return op_key;
-    }
-
-    //--------------------------------------------------------------------------
-    unsigned PhysicalTemplate::find_memo_entry(Memoizable *memo)
-    //--------------------------------------------------------------------------
-    {
-      TraceLocalID op_key = find_trace_local_id(memo);
-      return find_memo_entry(op_key);
-    }
-
-    //--------------------------------------------------------------------------
-    unsigned PhysicalTemplate::find_memo_entry(TraceLocalID op_key)
-    //--------------------------------------------------------------------------
-    {
-      std::map<TraceLocalID, unsigned>::iterator entry_finder =
-        memo_entries.find(op_key);
-#ifdef DEBUG_LEGION
-      assert(entry_finder != memo_entries.end());
-#endif
-      return entry_finder->second;
-    }
-
-    //--------------------------------------------------------------------------
-    void PhysicalTemplate::record_precondition(InstanceView *view,
-                                               ViewUser *user,
-                                               const FieldMask &user_mask)
-    //--------------------------------------------------------------------------
-    {
-      pre[view].insert(user, user_mask);
-      pre_users.insert(user);
-    }
-
-    //--------------------------------------------------------------------------
-    bool PhysicalTemplate::is_precondition(ViewUser *user)
-    //--------------------------------------------------------------------------
-    {
-      return pre_users.find(user) != pre_users.end();
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ bool PhysicalTemplate::is_compatible(const RegionUsage &u1,
-                                                    const RegionUsage &u2)
-    //--------------------------------------------------------------------------
-    {
-      if (IS_READ_ONLY(u1) && IS_READ_ONLY(u2))
-      {
-        return true;
-      }
-      else if (IS_REDUCE(u1) && IS_REDUCE(u2))
-      {
-        return u1.redop == u2.redop;
-      }
-      else
-      {
-        return false;
-      }
     }
 
     //--------------------------------------------------------------------------
@@ -4281,6 +3991,233 @@ namespace Legion {
       if (view->is_reduction_view())
       {
         reductions_in_trace[view].insert(user, user_mask);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalTemplate::record_copy_views(unsigned copy_id,
+                                             IndexSpaceExpression *expr,
+                                        const FieldMaskSet<InstanceView> &views)
+    //--------------------------------------------------------------------------
+    {
+      ViewExprs &cviews = copy_views[copy_id];
+      for (FieldMaskSet<InstanceView>::const_iterator it = views.begin();
+           it != views.end(); ++it)
+        cviews[it->first].insert(expr, it->second);
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalTemplate::record_fill_views(const FieldMaskSet<FillView>&views)
+    //--------------------------------------------------------------------------
+    {
+      for (FieldMaskSet<FillView>::const_iterator it = views.begin();
+           it != views.end(); ++it)
+      {
+        FieldMaskSet<FillView>::iterator finder =
+          post_fill_views.find(it->first);
+        if (finder == post_fill_views.end())
+          pre_fill_views.insert(it->first, it->second);
+        else
+        {
+          FieldMask non_dominated = it->second - finder->second;
+          if (!!non_dominated)
+            pre_fill_views.insert(it->first, non_dominated);
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalTemplate::record_set_op_sync_event(ApEvent &lhs, Operation *op)
+    //--------------------------------------------------------------------------
+    {
+      if (!lhs.exists())
+      {
+        Realm::UserEvent rename(Realm::UserEvent::create_user_event());
+        rename.trigger();
+        lhs = ApEvent(rename);
+      }
+#ifdef DEBUG_LEGION
+      assert(op->is_memoizing());
+#endif
+      AutoLock tpl_lock(template_lock);
+#ifdef DEBUG_LEGION
+      assert(is_recording());
+#endif
+
+      Memoizable *memo = op->get_memoizable();
+#ifdef DEBUG_LEGION
+      assert(memo != NULL);
+#endif
+      insert_instruction(new SetOpSyncEvent(*this, convert_event(lhs),
+            find_trace_local_id(memo)));
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalTemplate::record_complete_replay(Operation* op, ApEvent rhs)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(op->is_memoizing());
+#endif
+      AutoLock tpl_lock(template_lock);
+#ifdef DEBUG_LEGION
+      assert(is_recording());
+#endif
+
+      events.push_back(ApEvent());
+      Memoizable *memo = op->get_memoizable();
+#ifdef DEBUG_LEGION
+      assert(memo != NULL);
+#endif
+      TraceLocalID lhs = find_trace_local_id(memo);
+      insert_instruction(new CompleteReplay(*this, lhs, find_event(rhs)));
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalTemplate::record_outstanding_gc_event(
+                                      CollectableView *view, ApEvent term_event)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock tpl_lock(template_lock);
+#ifdef DEBUG_LEGION
+      assert(is_recording());
+#endif
+      std::map<CollectableView*, std::set<ApEvent> >::iterator finder =
+        outstanding_gc_events.find(view);
+      if (finder == outstanding_gc_events.end())
+      {
+        IgnoreReferenceMutator mutator;
+        view->add_collectable_reference(&mutator);
+        outstanding_gc_events[view].insert(term_event);
+      }
+      else
+        finder->second.insert(term_event);
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent PhysicalTemplate::defer_template_deletion(void)
+    //--------------------------------------------------------------------------
+    {
+      ApEvent wait_on = get_completion_for_deletion();
+      DeleteTemplateArgs args(this);
+      return implicit_runtime->issue_runtime_meta_task(args, LG_LOW_PRIORITY,
+          Runtime::protect_event(wait_on));
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void PhysicalTemplate::handle_replay_slice(const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const ReplaySliceArgs *pargs = (const ReplaySliceArgs*)args;
+      pargs->tpl->execute_slice(pargs->slice_index);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void PhysicalTemplate::handle_delete_template(const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const DeleteTemplateArgs *pargs = (const DeleteTemplateArgs*)args;
+      delete pargs->tpl;
+    }
+
+    //--------------------------------------------------------------------------
+    TraceLocalID PhysicalTemplate::find_trace_local_id(Memoizable *memo)
+    //--------------------------------------------------------------------------
+    {
+      TraceLocalID op_key = memo->get_trace_local_id();
+#ifdef DEBUG_LEGION
+      assert(operations.find(op_key) != operations.end());
+#endif
+      return op_key;
+    }
+
+    //--------------------------------------------------------------------------
+    unsigned PhysicalTemplate::find_memo_entry(Memoizable *memo)
+    //--------------------------------------------------------------------------
+    {
+      TraceLocalID op_key = find_trace_local_id(memo);
+      std::map<TraceLocalID, unsigned>::iterator entry_finder =
+        memo_entries.find(op_key);
+#ifdef DEBUG_LEGION
+      assert(entry_finder != memo_entries.end());
+#endif
+      return entry_finder->second;
+    }
+
+    //--------------------------------------------------------------------------
+    TraceLocalID PhysicalTemplate::record_memo_entry(Memoizable *memo,
+                                                     unsigned entry)
+    //--------------------------------------------------------------------------
+    {
+      TraceLocalID key = memo->get_trace_local_id();
+#ifdef DEBUG_LEGION
+      assert(operations.find(key) == operations.end());
+      assert(memo_entries.find(key) == memo_entries.end());
+#endif
+      operations[key] = memo;
+      memo_entries[key] = entry;
+      return key;
+    }
+
+    //--------------------------------------------------------------------------
+    inline unsigned PhysicalTemplate::convert_event(const ApEvent &event)
+    //--------------------------------------------------------------------------
+    {
+      unsigned event_ = events.size();
+      events.push_back(event);
+#ifdef DEBUG_LEGION
+      assert(event_map.find(event) == event_map.end());
+#endif
+      event_map[event] = event_;
+      return event_;
+    }
+
+    //--------------------------------------------------------------------------
+    inline unsigned PhysicalTemplate::find_event(const ApEvent &event) const
+    //--------------------------------------------------------------------------
+    {
+      std::map<ApEvent, unsigned>::const_iterator finder= event_map.find(event);
+#ifdef DEBUG_LEGION
+      assert(finder != event_map.end());
+#endif
+      return finder->second;
+    }
+
+    //--------------------------------------------------------------------------
+    inline void PhysicalTemplate::insert_instruction(Instruction *inst)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(instructions.size() + 1 == events.size());
+#endif
+      instructions.push_back(inst);
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalTemplate::record_precondition(InstanceView *view,
+                                               ViewUser *user,
+                                               const FieldMask &user_mask)
+    //--------------------------------------------------------------------------
+    {
+      pre[view].insert(user, user_mask);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ bool PhysicalTemplate::is_compatible(const RegionUsage &u1,
+                                                    const RegionUsage &u2)
+    //--------------------------------------------------------------------------
+    {
+      if (IS_READ_ONLY(u1) && IS_READ_ONLY(u2))
+      {
+        return true;
+      }
+      else if (IS_REDUCE(u1) && IS_REDUCE(u2))
+      {
+        return u1.redop == u2.redop;
+      }
+      else
+      {
+        return false;
       }
     }
 
