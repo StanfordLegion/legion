@@ -9,6 +9,8 @@ source "$root_dir"/../env.sh
 
 export LD_LIBRARY_PATH="$PWD"
 
+ulimit -S -c 0 # disable core dumps
+
 if [[ ! -d normal ]]; then mkdir normal; fi
 pushd normal
 
