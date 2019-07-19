@@ -38,8 +38,11 @@ namespace Realm {
     status.result = ProfilingMeasurements::OperationStatus::WAITING;
     status.error_code = 0;
     measurements.import_requests(requests); 
-    timeline.record_create_time();
+    wants_timeline = (measurements.wants_measurement<ProfilingMeasurements::OperationTimeline>() ||
+		      measurements.wants_measurement<ProfilingMeasurements::OperationTimelineGPU>());
     wants_event_waits = measurements.wants_measurement<ProfilingMeasurements::OperationEventWaits>();
+    if(wants_timeline)
+      timeline.record_create_time();
   }
 
   inline void Operation::add_reference(void)
@@ -78,16 +81,6 @@ namespace Realm {
     if(remaining == 0) {
       mark_completed();
    }
-  }
-
-  inline void Operation::update_gpu_start()
-  {
-    timeline_gpu.record_start_time();
-  }
-
-  inline void Operation::update_gpu_end()
-  {
-    timeline_gpu.record_end_time();
   }
 
   inline bool Operation::cancellation_requested(void) const
@@ -135,7 +128,8 @@ namespace Realm {
 
   inline void Operation::AsyncWorkItem::mark_gpu_task_start()
   {
-    op->update_gpu_start();
+    if(op->wants_timeline)
+      op->timeline_gpu.record_start_time();
     op->mark_finished(true);
   }
 
