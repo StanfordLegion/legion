@@ -333,6 +333,7 @@ void top_level_task(const void *args, size_t arglen,
       p.spawn(TASK_LAUNCHER, args_data, args_size);
     }
   }
+  free(args_data);
 
   // all done - wait for everything to finish via the finish_barrier
   launch_args.finish_barrier.wait();

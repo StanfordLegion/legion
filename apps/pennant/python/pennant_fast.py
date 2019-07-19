@@ -26,9 +26,13 @@ import legion
 from legion import task, print_once, Fspace, Future, IndexLaunch, Ispace, N, Partition, R, Reduce, Region, RW
 
 root_dir = os.path.dirname(__file__)
+try:
+    prefix_dir = legion.prefix_dir
+except AttributeError:
+    prefix_dir, legion_h_path = legion.find_legion_header()
 pennant_header = subprocess.check_output(
     [
-        "gcc", "-I", legion.prefix_dir, "-DLEGION_USE_PYTHON_CFFI", "-DLEGION_MAX_DIM=%s" % legion._max_dim, "-DREALM_MAX_DIM=%s" % legion._max_dim, "-E", "-P",
+        "gcc", "-I", prefix_dir, "-DLEGION_USE_PYTHON_CFFI", "-DLEGION_MAX_DIM=%s" % legion._max_dim, "-DREALM_MAX_DIM=%s" % legion._max_dim, "-E", "-P",
         os.path.join(root_dir, "pennant_config.h")
     ]).decode("utf-8")
 ffi = legion.ffi
@@ -38,15 +42,16 @@ mesh_colorings = legion.Type(
     np.dtype([('bytes', np.void, ffi.sizeof('mesh_colorings'))]),
     'mesh_colorings')
 
+mesh_partitions = legion.Type(
+    np.dtype([('bytes', np.void, ffi.sizeof('mesh_partitions'))]),
+    'mesh_partitions')
+
 config = legion.Type(
     np.dtype([('bytes', np.void, ffi.sizeof('config'))]),
     'config')
 
-def create_partition(is_disjoint, region, coloring, color_space):
-    ipart_raw = legion.c.legion_index_partition_create_coloring(
-        legion._my.ctx.runtime, legion._my.ctx.context,
-        region.ispace.raw_value(), coloring, is_disjoint, legion.AUTO_GENERATE_ID)
-    ipart = legion.Ipartition(ipart_raw, region.ispace, color_space)
+def create_partition(is_disjoint, region, c_partition, color_space):
+    ipart = legion.Ipartition(c_partition.index_partition, region.ispace, color_space)
     return legion.Partition.create(region, ipart)
 
 read_config = legion.extern_task(
@@ -58,9 +63,9 @@ read_config = legion.extern_task(
 
 read_partitions = legion.extern_task(
     task_id=10001,
-    argument_types=[config],
-    privileges=[None],
-    return_type=mesh_colorings,
+    argument_types=[Region, Region, Region, config],
+    privileges=[N, N, N],
+    return_type=mesh_partitions,
     calling_convention='regent')
 
 initialize_spans = legion.extern_task(
@@ -329,26 +334,25 @@ def main():
         # initialization will fail.
         conf.seq_init = False
 
-    if conf.par_init:
-        # Hack: This had better run on the same node...
-        colorings = read_partitions(conf).get()
+    assert conf.par_init
+    partitions = read_partitions(zones, points, sides, conf).get()
 
-    conf.nspans_zones = colorings.nspans_zones
-    conf.nspans_points = colorings.nspans_points
+    conf.nspans_zones = partitions.nspans_zones
+    conf.nspans_points = partitions.nspans_points
 
     pieces = Ispace.create([conf.npieces])
 
-    zones_part = create_partition(True, zones, colorings.rz_all_c, pieces)
+    zones_part = create_partition(True, zones, partitions.rz_all_p, pieces)
 
-    points_part = create_partition(True, points, colorings.rp_all_c, [2])
+    points_part = create_partition(True, points, partitions.rp_all_p, [2])
     private = points_part[0]
     ghost = points_part[1]
 
-    private_part = create_partition(True, private, colorings.rp_all_private_c, pieces)
-    ghost_part = create_partition(False, ghost, colorings.rp_all_ghost_c, pieces)
-    shared_part = create_partition(True, ghost, colorings.rp_all_shared_c, pieces)
+    private_part = create_partition(True, private, partitions.rp_all_private_p, pieces)
+    ghost_part = create_partition(False, ghost, partitions.rp_all_ghost_p, pieces)
+    shared_part = create_partition(True, ghost, partitions.rp_all_shared_p, pieces)
 
-    sides_part = create_partition(True, sides, colorings.rs_all_c, pieces)
+    sides_part = create_partition(True, sides, partitions.rs_all_p, pieces)
 
     zone_spans = Region.create([conf.npieces * conf.nspans_zones], span)
     zone_spans_part = Partition.create_equal(zone_spans, pieces)
