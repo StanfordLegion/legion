@@ -15,3 +15,5 @@ cp $root_dir/*_pennant*.sh .
 
 cp $root_dir/../../apps/pennant/python/*.py .
 cp $root_dir/../../apps/pennant/python/*.h .
+
+gcc -I $root_dir/../../runtime -DLEGION_USE_PYTHON_CFFI -DLEGION_MAX_DIM=3 -DREALM_MAX_DIM=3 -E -P pennant_config.h > cached_pennant_config.h
