@@ -39,6 +39,17 @@ typedef struct mesh_colorings {
   int64_t nspans_points;
 } mesh_colorings;
 
+typedef struct mesh_partitions {
+  legion_logical_partition_t rz_all_p;
+  legion_logical_partition_t rp_all_p;
+  legion_logical_partition_t rp_all_private_p;
+  legion_logical_partition_t rp_all_ghost_p;
+  legion_logical_partition_t rp_all_shared_p;
+  legion_logical_partition_t rs_all_p;
+  int64_t nspans_zones;
+  int64_t nspans_points;
+} mesh_partitions;
+
 typedef struct config {
   double alfa;
   double bcx[2];

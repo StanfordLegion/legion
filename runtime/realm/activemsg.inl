@@ -130,6 +130,9 @@ public:
       enqueue_message(prev_target, MSGID_NEW_ACTIVEMSG,
 		      args, arglen,
 		      payload, payload_len, payload_mode);
+    else
+      if(payload_mode == PAYLOAD_FREE)
+        free(const_cast<void *>(payload));
   }
 
   NodeID prev_target;

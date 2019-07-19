@@ -734,6 +734,17 @@ struct mesh_colorings {
   nspans_points : int64,
 }
 
+struct mesh_partitions {
+  rz_all_p : c.legion_logical_partition_t,
+  rp_all_p : c.legion_logical_partition_t,
+  rp_all_private_p : c.legion_logical_partition_t,
+  rp_all_ghost_p : c.legion_logical_partition_t,
+  rp_all_shared_p : c.legion_logical_partition_t,
+  rs_all_p : c.legion_logical_partition_t,
+  nspans_zones : int64,
+  nspans_points : int64,
+}
+
 local terra filter_none(i : int64, cs : &int64) return cs[i] end
 local terra filter_ismulticolor(i : int64, cs : &int64)
   return int64(cs[i] == cpennant.MULTICOLOR)
@@ -1386,8 +1397,56 @@ end
 read_partitions:compile()
 
 -- This is in a task so that it can be called from Python.
-task read_partitions_task(conf : config) : mesh_colorings
-  return read_partitions(conf)
+task read_partitions_task2(rz_all : region(zone),
+                           rp_all : region(point),
+                           rs_all : region(side(wild, wild, wild, wild)),
+                           conf : config) : mesh_partitions
+  var colorings = read_partitions(conf)
+
+  var rz_all_p = partition(disjoint, rz_all, colorings.rz_all_c)
+
+  -- Partition points into private and ghost regions.
+  var rp_all_p = partition(disjoint, rp_all, colorings.rp_all_c)
+  var rp_all_private = rp_all_p[0]
+  var rp_all_ghost = rp_all_p[1]
+
+  -- Partition private points into disjoint pieces by zone.
+  var rp_all_private_p = partition(
+    disjoint, rp_all_private, colorings.rp_all_private_c)
+
+  -- Partition ghost points into aliased pieces by zone.
+  var rp_all_ghost_p = partition(
+    aliased, rp_all_ghost, colorings.rp_all_ghost_c)
+
+  -- Partition ghost points into disjoint pieces, breaking ties
+  -- between zones so that each point goes into one region only.
+  var rp_all_shared_p = partition(
+    disjoint, rp_all_ghost, colorings.rp_all_shared_c)
+
+  -- Partition sides into disjoint pieces by zone.
+  var rs_all_p = partition(disjoint, rs_all, colorings.rs_all_c)
+
+  var result : mesh_partitions
+  result.rz_all_p = __raw(rz_all_p)
+  result.rp_all_p = __raw(rp_all_p)
+  result.rp_all_private_p = __raw(rp_all_private_p)
+  result.rp_all_ghost_p = __raw(rp_all_ghost_p)
+  result.rp_all_shared_p = __raw(rp_all_shared_p)
+  result.rs_all_p = __raw(rs_all_p)
+  result.nspans_zones = colorings.nspans_zones;
+  result.nspans_points = colorings.nspans_points;
+
+  c.legion_coloring_destroy(colorings.rz_all_c)
+  c.legion_coloring_destroy(colorings.rz_spans_c)
+  c.legion_coloring_destroy(colorings.rp_all_c)
+  c.legion_coloring_destroy(colorings.rp_all_private_c)
+  c.legion_coloring_destroy(colorings.rp_all_ghost_c)
+  c.legion_coloring_destroy(colorings.rp_all_shared_c)
+  c.legion_coloring_destroy(colorings.rp_spans_c)
+  c.legion_coloring_destroy(colorings.rs_all_c)
+  c.legion_coloring_destroy(colorings.rs_spans_c)
+
+  return result
 end
 
 local terra get_zone_position(conf : config, pcx : int64, pcy : int64, z : int64)
