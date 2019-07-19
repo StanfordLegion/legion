@@ -728,7 +728,7 @@ def main():
         cycle += 1
         time += dt.get()
 
-        if cycle == conf.cstop - conf.prune:
+        if cycle == cstop - conf.prune:
             legion.execution_fence(block=True)
             stop_time = legion.c.legion_get_current_time_in_nanos()
 
