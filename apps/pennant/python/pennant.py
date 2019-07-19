@@ -472,17 +472,6 @@ def main():
         colorings = read_input_sequential(zones, points, sides, conf).get()
 
     if conf.par_init:
-        if conf.seq_init:
-            legion.c.legion_coloring_destroy(colorings.rz_all_c)
-            legion.c.legion_coloring_destroy(colorings.rz_spans_c)
-            legion.c.legion_coloring_destroy(colorings.rp_all_c)
-            legion.c.legion_coloring_destroy(colorings.rp_all_private_c)
-            legion.c.legion_coloring_destroy(colorings.rp_all_ghost_c)
-            legion.c.legion_coloring_destroy(colorings.rp_all_shared_c)
-            legion.c.legion_coloring_destroy(colorings.rp_spans_c)
-            legion.c.legion_coloring_destroy(colorings.rs_all_c)
-            legion.c.legion_coloring_destroy(colorings.rs_spans_c)
-
         # Hack: This had better run on the same node...
         colorings = read_partitions(conf).get()
 

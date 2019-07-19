@@ -93,8 +93,6 @@ namespace Realm {
   protected:
     // called by AsyncWorkItem::mark_finished from an arbitrary thread
     void work_item_finished(AsyncWorkItem *item, bool successful);
-    void update_gpu_start();
-    void update_gpu_end();
     virtual void mark_completed(void);
 
     void clear_profiling(void);
@@ -112,6 +110,7 @@ namespace Realm {
   protected:
     typedef ProfilingMeasurements::OperationStatus Status;
     ProfilingMeasurements::OperationStatus status;
+    bool wants_timeline;
     ProfilingMeasurements::OperationTimeline timeline;
     ProfilingMeasurements::OperationTimelineGPU timeline_gpu; // gpu start/end times
     bool wants_event_waits;
