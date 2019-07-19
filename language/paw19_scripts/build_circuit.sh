@@ -15,3 +15,5 @@ cp $root_dir/*_circuit*.sh .
 
 cp $root_dir/../../apps/circuit/python/*.py .
 cp $root_dir/../../apps/circuit/python/*.h .
+
+gcc -D '__attribute__(x)=' -E -P circuit_config.h > cached_circuit_config.h

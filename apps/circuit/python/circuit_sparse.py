@@ -28,11 +28,8 @@ import legion
 from legion import disjoint_complete, index_launch, print_once, task, Domain, Fspace, Future, Ispace, IndexLaunch, ID, Partition, N, R, Reduce, Region, RW, Trace, WD
 
 root_dir = os.path.dirname(__file__)
-circuit_header = subprocess.check_output(
-    [
-        "gcc", "-D", "__attribute__(x)=", "-E", "-P",
-        os.path.join(root_dir, "circuit_config.h")
-    ]).decode("utf-8")
+with open(os.path.join(root_dir, "cached_circuit_config.h"), "r") as f:
+    circuit_header = f.read()
 ffi = legion.ffi
 ffi.cdef(circuit_header)
 
