@@ -9,6 +9,8 @@ source "$root_dir"/../env.sh
 
 export LD_LIBRARY_PATH="$PWD"
 
+ulimit -S -c 0 # disable core dumps
+
 nodes=$SLURM_JOB_NUM_NODES
 power=$(echo "l($nodes)/l(2)" | bc -l | xargs printf '%.0f\n')
 
