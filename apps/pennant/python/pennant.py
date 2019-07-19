@@ -42,15 +42,16 @@ mesh_colorings = legion.Type(
     np.dtype([('bytes', np.void, ffi.sizeof('mesh_colorings'))]),
     'mesh_colorings')
 
+mesh_partitions = legion.Type(
+    np.dtype([('bytes', np.void, ffi.sizeof('mesh_partitions'))]),
+    'mesh_partitions')
+
 config = legion.Type(
     np.dtype([('bytes', np.void, ffi.sizeof('config'))]),
     'config')
 
-def create_partition(is_disjoint, region, coloring, color_space):
-    ipart_raw = legion.c.legion_index_partition_create_coloring(
-        legion._my.ctx.runtime, legion._my.ctx.context,
-        region.ispace.raw_value(), coloring, is_disjoint, legion.AUTO_GENERATE_ID)
-    ipart = legion.Ipartition(ipart_raw, region.ispace, color_space)
+def create_partition(is_disjoint, region, c_partition, color_space):
+    ipart = legion.Ipartition(c_partition.index_partition, region.ispace, color_space)
     return legion.Partition.create(region, ipart)
 
 read_config = legion.extern_task(
@@ -62,16 +63,9 @@ read_config = legion.extern_task(
 
 read_partitions = legion.extern_task(
     task_id=10001,
-    argument_types=[config],
-    privileges=[None],
-    return_type=mesh_colorings,
-    calling_convention='regent')
-
-initialize_spans = legion.extern_task(
-    task_id=10002,
-    argument_types=[config, legion.int64, Region, Region, Region, Region],
-    privileges=[None, None, RW, RW, RW, RW],
-    return_type=legion.void,
+    argument_types=[Region, Region, Region, config],
+    privileges=[N, N, N],
+    return_type=mesh_partitions,
     calling_convention='regent')
 
 initialize_topology = legion.extern_task(
@@ -475,23 +469,22 @@ def main():
     if conf.seq_init:
         colorings = read_input_sequential(zones, points, sides, conf).get()
 
-    if conf.par_init:
-        # Hack: This had better run on the same node...
-        colorings = read_partitions(conf).get()
+    assert conf.par_init
+    partitions = read_partitions(zones, points, sides, conf).get()
 
     pieces = Ispace.create([conf.npieces])
 
-    zones_part = create_partition(True, zones, colorings.rz_all_c, pieces)
+    zones_part = create_partition(True, zones, partitions.rz_all_p, pieces)
 
-    points_part = create_partition(True, points, colorings.rp_all_c, [2])
+    points_part = create_partition(True, points, partitions.rp_all_p, [2])
     private = points_part[0]
     ghost = points_part[1]
 
-    private_part = create_partition(True, private, colorings.rp_all_private_c, pieces)
-    ghost_part = create_partition(False, ghost, colorings.rp_all_ghost_c, pieces)
-    shared_part = create_partition(True, ghost, colorings.rp_all_shared_c, pieces)
+    private_part = create_partition(True, private, partitions.rp_all_private_p, pieces)
+    ghost_part = create_partition(False, ghost, partitions.rp_all_ghost_p, pieces)
+    shared_part = create_partition(True, ghost, partitions.rp_all_shared_p, pieces)
 
-    sides_part = create_partition(True, sides, colorings.rs_all_c, pieces)
+    sides_part = create_partition(True, sides, partitions.rs_all_p, pieces)
 
     if conf.par_init:
         for i in IndexLaunch(pieces):
