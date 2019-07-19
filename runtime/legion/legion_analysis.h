@@ -125,7 +125,8 @@ namespace Legion {
     public:
       explicit PhysicalTraceInfo(Operation *op, unsigned index = -1U,
                                  bool initialize = false);
-      PhysicalTraceInfo(const PhysicalTraceInfo &info, unsigned index);
+      PhysicalTraceInfo(const PhysicalTraceInfo &info, unsigned index,
+                        bool update_validity = true);
       // Special case for copy across operations
       PhysicalTraceInfo(const PhysicalTraceInfo &info, unsigned src_idx,
                         unsigned dst_idx);
@@ -180,6 +181,7 @@ namespace Legion {
       const unsigned dst_index;
       PhysicalTemplate *const tpl;
       const bool recording;
+      const bool update_validity;
     };
 
     /**

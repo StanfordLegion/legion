@@ -659,7 +659,8 @@ namespace Legion {
                           unsigned idx,
                           InstanceView *view,
                           const RegionUsage &usage,
-                          const FieldMask &user_mask);
+                          const FieldMask &user_mask,
+                          bool update_validity);
       void record_set_op_sync_event(ApEvent &lhs, Operation *op);
       void record_complete_replay(Operation *op, ApEvent rhs);
       void record_issue_fill(Memoizable *memo, unsigned idx,

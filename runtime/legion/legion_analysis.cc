@@ -260,17 +260,19 @@ namespace Legion {
       : op(o), index(idx), dst_index(idx), tpl((op == NULL) ? NULL :
           (op->get_memoizable() == NULL) ? NULL :
             op->get_memoizable()->get_template()),
-        recording((tpl == NULL) ? false : tpl->is_recording())
+        recording((tpl == NULL) ? false : tpl->is_recording()),
+        update_validity(true)
     {
       if (recording && init)
         tpl->record_get_term_event(op->get_memoizable());
     }
 
     //--------------------------------------------------------------------------
-    PhysicalTraceInfo::PhysicalTraceInfo(
-                                    const PhysicalTraceInfo &info, unsigned idx)
+    PhysicalTraceInfo::PhysicalTraceInfo(const PhysicalTraceInfo &info,
+                                         unsigned idx,
+                                         bool update)
       : op(info.op), index(idx), dst_index(idx), tpl(info.tpl),
-        recording(info.recording)
+        recording(info.recording), update_validity(update)
     //--------------------------------------------------------------------------
     {
     }
@@ -280,7 +282,7 @@ namespace Legion {
                                          unsigned src_idx,
                                          unsigned dst_idx)
       : op(info.op), index(src_idx), dst_index(dst_idx), tpl(info.tpl),
-        recording(info.recording)
+        recording(info.recording), update_validity(info.update_validity)
     //--------------------------------------------------------------------------
     {
     }
@@ -288,7 +290,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     PhysicalTraceInfo::PhysicalTraceInfo(Operation *o, Memoizable &memo)
       : op(o), index(-1U), dst_index(-1U), tpl(memo.get_template()),
-        recording((tpl == NULL) ? false : tpl->is_recording())
+        recording((tpl == NULL) ? false : tpl->is_recording()),
+        update_validity(true)
     //--------------------------------------------------------------------------
     {
     }
@@ -296,7 +299,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     PhysicalTraceInfo::PhysicalTraceInfo(const PhysicalTraceInfo &rhs)
       : op(rhs.op), index(rhs.index), dst_index(rhs.dst_index), tpl(rhs.tpl),
-        recording(rhs.recording)
+        recording(rhs.recording), update_validity(rhs.update_validity)
     //--------------------------------------------------------------------------
     {
     }
@@ -450,14 +453,11 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(memo != NULL);
       assert(recording);
-      assert(index != -1U ||
-             op->get_operation_kind() == Operation::COPY_OP_KIND);
+      assert(index != -1U);
       assert(tpl != NULL);
       assert(tpl->is_recording());
 #endif
-      // Don't track views of copy across operations when they get registered,
-      // as they will do later when the realm copies are recorded.
-      tpl->record_op_view(memo, index, view, usage, user_mask);
+      tpl->record_op_view(memo, index, view, usage, user_mask, update_validity);
     }
 
     /////////////////////////////////////////////////////////////

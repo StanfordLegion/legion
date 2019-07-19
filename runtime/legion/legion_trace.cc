@@ -3796,7 +3796,8 @@ namespace Legion {
                                           unsigned idx,
                                           InstanceView *view,
                                           const RegionUsage &usage,
-                                          const FieldMask &user_mask)
+                                          const FieldMask &user_mask,
+                                          bool update_validity)
     //--------------------------------------------------------------------------
     {
       TraceLocalID op_key = find_trace_local_id(memo);
@@ -3804,7 +3805,7 @@ namespace Legion {
 
       unsigned parent = -1U;
       LegionList<FieldSet<EquivalenceSet*> >::aligned eqs;
-      if (idx != -1U)
+      if (update_validity)
       {
         parent = memo->get_operation()->find_parent_index(idx);
         memo->get_version_info(idx).get_equivalence_sets()
@@ -3821,7 +3822,7 @@ namespace Legion {
              eit != it->elements.end(); ++eit)
         {
           views.insert((*eit)->set_expr, mask);
-          if (idx != -1U)
+          if (update_validity)
           {
             ViewUser *view_user = new ViewUser(usage, entry, parent, (*eit));
             update_valid_views(memo, view, view_user, usage, mask, true);

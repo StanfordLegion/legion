@@ -4190,6 +4190,9 @@ namespace Legion {
         {
           // Now do the registration
           set_mapping_state(idx);
+          // Don't track source views of copy across operations here,
+          // as they will do later when the realm copies are recorded.
+          PhysicalTraceInfo src_info(trace_info, idx, false/*update_validity*/);
           const bool record_valid = (output.untracked_valid_srcs.find(idx) ==
                                      output.untracked_valid_srcs.end());
           runtime->forest->physical_perform_updates_and_registration(
@@ -4199,7 +4202,7 @@ namespace Legion {
                                               local_init_precondition,
                                               local_completion,
                                               src_targets,
-                                              PhysicalTraceInfo(trace_info,idx),
+                                              src_info,
                                               local_applied_events,
 #ifdef DEBUG_LEGION
                                               get_logging_name(),
@@ -4219,6 +4222,9 @@ namespace Legion {
         // Now do the registration
         const size_t dst_idx = src_requirements.size() + idx;
         set_mapping_state(dst_idx);
+        // Don't track target views of copy across operations here,
+        // as they will do later when the realm copies are recorded.
+        PhysicalTraceInfo dst_info(trace_info,dst_idx,false/*update_validity*/);
         ApEvent effects_done = 
           runtime->forest->physical_perform_updates_and_registration(
                                           dst_requirements[idx],
@@ -4227,7 +4233,7 @@ namespace Legion {
                                           local_init_precondition,
                                           local_completion,
                                           dst_targets,
-                                          PhysicalTraceInfo(trace_info,dst_idx),
+                                          dst_info,
                                           local_applied_events,
 #ifdef DEBUG_LEGION
                                           get_logging_name(),
@@ -4255,6 +4261,7 @@ namespace Legion {
           const size_t gather_idx = src_requirements.size() + 
             dst_requirements.size() + idx;
           set_mapping_state(gather_idx);
+          PhysicalTraceInfo gather_info(trace_info, gather_idx);
           const bool record_valid = (output.untracked_valid_ind_srcs.find(idx) 
                                     == output.untracked_valid_ind_srcs.end());
           ApEvent effects_done = 
@@ -4265,7 +4272,7 @@ namespace Legion {
                                        local_init_precondition,
                                        local_completion,
                                        gather_targets,
-                                       PhysicalTraceInfo(trace_info,gather_idx),
+                                       gather_info,
                                        local_applied_events,
 #ifdef DEBUG_LEGION
                                        get_logging_name(),
@@ -4293,6 +4300,7 @@ namespace Legion {
           const bool record_valid = (output.untracked_valid_ind_dsts.find(idx) 
                                     == output.untracked_valid_ind_dsts.end());
           set_mapping_state(scatter_idx);
+          PhysicalTraceInfo scatter_info(trace_info, scatter_idx);
           ApEvent effects_done = 
             runtime->forest->physical_perform_updates_and_registration(
                                       dst_indirect_requirements[idx],
@@ -4301,7 +4309,7 @@ namespace Legion {
                                       local_init_precondition,
                                       local_completion,
                                       scatter_targets,
-                                      PhysicalTraceInfo(trace_info,scatter_idx),
+                                      scatter_info,
                                       local_applied_events,
 #ifdef DEBUG_LEGION
                                       get_logging_name(),
