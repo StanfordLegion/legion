@@ -48,7 +48,8 @@ namespace Realm {
     case Status::WAITING:
       {
 	// normal behavior
-	timeline.record_ready_time();
+	if(wants_timeline)
+	  timeline.record_ready_time();
 	return true;
       }
 
@@ -76,7 +77,8 @@ namespace Realm {
     case Status::READY:
       {
 	// normal behavior
-	timeline.record_start_time();
+	if(wants_timeline)
+	  timeline.record_start_time();
 	return true;
       }
 
@@ -96,7 +98,8 @@ namespace Realm {
 
   void Operation::mark_finished(bool successful)
   {
-    timeline.record_end_time();
+    if(wants_timeline)
+      timeline.record_end_time();
 
     // update this count first
     if(!successful)
@@ -130,7 +133,8 @@ namespace Realm {
       // don't update error_code/details - that was already provided in the interrupt request
     }
 
-    timeline.record_complete_time();
+    if(wants_timeline)
+      timeline.record_complete_time();
 
     __sync_fetch_and_add(&failed_work_items, 1);
 
@@ -165,8 +169,10 @@ namespace Realm {
 	   (prev == Status::TERMINATED_EARLY) ||
 	   (prev == Status::CANCELLED));
 
-    timeline.record_complete_time();
-    timeline_gpu.record_end_time();
+    if(wants_timeline) {
+      timeline.record_complete_time();
+      timeline_gpu.record_end_time();
+    }
     send_profiling_data();
 
     // trigger the finish event last - the OperationTable will delete us shortly after we do
@@ -266,7 +272,11 @@ namespace Realm {
   void Operation::reconstruct_measurements()
   {
     measurements.import_requests(requests);
-    timeline.record_create_time();
+    wants_timeline = (measurements.wants_measurement<ProfilingMeasurements::OperationTimeline>() ||
+		      measurements.wants_measurement<ProfilingMeasurements::OperationTimelineGPU>());
+    wants_event_waits = measurements.wants_measurement<ProfilingMeasurements::OperationEventWaits>();
+    if(wants_timeline)
+      timeline.record_create_time();
   }
 
   std::ostream& operator<<(std::ostream& os, const Operation *op)
