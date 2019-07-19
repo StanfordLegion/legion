@@ -611,9 +611,6 @@ namespace Legion {
       inline bool is_recording(void) const { return recording; }
       inline bool is_replaying(void) const { return !recording; }
       inline bool is_replayable(void) const { return replayable; }
-    protected:
-      static std::string view_to_string(const InstanceView *view);
-      static std::string view_to_string(const FillView *view);
     public:
       void record_mapper_output(SingleTask *task,
                                 const Mapper::MapTaskOutput &output,

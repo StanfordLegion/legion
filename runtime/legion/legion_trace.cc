@@ -3350,51 +3350,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ inline std::string PhysicalTemplate::view_to_string(
-                                                       const InstanceView *view)
-    //--------------------------------------------------------------------------
-    {
-      std::stringstream ss;
-#if 0
-      assert(view->logical_node->is_region());
-      LogicalRegion handle = view->logical_node->as_region_node()->handle;
-      ss << "pointer: " << std::hex << view
-         << ", instance: " << std::hex << view->get_manager()->get_instance().id
-         << ", kind: "
-         << (view->is_materialized_view() ? "   normal" : "reduction")
-         << ", domain: "
-         << view->get_manager()->instance_domain->handle.get_id()
-         << ", region: " << "(" << handle.get_index_space().get_id()
-         << "," << handle.get_field_space().get_id()
-         << "," << handle.get_tree_id()
-         << ")";
-#else
-      assert(false);
-#endif
-      return ss.str();
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ inline std::string PhysicalTemplate::view_to_string(
-                                                       const FillView *view)
-    //--------------------------------------------------------------------------
-    {
-      std::stringstream ss;
-#if 0
-      assert(view->logical_node->is_region());
-      LogicalRegion handle = view->logical_node->as_region_node()->handle;
-      ss << "pointer: " << std::hex << view
-         << ", region: " << "(" << handle.get_index_space().get_id()
-         << "," << handle.get_field_space().get_id()
-         << "," << handle.get_tree_id()
-         << ")";
-#else
-      assert(false);
-#endif
-      return ss.str();
-    }
-
-    //--------------------------------------------------------------------------
     void PhysicalTemplate::dump_template(void)
     //--------------------------------------------------------------------------
     {
@@ -4141,9 +4096,6 @@ namespace Legion {
                                         const FieldMaskSet<InstanceView> &views)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(idx != -1U);
-#endif
       unsigned parent = memo->get_operation()->find_parent_index(idx);
       const VersionInfo &info = memo->get_version_info(idx);
       for (FieldMaskSet<InstanceView>::const_iterator vit = views.begin();
@@ -4712,7 +4664,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       std::stringstream ss;
-      ss << "events[" << lhs << "] = copy(operations[" << owner << "], {";
+      ss << "events[" << lhs << "] = copy(operations[" << owner << "], "
+         << "Index expr: " << expr->expr_id << ", {";
       for (unsigned idx = 0; idx < src_fields.size(); ++idx)
       {
         ss << "(" << std::hex << src_fields[idx].inst.id
@@ -4825,7 +4778,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       std::stringstream ss;
-      ss << "events[" << lhs << "] = fill({";
+      ss << "events[" << lhs << "] = fill(Index expr: " << expr->expr_id
+         << ", {";
       for (unsigned idx = 0; idx < fields.size(); ++idx)
       {
         ss << "(" << std::hex << fields[idx].inst.id

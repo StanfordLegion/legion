@@ -310,9 +310,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(recording);
-      assert(tpl != NULL);
-      assert(tpl->is_recording());
+      sanity_check(false);
 #endif
       tpl->record_merge_events(result, e1, e2, op);      
     }
@@ -323,9 +321,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(recording);
-      assert(tpl != NULL);
-      assert(tpl->is_recording());
+      sanity_check(false);
 #endif
       tpl->record_merge_events(result, e1, e2, e3, op);
     }
@@ -336,9 +332,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(recording);
-      assert(tpl != NULL);
-      assert(tpl->is_recording());
+      sanity_check(false);
 #endif
       tpl->record_merge_events(result, events, op);
     }
@@ -348,9 +342,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(recording);
-      assert(tpl != NULL);
-      assert(tpl->is_recording());
+      sanity_check(false);
 #endif
       tpl->record_set_op_sync_event(result, op);
     }
@@ -374,10 +366,8 @@ namespace Legion {
     {
       Memoizable *memo = op->get_memoizable();
 #ifdef DEBUG_LEGION
+      sanity_check(true);
       assert(memo != NULL);
-      assert(recording);
-      assert(tpl != NULL);
-      assert(tpl->is_recording());
       assert(tracing_srcs != NULL);
       assert(tracing_dsts != NULL);
 #endif
@@ -407,11 +397,8 @@ namespace Legion {
     {
       Memoizable *memo = op->get_memoizable();
 #ifdef DEBUG_LEGION
+      sanity_check(true);
       assert(memo != NULL);
-      assert(recording);
-      assert(tpl != NULL);
-      assert(index != -1U);
-      assert(tpl->is_recording());
       assert(tracing_srcs != NULL);
       assert(tracing_dsts != NULL);
 #endif
@@ -434,10 +421,8 @@ namespace Legion {
     {
       Memoizable *memo = op->get_memoizable();
 #ifdef DEBUG_LEGION
+      sanity_check(true);
       assert(memo != NULL);
-      assert(recording);
-      assert(tpl != NULL);
-      assert(tpl->is_recording());
 #endif
       tpl->record_issue_indirect(memo, result, expr, src_fields, dst_fields,
                                  indirections, precondition);
@@ -451,14 +436,24 @@ namespace Legion {
     {
       Memoizable *memo = op->get_memoizable();
 #ifdef DEBUG_LEGION
+      sanity_check(true);
       assert(memo != NULL);
-      assert(recording);
-      assert(index != -1U);
-      assert(tpl != NULL);
-      assert(tpl->is_recording());
 #endif
       tpl->record_op_view(memo, index, view, usage, user_mask, update_validity);
     }
+
+#ifdef DEBUG_LEGION
+    //--------------------------------------------------------------------------
+    inline void PhysicalTraceInfo::sanity_check(bool check_indices) const
+    //--------------------------------------------------------------------------
+    {
+      assert(recording);
+      assert(tpl != NULL);
+      assert(tpl->is_recording());
+      assert(!check_indices || index != -1U);
+      assert(!check_indices || dst_index != -1U);
+    }
+#endif
 
     /////////////////////////////////////////////////////////////
     // ProjectionInfo 

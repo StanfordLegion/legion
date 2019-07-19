@@ -175,6 +175,10 @@ namespace Legion {
       void record_op_view(const RegionUsage &usage,
                           const FieldMask &user_mask,
                           InstanceView *view) const;
+#ifdef DEBUG_LEGION
+    private:
+      void sanity_check(bool check_indices) const;
+#endif
     public:
       Operation *const op;
       const unsigned index;
