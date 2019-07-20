@@ -23,7 +23,7 @@ import os
 import subprocess
 
 import legion
-from legion import task, print_once, Fspace, Future, IndexLaunch, Ispace, N, Partition, R, Reduce, Region, RW
+from legion import index_launch, print_once, task, Fspace, Future, IndexLaunch, Ispace, ID, N, Partition, R, Reduce, Region, RW
 
 root_dir = os.path.dirname(__file__)
 try:
@@ -54,6 +54,12 @@ def create_partition(is_disjoint, region, c_partition, color_space):
     ipart = legion.Ipartition(c_partition.index_partition, region.ispace, color_space)
     return legion.Partition.create(region, ipart)
 
+_constant_time_launches = False
+if _constant_time_launches:
+    extern_task = legion.extern_task_wrapper
+else:
+    extern_task = legion.extern_task
+
 read_config = legion.extern_task(
     task_id=10000,
     argument_types=[],
@@ -68,7 +74,7 @@ read_partitions = legion.extern_task(
     return_type=mesh_partitions,
     calling_convention='regent')
 
-initialize_topology = legion.extern_task(
+initialize_topology = extern_task(
     task_id=10003,
     argument_types=[config, legion.int64, Region, Region, Region, Region, Region],
     privileges=[
@@ -82,21 +88,21 @@ initialize_topology = legion.extern_task(
     return_type=legion.void,
     calling_convention='regent')
 
-init_pointers = legion.extern_task(
+init_pointers = extern_task(
     task_id=10004,
     argument_types=[Region, Region, Region, Region],
     privileges=[N, N, N, RW('mapsp1', 'mapsp1_r', 'mapsp2', 'mapsp2_r')],
     return_type=legion.void,
     calling_convention='regent')
 
-init_mesh_zones = legion.extern_task(
+init_mesh_zones = extern_task(
     task_id=10005,
     argument_types=[Region],
     privileges=[RW('zx_x', 'zx_y', 'zarea', 'zvol')],
     return_type=legion.void,
     calling_convention='regent')
 
-init_side_fracs = legion.extern_task(
+init_side_fracs = extern_task(
     task_id=10006,
     argument_types=[Region, Region, Region, Region],
     privileges=[
@@ -107,7 +113,7 @@ init_side_fracs = legion.extern_task(
     return_type=legion.void,
     calling_convention='regent')
 
-init_hydro = legion.extern_task(
+init_hydro = extern_task(
     task_id=10007,
     argument_types=[Region, legion.float64, legion.float64, legion.float64, legion.float64, legion.float64, legion.float64, legion.float64, legion.float64],
     privileges=[
@@ -115,7 +121,7 @@ init_hydro = legion.extern_task(
     return_type=legion.void,
     calling_convention='regent')
 
-init_radial_velocity = legion.extern_task(
+init_radial_velocity = extern_task(
     task_id=10008,
     argument_types=[Region, legion.float64],
     privileges=[
@@ -123,7 +129,7 @@ init_radial_velocity = legion.extern_task(
     return_type=legion.void,
     calling_convention='regent')
 
-init_step_points = legion.extern_task(
+init_step_points = extern_task(
     task_id=10009,
     argument_types=[Region, legion.bool_],
     privileges=[
@@ -131,7 +137,7 @@ init_step_points = legion.extern_task(
     return_type=legion.void,
     calling_convention='regent')
 
-adv_pos_half = legion.extern_task(
+adv_pos_half = extern_task(
     task_id=10010,
     argument_types=[Region, legion.float64, legion.bool_],
     privileges=[
@@ -139,7 +145,7 @@ adv_pos_half = legion.extern_task(
     return_type=legion.void,
     calling_convention='regent')
 
-init_step_zones = legion.extern_task(
+init_step_zones = extern_task(
     task_id=10011,
     argument_types=[Region, legion.bool_],
     privileges=[
@@ -147,7 +153,7 @@ init_step_zones = legion.extern_task(
     return_type=legion.void,
     calling_convention='regent')
 
-calc_centers = legion.extern_task(
+calc_centers = extern_task(
     task_id=10012,
     argument_types=[Region, Region, Region, Region, legion.bool_],
     privileges=[
@@ -158,7 +164,7 @@ calc_centers = legion.extern_task(
     return_type=legion.void,
     calling_convention='regent')
 
-calc_volumes = legion.extern_task(
+calc_volumes = extern_task(
     task_id=10013,
     argument_types=[Region, Region, Region, Region, legion.bool_],
     privileges=[
@@ -169,7 +175,7 @@ calc_volumes = legion.extern_task(
     return_type=legion.int32,
     calling_convention='regent')
 
-calc_char_len = legion.extern_task(
+calc_char_len = extern_task(
     task_id=10014,
     argument_types=[Region, Region, Region, Region, legion.bool_],
     privileges=[
@@ -180,7 +186,7 @@ calc_char_len = legion.extern_task(
     return_type=legion.void,
     calling_convention='regent')
 
-calc_rho_half = legion.extern_task(
+calc_rho_half = extern_task(
     task_id=10015,
     argument_types=[Region, legion.bool_],
     privileges=[
@@ -188,7 +194,7 @@ calc_rho_half = legion.extern_task(
     return_type=legion.void,
     calling_convention='regent')
 
-sum_point_mass = legion.extern_task(
+sum_point_mass = extern_task(
     task_id=10016,
     argument_types=[Region, Region, Region, Region, legion.bool_],
     privileges=[
@@ -199,7 +205,7 @@ sum_point_mass = legion.extern_task(
     return_type=legion.void,
     calling_convention='regent')
 
-calc_state_at_half = legion.extern_task(
+calc_state_at_half = extern_task(
     task_id=10017,
     argument_types=[Region, legion.float64, legion.float64, legion.float64, legion.bool_],
     privileges=[
@@ -207,7 +213,7 @@ calc_state_at_half = legion.extern_task(
     return_type=legion.void,
     calling_convention='regent')
 
-calc_force_pgas_tts = legion.extern_task(
+calc_force_pgas_tts = extern_task(
     task_id=10018,
     argument_types=[Region, Region, Region, Region, legion.float64, legion.float64, legion.bool_],
     privileges=[
@@ -218,7 +224,7 @@ calc_force_pgas_tts = legion.extern_task(
     return_type=legion.void,
     calling_convention='regent')
 
-qcs_zone_center_velocity = legion.extern_task(
+qcs_zone_center_velocity = extern_task(
     task_id=10019,
     argument_types=[Region, Region, Region, Region, legion.bool_],
     privileges=[
@@ -229,7 +235,7 @@ qcs_zone_center_velocity = legion.extern_task(
     return_type=legion.void,
     calling_convention='regent')
 
-qcs_corner_divergence = legion.extern_task(
+qcs_corner_divergence = extern_task(
     task_id=10020,
     argument_types=[Region, Region, Region, Region, legion.bool_],
     privileges=[
@@ -240,7 +246,7 @@ qcs_corner_divergence = legion.extern_task(
     return_type=legion.void,
     calling_convention='regent')
 
-qcs_qcn_force = legion.extern_task(
+qcs_qcn_force = extern_task(
     task_id=10021,
     argument_types=[Region, Region, Region, Region, legion.float64, legion.float64, legion.float64, legion.bool_],
     privileges=[
@@ -251,7 +257,7 @@ qcs_qcn_force = legion.extern_task(
     return_type=legion.void,
     calling_convention='regent')
 
-qcs_force = legion.extern_task(
+qcs_force = extern_task(
     task_id=10022,
     argument_types=[Region, Region, Region, Region, legion.bool_],
     privileges=[
@@ -262,7 +268,7 @@ qcs_force = legion.extern_task(
     return_type=legion.void,
     calling_convention='regent')
 
-qcs_vel_diff = legion.extern_task(
+qcs_vel_diff = extern_task(
     task_id=10023,
     argument_types=[Region, Region, Region, Region, legion.float64, legion.float64, legion.bool_],
     privileges=[
@@ -273,7 +279,7 @@ qcs_vel_diff = legion.extern_task(
     return_type=legion.void,
     calling_convention='regent')
 
-sum_point_force = legion.extern_task(
+sum_point_force = extern_task(
     task_id=10024,
     argument_types=[Region, Region, Region, Region, legion.bool_],
     privileges=[
@@ -284,7 +290,7 @@ sum_point_force = legion.extern_task(
     return_type=legion.void,
     calling_convention='regent')
 
-apply_boundary_conditions = legion.extern_task(
+apply_boundary_conditions = extern_task(
     task_id=10025,
     argument_types=[Region, legion.bool_],
     privileges=[
@@ -292,7 +298,7 @@ apply_boundary_conditions = legion.extern_task(
     return_type=legion.void,
     calling_convention='regent')
 
-adv_pos_full = legion.extern_task(
+adv_pos_full = extern_task(
     task_id=10026,
     argument_types=[Region, legion.float64, legion.bool_],
     privileges=[
@@ -300,7 +306,7 @@ adv_pos_full = legion.extern_task(
     return_type=legion.void,
     calling_convention='regent')
 
-calc_centers_full = legion.extern_task(
+calc_centers_full = extern_task(
     task_id=10027,
     argument_types=[Region, Region, Region, Region, legion.bool_],
     privileges=[
@@ -311,7 +317,7 @@ calc_centers_full = legion.extern_task(
     return_type=legion.void,
     calling_convention='regent')
 
-calc_volumes_full = legion.extern_task(
+calc_volumes_full = extern_task(
     task_id=10028,
     argument_types=[Region, Region, Region, Region, legion.bool_],
     privileges=[
@@ -322,7 +328,7 @@ calc_volumes_full = legion.extern_task(
     return_type=legion.int32,
     calling_convention='regent')
 
-calc_work = legion.extern_task(
+calc_work = extern_task(
     task_id=10029,
     argument_types=[Region, Region, Region, Region, legion.float64, legion.bool_],
     privileges=[
@@ -333,7 +339,7 @@ calc_work = legion.extern_task(
     return_type=legion.void,
     calling_convention='regent')
 
-calc_work_rate_energy_rho_full = legion.extern_task(
+calc_work_rate_energy_rho_full = extern_task(
     task_id=10030,
     argument_types=[Region, legion.float64, legion.bool_],
     privileges=[
@@ -341,7 +347,7 @@ calc_work_rate_energy_rho_full = legion.extern_task(
     return_type=legion.void,
     calling_convention='regent')
 
-calc_dt_hydro = legion.extern_task(
+calc_dt_hydro = extern_task(
     task_id=10031,
     argument_types=[Region, legion.float64, legion.float64, legion.float64, legion.float64, legion.bool_, legion.bool_],
     privileges=[
@@ -349,7 +355,7 @@ calc_dt_hydro = legion.extern_task(
     return_type=legion.float64,
     calling_convention='regent')
 
-calc_global_dt = legion.extern_task(
+calc_global_dt = extern_task(
     task_id=10032,
     argument_types=[legion.float64, legion.float64, legion.float64, legion.float64, legion.float64, legion.float64, legion.float64, legion.int64],
     privileges=[],
@@ -487,199 +493,94 @@ def main():
     sides_part = create_partition(True, sides, partitions.rs_all_p, pieces)
 
     if conf.par_init:
-        for i in IndexLaunch(pieces):
-            initialize_topology(
-                conf, int(i),
-                zones_part[i],
-                private_part[i],
-                shared_part[i],
-                ghost_part[i],
-                sides_part[i])
+        if _constant_time_launches:
+            c = Future(conf, value_type=config)
+            index_launch(
+                pieces,
+                initialize_topology,
+                c, ID,
+                zones_part[ID],
+                private_part[ID],
+                shared_part[ID],
+                ghost_part[ID],
+                sides_part[ID])
+        else:
+            for i in IndexLaunch(pieces):
+                initialize_topology(
+                    conf, i,
+                    zones_part[i],
+                    private_part[i],
+                    shared_part[i],
+                    ghost_part[i],
+                    sides_part[i])
 
-    for i in IndexLaunch(pieces):
-        init_pointers(
-            zones_part[i],
-            private_part[i],
-            ghost_part[i],
-            sides_part[i])
+    if _constant_time_launches:
+        index_launch(
+            pieces,
+            init_pointers,
+            zones_part[ID],
+            private_part[ID],
+            ghost_part[ID],
+            sides_part[ID])
 
-    for i in IndexLaunch(pieces):
-        init_mesh_zones(
-            zones_part[i])
+        index_launch(
+            pieces,
+            init_mesh_zones,
+            zones_part[ID])
 
-    for i in IndexLaunch(pieces):
-        calc_centers_full(
-            zones_part[i],
-            private_part[i],
-            ghost_part[i],
-            sides_part[i],
+        index_launch(
+            pieces,
+            calc_centers_full,
+            zones_part[ID],
+            private_part[ID],
+            ghost_part[ID],
+            sides_part[ID],
             True)
 
-    for i in IndexLaunch(pieces):
-        calc_volumes_full(
-            zones_part[i],
-            private_part[i],
-            ghost_part[i],
-            sides_part[i],
+        index_launch(
+            pieces,
+            calc_volumes_full,
+            zones_part[ID],
+            private_part[ID],
+            ghost_part[ID],
+            sides_part[ID],
             True)
 
-    for i in IndexLaunch(pieces):
-        init_side_fracs(
-            zones_part[i],
-            private_part[i],
-            ghost_part[i],
-            sides_part[i])
+        index_launch(
+            pieces,
+            init_side_fracs,
+            zones_part[ID],
+            private_part[ID],
+            ghost_part[ID],
+            sides_part[ID])
 
-    for i in IndexLaunch(pieces):
-        init_hydro(
-            zones_part[i],
+        index_launch(
+            pieces,
+            init_hydro,
+            zones_part[ID],
             conf.rinit, conf.einit, conf.rinitsub, conf.einitsub,
             conf.subregion[0], conf.subregion[1], conf.subregion[2], conf.subregion[3])
 
-    for i in IndexLaunch(pieces):
-        init_radial_velocity(private_part[i], conf.uinitradial)
+        index_launch(
+            pieces,
+            init_radial_velocity,
+            private_part[ID], conf.uinitradial)
 
-    for i in IndexLaunch(pieces):
-        init_radial_velocity(shared_part[i], conf.uinitradial)
-
-    cycle = 0
-    cstop = conf.cstop + 2*conf.prune
-    time = 0.0
-    dt = Future(conf.dtmax, legion.float64)
-    dthydro = conf.dtmax
-    while cycle < cstop and time < conf.tstop:
-        if cycle == conf.prune:
-            legion.execution_fence(block=True)
-            start_time = legion.c.legion_get_current_time_in_nanos()
-
+        index_launch(
+            pieces,
+            init_radial_velocity,
+            shared_part[ID], conf.uinitradial)
+    else:
         for i in IndexLaunch(pieces):
-            init_step_points(private_part[i], True)
-
-        for i in IndexLaunch(pieces):
-            init_step_points(shared_part[i], True)
-
-        for i in IndexLaunch(pieces):
-            init_step_zones(zones_part[i], True)
-
-        dt = calc_global_dt(dt, conf.dtfac, conf.dtinit, conf.dtmax, dthydro, time, conf.tstop, cycle)
-
-        for i in IndexLaunch(pieces):
-            adv_pos_half(private_part[i], dt, True)
-
-        for i in IndexLaunch(pieces):
-            adv_pos_half(shared_part[i], dt, True)
-
-        for i in IndexLaunch(pieces):
-            calc_centers(
+            init_pointers(
                 zones_part[i],
                 private_part[i],
                 ghost_part[i],
-                sides_part[i],
-                True)
+                sides_part[i])
 
         for i in IndexLaunch(pieces):
-            calc_volumes(
-                zones_part[i],
-                private_part[i],
-                ghost_part[i],
-                sides_part[i],
-                True)
-
-        for i in IndexLaunch(pieces):
-            calc_char_len(
-                zones_part[i],
-                private_part[i],
-                ghost_part[i],
-                sides_part[i],
-                True)
-
-        for i in IndexLaunch(pieces):
-            calc_rho_half(zones_part[i], True)
-
-        for i in IndexLaunch(pieces):
-            sum_point_mass(
-                zones_part[i],
-                private_part[i],
-                ghost_part[i],
-                sides_part[i],
-                True)
-
-        for i in IndexLaunch(pieces):
-            calc_state_at_half(
-                zones_part[i],
-                conf.gamma, conf.ssmin, dt,
-                True)
-
-        for i in IndexLaunch(pieces):
-            calc_force_pgas_tts(
-                zones_part[i],
-                private_part[i],
-                ghost_part[i],
-                sides_part[i],
-                conf.alfa, conf.ssmin,
-                True)
-
-        for i in IndexLaunch(pieces):
-            qcs_zone_center_velocity(
-                zones_part[i],
-                private_part[i],
-                ghost_part[i],
-                sides_part[i],
-                True)
-
-        for i in IndexLaunch(pieces):
-            qcs_corner_divergence(
-                zones_part[i],
-                private_part[i],
-                ghost_part[i],
-                sides_part[i],
-                True)
-
-        for i in IndexLaunch(pieces):
-            qcs_qcn_force(
-                zones_part[i],
-                private_part[i],
-                ghost_part[i],
-                sides_part[i],
-                conf.gamma, conf.q1, conf.q2,
-                True)
-
-        for i in IndexLaunch(pieces):
-            qcs_force(
-                zones_part[i],
-                private_part[i],
-                ghost_part[i],
-                sides_part[i],
-                True)
-
-        for i in IndexLaunch(pieces):
-            qcs_vel_diff(
-                zones_part[i],
-                private_part[i],
-                ghost_part[i],
-                sides_part[i],
-                conf.q1, conf.q2,
-                True)
-
-        for i in IndexLaunch(pieces):
-            sum_point_force(
-                zones_part[i],
-                private_part[i],
-                ghost_part[i],
-                sides_part[i],
-                True)
-
-        for i in IndexLaunch(pieces):
-            apply_boundary_conditions(private_part[i], True)
-
-        for i in IndexLaunch(pieces):
-            apply_boundary_conditions(shared_part[i], True)
-
-        for i in IndexLaunch(pieces):
-            adv_pos_full(private_part[i], dt, True)
-
-        for i in IndexLaunch(pieces):
-            adv_pos_full(shared_part[i], dt, True)
+            init_mesh_zones(
+                zones_part[i])
 
         for i in IndexLaunch(pieces):
             calc_centers_full(
@@ -698,29 +599,379 @@ def main():
                 True)
 
         for i in IndexLaunch(pieces):
-            calc_work(
+            init_side_fracs(
                 zones_part[i],
                 private_part[i],
                 ghost_part[i],
-                sides_part[i],
-                dt,
-                True)
+                sides_part[i])
 
         for i in IndexLaunch(pieces):
-            calc_work_rate_energy_rho_full(
+            init_hydro(
                 zones_part[i],
+                conf.rinit, conf.einit, conf.rinitsub, conf.einitsub,
+                conf.subregion[0], conf.subregion[1], conf.subregion[2], conf.subregion[3])
+
+        for i in IndexLaunch(pieces):
+            init_radial_velocity(private_part[i], conf.uinitradial)
+
+        for i in IndexLaunch(pieces):
+            init_radial_velocity(shared_part[i], conf.uinitradial)
+
+    cycle = 0
+    cstop = conf.cstop + 2*conf.prune
+    time = 0.0
+    dt = Future(conf.dtmax, legion.float64)
+    dthydro = conf.dtmax
+    while cycle < cstop and time < conf.tstop:
+        if cycle == conf.prune:
+            legion.execution_fence(block=True)
+            start_time = legion.c.legion_get_current_time_in_nanos()
+
+        if _constant_time_launches:
+            index_launch(pieces, init_step_points, private_part[ID], True)
+
+            index_launch(pieces, init_step_points, shared_part[ID], True)
+
+            index_launch(pieces, init_step_zones, zones_part[ID], True)
+
+            dt = calc_global_dt(dt, conf.dtfac, conf.dtinit, conf.dtmax, dthydro, time, conf.tstop, cycle)
+
+            index_launch(pieces, adv_pos_half, private_part[ID], dt, True)
+
+            index_launch(pieces, adv_pos_half, shared_part[ID], dt, True)
+
+            index_launch(
+                pieces,
+                calc_centers,
+                zones_part[ID],
+                private_part[ID],
+                ghost_part[ID],
+                sides_part[ID],
+                True)
+
+            index_launch(
+                pieces,
+                calc_volumes,
+                zones_part[ID],
+                private_part[ID],
+                ghost_part[ID],
+                sides_part[ID],
+                True)
+
+            index_launch(
+                pieces,
+                calc_char_len,
+                zones_part[ID],
+                private_part[ID],
+                ghost_part[ID],
+                sides_part[ID],
+                True)
+
+            index_launch(pieces, calc_rho_half, zones_part[ID], True)
+
+            index_launch(
+                pieces,
+                sum_point_mass,
+                zones_part[ID],
+                private_part[ID],
+                ghost_part[ID],
+                sides_part[ID],
+                True)
+
+            index_launch(
+                pieces,
+                calc_state_at_half,
+                zones_part[ID],
+                conf.gamma, conf.ssmin, dt,
+                True)
+
+            index_launch(
+                pieces,
+                calc_force_pgas_tts,
+                zones_part[ID],
+                private_part[ID],
+                ghost_part[ID],
+                sides_part[ID],
+                conf.alfa, conf.ssmin,
+                True)
+
+            index_launch(
+                pieces,
+                qcs_zone_center_velocity,
+                zones_part[ID],
+                private_part[ID],
+                ghost_part[ID],
+                sides_part[ID],
+                True)
+
+            index_launch(
+                pieces,
+                qcs_corner_divergence,
+                zones_part[ID],
+                private_part[ID],
+                ghost_part[ID],
+                sides_part[ID],
+                True)
+
+            index_launch(
+                pieces,
+                qcs_qcn_force,
+                zones_part[ID],
+                private_part[ID],
+                ghost_part[ID],
+                sides_part[ID],
+                conf.gamma, conf.q1, conf.q2,
+                True)
+
+            index_launch(
+                pieces,
+                qcs_force,
+                zones_part[ID],
+                private_part[ID],
+                ghost_part[ID],
+                sides_part[ID],
+                True)
+
+            index_launch(
+                pieces,
+                qcs_vel_diff,
+                zones_part[ID],
+                private_part[ID],
+                ghost_part[ID],
+                sides_part[ID],
+                conf.q1, conf.q2,
+                True)
+
+            index_launch(
+                pieces,
+                sum_point_force,
+                zones_part[ID],
+                private_part[ID],
+                ghost_part[ID],
+                sides_part[ID],
+                True)
+
+            index_launch(pieces, apply_boundary_conditions,private_part[ID], True)
+
+            index_launch(pieces, apply_boundary_conditions, shared_part[ID], True)
+
+            index_launch(pieces, adv_pos_full, private_part[ID], dt, True)
+
+            index_launch(pieces, adv_pos_full, shared_part[ID], dt, True)
+
+            index_launch(
+                pieces,
+                calc_centers_full,
+                zones_part[ID],
+                private_part[ID],
+                ghost_part[ID],
+                sides_part[ID],
+                True)
+
+            index_launch(
+                pieces,
+                calc_volumes_full,
+                zones_part[ID],
+                private_part[ID],
+                ghost_part[ID],
+                sides_part[ID],
+                True)
+
+            index_launch(
+                pieces,
+                calc_work,
+                zones_part[ID],
+                private_part[ID],
+                ghost_part[ID],
+                sides_part[ID],
                 dt,
                 True)
 
-        futures = []
-        for i in IndexLaunch(pieces):
-            futures.append(
-                calc_dt_hydro(
-                    zones_part[i],
-                    dt, conf.dtmax, conf.cfl, conf.cflv, True))
+            index_launch(
+                pieces,
+                calc_work_rate_energy_rho_full,
+                zones_part[ID],
+                dt,
+                True)
 
-        dthydro = conf.dtmax
-        dthydro = min(dthydro, *list(map(lambda x: x.get(), futures)))
+            futures = index_launch(
+                pieces,
+                calc_dt_hydro,
+                zones_part[ID],
+                dt, conf.dtmax, conf.cfl, conf.cflv, True)
+
+            dthydro = conf.dtmax
+            dthydro = min(dthydro, *list(map(lambda x: futures[x].get(), pieces)))
+        else:
+            for i in IndexLaunch(pieces):
+                init_step_points(private_part[i], True)
+
+            for i in IndexLaunch(pieces):
+                init_step_points(shared_part[i], True)
+
+            for i in IndexLaunch(pieces):
+                init_step_zones(zones_part[i], True)
+
+            dt = calc_global_dt(dt, conf.dtfac, conf.dtinit, conf.dtmax, dthydro, time, conf.tstop, cycle)
+
+            for i in IndexLaunch(pieces):
+                adv_pos_half(private_part[i], dt, True)
+
+            for i in IndexLaunch(pieces):
+                adv_pos_half(shared_part[i], dt, True)
+
+            for i in IndexLaunch(pieces):
+                calc_centers(
+                    zones_part[i],
+                    private_part[i],
+                    ghost_part[i],
+                    sides_part[i],
+                    True)
+
+            for i in IndexLaunch(pieces):
+                calc_volumes(
+                    zones_part[i],
+                    private_part[i],
+                    ghost_part[i],
+                    sides_part[i],
+                    True)
+
+            for i in IndexLaunch(pieces):
+                calc_char_len(
+                    zones_part[i],
+                    private_part[i],
+                    ghost_part[i],
+                    sides_part[i],
+                    True)
+
+            for i in IndexLaunch(pieces):
+                calc_rho_half(zones_part[i], True)
+
+            for i in IndexLaunch(pieces):
+                sum_point_mass(
+                    zones_part[i],
+                    private_part[i],
+                    ghost_part[i],
+                    sides_part[i],
+                    True)
+
+            for i in IndexLaunch(pieces):
+                calc_state_at_half(
+                    zones_part[i],
+                    conf.gamma, conf.ssmin, dt,
+                    True)
+
+            for i in IndexLaunch(pieces):
+                calc_force_pgas_tts(
+                    zones_part[i],
+                    private_part[i],
+                    ghost_part[i],
+                    sides_part[i],
+                    conf.alfa, conf.ssmin,
+                    True)
+
+            for i in IndexLaunch(pieces):
+                qcs_zone_center_velocity(
+                    zones_part[i],
+                    private_part[i],
+                    ghost_part[i],
+                    sides_part[i],
+                    True)
+
+            for i in IndexLaunch(pieces):
+                qcs_corner_divergence(
+                    zones_part[i],
+                    private_part[i],
+                    ghost_part[i],
+                    sides_part[i],
+                    True)
+
+            for i in IndexLaunch(pieces):
+                qcs_qcn_force(
+                    zones_part[i],
+                    private_part[i],
+                    ghost_part[i],
+                    sides_part[i],
+                    conf.gamma, conf.q1, conf.q2,
+                    True)
+
+            for i in IndexLaunch(pieces):
+                qcs_force(
+                    zones_part[i],
+                    private_part[i],
+                    ghost_part[i],
+                    sides_part[i],
+                    True)
+
+            for i in IndexLaunch(pieces):
+                qcs_vel_diff(
+                    zones_part[i],
+                    private_part[i],
+                    ghost_part[i],
+                    sides_part[i],
+                    conf.q1, conf.q2,
+                    True)
+
+            for i in IndexLaunch(pieces):
+                sum_point_force(
+                    zones_part[i],
+                    private_part[i],
+                    ghost_part[i],
+                    sides_part[i],
+                    True)
+
+            for i in IndexLaunch(pieces):
+                apply_boundary_conditions(private_part[i], True)
+
+            for i in IndexLaunch(pieces):
+                apply_boundary_conditions(shared_part[i], True)
+
+            for i in IndexLaunch(pieces):
+                adv_pos_full(private_part[i], dt, True)
+
+            for i in IndexLaunch(pieces):
+                adv_pos_full(shared_part[i], dt, True)
+
+            for i in IndexLaunch(pieces):
+                calc_centers_full(
+                    zones_part[i],
+                    private_part[i],
+                    ghost_part[i],
+                    sides_part[i],
+                    True)
+
+            for i in IndexLaunch(pieces):
+                calc_volumes_full(
+                    zones_part[i],
+                    private_part[i],
+                    ghost_part[i],
+                    sides_part[i],
+                    True)
+
+            for i in IndexLaunch(pieces):
+                calc_work(
+                    zones_part[i],
+                    private_part[i],
+                    ghost_part[i],
+                    sides_part[i],
+                    dt,
+                    True)
+
+            for i in IndexLaunch(pieces):
+                calc_work_rate_energy_rho_full(
+                    zones_part[i],
+                    dt,
+                    True)
+
+            futures = []
+            for i in IndexLaunch(pieces):
+                futures.append(
+                    calc_dt_hydro(
+                        zones_part[i],
+                        dt, conf.dtmax, conf.cfl, conf.cflv, True))
+
+            dthydro = conf.dtmax
+            dthydro = min(dthydro, *list(map(lambda x: x.get(), futures)))
 
         cycle += 1
         time += dt.get()
