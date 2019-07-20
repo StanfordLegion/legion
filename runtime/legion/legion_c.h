@@ -4238,6 +4238,24 @@ extern "C" {
       size_t count);
 
   /**
+   * @see Legion::Runtime::generate_library_sharding_ids()
+   */
+  legion_sharding_id_t
+  legion_runtime_generate_library_sharding_ids(
+      legion_runtime_t runtime,
+      const char *library_name,
+      size_t count);
+
+  /**
+   * @see Legion::Runtime::generate_library_reduction_ids()
+   */
+  legion_reduction_op_id_t
+  legion_runtime_generate_library_reduction_ids(
+      legion_runtime_t runtime,
+      const char *library_name,
+      size_t count);
+
+  /**
    * @see Legion::Runtime::preregister_projection_functor()
    */
   void

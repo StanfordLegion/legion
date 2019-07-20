@@ -5752,6 +5752,28 @@ legion_runtime_generate_library_projection_ids(
   return runtime->generate_library_projection_ids(library_name, count);
 }
 
+legion_sharding_id_t
+legion_runtime_generate_library_sharding_ids(
+    legion_runtime_t runtime_,
+    const char *library_name,
+    size_t count)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+
+  return runtime->generate_library_sharding_ids(library_name, count);
+}
+
+legion_reduction_op_id_t
+legion_runtime_generate_library_reduction_ids(
+    legion_runtime_t runtime_,
+    const char *library_name,
+    size_t count)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+
+  return runtime->generate_library_reduction_ids(library_name, count);
+}
+
 void
 legion_runtime_preregister_projection_functor(
   legion_projection_id_t id,
