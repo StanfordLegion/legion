@@ -129,6 +129,7 @@ namespace Realm {
     virtual ~LocalPythonProcessor(void);
 
     virtual void enqueue_task(Task *task);
+    virtual void enqueue_tasks(Task::TaskList& tasks);
 
     virtual void spawn_task(Processor::TaskFuncID func_id,
 			    const void *args, size_t arglen,
@@ -183,8 +184,9 @@ namespace Realm {
 
     std::map<Processor::TaskFuncID, TaskTableEntry> task_table;
 
-    PriorityQueue<Task *, GASNetHSL> task_queue;
+    TaskQueue task_queue; // ready tasks
     ProfilingGauges::AbsoluteRangeGauge<int> ready_task_count;
+    DeferredSpawnCache deferred_spawn_cache;
   };
 
   // based on KernelThreadTaskScheduler, deals with the python GIL and thread

@@ -468,6 +468,97 @@ namespace Realm {
       assert(0);
     }
 
+    // helper function for spawn implementations
+    void ProcessorImpl::enqueue_or_defer_task(Task *task, Event start_event,
+					      DeferredSpawnCache *cache)
+    {
+      // case 1: no precondition
+      if(!start_event.exists()) {
+	enqueue_task(task);
+	return;
+      }
+
+      // case 2: precondition is triggered or poisoned
+      EventImpl *start_impl = get_runtime()->get_event_impl(start_event);
+      EventImpl::gen_t start_gen = ID(start_event).event_generation();
+      bool poisoned = false;
+      if(!start_impl->has_triggered(start_gen, poisoned)) {
+	// we'll create a new deferral unless we can tack it on to an existing
+	//  one
+	bool new_deferral = true;
+
+	if(cache) {
+	  Task *leader = 0;
+	  Task *evicted = 0;
+	  {
+	    AutoHSLLock al(cache->mutex);
+	    size_t i = 0;
+	    while((i < DeferredSpawnCache::MAX_ENTRIES) &&
+		  (cache->events[i] != start_event)) i++;
+	    if(i < DeferredSpawnCache::MAX_ENTRIES) {
+	      // cache hit
+	      cache->counts[i]++;
+	      leader = cache->tasks[i];
+	      leader->add_reference();  // keep it alive until we use it below
+	    } else {
+	      // miss - see if any counts are at 0
+	      i = 0;
+	      while((i < DeferredSpawnCache::MAX_ENTRIES) &&
+		    (cache->counts[i] > 0)) i++;
+	      // no? decrement them all and see if one goes to 0 now
+	      if(i < DeferredSpawnCache::MAX_ENTRIES) {
+		i = 0;
+		while((i < DeferredSpawnCache::MAX_ENTRIES) &&
+		      (--cache->counts[i] > 0)) i++;
+		// decrement the rest too
+		for(size_t j = i+1; j < DeferredSpawnCache::MAX_ENTRIES; j++)
+		  cache->counts[j]--;
+	      }
+
+	      // if we've got a candidate now, do a replacement
+	      if(i < DeferredSpawnCache::MAX_ENTRIES) {
+		evicted = cache->tasks[i];
+		cache->events[i] = start_event;
+		cache->tasks[i] = task;
+		cache->counts[i] = 1;
+		task->add_reference(); // cache holds a reference now too
+	      }
+	    }
+	  }
+	  // decrement the refcount on a task we evicted (if any)
+	  if(evicted)
+	    evicted->remove_reference();
+
+	  // if we found a leader, try to add ourselves to their list
+	  if(leader) {
+	    bool added = leader->deferred_spawn.add_task(task, poisoned);
+            leader->remove_reference();  // safe to let go of this now
+            if(added) {
+	      // success - nothing more needs to be done here
+	      return;
+	    } else {
+	      // failure, so no deferral is needed - fall through to
+	      //  enqueue-or-cancel code below
+	      new_deferral = false;
+	    }
+	  }
+	}
+
+	if(new_deferral) {
+	  task->deferred_spawn.defer(this, task, start_impl, start_gen);
+	  return;
+	}
+      }
+
+      // precondition is either triggered or poisoned
+      if(poisoned) {
+	log_poison.info() << "cancelling poisoned task - task=" << task << " after=" << task->get_finish_event();
+	task->handle_poisoned_precondition(start_event);
+      } else {
+	enqueue_task(task);
+      }
+    }
+
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -479,10 +570,12 @@ namespace Realm {
 	members_valid(false), members_requested(false), next_free(0)
       , ready_task_count(0)
     {
+      deferred_spawn_cache.clear();
     }
 
     ProcessorGroup::~ProcessorGroup(void)
     {
+      deferred_spawn_cache.flush();
       delete ready_task_count;
     }
 
@@ -531,11 +624,12 @@ namespace Realm {
 
     void ProcessorGroup::enqueue_task(Task *task)
     {
-      // put it into the task queue - one of the member procs will eventually grab it
-      if(task->mark_ready())
-	task_queue.put(task, task->priority);
-      else
-	task->mark_finished(false /*!successful*/);
+      task_queue.enqueue_task(task);
+    }
+
+    void ProcessorGroup::enqueue_tasks(Task::TaskList& tasks)
+    {
+      task_queue.enqueue_tasks(tasks);
     }
 
     void ProcessorGroup::add_to_group(ProcessorGroup *group)
@@ -591,21 +685,7 @@ namespace Realm {
       get_runtime()->optable.add_local_operation(finish_event->make_event(finish_gen),
 						 task);
 
-      if(start_event.exists()) {
-	EventImpl *start_impl = get_runtime()->get_event_impl(start_event);
-	EventImpl::gen_t start_gen = ID(start_event).event_generation();
-	bool poisoned = false;
-	if(start_impl->has_triggered(start_gen, poisoned)) {
-	  if(poisoned) {
-	    log_poison.info() << "cancelling poisoned task - task=" << task << " after=" << task->get_finish_event();
-	    task->handle_poisoned_precondition(start_event);
-	  } else
-	    enqueue_task(task);
-	} else {
-	  task->deferred_spawn.defer(this, task, start_impl, start_gen);
-	}
-      } else
-	enqueue_task(task);
+      enqueue_or_defer_task(task, start_event, &deferred_spawn_cache);
     }
 
 
@@ -688,6 +768,12 @@ namespace Realm {
       assert(0);
     }
 
+    void RemoteProcessor::enqueue_tasks(Task::TaskList& tasks)
+    {
+      // should never be called
+      assert(0);
+    }
+
     void RemoteProcessor::add_to_group(ProcessorGroup *group)
     {
       // not currently supported
@@ -749,6 +835,7 @@ namespace Realm {
     , ready_task_count(stringbuilder() << "realm/proc " << me << "/ready tasks")
   {
     task_queue.set_gauge(&ready_task_count);
+    deferred_spawn_cache.clear();
   }
 
   LocalTaskProcessor::~LocalTaskProcessor(void)
@@ -787,11 +874,12 @@ namespace Realm {
 
   void LocalTaskProcessor::enqueue_task(Task *task)
   {
-    // just jam it into the task queue
-    if(task->mark_ready())
-      task_queue.put(task, task->priority);
-    else
-      task->mark_finished(false /*!successful*/);
+    task_queue.enqueue_task(task);
+  }
+
+  void LocalTaskProcessor::enqueue_tasks(Task::TaskList& tasks)
+  {
+    task_queue.enqueue_tasks(tasks);
   }
 
   void LocalTaskProcessor::spawn_task(Processor::TaskFuncID func_id,
@@ -808,22 +896,7 @@ namespace Realm {
     get_runtime()->optable.add_local_operation(finish_event->make_event(finish_gen),
 					       task);
 
-    // if the start event has already triggered, we can enqueue right away
-    if(start_event.exists()) {
-      EventImpl *start_impl = get_runtime()->get_event_impl(start_event);
-      EventImpl::gen_t start_gen = ID(start_event).event_generation();
-      bool poisoned = false;
-      if(start_impl->has_triggered(start_gen, poisoned)) {
-	if(poisoned) {
-	  log_poison.info() << "cancelling poisoned task - task=" << task << " after=" << task->get_finish_event();
-	  task->handle_poisoned_precondition(start_event);
-	} else
-	  enqueue_task(task);
-      } else {
-	task->deferred_spawn.defer(this, task, start_impl, start_gen);
-      }
-    } else
-      enqueue_task(task);
+    enqueue_or_defer_task(task, start_event, &deferred_spawn_cache);
   }
 
   void LocalTaskProcessor::register_task(Processor::TaskFuncID func_id,
@@ -917,6 +990,7 @@ namespace Realm {
 #endif
 
     sched->shutdown();
+    deferred_spawn_cache.flush();
   }
   
 

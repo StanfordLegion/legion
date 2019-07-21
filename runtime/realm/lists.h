@@ -71,6 +71,70 @@ namespace Realm {
     IntrusiveListLink<T> *lastlink;
   };
 
+  template <typename T>
+  struct IntrusivePriorityListLink {
+    IntrusivePriorityListLink(void);
+    ~IntrusivePriorityListLink(void);
+
+    T *next_within_pri;
+    T **lastlink_within_pri;  // for O(1) append
+    T *next_lower_pri;
+#ifdef DEBUG_REALM_LISTS
+    // actual type is IntrusivePriorityList<T, ...>, but that would be a
+    //  circular definition...
+    void *current_list;
+#endif
+  };
+
+  template <typename T, typename PT, IntrusivePriorityListLink<T> T::*LINK, PT T::*PRI, typename LT>
+  class IntrusivePriorityList {
+  public:
+    typedef T ITEMTYPE;
+    typedef PT PRITYPE;
+    typedef LT LOCKTYPE;
+
+    IntrusivePriorityList(void);
+    ~IntrusivePriorityList(void);
+
+    // "copying" a list is only allowed if both lists are empty (this is most
+    //  useful when creating lists inside of containers)
+    IntrusivePriorityList(const IntrusivePriorityList<T, PT, LINK, PRI, LT>& copy_from);
+    IntrusivePriorityList<T, PT, LINK, PRI, LT>& operator=(const IntrusivePriorityList<T, PT, LINK, PRI, LT>& copy_from);
+
+    template <typename LT2>
+    void swap(IntrusivePriorityList<T, PT, LINK, PRI, LT2>& swap_with);
+
+    // sucks the contents of 'take_from' into the end of the current list
+    template <typename LT2>
+    void absorb_append(IntrusivePriorityList<T, PT, LINK, PRI, LT2>& take_from);
+
+    // places new item at front or back of its priority level
+    void push_back(T *new_entry);
+    void push_front(T *new_entry);
+
+    bool empty(PT min_priority) const;
+
+    // this call isn't thread safe - the pointer returned may be accessed only
+    //  if the caller can guarantee no concurrent pops have occurred
+    T *front(void) const;
+
+    T *pop_front(PT min_priority);
+
+    // calls callback for each element in list
+    template <typename CALLBACK>
+    void foreach(CALLBACK& cb);
+
+    // we don't maintain the size, so this is slow - use only for debugging
+    size_t size(void) const;
+
+    mutable LT lock;
+    T *head;
+    // TODO: consider indexing if many priorities exists simultaneously?
+  };
+
+  template <typename T, typename PT, IntrusivePriorityListLink<T> T::*LINK, PT T::*PRI, typename LT>
+  std::ostream& operator<<(std::ostream& os, const IntrusivePriorityList<T, PT, LINK, PRI, LT>& to_print);
+
 }; // namespace Realm
 
 #include "realm/lists.inl"
