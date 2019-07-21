@@ -384,6 +384,19 @@ namespace Legion {
      */
     class ReplFutureMapImpl : public FutureMapImpl {
     public:
+      struct PendingRequest {
+      public:
+        PendingRequest(void) { }
+        PendingRequest(const DomainPoint &p, DistributedID src,
+                       RtUserEvent done, bool empty)
+          : point(p), src_did(src), done_event(done), allow_empty(empty) { }
+      public:
+        DomainPoint point;
+        DistributedID src_did;
+        RtUserEvent done_event;
+        bool allow_empty;
+      };
+    public:
       ReplFutureMapImpl(ReplicateContext *ctx, Operation *op, 
                         const Domain &shard_domain, Runtime *rt, 
                         DistributedID did, AddressSpaceID owner_space);
@@ -405,6 +418,11 @@ namespace Legion {
     public:
       void set_sharding_function(ShardingFunction *function);
       void handle_future_map_request(Deserializer &derez);
+    protected:
+      void process_future_map_request(const DomainPoint &point,
+                                      bool allow_empty,
+                                      DistributedID src_did,
+                                      RtUserEvent done_event);
     public:
       static void handle_future_map_response(Deserializer &derez,
                                              Runtime *runtime);
@@ -414,6 +432,7 @@ namespace Legion {
       const ApBarrier future_map_barrier;
       const CollectiveID collective_index; // in case we have to do all-to-all
     protected:
+      std::vector<PendingRequest> pending_future_map_requests;
       RtUserEvent sharding_function_ready;
       ShardingFunction *sharding_function;
       bool collective_performed;

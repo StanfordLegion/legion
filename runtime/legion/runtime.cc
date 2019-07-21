@@ -1440,6 +1440,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(is_owner());
       assert(valid);
+      assert(sharding_function_ready.has_triggered());
+      assert(sharding_function != NULL);
 #endif
       const ShardID local_sid = repl_ctx->owner_shard->shard_id;
       AutoLock fm_lock(future_map_lock);
@@ -1459,8 +1461,21 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(sharding_function == NULL);
 #endif
-      sharding_function = function;
+      std::vector<PendingRequest> to_perform;
+      {
+        AutoLock fm_lock(future_map_lock);
+        sharding_function = function;
+        if (!pending_future_map_requests.empty())
+          to_perform.swap(pending_future_map_requests);
+      }
       Runtime::trigger_event(sharding_function_ready);
+      if (!to_perform.empty())
+      {
+        for (std::vector<PendingRequest>::const_iterator it = 
+              to_perform.begin(); it != to_perform.end(); it++)
+          process_future_map_request(it->point, it->allow_empty,
+                                     it->src_did, it->done_event);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -1475,9 +1490,33 @@ namespace Legion {
       derez.deserialize(src_did);
       RtUserEvent done_event;
       derez.deserialize(done_event);
+      // We can't actually process this until we get our sharding function
+      if (sharding_function == NULL)
+      {
+        // Take the lock and see if we lost the race
+        AutoLock fm_lock(future_map_lock);
+        if (sharding_function == NULL)
+        {
+          pending_future_map_requests.push_back(
+              PendingRequest(point, src_did, done_event, allow_empty));
+          return;
+        }
+        // If we have a sharding function now we can fall through and continue
+      }
+      process_future_map_request(point, allow_empty, src_did, done_event);
+    }
 
+    //--------------------------------------------------------------------------
+    void ReplFutureMapImpl::process_future_map_request(const DomainPoint &point,
+                                                       bool allow_empty,
+                                                       DistributedID src_did,
+                                                       RtUserEvent done_event)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(sharding_function != NULL);
+#endif
       const AddressSpaceID source = runtime->determine_owner(src_did);
-
       Future result = get_future(point, allow_empty);
       if (source != runtime->address_space)
       {
