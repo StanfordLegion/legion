@@ -172,7 +172,7 @@ calc_volumes = extern_task(
         R('pxp_x', 'pxp_y'),
         R('pxp_x', 'pxp_y'),
         R('mapsz', 'mapsp1', 'mapsp1_r', 'mapsp2', 'mapsp2_r') + RW('sareap', 'elen')],
-    return_type=legion.int32,
+    return_type=legion.void, # int32,
     calling_convention='regent')
 
 calc_char_len = extern_task(
@@ -325,7 +325,7 @@ calc_volumes_full = extern_task(
         R('px_x', 'px_y'),
         R('px_x', 'px_y'),
         R('mapsz', 'mapsp1', 'mapsp1_r', 'mapsp2', 'mapsp2_r') + RW('sarea')],
-    return_type=legion.int32,
+    return_type=legion.void, # int32,
     calling_convention='regent')
 
 calc_work = extern_task(
@@ -355,7 +355,7 @@ calc_dt_hydro = extern_task(
     return_type=legion.float64,
     calling_convention='regent')
 
-calc_global_dt = extern_task(
+calc_global_dt = legion.extern_task(
     task_id=10032,
     argument_types=[legion.float64, legion.float64, legion.float64, legion.float64, legion.float64, legion.float64, legion.float64, legion.int64],
     privileges=[],
@@ -376,7 +376,11 @@ validate_output_sequential = legion.extern_task(
     return_type=legion.void,
     calling_convention='regent')
 
-@task(task_id=2) # , inner=True
+@task(leaf=True, return_type=legion.float64)
+def min_task(a, b):
+    return min(a, b)
+
+@task(task_id=2, replicable=True, inner=True)
 def main():
     print_once('Running pennant.py')
 
@@ -794,14 +798,15 @@ def main():
                 dt,
                 True)
 
-            futures = index_launch(
+            future = index_launch(
                 pieces,
                 calc_dt_hydro,
                 zones_part[ID],
-                dt, conf.dtmax, conf.cfl, conf.cflv, True)
+                dt, conf.dtmax, conf.cfl, conf.cflv, True,
+                reduce='min')
 
             dthydro = conf.dtmax
-            dthydro = min(dthydro, *list(map(lambda x: futures[x].get(), pieces)))
+            dthydro = min_task(dthydro, future)
         else:
             for i in IndexLaunch(pieces):
                 init_step_points(private_part[i], True)
