@@ -378,7 +378,7 @@ validate_output_sequential = legion.extern_task(
 
 @task(leaf=True, return_type=legion.float64)
 def min_task(a, b):
-    return min(a, b)
+    return min(a, b.get())
 
 @task(task_id=2, replicable=True, inner=True)
 def main():
