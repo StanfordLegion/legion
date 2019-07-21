@@ -1898,7 +1898,7 @@ class _TaskLauncher(object):
         return future
 
 class _IndexLauncher(_TaskLauncher):
-    __slots__ = ['task', 'domain', 'global_args', 'local_args', 'region_args', 'future_args', 'future_map']
+    __slots__ = ['task', 'domain', 'global_args', 'local_args', 'region_args', 'future_args', 'reduction_op', 'future_map']
 
     def __init__(self, task, domain):
         super(_IndexLauncher, self).__init__(task)
@@ -1907,6 +1907,7 @@ class _IndexLauncher(_TaskLauncher):
         self.local_args = c.legion_argument_map_create()
         self.region_args = None
         self.future_args = []
+        self.reduction_op = None
         self.future_map = None
 
     def __del__(self):
@@ -1929,6 +1930,9 @@ class _IndexLauncher(_TaskLauncher):
 
     def attach_future_args(self, *args):
         self.future_args = args
+
+    def set_reduction_op(self, op):
+        self.reduction_op = op
 
     def launch(self):
         # Encode global args (if any).
@@ -1960,13 +1964,24 @@ class _IndexLauncher(_TaskLauncher):
             return _my.ctx.current_launch.attach_index_launcher(
                 launcher, root=global_args_root)
 
-        result = c.legion_index_launcher_execute(
-            _my.ctx.runtime, _my.ctx.context, launcher)
+        launch = c.legion_index_launcher_execute
+        redop = []
+        if self.reduction_op is not None:
+            assert self.task.return_type is not None
+            launch = c.legion_index_launcher_execute_reduction
+            redop = [_redop_ids[self.reduction_op][self.task.return_type]]
+
+        result = launch(
+            _my.ctx.runtime, _my.ctx.context, launcher, *redop)
         c.legion_index_launcher_destroy(launcher)
 
         # Build future (map) of result.
-        self.future_map = FutureMap(result, value_type=self.task.return_type)
-        c.legion_future_map_destroy(result)
+        if self.reduction_op is not None:
+            self.future_map = Future(result, value_type=self.task.return_type)
+            c.legion_future_destroy(result)
+        else:
+            self.future_map = FutureMap(result, value_type=self.task.return_type)
+            c.legion_future_map_destroy(result)
 
 class _MustEpochLauncher(object):
     __slots__ = ['domain', 'launcher', 'roots', 'has_sublaunchers']
@@ -2104,7 +2119,11 @@ class ConcreteLoopIndex(SymbolicExpr):
     def _legion_preprocess_task_argument(self):
         return self.value
 
-def index_launch(domain, task, *args):
+def index_launch(domain, task, *args, **kwargs):
+    def parse_kwargs(reduce=None):
+        return reduce
+    reduce = parse_kwargs(**kwargs)
+
     if isinstance(domain, Domain):
         domain = domain
     elif isinstance(domain, Ispace):
@@ -2115,6 +2134,7 @@ def index_launch(domain, task, *args):
     args, futures = launcher.gather_futures(args)
     launcher.attach_global_args(*args)
     launcher.attach_future_args(*futures)
+    launcher.set_reduction_op(reduce)
     launcher.launch()
     return launcher.future_map
 
