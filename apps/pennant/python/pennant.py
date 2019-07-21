@@ -47,7 +47,7 @@ def create_partition(is_disjoint, region, c_partition, color_space):
     ipart = Ipartition(c_partition.index_partition, region.ispace, color_space)
     return Partition(region, ipart)
 
-_constant_time_launches = False
+_constant_time_launches = True
 if _constant_time_launches:
     extern_task = legion.extern_task_wrapper
 else:
