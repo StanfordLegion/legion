@@ -1977,7 +1977,7 @@ class _IndexLauncher(_TaskLauncher):
 
         # Build future (map) of result.
         if self.reduction_op is not None:
-            self.future_map = Future(result, value_type=self.task.return_type)
+            self.future_map = Future.from_cdata(result, value_type=self.task.return_type)
             c.legion_future_destroy(result)
         else:
             self.future_map = FutureMap(result, value_type=self.task.return_type)
