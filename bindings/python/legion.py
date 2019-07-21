@@ -1477,7 +1477,9 @@ class ExternTaskWrapper(object):
         self.__name__ = name
         self.__qualname__ = name
     def __call__(self, *args, **kwargs):
-        return self.thunk(*args, **kwargs).get()
+        f = self.thunk(*args, **kwargs)
+        if f.value_type != void:
+            return f.get()
 
 _next_wrapper_id = 1000
 def extern_task_wrapper(privileges=None, return_type=void, **kwargs):
