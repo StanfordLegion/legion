@@ -348,7 +348,7 @@ calc_dt_hydro = extern_task(
     return_type=legion.float64,
     calling_convention='regent')
 
-calc_global_dt = extern_task(
+calc_global_dt = legion.extern_task(
     task_id=10037,
     argument_types=[legion.float64, legion.float64, legion.float64, legion.float64, legion.float64, legion.float64, legion.float64, legion.int64],
     privileges=[],
