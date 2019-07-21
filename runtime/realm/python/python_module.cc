@@ -378,25 +378,8 @@ namespace Realm {
       resumable_workers.peek(&resumable_priority);
 
       // try to get a new task then
-      // remember where a task has come from in case we want to put it back
-      Task *task = 0;
-      TaskQueue *task_source = 0;
       int task_priority = resumable_priority;
-      for(std::vector<TaskQueue *>::const_iterator it = task_queues.begin();
-	  it != task_queues.end();
-	  it++) {
-	int new_priority;
-	Task *new_task = (*it)->get(&new_priority, task_priority);
-	if(new_task) {
-	  // if we got something better, put back the old thing (if any)
-	  if(task)
-	    task_source->put(task, task_priority, false); // back on front of list
-	  
-	  task = new_task;
-	  task_source = *it;
-	  task_priority = new_priority;
-	}
-      }
+      Task *task = TaskQueue::get_best_task(task_queues, task_priority);
 
       // did we find work to do?
       if(task) {
@@ -653,6 +636,7 @@ namespace Realm {
     , ready_task_count(stringbuilder() << "realm/proc " << me << "/ready tasks")
   {
     task_queue.set_gauge(&ready_task_count);
+    deferred_spawn_cache.clear();
 
     CoreReservationParameters params;
     params.set_num_cores(1);
@@ -688,6 +672,7 @@ namespace Realm {
     log_py.info() << "shutting down";
 
     sched->shutdown();
+    deferred_spawn_cache.flush();
   }
 
   void LocalPythonProcessor::create_interpreter(void)
@@ -807,11 +792,12 @@ namespace Realm {
 
   void LocalPythonProcessor::enqueue_task(Task *task)
   {
-    // just jam it into the task queue, scheduler will take care of the rest
-    if(task->mark_ready())
-      task_queue.put(task, task->priority);
-    else
-      task->mark_finished(false /*!successful*/);
+    task_queue.enqueue_task(task);
+  }
+
+  void LocalPythonProcessor::enqueue_tasks(Task::TaskList& tasks)
+  {
+    task_queue.enqueue_tasks(tasks);
   }
 
   void LocalPythonProcessor::spawn_task(Processor::TaskFuncID func_id,
@@ -827,22 +813,7 @@ namespace Realm {
 			  start_event, finish_event, finish_gen, priority);
     get_runtime()->optable.add_local_operation(finish_event->make_event(finish_gen), task);
 
-    // if the start event has already triggered, we can enqueue right away
-    if(start_event.exists()) {
-      EventImpl *start_impl = get_runtime()->get_event_impl(start_event);
-      EventImpl::gen_t start_gen = ID(start_event).event_generation();
-      bool poisoned = false;
-      if(start_impl->has_triggered(start_gen, poisoned)) {
-	if(poisoned) {
-	  log_poison.info() << "cancelling poisoned task - task=" << task << " after=" << task->get_finish_event();
-	  task->handle_poisoned_precondition(start_event);
-	} else
-	  enqueue_task(task);
-      } else {
-	task->deferred_spawn.defer(this, task, start_impl, start_gen);
-      }
-    } else
-      enqueue_task(task);
+    enqueue_or_defer_task(task, start_event, &deferred_spawn_cache);
   }
 
   void LocalPythonProcessor::add_to_group(ProcessorGroup *group)

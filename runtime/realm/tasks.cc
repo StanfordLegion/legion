@@ -40,6 +40,10 @@ namespace Realm {
       before_event(_before_event), priority(_priority),
       executing_thread(0)
   {
+    // clamp task priority to "finite" range
+    if(priority < TaskQueue::PRI_MIN_FINITE) priority = TaskQueue::PRI_MIN_FINITE;
+    if(priority > TaskQueue::PRI_MAX_FINITE) priority = TaskQueue::PRI_MAX_FINITE;
+
     arglen = _arglen;
     if(arglen <= SHORT_ARGLEN_MAX) {
       if(arglen) {
@@ -224,6 +228,10 @@ namespace Realm {
   // class Task::DeferredSpawn
   //
 
+  Task::DeferredSpawn::DeferredSpawn(void)
+    : is_triggered(false)
+  {}
+
   void Task::DeferredSpawn::defer(ProcessorImpl *_proc, Task *_task,
 				  EventImpl *_wait_on,
 				  EventImpl::gen_t _wait_gen)
@@ -231,19 +239,36 @@ namespace Realm {
     proc = _proc;
     task = _task;
     wait_on = _wait_on->make_event(_wait_gen);
+    {
+      AutoHSLLock al(pending_list_mutex);
+      // insert ourselves in the pending list
+      pending_list.push_back(task);
+    }
     _wait_on->add_waiter(_wait_gen, this);
   }
     
   void Task::DeferredSpawn::event_triggered(bool poisoned)
   {
-    if(poisoned) {
-      // cancel the task - this has to work
-      log_poison.info() << "cancelling poisoned task - task=" << task << " after=" << task->get_finish_event();
-      task->handle_poisoned_precondition(wait_on);
-      return;
+    // record the triggering, which closes the pending_list
+    {
+      AutoHSLLock al(pending_list_mutex);
+      is_poisoned = poisoned;
+      is_triggered = true;
     }
-
-    proc->enqueue_task(task);
+    if(poisoned) {
+      // hold a reference on this task while we cancel a bunch of tasks including ourself
+      task->add_reference();
+      while(!pending_list.empty(INT_MIN)) {
+        Task *to_cancel = pending_list.pop_front(INT_MIN);
+        // cancel the task - this has to work
+        log_poison.info() << "cancelling poisoned task - task=" << to_cancel << " after=" << to_cancel->get_finish_event();
+        to_cancel->handle_poisoned_precondition(wait_on);
+      }
+      task->remove_reference();
+    } else {
+      //log_task.print() << "enqueuing " << pending_list.size() << " tasks";
+      proc->enqueue_tasks(pending_list);
+    }
   }
 
   void Task::DeferredSpawn::print(std::ostream& os) const
@@ -253,7 +278,160 @@ namespace Realm {
 
   Event Task::DeferredSpawn::get_finish_event(void) const
   {
+    // TODO: change this interface to return multiple finish events
     return task->get_finish_event();
+  }
+
+  // attempts to add another task to the this deferred spawn group -
+  // returns true on success, or false if the event has already
+  //  triggered, in which case 'poisoned' is set appropriately
+  bool Task::DeferredSpawn::add_task(Task *to_add, bool& poisoned)
+  {
+    assert(to_add->before_event == wait_on);
+    bool ok;
+    {
+      AutoHSLLock al(pending_list_mutex);
+      if(is_triggered) {
+	ok = false;
+	poisoned = is_poisoned;
+      } else {
+	ok = true;
+	pending_list.push_back(to_add);
+      }
+    }
+    return ok;
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class TaskQueue
+  //
+
+  TaskQueue::TaskQueue(void)
+    : task_count_gauge(0)
+  {}
+
+  void TaskQueue::add_subscription(NotificationCallback *callback,
+				   priority_t higher_than /*= PRI_NEG_INF*/)
+  {
+    AutoHSLLock al(mutex);
+    callbacks.push_back(callback);
+    callback_priorities.push_back(higher_than);
+  }
+
+  void TaskQueue::set_gauge(ProfilingGauges::AbsoluteRangeGauge<int> *new_gauge)
+  {
+    task_count_gauge = new_gauge;
+  }
+
+  // gets highest priority task available from any task queue
+  /*static*/ Task *TaskQueue::get_best_task(const std::vector<TaskQueue *>& queues,
+					    int& task_priority)
+  {
+    // remember where a task has come from in case we want to put it back
+    Task *task = 0;
+    TaskQueue *task_source = 0;
+
+    for(std::vector<TaskQueue *>::const_iterator it = queues.begin();
+	it != queues.end();
+	it++) {
+      Task *new_task;
+      {
+	AutoHSLLock al((*it)->mutex);
+	new_task = (*it)->ready_task_list.pop_front(task_priority+1);
+      }
+      if(new_task) {
+	if((*it)->task_count_gauge)
+	  *((*it)->task_count_gauge) -= 1;
+
+	// if we got something better, put back the old thing (if any)
+	if(task) {
+	  {
+	    AutoHSLLock al(task_source->mutex);
+	    task_source->ready_task_list.push_front(task);
+	  }
+	  if(task_source->task_count_gauge)
+	    (*task_source->task_count_gauge) += 1;
+	}
+	  
+	task = new_task;
+	task_source = *it;
+	task_priority = task->priority;
+      }
+    }
+
+    return task;
+  }
+
+  void TaskQueue::enqueue_task(Task *task)
+  {
+    priority_t notify_priority = PRI_NEG_INF;
+
+    // just jam it into the task queue
+    if(task->mark_ready()) {
+      {
+	AutoHSLLock al(mutex);
+	if(ready_task_list.empty(task->priority))
+	  notify_priority = task->priority;
+	ready_task_list.push_back(task);
+      }
+
+      if(task_count_gauge)
+	*task_count_gauge += 1;
+
+      if(notify_priority > PRI_NEG_INF)
+	for(size_t i = 0; i < callbacks.size(); i++)
+	  if(notify_priority >= callback_priorities[i])
+	    callbacks[i]->item_available(notify_priority);
+    } else
+      task->mark_finished(false /*!successful*/);
+  }
+
+  class ReadyMarker {
+  public:
+    ReadyMarker() : count(0) {}
+
+    void operator()(Task *task)
+    {
+      task->mark_ready();
+      count++;
+    }
+
+    size_t count;
+  };
+
+  void TaskQueue::enqueue_tasks(Task::TaskList& tasks)
+  {
+    // early out if there are no tasks to add
+    if(tasks.empty(PRI_NEG_INF)) return;
+
+    // mark all tasks as ready - we lose the ability to filter out those
+    //  that have been cancelled, but that'll happen in mark_started too,
+    //  and it saves us from messing with the list structure
+    ReadyMarker marker;
+    tasks.foreach(marker);
+
+    // we'll tentatively notify based on the highest priority task to be
+    //  added
+    priority_t notify_priority = tasks.front()->priority;
+
+    {
+      AutoHSLLock al(mutex);
+      // cancel notification if we already have equal/higher priority tasks
+      if(!ready_task_list.empty(notify_priority))
+	notify_priority = PRI_NEG_INF;
+      // absorb new list into ours
+      ready_task_list.absorb_append(tasks);
+    }
+
+    if(task_count_gauge)
+      *task_count_gauge += marker.count;
+
+    if(notify_priority > PRI_NEG_INF)
+      for(size_t i = 0; i < callbacks.size(); i++)
+	if(notify_priority >= callback_priorities[i])
+	  callbacks[i]->item_available(notify_priority);
   }
 
 
@@ -677,25 +855,8 @@ namespace Realm {
 	resumable_workers.peek(&resumable_priority);
 
 	// try to get a new task then
-	// remember where a task has come from in case we want to put it back
-	Task *task = 0;
-	TaskQueue *task_source = 0;
 	int task_priority = resumable_priority;
-	for(std::vector<TaskQueue *>::const_iterator it = task_queues.begin();
-	    it != task_queues.end();
-	    it++) {
-	  int new_priority;
-	  Task *new_task = (*it)->get(&new_priority, task_priority);
-	  if(new_task) {
-	    // if we got something better, put back the old thing (if any)
-	    if(task)
-	      task_source->put(task, task_priority, false); // back on front of list
-	  
-	    task = new_task;
-	    task_source = *it;
-	    task_priority = new_priority;
-	  }
-	}
+	Task *task = TaskQueue::get_best_task(task_queues, task_priority);
 
 	// did we find work to do?
 	if(task) {

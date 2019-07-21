@@ -50,6 +50,7 @@ namespace Realm {
       virtual ~ProcessorImpl(void);
 
       virtual void enqueue_task(Task *task) = 0;
+      virtual void enqueue_tasks(Task::TaskList& tasks) = 0;
 
       virtual void spawn_task(Processor::TaskFuncID func_id,
 			      const void *args, size_t arglen,
@@ -77,6 +78,33 @@ namespace Realm {
       virtual void execute_task(Processor::TaskFuncID func_id,
 				const ByteArrayRef& task_args);
 
+      struct DeferredSpawnCache {
+	static const size_t MAX_ENTRIES = 4;
+	GASNetHSL mutex;
+	Event events[MAX_ENTRIES];
+	Task *tasks[MAX_ENTRIES];
+	int counts[MAX_ENTRIES];
+
+	void clear()
+	{
+	  for(size_t i = 0; i < MAX_ENTRIES; i++) events[i] = Event::NO_EVENT;
+	  for(size_t i = 0; i < MAX_ENTRIES; i++) tasks[i] = 0;
+	  for(size_t i = 0; i < MAX_ENTRIES; i++) counts[i] = 0;
+	}
+
+	void flush()
+	{
+	  for(size_t i = 0; i < MAX_ENTRIES; i++)
+	    if(tasks[i])
+	      tasks[i]->remove_reference();
+	  clear();
+	}
+      };
+
+      // helper function for spawn implementations
+      void enqueue_or_defer_task(Task *task, Event start_event,
+				 DeferredSpawnCache *cache);
+
     public:
       Processor me;
       Processor::Kind kind;
@@ -91,6 +119,7 @@ namespace Realm {
       virtual ~LocalTaskProcessor(void);
 
       virtual void enqueue_task(Task *task);
+      virtual void enqueue_tasks(Task::TaskList& tasks);
 
       virtual void spawn_task(Processor::TaskFuncID func_id,
 			      const void *args, size_t arglen,
@@ -116,8 +145,9 @@ namespace Realm {
       void set_scheduler(ThreadedTaskScheduler *_sched);
 
       ThreadedTaskScheduler *sched;
-      PriorityQueue<Task *, GASNetHSL> task_queue;
+      TaskQueue task_queue; // ready tasks
       ProfilingGauges::AbsoluteRangeGauge<int> ready_task_count;
+      DeferredSpawnCache deferred_spawn_cache;
 
       struct TaskTableEntry {
 	Processor::TaskFuncPtr fnptr;
@@ -175,6 +205,7 @@ namespace Realm {
       virtual ~RemoteProcessor(void);
 
       virtual void enqueue_task(Task *task);
+      virtual void enqueue_tasks(Task::TaskList& tasks);
 
       virtual void add_to_group(ProcessorGroup *group);
 
@@ -202,6 +233,7 @@ namespace Realm {
       void get_group_members(std::vector<Processor>& member_list);
 
       virtual void enqueue_task(Task *task);
+      virtual void enqueue_tasks(Task::TaskList& tasks);
 
       virtual void add_to_group(ProcessorGroup *group);
 
@@ -222,8 +254,9 @@ namespace Realm {
 
       void request_group_members(void);
 
-      PriorityQueue<Task *, GASNetHSL> task_queue;
+      TaskQueue task_queue; // ready tasks
       ProfilingGauges::AbsoluteRangeGauge<int> *ready_task_count;
+      DeferredSpawnCache deferred_spawn_cache;
     };
     
     // a task registration can take a while if remote processors and/or JITs are

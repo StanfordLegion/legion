@@ -74,18 +74,31 @@ namespace Realm {
       Event before_event;
       int priority;
 
+      // intrusive task list - used for pending, ready, and suspended tasks
+      IntrusivePriorityListLink<Task> tl_link;
+      typedef IntrusivePriorityList<Task, int, &Task::tl_link, &Task::priority, DummyLock> TaskList;
+
       class DeferredSpawn : public EventWaiter {
       public:
+	DeferredSpawn(void);
 	void defer(ProcessorImpl *_proc, Task *_task,
 		   EventImpl *_wait_on, EventImpl::gen_t _wait_gen);
 	virtual void event_triggered(bool poisoned);
 	virtual void print(std::ostream& os) const;
 	virtual Event get_finish_event(void) const;
 
+	// attempts to add another task to the this deferred spawn group -
+	// returns true on success, or false if the event has already
+	//  triggered, in which case 'poisoned' is set appropriately
+	bool add_task(Task *to_add, bool& poisoned);
+
       protected:
 	ProcessorImpl *proc;
 	Task *task;
 	Event wait_on;
+	GASNetHSL pending_list_mutex;
+	TaskList pending_list;
+	bool is_triggered, is_poisoned;
       };
       DeferredSpawn deferred_spawn;
       
@@ -93,6 +106,42 @@ namespace Realm {
       virtual void mark_completed(void);
 
       Thread *executing_thread;
+    };
+
+    class TaskQueue {
+    public:
+      TaskQueue(void);
+
+      // we used most of the signed integer range for priorities - we do borrow a 
+      //  few of the extreme values to make sure we have "infinity" and "negative infinity"
+      //  and that we don't run into problems with -INT_MIN
+      typedef int priority_t;
+      static const priority_t PRI_MAX_FINITE = INT_MAX - 1;
+      static const priority_t PRI_MIN_FINITE = -(INT_MAX - 1);
+      static const priority_t PRI_POS_INF = PRI_MAX_FINITE + 1;
+      static const priority_t PRI_NEG_INF = PRI_MIN_FINITE - 1;
+
+      class NotificationCallback {
+      public:
+	virtual void item_available(priority_t item_priority) = 0;
+      };
+
+      GASNetHSL mutex;
+      Task::TaskList ready_task_list;
+      std::vector<NotificationCallback *> callbacks;
+      std::vector<priority_t> callback_priorities;
+      ProfilingGauges::AbsoluteRangeGauge<int> *task_count_gauge;
+
+      void add_subscription(NotificationCallback *callback, priority_t higher_than = PRI_NEG_INF);
+
+      void set_gauge(ProfilingGauges::AbsoluteRangeGauge<int> *new_gauge);
+
+      // gets highest priority task available from any task queue in list
+      static Task *get_best_task(const std::vector<TaskQueue *>& queues,
+				 int& task_priority);
+
+      void enqueue_task(Task *task);
+      void enqueue_tasks(Task::TaskList& tasks);
     };
 
     // a task scheduler in which one or more worker threads execute tasks from one
@@ -106,8 +155,6 @@ namespace Realm {
       ThreadedTaskScheduler(void);
 
       virtual ~ThreadedTaskScheduler(void);
-
-      typedef PriorityQueue<Task *, GASNetHSL> TaskQueue;
 
       virtual void add_task_queue(TaskQueue *queue);
 
@@ -135,6 +182,9 @@ namespace Realm {
       virtual void worker_sleep(Thread *switch_to) = 0;
       virtual void worker_wake(Thread *to_wake) = 0;
       virtual void worker_terminate(Thread *switch_to) = 0;
+
+      // gets highest priority task available from any task queue
+      Task *get_best_ready_task(int& task_priority);
 
       GASNetHSL lock;
       std::vector<TaskQueue *> task_queues;
@@ -196,14 +246,24 @@ namespace Realm {
       template <typename PQ>
       class WorkCounterUpdater : public PQ::NotificationCallback {
       public:
-        WorkCounterUpdater(ThreadedTaskScheduler *_sched) : sched(_sched) {}
-	virtual bool item_available(typename PQ::ITEMTYPE, typename PQ::priority_t) 
+        WorkCounterUpdater(ThreadedTaskScheduler *sched)
+	  : work_counter(&sched->work_counter)
+	{}
+
+	// TaskQueue-style
+	virtual void item_available(typename PQ::priority_t)
+	{
+	  work_counter->increment_counter();
+	}
+
+	// PriorityQueue-style
+	virtual bool item_available(Thread *, typename PQ::priority_t) 
 	{ 
-	  sched->work_counter.increment_counter();
+	  work_counter->increment_counter();
 	  return false;  // never consumes the work
 	}
       protected:
-	ThreadedTaskScheduler *sched;
+	WorkCounter *work_counter;
       };
 
       WorkCounterUpdater<TaskQueue> wcu_task_queues;

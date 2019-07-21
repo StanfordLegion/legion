@@ -130,7 +130,7 @@ namespace Realm {
   {
     if(op->wants_timeline)
       op->timeline_gpu.record_start_time();
-    op->mark_finished(true);
+    mark_finished(true);
   }
 
 }; // namespace Realm

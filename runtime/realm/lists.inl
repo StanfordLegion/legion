@@ -25,7 +25,7 @@ namespace Realm {
   // class IntrusiveListLink<T>
 
   template <typename T>
-  IntrusiveListLink<T>::IntrusiveListLink(void)
+  inline IntrusiveListLink<T>::IntrusiveListLink(void)
     : next(0)
 #ifdef DEBUG_REALM_LISTS
     , current_list(0)
@@ -33,7 +33,7 @@ namespace Realm {
   {}
 
   template <typename T>
-  IntrusiveListLink<T>::~IntrusiveListLink(void)
+  inline IntrusiveListLink<T>::~IntrusiveListLink(void)
   {
 #ifdef DEBUG_REALM_LISTS
     // should not be deleted while in a list
@@ -67,7 +67,7 @@ namespace Realm {
   // "copying" a list is only allowed if both lists are empty (this is most
   //  useful when creating lists inside of containers)
   template <typename T, IntrusiveListLink<T> T::*LINK, typename LT>
-  IntrusiveList<T, LINK, LT>::IntrusiveList(const IntrusiveList<T, LINK, LT>& copy_from)
+  inline IntrusiveList<T, LINK, LT>::IntrusiveList(const IntrusiveList<T, LINK, LT>& copy_from)
   {
     assert(copy_from.empty());
     head.next = 0;
@@ -75,7 +75,7 @@ namespace Realm {
   }
 
   template <typename T, IntrusiveListLink<T> T::*LINK, typename LT>
-  IntrusiveList<T, LINK, LT>& IntrusiveList<T, LINK, LT>::operator=(const IntrusiveList<T, LINK, LT>& copy_from)
+  inline IntrusiveList<T, LINK, LT>& IntrusiveList<T, LINK, LT>::operator=(const IntrusiveList<T, LINK, LT>& copy_from)
   {
     assert(empty());
     assert(copy_from.empty());
@@ -172,29 +172,364 @@ namespace Realm {
     return popped;
   }
 
-#if 0
-  class IntrusiveList {
-  public:
-    typedef T ITEMTYPE;
-    typedef LT LOCKTYPE;
 
-    IntrusiveList(void);
-    ~IntrusiveList(void);
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class IntrusivePriorityListLink<T>
 
-    template <typename LT2>
-    void swap(IntrusiveList<T, LINK, LT2>& swap_with);
-
-    void append(T *new_entry);
-    void prepend(T *new_entry);
-
-    bool empty(void) const;
-
-    T *front(void) const;
-    T *pop_front(void);
-
-    mutable LT lock;
-    IntrusiveListLink<T> head;
-    IntrusiveListLink<T> *lastlink;
-  };
+  template <typename T>
+  inline IntrusivePriorityListLink<T>::IntrusivePriorityListLink(void)
+    : next_within_pri(0)
+    , lastlink_within_pri(0)
+    , next_lower_pri(0)
+#ifdef DEBUG_REALM_LISTS
+    , current_list(0)
 #endif
+  {}
+
+  template <typename T>
+  inline IntrusivePriorityListLink<T>::~IntrusivePriorityListLink(void)
+  {
+#ifdef DEBUG_REALM_LISTS
+    // should not be deleted while in a list
+    assert(next_within_pri == 0);
+    assert(next_lower_pri == 0);
+    assert(current_list == 0);
+#endif
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class IntrusivePriorityList<T, PT, LINK, PRI, LT>
+
+  template <typename T, typename PT, IntrusivePriorityListLink<T> T::*LINK, PT T::*PRI, typename LT>
+  IntrusivePriorityList<T, PT, LINK, PRI, LT>::IntrusivePriorityList(void)
+    : head(0)
+  {}
+
+  template <typename T, typename PT, IntrusivePriorityListLink<T> T::*LINK, PT T::*PRI, typename LT>
+  IntrusivePriorityList<T, PT, LINK, PRI, LT>::~IntrusivePriorityList(void)
+  {
+#ifdef DEBUG_REALM_LISTS
+    lock.lock();
+    // list should be empty when deleted
+    assert(head == 0);
+#endif
+  }
+
+  // "copying" a list is only allowed if both lists are empty (this is most
+  //  useful when creating lists inside of containers)
+  template <typename T, typename PT, IntrusivePriorityListLink<T> T::*LINK, PT T::*PRI, typename LT>
+  IntrusivePriorityList<T, PT, LINK, PRI, LT>::IntrusivePriorityList(const IntrusivePriorityList<T, PT, LINK, PRI, LT>& copy_from)
+    : head(0)
+  {
+    assert(copy_from.empty());
+  }
+
+  template <typename T, typename PT, IntrusivePriorityListLink<T> T::*LINK, PT T::*PRI, typename LT>
+  IntrusivePriorityList<T, PT, LINK, PRI, LT>& IntrusivePriorityList<T, PT, LINK, PRI, LT>::operator=(const IntrusivePriorityList<T, PT, LINK, PRI, LT>& copy_from)
+  {
+    assert(empty());
+    assert(copy_from.empty());
+    return *this;
+  } 
+
+#ifdef DEBUG_REALM_LISTS
+  template <typename T, IntrusivePriorityListLink<T> T::*LINK>
+  static void fixup_current_list_pointers(T *head, void *from, void *to)
+  {
+    T *nextp = head;
+    while(nextp != 0) {
+      T *cur = nextp;
+      nextp = (nextp->*LINK).next_lower_pri;
+      while(cur != 0) {
+	assert((cur->*LINK).current_list == from);
+	(cur->*LINK).current_list = to;
+	cur = (cur->*LINK).next_within_pri;
+      }
+    }
+  }
+#endif
+
+  template <typename T, typename PT, IntrusivePriorityListLink<T> T::*LINK, PT T::*PRI, typename LT>
+  template <typename LT2>
+  void IntrusivePriorityList<T, PT, LINK, PRI, LT>::swap(IntrusivePriorityList<T, PT, LINK, PRI, LT2>& swap_with)
+  {
+    lock.lock();
+    swap_with.lock.lock();
+    std::swap(head, swap_with.head);
+#ifdef DEBUG_REALM_LISTS
+    // fix current_list pointers
+    fixup_current_list_pointers<T, LINK>(head, &swap_with, this);
+    fixup_current_list_pointers<T, LINK>(swap_with.head, this, &swap_with);
+#endif
+    swap_with.lock.unlock();
+    lock.unlock();
+  }
+
+    // sucks the contents of 'take_from' into the end of the current list
+  template <typename T, typename PT, IntrusivePriorityListLink<T> T::*LINK, PT T::*PRI, typename LT>
+  template <typename LT2>
+  void IntrusivePriorityList<T, PT, LINK, PRI, LT>::absorb_append(IntrusivePriorityList<T, PT, LINK, PRI, LT2>& take_from)
+  {
+    lock.lock();
+    take_from.lock.lock();
+#ifdef DEBUG_REALM_LISTS
+    size_t exp_size = size() + take_from.size();
+    // fix current_list pointers before we tear lists apart
+    fixup_current_list_pointers<T, LINK>(take_from.head, &take_from, this);
+#endif
+    T **curdst = &head;
+    T *cursrc = take_from.head;
+    while(cursrc) {
+      // have something to merge
+
+      // first, skip over any tiers that are higher priority in destination
+      while(*curdst && ((*curdst)->*PRI > cursrc->*PRI))
+	curdst = &(((*curdst)->*LINK).next_lower_pri);
+
+      // if no equal/lower priority stuff left in destination, absorb rest
+      //  of entries in one go
+      if(!*curdst) {
+	*curdst = cursrc;
+	break;
+      }
+
+      if((*curdst)->*PRI == cursrc->*PRI) {
+	// equal priority - merge tiers
+	T *nextsrc = (cursrc->*LINK).next_lower_pri;
+	*(((*curdst)->*LINK).lastlink_within_pri) = cursrc;
+	((*curdst)->*LINK).lastlink_within_pri = (cursrc->*LINK).lastlink_within_pri;
+#ifdef DEBUG_REALM_LISTS
+	// clean up now-unused pointers to make debugging easier
+	(cursrc->*LINK).next_lower_pri = 0;
+	(cursrc->*LINK).lastlink_within_pri = 0;
+#endif
+	curdst = &(((*curdst)->*LINK).next_lower_pri);
+	cursrc = nextsrc;
+      } else {
+	// new priority level for destination - insert tier as is
+	T *nextsrc = (cursrc->*LINK).next_lower_pri;
+	(cursrc->*LINK).next_lower_pri = *curdst;
+	*curdst = cursrc;
+	curdst = &((cursrc->*LINK).next_lower_pri);
+	cursrc = nextsrc;
+      }
+    }
+    take_from.head = 0;
+#ifdef DEBUG_REALM_LISTS
+    size_t act_size = size();
+    assert(exp_size == act_size);
+#endif
+    take_from.lock.unlock();
+    lock.unlock();
+  }
+
+  // places new item at front or back of its priority level
+  template <typename T, typename PT, IntrusivePriorityListLink<T> T::*LINK, PT T::*PRI, typename LT>
+  void IntrusivePriorityList<T, PT, LINK, PRI, LT>::push_back(T *new_entry)
+  {
+    lock.lock();
+    lock.unlock();
+#ifdef DEBUG_REALM_LISTS
+    // entry being added should be unentangled
+    assert((new_entry->*LINK).next_within_pri == 0);
+    assert((new_entry->*LINK).lastlink_within_pri == 0);
+    assert((new_entry->*LINK).next_lower_pri == 0);
+    size_t exp_size = size() + 1;
+#endif
+    // scan ahead to find right priority level to insert at
+    T **curdst = &head;
+    while(*curdst && ((*curdst)->*PRI > new_entry->*PRI))
+      curdst = &(((*curdst)->*LINK).next_lower_pri);
+
+    if(*curdst && ((*curdst)->*PRI == new_entry->*PRI)) {
+      // insert at back of current tier
+      (new_entry->*LINK).next_within_pri = 0;
+      // lastlink_with_pri and next_lower_pri are don't cares - we are not the first in our tier
+      *(((*curdst)->*LINK).lastlink_within_pri) = new_entry;
+      ((*curdst)->*LINK).lastlink_within_pri = &((new_entry->*LINK).next_within_pri);
+    } else {
+      // start new tier ahead of whatever's left (if anything)
+      (new_entry->*LINK).next_within_pri = 0;
+      (new_entry->*LINK).lastlink_within_pri = &((new_entry->*LINK).next_within_pri);
+      (new_entry->*LINK).next_lower_pri = *curdst;
+      *curdst = new_entry;
+    }
+#ifdef DEBUG_REALM_LISTS
+    assert((new_entry->*LINK).current_list == 0);
+    (new_entry->*LINK).current_list = this;
+    size_t act_size = size();
+    assert(exp_size == act_size);
+#endif
+  }
+
+  template <typename T, typename PT, IntrusivePriorityListLink<T> T::*LINK, PT T::*PRI, typename LT>
+  void IntrusivePriorityList<T, PT, LINK, PRI, LT>::push_front(T *new_entry)
+  {
+    lock.lock();
+    lock.unlock();
+#ifdef DEBUG_REALM_LISTS
+    // entry being added should be unentangled
+    assert((new_entry->*LINK).next_within_pri == 0);
+    assert((new_entry->*LINK).lastlink_within_pri == 0);
+    assert((new_entry->*LINK).next_lower_pri == 0);
+    size_t exp_size = size() + 1;
+#endif
+    // scan ahead to find right priority level to insert at
+    T **curdst = &head;
+    while(*curdst && ((*curdst)->*PRI > new_entry->*PRI))
+      curdst = &(((*curdst)->*LINK).next_lower_pri);
+
+    if(*curdst && ((*curdst)->*PRI == new_entry->*PRI)) {
+      // insert at front of current tier
+      (new_entry->*LINK).next_within_pri = *curdst;
+      (new_entry->*LINK).lastlink_within_pri = ((*curdst)->*LINK).lastlink_within_pri;
+      (new_entry->*LINK).next_lower_pri = ((*curdst)->*LINK).next_lower_pri;
+#ifdef DEBUG_REALM_LISTS
+      // clean up now-unused pointers to make debugging easier
+      ((*curdst)->*LINK).lastlink_within_pri = 0;
+      ((*curdst)->*LINK).next_lower_pri = 0;
+#endif
+      *curdst = new_entry;
+    } else {
+      // start new tier ahead of whatever's left (if anything)
+      (new_entry->*LINK).next_within_pri = 0;
+      (new_entry->*LINK).lastlink_within_pri = &((new_entry->*LINK).next_within_pri);
+      (new_entry->*LINK).next_lower_pri = *curdst;
+      *curdst = new_entry;
+    }
+#ifdef DEBUG_REALM_LISTS
+    assert((new_entry->*LINK).current_list == 0);
+    (new_entry->*LINK).current_list = this;
+    size_t act_size = size();
+    assert(exp_size == act_size);
+#endif
+  }
+
+  template <typename T, typename PT, IntrusivePriorityListLink<T> T::*LINK, PT T::*PRI, typename LT>
+  inline bool IntrusivePriorityList<T, PT, LINK, PRI, LT>::empty(PT min_priority) const
+  {
+    // have to take lock here in order to test priority safely
+    lock.lock();
+    bool found = (head != 0) && (head->*PRI >= min_priority);
+    lock.unlock();
+    return !found;
+  }
+
+  // this call isn't thread safe - the pointer returned may be accessed only
+  //  if the caller can guarantee no concurrent pops have occurred
+  template <typename T, typename PT, IntrusivePriorityListLink<T> T::*LINK, PT T::*PRI, typename LT>
+  inline T *IntrusivePriorityList<T, PT, LINK, PRI, LT>::front(void) const
+  {
+    return head;
+  }
+
+  template <typename T, typename PT, IntrusivePriorityListLink<T> T::*LINK, PT T::*PRI, typename LT>
+  T *IntrusivePriorityList<T, PT, LINK, PRI, LT>::pop_front(PT min_priority)
+  {
+    lock.lock();
+#ifdef DEBUG_REALM_LISTS
+    size_t exp_size = size();
+#endif
+    T *popped = ((head && (head->*PRI >= min_priority)) ? head : 0);
+    if(popped) {
+#ifdef DEBUG_REALM_LISTS
+      exp_size--;
+#endif
+      if((popped->*LINK).next_within_pri != 0) {
+	// others in tier - next one becomes head
+        head = (popped->*LINK).next_within_pri;
+	(head->*LINK).lastlink_within_pri = (popped->*LINK).lastlink_within_pri;
+        (head->*LINK).next_lower_pri = (popped->*LINK).next_lower_pri;
+      } else {
+	// was only one in tier - point head at next priority tier
+        head = (popped->*LINK).next_lower_pri;
+      }
+#ifdef DEBUG_REALM_LISTS
+      assert((popped->*LINK).current_list == this);
+      (popped->*LINK).current_list = 0;
+      // clean up now-unused pointers to make debugging easier
+      (popped->*LINK).next_within_pri = 0;
+      (popped->*LINK).lastlink_within_pri = 0;
+      (popped->*LINK).next_lower_pri = 0;
+#endif
+    }
+#ifdef DEBUG_REALM_LISTS
+    size_t act_size = size();
+    assert(exp_size == act_size);
+#endif
+    lock.unlock();
+    return popped;
+  }
+
+  // calls callback for each element in list
+  template <typename T, typename PT, IntrusivePriorityListLink<T> T::*LINK, PT T::*PRI, typename LT>
+  template <typename CALLBACK>
+  inline void IntrusivePriorityList<T, PT, LINK, PRI, LT>::foreach(CALLBACK& cb)
+  {
+    lock.lock();
+    T *cur = head;
+    while(cur) {
+      cb(cur);
+      T *cur2 = cur;
+      while((cur2->*LINK).next_within_pri != 0) {
+        cur2 = (cur2->*LINK).next_within_pri;
+	cb(cur2);
+      }
+      cur = (cur->*LINK).next_lower_pri;
+    }
+    lock.unlock();
+  }
+
+  template <typename T, typename PT, IntrusivePriorityListLink<T> T::*LINK, PT T::*PRI, typename LT>
+  size_t IntrusivePriorityList<T, PT, LINK, PRI, LT>::size(void) const
+  {
+    size_t count = 0;
+    lock.lock();
+    const T *cur = head;
+    while(cur) {
+      count++;
+      const T *cur2 = cur;
+      while((cur2->*LINK).next_within_pri != 0) {
+        cur2 = (cur2->*LINK).next_within_pri;
+#ifdef DEBUG_REALM_LISTS
+	assert(cur2->*PRI == cur->*PRI);
+	assert((cur2->*LINK).lastlink_within_pri == 0);
+	assert((cur2->*LINK).next_lower_pri == 0);
+#endif
+	count++;
+      }
+#ifdef DEBUG_REALM_LISTS
+      assert((cur->*LINK).lastlink_within_pri == &((cur2->*LINK).next_within_pri));
+#endif
+      cur = (cur->*LINK).next_lower_pri;
+    }
+    lock.unlock();
+    return count;
+  }
+
+  template <typename T, typename PT, IntrusivePriorityListLink<T> T::*LINK, PT T::*PRI, typename LT>
+  std::ostream& operator<<(std::ostream& os, const IntrusivePriorityList<T, PT, LINK, PRI, LT>& to_print)
+  {
+    to_print.lock.lock();
+    os << "PriList(" << ((void *)&to_print) << ") {\n";
+    const T *cur = to_print.head;
+    while(cur) {
+      os << "  [" << (cur->*PRI) << "]: " << ((void *)cur);
+      const T *cur2 = (cur->*LINK).next_within_pri;
+      while(cur2) {
+	os << ", " << ((void *)cur2);
+	cur2 = (cur2->*LINK).next_within_pri;
+      }
+      os << "\n";
+      cur = (cur->*LINK).next_lower_pri;
+    }
+    os << "}\n";
+    to_print.lock.unlock();
+    return os;
+  }
+
+
 }; // namespace Realm
