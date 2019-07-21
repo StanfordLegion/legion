@@ -344,7 +344,7 @@ namespace Legion {
                             const char *warning_string = NULL);
       virtual void wait_all_results(bool silence_warnings = true,
                                     const char *warning_string = NULL);
-      void complete_all_futures(void);
+      virtual void complete_all_futures(void);
       bool reset_all_futures(void);
     public:
       virtual void get_all_futures(std::map<DomainPoint,Future> &futures);
@@ -400,6 +400,8 @@ namespace Legion {
       virtual void get_all_futures(std::map<DomainPoint,Future> &futures);
       virtual void wait_all_results(bool silence_warnings = true,
                                     const char *warning_string = NULL);
+    public:
+      virtual void complete_all_futures(void);
     public:
       void set_sharding_function(ShardingFunction *function);
       void handle_future_map_request(Deserializer &derez);

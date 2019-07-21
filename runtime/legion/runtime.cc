@@ -1434,6 +1434,25 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void ReplFutureMapImpl::complete_all_futures(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(is_owner());
+      assert(valid);
+#endif
+      const ShardID local_sid = repl_ctx->owner_shard->shard_id;
+      AutoLock fm_lock(future_map_lock);
+      for (std::map<DomainPoint,Future>::const_iterator it = 
+            futures.begin(); it != futures.end(); it++)
+      {
+        // Only complete futures that came from our shard
+        if (sharding_function->find_owner(it->first, shard_domain) == local_sid)
+          runtime->help_complete_future(it->second);
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void ReplFutureMapImpl::set_sharding_function(ShardingFunction *function)
     //--------------------------------------------------------------------------
     {
