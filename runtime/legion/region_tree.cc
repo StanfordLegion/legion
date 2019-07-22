@@ -9181,7 +9181,6 @@ namespace Legion {
       assert(!!mask);
 #endif
       std::string result;
-      bool first = true;
       for (std::map<FieldID,FieldInfo>::const_iterator it = fields.begin();
             it != fields.end(); it++)
       {
@@ -9192,9 +9191,6 @@ namespace Legion {
           result += temp;
         }
       }
-#ifdef DEBUG_LEGION
-      assert(!first); // we should have written something
-#endif
       return strdup(result.c_str());
     }
 
