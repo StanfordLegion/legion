@@ -8604,8 +8604,10 @@ class GraphPrinter(object):
                 subprocess.check_call(['dot', '-Tpdf', '-o', pdf_file, dot_file])
                 #subprocess.check_call(['dot', '-Tsvg', '-o', svg_file, dot_file])
                 #subprocess.check_call(['dot', '-Tpng', '-o', png_file, dot_file])
+        except OSError:
+            print("WARNING: graphviz is not installed, skipping generation of "+str(self.name))
         except:
-            print("WARNING: DOT failure, image for graph "+str(self.name)+" not generated")
+            print("WARNING: 'dot' failure, image for graph "+str(self.name)+" not generated")
             subprocess.call(['rm', '-f', 'core', pdf_file])
         # If we are making a zoom graph, then make a directory with the appropriate name
         if zoom_graph:
