@@ -232,19 +232,23 @@ namespace Realm {
     : is_triggered(false)
   {}
 
-  void Task::DeferredSpawn::defer(ProcessorImpl *_proc, Task *_task,
-				  EventImpl *_wait_on,
-				  EventImpl::gen_t _wait_gen)
+  void Task::DeferredSpawn::setup(ProcessorImpl *_proc, Task *_task,
+				  Event _wait_on)
   {
     proc = _proc;
     task = _task;
-    wait_on = _wait_on->make_event(_wait_gen);
+    wait_on = _wait_on;
+  }
+
+  void Task::DeferredSpawn::defer(EventImpl *_wait_impl,
+                                  EventImpl::gen_t _wait_gen)
+  {
     {
       AutoHSLLock al(pending_list_mutex);
       // insert ourselves in the pending list
       pending_list.push_back(task);
     }
-    _wait_on->add_waiter(_wait_gen, this);
+    _wait_impl->add_waiter(_wait_gen, this);
   }
     
   void Task::DeferredSpawn::event_triggered(bool poisoned)

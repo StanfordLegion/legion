@@ -11152,30 +11152,18 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(!!mask);
 #endif
-      char *result = (char*)malloc(LEGION_MAX_FIELDS*4); 
-      bool first = true;
+      std::string result;
       for (std::map<FieldID,FieldInfo>::const_iterator it = fields.begin();
             it != fields.end(); it++)
       {
         if (mask.is_set(it->second.idx))
         {
-          if (first)
-          {
-            sprintf(result,"%d",it->first);
-            first = false;
-          }
-          else
-          {
-            char temp[8];
-            sprintf(temp,",%d",it->first);
-            strcat(result, temp);
-          }
+          char temp[32];
+          snprintf(temp, 32, ",%d", it->first);
+          result += temp;
         }
       }
-#ifdef DEBUG_LEGION
-      assert(!first); // we should have written something
-#endif
-      return result;
+      return strdup(result.c_str());
     }
 
     //--------------------------------------------------------------------------

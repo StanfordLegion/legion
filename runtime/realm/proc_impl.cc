@@ -486,6 +486,9 @@ namespace Realm {
 	// we'll create a new deferral unless we can tack it on to an existing
 	//  one
 	bool new_deferral = true;
+        // we might hit in the cache below, but set up the deferral before to
+        //  avoid race conditions with other tasks being added
+	task->deferred_spawn.setup(this, task, start_event);
 
 	if(cache) {
 	  Task *leader = 0;
@@ -545,7 +548,7 @@ namespace Realm {
 	}
 
 	if(new_deferral) {
-	  task->deferred_spawn.defer(this, task, start_impl, start_gen);
+	  task->deferred_spawn.defer(start_impl, start_gen);
 	  return;
 	}
       }
