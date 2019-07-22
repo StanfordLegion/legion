@@ -81,8 +81,8 @@ namespace Realm {
       class DeferredSpawn : public EventWaiter {
       public:
 	DeferredSpawn(void);
-	void defer(ProcessorImpl *_proc, Task *_task,
-		   EventImpl *_wait_on, EventImpl::gen_t _wait_gen);
+	void setup(ProcessorImpl *_proc, Task *_task, Event _wait_on);
+        void defer(EventImpl *_wait_impl, EventImpl::gen_t _wait_gen);
 	virtual void event_triggered(bool poisoned);
 	virtual void print(std::ostream& os) const;
 	virtual Event get_finish_event(void) const;
