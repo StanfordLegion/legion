@@ -1196,16 +1196,6 @@ namespace Legion {
       FenceOp::trigger_mapping();
     }
 
-    //--------------------------------------------------------------------------
-    unsigned TraceCaptureOp::find_parent_index(unsigned index)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(current_template != NULL);
-#endif
-      return current_template->pre_parent_indices[index];
-    }
-
     /////////////////////////////////////////////////////////////
     // TraceCompleteOp 
     /////////////////////////////////////////////////////////////
@@ -1392,16 +1382,6 @@ namespace Legion {
       FenceOp::trigger_mapping();
     }
 
-    //--------------------------------------------------------------------------
-    unsigned TraceCompleteOp::find_parent_index(unsigned index)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(current_template != NULL);
-#endif
-      return current_template->pre_parent_indices[index];
-    }
-
     /////////////////////////////////////////////////////////////
     // TraceReplayOp
     /////////////////////////////////////////////////////////////
@@ -1453,7 +1433,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       activate_operation();
-      current_template = NULL;
     }
 
     //--------------------------------------------------------------------------
@@ -1558,16 +1537,6 @@ namespace Legion {
 #else
       parent_ctx->update_current_fence(this, false, true);
 #endif
-    }
-
-    //--------------------------------------------------------------------------
-    unsigned TraceReplayOp::find_parent_index(unsigned index)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(current_template != NULL);
-#endif
-      return current_template->pre_parent_indices[index];
     }
 
     /////////////////////////////////////////////////////////////
@@ -1993,7 +1962,6 @@ namespace Legion {
       for (std::vector<PhysicalTemplate*>::reverse_iterator it =
            templates.rbegin(); it != templates.rend(); ++it)
       {
-        op->set_current_template((*it));
         if ((*it)->check_preconditions(op))
         {
 #ifdef DEBUG_LEGION
@@ -2003,10 +1971,8 @@ namespace Legion {
           // the precondition
           nonreplayable_count = 0;
           current_template = *it;
-          op->set_current_template(NULL);
           return;
         }
-        op->set_current_template(NULL);
       }
     }
 
@@ -2391,9 +2357,8 @@ namespace Legion {
           FieldMaskSet<InstanceView> &views = pre_views.back();
           views.insert(it->first, fields);
           pre_exprs.push_back(user->eq->set_expr);
-          pre_parent_indices.push_back(user->parent);
         }
-      pre_version_infos.resize(pre_parent_indices.size());
+      pre_version_infos.resize(pre_views.size());
       unsigned idx = 0;
       for (Conditions::iterator it = pre.begin(); it != pre.end(); ++it)
       {
@@ -2417,9 +2382,8 @@ namespace Legion {
           FieldMaskSet<InstanceView> &views = post_views.back();
           views.insert(it->first, fields);
           post_exprs.push_back(user->eq->set_expr);
-          post_parent_indices.push_back(user->parent);
         }
-      post_version_infos.resize(post_parent_indices.size());
+      post_version_infos.resize(post_views.size());
       idx = 0;
       for (Conditions::iterator it = post.begin(); it != post.end(); ++it)
         for (FieldMaskSet<ViewUser>::iterator uit = it->second.begin(); uit !=
@@ -3757,11 +3721,9 @@ namespace Legion {
       TraceLocalID op_key = find_trace_local_id(memo);
       unsigned entry = find_memo_entry(memo);
 
-      unsigned parent = -1U;
       LegionList<FieldSet<EquivalenceSet*> >::aligned eqs;
       if (update_validity)
       {
-        parent = memo->get_operation()->find_parent_index(idx);
         memo->get_version_info(idx).get_equivalence_sets()
           .compute_field_sets(user_mask, eqs);
       }
@@ -3778,7 +3740,7 @@ namespace Legion {
           views.insert((*eit)->set_expr, mask);
           if (update_validity)
           {
-            ViewUser *view_user = new ViewUser(usage, entry, parent, (*eit));
+            ViewUser *view_user = new ViewUser(usage, entry, (*eit));
             update_valid_views(memo, view, view_user, usage, mask, true);
           }
         }
@@ -3806,7 +3768,6 @@ namespace Legion {
                                         const FieldMaskSet<InstanceView> &views)
     //--------------------------------------------------------------------------
     {
-      unsigned parent = memo->get_operation()->find_parent_index(idx);
       const VersionInfo &info = memo->get_version_info(idx);
       for (FieldMaskSet<InstanceView>::const_iterator vit = views.begin();
            vit != views.end(); ++vit)
@@ -3819,7 +3780,7 @@ namespace Legion {
                eit != it->elements.end(); ++eit)
           {
             if ((*eit)->set_expr != expr) continue;
-            ViewUser *user = new ViewUser(usage, entry, parent, (*eit));
+            ViewUser *user = new ViewUser(usage, entry, (*eit));
             update_valid_views(memo, vit->first, user, usage,
                 it->set_mask & vit->second, false);
           }

@@ -327,8 +327,6 @@ namespace Legion {
       virtual OpKind get_operation_kind(void) const;
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_mapping(void);
-    public:
-      virtual unsigned find_parent_index(unsigned index);
     protected:
       DynamicTrace *dynamic_trace;
       PhysicalTemplate *current_template;
@@ -361,8 +359,6 @@ namespace Legion {
       virtual OpKind get_operation_kind(void) const;
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_mapping(void);
-    public:
-      virtual unsigned find_parent_index(unsigned index);
     protected:
       PhysicalTemplate *current_template;
       ApEvent template_completion;
@@ -393,13 +389,6 @@ namespace Legion {
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
       virtual void trigger_dependence_analysis(void);
-    public:
-      virtual unsigned find_parent_index(unsigned index);
-    public:
-      void set_current_template(PhysicalTemplate *tpl)
-        { current_template = tpl; }
-    protected:
-      PhysicalTemplate *current_template;
     };
 
     /**
@@ -541,14 +530,11 @@ namespace Legion {
       };
     public:
       struct ViewUser {
-        ViewUser(const RegionUsage &r,
-                 unsigned u, unsigned p,
-                 EquivalenceSet *e)
-          : usage(r), user(u), parent(p), eq(e)
+        ViewUser(const RegionUsage &r, unsigned u, EquivalenceSet *e)
+          : usage(r), user(u), eq(e)
         { }
         const RegionUsage usage;
         unsigned user;
-        unsigned parent;
         EquivalenceSet * const eq;
       };
       struct CachedMapping
@@ -777,11 +763,9 @@ namespace Legion {
       ViewGroups                                         view_groups;
       LegionVector<FieldMaskSet<InstanceView> >::aligned pre_views;
       std::vector<IndexSpaceExpression*>                 pre_exprs;
-      std::vector<unsigned>                              pre_parent_indices;
       LegionVector<VersionInfo>::aligned                 pre_version_infos;
       LegionVector<FieldMaskSet<InstanceView> >::aligned post_views;
       std::vector<IndexSpaceExpression*>                 post_exprs;
-      std::vector<unsigned>                              post_parent_indices;
       LegionVector<VersionInfo>::aligned                 post_version_infos;
       std::set<ViewUser*>                                all_users;
     public:
