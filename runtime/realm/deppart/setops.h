@@ -42,8 +42,9 @@ namespace Realm {
     friend struct RemoteMicroOpMessage<UnionMicroOp<N,T> >;
     static ActiveMessageHandlerReg<RemoteMicroOpMessage<UnionMicroOp<N,T> > > areg;
 
+    friend class PartitioningMicroOp;
     template <typename S>
-    bool serialize_params(S& s) const;
+    bool serialize_params(S& s) const WARN_UNUSED;
 
     // construct from received packet
     template <typename S>
@@ -76,8 +77,9 @@ namespace Realm {
     friend struct RemoteMicroOpMessage<IntersectionMicroOp<N,T> >;
     static ActiveMessageHandlerReg<RemoteMicroOpMessage<IntersectionMicroOp<N,T> > > areg;
 
+    friend class PartitioningMicroOp;
     template <typename S>
-    bool serialize_params(S& s) const;
+    bool serialize_params(S& s) const WARN_UNUSED;
 
     // construct from received packet
     template <typename S>
@@ -109,8 +111,9 @@ namespace Realm {
     friend struct RemoteMicroOpMessage<DifferenceMicroOp<N,T> >;
     static ActiveMessageHandlerReg<RemoteMicroOpMessage<DifferenceMicroOp<N,T> > > areg;
 
+    friend class PartitioningMicroOp;
     template <typename S>
-    bool serialize_params(S& s) const;
+    bool serialize_params(S& s) const WARN_UNUSED;
 
     // construct from received packet
     template <typename S>

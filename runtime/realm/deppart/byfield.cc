@@ -205,18 +205,7 @@ namespace Realm {
     NodeID exec_node = ID(inst).instance_owner_node();
 
     if(exec_node != my_node_id) {
-      // we're going to ship it elsewhere, which means we always need an AsyncMicroOp to
-      //  track it
-      async_microop = new AsyncMicroOp(op, this);
-      op->add_async_work_item(async_microop);
-
-      ActiveMessage<RemoteMicroOpMessage<ByFieldMicroOp<N,T,FT> > > msg(exec_node, 4096);
-      msg->operation = op;
-      msg->async_microop = async_microop;
-      this->serialize_params(msg);
-      msg.commit();
-
-      delete this;
+      forward_microop<ByFieldMicroOp<N,T,FT> >(exec_node, op, this);
       return;
     }
 

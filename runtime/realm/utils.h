@@ -26,6 +26,8 @@
 #include <map>
 #include <cassert>
 
+#define WARN_UNUSED __attribute__((warn_unused_result))
+
 namespace Realm {
     
   // helpers for deleting contents STL containers of pointers-to-things
