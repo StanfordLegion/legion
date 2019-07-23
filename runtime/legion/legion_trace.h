@@ -500,6 +500,57 @@ namespace Legion {
     typedef Memoizable::TraceLocalID TraceLocalID;
 
     /**
+     * \class TraceViewSet
+     */
+    class TraceViewSet {
+    public:
+      TraceViewSet(RegionTreeForest *forest);
+      virtual ~TraceViewSet(void);
+    public:
+      void insert(InstanceView *view,
+                  EquivalenceSet *eq,
+                  const FieldMask &mask);
+      void invalidate(InstanceView *view,
+                      EquivalenceSet *eq,
+                      const FieldMask &mask);
+    public:
+      bool dominates(InstanceView *view,
+                     EquivalenceSet *eq,
+                     FieldMask &non_dominated) const;
+      bool subsumed_by(const TraceViewSet &set) const;
+      bool has_refinements(void) const;
+      bool empty(void) const;
+    public:
+      void dump(void) const;
+    protected:
+      typedef LegionMap<InstanceView*,
+                        FieldMaskSet<EquivalenceSet>  >::aligned Conditions;
+    protected:
+      RegionTreeForest * const forest;
+    protected:
+      Conditions conditions;
+    };
+
+    /**
+     * \class TraceConditionSet
+     */
+    class TraceConditionSet : public TraceViewSet {
+    public:
+      TraceConditionSet(RegionTreeForest *forest);
+      virtual ~TraceConditionSet(void);
+    public:
+      void make_ready(void);
+    public:
+      bool require(Operation *op);
+      void ensure(Operation *op);
+    private:
+      bool cached;
+      // The following containers are populated only when the 'cached' is true.
+      LegionVector<FieldMaskSet<InstanceView> >::aligned views;
+      LegionVector<VersionInfo>::aligned                 version_infos;
+    };
+
+    /**
      * \class PhysicalTemplate
      * This class represents a recipe to reconstruct a physical task graph.
      * A template consists of a sequence of instructions, each of which is
@@ -528,15 +579,16 @@ namespace Legion {
       public:
         PhysicalTemplate *tpl;
       };
-    public:
+    private:
       struct ViewUser {
-        ViewUser(const RegionUsage &r, unsigned u, EquivalenceSet *e)
-          : usage(r), user(u), eq(e)
-        { }
+        ViewUser(const RegionUsage &r, unsigned u, IndexSpaceExpression *e)
+          : usage(r), user(u), expr(e)
+        {}
         const RegionUsage usage;
         unsigned user;
-        EquivalenceSet * const eq;
+        IndexSpaceExpression *expr;
       };
+    private:
       struct CachedMapping
       {
         VariantID               chosen_variant;
@@ -545,12 +597,13 @@ namespace Legion {
         std::vector<Processor>  target_procs;
         std::deque<InstanceSet> physical_instances;
       };
-      typedef LegionMap<TraceLocalID, CachedMapping>::aligned CachedMappings;
-      typedef LegionMap<InstanceView*,
-                        FieldMaskSet<ViewUser> >::aligned            Conditions;
+      typedef LegionMap<TraceLocalID,CachedMapping>::aligned CachedMappings;
+    private:
       typedef LegionMap<InstanceView*,
                         FieldMaskSet<IndexSpaceExpression> >::aligned ViewExprs;
-      typedef std::map<RegionTreeID, std::set<InstanceView*> >       ViewGroups;
+      typedef LegionMap<InstanceView*,
+                        FieldMaskSet<ViewUser> >::aligned             ViewUsers;
+      typedef std::map<RegionTreeID,std::set<InstanceView*> >        ViewGroups;
     public:
       PhysicalTemplate(PhysicalTrace *trace, ApEvent fence_event);
       PhysicalTemplate(const PhysicalTemplate &rhs);
@@ -677,10 +730,13 @@ namespace Legion {
                         const FieldMaskSet<InstanceView> &views);
       void update_valid_views(Memoizable *memo,
                               InstanceView *view,
-                              ViewUser *user,
+                              EquivalenceSet *eq,
                               const RegionUsage &usage,
                               const FieldMask &user_mask,
                               bool invalidates);
+      void add_view_user(InstanceView *view,
+                         ViewUser *user,
+                         const FieldMask &user_mask);
       void record_copy_views(unsigned copy_id,
                              IndexSpaceExpression *expr,
                              const FieldMaskSet<InstanceView> &views);
@@ -705,11 +761,6 @@ namespace Legion {
       unsigned find_event(const ApEvent &event) const;
       void insert_instruction(Instruction *inst);
     private:
-      void record_precondition(InstanceView *view,
-                               ViewUser *user,
-                               const FieldMask &user_mask);
-      bool is_precondition(ViewUser *user);
-    private:
       static bool is_compatible(const RegionUsage &u1,
                                 const RegionUsage &u2);
     private:
@@ -729,11 +780,11 @@ namespace Legion {
     private:
       RtUserEvent replay_ready;
       RtEvent replay_done;
-      std::map<ApEvent, unsigned> event_map;
+      std::map<ApEvent,unsigned> event_map;
       std::vector<Instruction*> instructions;
       std::vector<std::vector<Instruction*> > slices;
       std::vector<std::vector<TraceLocalID> > slice_tasks;
-      std::map<TraceLocalID, unsigned> memo_entries;
+      std::map<TraceLocalID,unsigned> memo_entries;
       std::vector<std::pair<RegionRequirement, InstanceSet> > summary_info;
       std::vector<unsigned> parent_indices;
       struct SummaryOpInfo {
@@ -742,37 +793,36 @@ namespace Legion {
         std::vector<unsigned> parent_indices;
       };
       std::vector<SummaryOpInfo> dedup_summary_ops;
-      std::map<unsigned, unsigned> frontiers;
+      std::map<unsigned,unsigned> frontiers;
 #ifdef LEGION_SPY
       UniqueID prev_fence_uid;
 #endif
     public:
-      ApEvent fence_completion;
-      std::map<TraceLocalID, Memoizable*> operations;
-      std::vector<ApEvent> events;
-      std::vector<ApUserEvent> user_events;
-      std::map<unsigned, unsigned> crossing_events;
+      std::map<TraceLocalID,Memoizable*> operations;
     public:
+      ApEvent                     fence_completion;
+      std::vector<ApEvent>        events;
+      std::vector<ApUserEvent>    user_events;
+      std::map<unsigned,unsigned> crossing_events;
+    private:
       CachedMappings cached_mappings;
-    public:
-      std::map<TraceLocalID,ViewExprs>                   op_views;
-      std::map<unsigned,ViewExprs>                       copy_views;
-    public:
-      Conditions                                         pre, post;
-      Conditions                                         reductions_in_trace;
-      ViewGroups                                         view_groups;
-      LegionVector<FieldMaskSet<InstanceView> >::aligned pre_views;
-      std::vector<IndexSpaceExpression*>                 pre_exprs;
-      LegionVector<VersionInfo>::aligned                 pre_version_infos;
-      LegionVector<FieldMaskSet<InstanceView> >::aligned post_views;
-      std::vector<IndexSpaceExpression*>                 post_exprs;
-      LegionVector<VersionInfo>::aligned                 post_version_infos;
-      std::set<ViewUser*>                                all_users;
-    public:
-      FieldMaskSet<FillView>                             pre_fill_views;
-      FieldMaskSet<FillView>                             post_fill_views;
-    public:
-      std::map<CollectableView*, std::set<ApEvent> >     outstanding_gc_events;
+    private:
+      std::map<TraceLocalID,ViewExprs> op_views;
+      std::map<unsigned,ViewExprs>     copy_views;
+    private:
+      TraceConditionSet   pre, post;
+      ViewGroups          view_groups;
+      ViewUsers           view_users;
+      std::set<ViewUser*> all_users;
+    private:
+      TraceViewSet pre_reductions;
+      TraceViewSet post_reductions;
+      TraceViewSet consumed_reductions;
+    private:
+      FieldMaskSet<FillView> pre_fill_views;
+      FieldMaskSet<FillView> post_fill_views;
+    private:
+      std::map<CollectableView*,std::set<ApEvent> > outstanding_gc_events;
     };
 
     enum InstructionKind

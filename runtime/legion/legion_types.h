@@ -1418,6 +1418,8 @@ namespace Legion {
     class TraceBeginOp;
     class TraceSummaryOp;
     class PhysicalTrace;
+    class TraceViewSet;
+    class TraceConditionSet;
     struct PhysicalTemplate;
     struct Instruction;
     struct GetTermEvent;
