@@ -5614,9 +5614,14 @@ class Operation(object):
                                "operation %s is self interfering in %s") %
                                (req.index,str(self),str(self.context)))
                         return True
-        for point_task in itervalues(self.points):
-            for req in itervalues(point_task.op.reqs):
-                all_reqs.append(req)
+        if self.kind == INDEX_TASK_KIND:
+            for point_task in itervalues(self.points):
+                for req in itervalues(point_task.op.reqs):
+                    all_reqs.append(req)
+        else:
+            for point in itervalues(self.points):
+                for req in itervalues(point.reqs):
+                    all_reqs.append(req)
         # All requirements should be non interfering
         for idx1 in range(0, len(all_reqs)):
             req1 = all_reqs[idx1]
