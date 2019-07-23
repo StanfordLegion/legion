@@ -524,11 +524,11 @@ namespace Legion {
       void dump(void) const;
     protected:
       typedef LegionMap<InstanceView*,
-                        FieldMaskSet<EquivalenceSet>  >::aligned Conditions;
+                        FieldMaskSet<EquivalenceSet>  >::aligned ViewSet;
     protected:
       RegionTreeForest * const forest;
     protected:
-      Conditions conditions;
+      ViewSet conditions;
     };
 
     /**
@@ -558,7 +558,7 @@ namespace Legion {
      * the interpreter state (operations and events). These are initialized
      * before the template gets executed.
      */
-    struct PhysicalTemplate {
+    class PhysicalTemplate {
     public:
       struct ReplaySliceArgs : public LgTaskArgs<ReplaySliceArgs> {
       public:
@@ -608,7 +608,6 @@ namespace Legion {
       PhysicalTemplate(PhysicalTrace *trace, ApEvent fence_event);
       PhysicalTemplate(const PhysicalTemplate &rhs);
     private:
-      friend class PhysicalTrace;
       ~PhysicalTemplate(void);
     public:
       void initialize(Runtime *runtime, ApEvent fence_completion,
@@ -640,9 +639,10 @@ namespace Legion {
                                     Operation *invalidator);
     public:
       void dump_template(void);
+    private:
       void dump_instructions(const std::vector<Instruction*> &instructions);
-    public:
 #ifdef LEGION_SPY
+    public:
       void set_fence_uid(UniqueID fence_uid) { prev_fence_uid = fence_uid; }
       UniqueID get_fence_uid(void) const { return prev_fence_uid; }
 #endif
@@ -761,15 +761,15 @@ namespace Legion {
       unsigned find_event(const ApEvent &event) const;
       void insert_instruction(Instruction *inst);
     private:
-      static bool is_compatible(const RegionUsage &u1,
-                                const RegionUsage &u2);
-    private:
       void find_all_last_users(ViewExprs &view_exprs,
                                std::set<unsigned> &users);
       void find_last_users(InstanceView *view,
                            IndexSpaceExpression *expr,
                            const FieldMask &mask,
                            std::set<unsigned> &users);
+    public:
+      ApEvent get_fence_completion(void)
+        { return fence_completion; }
     private:
       PhysicalTrace *trace;
       volatile bool recording;
@@ -778,13 +778,26 @@ namespace Legion {
       const unsigned fence_completion_id;
       const unsigned replay_parallelism;
     private:
-      RtUserEvent replay_ready;
-      RtEvent replay_done;
+      std::map<TraceLocalID,Memoizable*> operations;
+      std::map<TraceLocalID,unsigned>    memo_entries;
+    private:
+      CachedMappings cached_mappings;
+    private:
+      ApEvent                    fence_completion;
+      std::vector<ApEvent>       events;
+      std::vector<ApUserEvent>   user_events;
       std::map<ApEvent,unsigned> event_map;
-      std::vector<Instruction*> instructions;
+    private:
+      std::vector<Instruction*>               instructions;
       std::vector<std::vector<Instruction*> > slices;
       std::vector<std::vector<TraceLocalID> > slice_tasks;
-      std::map<TraceLocalID,unsigned> memo_entries;
+    private:
+      std::map<unsigned,unsigned> crossing_events;
+      std::map<unsigned,unsigned> frontiers;
+    private:
+      RtUserEvent replay_ready;
+      RtEvent     replay_done;
+    private:
       std::vector<std::pair<RegionRequirement, InstanceSet> > summary_info;
       std::vector<unsigned> parent_indices;
       struct SummaryOpInfo {
@@ -793,19 +806,9 @@ namespace Legion {
         std::vector<unsigned> parent_indices;
       };
       std::vector<SummaryOpInfo> dedup_summary_ops;
-      std::map<unsigned,unsigned> frontiers;
 #ifdef LEGION_SPY
       UniqueID prev_fence_uid;
 #endif
-    public:
-      std::map<TraceLocalID,Memoizable*> operations;
-    public:
-      ApEvent                     fence_completion;
-      std::vector<ApEvent>        events;
-      std::vector<ApUserEvent>    user_events;
-      std::map<unsigned,unsigned> crossing_events;
-    private:
-      CachedMappings cached_mappings;
     private:
       std::map<TraceLocalID,ViewExprs> op_views;
       std::map<unsigned,ViewExprs>     copy_views;
@@ -823,6 +826,8 @@ namespace Legion {
       FieldMaskSet<FillView> post_fill_views;
     private:
       std::map<CollectableView*,std::set<ApEvent> > outstanding_gc_events;
+      friend class PhysicalTrace;
+      friend class Instruction;
     };
 
     enum InstructionKind
@@ -842,7 +847,8 @@ namespace Legion {
      * \class Instruction
      * This class is an abstract parent class for all template instructions.
      */
-    struct Instruction {
+    class Instruction {
+    public:
       Instruction(PhysicalTemplate& tpl, const TraceLocalID &owner);
       virtual ~Instruction(void) {};
       virtual void execute(void) = 0;
@@ -875,7 +881,8 @@ namespace Legion {
      * This instruction has the following semantics:
      *   events[lhs] = operations[rhs].get_memo_completion()
      */
-    struct GetTermEvent : public Instruction {
+    class GetTermEvent : public Instruction {
+    public:
       GetTermEvent(PhysicalTemplate& tpl, unsigned lhs,
                    const TraceLocalID& rhs);
       virtual void execute(void);
@@ -906,7 +913,7 @@ namespace Legion {
                                  const std::map<unsigned, unsigned> &rewrite);
 
     private:
-      friend struct PhysicalTemplate;
+      friend class PhysicalTemplate;
       unsigned lhs;
     };
 
@@ -915,7 +922,8 @@ namespace Legion {
      * This instruction has the following semantics:
      *   events[lhs] = Runtime::create_ap_user_event()
      */
-    struct CreateApUserEvent : public Instruction {
+    class CreateApUserEvent : public Instruction {
+    public:
       CreateApUserEvent(PhysicalTemplate& tpl, unsigned lhs,
                         const TraceLocalID &owner);
       virtual void execute(void);
@@ -946,7 +954,7 @@ namespace Legion {
                                  const std::map<unsigned, unsigned> &rewrite);
 
     private:
-      friend struct PhysicalTemplate;
+      friend class PhysicalTemplate;
       unsigned lhs;
     };
 
@@ -955,7 +963,8 @@ namespace Legion {
      * This instruction has the following semantics:
      *   Runtime::trigger_event(events[lhs], events[rhs])
      */
-    struct TriggerEvent : public Instruction {
+    class TriggerEvent : public Instruction {
+    public:
       TriggerEvent(PhysicalTemplate& tpl, unsigned lhs, unsigned rhs,
                    const TraceLocalID &owner);
       virtual void execute(void);
@@ -986,7 +995,7 @@ namespace Legion {
                                  const std::map<unsigned, unsigned> &rewrite);
 
     private:
-      friend struct PhysicalTemplate;
+      friend class PhysicalTemplate;
       unsigned lhs;
       unsigned rhs;
     };
@@ -996,7 +1005,8 @@ namespace Legion {
      * This instruction has the following semantics:
      *   events[lhs] = Runtime::merge_events(events[rhs])
      */
-    struct MergeEvent : public Instruction {
+    class MergeEvent : public Instruction {
+    public:
       MergeEvent(PhysicalTemplate& tpl, unsigned lhs,
                  const std::set<unsigned>& rhs,
                  const TraceLocalID &owner);
@@ -1028,7 +1038,7 @@ namespace Legion {
                                  const std::map<unsigned, unsigned> &rewrite);
 
     private:
-      friend struct PhysicalTemplate;
+      friend class PhysicalTemplate;
       unsigned lhs;
       std::set<unsigned> rhs;
     };
@@ -1038,7 +1048,7 @@ namespace Legion {
      * This instruction has the following semantics:
      *   events[lhs] = fence_completion
      */
-    struct AssignFenceCompletion : public Instruction {
+    class AssignFenceCompletion : public Instruction {
       AssignFenceCompletion(PhysicalTemplate& tpl, unsigned lhs,
                             const TraceLocalID &owner);
       virtual void execute(void);
@@ -1069,8 +1079,8 @@ namespace Legion {
                                  const std::map<unsigned, unsigned> &rewrite);
 
     private:
-      friend struct PhysicalTemplate;
-      ApEvent &fence_completion;
+      friend class PhysicalTemplate;
+      PhysicalTemplate &tpl;
       unsigned lhs;
     };
 
@@ -1081,7 +1091,8 @@ namespace Legion {
      *   events[lhs] = expr->fill(fields, fill_value, fill_size,
      *                            events[precondition_idx]);
      */
-    struct IssueFill : public Instruction {
+    class IssueFill : public Instruction {
+    public:
       IssueFill(PhysicalTemplate& tpl,
                 unsigned lhs, IndexSpaceExpression *expr,
                 const TraceLocalID &op_key,
@@ -1122,7 +1133,7 @@ namespace Legion {
                                  const std::map<unsigned, unsigned> &rewrite);
 
     private:
-      friend struct PhysicalTemplate;
+      friend class PhysicalTemplate;
       unsigned lhs;
       IndexSpaceExpression *expr;
       std::vector<CopySrcDstField> fields;
@@ -1144,7 +1155,8 @@ namespace Legion {
      *                                  predicate_guard,
      *                                  redop, reduction_fold);
      */
-    struct IssueCopy : public Instruction {
+    class IssueCopy : public Instruction {
+    public:
       IssueCopy(PhysicalTemplate &tpl,
                 unsigned lhs, IndexSpaceExpression *expr,
                 const TraceLocalID &op_key,
@@ -1186,7 +1198,7 @@ namespace Legion {
                                  const std::map<unsigned, unsigned> &rewrite);
 
     private:
-      friend struct PhysicalTemplate;
+      friend class PhysicalTemplate;
       unsigned lhs;
       IndexSpaceExpression *expr;
       std::vector<CopySrcDstField> src_fields;
@@ -1206,7 +1218,8 @@ namespace Legion {
      * This instruction has the following semantics:
      *   events[lhs] = operations[rhs].compute_sync_precondition()
      */
-    struct SetOpSyncEvent : public Instruction {
+    class SetOpSyncEvent : public Instruction {
+    public:
       SetOpSyncEvent(PhysicalTemplate& tpl, unsigned lhs,
                      const TraceLocalID& rhs);
       virtual void execute(void);
@@ -1237,7 +1250,7 @@ namespace Legion {
                                  const std::map<unsigned, unsigned> &rewrite);
 
     private:
-      friend struct PhysicalTemplate;
+      friend class PhysicalTemplate;
       unsigned lhs;
     };
 
@@ -1246,7 +1259,8 @@ namespace Legion {
      * This instruction has the following semantics:
      *   operations[lhs]->complete_replay(events[rhs])
      */
-    struct CompleteReplay : public Instruction {
+    class CompleteReplay : public Instruction {
+    public:
       CompleteReplay(PhysicalTemplate& tpl, const TraceLocalID& lhs,
                      unsigned rhs);
       virtual void execute(void);
@@ -1277,7 +1291,7 @@ namespace Legion {
                                  const std::map<unsigned, unsigned> &rewrite);
 
     private:
-      friend struct PhysicalTemplate;
+      friend class PhysicalTemplate;
       unsigned rhs;
     };
 

@@ -1420,18 +1420,18 @@ namespace Legion {
     class PhysicalTrace;
     class TraceViewSet;
     class TraceConditionSet;
-    struct PhysicalTemplate;
-    struct Instruction;
-    struct GetTermEvent;
-    struct CreateApUserEvent;
-    struct TriggerEvent;
-    struct MergeEvent;
-    struct AssignFenceCompletion;
-    struct IssueCopy;
-    struct IssueFill;
-    struct GetOpTermEvent;
-    struct SetOpSyncEvent;
-    struct CompleteReplay;
+    class PhysicalTemplate;
+    class Instruction;
+    class GetTermEvent;
+    class CreateApUserEvent;
+    class TriggerEvent;
+    class MergeEvent;
+    class AssignFenceCompletion;
+    class IssueCopy;
+    class IssueFill;
+    class GetOpTermEvent;
+    class SetOpSyncEvent;
+    class CompleteReplay;
 
     // region_tree.h
     class RegionTreeForest;

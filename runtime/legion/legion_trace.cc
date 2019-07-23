@@ -2029,7 +2029,7 @@ namespace Legion {
                   InstanceView *view, EquivalenceSet *eq, const FieldMask &mask)
     //--------------------------------------------------------------------------
     {
-      Conditions::iterator finder = conditions.find(view);
+      ViewSet::iterator finder = conditions.find(view);
       if (finder == conditions.end())
         return;
 
@@ -2074,7 +2074,7 @@ namespace Legion {
          InstanceView *view, EquivalenceSet *eq, FieldMask &non_dominated) const
     //--------------------------------------------------------------------------
     {
-      Conditions::const_iterator finder = conditions.find(view);
+      ViewSet::const_iterator finder = conditions.find(view);
       if (finder == conditions.end())
         return false;
 
@@ -2112,7 +2112,7 @@ namespace Legion {
     bool TraceViewSet::subsumed_by(const TraceViewSet &set) const
     //--------------------------------------------------------------------------
     {
-      for (Conditions::const_iterator it = conditions.begin();
+      for (ViewSet::const_iterator it = conditions.begin();
            it != conditions.end(); ++it)
         for (FieldMaskSet<EquivalenceSet>::const_iterator eit =
              it->second.begin(); eit != it->second.end(); ++eit)
@@ -2129,7 +2129,7 @@ namespace Legion {
     bool TraceViewSet::has_refinements(void) const
     //--------------------------------------------------------------------------
     {
-      for (Conditions::const_iterator it = conditions.begin();
+      for (ViewSet::const_iterator it = conditions.begin();
            it != conditions.end(); ++it)
         for (FieldMaskSet<EquivalenceSet>::const_iterator eit =
              it->second.begin(); eit != it->second.end(); ++eit)
@@ -2150,7 +2150,7 @@ namespace Legion {
     void TraceViewSet::dump(void) const
     //--------------------------------------------------------------------------
     {
-      for (Conditions::const_iterator it = conditions.begin();
+      for (ViewSet::const_iterator it = conditions.begin();
            it != conditions.end(); ++it)
       {
         InstanceView *view = it->first;
@@ -2201,7 +2201,7 @@ namespace Legion {
       if (cached)
         return;
       cached = true;
-      for (Conditions::iterator it = conditions.begin(); it != conditions.end();
+      for (ViewSet::iterator it = conditions.begin(); it != conditions.end();
            ++it)
         for (FieldMaskSet<EquivalenceSet>::iterator eit = it->second.begin();
              eit != it->second.end(); ++eit)
@@ -2211,7 +2211,7 @@ namespace Legion {
         }
       version_infos.resize(views.size());
       unsigned idx = 0;
-      for (Conditions::iterator it = conditions.begin(); it != conditions.end();
+      for (ViewSet::iterator it = conditions.begin(); it != conditions.end();
            ++it)
         for (FieldMaskSet<EquivalenceSet>::iterator eit = it->second.begin();
              eit != it->second.end(); ++eit)
@@ -3938,161 +3938,6 @@ namespace Legion {
         }
         post.insert(view, eq, user_mask);
       }
-
-#if 0
-      // invalidates == false <==> (the user is a realm copy)
-
-      if (user->eq->set_expr->is_empty())
-      {
-        if (view->is_reduction_view())
-          reductions_in_trace[view].insert(user, user_mask);
-        return;
-      }
-
-      RegionTreeForest *forest = trace->runtime->forest;
-
-      // If the view is read, we should identify the part that
-      // is not yet valid, which joins the precondition.
-      if (HAS_READ(usage))
-      {
-        Conditions::iterator finder = post.find(view);
-        // If the view has showed up for the first time,
-        // it definitely needs to be added to the precondition.
-        if (finder == post.end())
-        {
-          record_precondition(view, user, user_mask);
-        }
-        // Otherwise, we find the fields that are already valid
-        else
-        {
-          FieldMask valid;
-          for (FieldMaskSet<ViewUser>::iterator uit = finder->second.begin();
-               uit != finder->second.end(); ++uit)
-          {
-            FieldMask overlap = user_mask & uit->second;
-
-            if (!overlap) continue;
-
-            if (user->eq->set_expr == uit->first->eq->set_expr)
-            {
-              valid |= overlap;
-            }
-            else
-            {
-              IndexSpaceExpression *subtract =
-                forest->subtract_index_spaces(user->eq->set_expr,
-                                              uit->first->eq->set_expr);
-              if (subtract->is_empty())
-              {
-                valid |= overlap;
-              }
-            }
-          }
-
-          FieldMask invalid = user_mask - valid;
-          if (!!invalid)
-          {
-            record_precondition(view, user, invalid);
-          }
-        }
-      }
-
-      // If the view is written, we should find the other views that are
-      // invalidated by this change.
-      Conditions all_invalidated;
-      if (invalidates)
-      {
-        for (std::set<InstanceView*>::iterator vit = views.begin();
-             vit != views.end(); ++vit)
-        {
-          Conditions::iterator finder = post.find(*vit);
-          if (finder == post.end()) continue;
-
-          FieldMaskSet<ViewUser> &invalidated = all_invalidated[*vit];
-          FieldMaskSet<ViewUser> &users = finder->second;
-          for (FieldMaskSet<ViewUser>::iterator uit = users.begin();
-               uit != users.end(); ++uit)
-          {
-            if (is_compatible(uit->first->usage, user->usage))
-            {
-              continue;
-            }
-
-            FieldMask overlap = user_mask & uit->second;
-            if (!overlap) continue;
-
-            if (user->eq->set_expr == uit->first->eq->set_expr)
-            {
-              invalidated.insert(uit->first, overlap);
-            }
-            else
-            {
-              IndexSpaceExpression *subtract =
-                forest->subtract_index_spaces(uit->first->eq->set_expr,
-                                              user->eq->set_expr);
-              if (subtract->is_empty())
-              {
-                invalidated.insert(uit->first, overlap);
-              }
-            }
-          }
-        }
-      }
-      else
-      {
-        Conditions::iterator finder = post.find(view);
-        if (finder != post.end())
-        {
-          FieldMaskSet<ViewUser> &invalidated = all_invalidated[view];
-          FieldMaskSet<ViewUser> &users = finder->second;
-          for (FieldMaskSet<ViewUser>::iterator uit = users.begin();
-               uit != users.end(); ++uit)
-          {
-            if (!(IS_REDUCE(uit->first->usage) && IS_READ_ONLY(user->usage)))
-            {
-              continue;
-            }
-
-            FieldMask overlap = user_mask & uit->second;
-            if (!overlap) continue;
-
-            if (user->eq->set_expr == uit->first->eq->set_expr)
-            {
-              invalidated.insert(uit->first, overlap);
-            }
-          }
-        }
-      }
-
-      for (Conditions::iterator it = all_invalidated.begin();
-           it != all_invalidated.end(); ++it)
-      {
-        Conditions::iterator finder = post.find(it->first);
-#ifdef DEBUG_LEGION
-        assert(finder != post.end());
-#endif
-        FieldMaskSet<ViewUser> &users = finder->second;
-        for (FieldMaskSet<ViewUser>::iterator uit = it->second.begin();
-             uit != it->second.end(); ++uit)
-        {
-          FieldMaskSet<ViewUser>::iterator finder = users.find(uit->first);
-#ifdef DEBUG_LEGION
-          assert(finder != users.end());
-#endif
-          finder.filter(uit->second);
-          if (!finder->second)
-          {
-            users.erase(finder);
-          }
-        }
-      }
-
-      post[view].insert(user, user_mask);
-      if (view->is_reduction_view())
-      {
-        reductions_in_trace[view].insert(user, user_mask);
-      }
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -4337,25 +4182,6 @@ namespace Legion {
       assert(instructions.size() + 1 == events.size());
 #endif
       instructions.push_back(inst);
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ bool PhysicalTemplate::is_compatible(const RegionUsage &u1,
-                                                    const RegionUsage &u2)
-    //--------------------------------------------------------------------------
-    {
-      if (IS_READ_ONLY(u1) && IS_READ_ONLY(u2))
-      {
-        return true;
-      }
-      else if (IS_REDUCE(u1) && IS_REDUCE(u2))
-      {
-        return u1.redop == u2.redop;
-      }
-      else
-      {
-        return false;
-      }
     }
 
     //--------------------------------------------------------------------------
@@ -4637,8 +4463,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     AssignFenceCompletion::AssignFenceCompletion(
-                       PhysicalTemplate& tpl, unsigned l, const TraceLocalID &o)
-      : Instruction(tpl, o), fence_completion(tpl.fence_completion), lhs(l)
+                       PhysicalTemplate& t, unsigned l, const TraceLocalID &o)
+      : Instruction(t, o), tpl(t), lhs(l)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -4650,7 +4476,7 @@ namespace Legion {
     void AssignFenceCompletion::execute(void)
     //--------------------------------------------------------------------------
     {
-      events[lhs] = fence_completion;
+      events[lhs] = tpl.get_fence_completion();
     }
 
     //--------------------------------------------------------------------------
