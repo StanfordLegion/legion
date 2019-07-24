@@ -1031,18 +1031,7 @@ namespace Realm {
     NodeID exec_node = ID(sparsity_output).sparsity_creator_node();
 
     if(exec_node != my_node_id) {
-      // we're going to ship it elsewhere, which means we always need an AsyncMicroOp to
-      //  track it
-      async_microop = new AsyncMicroOp(op, this);
-      op->add_async_work_item(async_microop);
-
-      ActiveMessage<RemoteMicroOpMessage<UnionMicroOp<N,T> > > msg(exec_node, 4096);
-      msg->operation = op;
-      msg->async_microop = async_microop;
-      this->serialize_params(msg);
-      msg.commit();
-
-      delete this;
+      forward_microop<UnionMicroOp<N,T> >(exec_node, op, this);
       return;
     }
 
@@ -1204,18 +1193,7 @@ namespace Realm {
     NodeID exec_node = ID(sparsity_output).sparsity_creator_node();
 
     if(exec_node != my_node_id) {
-      // we're going to ship it elsewhere, which means we always need an AsyncMicroOp to
-      //  track it
-      async_microop = new AsyncMicroOp(op, this);
-      op->add_async_work_item(async_microop);
-
-      ActiveMessage<RemoteMicroOpMessage<IntersectionMicroOp<N,T> > > msg(exec_node, 4096);
-      msg->operation = op;
-      msg->async_microop = async_microop;
-      this->serialize_params(msg);
-      msg.commit();
-
-      delete this;
+      forward_microop<IntersectionMicroOp<N,T> >(exec_node, op, this);
       return;
     }
 
@@ -1448,18 +1426,7 @@ namespace Realm {
     NodeID exec_node = ID(sparsity_output).sparsity_creator_node();
 
     if(exec_node != my_node_id) {
-      // we're going to ship it elsewhere, which means we always need an AsyncMicroOp to
-      //  track it
-      async_microop = new AsyncMicroOp(op, this);
-      op->add_async_work_item(async_microop);
-
-      ActiveMessage<RemoteMicroOpMessage<DifferenceMicroOp<N,T> > > msg(exec_node, 4096);
-      msg->operation = op;
-      msg->async_microop = async_microop;
-      this->serialize_params(msg);
-      msg.commit();
-
-      delete this;
+      forward_microop<DifferenceMicroOp<N,T> >(exec_node, op, this);
       return;
     }
 

@@ -6154,9 +6154,11 @@ namespace Legion {
        * @param buffer pointer to a buffer
        * @param size size of the buffer to save
        * @param is_mutable can the tag value be changed later
+       * @param local_only attach the name only on this node
        */
       void attach_semantic_information(TaskID task_id, SemanticTag tag,
-                     const void *buffer, size_t size, bool is_mutable = false);
+                     const void *buffer, size_t size, 
+                     bool is_mutable = false, bool local_only = false);
 
       /**
        * Attach semantic information to an index space
@@ -6232,9 +6234,11 @@ namespace Legion {
        * @param task_id the ID of the task
        * @param name pointer to the name
        * @param is_mutable can the name be changed later
+       * @param local_only attach the name only on the local node
        */
       void attach_name(TaskID task_id, const char *name, 
-                       bool is_mutable = false);
+                       bool is_mutable = false,
+                       bool local_only = false);
 
       /**
        * Attach a name to an index space

@@ -48,8 +48,9 @@ namespace Realm {
     friend struct RemoteMicroOpMessage<ImageMicroOp<N,T,N2,T2> >;
     static ActiveMessageHandlerReg<RemoteMicroOpMessage<ImageMicroOp<N,T,N2,T2> > > areg;
 
+    friend class PartitioningMicroOp;
     template <typename S>
-    bool serialize_params(S& s) const;
+    bool serialize_params(S& s) const WARN_UNUSED;
 
     // construct from received packet
     template <typename S>

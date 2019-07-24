@@ -5605,7 +5605,6 @@ class Operation(object):
         return cycle_detector.check_for_cycles(self, self.physical_outgoing) 
 
     def is_interfering_index_space_launch(self):
-        assert self.kind == INDEX_TASK_KIND
         if self.reqs is None or self.points is None:
             return False
         all_reqs = list()
@@ -5620,9 +5619,14 @@ class Operation(object):
                                "operation %s is self interfering in %s") %
                                (req.index,str(self),str(self.context)))
                         return True
-        for point_task in itervalues(self.points):
-            for req in itervalues(point_task.op.reqs):
-                all_reqs.append(req)
+        if self.kind == INDEX_TASK_KIND:
+            for point_task in itervalues(self.points):
+                for req in itervalues(point_task.op.reqs):
+                    all_reqs.append(req)
+        else:
+            for point in itervalues(self.points):
+                for req in itervalues(point.reqs):
+                    all_reqs.append(req)
         # All requirements should be non interfering
         for idx1 in range(0, len(all_reqs)):
             req1 = all_reqs[idx1]
@@ -6926,6 +6930,19 @@ class Task(object):
                         all_ops.append(close)
                 # Then add the operation itself
                 all_ops.append(op)
+                # If this is an index space operation prune any
+                # self-edges which could interfere with the
+                # transitive reduction that we're about to do
+                # These transitive edges occur when we have potentially
+                # interfering and aliased projection region requirements
+                # but the point tasks ultimately do not end up interfering
+                # We know this is safe because it is checked in post_parse
+                # by the is_interfering_index_space_launch method so these
+                # cannot be actually intefering edges.
+                if op.points is not None and op.logical_incoming is not None:
+                    if op in op.logical_incoming:
+                        op.logical_incoming.remove(op)
+                        op.logical_outgoing.remove(op)
                 # Print any phase barier edges now, since
                 # we know they will all be printed
                 if self.state.detailed_graphs:
@@ -8637,8 +8654,10 @@ class GraphPrinter(object):
                 subprocess.check_call(['dot', '-Tpdf', '-o', pdf_file, dot_file])
                 #subprocess.check_call(['dot', '-Tsvg', '-o', svg_file, dot_file])
                 #subprocess.check_call(['dot', '-Tpng', '-o', png_file, dot_file])
+        except OSError:
+            print("WARNING: graphviz is not installed, skipping generation of "+str(self.name))
         except:
-            print("WARNING: DOT failure, image for graph "+str(self.name)+" not generated")
+            print("WARNING: 'dot' failure, image for graph "+str(self.name)+" not generated")
             subprocess.call(['rm', '-f', 'core', pdf_file])
         # If we are making a zoom graph, then make a directory with the appropriate name
         if zoom_graph:
@@ -10043,7 +10062,7 @@ class State(object):
                     op.finish_event.incoming_ops.remove(op)
         # Check for any interfering index space launches
         for op in self.unique_ops:
-            if op.kind == INDEX_TASK_KIND and op.is_interfering_index_space_launch():
+            if op.is_interfering_index_space_launch():
                 print("ERROR: Found interfering index space launch: %s!" % str(op))
                 if self.assert_on_error:
                     assert False

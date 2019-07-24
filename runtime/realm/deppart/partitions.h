@@ -112,6 +112,11 @@ namespace Realm {
     int wait_count;  // how many sparsity maps are we still waiting for?
     NodeID requestor;
     AsyncMicroOp *async_microop;
+
+    // helper code to ship a microop to another node
+    template <typename T>
+    static void forward_microop(NodeID target,
+				PartitioningOperation *op, T *microop);
   };
 
   template <int N, typename T>
@@ -235,6 +240,8 @@ namespace Realm {
 
 
 };
+
+#include "partitions.inl"
 
 #endif // REALM_PARTITIONS_H
 
