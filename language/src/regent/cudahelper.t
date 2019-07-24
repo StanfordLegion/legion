@@ -385,11 +385,7 @@ end)
 function cudahelper.compute_reduction_buffer_size(node, reductions)
   local size = 0
   for k, v in pairs(reductions) do
-    if size ~= 0 then
-      -- TODO: We assume there is only one scalar reduction for now
-      report.error(node,
-          "Multiple scalar reductions in a CUDA task are not supported yet")
-    elseif not supported_scalar_red_ops[v] then
+    if not supported_scalar_red_ops[v] then
       report.error(node,
           "Scalar reduction with operator " .. v .. " is not supported yet")
     elseif not (sizeof(k.type) == 4 or sizeof(k.type) == 8) then
@@ -563,6 +559,7 @@ function cudahelper.generate_reduction_kernel(reductions, device_ptrs_map)
     local tid = terralib.newsymbol(c.size_t, "tid")
     local reduction_tree = cudahelper.generate_reduction_tree(tid, shared_mem_ptr, red_op)
     postamble = quote
+      [postamble]
       do
         var [tid] = tid_x()
         var bid = [cudahelper.global_block_id()]
