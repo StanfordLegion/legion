@@ -54,5 +54,5 @@ def main():
     saxpy(R, 2)
     check(R)
 
-if __name__ == '__legion_main__':
+if __name__ == '__main__':
     main()

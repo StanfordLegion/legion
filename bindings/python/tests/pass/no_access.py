@@ -45,5 +45,5 @@ def main():
     # FIXME: This is needed in nopaint to avoid a race with region deletion
     legion.execution_fence()
 
-if __name__ == '__legion_main__':
+if __name__ == '__main__':
     main()
