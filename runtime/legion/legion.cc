@@ -6388,10 +6388,11 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void Runtime::attach_semantic_information(TaskID task_id, SemanticTag tag,
-                                   const void *buffer, size_t size, bool is_mut)
+                       const void *buffer, size_t size, bool is_mut, bool local)
     //--------------------------------------------------------------------------
     {
-      runtime->attach_semantic_information(task_id, tag, buffer, size, is_mut);
+      runtime->attach_semantic_information(task_id, tag, buffer, size, 
+                                           is_mut, !local);
     }
 
     //--------------------------------------------------------------------------
@@ -6457,11 +6458,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::attach_name(TaskID task_id, const char *name, bool is_mutable)
+    void Runtime::attach_name(TaskID task_id, const char *name, 
+                              bool is_mutable, bool local_only)
     //--------------------------------------------------------------------------
     {
       Runtime::attach_semantic_information(task_id,
-          NAME_SEMANTIC_TAG, name, strlen(name) + 1, is_mutable);
+          NAME_SEMANTIC_TAG, name, strlen(name) + 1, is_mutable, local_only);
     }
 
     //--------------------------------------------------------------------------
