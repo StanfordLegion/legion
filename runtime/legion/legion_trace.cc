@@ -2395,6 +2395,7 @@ namespace Legion {
     {
       return pre.require(op);
     }
+
     //--------------------------------------------------------------------------
     bool PhysicalTemplate::check_replayable(void) const
     //--------------------------------------------------------------------------
@@ -2816,6 +2817,14 @@ namespace Legion {
       std::map<TraceLocalID, unsigned> slice_indices_by_owner;
       std::vector<unsigned> slice_indices_by_inst;
       slice_indices_by_inst.resize(instructions.size());
+
+      // Make sure that the fence is assigned correctly
+      // for every replay when the fence elision is
+      // turned off.
+      if (implicit_runtime->no_trace_optimization ||
+          implicit_runtime->no_fence_elision)
+        slices[0].push_back(instructions[0]);
+
 #ifdef DEBUG_LEGION
       for (unsigned idx = 1; idx < instructions.size(); ++idx)
         slice_indices_by_inst[idx] = -1U;
@@ -2866,10 +2875,14 @@ namespace Legion {
         const TraceLocalID &owner = inst->owner;
         std::map<TraceLocalID, unsigned>::iterator finder =
           slice_indices_by_owner.find(owner);
-#ifdef DEBUG_LEGION
-        assert(finder != slice_indices_by_owner.end());
-#endif
-        unsigned slice_index = finder->second;
+        unsigned slice_index = -1U;
+        if (finder != slice_indices_by_owner.end())
+          slice_index = finder->second;
+        else
+        {
+          slice_index = next_slice_id;
+          next_slice_id = (next_slice_id + 1) % replay_parallelism;
+        }
         slices[slice_index].push_back(inst);
         slice_indices_by_inst[idx] = slice_index;
 
@@ -3653,7 +3666,7 @@ namespace Legion {
            it++)
       {
         std::map<ApEvent, unsigned>::iterator finder = event_map.find(*it);
-        if (finder != event_map.end() && finder->second != fence_completion_id)
+        if (finder != event_map.end())
           rhs_.insert(finder->second);
       }
       if (rhs_.size() == 0)
