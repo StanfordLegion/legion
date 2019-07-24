@@ -138,6 +138,11 @@ def iterkeys(obj):
 def itervalues(obj):
     return obj.values() if sys.version_info > (3,) else obj.viewvalues()
 
+try:
+    xrange # Python 2
+except NameError:
+    xrange = range # Python 3
+
 def check_for_anti_dependence(req1, req2, actual):
     if req1.is_read_only():
         assert req2.has_write()
@@ -360,6 +365,45 @@ class Shape(object):
     def __init__(self):
         self.points = set()
         self.rects = set()
+
+    @property
+    def dense(self):
+        # pretty sure that realm is making sure these are
+        # not overlapping so as long as we only have one
+        # of either then we're dense, otherwise we're sparse
+        return (len(self.points)+len(self.rects)) == 1
+
+    @property
+    def bounds(self):
+        lo = None
+        hi = None
+        for point in self.points:
+            if lo is None:
+                lo = point.copy()
+            else:
+                for d in range(point.dim):
+                    if point.vals[d] < lo.vals[d]:
+                        lo.vals[d] = point.vals[d]
+            if hi is None:
+                hi = point.copy()
+            else:
+                for d in range(point.dim):
+                    if point.vals[dx] > hi.vals[d]:
+                        hi.vals[d] = point.vals[d]
+        for rect in self.rects:
+            if lo is None:
+                lo = rect.lo.copy()
+            else:
+                for d in range(rect.lo.dim):
+                    if rect.lo.vals[d] < lo.vals[d]:
+                        lo.vals[d] = rect.lo.vals[d]
+            if hi is None:
+                hi = rect.hi.copy()
+            else:
+                for d in range(rect.hi.dim):
+                    if rect.hi.vals[d] > hi.vals[d]:
+                        hi.vals[d] = rect.hi.vals[d]
+        return (lo,hi)
 
     def get_dim(self):
         if self.points:
@@ -2536,7 +2580,7 @@ class IndexSpace(object):
             label = '%s (ID: %s)' % (self.name, self.uid)
         else:
             if self.parent is None:
-                label = 'index space %s' % hex(self.uid)
+                label = 'index space %s' % self.uid
             else:
                 
                 label = 'subspace %s' % self.uid
@@ -2548,6 +2592,15 @@ class IndexSpace(object):
                     break
             assert color is not None
             label += ' (color: %s)' % color
+        if self.shape is None:
+            label += '\nEmpty Bounds'
+        else:
+            if self.shape.dense:
+                label += '\nDense Bounds: '
+            else:
+                label += '\nSparse Bounds: '
+            lo,hi = self.shape.bounds
+            label += lo.to_string()+' - '+hi.to_string()
         printer.println('%s [label="%s",shape=plaintext,fontsize=14,fontcolor=black,fontname="Helvetica"];' %
                         (self.node_name, label))
         # print links to children
@@ -3163,6 +3216,16 @@ class LogicalRegion(object):
                 label = 'region ('+self.gen_id()+')'
             else:
                 label = 'subregion ('+self.gen_id()+')'
+        shape = self.get_shape()
+        if shape is None:
+            label += '\nEmpty Bounds'
+        else:
+            if shape.dense:
+                label += '\nDense Bounds: '
+            else:
+                label += '\nSparse Bounds: '
+            lo,hi = shape.bounds
+            label += lo.to_string()+' - '+hi.to_string()
 
         printer.println(self.node_name+' [label="'+label+
                 '",shape=plaintext,fontsize=14,'+
