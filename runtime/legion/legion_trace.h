@@ -478,7 +478,12 @@ namespace Legion {
       ApEvent get_previous_template_completion(void) const
         { return previous_template_completion; }
     public:
-      PhysicalTemplate* start_new_template(ApEvent fence_event);
+      void set_current_execution_fence_event(ApEvent event)
+        { execution_fence_event = event; }
+      ApEvent get_current_execution_fence_event(void) const
+        { return execution_fence_event; }
+    public:
+      PhysicalTemplate* start_new_template(void);
       RtEvent fix_trace(PhysicalTemplate *tpl,
                         Operation *op,
                         bool has_blocking_call);
@@ -495,6 +500,7 @@ namespace Legion {
     public:
       std::vector<Processor> replay_targets;
       ApEvent previous_template_completion;
+      ApEvent execution_fence_event;
     };
 
     typedef Memoizable::TraceLocalID TraceLocalID;

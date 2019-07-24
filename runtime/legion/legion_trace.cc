@@ -1495,13 +1495,9 @@ namespace Legion {
 #endif
 
         // Register this fence with all previous users in the parent's context
-#ifdef LEGION_SPY
         execution_precondition = 
           parent_ctx->perform_fence_analysis(this, true, true);
-#else
-        execution_precondition = 
-          parent_ctx->perform_fence_analysis(this, false, true);
-#endif
+
         fence_registered = true;
       }
 
@@ -1521,22 +1517,15 @@ namespace Legion {
       }
       else if (!fence_registered)
       {
-#ifdef LEGION_SPY
         execution_precondition = 
           parent_ctx->perform_fence_analysis(this, true, true);
-#else
-        execution_precondition = 
-          parent_ctx->perform_fence_analysis(this, false, true);
-#endif
+        physical_trace->set_current_execution_fence_event(
+            get_completion_event());
       }
 
       // Now update the parent context with this fence before we can complete
       // the dependence analysis and possibly be deactivated
-#ifdef LEGION_SPY
       parent_ctx->update_current_fence(this, true, true);
-#else
-      parent_ctx->update_current_fence(this, false, true);
-#endif
     }
 
     /////////////////////////////////////////////////////////////
@@ -1977,13 +1966,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    PhysicalTemplate* PhysicalTrace::start_new_template(ApEvent fence_event)
+    PhysicalTemplate* PhysicalTrace::start_new_template(void)
     //--------------------------------------------------------------------------
     {
-      current_template = new PhysicalTemplate(this, fence_event);
-#ifdef DEBUG_LEGION
-      assert(fence_event.exists());
-#endif
+      current_template = new PhysicalTemplate(this, execution_fence_event);
       return current_template;
     }
 
@@ -2790,11 +2776,14 @@ namespace Legion {
         if (used[idx])
         {
           Instruction *inst = instructions[idx];
-          if (inst->get_kind() == MERGE_EVENT)
+          if (!implicit_runtime->no_fence_elision)
           {
-            MergeEvent *merge = inst->as_merge_event();
-            if (merge->rhs.size() > 1)
-              merge->rhs.erase(fence_completion_id);
+            if (inst->get_kind() == MERGE_EVENT)
+            {
+              MergeEvent *merge = inst->as_merge_event();
+              if (merge->rhs.size() > 1)
+                merge->rhs.erase(fence_completion_id);
+            }
           }
           new_gen[inv_gen[idx]] = new_instructions.size();
           new_instructions.push_back(inst);
@@ -2817,13 +2806,6 @@ namespace Legion {
       std::map<TraceLocalID, unsigned> slice_indices_by_owner;
       std::vector<unsigned> slice_indices_by_inst;
       slice_indices_by_inst.resize(instructions.size());
-
-      // Make sure that the fence is assigned correctly
-      // for every replay when the fence elision is
-      // turned off.
-      if (implicit_runtime->no_trace_optimization ||
-          implicit_runtime->no_fence_elision)
-        slices[0].push_back(instructions[0]);
 
 #ifdef DEBUG_LEGION
       for (unsigned idx = 1; idx < instructions.size(); ++idx)
