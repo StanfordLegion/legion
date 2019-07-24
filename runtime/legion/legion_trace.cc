@@ -259,7 +259,7 @@ namespace Legion {
     {
       std::pair<Operation*,GenerationID> key(op,gen);
       const unsigned index = operations.size();
-      if (!implicit_runtime->no_physical_tracing &&
+      if (!ctx->runtime->no_physical_tracing &&
           op->is_memoizing() && !op->is_internal_op())
       {
         if (index != last_memoized)
@@ -558,7 +558,7 @@ namespace Legion {
     {
       std::pair<Operation*,GenerationID> key(op,gen);
       const unsigned index = operations.size();
-      if (!implicit_runtime->no_physical_tracing &&
+      if (!ctx->runtime->no_physical_tracing &&
           op->is_memoizing() && !op->is_internal_op())
       {
         if (index != last_memoized)
@@ -1863,7 +1863,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     PhysicalTrace::PhysicalTrace(Runtime *rt, LegionTrace *lt)
       : runtime(rt), logical_trace(lt), current_template(NULL),
-        nonreplayable_count(0)
+        nonreplayable_count(0),
+        previous_template_completion(ApEvent::NO_AP_EVENT),
+        execution_fence_event(ApEvent::NO_AP_EVENT)
     //--------------------------------------------------------------------------
     {
       if (runtime->replay_on_cpus)
@@ -1882,7 +1884,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     PhysicalTrace::PhysicalTrace(const PhysicalTrace &rhs)
       : runtime(NULL), logical_trace(NULL), current_template(NULL),
-        nonreplayable_count(0)
+        nonreplayable_count(0),
+        previous_template_completion(ApEvent::NO_AP_EVENT),
+        execution_fence_event(ApEvent::NO_AP_EVENT)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -2331,7 +2335,8 @@ namespace Legion {
 
       replay_ready = Runtime::create_rt_user_event();
       std::set<RtEvent> replay_done_events;
-      std::vector<Processor> &replay_targets = trace->replay_targets;
+      const std::vector<Processor> &replay_targets =
+        trace->get_replay_targets();
       for (unsigned idx = 0; idx < replay_parallelism; ++idx)
       {
         ReplaySliceArgs args(this, idx);
@@ -2487,7 +2492,7 @@ namespace Legion {
 
       if (!replayable)
       {
-        if (implicit_runtime->dump_physical_traces)
+        if (trace->runtime->dump_physical_traces)
         {
           generate_conditions();
           optimize();
@@ -2498,7 +2503,7 @@ namespace Legion {
       generate_conditions();
       optimize();
       //generate_summary_operations();
-      if (implicit_runtime->dump_physical_traces) dump_template();
+      if (trace->runtime->dump_physical_traces) dump_template();
       size_t num_events = events.size();
       events.clear();
       events.resize(num_events);
@@ -2518,8 +2523,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       std::vector<unsigned> gen;
-      if (!(implicit_runtime->no_trace_optimization ||
-            implicit_runtime->no_fence_elision))
+      if (!(trace->runtime->no_trace_optimization ||
+            trace->runtime->no_fence_elision))
         elide_fences(gen);
       else
       {
@@ -2530,7 +2535,7 @@ namespace Legion {
         for (unsigned idx = 0; idx < events.size(); ++idx)
           gen[idx] = idx;
       }
-      if (!implicit_runtime->no_trace_optimization)
+      if (!trace->runtime->no_trace_optimization)
       {
         propagate_merges(gen);
         transitive_reduction();
@@ -2776,7 +2781,7 @@ namespace Legion {
         if (used[idx])
         {
           Instruction *inst = instructions[idx];
-          if (!implicit_runtime->no_fence_elision)
+          if (!trace->runtime->no_fence_elision)
           {
             if (inst->get_kind() == MERGE_EVENT)
             {
@@ -4086,7 +4091,7 @@ namespace Legion {
     {
       ApEvent wait_on = get_completion_for_deletion();
       DeleteTemplateArgs args(this);
-      return implicit_runtime->issue_runtime_meta_task(args, LG_LOW_PRIORITY,
+      return trace->runtime->issue_runtime_meta_task(args, LG_LOW_PRIORITY,
           Runtime::protect_event(wait_on));
     }
 

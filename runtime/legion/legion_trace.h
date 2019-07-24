@@ -488,6 +488,9 @@ namespace Legion {
                         Operation *op,
                         bool has_blocking_call);
     public:
+      const std::vector<Processor> &get_replay_targets(void)
+        { return replay_targets; }
+    public:
       void initialize_template(ApEvent fence_completion, bool recurrent);
     public:
       Runtime * const runtime;
@@ -497,10 +500,10 @@ namespace Legion {
       PhysicalTemplate* current_template;
       std::vector<PhysicalTemplate*> templates;
       unsigned nonreplayable_count;
-    public:
-      std::vector<Processor> replay_targets;
+    private:
       ApEvent previous_template_completion;
       ApEvent execution_fence_event;
+      std::vector<Processor> replay_targets;
     };
 
     typedef Memoizable::TraceLocalID TraceLocalID;
@@ -777,7 +780,7 @@ namespace Legion {
       ApEvent get_fence_completion(void)
         { return fence_completion; }
     private:
-      PhysicalTrace *trace;
+      PhysicalTrace * const trace;
       volatile bool recording;
       bool replayable;
       mutable LocalLock template_lock;
