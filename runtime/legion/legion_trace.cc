@@ -3785,6 +3785,70 @@ namespace Legion {
       record_copy_views(lhs_, expr, tracing_dsts);
     }
 
+    //--------------------------------------------------------------------------
+    void PhysicalTemplate::record_issue_fill_for_reduction(Memoizable *memo,
+                                                           unsigned idx,
+                                                           InstanceView *view,
+                                                     const FieldMask &user_mask,
+                                                     IndexSpaceExpression *expr)
+    //--------------------------------------------------------------------------
+    {
+      TraceLocalID op_key = find_trace_local_id(memo);
+      ReductionView *reduction_view = view->as_reduction_view();
+      ReductionManager *manager = reduction_view->manager;
+      LayoutDescription *const layout = manager->layout;
+      const ReductionOp *reduction_op = manager->op;
+
+      std::vector<CopySrcDstField> fields;
+      std::vector<FieldID> fill_fields;
+      // FIXME: The following line, which should have worked, exhibits
+      //        "phantom reads" of local field ids from other contexts
+      //        as the local field allocation currently has a bug assigning
+      //        the same internal field id to local field allocations from
+      //        different contexts.
+      //manager->field_space_node->get_field_set(user_mask, fill_fields);
+      layout->get_fields(fill_fields);
+      layout->compute_copy_offsets(fill_fields, manager, fields);
+
+      size_t fill_size = reduction_op->sizeof_rhs;
+      void *fill_value = malloc(fill_size);
+      reduction_op->init(fill_value, 1);
+
+      ApEvent lhs;
+      {
+        Realm::UserEvent e(Realm::UserEvent::create_user_event());
+        e.trigger();
+        lhs = ApEvent(e);
+      }
+      unsigned lhs_ = convert_event(lhs);
+      insert_instruction(new IssueFill(*this, lhs_, expr, op_key,
+                                       fields, fill_value, fill_size,
+#ifdef LEGION_SPY
+                                       0, manager->field_space_node->handle,
+                                       manager->tree_id,
+#endif
+                                       fence_completion_id));
+      reduction_ready_events[op_key].insert(lhs);
+
+      FieldMaskSet<InstanceView> views;
+      views.insert(view, user_mask);
+      record_copy_views(lhs_, expr, views);
+
+      ViewUser *user =
+        new ViewUser(RegionUsage(WRITE_ONLY, EXCLUSIVE, 0), lhs_, expr);
+      add_view_user(view, user, user_mask);
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalTemplate::get_reduction_ready_events(
+                              Memoizable *memo, std::set<ApEvent> &ready_events)
+    //--------------------------------------------------------------------------
+    {
+      std::map<TraceLocalID,std::set<ApEvent> >::iterator finder =
+        reduction_ready_events.find(find_trace_local_id(memo));
+      if (finder != reduction_ready_events.end())
+        ready_events.insert(finder->second.begin(), finder->second.end());
+    }
 
     //--------------------------------------------------------------------------
     void PhysicalTemplate::record_summary_info(const RegionRequirement &region,
@@ -3830,10 +3894,13 @@ namespace Legion {
         for (std::set<EquivalenceSet*>::iterator eit = it->elements.begin();
              eit != it->elements.end(); ++eit)
         {
-          views.insert((*eit)->set_expr, mask);
+          IndexSpaceExpression *expr = (*eit)->set_expr;
+          views.insert(expr, mask);
           if (update_validity)
           {
-            ViewUser *user = new ViewUser(usage, entry, (*eit)->set_expr);
+            if (view->is_reduction_view() && IS_REDUCE(usage))
+              record_issue_fill_for_reduction(memo, idx, view, mask, expr);
+            ViewUser *user = new ViewUser(usage, entry, expr);
             update_valid_views(memo, view, *eit, usage, mask, true);
             add_view_user(view, user, mask);
           }

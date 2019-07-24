@@ -3633,9 +3633,10 @@ namespace Legion {
           if (!virtual_mapped[idx] && !no_access_regions[idx])
             physical_instances[idx].update_wait_on_events(ready_events);
         }
+        tpl->get_reduction_ready_events(this, ready_events);
         ApEvent ready_event = Runtime::merge_events(&trace_info, ready_events);
         tpl->record_complete_replay(this, ready_event);
-      } 
+      }
       return RtEvent::NO_RT_EVENT;
     }
 

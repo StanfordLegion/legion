@@ -718,6 +718,15 @@ namespace Legion {
                              ApEvent precondition,
                              const FieldMaskSet<FillView> &tracing_srcs,
                              const FieldMaskSet<InstanceView> &tracing_dsts);
+    private:
+      void record_issue_fill_for_reduction(Memoizable *memo,
+                                           unsigned idx,
+                                           InstanceView *view,
+                                           const FieldMask &user_mask,
+                                           IndexSpaceExpression *expr);
+    public:
+      void get_reduction_ready_events(Memoizable *memo,
+                                      std::set<ApEvent> &ready_events);
     public:
       void record_summary_info(const RegionRequirement &region,
                                const InstanceSet &instance_set,
@@ -830,6 +839,8 @@ namespace Legion {
       TraceViewSet pre_reductions;
       TraceViewSet post_reductions;
       TraceViewSet consumed_reductions;
+    private:
+      std::map<TraceLocalID,std::set<ApEvent> > reduction_ready_events;
     private:
       FieldMaskSet<FillView> pre_fill_views;
       FieldMaskSet<FillView> post_fill_views;
