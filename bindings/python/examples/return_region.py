@@ -71,5 +71,5 @@ def main():
     # Check that this is the same region.
     assert R.handle[0].tree_id == R_copy.handle[0].tree_id
 
-if __name__ == '__legion_main__':
+if __name__ == '__main__':
     main()

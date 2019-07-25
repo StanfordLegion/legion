@@ -32,5 +32,5 @@ def main():
     a = A()
     a.static()
 
-if __name__ == '__legion_main__':
+if __name__ == '__main__':
     main()

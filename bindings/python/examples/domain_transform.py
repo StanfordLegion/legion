@@ -26,5 +26,5 @@ def main():
     dt = legion.DomainTransform.create([[1, 2], [3, 4]])
     print(dt)
 
-if __name__ == '__legion_main__':
+if __name__ == '__main__':
     main()

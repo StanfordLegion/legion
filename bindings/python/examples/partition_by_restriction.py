@@ -61,5 +61,5 @@ def main():
     assert check_subregion(P2[1]).get() == 4
     assert check_subregion(P2[2]).get() == 2
 
-if __name__ == '__legion_main__':
+if __name__ == '__main__':
     main()

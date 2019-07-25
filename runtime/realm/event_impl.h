@@ -181,7 +181,7 @@ namespace Realm {
       //  early-out conditions
       atomic<gen_t> generation;
       gen_t gen_subscribed;
-      int num_poisoned_generations;
+      atomic<int> num_poisoned_generations;
       bool has_local_triggers;
 
       bool is_generation_poisoned(gen_t gen) const; // helper function - linear search

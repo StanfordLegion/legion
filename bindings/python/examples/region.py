@@ -74,5 +74,5 @@ def main():
     print("child task future contains", child_result.get())
     print("main_task done")
 
-if __name__ == '__legion_main__':
+if __name__ == '__main__':
     main()

@@ -50,5 +50,5 @@ def main():
     assert Q[1, 0].ispace.volume == 3
     assert Q[1, 1].ispace.volume == 4
 
-if __name__ == '__legion_main__':
+if __name__ == '__main__':
     main()

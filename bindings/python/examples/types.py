@@ -66,5 +66,5 @@ def main():
     x = complex_plus_one(3+4j)
     print(x.get())
 
-if __name__ == '__legion_main__':
+if __name__ == '__main__':
     main()

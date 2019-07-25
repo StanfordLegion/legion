@@ -25,5 +25,5 @@ def main():
     nprocs = legion.Tunable.select(legion.Tunable.GLOBAL_PYS).get()
     print("Number of Python processors: %s" % nprocs)
 
-if __name__ == '__legion_main__':
+if __name__ == '__main__':
     main()

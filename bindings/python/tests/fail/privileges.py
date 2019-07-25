@@ -36,5 +36,5 @@ def main():
     else:
         assert False, 'Test failed'
 
-if __name__ == '__legion_main__':
+if __name__ == '__main__':
     main()

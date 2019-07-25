@@ -24,5 +24,5 @@ from legion import task
 def main():
     legion.print_once("Hello, Legion!")
 
-if __name__ == '__legion_main__':
+if __name__ == '__main__':
     main()

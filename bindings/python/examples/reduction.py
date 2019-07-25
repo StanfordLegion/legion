@@ -37,5 +37,5 @@ def main():
     assert R.x[0, 0] == 21.25
     assert R.y[0, 0] == 22
 
-if __name__ == '__legion_main__':
+if __name__ == '__main__':
     main()
