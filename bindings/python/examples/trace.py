@@ -20,7 +20,7 @@ from __future__ import print_function
 import numpy
 
 import legion
-from legion import task, ID, R, RW
+from legion import index_launch, task, IndexLaunch, ID, Partition, R, Region, RW, Trace
 
 @task(privileges=[R])
 def look(R, i):
@@ -32,24 +32,24 @@ def incr(R, i):
 
 @task
 def main():
-    R = legion.Region.create([4, 4], {'x': legion.float64})
-    P = legion.Partition.create_equal(R, [2, 2])
+    R = Region([4, 4], {'x': legion.float64})
+    P = Partition.equal(R, [2, 2])
     legion.fill(R, 'x', 0)
 
-    trace1 = legion.Trace()
+    trace1 = Trace()
     for t in range(5):
         with trace1:
-            for i in legion.IndexLaunch([2, 2]):
+            for i in IndexLaunch([2, 2]):
                 look(R, i)
 
-            for i in legion.IndexLaunch([2, 2]):
+            for i in IndexLaunch([2, 2]):
                 incr(P[i], i)
 
-    trace2 = legion.Trace()
+    trace2 = Trace()
     for t in range(5):
         with trace2:
-            legion.index_launch([2, 2], look, R, ID)
-            legion.index_launch([2, 2], incr, P[ID], ID)
+            index_launch([2, 2], look, R, ID)
+            index_launch([2, 2], incr, P[ID], ID)
 
 if __name__ == '__main__':
     main()

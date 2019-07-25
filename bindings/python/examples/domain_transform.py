@@ -18,12 +18,12 @@
 from __future__ import print_function
 
 import legion
-from legion import task, RW
+from legion import task, DomainTransform, RW
 import numpy
 
 @task
 def main():
-    dt = legion.DomainTransform.create([[1, 2], [3, 4]])
+    dt = DomainTransform([[1, 2], [3, 4]])
     print(dt)
 
 if __name__ == '__main__':

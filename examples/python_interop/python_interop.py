@@ -18,18 +18,19 @@
 from __future__ import print_function
 
 import legion
+from legion import task, Fspace, Ispace, Region, RW
 import numpy
 
 # This task is defined in C++. See init_task in python_interop.cc.
-init = legion.extern_task(task_id=3, privileges=[legion.RW], return_type=legion.int64)
+init = legion.extern_task(task_id=3, privileges=[RW], return_type=legion.int64)
 
-@legion.task
+@task
 def hello(i, j):
     print('hello %s %s' % (i, j))
 
 # Define a Python task. This task takes two arguments: a region and a
 # number, and increments every element of the region by that number.
-@legion.task(privileges=[legion.RW])
+@task(privileges=[RW])
 def inc(R, step):
     # The fields of regions are numpy arrays, so you can call normal
     # numpy methods on them. Be careful about where the output is
@@ -41,19 +42,19 @@ def inc(R, step):
 
 # Define the main Python task. This task is called from C++. See
 # top_level_task in python_iterop.cc.
-@legion.task
+@task
 def main_task():
     # Create a 2D index space of size 4x4.
-    I = legion.Ispace.create([4, 4])
+    I = Ispace([4, 4])
 
     # Create a field space with a single field x of type float64. For
     # interop with C++, we have to choose an explicit field ID here
     # (in this case, 1). We could leave this out if the code were pure
     # Python.
-    F = legion.Fspace.create({'x': (legion.float64, 1)})
+    F = Fspace({'x': (legion.float64, 1)})
 
     # Create a region from I and F and launch two tasks.
-    R = legion.Region.create(I, F)
+    R = Region(I, F)
     init_result = init(R)
     child_result = inc(R, 1)
 
@@ -64,7 +65,7 @@ def main_task():
     assert child_result.get() == 42
 
     values = 'abc'
-    for i in legion.IndexLaunch([3]):
+    for i in IndexLaunch([3]):
         print('queue %s' % i)
         hello(i, values[i])
 

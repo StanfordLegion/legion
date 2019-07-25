@@ -18,7 +18,7 @@
 from __future__ import print_function
 
 import legion
-from legion import task, RW
+from legion import task, Fspace, Ispace, Region, RW
 import numpy
 
 # Define a Python task. This task takes one argument: a region. The
@@ -46,17 +46,17 @@ def inc(R, step):
 @task
 def main():
     # Create a 2D index space of size 4x4.
-    I = legion.Ispace.create([4, 4])
+    I = Ispace([4, 4])
 
     # Create a field space with a single field x of type float64.
-    F = legion.Fspace.create({'x': legion.float64})
+    F = Fspace({'x': legion.float64})
 
     # Create a region from I and F.
-    R = legion.Region.create(I, F)
+    R = Region(I, F)
 
     # This could have also been done with the following shortand, and
     # Legion will automatically create an index space and field space.
-    R2 = legion.Region.create([4, 4], {'x': legion.float64})
+    R2 = Region([4, 4], {'x': legion.float64})
 
     # Fill the field x of region R with an initial value.
     legion.fill(R, 'x', 101)

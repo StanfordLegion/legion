@@ -23,7 +23,7 @@ import os
 import subprocess
 
 import legion
-from legion import index_launch, print_once, task, Fspace, Future, IndexLaunch, Ispace, ID, N, Partition, R, Reduce, Region, RW
+from legion import index_launch, print_once, task, Fspace, Future, IndexLaunch, Ipartition, Ispace, ID, N, Partition, R, Reduce, Region, RW
 
 root_dir = os.path.dirname(__file__)
 try:
@@ -51,8 +51,8 @@ config = legion.Type(
     'config')
 
 def create_partition(is_disjoint, region, c_partition, color_space):
-    ipart = legion.Ipartition(c_partition.index_partition, region.ispace, color_space)
-    return legion.Partition.create(region, ipart)
+    ipart = Ipartition(c_partition.index_partition, region.ispace, color_space)
+    return Partition(region, ipart)
 
 _constant_time_launches = False
 if _constant_time_launches:
@@ -386,7 +386,7 @@ def main():
 
     conf = read_config().get()
 
-    zone = Fspace.create(OrderedDict([
+    zone = Fspace(OrderedDict([
         ('zxp_x', legion.float64),
         ('zxp_y', legion.float64),
         ('zx_x', legion.float64),
@@ -413,7 +413,7 @@ def main():
         ('znump', legion.uint8),
     ]))
 
-    point = Fspace.create(OrderedDict([
+    point = Fspace(OrderedDict([
         ('px0_x', legion.float64),
         ('px0_y', legion.float64),
         ('pxp_x', legion.float64),
@@ -433,7 +433,7 @@ def main():
         ('has_bcy', legion.bool_),
     ]))
 
-    side = Fspace.create(OrderedDict([
+    side = Fspace(OrderedDict([
         ('mapsz', legion.int1d),
         ('mapsp1', legion.int1d),
         ('mapsp1_r', legion.uint8),
@@ -470,9 +470,9 @@ def main():
         ('cqe2_y', legion.float64),
     ]))
 
-    zones = Region.create([conf.nz], zone)
-    points = Region.create([conf.np], point)
-    sides = Region.create([conf.ns], side)
+    zones = Region([conf.nz], zone)
+    points = Region([conf.np], point)
+    sides = Region([conf.ns], side)
 
     assert conf.seq_init or conf.par_init, 'enable one of sequential or parallel initialization'
 
@@ -482,7 +482,7 @@ def main():
     assert conf.par_init
     partitions = read_partitions(zones, points, sides, conf).get()
 
-    pieces = Ispace.create([conf.npieces])
+    pieces = Ispace([conf.npieces])
 
     zones_part = create_partition(True, zones, partitions.rz_all_p, pieces)
 

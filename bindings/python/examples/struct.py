@@ -18,7 +18,7 @@
 from __future__ import print_function
 
 import legion
-from legion import task, RW
+from legion import task, Future, Region, RW
 import numpy
 
 # Define a custom struct type.
@@ -41,12 +41,12 @@ def main():
     myvalue.z = 65
 
     # Make a future with the custom struct type.
-    g = legion.Future(myvalue, mystruct)
+    g = Future(myvalue, mystruct)
     print("value of g.get() is %s" % g.get())
     assert g.get().x == 123
 
     # Make a region with the custom struct type.
-    R = legion.Region.create([4], {'myvalue': mystruct})
+    R = Region([4], {'myvalue': mystruct})
     R.myvalue[0] = (123, 3.14, 65)
     print(R.myvalue[0])
 
