@@ -231,11 +231,15 @@ namespace Realm {
     if (!function) {
       {
         LoggerMessage m = log_py.fatal();
-        m << "unable to import Python function " << psi->module_name;
+        m << "unable to import Python function ";
         for (std::vector<std::string>::const_iterator it = psi->function_name.begin(),
                ie = psi->function_name.begin(); it != ie; ++it) {
-          m << "." << *it;
+          m << *it;
+          if (it + 1 != ie) {
+            m << ".";
+          }
         }
+        m << " from module " << psi->module_name;
       }
       (api->PyErr_PrintEx)(0);
       (api->Py_Finalize)(); // otherwise Python doesn't flush its buffers
