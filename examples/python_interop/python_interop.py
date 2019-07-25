@@ -18,7 +18,7 @@
 from __future__ import print_function
 
 import legion
-from legion import task, Fspace, Ispace, Region, RW
+from legion import task, Fspace, IndexLaunch, Ispace, Region, RW
 import numpy
 
 # This task is defined in C++. See init_task in python_interop.cc.
