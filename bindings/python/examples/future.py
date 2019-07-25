@@ -84,5 +84,5 @@ def main():
     for i in legion.IndexLaunch([3]):
         show_index(i, f)
 
-if __name__ == '__legion_main__':
+if __name__ == '__main__':
     main()

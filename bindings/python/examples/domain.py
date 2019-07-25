@@ -52,5 +52,5 @@ def main():
         t3 += x[0] * x[1] * x[2]
     assert t3 == 420
 
-if __name__ == '__legion_main__':
+if __name__ == '__main__':
     main()

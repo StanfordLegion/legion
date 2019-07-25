@@ -33,5 +33,5 @@ def main():
 
     hello(R)
 
-if __name__ == '__legion_main__':
+if __name__ == '__main__':
     main()

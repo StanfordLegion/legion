@@ -70,5 +70,5 @@ def main():
     print(R('x') + RW('y'))
     print(RW('x') + RW('y'))
 
-if __name__ == '__legion_main__':
+if __name__ == '__main__':
     main()

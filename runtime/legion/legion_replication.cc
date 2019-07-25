@@ -4207,8 +4207,8 @@ namespace Legion {
         map_complete_event = mapped_instances[0].get_ready_event();
       if (runtime->legion_spy_enabled)
       {
-        runtime->forest->log_mapping_decision(unique_op_id, 0/*idx*/,
-                                              requirement,
+        runtime->forest->log_mapping_decision(unique_op_id, parent_ctx,
+                                              0/*idx*/, requirement,
                                               mapped_instances);
 #ifdef LEGION_SPY
         LegionSpy::log_operation_events(unique_op_id, map_complete_event,

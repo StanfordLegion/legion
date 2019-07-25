@@ -39,5 +39,5 @@ def main():
     assert d1 != legion.DomainPoint.create([0])
     assert d1 != legion.DomainPoint.create([1, 2])
 
-if __name__ == '__legion_main__':
+if __name__ == '__main__':
     main()

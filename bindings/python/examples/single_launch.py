@@ -36,5 +36,5 @@ def main():
         print("got %s" % future.get())
         assert future.get() == i
 
-if __name__ == '__legion_main__':
+if __name__ == '__main__':
     main()

@@ -2259,10 +2259,9 @@ namespace Legion {
               regions.begin(); it != regions.end(); it++)
           runtime->profiler->record_physical_instance_region(creator_id, 
                                                       instance.id, *it);
-        std::vector<FieldID> fields;
-        layout->owner->get_field_ids(instance_mask, fields);
         runtime->profiler->record_physical_instance_fields(creator_id, 
-                          instance.id, layout->owner->handle, fields);
+                                    instance.id, layout->owner->handle, 
+                                    constraints.field_constraint.field_set);
       }
       return result;
     }

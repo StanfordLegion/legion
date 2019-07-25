@@ -36,5 +36,5 @@ def main():
         t2 += x[0] * x[1]
     assert t2 == 36
 
-if __name__ == '__legion_main__':
+if __name__ == '__main__':
     main()

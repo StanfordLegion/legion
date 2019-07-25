@@ -270,6 +270,12 @@ namespace Legion {
       virtual void destroy_logical_partition(LogicalPartition handle) = 0;
       virtual FieldAllocatorImpl* create_field_allocator(FieldSpace handle);
       virtual void destroy_field_allocator(FieldSpace handle);
+      virtual void get_local_field_set(const FieldSpace handle,
+                                       const std::set<unsigned> &indexes,
+                                       std::set<FieldID> &to_set) const = 0;
+      virtual void get_local_field_set(const FieldSpace handle,
+                                       const std::set<unsigned> &indexes,
+                                       std::vector<FieldID> &to_set) const = 0;
     public:
       virtual Future execute_task(const TaskLauncher &launcher) = 0;
       virtual FutureMap execute_index_space(
@@ -963,6 +969,12 @@ namespace Legion {
                                const std::set<FieldID> &to_free);
       virtual void destroy_logical_region(LogicalRegion handle);
       virtual void destroy_logical_partition(LogicalPartition handle);
+      virtual void get_local_field_set(const FieldSpace handle,
+                                       const std::set<unsigned> &indexes,
+                                       std::set<FieldID> &to_set) const;
+      virtual void get_local_field_set(const FieldSpace handle,
+                                       const std::set<unsigned> &indexes,
+                                       std::vector<FieldID> &to_set) const;
     public:
       // Find an index space name for a concrete launch domain
       virtual Future execute_task(const TaskLauncher &launcher);
@@ -2063,6 +2075,12 @@ namespace Legion {
                                const std::set<FieldID> &to_free);
       virtual void destroy_logical_region(LogicalRegion handle);
       virtual void destroy_logical_partition(LogicalPartition handle);
+      virtual void get_local_field_set(const FieldSpace handle,
+                                       const std::set<unsigned> &indexes,
+                                       std::set<FieldID> &to_set) const;
+      virtual void get_local_field_set(const FieldSpace handle,
+                                       const std::set<unsigned> &indexes,
+                                       std::vector<FieldID> &to_set) const;
     public:
       virtual Future execute_task(const TaskLauncher &launcher);
       virtual FutureMap execute_index_space(const IndexTaskLauncher &launcher);
@@ -2403,6 +2421,12 @@ namespace Legion {
       virtual void destroy_logical_partition(LogicalPartition handle);
       virtual FieldAllocatorImpl* create_field_allocator(FieldSpace handle);
       virtual void destroy_field_allocator(FieldSpace handle);
+      virtual void get_local_field_set(const FieldSpace handle,
+                                       const std::set<unsigned> &indexes,
+                                       std::set<FieldID> &to_set) const;
+      virtual void get_local_field_set(const FieldSpace handle,
+                                       const std::set<unsigned> &indexes,
+                                       std::vector<FieldID> &to_set) const;
     public:
       virtual Future execute_task(const TaskLauncher &launcher);
       virtual FutureMap execute_index_space(const IndexTaskLauncher &launcher);

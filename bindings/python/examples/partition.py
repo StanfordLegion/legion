@@ -61,5 +61,5 @@ def main():
     for Rij in P:
         assert Rij.ispace.volume == 4
 
-if __name__ == '__legion_main__':
+if __name__ == '__main__':
     main()

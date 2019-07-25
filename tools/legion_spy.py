@@ -138,6 +138,11 @@ def iterkeys(obj):
 def itervalues(obj):
     return obj.values() if sys.version_info > (3,) else obj.viewvalues()
 
+try:
+    xrange # Python 2
+except NameError:
+    xrange = range # Python 3
+
 def check_for_anti_dependence(req1, req2, actual):
     if req1.is_read_only():
         assert req2.has_write()
@@ -254,14 +259,14 @@ class Point(object):
 
     def __eq__(self, point):
         assert self.dim == point.dim
-        for i in range(self.dim):
+        for i in xrange(self.dim):
             if self.vals[i] != point.vals[i]:
                 return False
         return True
 
     def copy(self):
         result = Point(self.dim)
-        for i in range(self.dim):
+        for i in xrange(self.dim):
             result.vals[i] = self.vals[i]
         result.shape = self.shape
         result.index_set = self.index_set
@@ -284,7 +289,7 @@ class Rect(object):
         return hash(str(self))
 
     def empty(self):
-        for i in range(self.dim):
+        for i in xrange(self.dim):
             if self.lo.vals[i] > self.hi.vals[i]:
                 return True
         return False
@@ -293,12 +298,12 @@ class Rect(object):
         if self.empty():
             return 0
         result = 1
-        for i in range(self.dim):
+        for i in xrange(self.dim):
             result *= (self.hi.vals[i] - self.lo.vals[i] + 1)
         return result
 
     def dominates(self, rect):
-        for i in range(self.dim):
+        for i in xrange(self.dim):
             if rect.lo.vals[i] < self.lo.vals[i] or self.hi.vals[i] < rect.hi.vals[i]:
                 return False
         return True
@@ -306,7 +311,7 @@ class Rect(object):
     def intersects(self, rect):
         # If they overlap in all dimensions then they intersect
         assert rect.dim == self.dim
-        for i in range(self.dim):
+        for i in xrange(self.dim):
             if rect.hi.vals[i] < self.lo.vals[i] or self.hi.vals[i] < rect.lo.vals[i]:
                 return False
         return True
@@ -314,13 +319,13 @@ class Rect(object):
     def intersection(self, rect):
         lo = Point(self.dim)
         hi = Point(self.dim)
-        for i in range(self.dim):
+        for i in xrange(self.dim):
             lo.vals[i] = max(self.lo.vals[i], rect.lo.vals[i])
             hi.vals[i] = min(self.hi.vals[i], rect.hi.vals[i])
         return Rect(lo, hi)
 
     def contains_point(self, point):
-        for i in range(point.dim):
+        for i in xrange(point.dim):
             x = point.vals[i]
             if x < self.lo.vals[i] or self.hi.vals[i] < x:
                 return False
@@ -328,21 +333,21 @@ class Rect(object):
 
     def iterator(self):
         if self.dim == 1:
-            for x in range(self.lo.vals[0], self.hi.vals[0]+1):
+            for x in xrange(self.lo.vals[0], self.hi.vals[0]+1):
                 point = Point(1)
                 point.vals[0] = x
                 yield point
         elif self.dim == 2:
-            for x in range(self.lo.vals[0], self.hi.vals[0]+1):
-                for y in range(self.lo.vals[1], self.hi.vals[1]+1):
+            for x in xrange(self.lo.vals[0], self.hi.vals[0]+1):
+                for y in xrange(self.lo.vals[1], self.hi.vals[1]+1):
                     point = Point(2)
                     point.vals[0] = x
                     point.vals[1] = y
                     yield point
         elif self.dim == 3:
-            for x in range(self.lo.vals[0], self.hi.vals[0]+1):
-                for y in range(self.lo.vals[1], self.hi.vals[1]+1):
-                    for z in range(self.lo.vals[2], self.hi.vals[2]+1):
+            for x in xrange(self.lo.vals[0], self.hi.vals[0]+1):
+                for y in xrange(self.lo.vals[1], self.hi.vals[1]+1):
+                    for z in xrange(self.lo.vals[2], self.hi.vals[2]+1):
                         point = Point(3)
                         point.vals[0] = x
                         point.vals[1] = y
@@ -360,6 +365,45 @@ class Shape(object):
     def __init__(self):
         self.points = set()
         self.rects = set()
+
+    @property
+    def dense(self):
+        # pretty sure that realm is making sure these are
+        # not overlapping so as long as we only have one
+        # of either then we're dense, otherwise we're sparse
+        return (len(self.points)+len(self.rects)) == 1
+
+    @property
+    def bounds(self):
+        lo = None
+        hi = None
+        for point in self.points:
+            if lo is None:
+                lo = point.copy()
+            else:
+                for d in xrange(point.dim):
+                    if point.vals[d] < lo.vals[d]:
+                        lo.vals[d] = point.vals[d]
+            if hi is None:
+                hi = point.copy()
+            else:
+                for d in xrange(point.dim):
+                    if point.vals[dx] > hi.vals[d]:
+                        hi.vals[d] = point.vals[d]
+        for rect in self.rects:
+            if lo is None:
+                lo = rect.lo.copy()
+            else:
+                for d in xrange(rect.lo.dim):
+                    if rect.lo.vals[d] < lo.vals[d]:
+                        lo.vals[d] = rect.lo.vals[d]
+            if hi is None:
+                hi = rect.hi.copy()
+            else:
+                for d in xrange(rect.hi.dim):
+                    if rect.hi.vals[d] > hi.vals[d]:
+                        hi.vals[d] = rect.hi.vals[d]
+        return (lo,hi)
 
     def get_dim(self):
         if self.points:
@@ -2125,7 +2169,7 @@ class NodeSet(object):
                     mask = 1 << offset
                     self.impl[index] |= mask
             else:
-                for index in range(self.bound):
+                for index in xrange(self.bound):
                     self.impl[index] |= other.impl[index]
 
     def contains(self, node):
@@ -2536,7 +2580,7 @@ class IndexSpace(object):
             label = '%s (ID: %s)' % (self.name, self.uid)
         else:
             if self.parent is None:
-                label = 'index space %s' % hex(self.uid)
+                label = 'index space %s' % self.uid
             else:
                 
                 label = 'subspace %s' % self.uid
@@ -2548,6 +2592,15 @@ class IndexSpace(object):
                     break
             assert color is not None
             label += ' (color: %s)' % color
+        if self.shape is None:
+            label += '\nEmpty Bounds'
+        else:
+            if self.shape.dense:
+                label += '\nDense Bounds: '
+            else:
+                label += '\nSparse Bounds: '
+            lo,hi = self.shape.bounds
+            label += lo.to_string()+' - '+hi.to_string()
         printer.println('%s [label="%s",shape=plaintext,fontsize=14,fontcolor=black,fontname="Helvetica"];' %
                         (self.node_name, label))
         # print links to children
@@ -2562,7 +2615,7 @@ class IndexSpace(object):
             print(self)
         else:
             prefix = ''
-            for i in range(self.depth):
+            for i in xrange(self.depth):
                 prefix += '  '
             print('%s%s Color: %s' % (prefix, self, self.color.to_string()))
         for child in itervalues(self.children):
@@ -3163,6 +3216,16 @@ class LogicalRegion(object):
                 label = 'region ('+self.gen_id()+')'
             else:
                 label = 'subregion ('+self.gen_id()+')'
+        shape = self.get_shape()
+        if shape is None:
+            label += '\nEmpty Bounds'
+        else:
+            if shape.dense:
+                label += '\nDense Bounds: '
+            else:
+                label += '\nSparse Bounds: '
+            lo,hi = shape.bounds
+            label += lo.to_string()+' - '+hi.to_string()
 
         printer.println(self.node_name+' [label="'+label+
                 '",shape=plaintext,fontsize=14,'+
@@ -3191,7 +3254,7 @@ class LogicalRegion(object):
             print(self)
         else:
             prefix = ''
-            for i in range(self.index_space.depth):
+            for i in xrange(self.index_space.depth):
                 prefix += '  '
             print('%s%s Color: %s' % (prefix, self, self.index_space.color.to_string()))
         for child in itervalues(self.children):
@@ -3407,7 +3470,7 @@ class LogicalPartition(object):
 
     def print_tree(self):
         prefix = ''
-        for i in range(self.index_partition.depth):
+        for i in xrange(self.index_partition.depth):
             prefix += '  '
         print('%s%s Color: %s' % (prefix, self, self.index_partition.color.to_string()))
         for child in itervalues(self.children):
@@ -5628,11 +5691,11 @@ class Operation(object):
                 for req in itervalues(point.reqs):
                     all_reqs.append(req)
         # All requirements should be non interfering
-        for idx1 in range(0, len(all_reqs)):
+        for idx1 in xrange(0, len(all_reqs)):
             req1 = all_reqs[idx1]
             if req1.is_no_access():
                 continue
-            for idx2 in range(idx1+1, len(all_reqs)):
+            for idx2 in xrange(idx1+1, len(all_reqs)):
                 req2 = all_reqs[idx2]
                 if req2.is_no_access():
                     continue
@@ -5686,7 +5749,7 @@ class Operation(object):
         for field in req.fields:
             # See if we have any aliased fields in future region requirements
             aliased_children = set()
-            for idx in range(index+1,len(self.reqs)):
+            for idx in xrange(index+1,len(self.reqs)):
                 other_req = self.reqs[idx]
                 if other_req.priv is NO_ACCESS:
                     continue
@@ -5732,7 +5795,7 @@ class Operation(object):
         start_index = 0 if self.context.current_fence is None else \
             self.context.operations.index(self.context.current_fence)
         stop_index = self.context.operations.index(self)
-        for index in range(start_index, stop_index):
+        for index in xrange(start_index, stop_index):
             prev_op = self.context.operations[index]
             if prev_op.replayed:
                 continue
@@ -5779,7 +5842,7 @@ class Operation(object):
     def perform_logical_analysis(self, perform_checks):
         if self.replayed:
             if self.reqs is not None:
-                for idx in range(0,len(self.reqs)):
+                for idx in xrange(0,len(self.reqs)):
                     self.context.check_restricted_coherence(self, self.reqs[idx])
             return True
         # We need a context to do this
@@ -5817,7 +5880,7 @@ class Operation(object):
                 if not self.analyze_logical_deletion(idx, perform_checks):
                     return False
             return True
-        for idx in range(0,len(self.reqs)):
+        for idx in xrange(0,len(self.reqs)):
             if not self.analyze_logical_requirement(idx, perform_checks):
                 return False
         return True
@@ -5973,7 +6036,7 @@ class Operation(object):
         src_depth = self.context.find_enclosing_context_depth(src_req, src_mappings) 
         dst_depth = self.context.find_enclosing_context_depth(dst_req, dst_mappings)
         assert len(src_req.fields) == len(dst_req.fields)
-        for fidx in range(len(src_req.fields)):
+        for fidx in xrange(len(src_req.fields)):
             src_field = src_req.fields[fidx]
             dst_field = dst_req.fields[fidx]
             assert src_field.fid in src_mappings
@@ -6137,7 +6200,7 @@ class Operation(object):
         prefix = ''
         if self.context:
             depth = self.context.get_depth()
-            for idx in range(depth):
+            for idx in xrange(depth):
                 prefix += '  '
         # If we are an index space task, only do our points
         if self.kind == INDEX_TASK_KIND and self.points:
@@ -6170,7 +6233,7 @@ class Operation(object):
             num_reqs = len(self.reqs)
             assert num_reqs % 2 == 0
             num_copies = num_reqs // 2
-            for idx in range(num_copies):
+            for idx in xrange(num_copies):
                 if not self.verify_copy_requirements(idx, self.reqs[idx],
                         idx+num_copies, self.reqs[idx+num_copies], perform_checks):
                     return False
@@ -6272,7 +6335,7 @@ class Operation(object):
             return
         # Print our mapping decisions
         prefix = ''
-        for idx in range(depth):
+        for idx in xrange(depth):
             prefix += '  '
         print(prefix+'-------------------------------------------------')
         print(prefix+' Mapping Decisions for '+str(self)+' (depth='+str(depth)+')')
@@ -6766,7 +6829,7 @@ class Task(object):
         print('Performing logical sanity analysis for %s...' % str(self))
         # Iterate over all operations from 1 to N and check all their
         # dependences against all the previous operations in the context
-        for idx in range(1, len(self.operations)):
+        for idx in xrange(1, len(self.operations)):
             # Find all the backwards reachable operations
             current_op = self.operations[idx]
             # No need to do anything if there are no region requirements
@@ -6776,7 +6839,7 @@ class Task(object):
             current_op.get_logical_reachable(reachable, False) 
             # Do something special for fence operations
             if current_op.kind == FENCE_OP_KIND: # special path for fences
-                for prev in range(idx):
+                for prev in xrange(idx):
                     if not prev in reachable:
                         print("ERROR: Failed logical sanity check. No mapping "+
                               "dependence between previous "+str(prev)+" and "+
@@ -6785,7 +6848,7 @@ class Task(object):
                             assert False
                         return False
             else: # The normal path
-                for prev in range(idx):
+                for prev in xrange(idx):
                     if not current_op.analyze_logical_interference(
                                   self.operations[prev], reachable):
                         print("FAIL")
@@ -6951,7 +7014,7 @@ class Task(object):
             reachable = dict()
             total_nodes = len(all_ops)
             # Now traverse the list in reverse order
-            for src_index in range(total_nodes-1,-1,-1):
+            for src_index in xrange(total_nodes-1,-1,-1):
                 src = all_ops[src_index]
                 index_map[src] = src_index
                 our_reachable = NodeSet(total_nodes)
@@ -7072,7 +7135,7 @@ class Task(object):
         # Pack the point
         replay_file.write(struct.pack('Q', op_id))
         replay_file.write(struct.pack('i', self.point.dim))
-        for idx in range(self.point.dim):
+        for idx in xrange(self.point.dim):
             replay_file.write(struct.pack('Q',self.point.vals[idx]))
         # Pack the base data
         replay_file.write(struct.pack('Q', op_id)) 
@@ -7092,7 +7155,7 @@ class Task(object):
         # Pack mappings
         if self.op.reqs:
             replay_file.write(struct.pack('I',len(self.op.reqs)))
-            for index in range(len(self.op.reqs)):
+            for index in xrange(len(self.op.reqs)):
                 self.op.pack_requirement_replay_info(replay_file, self.op.reqs[index], 
                     None if index not in self.op.mappings else self.op.mappings[index])
         else:
@@ -7109,7 +7172,7 @@ class Task(object):
         # Pack the tunables
         if self.tunables:
             replay_file.write(struct.pack('I',len(self.tunables)))
-            for index in range(len(self.tunables)):
+            for index in xrange(len(self.tunables)):
                 assert index in self.tunables
                 value,size = self.tunables[index]
                 replay_file.write(struct.pack('I',size))
@@ -7121,7 +7184,7 @@ class Task(object):
         # Pack the operation indexes
         if self.operation_indexes:
             replay_file.write(struct.pack('I',len(self.operation_indexes)))
-            for idx in range(len(self.operation_indexes)):
+            for idx in xrange(len(self.operation_indexes)):
                 assert idx in self.operation_indexes
                 replay_file.write(struct.pack('Q',self.operation_indexes[idx]))
         else:
@@ -7129,7 +7192,7 @@ class Task(object):
         # Pack the close indexes
         if self.close_indexes:
             replay_file.write(struct.pack('I',len(self.close_indexes)))
-            for idx in range(len(self.close_indexes)):
+            for idx in xrange(len(self.close_indexes)):
                 assert idx in self.close_indexes
                 replay_file.write(struct.pack('Q',self.close_indexes[idx]))
         else:
@@ -7733,7 +7796,7 @@ class Instance(object):
             replay_file.write(struct.pack('I',len(path)))
             for color in path:
                 replay_file.write(struct.pack('i', color.dim))
-                for idx in range(color.dim):
+                for idx in xrange(color.dim):
                     replay_file.write(struct.pack('Q', color.vals[idx]))
 
 class EventHandle(object):
@@ -8140,7 +8203,7 @@ class RealmCopy(RealmBase):
         else:
             self.across = False
             assert len(self.src_fields) == len(self.dst_fields)
-            for idx in range(len(self.src_fields)):
+            for idx in xrange(len(self.src_fields)):
                 if self.src_fields[idx] != self.dst_fields[idx]:
                     self.across = True
                     break
@@ -8165,7 +8228,7 @@ class RealmCopy(RealmBase):
 
     def find_src_inst(self, src_field):
         assert len(self.src_fields) == len(self.srcs)
-        for idx in range(len(self.src_fields)):
+        for idx in xrange(len(self.src_fields)):
             if src_field == self.src_fields[idx]:
                 return self.srcs[idx]
         assert False
@@ -8194,7 +8257,7 @@ class RealmCopy(RealmBase):
         if self.state.detailed_graphs:
             num_fields = len(self.src_fields)
             first_field = True
-            for fidx in range(num_fields):
+            for fidx in xrange(num_fields):
                 src_field = self.src_fields[fidx]
                 dst_field = self.dst_fields[fidx]
                 src_inst = self.srcs[fidx]
@@ -8343,7 +8406,7 @@ class RealmFill(RealmBase):
         if self.state.detailed_graphs:
             num_fields = len(self.fields)
             first_field = True
-            for fidx in range(num_fields):
+            for fidx in xrange(num_fields):
                 dst_field = self.fields[fidx]
                 dst_inst = self.dsts[fidx]
                 line = []
@@ -8756,7 +8819,7 @@ class GraphPrinter(object):
         self.println('}')
 
     def println(self,string):
-        for i in range(self.depth):
+        for i in xrange(self.depth):
             self.out.write('  ')
         self.out.write(string)
         self.out.write('\n')
@@ -8780,7 +8843,7 @@ class GraphPrinter(object):
         lines = list()
         lines.append([{"label" : title, "colspan" : 3}])       
         if requirements is not None:
-            for i in range(len(requirements)):
+            for i in xrange(len(requirements)):
                 req = requirements[i]
                 region_name = str(req.logical_node)
                 line = [str(i), region_name, req.get_privilege_and_coherence()]
@@ -9242,7 +9305,7 @@ def parse_legion_spy_line(line, state):
         hi = Point(dim)
         # Get the remainder of the points
         values = decimal_pat.findall(m.group('rem'))
-        for index in range(dim):
+        for index in xrange(dim):
             lo.vals[index] = int(values[2*index])
             hi.vals[index] = int(values[2*index+1])
         op.set_launch_rect(Rect(lo, hi)) 
@@ -9265,7 +9328,7 @@ def parse_legion_spy_line(line, state):
         dim = int(m.group('dim'))
         point = Point(dim)
         values = decimal_pat.findall(m.group('rem'))
-        for index in range(dim):
+        for index in xrange(dim):
             point.vals[index] = int(values[index])
         future.set_point(point)
         return True 
@@ -9627,7 +9690,7 @@ def parse_legion_spy_line(line, state):
         dim = int(m.group('dim'))
         index_point = Point(dim)
         values = decimal_pat.findall(m.group('rem'))
-        for index in range(dim):
+        for index in xrange(dim):
             index_point.vals[index] = int(values[index])
         point.set_point(index_point)
         state.point_slice[point] = int(m.group('slice'))
@@ -9647,7 +9710,7 @@ def parse_legion_spy_line(line, state):
         dim = int(m.group('dim'))
         index_point = Point(dim)
         values = decimal_pat.findall(m.group('rem'))
-        for index in range(dim):
+        for index in xrange(dim):
             index_point.vals[index] = int(values[index])
         index = state.get_operation(int(m.group('index')))
         index.add_point_op(point, index_point) 
@@ -9717,7 +9780,7 @@ def parse_legion_spy_line(line, state):
         dim = int(m.group('dim'))
         color= Point(dim)
         values = decimal_pat.findall(m.group('rem'))
-        for index in range(dim):
+        for index in xrange(dim):
             color.vals[index] = int(values[index])
         ispace.set_parent(parent, color)
         return True
@@ -9765,7 +9828,7 @@ def parse_legion_spy_line(line, state):
         dim = int(m.group('dim'))
         point = Point(dim)
         values = decimal_pat.findall(m.group('rem'))
-        for index in range(dim):
+        for index in xrange(dim):
             point.vals[index] = int(values[index])
         index_space.add_point(point)
         return True
@@ -9776,7 +9839,7 @@ def parse_legion_spy_line(line, state):
         lo = Point(dim)
         hi = Point(dim)
         values = decimal_pat.findall(m.group('rem'))
-        for index in range(dim):
+        for index in xrange(dim):
             lo.vals[index] = int(values[2*index])
             hi.vals[index] = int(values[2*index+1])
         if lo == hi:
@@ -10955,7 +11018,7 @@ def generate_random_intersecting_rects(dim, max_size):
     hi1 = Point(dim)
     lo2 = Point(dim)
     hi2 = Point(dim)
-    for d in range(dim):
+    for d in xrange(dim):
         lo1.vals[d] = random.randint(0,max_size)
         hi1.vals[d] = random.randint(lo1.vals[d],max_size)
         lo2.vals[d] = random.randint(0,hi1.vals[d])
@@ -11016,9 +11079,9 @@ def perform_geometry_test(dim, max_size=100):
 
 def run_geometry_tests(num_tests=10000):
     success = True
-    for dim in range(1,4):
+    for dim in xrange(1,4):
         print("Testing dimension... "+str(dim))
-        for i in range(num_tests):
+        for i in xrange(num_tests):
             print('  Running test '+str(i))
             success = perform_geometry_test(dim)
             if not success:

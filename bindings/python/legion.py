@@ -2313,7 +2313,9 @@ if is_script:
         setattr(module, '__file__', filename)
         setattr(module, '__loader__', None)
         setattr(module, '__package__', run_name.rpartition('.')[0])
-        assert run_name not in sys.modules
+
+        # Hide the current module if it exists.
+        old_module = sys.modules[run_name] if run_name in sys.modules else None
         sys.modules[run_name] = module
 
         sys.path.append(os.path.dirname(filename))
@@ -2321,6 +2323,13 @@ if is_script:
         with open(filename) as f:
             code = compile(f.read(), filename, 'exec')
             exec(code, module.__dict__)
+
+        # FIXME: Can't restore the old module because tasks may be
+        # continuing to execute asynchronously. We could fix this with
+        # an execution fence but it doesn't seem worth it given that
+        # we'll be cleaning up the process right after this.
+
+        # sys.modules[run_name] = old_module
 
     @task(top_level=True, replicable=True)
     def legion_main():
@@ -2332,7 +2341,7 @@ if is_script:
         args = input_args(True)
         assert len(args) >= 2
         sys.argv = list(args)
-        run_path(args[1], run_name='__legion_main__')
+        run_path(args[1], run_name='__main__')
 elif is_legion_python:
     print('WARNING: Executing Python modules via legion_python has been deprecated.')
     print('It is now recommended to run the script directly by passing the path')

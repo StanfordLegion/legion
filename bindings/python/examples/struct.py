@@ -50,5 +50,5 @@ def main():
     R.myvalue[0] = (123, 3.14, 65)
     print(R.myvalue[0])
 
-if __name__ == '__legion_main__':
+if __name__ == '__main__':
     main()

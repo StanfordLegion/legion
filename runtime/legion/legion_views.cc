@@ -3460,7 +3460,8 @@ namespace Legion {
     {
       // Compute the field set
       std::vector<FieldID> atomic_fields;
-      manager->field_space_node->get_field_set(mask, atomic_fields);
+      manager->field_space_node->get_field_set(mask, op->get_context(), 
+                                               atomic_fields);
       // If we are the owner we can do this here
       if (is_owner())
       {

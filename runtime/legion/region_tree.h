@@ -615,7 +615,8 @@ namespace Legion {
                                     std::pair<unsigned,bool> > *acquired,
                                std::vector<PhysicalManager*> &unacquired,
                                const bool do_acquire_checks);
-      void log_mapping_decision(UniqueID uid, unsigned index,
+      void log_mapping_decision(const UniqueID unique_id, TaskContext *context,
+                                const unsigned index, 
                                 const RegionRequirement &req,
                                 const InstanceSet &targets,
                                 bool postmapping = false);
@@ -2744,14 +2745,16 @@ namespace Legion {
       struct FieldInfo {
       public:
         FieldInfo(void) : field_size(0), idx(0), serdez_id(0),
-                          destroyed(false) { }
-        FieldInfo(size_t size, unsigned id, CustomSerdezID sid)
-          : field_size(size), idx(id), serdez_id(sid), destroyed(false) { }
+                          destroyed(false), local(false) { }
+        FieldInfo(size_t size, unsigned id, CustomSerdezID sid, bool loc=false)
+          : field_size(size), idx(id), serdez_id(sid), 
+            destroyed(false), local(loc) { }
       public:
         size_t field_size;
         unsigned idx;
         CustomSerdezID serdez_id;
         bool destroyed;
+        bool local;
       };
       struct FindTargetsFunctor {
       public:
@@ -2879,10 +2882,12 @@ namespace Legion {
       size_t get_field_size(FieldID fid);
       void get_all_fields(std::vector<FieldID> &to_set);
       void get_all_regions(std::set<LogicalRegion> &regions);
-      void get_field_set(const FieldMask &mask, std::set<FieldID> &to_set);
-      void get_field_set(const FieldMask &mask, std::vector<FieldID> &to_set);
-      void get_field_set(const FieldMask &mask, const std::set<FieldID> &basis,
-                         std::set<FieldID> &to_set);
+      void get_field_set(const FieldMask &mask, TaskContext *context,
+                         std::set<FieldID> &to_set) const;
+      void get_field_set(const FieldMask &mask, TaskContext *context,
+                         std::vector<FieldID> &to_set) const;
+      void get_field_set(const FieldMask &mask,
+          const std::set<FieldID> &basis, std::set<FieldID> &to_set) const;
     public:
       void add_instance(RegionNode *inst, ReferenceMutator *mutator);
       RtEvent add_instance(LogicalRegion inst, AddressSpaceID source);
@@ -2959,9 +2964,7 @@ namespace Legion {
                                     Deserializer &derez);
     public:
       // Help with debug printing
-      char* to_string(const FieldMask &mask) const;
-      void get_field_ids(const FieldMask &mask,
-                         std::vector<FieldID> &fields) const;
+      char* to_string(const FieldMask &mask, TaskContext *ctx) const;
     protected:
       // Assume we are already holding the node lock
       // when calling these methods

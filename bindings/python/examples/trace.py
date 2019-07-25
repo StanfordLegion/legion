@@ -51,5 +51,5 @@ def main():
             legion.index_launch([2, 2], look, R, ID)
             legion.index_launch([2, 2], incr, P[ID], ID)
 
-if __name__ == '__legion_main__':
+if __name__ == '__main__':
     main()

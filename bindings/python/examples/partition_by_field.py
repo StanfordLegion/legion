@@ -47,5 +47,5 @@ def main():
     assert P[1, 0].ispace.volume == 3
     assert P[1, 1].ispace.volume == 6
 
-if __name__ == '__legion_main__':
+if __name__ == '__main__':
     main()

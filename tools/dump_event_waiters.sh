@@ -1,6 +1,6 @@
-#!/usr/bin/env python
+#!/bin/bash -eu
 
-# Copyright 2019 Stanford University
+# Copyright 2019 Stanford University, NVIDIA Corporation
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -15,9 +15,11 @@
 # limitations under the License.
 #
 
-from __future__ import print_function
+if [ $# -ne 1 ]; then
+    echo "Usage: $(basename "${BASH_SOURCE[0]}") appname"
+    exit 1
+fi
+APPNAME="$1"
 
-import hello
+gdb -p `pgrep "$APPNAME"` -ex 'call Realm::realm_show_events(0)' -ex 'quit'
 
-if __name__ == '__main__':
-    hello.main()
