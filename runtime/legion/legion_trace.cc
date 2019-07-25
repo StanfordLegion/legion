@@ -3793,6 +3793,8 @@ namespace Legion {
                                                      IndexSpaceExpression *expr)
     //--------------------------------------------------------------------------
     {
+      if (expr->is_empty()) return;
+
       TraceLocalID op_key = find_trace_local_id(memo);
       ReductionView *reduction_view = view->as_reduction_view();
       ReductionManager *manager = reduction_view->manager;
@@ -3801,13 +3803,8 @@ namespace Legion {
 
       std::vector<CopySrcDstField> fields;
       std::vector<FieldID> fill_fields;
-      // FIXME: The following line, which should have worked, exhibits
-      //        "phantom reads" of local field ids from other contexts
-      //        as the local field allocation currently has a bug assigning
-      //        the same internal field id to local field allocations from
-      //        different contexts.
-      //manager->field_space_node->get_field_set(user_mask, fill_fields);
-      layout->get_fields(fill_fields);
+      manager->field_space_node->get_field_set(user_mask,
+          memo->get_operation()->get_context(), fill_fields);
       layout->compute_copy_offsets(fill_fields, manager, fields);
 
       size_t fill_size = reduction_op->sizeof_rhs;
