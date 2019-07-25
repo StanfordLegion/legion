@@ -882,10 +882,10 @@ namespace Realm {
   GenEventImpl::GenEventImpl(void)
     : generation(0)
     , gen_subscribed(0)
+    , num_poisoned_generations(0)
     , merger(this)
   {
     next_free = 0;
-    num_poisoned_generations = 0;
     poisoned_generations = 0;
     has_local_triggers = false;
     free_list_insertion_delayed = false;
@@ -925,7 +925,7 @@ namespace Realm {
     generation.store(0);
     gen_subscribed = 0;
     next_free = 0;
-    num_poisoned_generations = 0;
+    num_poisoned_generations.store(0);
     poisoned_generations = 0;
     has_local_triggers = false;
   }
@@ -1313,10 +1313,11 @@ namespace Realm {
     inline bool GenEventImpl::is_generation_poisoned(gen_t gen) const
     {
       // common case: no poisoned generations
-      if(__builtin_expect((num_poisoned_generations == 0), 1))
+      int npg_cached = num_poisoned_generations.load_acquire();
+      if(__builtin_expect((npg_cached == 0), 1))
 	return false;
       
-      for(int i = 0; i < num_poisoned_generations; i++)
+      for(int i = 0; i < npg_cached; i++)
 	if(poisoned_generations[i] == gen)
 	  return true;
       return false;
@@ -1410,9 +1411,10 @@ namespace Realm {
 	// it is legal to use poisoned generation info like this because it is
 	// always updated before the generation - the load_acquire above makes
 	// sure we read in the correct order
-	ActiveMessage<EventUpdateMessage> amsg(sender, impl->num_poisoned_generations*sizeof(EventImpl::gen_t));
+	int npg_cached = impl->num_poisoned_generations.load_acquire();
+	ActiveMessage<EventUpdateMessage> amsg(sender, npg_cached*sizeof(EventImpl::gen_t));
 	amsg->event = triggered;
-	amsg.add_payload(impl->poisoned_generations, impl->num_poisoned_generations*sizeof(EventImpl::gen_t), PAYLOAD_KEEP);
+	amsg.add_payload(impl->poisoned_generations, npg_cached*sizeof(EventImpl::gen_t), PAYLOAD_KEEP);
 	amsg.commit();
       }
     } 
@@ -1470,13 +1472,14 @@ namespace Realm {
 #ifdef CHECK_POISONED_GENS
       if(new_poisoned_count > 0) {
 	// should be an incremental update
-	assert(num_poisoned_generations <= new_poisoned_count);
-	if(num_poisoned_generations > 0)
+	int old_npg = num_poisoned_generations.load();
+	assert(old_npg <= new_poisoned_count);
+	if(old_npg > 0)
 	  assert(memcmp(poisoned_generations, new_poisoned_generations, 
-			num_poisoned_generations * sizeof(gen_t)) == 0);
+			old_npg * sizeof(gen_t)) == 0);
       } else {
 	// we shouldn't have any local ones either
-	assert(num_poisoned_generations == 0);
+	assert(num_poisoned_generations.load() == 0);
       }
 #endif
 
@@ -1488,11 +1491,11 @@ namespace Realm {
       if(new_poisoned_count > 0) {
 	if(!poisoned_generations)
 	  poisoned_generations = new gen_t[POISONED_GENERATION_LIMIT];
-	if(num_poisoned_generations < new_poisoned_count) {
+	if(num_poisoned_generations.load() < new_poisoned_count) {
 	  assert(new_poisoned_count <= POISONED_GENERATION_LIMIT);
-	  num_poisoned_generations = new_poisoned_count;
 	  memcpy(poisoned_generations, new_poisoned_generations,
 		 new_poisoned_count * sizeof(gen_t));
+	  num_poisoned_generations.store_release(new_poisoned_count);
 	}
       }
 
@@ -1696,6 +1699,7 @@ namespace Realm {
 	// we own this event
 
 	NodeSet to_update;
+	gen_t update_gen;
 	bool free_event = false;
 
 	{
@@ -1708,13 +1712,19 @@ namespace Realm {
 	  assert(future_local_waiters.empty()); // no future waiters here
 
 	  to_update.swap(remote_waiters);
+	  update_gen = gen_triggered;
 
 	  // update poisoned generation list
+	  bool max_poisons = false;
 	  if(poisoned) {
 	    if(!poisoned_generations)
 	      poisoned_generations = new gen_t[POISONED_GENERATION_LIMIT];
-	    assert(num_poisoned_generations < POISONED_GENERATION_LIMIT);
-	    poisoned_generations[num_poisoned_generations++] = gen_triggered;
+	    int npg_cached = num_poisoned_generations.load();
+	    assert(npg_cached < POISONED_GENERATION_LIMIT);
+	    poisoned_generations[npg_cached] = gen_triggered;
+	    num_poisoned_generations.store_release(npg_cached + 1);
+	    if((npg_cached + 1) == POISONED_GENERATION_LIMIT)
+	      max_poisons = true;
 	  }
 
 	  // update generation last, with a synchronization to make sure poisoned generation
@@ -1723,8 +1733,8 @@ namespace Realm {
 
 	  // we'll free the event unless it's maxed out on poisoned generations
 	  //  or generation count
-	  free_event = ((num_poisoned_generations < POISONED_GENERATION_LIMIT) &&
-			(gen_triggered < ((1U << ID::EVENT_GENERATION_WIDTH) - 1)));
+	  free_event = ((gen_triggered < ((1U << ID::EVENT_GENERATION_WIDTH) - 1)) &&
+			!max_poisons);
 	  // special case: if the merger is still active, defer the
 	  //  re-insertion until all the preconditions have triggered
 	  if(free_event && merger.is_active()) {
@@ -1735,9 +1745,10 @@ namespace Realm {
 
 	// any remote nodes to notify?
 	if(!to_update.empty()) {
-	  ActiveMessage<EventUpdateMessage> amsg(to_update,num_poisoned_generations*sizeof(EventImpl::gen_t));
-	  amsg->event = make_event(gen_triggered);
-	  amsg.add_payload(poisoned_generations, num_poisoned_generations*sizeof(EventImpl::gen_t), PAYLOAD_KEEP);
+	  int npg_cached = num_poisoned_generations.load_acquire();
+	  ActiveMessage<EventUpdateMessage> amsg(to_update, npg_cached*sizeof(EventImpl::gen_t));
+	  amsg->event = make_event(update_gen);
+	  amsg.add_payload(poisoned_generations, npg_cached*sizeof(EventImpl::gen_t), PAYLOAD_KEEP);
 	  amsg.commit();
 	}
 
