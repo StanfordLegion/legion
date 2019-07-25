@@ -204,19 +204,34 @@ class Context(object):
 
 # Hack: Can't pickle static methods.
 def _DomainPoint_unpickle(values):
-    return DomainPoint.create(values)
+    return DomainPoint(values)
 
 class DomainPoint(object):
     __slots__ = [
         'handle',
         '_point', # cached properties
     ]
-    def __init__(self, handle, take_ownership=False):
-        # Important: Copy handle. Do NOT assume ownership unless explicitly told.
-        if take_ownership:
-            self.handle = handle
+    def __init__(self, values, **kwargs):
+        def parse_kwargs(_handle=None):
+            return _handle
+        handle = parse_kwargs(**kwargs)
+
+        if values is not None:
+            assert handle is None
+            try:
+                len(values)
+            except TypeError:
+                values = [values]
+            assert 1 <= len(values) <= _max_dim
+            self.handle = ffi.new('legion_domain_point_t *')
+            self.handle[0].dim = len(values)
+            for i, value in enumerate(values):
+                self.handle[0].point_data[i] = value
         else:
+            # Important: Copy handle. Do NOT assume ownership.
+            assert handle is not None
             self.handle = ffi.new('legion_domain_point_t *', handle)
+
         self._point = None
 
     def __reduce__(self):
@@ -258,22 +273,9 @@ class DomainPoint(object):
         return self._point
 
     @staticmethod
-    def create(values):
-        try:
-            len(values)
-        except TypeError:
-            values = [values]
-        assert 1 <= len(values) <= _max_dim
-        handle = ffi.new('legion_domain_point_t *')
-        handle[0].dim = len(values)
-        for i, value in enumerate(values):
-            handle[0].point_data[i] = value
-        return DomainPoint(handle, take_ownership=True)
-
-    @staticmethod
     def coerce(value):
         if not isinstance(value, DomainPoint):
-            return DomainPoint.create(value)
+            return DomainPoint(value)
         return value
 
     def raw_value(self):
@@ -290,8 +292,34 @@ class Domain(object):
         'handle',
         '_bounds', # cached properties
     ]
-    def __init__(self, handle):
+    def __init__(self, extent, start=None, **kwargs):
+        def parse_kwargs(_handle=None):
+            return _handle
+        handle = parse_kwargs(**kwargs)
+
+        if extent is not None:
+            assert handle is None
+            try:
+                len(extent)
+            except TypeError:
+                extent = [extent]
+            if start is not None:
+                try:
+                    len(start)
+                except TypeError:
+                    start = [start]
+                assert len(start) == len(extent)
+            else:
+                start = [0 for _ in extent]
+            assert 1 <= len(extent) <= _max_dim
+            rect = ffi.new('legion_rect_{}d_t *'.format(len(extent)))
+            for i in xrange(len(extent)):
+                rect[0].lo.x[i] = start[i]
+                rect[0].hi.x[i] = start[i] + extent[i] - 1
+            handle = getattr(c, 'legion_domain_from_rect_{}d'.format(len(extent)))(rect[0])
+
         # Important: Copy handle. Do NOT assume ownership.
+        assert handle is not None
         self.handle = ffi.new('legion_domain_t *', handle)
         self._bounds = None
 
@@ -319,35 +347,14 @@ class Domain(object):
         return self.bounds[0]
 
     @staticmethod
-    def create(extent, start=None):
-        try:
-            len(extent)
-        except TypeError:
-            extent = [extent]
-        if start is not None:
-            try:
-                len(start)
-            except TypeError:
-                start = [start]
-            assert len(start) == len(extent)
-        else:
-            start = [0 for _ in extent]
-        assert 1 <= len(extent) <= _max_dim
-        rect = ffi.new('legion_rect_{}d_t *'.format(len(extent)))
-        for i in xrange(len(extent)):
-            rect[0].lo.x[i] = start[i]
-            rect[0].hi.x[i] = start[i] + extent[i] - 1
-        return Domain(getattr(c, 'legion_domain_from_rect_{}d'.format(len(extent)))(rect[0]))
-
-    @staticmethod
     def coerce(value):
         if not isinstance(value, Domain):
-            return Domain.create(value)
+            return Domain(value)
         return value
 
     def __iter__(self):
         return imap(
-            DomainPoint.create,
+            DomainPoint,
             itertools.product(
                 *[xrange(
                     self.handle[0].rect_data[i],
@@ -366,21 +373,26 @@ class Domain(object):
 
 class DomainTransform(object):
     __slots__ = ['handle']
-    def __init__(self, handle):
-        # Important: Copy handle. Do NOT assume ownership.
-        self.handle = ffi.new('legion_domain_transform_t *', handle)
+    def __init__(self, matrix, **kwargs):
+        def parse_kwargs(_handle=None):
+            return _handle
+        handle = parse_kwargs(**kwargs)
 
-    @staticmethod
-    def create(matrix):
-        matrix = numpy.asarray(matrix, dtype=numpy.int64)
-        transform = ffi.new('legion_transform_{}x{}_t *'.format(*matrix.shape))
-        ffi.buffer(transform[0].trans)[:] = matrix
-        return DomainTransform(getattr(c, 'legion_domain_transform_from_{}x{}'.format(*matrix.shape))(transform[0]))
+        if matrix is not None:
+            assert handle is None
+            matrix = numpy.asarray(matrix, dtype=numpy.int64)
+            transform = ffi.new('legion_transform_{}x{}_t *'.format(*matrix.shape))
+            ffi.buffer(transform[0].trans)[:] = matrix
+            handle = getattr(c, 'legion_domain_transform_from_{}x{}'.format(*matrix.shape))(transform[0])
+
+        # Important: Copy handle. Do NOT assume ownership.
+        assert handle is not None
+        self.handle = ffi.new('legion_domain_transform_t *', handle)
 
     @staticmethod
     def coerce(value):
         if not isinstance(value, DomainTransform):
-            return DomainTransform.create(value)
+            return DomainTransform(value)
         return value
 
     def raw_value(self):
@@ -784,7 +796,7 @@ def _Ispace_unpickle(ispace_tid, ispace_id, ispace_type_tag, owned):
     handle[0].tid = ispace_tid
     handle[0].id = ispace_id
     handle[0].type_tag = ispace_type_tag
-    return Ispace(handle[0], owned=owned)
+    return Ispace(None, _handle=handle[0], _owned=owned)
 
 class Ispace(object):
     __slots__ = [
@@ -793,8 +805,19 @@ class Ispace(object):
         '__weakref__', # allow weak references
     ]
 
-    def __init__(self, handle, owned=False):
+    def __init__(self, extent, start=None, **kwargs):
+        def parse_kwargs(_handle=None, _owned=False):
+            return _handle, _owned
+        handle, owned = parse_kwargs(**kwargs)
+
+        if extent is not None:
+            assert handle is None
+            domain = Domain(extent, start=start).raw_value()
+            handle = c.legion_index_space_create_domain(_my.ctx.runtime, _my.ctx.context, domain)
+            owned = True
+
         # Important: Copy handle. Do NOT assume ownership.
+        assert handle is not None
         self.handle = ffi.new('legion_index_space_t *', handle)
         self.owned = owned
         self.escaped = False
@@ -820,7 +843,7 @@ class Ispace(object):
     @property
     def domain(self):
         if self._domain is None:
-            self._domain = Domain(c.legion_index_space_get_domain(_my.ctx.runtime, self.handle[0]))
+            self._domain = Domain(None, _handle=c.legion_index_space_get_domain(_my.ctx.runtime, self.handle[0]))
         return self._domain
 
     @property
@@ -836,15 +859,9 @@ class Ispace(object):
         return self.domain.bounds
 
     @staticmethod
-    def create(extent, start=None):
-        domain = Domain.create(extent, start=start).raw_value()
-        handle = c.legion_index_space_create_domain(_my.ctx.runtime, _my.ctx.context, domain)
-        return Ispace(handle, owned=True)
-
-    @staticmethod
     def coerce(value):
         if not isinstance(value, Ispace):
-            return Ispace.create(value)
+            return Ispace(value)
         return value
 
     def destroy(self):
@@ -864,7 +881,7 @@ class Ispace(object):
 def _Fspace_unpickle(fspace_id, field_ids, field_types, owned):
     handle = ffi.new('legion_field_space_t *')
     handle[0].id = fspace_id
-    return Fspace(handle[0], field_ids, field_types, owned=owned)
+    return Fspace(None, _handle=handle[0], _field_ids=field_ids, _field_types=field_types, _owned=owned)
 
 class Fspace(object):
     __slots__ = [
@@ -873,8 +890,35 @@ class Fspace(object):
         '__weakref__', # allow weak references
     ]
 
-    def __init__(self, handle, field_ids, field_types, owned=False):
+    def __init__(self, fields, **kwargs):
+        def parse_kwargs(_handle=None, _field_ids=None, _field_types=None, _owned=False):
+            return _handle, _field_ids, _field_types, _owned
+        handle, field_ids, field_types, owned = parse_kwargs(**kwargs)
+
+        if fields is not None:
+            assert handle is None and field_ids is None and field_types is None
+            handle = c.legion_field_space_create(_my.ctx.runtime, _my.ctx.context)
+            alloc = c.legion_field_allocator_create(
+                _my.ctx.runtime, _my.ctx.context, handle)
+            field_ids = collections.OrderedDict()
+            field_types = collections.OrderedDict()
+            for field_name, field_entry in fields.items():
+                try:
+                    field_type, field_id = field_entry
+                except TypeError:
+                    field_type = field_entry
+                    field_id = ffi.cast('legion_field_id_t', AUTO_GENERATE_ID)
+                field_id = c.legion_field_allocator_allocate_field(
+                    alloc, field_type.size, field_id)
+                c.legion_field_id_attach_name(
+                    _my.ctx.runtime, handle, field_id, field_name.encode('utf-8'), False)
+                field_ids[field_name] = field_id
+                field_types[field_name] = field_type
+            c.legion_field_allocator_destroy(alloc)
+            owned = True
+
         # Important: Copy handle. Do NOT assume ownership.
+        assert handle is not None and field_ids is not None and field_types is not None
         self.handle = ffi.new('legion_field_space_t *', handle)
         self.field_ids = field_ids
         self.field_types = field_types
@@ -896,31 +940,9 @@ class Fspace(object):
                  self.owned and self.escaped))
 
     @staticmethod
-    def create(fields):
-        handle = c.legion_field_space_create(_my.ctx.runtime, _my.ctx.context)
-        alloc = c.legion_field_allocator_create(
-            _my.ctx.runtime, _my.ctx.context, handle)
-        field_ids = collections.OrderedDict()
-        field_types = collections.OrderedDict()
-        for field_name, field_entry in fields.items():
-            try:
-                field_type, field_id = field_entry
-            except TypeError:
-                field_type = field_entry
-                field_id = ffi.cast('legion_field_id_t', AUTO_GENERATE_ID)
-            field_id = c.legion_field_allocator_allocate_field(
-                alloc, field_type.size, field_id)
-            c.legion_field_id_attach_name(
-                _my.ctx.runtime, handle, field_id, field_name.encode('utf-8'), False)
-            field_ids[field_name] = field_id
-            field_types[field_name] = field_type
-        c.legion_field_allocator_destroy(alloc)
-        return Fspace(handle, field_ids, field_types, owned=True)
-
-    @staticmethod
     def coerce(value):
         if not isinstance(value, Fspace):
-            return Fspace.create(value)
+            return Fspace(value)
         return value
 
     def destroy(self):
@@ -942,13 +964,13 @@ class Fspace(object):
         return self.field_ids.keys()
 
 # Hack: Can't pickle static methods.
-def _Region_unpickle(tree_id, ispace, fspace, owned):
+def _Region_unpickle(ispace, fspace, tree_id, owned):
     handle = ffi.new('legion_logical_region_t *')
     handle[0].tree_id = tree_id
     handle[0].index_space = ispace.handle[0]
     handle[0].field_space = fspace.handle[0]
 
-    return Region(handle[0], ispace, fspace, owned=owned)
+    return Region(ispace, fspace, _handle=handle[0], _owned=owned)
 
 class Region(object):
     __slots__ = [
@@ -963,8 +985,21 @@ class Region(object):
     cffi_type = 'legion_logical_region_t'
     size = ffi.sizeof(cffi_type)
 
-    def __init__(self, handle, ispace, fspace, parent=None, owned=False):
+    def __init__(self, ispace, fspace, **kwargs):
+        def parse_kwargs(_handle=None, _parent=None, _owned=False):
+            return _handle, _parent, _owned
+        handle, parent, owned = parse_kwargs(**kwargs)
+
+        if handle is None:
+            assert parent is None
+            ispace = Ispace.coerce(ispace)
+            fspace = Fspace.coerce(fspace)
+            handle = c.legion_logical_region_create(
+                _my.ctx.runtime, _my.ctx.context, ispace.raw_value(), fspace.raw_value(), False)
+            owned = True
+
         # Important: Copy handle. Do NOT assume ownership.
+        assert handle is not None
         self.handle = ffi.new('legion_logical_region_t *', handle)
         self.ispace = ispace
         self.fspace = fspace
@@ -986,18 +1021,10 @@ class Region(object):
 
     def __reduce__(self):
         return (_Region_unpickle,
-                (self.handle[0].tree_id,
-                 self.ispace,
+                (self.ispace,
                  self.fspace,
+                 self.handle[0].tree_id,
                  self.owned and self.escaped))
-
-    @staticmethod
-    def create(ispace, fspace):
-        ispace = Ispace.coerce(ispace)
-        fspace = Fspace.coerce(fspace)
-        handle = c.legion_logical_region_create(
-            _my.ctx.runtime, _my.ctx.context, ispace.raw_value(), fspace.raw_value(), False)
-        return Region(handle, ispace, fspace, owned=True)
 
     def destroy(self):
         assert self.owned and not self.escaped
@@ -1190,14 +1217,14 @@ class Ipartition(object):
         point = DomainPoint.coerce(point)
         subspace = c.legion_index_partition_get_index_subspace_domain_point(
             _my.ctx.runtime, self.handle[0], point.raw_value())
-        return Ispace(subspace)
+        return Ispace(None, _handle=subspace)
 
     def __iter__(self):
         for point in self.color_space:
             yield self[point]
 
     @staticmethod
-    def create_equal(ispace, color_space, granularity=1, color=AUTO_GENERATE_ID):
+    def equal(ispace, color_space, granularity=1, color=AUTO_GENERATE_ID):
         assert isinstance(ispace, Ispace)
         color_space = Ispace.coerce(color_space)
         handle = c.legion_index_partition_create_equal(
@@ -1206,7 +1233,7 @@ class Ipartition(object):
         return Ipartition(handle, ispace, color_space)
 
     @staticmethod
-    def create_by_field(region, field, color_space, color=AUTO_GENERATE_ID):
+    def by_field(region, field, color_space, color=AUTO_GENERATE_ID):
         assert isinstance(region, Region)
         color_space = Ispace.coerce(color_space)
         handle = c.legion_index_partition_create_by_field(
@@ -1218,7 +1245,7 @@ class Ipartition(object):
         return Ipartition(handle, region.ispace, color_space)
 
     @staticmethod
-    def create_by_image(ispace, projection, field, color_space,
+    def image(ispace, projection, field, color_space,
                         part_kind=compute, color=AUTO_GENERATE_ID):
         assert isinstance(ispace, Ispace)
         assert isinstance(projection, Partition)
@@ -1238,7 +1265,7 @@ class Ipartition(object):
         return Ipartition(handle, parent.ispace, color_space)
 
     @staticmethod
-    def create_by_preimage(projection, region, field, color_space,
+    def preimage(projection, region, field, color_space,
                            part_kind=compute, color=AUTO_GENERATE_ID):
         assert isinstance(projection, Ipartition)
         assert isinstance(region, Region)
@@ -1257,7 +1284,7 @@ class Ipartition(object):
         return Ipartition(handle, region.ispace, color_space)
 
     @staticmethod
-    def create_by_restriction(ispace, color_space, transform, extent,
+    def restrict(ispace, color_space, transform, extent,
                               part_kind=compute, color=AUTO_GENERATE_ID):
         assert isinstance(ispace, Ispace)
         assert isinstance(part_kind, Disjointness)
@@ -1270,7 +1297,7 @@ class Ipartition(object):
         return Ipartition(handle, ispace, color_space)
 
     @staticmethod
-    def create_pending(ispace, color_space,
+    def pending(ispace, color_space,
                        part_kind=compute, color=AUTO_GENERATE_ID):
         assert isinstance(ispace, Ispace)
         assert isinstance(part_kind, Disjointness)
@@ -1281,7 +1308,7 @@ class Ipartition(object):
         return Ipartition(handle, ispace, color_space)
 
     # The following methods are for pending partitions only:
-    def create_union(self, color, ispaces):
+    def union(self, color, ispaces):
         color = DomainPoint.coerce(color)
 
         handles = ffi.new('legion_index_space_t[]', [ispace.raw_value() for ispace in ispaces])
@@ -1309,7 +1336,7 @@ def _Partition_unpickle(parent, ipartition):
     handle[0].index_partition = ipartition.raw_value()
     handle[0].field_space = parent.fspace.raw_value()
 
-    return Partition(handle[0], parent, ipartition)
+    return Partition(parent, ipartition, _handle=handle[0])
 
 class Partition(object):
     __slots__ = ['handle', 'parent', 'ipartition']
@@ -1319,8 +1346,19 @@ class Partition(object):
     cffi_type = 'legion_logical_partition_t'
     size = ffi.sizeof(cffi_type)
 
-    def __init__(self, handle, parent, ipartition):
+    def __init__(self, parent, ipartition, **kwargs):
+        def parse_kwargs(_handle=None):
+            return _handle
+        handle = parse_kwargs(**kwargs)
+
+        if handle is None:
+            assert isinstance(parent, Region)
+            assert isinstance(ipartition, Ipartition)
+            handle = c.legion_logical_partition_create(
+                _my.ctx.runtime, _my.ctx.context, parent.raw_value(), ipartition.raw_value())
+
         # Important: Copy handle. Do NOT assume ownership.
+        assert handle is not None
         self.handle = ffi.new('legion_logical_partition_t *', handle)
         self.parent = parent
         self.ipartition = ipartition
@@ -1337,8 +1375,8 @@ class Partition(object):
         subspace = self.ipartition[point]
         subregion = c.legion_logical_partition_get_logical_subregion_by_color_domain_point(
             _my.ctx.runtime, self.handle[0], point.raw_value())
-        return Region(subregion, subspace, self.parent.fspace,
-                      parent=self.parent.parent if self.parent.parent is not None else self.parent)
+        return Region(subspace, self.parent.fspace, _handle=subregion,
+                      _parent=self.parent.parent if self.parent.parent is not None else self.parent)
 
     def __iter__(self):
         for point in self.color_space:
@@ -1349,60 +1387,52 @@ class Partition(object):
         return self.ipartition.color_space
 
     @staticmethod
-    def create(parent, ipartition):
-        assert isinstance(parent, Region)
-        assert isinstance(ipartition, Ipartition)
-        handle = c.legion_logical_partition_create(
-            _my.ctx.runtime, _my.ctx.context, parent.raw_value(), ipartition.raw_value())
-        return Partition(handle, parent, ipartition)
+    def equal(region, color_space, granularity=1, color=AUTO_GENERATE_ID):
+        assert isinstance(region, Region)
+        ipartition = Ipartition.equal(region.ispace, color_space, granularity, color)
+        return Partition(region, ipartition)
 
     @staticmethod
-    def create_equal(region, color_space, granularity=1, color=AUTO_GENERATE_ID):
+    def by_field(region, field, color_space, color=AUTO_GENERATE_ID):
         assert isinstance(region, Region)
-        ipartition = Ipartition.create_equal(region.ispace, color_space, granularity, color)
-        return Partition.create(region, ipartition)
-
-    @staticmethod
-    def create_by_field(region, field, color_space, color=AUTO_GENERATE_ID):
-        assert isinstance(region, Region)
-        ipartition = Ipartition.create_by_field(
+        ipartition = Ipartition.by_field(
             region, field, color_space, color)
-        return Partition.create(region, ipartition)
+        return Partition(region, ipartition)
 
     @staticmethod
-    def create_by_image(region, projection, field, color_space,
+    def image(region, projection, field, color_space,
                         part_kind=compute, color=AUTO_GENERATE_ID):
         assert isinstance(region, Region)
-        ipartition = Ipartition.create_by_image(
+        ipartition = Ipartition.image(
             region.ispace, projection, field, color_space, part_kind, color)
-        return Partition.create(region, ipartition)
+        return Partition(region, ipartition)
 
     @staticmethod
-    def create_by_preimage(projection, region, field, color_space,
+    def preimage(projection, region, field, color_space,
                            part_kind=compute, color=AUTO_GENERATE_ID):
         assert isinstance(projection, Partition)
-        ipartition = Ipartition.create_by_preimage(
+        ipartition = Ipartition.preimage(
             projection.ipartition, region, field, color_space, part_kind, color)
-        return Partition.create(region, ipartition)
+        return Partition(region, ipartition)
 
     @staticmethod
-    def create_by_restriction(region, color_space, transform, extent,
+    def restrict(region, color_space, transform, extent,
                               part_kind=compute, color=AUTO_GENERATE_ID):
         assert isinstance(region, Region)
-        ipartition = Ipartition.create_by_restriction(
+        ipartition = Ipartition.restrict(
             region.ispace, color_space, transform, extent, part_kind, color)
-        return Partition.create(region, ipartition)
+        return Partition(region, ipartition)
 
     @staticmethod
-    def create_pending(region, color_space, part_kind=compute, color=AUTO_GENERATE_ID):
+    def pending(region, color_space, part_kind=compute, color=AUTO_GENERATE_ID):
         assert isinstance(region, Region)
-        ipartition = Ipartition.create_pending(
+        ipartition = Ipartition.pending(
             region.ispace, color_space, part_kind, color)
-        return Partition.create(region, ipartition)
+        return Partition(region, ipartition)
 
-    def create_union(self, color, regions):
+    def union(self, color, regions):
         ispaces = [region.ispace for region in regions]
-        self.ipartition.create_union(color, ispaces)
+        self.ipartition.union(color, ispaces)
 
     def destroy(self):
         # This is not something you want to have happen in a
@@ -1610,7 +1640,7 @@ class Task (object):
         _my.ctx = ctx
 
         # Postprocess arguments.
-        point = DomainPoint(c.legion_task_get_index_point(task[0]))
+        point = DomainPoint(None, _handle=c.legion_task_get_index_point(task[0]))
         args = tuple(_postprocess(arg, point) for arg in args)
 
         # Unpack physical regions.
@@ -2129,7 +2159,7 @@ def index_launch(domain, task, *args, **kwargs):
     elif isinstance(domain, Ispace):
         domain = domain.domain
     else:
-        domain = Domain.create(domain)
+        domain = Domain(domain)
     launcher = _IndexLauncher(task=task, domain=domain)
     args, futures = launcher.gather_futures(args)
     launcher.attach_global_args(*args)
@@ -2148,7 +2178,7 @@ class IndexLaunch(object):
         elif isinstance(domain, Ispace):
             self.domain = domain.domain
         else:
-            self.domain = Domain.create(domain)
+            self.domain = Domain(domain)
         self.launcher = None
         self.point = None
         self.saved_task = None
@@ -2217,7 +2247,7 @@ class MustEpochLaunch(object):
         elif isinstance(domain, Ispace):
             self.domain = ispace.domain
         elif domain is not None:
-            self.domain = Domain.create(domain)
+            self.domain = Domain(domain)
         else:
             self.domain = None
         self.launcher = None

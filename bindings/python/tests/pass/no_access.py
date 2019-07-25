@@ -31,8 +31,8 @@ def hello2(R, i):
 
 @task
 def main():
-    R = legion.Region.create([4], {'x': legion.float64})
-    P = legion.Partition.create_equal(R, [4])
+    R = legion.Region([4], {'x': legion.float64})
+    P = legion.Partition.equal(R, [4])
     legion.fill(R, 'x', 0)
 
     hello2(P[0], 0)

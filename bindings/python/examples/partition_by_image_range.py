@@ -18,7 +18,7 @@
 from __future__ import print_function
 
 import legion
-from legion import task, RW, WD
+from legion import task, Partition, Region, RW, WD
 import numpy as np
 
 @task(privileges=[WD])
@@ -34,11 +34,11 @@ def init_field(R):
 
 @task
 def main():
-    R = legion.Region.create([4, 4], {'rect': legion.rect2d})
+    R = Region([4, 4], {'rect': legion.rect2d})
     init_field(R)
 
-    P = legion.Partition.create_by_restriction(R, [2, 2], np.eye(2)*2, [2, 2])
-    Q = legion.Partition.create_by_image(R, P, 'rect', [2, 2])
+    P = Partition.restrict(R, [2, 2], np.eye(2)*2, [2, 2])
+    Q = Partition.image(R, P, 'rect', [2, 2])
 
     assert P.color_space.volume == 4
     assert P[0, 0].ispace.volume == 4

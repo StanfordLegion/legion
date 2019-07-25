@@ -39,8 +39,8 @@ def parse_args(argv):
     return parser.parse_args(argv[1:])
 
 def make_colors_part(tiles):
-    colors = Region.create(tiles, {'rect': legion.rect2d})
-    colors_part = Partition.create_by_restriction(colors, tiles, np.eye(2), [1, 1], disjoint_complete)
+    colors = Region(tiles, {'rect': legion.rect2d})
+    colors_part = Partition.restrict(colors, tiles, np.eye(2), [1, 1], disjoint_complete)
     return colors, colors_part
 
 def make_private_partition(points, tiles, n, nt):
@@ -51,7 +51,7 @@ def make_private_partition(points, tiles, n, nt):
         colors.rect[tile] = (
             idx*npoints/nt,
             (idx+1)*npoints/nt - 1)
-    return Partition.create_by_image(points, colors_part, 'rect', tiles, disjoint_complete)
+    return Partition.image(points, colors_part, 'rect', tiles, disjoint_complete)
 
 def make_interior_partition(points, tiles, n, nt):
     colors, colors_part = make_colors_part(tiles)
@@ -61,7 +61,7 @@ def make_interior_partition(points, tiles, n, nt):
         colors.rect[tile] = (
             idx*npoints/nt + RADIUS,
             (idx+1)*npoints/nt - 1 - RADIUS)
-    return Partition.create_by_image(points, colors_part, 'rect', tiles, disjoint_incomplete)
+    return Partition.image(points, colors_part, 'rect', tiles, disjoint_incomplete)
 
 def make_exterior_partition(points, tiles, n, nt):
     colors, colors_part = make_colors_part(tiles)
@@ -73,7 +73,7 @@ def make_exterior_partition(points, tiles, n, nt):
         colors.rect[tile] = (
             idx*npoints/nt + loff,
             (idx+1)*npoints/nt - 1 - hoff)
-    return Partition.create_by_image(points, colors_part, 'rect', tiles, disjoint_incomplete)
+    return Partition.image(points, colors_part, 'rect', tiles, disjoint_incomplete)
 
 def clamp(val, lo, hi):
   return min(max(val, lo), hi)
@@ -86,7 +86,7 @@ def make_ghost_x_partition(points, tiles, n, nt, direction):
             [clamp((idx[0]+direction)*RADIUS, 0, nt[0]*RADIUS), idx[1]*n[1]/nt[1]],
             [clamp((idx[0]+1+direction)*RADIUS - 1, -1, nt[0]*RADIUS - 1), (idx[1]+1)*n[1]/nt[1] - 1])
     kind = disjoint_complete if direction == 0 else disjoint_incomplete
-    return Partition.create_by_image(points, colors_part, 'rect', tiles, kind)
+    return Partition.image(points, colors_part, 'rect', tiles, kind)
 
 def make_ghost_y_partition(points, tiles, n, nt, direction):
     colors, colors_part = make_colors_part(tiles)
@@ -96,7 +96,7 @@ def make_ghost_y_partition(points, tiles, n, nt, direction):
             [idx[0]*n[0]/nt[0], clamp((idx[1]+direction)*RADIUS, 0, nt[1]*RADIUS)],
             [(idx[0]+1)*n[0]/nt[0] - 1, clamp((idx[1]+1+direction)*RADIUS - 1, -1, nt[1]*RADIUS - 1)])
     kind = disjoint_complete if direction == 0 else disjoint_incomplete
-    return Partition.create_by_image(points, colors_part, 'rect', tiles, kind)
+    return Partition.image(points, colors_part, 'rect', tiles, kind)
 
 _constant_time_launches = True
 if _constant_time_launches:
@@ -138,24 +138,24 @@ def main():
     n = nbloated - 2*RADIUS
     assert np.all(n >= nt), "grid too small"
 
-    grid = Ispace.create(n + nt*2*RADIUS)
-    tiles = Ispace.create(nt)
+    grid = Ispace(n + nt*2*RADIUS)
+    tiles = Ispace(nt)
 
-    point = Fspace.create(OrderedDict([
+    point = Fspace(OrderedDict([
         ('input', DTYPE),
         ('output', DTYPE),
     ]))
 
-    points = Region.create(grid, point)
+    points = Region(grid, point)
 
     private = make_private_partition(points, tiles, n, nt)
     interior = make_interior_partition(points, tiles, n, nt)
     exterior = make_exterior_partition(points, tiles, n, nt)
 
-    xm = Region.create([nt[0]*RADIUS, n[1]], point)
-    xp = Region.create([nt[0]*RADIUS, n[1]], point)
-    ym = Region.create([n[0], nt[1]*RADIUS], point)
-    yp = Region.create([n[0], nt[1]*RADIUS], point)
+    xm = Region([nt[0]*RADIUS, n[1]], point)
+    xp = Region([nt[0]*RADIUS, n[1]], point)
+    ym = Region([n[0], nt[1]*RADIUS], point)
+    yp = Region([n[0], nt[1]*RADIUS], point)
     pxm_in = make_ghost_x_partition(xm, tiles, n, nt, -1)
     pxp_in = make_ghost_x_partition(xp, tiles, n, nt,  1)
     pym_in = make_ghost_y_partition(ym, tiles, n, nt, -1)

@@ -26,7 +26,7 @@ def complex_plus_one(x):
 
 @task
 def main():
-    R = legion.Region.create(
+    R = legion.Region(
         [10],
         {
             'b': legion.bool_,

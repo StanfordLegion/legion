@@ -18,18 +18,18 @@
 from __future__ import print_function
 
 import legion
-from legion import task, RW
+from legion import task, Ispace, RW
 
 @task
 def main():
-    d = legion.Ispace.create(10)
+    d = Ispace(10)
     t = 0
     for x in d:
         print(x)
         t += int(x)
     assert t == 45
 
-    d2 = legion.Ispace.create([3, 3], [1, 1])
+    d2 = Ispace([3, 3], [1, 1])
     t2 = 0
     for x in d2:
         print(x)

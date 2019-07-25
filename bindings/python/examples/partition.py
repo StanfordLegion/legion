@@ -18,7 +18,7 @@
 from __future__ import print_function
 
 import legion
-from legion import task, RW
+from legion import task, Ipartition, Partition, Region, RW
 import numpy as np
 
 @task(privileges=[RW])
@@ -30,14 +30,14 @@ def check_subregion(R):
 
 @task
 def main():
-    R = legion.Region.create([4, 4], {'x': legion.float64})
+    R = Region([4, 4], {'x': legion.float64})
 
     # Create a partition of R.
-    P = legion.Partition.create_equal(R, [2, 2])
+    P = Partition.equal(R, [2, 2])
 
     # Same as above, broken explicitly into two steps.
-    IP2 = legion.Ipartition.create_equal(R.ispace, [2, 2])
-    P2 = legion.Partition.create(R, IP2)
+    IP2 = Ipartition.equal(R.ispace, [2, 2])
+    P2 = Partition(R, IP2)
 
     assert P.color_space.volume == 4
 
@@ -49,7 +49,7 @@ def main():
     assert check_subregion(R00).get() == 4
 
     # Partition the subregion again.
-    P00 = legion.Partition.create_equal(R00, [2, 2])
+    P00 = Partition.equal(R00, [2, 2])
     total_volume = 0
     for x in range(2):
         for y in range(2):

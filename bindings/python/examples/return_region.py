@@ -18,13 +18,13 @@
 from __future__ import print_function
 
 import legion
-from legion import task, RW
+from legion import task, Region, RW
 
 @task
 def make_region():
     # If you return a region from a task, the privileges to the region
     # will be automatically given to the calling task.
-    R = legion.Region.create([4, 4], {'x': legion.float64})
+    R = Region([4, 4], {'x': legion.float64})
     legion.fill(R, 'x', 0)
     print('returning from make_region with', R)
     return R
@@ -33,7 +33,7 @@ def make_region():
 def make_region_dict():
     # It should also work if the region in question is returned as
     # part of a larger data structure.
-    R = legion.Region.create([4, 4], {'x': legion.float64})
+    R = Region([4, 4], {'x': legion.float64})
     legion.fill(R, 'x', 0)
     result = {'asdf': R}
     print('returning from make_region_dict with', result)
