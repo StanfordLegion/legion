@@ -19,7 +19,7 @@ from __future__ import print_function
 
 from collections import OrderedDict
 import legion
-from legion import task, R
+from legion import task, Fspace, R, Region, RW
 
 # FIXME: Need a better way to determine task IDs.
 hello = legion.extern_task(
@@ -30,8 +30,8 @@ hello = legion.extern_task(
 
 saxpy = legion.extern_task(
     task_id=10001,
-    argument_types=[legion.Region, legion.float64],
-    privileges=[legion.RW],
+    argument_types=[Region, legion.float64],
+    privileges=[RW],
     calling_convention='regent')
 
 @task(privileges=[R])
@@ -48,10 +48,10 @@ def main():
 
     print('creating a field space with two fields')
     # Note: Need to use OrderedDict so that the field ordering matches Regent.
-    fs = legion.Fspace.create(OrderedDict([('x', legion.float64), ('y', legion.float64)]))
+    fs = Fspace(OrderedDict([('x', legion.float64), ('y', legion.float64)]))
 
     print('creating a region with 12 elements')
-    r = legion.Region.create([12], fs)
+    r = Region([12], fs)
 
     legion.fill(r, 'x', 1)
     legion.fill(r, 'y', 2)

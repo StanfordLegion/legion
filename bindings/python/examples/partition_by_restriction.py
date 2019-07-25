@@ -18,7 +18,7 @@
 from __future__ import print_function
 
 import legion
-from legion import task, RW
+from legion import task, Domain, Partition, Region, RW
 import numpy as np
 
 @task(privileges=[RW])
@@ -30,7 +30,7 @@ def check_subregion(R):
 
 @task
 def main():
-    R = legion.Region.create([4, 4], {'x': legion.float64})
+    R = Region([4, 4], {'x': legion.float64})
 
     legion.fill(R, 'x', 0)
 
@@ -38,13 +38,13 @@ def main():
     colors = [2, 2]
     transform = [[2, 0], [0, 2]]
     extent = [2, 2]
-    P = legion.Partition.create_by_restriction(R, colors, transform, extent)
+    P = Partition.restrict(R, colors, transform, extent)
 
     # Again, with different parameters.
     colors2 = [3]
     transform2 = [[1], [2]]
-    extent2 = legion.Domain.create([2, 2], [-1, -1])
-    P2 = legion.Partition.create_by_restriction(R, colors2, transform2, extent2)
+    extent2 = Domain([2, 2], [-1, -1])
+    P2 = Partition.restrict(R, colors2, transform2, extent2)
 
     assert P.color_space.volume == 4
     assert P2.color_space.volume == 3

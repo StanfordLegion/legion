@@ -18,7 +18,7 @@
 from __future__ import print_function
 
 import legion
-from legion import task, RW, WD
+from legion import task, Partition, Region, RW, WD
 import numpy as np
 
 @task(privileges=[WD])
@@ -33,10 +33,10 @@ def init_field(R):
 
 @task
 def main():
-    R = legion.Region.create([4, 4], {'color': legion.int2d})
+    R = Region([4, 4], {'color': legion.int2d})
     init_field(R)
 
-    P = legion.Partition.create_by_field(R, 'color', [2, 2])
+    P = Partition.by_field(R, 'color', [2, 2])
 
     assert P.color_space.volume == 4
 

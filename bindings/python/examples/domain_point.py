@@ -18,14 +18,14 @@
 from __future__ import print_function
 
 import legion
-from legion import task, RW
+from legion import task, DomainPoint, RW
 import numpy as np
 
 @task
 def main():
-    d1 = legion.DomainPoint.create([1])
-    d2 = legion.DomainPoint.create([1, 2])
-    d3 = legion.DomainPoint.create([1, 2, 3])
+    d1 = DomainPoint([1])
+    d2 = DomainPoint([1, 2])
+    d3 = DomainPoint([1, 2, 3])
 
     print(d1, repr(d1), d1.point)
     print(d2, repr(d2), d2.point)
@@ -35,9 +35,9 @@ def main():
     assert np.array_equal(d2.point, [1, 2])
     assert np.array_equal(d3.point, [1, 2, 3])
 
-    assert d1 == legion.DomainPoint.create([1])
-    assert d1 != legion.DomainPoint.create([0])
-    assert d1 != legion.DomainPoint.create([1, 2])
+    assert d1 == DomainPoint([1])
+    assert d1 != DomainPoint([0])
+    assert d1 != DomainPoint([1, 2])
 
 if __name__ == '__main__':
     main()

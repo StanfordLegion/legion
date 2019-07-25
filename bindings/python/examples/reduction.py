@@ -18,7 +18,7 @@
 from __future__ import print_function
 
 import legion
-from legion import task, Reduce
+from legion import task, Region, Reduce
 import numpy
 
 @task(privileges=[Reduce('+')])
@@ -28,7 +28,7 @@ def inc(R, step):
 
 @task
 def main():
-    R = legion.Region.create([4, 4], {'x': legion.float64, 'y': legion.int32})
+    R = Region([4, 4], {'x': legion.float64, 'y': legion.int32})
     legion.fill(R, 'x', 1.25)
     legion.fill(R, 'y', 2)
     inc(R, 20)

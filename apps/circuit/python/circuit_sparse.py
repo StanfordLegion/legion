@@ -138,13 +138,13 @@ def main():
     num_circuit_nodes = num_pieces * conf.nodes_per_piece
     num_circuit_wires = num_pieces * conf.wires_per_piece
 
-    node = Fspace.create(OrderedDict([
+    node = Fspace(OrderedDict([
         ('node_cap', legion.float32),
         ('leakage', legion.float32),
         ('charge', legion.float32),
         ('node_voltage', legion.float32),
     ]))
-    wire = Fspace.create(OrderedDict([
+    wire = Fspace(OrderedDict([
         ('in_ptr', legion.int64),
         ('in_ptr_r', legion.uint8),
         ('out_ptr', legion.int64),
@@ -158,8 +158,8 @@ def main():
         ('voltage_%d' % i, legion.float32) for i in range(WIRE_SEGMENTS - 1)
     ]))
 
-    all_nodes = Region.create([num_circuit_nodes], node)
-    all_wires = Region.create([num_circuit_wires], wire)
+    all_nodes = Region([num_circuit_nodes], node)
+    all_wires = Region([num_circuit_wires], wire)
 
     node_size = np.dtype(list(map(lambda x: (x[0], x[1].numpy_type), node.field_types.items())), align=True).itemsize
     wire_size = np.dtype(list(map(lambda x: (x[0], x[1].numpy_type), wire.field_types.items())), align=True).itemsize
@@ -174,30 +174,30 @@ def main():
     pps = conf.pieces_per_superpiece
     num_shared_nodes = num_pieces * snpp
 
-    privacy_coloring = Region.create([2], {'rect': legion.rect1d})
+    privacy_coloring = Region([2], {'rect': legion.rect1d})
     np.copyto(
         privacy_coloring.rect,
         np.array([(num_shared_nodes, num_circuit_nodes - 1),
                   (0, num_shared_nodes - 1)],
                  dtype=privacy_coloring.rect.dtype),
         casting='no')
-    privacy_part = Partition.create_by_restriction(privacy_coloring, [2], np.eye(1), [1], disjoint_complete)
-    all_nodes_part = Partition.create_by_image(all_nodes, privacy_part, 'rect', [2], disjoint_complete)
+    privacy_part = Partition.restrict(privacy_coloring, [2], np.eye(1), [1], disjoint_complete)
+    all_nodes_part = Partition.image(all_nodes, privacy_part, 'rect', [2], disjoint_complete)
 
     all_private = all_nodes_part[0]
     all_shared = all_nodes_part[1]
 
-    launch_domain = Ispace.create([num_superpieces])
+    launch_domain = Ispace([num_superpieces])
 
-    private_part = Partition.create_by_restriction(
-        all_private, launch_domain, np.eye(1)*pnpp*pps, Domain.create([pnpp*pps], [num_shared_nodes]), disjoint_complete)
-    shared_part = Partition.create_by_restriction(
+    private_part = Partition.restrict(
+        all_private, launch_domain, np.eye(1)*pnpp*pps, Domain([pnpp*pps], [num_shared_nodes]), disjoint_complete)
+    shared_part = Partition.restrict(
         all_shared, launch_domain, np.eye(1)*snpp*pps, [snpp*pps], disjoint_complete)
 
-    wires_part = Partition.create_equal(all_wires, launch_domain)
+    wires_part = Partition.equal(all_wires, launch_domain)
 
-    ghost_ranges = Region.create([num_superpieces], OrderedDict([('rect', legion.rect1d)]))
-    ghost_ranges_part = Partition.create_equal(ghost_ranges, launch_domain)
+    ghost_ranges = Region([num_superpieces], OrderedDict([('rect', legion.rect1d)]))
+    ghost_ranges_part = Partition.equal(ghost_ranges, launch_domain)
 
     if _constant_time_launches:
         c = Future(conf[0], value_type=Config)
@@ -206,7 +206,7 @@ def main():
         for i in IndexLaunch(launch_domain):
             init_piece(i, conf[0], ghost_ranges_part[i], private_part[i], shared_part[i], all_shared, wires_part[i])
 
-    ghost_part = Partition.create_by_image(all_shared, ghost_ranges_part, 'rect', launch_domain)
+    ghost_part = Partition.image(all_shared, ghost_ranges_part, 'rect', launch_domain)
 
     if _constant_time_launches:
         index_launch(launch_domain, init_pointers, private_part[ID], shared_part[ID], ghost_part[ID], wires_part[ID])

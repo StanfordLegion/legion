@@ -23,7 +23,7 @@ import os
 import subprocess
 
 import legion
-from legion import task, print_once, Fspace, Future, IndexLaunch, Ispace, N, Partition, R, Reduce, Region, RW
+from legion import task, print_once, Fspace, Future, IndexLaunch, Ipartition, Ispace, N, Partition, R, Reduce, Region, RW
 
 root_dir = os.path.dirname(__file__)
 try:
@@ -51,8 +51,8 @@ config = legion.Type(
     'config')
 
 def create_partition(is_disjoint, region, c_partition, color_space):
-    ipart = legion.Ipartition(c_partition.index_partition, region.ispace, color_space)
-    return legion.Partition.create(region, ipart)
+    ipart = Ipartition(c_partition.index_partition, region.ispace, color_space)
+    return Partition(region, ipart)
 
 read_config = legion.extern_task(
     task_id=10000,
@@ -230,7 +230,7 @@ def main():
 
     conf = read_config().get()
 
-    zone = Fspace.create(OrderedDict([
+    zone = Fspace(OrderedDict([
         ('zxp_x', legion.float64),
         ('zxp_y', legion.float64),
         ('zx_x', legion.float64),
@@ -257,7 +257,7 @@ def main():
         ('znump', legion.uint8),
     ]))
 
-    point = Fspace.create(OrderedDict([
+    point = Fspace(OrderedDict([
         ('px0_x', legion.float64),
         ('px0_y', legion.float64),
         ('pxp_x', legion.float64),
@@ -277,7 +277,7 @@ def main():
         ('has_bcy', legion.bool_),
     ]))
 
-    side = Fspace.create(OrderedDict([
+    side = Fspace(OrderedDict([
         ('mapsz', legion.int1d),
         ('mapsp1', legion.int1d),
         ('mapsp1_r', legion.uint8),
@@ -314,15 +314,15 @@ def main():
         ('cqe2_y', legion.float64),
     ]))
 
-    span = Fspace.create(OrderedDict([
+    span = Fspace(OrderedDict([
         ('start', legion.int64),
         ('stop', legion.int64),
         ('internal', legion.bool_), 
    ]))
 
-    zones = Region.create([conf.nz], zone)
-    points = Region.create([conf.np], point)
-    sides = Region.create([conf.ns], side)
+    zones = Region([conf.nz], zone)
+    points = Region([conf.np], point)
+    sides = Region([conf.ns], side)
 
     assert conf.par_init, 'parallel initialization required'
 
@@ -340,7 +340,7 @@ def main():
     conf.nspans_zones = partitions.nspans_zones
     conf.nspans_points = partitions.nspans_points
 
-    pieces = Ispace.create([conf.npieces])
+    pieces = Ispace([conf.npieces])
 
     zones_part = create_partition(True, zones, partitions.rz_all_p, pieces)
 
@@ -354,17 +354,17 @@ def main():
 
     sides_part = create_partition(True, sides, partitions.rs_all_p, pieces)
 
-    zone_spans = Region.create([conf.npieces * conf.nspans_zones], span)
-    zone_spans_part = Partition.create_equal(zone_spans, pieces)
+    zone_spans = Region([conf.npieces * conf.nspans_zones], span)
+    zone_spans_part = Partition.equal(zone_spans, pieces)
 
-    private_spans = Region.create([conf.npieces * conf.nspans_points], span)
-    private_spans_part = Partition.create_equal(private_spans, pieces)
+    private_spans = Region([conf.npieces * conf.nspans_points], span)
+    private_spans_part = Partition.equal(private_spans, pieces)
 
-    shared_spans = Region.create([conf.npieces * conf.nspans_points], span)
-    shared_spans_part = Partition.create_equal(shared_spans, pieces)
+    shared_spans = Region([conf.npieces * conf.nspans_points], span)
+    shared_spans_part = Partition.equal(shared_spans, pieces)
 
-    side_spans = Region.create([conf.npieces * conf.nspans_zones], span)
-    side_spans_part = Partition.create_equal(side_spans, pieces)
+    side_spans = Region([conf.npieces * conf.nspans_zones], span)
+    side_spans_part = Partition.equal(side_spans, pieces)
 
     for region in [zone_spans, private_spans, shared_spans, side_spans]:
         for field in ['start', 'stop']:

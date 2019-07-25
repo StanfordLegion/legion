@@ -18,20 +18,21 @@
 from __future__ import print_function
 
 import legion
+from legion import task, Region, RW
 import numpy
 
-@legion.task
+@task
 def f(x, y, z):
     print("inside task f%s" % ((x, y, z),))
     return x+1
 
-@legion.task(privileges=[legion.RW], leaf=True)
+@task(privileges=[RW], leaf=True)
 def init(R):
     for x in range(0, 4):
         for y in range(0, 4):
             R.x[x][y] = x*4 + y
 
-@legion.task(privileges=[legion.RW], leaf=True)
+@task(privileges=[RW], leaf=True)
 def inc(R, step):
     print("inside task inc%s" % ((R, step),))
 
@@ -45,7 +46,7 @@ def inc(R, step):
     numpy.add(R.x, step, out=R.x)
     print(R.x)
 
-@legion.task(privileges=[legion.RW], leaf=True)
+@task(privileges=[RW], leaf=True)
 def fill(S, value):
     print("inside task fill%s" % ((S, value),))
 
@@ -54,7 +55,7 @@ def fill(S, value):
     print(S.x[0:10])
     print(S.y[0:10])
 
-@legion.task(privileges=[legion.RW], leaf=True)
+@task(privileges=[RW], leaf=True)
 def saxpy(S, a):
     print("inside task saxpy%s" % ((S, a),))
 
@@ -63,17 +64,17 @@ def saxpy(S, a):
     numpy.add(S.y, a*S.x, out=S.y)
     print(S.y[0:10])
 
-@legion.task(inner=True)
+@task(inner=True)
 def main_task():
     print("inside main_task()")
 
     x = f(1, "asdf", True)
     print("result of f is %s" % x.get())
 
-    R = legion.Region.create([4, 4], {'x': legion.float64})
+    R = Region([4, 4], {'x': legion.float64})
     init(R)
     inc(R, 1)
 
-    S = legion.Region.create([1000], {'x': legion.float64, 'y': legion.float64})
+    S = Region([1000], {'x': legion.float64, 'y': legion.float64})
     fill(S, 10)
     saxpy(S, 2)

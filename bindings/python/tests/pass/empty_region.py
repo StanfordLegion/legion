@@ -28,7 +28,7 @@ def hello(R):
 # Define the main task. This task is called first.
 @task
 def main():
-    R = legion.Region.create([0, 0], {'x': legion.float64})
+    R = legion.Region([0, 0], {'x': legion.float64})
     legion.fill(R, 'x', 3.14)
 
     hello(R)

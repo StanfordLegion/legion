@@ -18,11 +18,11 @@
 from __future__ import print_function
 
 import legion
-from legion import task, RW
+from legion import task, Domain, RW
 
 @task
 def main():
-    d = legion.Domain.create(10)
+    d = Domain(10)
 
     print(d, d.bounds)
 
@@ -32,7 +32,7 @@ def main():
         t += int(x)
     assert t == 45
 
-    d2 = legion.Domain.create([3, 3], [1, 1])
+    d2 = Domain([3, 3], [1, 1])
 
     print(d2, d2.bounds)
 
@@ -43,7 +43,7 @@ def main():
     assert t2 == 36
 
 
-    d3 = legion.Domain.create([4, 5, 6], [-1, 0, 1])
+    d3 = Domain([4, 5, 6], [-1, 0, 1])
 
     print(d3, d3.bounds)
 
