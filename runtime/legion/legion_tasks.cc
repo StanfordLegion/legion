@@ -1858,8 +1858,8 @@ namespace Legion {
                         parent_ctx->get_task_name(),
                         parent_ctx->get_unique_id())
         if (runtime->legion_spy_enabled)
-          runtime->forest->log_mapping_decision(unique_op_id, *it,
-                                                regions[*it],
+          runtime->forest->log_mapping_decision(unique_op_id, parent_ctx, 
+                                                *it, regions[*it],
                                                 chosen_instances);
         if (!runtime->unsafe_mapper)
         {
@@ -2806,8 +2806,8 @@ namespace Legion {
             }
           }
           if (runtime->legion_spy_enabled)
-            runtime->forest->log_mapping_decision(unique_op_id, idx,
-                                                  regions[idx],
+            runtime->forest->log_mapping_decision(unique_op_id, parent_ctx, 
+                                                  idx, regions[idx],
                                                   physical_instances[idx]);
           continue;
         }
@@ -2939,8 +2939,8 @@ namespace Legion {
           virtual_mapped[idx] = true;
         } 
         if (runtime->legion_spy_enabled)
-          runtime->forest->log_mapping_decision(unique_op_id, idx,
-                                                regions[idx],
+          runtime->forest->log_mapping_decision(unique_op_id, parent_ctx, 
+                                                idx, regions[idx],
                                                 physical_instances[idx]);
         // Skip checks if the mapper promises it is safe
         if (runtime->unsafe_mapper)
@@ -3090,8 +3090,8 @@ namespace Legion {
         if (instances.is_virtual_mapping())
           virtual_mapped[idx] = true;
         if (runtime->legion_spy_enabled)
-          runtime->forest->log_mapping_decision(unique_op_id, idx,
-                                                regions[idx],
+          runtime->forest->log_mapping_decision(unique_op_id, parent_ctx,
+                                                idx, regions[idx],
                                                 instances);
       }
     }
@@ -3780,8 +3780,8 @@ namespace Legion {
           }
         }
         if (runtime->legion_spy_enabled)
-          runtime->forest->log_mapping_decision(unique_op_id, idx,
-                                                regions[idx], result,
+          runtime->forest->log_mapping_decision(unique_op_id, parent_ctx, 
+                                                idx, regions[idx], result,
                                                 true/*postmapping*/);
         // TODO: Implement physical tracing for postmapped regions
         if (is_memoizing())

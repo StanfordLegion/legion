@@ -2933,7 +2933,7 @@ namespace Legion {
           // going to be reporting an error so performance no
           // longer matters
           std::set<FieldID> missing;
-          node->get_field_set(needed_fields, missing);
+          node->get_field_set(needed_fields, op->get_context(), missing);
           missing_fields.insert(missing_fields.end(), 
                                 missing.begin(), missing.end());
         }
@@ -3007,7 +3007,9 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeForest::log_mapping_decision(UniqueID uid, unsigned index,
+    void RegionTreeForest::log_mapping_decision(const UniqueID uid, 
+                                                TaskContext *context,
+                                                const unsigned index,
                                                 const RegionRequirement &req,
                                                 const InstanceSet &targets,
                                                 bool postmapping)
@@ -3025,7 +3027,7 @@ namespace Legion {
         const FieldMask &valid_mask = inst.get_valid_fields();
         PhysicalManager *manager = inst.get_manager();
         std::vector<FieldID> valid_fields;
-        node->get_field_ids(valid_mask, valid_fields);
+        node->get_field_set(valid_mask, context, valid_fields);
         for (std::vector<FieldID>::const_iterator it = valid_fields.begin();
               it != valid_fields.end(); it++)
         {
@@ -10119,7 +10121,8 @@ namespace Legion {
         for (unsigned idx = 0; idx < fids.size(); idx++)
         {
           FieldID fid = fids[idx];
-          fields[fid] = FieldInfo(sizes[idx], new_indexes[idx], serdez_id);
+          fields[fid] = 
+            FieldInfo(sizes[idx], new_indexes[idx], serdez_id, true/*local*/);
         }
       }
       else
@@ -10135,7 +10138,8 @@ namespace Legion {
             REPORT_LEGION_ERROR(ERROR_ILLEGAL_DUPLICATE_FIELD_ID,
               "Illegal duplicate field ID %d used by the "
                             "application in field space %d", fid, handle.id)
-          fields[fid] = FieldInfo(sizes[idx], new_indexes[idx], serdez_id);
+          fields[fid] = 
+            FieldInfo(sizes[idx], new_indexes[idx], serdez_id, true/*local*/);
         }
       }
       return true;
@@ -10195,7 +10199,8 @@ namespace Legion {
 #endif
       AutoLock n_lock(node_lock);
       for (unsigned idx = 0; idx < fids.size(); idx++)
-        fields[fids[idx]] = FieldInfo(sizes[idx], indexes[idx],serdez_ids[idx]);
+        fields[fids[idx]] = 
+          FieldInfo(sizes[idx], indexes[idx], serdez_ids[idx], true/*local*/);
     }
 
     //--------------------------------------------------------------------------
@@ -10281,41 +10286,61 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void FieldSpaceNode::get_field_set(const FieldMask &mask,
-                                       std::set<FieldID> &to_set)
+    void FieldSpaceNode::get_field_set(const FieldMask &mask, TaskContext *ctx,
+                                       std::set<FieldID> &to_set) const
     //--------------------------------------------------------------------------
     {
-      AutoLock n_lock(node_lock,1,false/*exclusive*/);
-      for (std::map<FieldID,FieldInfo>::const_iterator it = fields.begin();
-            it != fields.end(); it++)
+      std::set<unsigned> local_indexes;
       {
-        if (it->second.destroyed)
-          continue;
-        if (mask.is_set(it->second.idx))
-          to_set.insert(it->first);
+        AutoLock n_lock(node_lock,1,false/*exclusive*/);
+        for (std::map<FieldID,FieldInfo>::const_iterator it = fields.begin();
+              it != fields.end(); it++)
+        {
+          if (it->second.destroyed)
+            continue;
+          if (mask.is_set(it->second.idx))
+          {
+            if (it->second.local)
+              local_indexes.insert(it->second.idx);
+            else
+              to_set.insert(it->first);
+          }
+        }
       }
+      if (!local_indexes.empty())
+        ctx->get_local_field_set(handle, local_indexes, to_set);
     }
 
     //--------------------------------------------------------------------------
-    void FieldSpaceNode::get_field_set(const FieldMask &mask,
-                                       std::vector<FieldID> &to_set)
+    void FieldSpaceNode::get_field_set(const FieldMask &mask, TaskContext *ctx,
+                                       std::vector<FieldID> &to_set) const
     //--------------------------------------------------------------------------
     {
-      AutoLock n_lock(node_lock,1,false/*exclusive*/);
-      for (std::map<FieldID,FieldInfo>::const_iterator it = fields.begin();
-            it != fields.end(); it++)
+      std::set<unsigned> local_indexes;
       {
-        if (it->second.destroyed)
-          continue;
-        if (mask.is_set(it->second.idx))
-          to_set.push_back(it->first);
+        AutoLock n_lock(node_lock,1,false/*exclusive*/);
+        for (std::map<FieldID,FieldInfo>::const_iterator it = fields.begin();
+              it != fields.end(); it++)
+        {
+          if (it->second.destroyed)
+            continue;
+          if (mask.is_set(it->second.idx))
+          {
+            if (it->second.local)
+              local_indexes.insert(it->second.idx);
+            else
+              to_set.push_back(it->first);
+          }
+        }
       }
+      if (!local_indexes.empty())
+        ctx->get_local_field_set(handle, local_indexes, to_set);
     }
 
     //--------------------------------------------------------------------------
     void FieldSpaceNode::get_field_set(const FieldMask &mask, 
                                        const std::set<FieldID> &basis,
-                                       std::set<FieldID> &to_set)
+                                       std::set<FieldID> &to_set) const
     //--------------------------------------------------------------------------
     {
       AutoLock n_lock(node_lock,1,false/*exclusive*/);
@@ -11145,47 +11170,46 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    char* FieldSpaceNode::to_string(const FieldMask &mask) const
+    char* FieldSpaceNode::to_string(const FieldMask &mask, 
+                                    TaskContext *ctx) const
     //--------------------------------------------------------------------------
     {
-      AutoLock n_lock(node_lock,1,false/*exclusive*/);
-#ifdef DEBUG_LEGION
-      assert(!!mask);
-#endif
       std::string result;
-      for (std::map<FieldID,FieldInfo>::const_iterator it = fields.begin();
-            it != fields.end(); it++)
+      std::set<unsigned> local_indexes;
       {
-        if (mask.is_set(it->second.idx))
+        AutoLock n_lock(node_lock,1,false/*exclusive*/);
+#ifdef DEBUG_LEGION
+        assert(!!mask);
+#endif
+        for (std::map<FieldID,FieldInfo>::const_iterator it = 
+              fields.begin(); it != fields.end(); it++)
+        {
+          if (mask.is_set(it->second.idx))
+          {
+            if (!it->second.local)
+            {
+              char temp[32];
+              snprintf(temp, 32, ",%d", it->first);
+              result += temp;
+            }
+            else
+              local_indexes.insert(it->second.idx);
+          }
+        }
+      }
+      if (!local_indexes.empty())
+      {
+        std::vector<FieldID> local_fields;
+        ctx->get_local_field_set(handle, local_indexes, local_fields);
+        for (std::vector<FieldID>::const_iterator it =
+              local_fields.begin(); it != local_fields.end(); it++)
         {
           char temp[32];
-          snprintf(temp, 32, ",%d", it->first);
+          snprintf(temp, 32, ",%d", *it);
           result += temp;
         }
       }
       return strdup(result.c_str());
-    }
-
-    //--------------------------------------------------------------------------
-    void FieldSpaceNode::get_field_ids(const FieldMask &mask,
-                                       std::vector<FieldID> &field_ids) const
-    //--------------------------------------------------------------------------
-    {
-      AutoLock n_lock(node_lock,1,false/*exclusive*/);
-#ifdef DEBUG_LEGION
-      assert(!!mask);
-#endif
-      for (std::map<FieldID,FieldInfo>::const_iterator it = fields.begin();
-            it != fields.end(); it++)
-      {
-        if (mask.is_set(it->second.idx))
-        {
-          field_ids.push_back(it->first);
-        }
-      }
-#ifdef DEBUG_LEGION
-      assert(!field_ids.empty()); // we should have found something
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -13039,7 +13063,7 @@ namespace Legion {
       assert(reported.exists());
 #endif
       LogicalRegion handle = as_region_node()->handle;
-      char *field_string = column_source->to_string(uninit);
+      char *field_string = column_source->to_string(uninit, op->get_context());
       op->report_uninitialized_usage(idx, handle, usage, field_string,reported);
       free(field_string);
     }

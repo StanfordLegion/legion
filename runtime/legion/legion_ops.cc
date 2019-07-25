@@ -2603,8 +2603,8 @@ namespace Legion {
         map_complete_event = mapped_instances[0].get_ready_event();
       if (runtime->legion_spy_enabled)
       {
-        runtime->forest->log_mapping_decision(unique_op_id, 0/*idx*/,
-                                              requirement,
+        runtime->forest->log_mapping_decision(unique_op_id, parent_ctx, 
+                                              0/*idx*/, requirement,
                                               mapped_instances);
 #ifdef LEGION_SPY
         LegionSpy::log_operation_events(unique_op_id, map_complete_event,
@@ -4159,8 +4159,8 @@ namespace Legion {
                                       src_targets,
                                       IS_REDUCE(dst_requirements[idx]));
         if (runtime->legion_spy_enabled)
-          runtime->forest->log_mapping_decision(unique_op_id, idx, 
-                                                src_requirements[idx],
+          runtime->forest->log_mapping_decision(unique_op_id, parent_ctx, 
+                                                idx, src_requirements[idx],
                                                 src_targets);
         ApEvent local_init_precondition = init_precondition;
         // See if we have any atomic locks we have to acquire
@@ -4237,8 +4237,8 @@ namespace Legion {
         if (effects_done.exists())
           copy_complete_events.insert(effects_done);
         if (runtime->legion_spy_enabled)
-          runtime->forest->log_mapping_decision(unique_op_id, dst_idx, 
-                                  dst_requirements[idx], dst_targets);
+          runtime->forest->log_mapping_decision(unique_op_id, parent_ctx,
+              dst_idx, dst_requirements[idx], dst_targets);
         // Switch the privileges back when we are done
         if (is_reduce_req)
           dst_requirements[idx].privilege = REDUCE; 
@@ -4275,8 +4275,8 @@ namespace Legion {
           if (effects_done.exists())
             copy_complete_events.insert(effects_done);
           if (runtime->legion_spy_enabled)
-            runtime->forest->log_mapping_decision(unique_op_id, 
-               gather_idx, src_indirect_requirements[idx], gather_targets);
+            runtime->forest->log_mapping_decision(unique_op_id, parent_ctx,
+                gather_idx, src_indirect_requirements[idx], gather_targets);
         }
         if (idx < dst_indirect_requirements.size())
         {
@@ -4311,8 +4311,8 @@ namespace Legion {
           if (effects_done.exists())
             copy_complete_events.insert(effects_done);
           if (runtime->legion_spy_enabled)
-            runtime->forest->log_mapping_decision(unique_op_id, 
-               scatter_idx, dst_indirect_requirements[idx], scatter_targets);
+            runtime->forest->log_mapping_decision(unique_op_id, parent_ctx, 
+                scatter_idx, dst_indirect_requirements[idx], scatter_targets);
         }
         // If we made it here, we passed all our error-checking so
         // now we can issue the copy/reduce across operation
@@ -7842,8 +7842,8 @@ namespace Legion {
         Runtime::trigger_event(close_event);
       if (runtime->legion_spy_enabled)
       {
-        runtime->forest->log_mapping_decision(unique_op_id, 0/*idx*/,
-                                              requirement,
+        runtime->forest->log_mapping_decision(unique_op_id, parent_ctx,
+                                              0/*idx*/, requirement,
                                               target_instances);
 #ifdef LEGION_SPY
         LegionSpy::log_operation_events(unique_op_id, close_event, 
@@ -8460,8 +8460,8 @@ namespace Legion {
                                    acquire_complete, init_precondition);
       if (runtime->legion_spy_enabled)
       {
-        runtime->forest->log_mapping_decision(unique_op_id, 0/*idx*/,
-                                              requirement,
+        runtime->forest->log_mapping_decision(unique_op_id, parent_ctx, 
+                                              0/*idx*/, requirement,
                                               restricted_instances);
 #ifdef LEGION_SPY
         LegionSpy::log_operation_events(unique_op_id, acquire_complete,
@@ -9231,8 +9231,8 @@ namespace Legion {
                             release_complete, init_precondition);
       if (runtime->legion_spy_enabled)
       {
-        runtime->forest->log_mapping_decision(unique_op_id, 0/*idx*/,
-                                              requirement,
+        runtime->forest->log_mapping_decision(unique_op_id, parent_ctx, 
+                                              0/*idx*/, requirement,
                                               restricted_instances);
 #ifdef LEGION_SPY
         LegionSpy::log_operation_events(unique_op_id, release_complete,
@@ -12385,8 +12385,8 @@ namespace Legion {
       InstanceSet mapped_instances;
       const bool record_valid = invoke_mapper(mapped_instances);
       if (runtime->legion_spy_enabled)
-        runtime->forest->log_mapping_decision(unique_op_id, 0/*idx*/,
-                                              requirement,
+        runtime->forest->log_mapping_decision(unique_op_id, parent_ctx, 
+                                              0/*idx*/, requirement,
                                               mapped_instances);
 #ifdef DEBUG_LEGION
       assert(!mapped_instances.empty()); 
@@ -15262,7 +15262,7 @@ namespace Legion {
       }
       FieldSpaceNode *field_space = 
         runtime->forest->get_node(requirement.region.get_field_space());
-      field_space->get_field_set(all_allocated_fields, 
+      field_space->get_field_set(all_allocated_fields, parent_ctx, 
                                  requirement.privilege_fields);
       // Check to see if this is a valid detach operation
       if (!region.impl->is_external_region())
@@ -15440,7 +15440,7 @@ namespace Legion {
         detach_event = effects_done;
       if (runtime->legion_spy_enabled)
       {
-        runtime->forest->log_mapping_decision(unique_op_id, 0/*idx*/,
+        runtime->forest->log_mapping_decision(unique_op_id, parent_ctx,0/*idx*/,
                                               requirement, references);
 #ifdef LEGION_SPY
         LegionSpy::log_operation_events(unique_op_id, detach_event,

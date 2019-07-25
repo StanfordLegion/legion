@@ -1709,8 +1709,8 @@ namespace Legion {
                                     requirement.parent.index_space.id);
         LegionSpy::log_requirement_fields(unique_op_id, idx,
                                   requirement.privilege_fields);
-        runtime->forest->log_mapping_decision(unique_op_id, idx,
-            requirement, instances[idx]);
+        runtime->forest->log_mapping_decision(unique_op_id, parent_ctx,
+            idx, requirement, instances[idx]);
       }
     }
 
@@ -3263,6 +3263,7 @@ namespace Legion {
     void PhysicalTemplate::generate_summary_operations(void)
     //--------------------------------------------------------------------------
     {
+#if 0
       RegionTreeForest *forest = trace->runtime->forest;
 
       typedef std::pair<RegionTreeNode*, PhysicalManager*> DedupKey;
@@ -3349,6 +3350,9 @@ namespace Legion {
       }
       std::reverse(summary_ops.begin(), summary_ops.end());
       dedup_summary_ops.swap(summary_ops);
+#else
+      assert(false);
+#endif
     }
 
     //--------------------------------------------------------------------------

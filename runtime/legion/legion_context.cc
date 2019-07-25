@@ -411,7 +411,7 @@ namespace Legion {
         runtime->forest->physical_convert_mapping(owner_task, 
             it->second, instances, instance_set, bad_tree, 
             missing_fields, NULL, unacquired, false/*do acquire_checks*/);
-        runtime->forest->log_mapping_decision(unique_op_id,
+        runtime->forest->log_mapping_decision(unique_op_id, this,
             it->first, it->second, instance_set);
       }
     } 
@@ -649,7 +649,7 @@ namespace Legion {
                   runtime->forest->physical_convert_mapping(owner_task, 
                     it->second, instances, instance_set, bad_tree, 
                     missing_fields, NULL,unacquired,false/*do acquire_checks*/);
-                  runtime->forest->log_mapping_decision(unique_op_id,
+                  runtime->forest->log_mapping_decision(unique_op_id, this,
                       it->first, it->second, instance_set);
                 }
                 // Record the returnable privileges if we didn't yet
@@ -804,7 +804,7 @@ namespace Legion {
               runtime->forest->physical_convert_mapping(owner_task, 
                       req, instances, instance_set, bad_tree, missing_fields,
                       NULL, unacquired, false/*do acquire_checks*/);
-              runtime->forest->log_mapping_decision(get_unique_id(),
+              runtime->forest->log_mapping_decision(get_unique_id(), this,
                       it->first, req, instance_set);
             }
           }
@@ -1482,7 +1482,7 @@ namespace Legion {
             runtime->forest->physical_convert_mapping(owner_task, 
                 req, instances, instance_set, bad_tree, 
                 missing_fields, NULL, unacquired, false/*do acquire_checks*/);
-            runtime->forest->log_mapping_decision(get_unique_id(),
+            runtime->forest->log_mapping_decision(get_unique_id(), this,
                 it->first, req, instance_set);
           }
         }
@@ -1543,7 +1543,7 @@ namespace Legion {
               runtime->forest->physical_convert_mapping(owner_task, 
                   it->second, instances, instance_set, bad_tree, 
                   missing_fields, NULL, unacquired, false/*do acquire_checks*/);
-              runtime->forest->log_mapping_decision(unique_op_id,
+              runtime->forest->log_mapping_decision(unique_op_id, this,
                   it->first, it->second, instance_set);
               // Then do the result of the normal operations
               delete_reqs.resize(delete_reqs.size()+1);
@@ -4624,6 +4624,64 @@ namespace Legion {
       op->initialize_logical_partition_deletion(this, handle);
       runtime->add_to_dependence_queue(this, executing_processor, op);
     } 
+
+    //--------------------------------------------------------------------------
+    void InnerContext::get_local_field_set(const FieldSpace handle,
+                                           const std::set<unsigned> &indexes,
+                                           std::set<FieldID> &to_set) const
+    //--------------------------------------------------------------------------
+    {
+      AutoLock lf_lock(local_field_lock, 1, false/*exclusive*/);
+      std::map<FieldSpace,std::vector<LocalFieldInfo> >::const_iterator
+        finder = local_field_infos.find(handle);
+#ifdef DEBUG_LEGION
+      assert(finder != local_field_infos.end());
+      unsigned found = 0;
+#endif
+      for (std::vector<LocalFieldInfo>::const_iterator it = 
+            finder->second.begin(); it != finder->second.end(); it++)
+      {
+        if (indexes.find(it->index) != indexes.end())
+        {
+#ifdef DEBUG_LEGION
+          found++;
+#endif
+          to_set.insert(it->fid);
+        }
+      }
+#ifdef DEBUG_LEGION
+      assert(found == indexes.size());
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::get_local_field_set(const FieldSpace handle,
+                                           const std::set<unsigned> &indexes,
+                                           std::vector<FieldID> &to_set) const
+    //--------------------------------------------------------------------------
+    {
+      AutoLock lf_lock(local_field_lock, 1, false/*exclusive*/);
+      std::map<FieldSpace,std::vector<LocalFieldInfo> >::const_iterator
+        finder = local_field_infos.find(handle);
+#ifdef DEBUG_LEGION
+      assert(finder != local_field_infos.end());
+      unsigned found = 0;
+#endif
+      for (std::vector<LocalFieldInfo>::const_iterator it = 
+            finder->second.begin(); it != finder->second.end(); it++)
+      {
+        if (indexes.find(it->index) != indexes.end())
+        {
+#ifdef DEBUG_LEGION
+          found++;
+#endif
+          to_set.push_back(it->fid);
+        }
+      }
+#ifdef DEBUG_LEGION
+      assert(found == indexes.size());
+#endif
+    }
 
     //--------------------------------------------------------------------------
     Future InnerContext::execute_task(const TaskLauncher &launcher)
@@ -9400,6 +9458,26 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void LeafContext::get_local_field_set(const FieldSpace handle,
+                                          const std::set<unsigned> &indexes,
+                                          std::set<FieldID> &to_set) const
+    //--------------------------------------------------------------------------
+    {
+      // Should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void LeafContext::get_local_field_set(const FieldSpace handle,
+                                          const std::set<unsigned> &indexes,
+                                          std::vector<FieldID> &to_set) const
+    //--------------------------------------------------------------------------
+    {
+      // Should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
     Future LeafContext::execute_task(const TaskLauncher &launcher)
     //--------------------------------------------------------------------------
     {
@@ -10639,6 +10717,24 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       enclosing->destroy_field_allocator(handle);
+    }
+
+    //--------------------------------------------------------------------------
+    void InlineContext::get_local_field_set(const FieldSpace handle,
+                                            const std::set<unsigned> &indexes,
+                                            std::set<FieldID> &to_set) const
+    //--------------------------------------------------------------------------
+    {
+      enclosing->get_local_field_set(handle, indexes, to_set);
+    }
+
+    //--------------------------------------------------------------------------
+    void InlineContext::get_local_field_set(const FieldSpace handle,
+                                            const std::set<unsigned> &indexes,
+                                            std::vector<FieldID> &to_set) const
+    //--------------------------------------------------------------------------
+    {
+      enclosing->get_local_field_set(handle, indexes, to_set);
     }
 
     //--------------------------------------------------------------------------
