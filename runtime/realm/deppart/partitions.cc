@@ -546,6 +546,7 @@ namespace Realm {
     if(async_microop) {
       if(requestor == my_node_id) {
 	async_microop->mark_finished(true /*successful*/);
+	delete async_microop;
       } else {
 	ActiveMessage<RemoteMicroOpCompleteMessage> amsg(requestor);
 	amsg->async_microop = async_microop;
@@ -574,6 +575,7 @@ namespace Realm {
       mark_started();
       execute();
       mark_finished();
+      delete this;
       return;
     }
 
@@ -595,6 +597,7 @@ namespace Realm {
 	mark_started();
 	execute();
 	mark_finished();
+	delete this;
       } else
 	op_queue->enqueue_partitioning_microop(this);
     }
@@ -681,6 +684,7 @@ namespace Realm {
   {
     log_part.info() << "received remote micro op complete message: " << msg.async_microop;
     msg.async_microop->mark_finished(true /*successful*/);
+    delete msg.async_microop;
   }
 
   ActiveMessageHandlerReg<RemoteMicroOpCompleteMessage> RemoteMicroOpCompleteMessage::areg;
@@ -883,6 +887,7 @@ namespace Realm {
 	    p_uop->execute();
 	    log_part.info() << "worker " << this << " finished uop " << p_uop;
 	    p_uop->mark_finished();
+	    delete p_uop;
 	    break;
 	  }
 	default: assert(0);

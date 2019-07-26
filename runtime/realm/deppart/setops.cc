@@ -212,6 +212,7 @@ namespace Realm {
 	e = finish_event->current_event();
 	op = new UnionOperation<N,T>(reqs,
 				     finish_event, ID(e).event_generation());
+	get_runtime()->optable.add_local_operation(e, op);
       }
       results[i] = op->add_union(l, r);
     }
@@ -284,6 +285,7 @@ namespace Realm {
 	op = new IntersectionOperation<N,T>(reqs,
 					    finish_event,
 					    ID(e).event_generation());
+	get_runtime()->optable.add_local_operation(e, op);
       }
       results[i] = op->add_intersection(lhss[li], rhss[ri]);
     }
@@ -369,6 +371,7 @@ namespace Realm {
 	op = new DifferenceOperation<N,T>(reqs,
 					  finish_event,
 					  ID(e).event_generation());
+	get_runtime()->optable.add_local_operation(e, op);
       }
       results[i] = op->add_difference(lhss[li], rhss[ri]);
     }
@@ -429,6 +432,7 @@ namespace Realm {
 	UnionOperation<N,T> *op = new UnionOperation<N,T>(reqs,
 							  finish_event,
 							  ID(e).event_generation());
+	get_runtime()->optable.add_local_operation(e, op);
 
 	result = op->add_union(subspaces);
 	op->launch(wait_on);
@@ -512,6 +516,7 @@ namespace Realm {
 	IntersectionOperation<N,T> *op = new IntersectionOperation<N,T>(reqs,
 									finish_event,
 									ID(e).event_generation());
+	get_runtime()->optable.add_local_operation(e, op);
 
 	result = op->add_intersection(subspaces);
 	op->launch(wait_on);
