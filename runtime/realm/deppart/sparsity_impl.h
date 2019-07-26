@@ -112,7 +112,6 @@ namespace Realm {
     static const ID::ID_Types ID_TYPE = ID::ID_SPARSITY;
 
     SparsityMapImplWrapper(void);
-    ~SparsityMapImplWrapper(void);
 
     void init(ID _me, unsigned _init_owner);
 
@@ -121,7 +120,6 @@ namespace Realm {
     SparsityMapImplWrapper *next_free;
     DynamicTemplates::TagType type_tag;
     void *map_impl;  // actual implementation
-    void (*map_deleter)(void *);  // function to delete the map_impl
 
     template <int N, typename T>
     SparsityMapImpl<N,T> *get_or_create(SparsityMap<N,T> me);

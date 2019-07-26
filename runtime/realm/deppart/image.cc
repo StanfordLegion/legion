@@ -43,7 +43,6 @@ namespace Realm {
     GenEventImpl *finish_event = GenEventImpl::create_genevent();
     Event e = finish_event->current_event();
     ImageOperation<N,T,N2,T2> *op = new ImageOperation<N,T,N2,T2>(*this, field_data, reqs, finish_event, ID(e).event_generation());
-    get_runtime()->optable.add_local_operation(e, op);
 
     size_t n = sources.size();
     images.resize(n);
@@ -70,7 +69,6 @@ namespace Realm {
     GenEventImpl *finish_event = GenEventImpl::create_genevent();
     Event e = finish_event->current_event();
     ImageOperation<N,T,N2,T2> *op = new ImageOperation<N,T,N2,T2>(*this, field_data, reqs, finish_event, ID(e).event_generation());
-    get_runtime()->optable.add_local_operation(e, op);
 
     size_t n = sources.size();
     images.resize(n);
@@ -98,7 +96,6 @@ namespace Realm {
     GenEventImpl *finish_event = GenEventImpl::create_genevent();
     Event e = finish_event->current_event();
     ImageOperation<N,T,N2,T2> *op = new ImageOperation<N,T,N2,T2>(*this, field_data, reqs, finish_event, ID(e).event_generation());
-    get_runtime()->optable.add_local_operation(e, op);
 
     size_t n = sources.size();
     images.resize(n);

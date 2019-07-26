@@ -110,25 +110,13 @@ namespace Realm {
   // class SparsityMapImplWrapper
 
   SparsityMapImplWrapper::SparsityMapImplWrapper(void)
-    : me((ID::IDType)-1), owner(-1), type_tag(0), map_impl(0), map_deleter(0)
+    : me((ID::IDType)-1), owner(-1), type_tag(0), map_impl(0)
   {}
-
-  SparsityMapImplWrapper::~SparsityMapImplWrapper(void)
-  {
-    if(map_impl)
-      (*map_deleter)(map_impl);
-  }
 
   void SparsityMapImplWrapper::init(ID _me, unsigned _init_owner)
   {
     me = _me;
     owner = _init_owner;
-  }
-
-  template <int N, typename T>
-  static void map_impl_deleter(void *map_impl)
-  {
-    delete static_cast<SparsityMapImpl<N,T> *>(map_impl);
   }
 
   template <int N, typename T>
@@ -155,7 +143,6 @@ namespace Realm {
       return static_cast<SparsityMapImpl<N,T> *>(impl);
     } else {
       // ours is the winner - return it
-      map_deleter = &map_impl_deleter<N,T>;
       return new_impl;
     }
   }
