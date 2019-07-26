@@ -17872,6 +17872,29 @@ namespace Legion {
       for (std::map<std::pair<Domain,TypeTag>,IndexSpace>::const_iterator it =
             index_slice_spaces.begin(); it != index_slice_spaces.end(); it++)
         forest->destroy_index_space(it->second, address_space, applied);
+      // If there are still any layout constraints that the application
+      // failed to remove its references to then we can remove the reference
+      // for them and make sure it's effects propagate
+      if (!separate_runtime_instances)
+      {
+        std::vector<LayoutConstraints*> to_remove;
+        {
+          AutoLock l_lock(layout_constraints_lock,1,false/*exclusive*/);
+          for (std::map<LayoutConstraintID,LayoutConstraints*>::const_iterator
+                it = layout_constraints_table.begin(); it !=
+                layout_constraints_table.end(); it++)
+            if (it->second->is_owner() && !it->second->internal)
+              to_remove.push_back(it->second);
+        }
+        if (!to_remove.empty())
+        {
+          WrapperReferenceMutator mutator(applied); 
+          for (std::vector<LayoutConstraints*>::const_iterator it = 
+                to_remove.begin(); it != to_remove.end(); it++)
+            if ((*it)->remove_base_gc_ref(APPLICATION_REF, &mutator))
+              delete (*it);
+        }
+      }
       if (!applied.empty())
       {
         const RtEvent wait_on = Runtime::merge_events(applied);
