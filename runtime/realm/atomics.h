@@ -45,6 +45,9 @@ namespace Realm {
     T exchange(T newval);
     bool compare_exchange(T& expected, T newval);
 
+    // these updates use relaxed semantics, guaranteeing atomicity, but
+    //  imposing no constraints on other loads and stores - use *_acqrel
+    //  variants below for fencing behavior
     T fetch_add(T to_add);
     T fetch_sub(T to_sub);
     T fetch_and(T to_and);
@@ -52,6 +55,14 @@ namespace Realm {
     T fetch_xor(T to_xor);
     T fetch_min(T to_min);
     T fetch_max(T to_max);
+
+    T fetch_add_acqrel(T to_add);
+    T fetch_sub_acqrel(T to_sub);
+    T fetch_and_acqrel(T to_and);
+    T fetch_or_acqrel(T to_or);
+    T fetch_xor_acqrel(T to_xor);
+    T fetch_min_acqrel(T to_min);
+    T fetch_max_acqrel(T to_max);
 
   protected:
 #ifdef REALM_USE_STD_ATOMIC

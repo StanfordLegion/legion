@@ -131,8 +131,17 @@ namespace Realm {
   inline T atomic<T>::fetch_add(T to_add)
   {
 #ifdef REALM_USE_STD_ATOMIC
-    // do we need a release version?
     return value.fetch_add(to_add, std::memory_order_relaxed);
+#else
+    return __sync_fetch_and_add(&value, to_add);
+#endif
+  }
+
+  template <typename T>
+  inline T atomic<T>::fetch_add_acqrel(T to_add)
+  {
+#ifdef REALM_USE_STD_ATOMIC
+    return value.fetch_add(to_add, std::memory_order_acq_rel);
 #else
     return __sync_fetch_and_add(&value, to_add);
 #endif
@@ -142,8 +151,17 @@ namespace Realm {
   inline T atomic<T>::fetch_sub(T to_sub)
   {
 #ifdef REALM_USE_STD_ATOMIC
-    // do we need a release version?
     return value.fetch_sub(to_sub, std::memory_order_relaxed);
+#else
+    return __sync_fetch_and_sub(&value, to_sub);
+#endif
+  }
+
+  template <typename T>
+  inline T atomic<T>::fetch_sub_acqrel(T to_sub)
+  {
+#ifdef REALM_USE_STD_ATOMIC
+    return value.fetch_sub(to_sub, std::memory_order_acq_rel);
 #else
     return __sync_fetch_and_sub(&value, to_sub);
 #endif
@@ -153,8 +171,17 @@ namespace Realm {
   inline T atomic<T>::fetch_and(T to_and)
   {
 #ifdef REALM_USE_STD_ATOMIC
-    // do we need a release version?
     return value.fetch_and(to_and, std::memory_order_relaxed);
+#else
+    return __sync_fetch_and_and(&value, to_and);
+#endif
+  }
+
+  template <typename T>
+  inline T atomic<T>::fetch_and_acqrel(T to_and)
+  {
+#ifdef REALM_USE_STD_ATOMIC
+    return value.fetch_and(to_and, std::memory_order_acq_rel);
 #else
     return __sync_fetch_and_and(&value, to_and);
 #endif
@@ -164,8 +191,17 @@ namespace Realm {
   inline T atomic<T>::fetch_or(T to_or)
   {
 #ifdef REALM_USE_STD_ATOMIC
-    // do we need a release version?
     return value.fetch_or(to_or, std::memory_order_relaxed);
+#else
+    return __sync_fetch_and_or(&value, to_or);
+#endif
+  }
+
+  template <typename T>
+  inline T atomic<T>::fetch_or_acqrel(T to_or)
+  {
+#ifdef REALM_USE_STD_ATOMIC
+    return value.fetch_or(to_or, std::memory_order_acq_rel);
 #else
     return __sync_fetch_and_or(&value, to_or);
 #endif
@@ -175,8 +211,17 @@ namespace Realm {
   inline T atomic<T>::fetch_xor(T to_xor)
   {
 #ifdef REALM_USE_STD_ATOMIC
-    // do we need a release version?
     return value.fetch_xor(to_xor, std::memory_order_relaxed);
+#else
+    return __sync_fetch_and_xor(&value, to_xor);
+#endif
+  }
+
+  template <typename T>
+  inline T atomic<T>::fetch_xor_acqrel(T to_xor)
+  {
+#ifdef REALM_USE_STD_ATOMIC
+    return value.fetch_xor(to_xor, std::memory_order_acq_rel);
 #else
     return __sync_fetch_and_xor(&value, to_xor);
 #endif
@@ -194,6 +239,13 @@ namespace Realm {
   }
 
   template <typename T>
+  inline T atomic<T>::fetch_min_acqrel(T to_min)
+  {
+    // "relaxed" version is already acq_rel
+    return fetch_min(to_min);
+  }
+  
+  template <typename T>
   inline T atomic<T>::fetch_max(T to_max)
   {
     // no builtins for this, so use compare_exchange
@@ -204,5 +256,12 @@ namespace Realm {
     return prev;
   }
 
+  template <typename T>
+  inline T atomic<T>::fetch_max_acqrel(T to_max)
+  {
+    // "relaxed" version is already acq_rel
+    return fetch_max(to_max);
+  }
+  
 
 };

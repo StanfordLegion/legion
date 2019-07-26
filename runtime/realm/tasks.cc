@@ -453,9 +453,10 @@ namespace Realm {
 
   void ThreadedTaskScheduler::WorkCounter::increment_counter(void)
   {
-    // common case is that we'll bump the counter and nobody cares, so do this without a lock
-    // use __sync_* though to make sure memory ordering is preserved
-    long long old_value = counter.fetch_add(1);
+    // common case is that we'll bump the counter and nobody cares, so do
+    //  this without a lock - have to make certain order of these two loads
+    //  is preserved though
+    long long old_value = counter.fetch_add_acqrel(1);
     long long wv_snapshot = wait_value.load();
 
 //define DEBUG_WORK_COUNTER
