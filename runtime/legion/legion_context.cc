@@ -6060,7 +6060,8 @@ namespace Legion {
             (op_kind != Operation::TRACE_BEGIN_OP_KIND) && 
             (op_kind != Operation::TRACE_COMPLETE_OP_KIND) &&
             (op_kind != Operation::TRACE_CAPTURE_OP_KIND) &&
-            (op_kind != Operation::TRACE_REPLAY_OP_KIND))
+            (op_kind != Operation::TRACE_REPLAY_OP_KIND) &&
+            (op_kind != Operation::TRACE_SUMMARY_OP_KIND))
         {
           const ApEvent merge = 
             Runtime::merge_events(NULL, previous_completion_events);
@@ -6100,7 +6101,8 @@ namespace Legion {
                (op_kind == Operation::TRACE_BEGIN_OP_KIND) ||
                (op_kind == Operation::TRACE_COMPLETE_OP_KIND) ||
                (op_kind == Operation::TRACE_CAPTURE_OP_KIND) ||
-               (op_kind == Operation::TRACE_REPLAY_OP_KIND));
+               (op_kind == Operation::TRACE_REPLAY_OP_KIND) ||
+               (op_kind == Operation::TRACE_SUMMARY_OP_KIND));
       }
 #endif
       std::map<Operation*,GenerationID> previous_operations;

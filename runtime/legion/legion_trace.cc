@@ -1610,14 +1610,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     TraceSummaryOp::TraceSummaryOp(Runtime *rt)
-      : Operation(rt)
+      : TraceOp(rt)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     TraceSummaryOp::TraceSummaryOp(const TraceSummaryOp &rhs)
-      : Operation(NULL)
+      : TraceOp(NULL)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -1640,67 +1640,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TraceSummaryOp::initialize_summary(
-                                  InnerContext *ctx,
-                                  UniqueID creator_op_id,
-                                  const std::vector<RegionRequirement> &reqs,
-                                  const std::vector<InstanceSet> &insts,
-                                  const std::vector<unsigned> &indices)
+    void TraceSummaryOp::initialize_summary(InnerContext *ctx,
+                                            TraceConditionSet *c,
+                                            Operation *invalidator)
     //--------------------------------------------------------------------------
     {
-      size_t num_requirements = reqs.size();
-      initialize_operation(ctx, false, num_requirements);
-      // We actually want to track summary operations
-      track_parent = true;
-      context_index = ctx->register_new_summary_operation(this);
-      requirements = reqs;
-      instances = insts;
-      parent_indices = indices;
-      privilege_paths.resize(num_requirements);
-      for (unsigned idx = 0; idx < num_requirements; ++idx)
-        initialize_privilege_path(privilege_paths[idx], requirements[idx]);
-      version_infos.resize(num_requirements);
-      if (runtime->legion_spy_enabled)
-      {
-        LegionSpy::log_summary_operation(parent_ctx->get_unique_id(),
-                                         unique_op_id);
-        LegionSpy::log_summary_op_creator(unique_op_id, creator_op_id);
-        perform_logging();
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void TraceSummaryOp::perform_logging(void)
-    //--------------------------------------------------------------------------
-    {
-      for (unsigned idx = 0; idx < requirements.size(); ++idx)
-      {
-        const RegionRequirement &requirement = requirements[idx];
-        if (requirement.handle_type == PART_PROJECTION)
-          LegionSpy::log_logical_requirement(unique_op_id, idx,
-                                    false/*region*/,
-                                    requirement.partition.index_partition.id,
-                                    requirement.partition.field_space.id,
-                                    requirement.partition.tree_id,
-                                    requirement.privilege,
-                                    requirement.prop,
-                                    requirement.redop,
-                                    requirement.parent.index_space.id);
-        else
-          LegionSpy::log_logical_requirement(unique_op_id, idx,
-                                    true/*region*/,
-                                    requirement.region.index_space.id,
-                                    requirement.region.field_space.id,
-                                    requirement.region.tree_id,
-                                    requirement.privilege,
-                                    requirement.prop,
-                                    requirement.redop,
-                                    requirement.parent.index_space.id);
-        LegionSpy::log_requirement_fields(unique_op_id, idx,
-                                  requirement.privilege_fields);
-        runtime->forest->log_mapping_decision(unique_op_id, parent_ctx,
-            idx, requirement, instances[idx]);
-      }
+      initialize(ctx, MAPPING_FENCE);
+      context_index = invalidator->get_ctx_index();
+#ifdef DEBUG_LEGION
+      assert(c != NULL);
+#endif
+      condition = c;
     }
 
     //--------------------------------------------------------------------------
@@ -1708,13 +1658,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       activate_operation();
-      requirements.clear();
-      instances.clear();
-      parent_indices.clear();
-      privilege_paths.clear();
-      version_infos.clear();
-      map_applied_conditions.clear();
-      mapped_preconditions.clear();
+      condition = NULL;
     }
 
     //--------------------------------------------------------------------------
@@ -1743,117 +1687,22 @@ namespace Legion {
     void TraceSummaryOp::trigger_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
-      ProjectionInfo projection_info;
-      for (unsigned idx = 0; idx < requirements.size(); ++idx)
-      {
-        runtime->forest->perform_dependence_analysis(this, idx,
-                                                     requirements[idx],
-                                                     projection_info,
-                                                     privilege_paths[idx]);
-      }
+      perform_fence_analysis(true/*register fence also*/);
     }
 
     //--------------------------------------------------------------------------
     void TraceSummaryOp::trigger_ready(void)
     //--------------------------------------------------------------------------
     {
-      // Compute the version numbers for this mapping operation
-      std::set<RtEvent> preconditions;
-      for (unsigned idx = 0; idx < requirements.size(); ++idx)
-        runtime->forest->perform_versioning_analysis(this, idx,
-                                                     requirements[idx],
-                                                     version_infos[idx],
-                                                     preconditions);
-      if (!preconditions.empty())
-        enqueue_ready_operation(Runtime::merge_events(preconditions));
-      else
-        enqueue_ready_operation();
+      enqueue_ready_operation();
     }
 
     //--------------------------------------------------------------------------
     void TraceSummaryOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
-      const PhysicalTraceInfo trace_info(this);
-      std::set<RtEvent> registration_postconditions;
-      std::vector<UpdateAnalysis*> analyses(requirements.size(), NULL);
-      std::vector<ApEvent> effects(requirements.size(), ApEvent::NO_AP_EVENT);
-      std::vector<RtEvent> reg_pre(requirements.size(), RtEvent::NO_RT_EVENT);
-      for (unsigned idx = 0; idx < requirements.size(); ++idx)
-      {
-        reg_pre[idx] = runtime->forest->physical_perform_updates(
-                                                  requirements[idx],
-                                                  version_infos[idx],
-                                                  this, idx,
-                                                  ApEvent::NO_AP_EVENT,
-                                                  completion_event,
-                                                  instances[idx],
-                                                  trace_info,
-                                                  map_applied_conditions,
-                                                  analyses[idx],
-#ifdef DEBUG_LEGION
-                                                  get_logging_name(),
-                                                  unique_op_id,
-#endif
-                                                  true/*track effects*/);
-      }
-      for (unsigned idx = 0; idx < requirements.size(); idx++)
-      {
-        if (reg_pre[idx].exists() || analyses[idx]->has_output_updates())
-        {
-          const RtEvent postcondition = 
-            runtime->forest->defer_physical_perform_registration(reg_pre[idx],
-                                                 analyses[idx], instances[idx],
-                                                 map_applied_conditions,
-                                                 effects[idx]);
-          registration_postconditions.insert(postcondition);
-        }
-        else
-          effects[idx] = 
-            runtime->forest->physical_perform_registration(
-                                                 analyses[idx], instances[idx],
-                                                 trace_info,
-                                                 map_applied_conditions);
-      }
-      if (!registration_postconditions.empty())
-      {
-        const RtEvent wait_on = 
-          Runtime::merge_events(registration_postconditions);
-        wait_on.wait();
-      }
-      std::set<ApEvent> wait_events;
-      for (unsigned idx = 0; idx < effects.size(); idx++)
-        if (effects[idx].exists())
-          wait_events.insert(effects[idx]);
-      if (!map_applied_conditions.empty())
-        complete_mapping(Runtime::merge_events(map_applied_conditions));
-      else
-        complete_mapping();
-
-      if (execution_fence_event.exists())
-        wait_events.insert(execution_fence_event);
-      for (unsigned idx = 0; idx < instances.size(); ++idx)
-        instances[idx].update_wait_on_events(wait_events);
-      ApEvent wait_event = Runtime::merge_events(NULL, wait_events);
-#ifdef LEGION_SPY
-      LegionSpy::log_operation_events(unique_op_id, wait_event,
-                                      completion_event);
-#endif
-      complete_execution(Runtime::protect_event(wait_event));
-    }
-
-    //--------------------------------------------------------------------------
-    void TraceSummaryOp::trigger_commit(void)
-    //--------------------------------------------------------------------------
-    {
-      commit_operation(true);
-    }
-
-    //--------------------------------------------------------------------------
-    unsigned TraceSummaryOp::find_parent_index(unsigned idx)
-    //--------------------------------------------------------------------------
-    {
-      return parent_indices[idx];
+      condition->ensure(this);
+      FenceOp::trigger_mapping();
     }
 
     /////////////////////////////////////////////////////////////
@@ -2459,17 +2308,10 @@ namespace Legion {
                                   InnerContext* context, Operation *invalidator)
     //--------------------------------------------------------------------------
     {
-      Runtime *runtime = trace->runtime;
-      for (std::vector<SummaryOpInfo>::iterator it = dedup_summary_ops.begin();
-           it != dedup_summary_ops.end(); ++it)
-      {
-        TraceSummaryOp *op = runtime->get_available_summary_op();
-        op->initialize_summary(context, invalidator->get_unique_op_id(),
-            it->requirements, it->instances, it->parent_indices);
-        context->register_executing_child(op);
-        op->execute_dependence_analysis();
-        op->add_mapping_reference(op->get_generation());
-      }
+      TraceSummaryOp *op = trace->runtime->get_available_summary_op();
+      op->initialize_summary(context, &post, invalidator);
+      context->register_executing_child(op);
+      op->execute_dependence_analysis();
     }
 
     //--------------------------------------------------------------------------
@@ -2502,7 +2344,6 @@ namespace Legion {
       }
       generate_conditions();
       optimize();
-      //generate_summary_operations();
       if (trace->runtime->dump_physical_traces) dump_template();
       size_t num_events = events.size();
       events.clear();
@@ -3349,102 +3190,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::generate_summary_operations(void)
-    //--------------------------------------------------------------------------
-    {
-#if 0
-      RegionTreeForest *forest = trace->runtime->forest;
-
-      typedef std::pair<RegionTreeNode*, PhysicalManager*> DedupKey;
-      LegionMap<DedupKey, FieldMask>::aligned covered_fields;
-      std::vector<SummaryOpInfo> summary_ops;
-
-      for (int idx = summary_info.size() - 1; idx >= 0; --idx)
-      {
-        const std::pair<RegionRequirement, InstanceSet> &pair =
-          summary_info[idx];
-        const RegionRequirement &req = pair.first;
-        const InstanceSet &insts = pair.second;
-
-        // We do not need to bump the version number for read-only regions.
-        // We can also ignore reductions because we reject traces that end with
-        // reduction tasks.
-        if (!HAS_WRITE(req) || IS_REDUCE(req)) continue;
-
-        RegionTreeNode *region_node = forest->get_node(req.region);
-        FieldSpaceNode *field_node = region_node->get_column_source();
-        FieldMask fields = field_node->get_field_mask(req.privilege_fields);
-
-        summary_ops.push_back(SummaryOpInfo());
-        SummaryOpInfo &summary_op = summary_ops.back();
-        bool dedup = true;
-        FieldMask all_uncovered;
-        InstanceSet new_insts;
-        for (unsigned iidx = 0; iidx < insts.size(); ++iidx)
-        {
-          const InstanceRef &ref = insts[iidx];
-#ifdef DEBUG_LEGION
-          assert(!(ref.get_valid_fields() - fields));
-#endif
-          FieldMask uncovered = fields & ref.get_valid_fields();
-          // We only need to consider fields that are not yet analyzed.
-          // If all the fields are covered by the summary operations generated
-          // so far, we simply ignore the region requirement.
-          // We also rememeber whether any of the fields are deduplicated so that
-          // we know later whether we should match the set of fields in the
-          // requirement with those actually summarized.
-          DedupKey key(region_node, ref.get_manager());
-          LegionMap<DedupKey, FieldMask>::aligned::iterator cf_finder =
-            covered_fields.find(key);
-          bool fields_narrowed = false;
-          if (cf_finder == covered_fields.end())
-            covered_fields[key] = uncovered;
-          else
-          {
-            FieldMask fields = uncovered;
-            uncovered -= cf_finder->second;
-            if (!uncovered) continue;
-            cf_finder->second |= uncovered;
-            fields_narrowed = !!(fields - uncovered);
-          }
-          all_uncovered |= uncovered;
-
-          dedup = false;
-          if (fields_narrowed)
-            new_insts.add_instance(InstanceRef(ref.get_manager(), uncovered));
-          else
-            new_insts.add_instance(ref);
-        }
-
-        if (!dedup)
-        {
-          summary_op.requirements.push_back(req);
-          summary_op.parent_indices.push_back(parent_indices[idx]);
-          RegionRequirement &req_copy = summary_op.requirements.back();
-          req_copy.privilege = WRITE_DISCARD;
-          if (!!(fields - all_uncovered))
-          {
-            req_copy.privilege_fields.clear();
-            req_copy.instance_fields.clear();
-            field_node->get_field_set(all_uncovered, req_copy.privilege_fields);
-            field_node->get_field_set(all_uncovered, req_copy.instance_fields);
-          }
-#ifdef DEBUG_LEGION
-          assert(new_insts.size() > 0);
-#endif
-          summary_op.instances.push_back(new_insts);
-        }
-        else
-          summary_ops.pop_back();
-      }
-      std::reverse(summary_ops.begin(), summary_ops.end());
-      dedup_summary_ops.swap(summary_ops);
-#else
-      assert(false);
-#endif
-    }
-
-    //--------------------------------------------------------------------------
     void PhysicalTemplate::dump_template(void)
     //--------------------------------------------------------------------------
     {
@@ -3845,22 +3590,6 @@ namespace Legion {
         reduction_ready_events.find(find_trace_local_id(memo));
       if (finder != reduction_ready_events.end())
         ready_events.insert(finder->second.begin(), finder->second.end());
-    }
-
-    //--------------------------------------------------------------------------
-    void PhysicalTemplate::record_summary_info(const RegionRequirement &region,
-                                               const InstanceSet &instance_set,
-                                               unsigned parent_idx)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock tpl_lock(template_lock);
-#ifdef DEBUG_LEGION
-      assert(is_recording());
-#endif
-      summary_info.resize(summary_info.size() + 1);
-      summary_info.back().first = region;
-      summary_info.back().second = instance_set;
-      parent_indices.push_back(parent_idx);
     }
 
     //--------------------------------------------------------------------------

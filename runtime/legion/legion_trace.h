@@ -415,7 +415,7 @@ namespace Legion {
       virtual OpKind get_operation_kind(void) const;
     };
 
-    class TraceSummaryOp : public Operation {
+    class TraceSummaryOp : public TraceOp {
     public:
       static const AllocationType alloc_type = TRACE_SUMMARY_OP_ALLOC;
     public:
@@ -426,10 +426,8 @@ namespace Legion {
       TraceSummaryOp& operator=(const TraceSummaryOp &rhs);
     public:
       void initialize_summary(InnerContext *ctx,
-                              UniqueID creator_id,
-                              const std::vector<RegionRequirement> &reqs,
-                              const std::vector<InstanceSet> &insts,
-                              const std::vector<unsigned> &indices);
+                              TraceConditionSet *condition,
+                              Operation *invalidator);
       void perform_logging(void);
     public:
       virtual void activate(void);
@@ -440,18 +438,8 @@ namespace Legion {
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
       virtual void trigger_mapping(void);
-      virtual void trigger_commit(void);
-    public:
-      virtual unsigned find_parent_index(unsigned idx);
     protected:
-      UniqueID creator_id;
-      std::vector<RegionRequirement> requirements;
-      std::vector<InstanceSet> instances;
-      std::vector<unsigned> parent_indices;
-      std::vector<RegionTreePath> privilege_paths;
-      std::vector<VersionInfo> version_infos;
-      std::set<RtEvent> map_applied_conditions;
-      std::set<ApEvent> mapped_preconditions;
+      TraceConditionSet *condition;
     };
 
     /**
@@ -643,7 +631,6 @@ namespace Legion {
       void execute_all(void);
       void execute_slice(unsigned slice_idx);
     public:
-      void generate_summary_operations(void);
       void issue_summary_operations(InnerContext* context,
                                     Operation *invalidator);
     public:
@@ -728,10 +715,6 @@ namespace Legion {
       void get_reduction_ready_events(Memoizable *memo,
                                       std::set<ApEvent> &ready_events);
     public:
-      void record_summary_info(const RegionRequirement &region,
-                               const InstanceSet &instance_set,
-                               unsigned parent_idx);
-    public:
       void record_op_view(Memoizable *memo,
                           unsigned idx,
                           InstanceView *view,
@@ -815,15 +798,6 @@ namespace Legion {
     private:
       RtUserEvent replay_ready;
       RtEvent     replay_done;
-    private:
-      std::vector<std::pair<RegionRequirement, InstanceSet> > summary_info;
-      std::vector<unsigned> parent_indices;
-      struct SummaryOpInfo {
-        std::vector<RegionRequirement> requirements;
-        std::vector<InstanceSet> instances;
-        std::vector<unsigned> parent_indices;
-      };
-      std::vector<SummaryOpInfo> dedup_summary_ops;
 #ifdef LEGION_SPY
       UniqueID prev_fence_uid;
 #endif
