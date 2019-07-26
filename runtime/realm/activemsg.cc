@@ -39,7 +39,9 @@ static const void *ignore_gasnet_warning1 __attribute__((unused)) = (void *)_gas
 static const void *ignore_gasnet_warning2 __attribute__((unused)) = (void *)_gasnett_trace_printf_noop;
 
 // can't use gasnet_hsl_t in debug mode
-#ifndef GASNET_DEBUG
+// actually, don't use gasnet_hsl_t at all right now...
+//#ifndef GASNET_DEBUG
+#if 0
 #define USE_GASNET_HSL_T
 #define GASNETHSL_IMPL     gasnet_hsl_t mutex
 #define GASNETCONDVAR_IMPL gasnett_cond_t condvar
