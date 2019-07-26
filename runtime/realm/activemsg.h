@@ -171,6 +171,10 @@ public:
 
   void wait(void);
 
+  // wait with a timeout - returns true if awakened by a signal and
+  //  false if the timeout expires first
+  bool timedwait(long long max_nsec);
+
   GASNetHSL &mutex;
 
 protected:

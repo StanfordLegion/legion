@@ -552,7 +552,21 @@ namespace Realm {
 #ifdef DEBUG_WORK_COUNTER
       printf("WC(%p) wait %lld (%lld)\n", this, old_counter, wait_value.load());
 #endif
+#define WORK_COUNTER_TIMEOUT_CHECK
+#ifdef WORK_COUNTER_TIMEOUT_CHECK
+      bool awakened = condvar.timedwait(1000000000LL);
+      if(!awakened && (counter.load_acquire() != old_counter)) {
+	static atomic<int> warncount(0);
+	static const int MAX_WARNINGS = 10;
+	int c = warncount.fetch_add(1) + 1;
+	if(c <= MAX_WARNINGS)
+	  log_task.warning() << "missed work counter wakeup?"
+			     << ((c == MAX_WARNINGS) ? " - suppressing further messages" : "");
+	break;
+      }
+#else
       condvar.wait();
+#endif
       //while(counter == old_counter) { mutex.unlock(); Thread::yield(); mutex.lock(); }
 #ifdef DEBUG_WORK_COUNTER
       printf("WC(%p) ready %lld\n", this, old_counter);

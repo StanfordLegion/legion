@@ -39,7 +39,9 @@ static const void *ignore_gasnet_warning1 __attribute__((unused)) = (void *)_gas
 static const void *ignore_gasnet_warning2 __attribute__((unused)) = (void *)_gasnett_trace_printf_noop;
 
 // can't use gasnet_hsl_t in debug mode
-#ifndef GASNET_DEBUG
+// actually, don't use gasnet_hsl_t at all right now...
+//#ifndef GASNET_DEBUG
+#if 0
 #define USE_GASNET_HSL_T
 #define GASNETHSL_IMPL     gasnet_hsl_t mutex
 #define GASNETCONDVAR_IMPL gasnett_cond_t condvar
@@ -50,6 +52,7 @@ static const void *ignore_gasnet_warning2 __attribute__((unused)) = (void *)_gas
 #ifndef USE_GASNET_HSL_T
 // use pthread mutex/condvar
 #include <pthread.h>
+#include <errno.h>
 
 #define GASNETHSL_IMPL     pthread_mutex_t mutex
 #define GASNETCONDVAR_IMPL pthread_cond_t  condvar
@@ -166,6 +169,24 @@ void GASNetCondVar::wait(void)
   gasnett_cond_wait(&condvar, &(mutex.mutex.lock));
 #else
   pthread_cond_wait(&condvar, &mutex.mutex);
+#endif
+}
+
+// wait with a timeout - returns true if awakened by a signal and
+//  false if the timeout expires first
+bool GASNetCondVar::timedwait(long long max_nsec)
+{
+#ifdef USE_GASNET_HSL_T
+  assert(0 && "gasnett_cond_t doesn't have timedwait!");
+#else
+  struct timespec ts;
+  clock_gettime(CLOCK_REALTIME, &ts);
+  ts.tv_sec += (ts.tv_nsec + max_nsec) / 1000000000LL;
+  ts.tv_nsec = (ts.tv_nsec + max_nsec) % 1000000000LL;
+  int ret = pthread_cond_timedwait(&condvar, &mutex.mutex, &ts);
+  if(ret == ETIMEDOUT) return false;
+  // TODO: check other error codes?
+  return true;
 #endif
 }
 
