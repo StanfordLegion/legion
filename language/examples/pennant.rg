@@ -1364,6 +1364,8 @@ do
 
   for i = 0, conf.npieces do
     init_radial_velocity(rp_all_private_p[i], uinitradial)
+  end
+  for i = 0, conf.npieces do
     init_radial_velocity(rp_all_shared_p[i], uinitradial)
   end
 end
