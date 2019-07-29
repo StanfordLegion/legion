@@ -1475,7 +1475,6 @@ namespace Legion {
       if (physical_trace->get_current_template() == NULL || is_recording)
       {
         recurrent = false;
-        if (physical_trace->has_any_templates() || is_recording)
         {
           // Wait for the previous recordings to be done before checking
           // template preconditions, otherwise no template would exist.
@@ -1641,16 +1640,13 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void TraceSummaryOp::initialize_summary(InnerContext *ctx,
-                                            TraceConditionSet *c,
+                                            PhysicalTemplate *tpl,
                                             Operation *invalidator)
     //--------------------------------------------------------------------------
     {
       initialize(ctx, MAPPING_FENCE);
       context_index = invalidator->get_ctx_index();
-#ifdef DEBUG_LEGION
-      assert(c != NULL);
-#endif
-      condition = c;
+      current_template = tpl;
     }
 
     //--------------------------------------------------------------------------
@@ -1658,7 +1654,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       activate_operation();
-      condition = NULL;
+      current_template = NULL;
     }
 
     //--------------------------------------------------------------------------
@@ -1701,7 +1697,8 @@ namespace Legion {
     void TraceSummaryOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
-      condition->ensure(this);
+      if (current_template->is_replayable())
+        current_template->apply_postcondition(this);
       FenceOp::trigger_mapping();
     }
 
@@ -2237,6 +2234,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void PhysicalTemplate::apply_postcondition(TraceSummaryOp *op)
+    //--------------------------------------------------------------------------
+    {
+      post.ensure(op);
+    }
+
+    //--------------------------------------------------------------------------
     bool PhysicalTemplate::check_replayable(void) const
     //--------------------------------------------------------------------------
     {
@@ -2309,7 +2313,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       TraceSummaryOp *op = trace->runtime->get_available_summary_op();
-      op->initialize_summary(context, &post, invalidator);
+      op->initialize_summary(context, this, invalidator);
       context->register_executing_child(op);
       op->execute_dependence_analysis();
     }

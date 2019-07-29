@@ -426,7 +426,7 @@ namespace Legion {
       TraceSummaryOp& operator=(const TraceSummaryOp &rhs);
     public:
       void initialize_summary(InnerContext *ctx,
-                              TraceConditionSet *condition,
+                              PhysicalTemplate *tpl,
                               Operation *invalidator);
       void perform_logging(void);
     public:
@@ -439,7 +439,7 @@ namespace Legion {
       virtual void trigger_ready(void);
       virtual void trigger_mapping(void);
     protected:
-      TraceConditionSet *condition;
+      PhysicalTemplate *current_template;
     };
 
     /**
@@ -627,6 +627,8 @@ namespace Legion {
       void push_complete_replays(void);
     public:
       bool check_preconditions(TraceReplayOp *op);
+      void apply_postcondition(TraceSummaryOp *op);
+    public:
       void register_operation(Operation *op);
       void execute_all(void);
       void execute_slice(unsigned slice_idx);
