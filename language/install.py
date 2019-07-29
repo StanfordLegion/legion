@@ -214,6 +214,9 @@ def install_bindings(regent_dir, legion_dir, bindings_dir, runtime_dir,
             shutil.rmtree(build_dir)
         if not os.path.exists(build_dir):
             os.mkdir(build_dir)
+        cc_flags = os.environ['CC_FLAGS'] if 'CC_FLAGS' in os.environ else ''
+        if spy:
+            cc_flags = cc_flags + ' -DLEGION_SPY'
         flags = (
             ['-DCMAKE_BUILD_TYPE=%s' % ('Debug' if debug else 'Release'),
              '-DLegion_USE_CUDA=%s' % ('ON' if cuda else 'OFF'),
@@ -228,9 +231,8 @@ def install_bindings(regent_dir, legion_dir, bindings_dir, runtime_dir,
             (['-DGASNet_ROOT_DIR=%s' % gasnet_dir] if gasnet_dir is not None else []) +
             (['-DGASNet_CONDUIT=%s' % conduit] if conduit is not None else []) +
             (['-DCMAKE_CXX_COMPILER=%s' % os.environ['CXX']] if 'CXX' in os.environ else []) +
-            (['-DCMAKE_CXX_FLAGS=%s' % os.environ['CC_FLAGS']] if 'CC_FLAGS' in os.environ else []))
+            (['-DCMAKE_CXX_FLAGS=%s' % cc_flags] if cc_flags else []))
         make_flags = ['VERBOSE=1'] if verbose else []
-        assert not spy # unimplemented
         try:
             subprocess.check_output([cmake_exe, '--version'])
         except OSError:
