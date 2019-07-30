@@ -531,7 +531,7 @@ namespace Legion {
      * the interpreter state (operations and events). These are initialized
      * before the template gets executed.
      */
-    class PhysicalTemplate {
+    class PhysicalTemplate : public LegionHeapify<PhysicalTemplate> {
     public:
       struct ReplaySliceArgs : public LgTaskArgs<ReplaySliceArgs> {
       public:
