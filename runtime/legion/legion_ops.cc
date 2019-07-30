@@ -7203,6 +7203,8 @@ namespace Legion {
           execution_preconditions.insert(node->partition_ready);
         }
       }
+      if (execution_fence_event.exists())
+        execution_preconditions.insert(execution_fence_event);
       if (!execution_preconditions.empty())
         complete_execution(Runtime::protect_event(
             Runtime::merge_events(NULL, execution_preconditions)));
