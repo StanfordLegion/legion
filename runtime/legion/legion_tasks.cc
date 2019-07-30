@@ -5319,15 +5319,19 @@ namespace Legion {
             wait_on.wait();
         }
         must_epoch->notify_subop_complete(this);
-        complete_operation();
+        complete_operation(complete_memoizable());
       }
       else
       {
         // Mark that this operation is complete
         if (!completion_preconditions.empty())
-          complete_operation(Runtime::merge_events(completion_preconditions));
+        {
+          RtEvent complete_precondition =
+            Runtime::merge_events(completion_preconditions);
+          complete_operation(complete_memoizable(complete_precondition));
+        }
         else
-          complete_operation();
+          complete_operation(complete_memoizable());
       }
       if (need_commit)
         trigger_children_committed();

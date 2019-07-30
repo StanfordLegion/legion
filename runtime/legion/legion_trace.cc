@@ -165,6 +165,16 @@ namespace Legion {
 #endif
 
     //--------------------------------------------------------------------------
+    void LegionTrace::record_blocking_call(void)
+    //--------------------------------------------------------------------------
+    {
+      blocking_call_observed = true;
+      PhysicalTemplate *tpl = physical_trace->get_current_template();
+      if (tpl != NULL)
+        tpl->trigger_recording_done();
+    }
+
+    //--------------------------------------------------------------------------
     void LegionTrace::invalidate_trace_cache(Operation *invalidator)
     //--------------------------------------------------------------------------
     {
@@ -1647,6 +1657,10 @@ namespace Legion {
       initialize(ctx, MAPPING_FENCE);
       context_index = invalidator->get_ctx_index();
       current_template = tpl;
+      // The summary could have been marked as being traced,
+      // so here we forcibly clear them out.
+      trace = NULL;
+      tracing = false;
     }
 
     //--------------------------------------------------------------------------
@@ -2098,6 +2112,7 @@ namespace Legion {
     PhysicalTemplate::PhysicalTemplate(PhysicalTrace *t, ApEvent fence_event)
       : trace(t), recording(true), replayable(true), fence_completion_id(0),
         replay_parallelism(t->runtime->max_replay_parallelism),
+        recording_done(RtUserEvent::NO_RT_USER_EVENT),
         pre(t->runtime->forest), post(t->runtime->forest),
         pre_reductions(t->runtime->forest), post_reductions(t->runtime->forest),
         consumed_reductions(t->runtime->forest)
@@ -2112,8 +2127,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     PhysicalTemplate::PhysicalTemplate(const PhysicalTemplate &rhs)
       : trace(NULL), recording(true), replayable(true), fence_completion_id(0),
-        replay_parallelism(1), pre(NULL), post(NULL),
-        pre_reductions(NULL), post_reductions(NULL),
+        replay_parallelism(1), recording_done(RtUserEvent::NO_RT_USER_EVENT),
+        pre(NULL), post(NULL), pre_reductions(NULL), post_reductions(NULL),
         consumed_reductions(NULL)
     //--------------------------------------------------------------------------
     {
@@ -2322,17 +2337,9 @@ namespace Legion {
     void PhysicalTemplate::finalize(Operation *op, bool has_blocking_call)
     //--------------------------------------------------------------------------
     {
+      if (!recording_done.has_triggered())
+        Runtime::trigger_event(recording_done);
       recording = false;
-      if (outstanding_gc_events.size() > 0)
-        for (std::map<CollectableView*, std::set<ApEvent> >::iterator it =
-             outstanding_gc_events.begin(); it !=
-             outstanding_gc_events.end(); ++it)
-        {
-          IgnoreReferenceMutator mutator;
-          it->first->remove_collectable_reference(&mutator);
-          it->first->update_gc_events(it->second);
-        }
-
       replayable = !has_blocking_call && check_replayable();
       replayable = replayable && check_subsumption();
 
@@ -3862,27 +3869,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::record_outstanding_gc_event(
-                                      CollectableView *view, ApEvent term_event)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock tpl_lock(template_lock);
-#ifdef DEBUG_LEGION
-      assert(is_recording());
-#endif
-      std::map<CollectableView*, std::set<ApEvent> >::iterator finder =
-        outstanding_gc_events.find(view);
-      if (finder == outstanding_gc_events.end())
-      {
-        IgnoreReferenceMutator mutator;
-        view->add_collectable_reference(&mutator);
-        outstanding_gc_events[view].insert(term_event);
-      }
-      else
-        finder->second.insert(term_event);
-    }
-
-    //--------------------------------------------------------------------------
     RtEvent PhysicalTemplate::defer_template_deletion(void)
     //--------------------------------------------------------------------------
     {
@@ -3906,6 +3892,14 @@ namespace Legion {
     {
       const DeleteTemplateArgs *pargs = (const DeleteTemplateArgs*)args;
       delete pargs->tpl;
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalTemplate::trigger_recording_done(void)
+    //--------------------------------------------------------------------------
+    {
+      if (!recording_done.has_triggered())
+        Runtime::trigger_event(recording_done);
     }
 
     //--------------------------------------------------------------------------

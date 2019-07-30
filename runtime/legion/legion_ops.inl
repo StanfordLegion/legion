@@ -172,6 +172,17 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<typename OP>
+    RtEvent MemoizableOp<OP>::complete_memoizable(RtEvent complete_event)
+    //--------------------------------------------------------------------------
+    {
+      if (tpl != NULL)
+        complete_event =
+          Runtime::merge_events(complete_event, tpl->get_recording_done());
+      return complete_event;
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
     void MemoizableOp<OP>::invoke_memoize_operation(MapperID mapper_id)
     //--------------------------------------------------------------------------
     {

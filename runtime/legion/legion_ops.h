@@ -842,6 +842,8 @@ namespace Legion {
       virtual Operation::OpKind get_memoizable_kind(void) const
         { return this->get_operation_kind(); }
       virtual ApEvent compute_init_precondition(const PhysicalTraceInfo &info);
+      virtual RtEvent complete_memoizable(
+                                 RtEvent complete_event = RtEvent::NO_RT_EVENT);
     protected:
       void invoke_memoize_operation(MapperID mapper_id);
       void set_memoize(bool memoize);

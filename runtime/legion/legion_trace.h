@@ -116,7 +116,7 @@ namespace Legion {
       bool is_replaying(void) const { return state == PHYSICAL_REPLAY; }
     public:
       void clear_blocking_call(void) { blocking_call_observed = false; }
-      void record_blocking_call(void) { blocking_call_observed = true; }
+      void record_blocking_call(void);
       bool has_blocking_call(void) const { return blocking_call_observed; }
       void invalidate_trace_cache(Operation *invalidator);
 #ifdef LEGION_SPY
@@ -748,13 +748,16 @@ namespace Legion {
       void record_set_op_sync_event(ApEvent &lhs, Operation *op);
       void record_complete_replay(Operation *op, ApEvent rhs);
     public:
-      void record_outstanding_gc_event(CollectableView *view, 
-                                       ApEvent term_event);
-    public:
       RtEvent defer_template_deletion(void);
     public:
       static void handle_replay_slice(const void *args);
       static void handle_delete_template(const void *args);
+    public:
+      void create_recording_done(void)
+        { recording_done = Runtime::create_rt_user_event(); }
+      RtEvent get_recording_done(void) const
+        { return recording_done; }
+      void trigger_recording_done(void);
     private:
       TraceLocalID find_trace_local_id(Memoizable *memo);
       unsigned find_memo_entry(Memoizable *memo);
@@ -798,6 +801,8 @@ namespace Legion {
       std::map<unsigned,unsigned> crossing_events;
       std::map<unsigned,unsigned> frontiers;
     private:
+      RtUserEvent recording_done;
+    private:
       RtUserEvent replay_ready;
       RtEvent     replay_done;
 #ifdef LEGION_SPY
@@ -821,7 +826,6 @@ namespace Legion {
       FieldMaskSet<FillView> pre_fill_views;
       FieldMaskSet<FillView> post_fill_views;
     private:
-      std::map<CollectableView*,std::set<ApEvent> > outstanding_gc_events;
       friend class PhysicalTrace;
       friend class Instruction;
     };

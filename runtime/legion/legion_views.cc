@@ -1233,17 +1233,7 @@ namespace Legion {
       }
       if (issue_collect)
       {
-        // If we're tracing we defer adding these events until the trace
-        // capture is complete so we can get a full set of preconditions
-        if (trace_info.recording)
-        {
-#ifdef DEBUG_LEGION
-          assert(trace_info.tpl != NULL && trace_info.tpl->is_recording());
-#endif
-          trace_info.tpl->record_outstanding_gc_event(this, term_event); 
-        }
-        else
-          defer_collect_user(manager, term_event);
+        defer_collect_user(manager, term_event);
       }
     }
 
@@ -1735,28 +1725,6 @@ namespace Legion {
           delete inst_view;
       }
       return remove_reference();
-    }
-
-    //--------------------------------------------------------------------------
-    void ExprView::update_gc_events(const std::set<ApEvent> &term_events)
-    //--------------------------------------------------------------------------
-    {
-      // See which ones are still in current or previous users and defer them
-      std::vector<ApEvent> to_defer;
-      {
-        AutoLock v_lock(view_lock,1,false/*exclusive*/);
-        for (std::set<ApEvent>::const_iterator it = 
-              term_events.begin(); it != term_events.end(); it++)
-          if ((current_epoch_users.find(*it) != current_epoch_users.end()) ||
-              (previous_epoch_users.find(*it) != previous_epoch_users.end()))
-            to_defer.push_back(*it);
-      }
-      if (!to_defer.empty())
-      {
-        for (std::vector<ApEvent>::const_iterator it = 
-              to_defer.begin(); it != to_defer.end(); it++)
-          defer_collect_user(manager, *it);
-      }
     }
 
     //--------------------------------------------------------------------------
@@ -4658,18 +4626,8 @@ namespace Legion {
       // can handle any clean-up and add our user
       AutoLock v_lock(view_lock);
       add_physical_user(new_user, IS_READ_ONLY(usage), term_event, user_mask);
-      // If we're tracing we defer adding these events until the trace
-      // capture is complete so we can get a full set of preconditions
-      if (trace_info.recording)
-      {
-#ifdef DEBUG_LEGION
-        assert(trace_info.tpl != NULL && trace_info.tpl->is_recording());
-#endif
-        trace_info.tpl->record_outstanding_gc_event(this, term_event);
-        return false;
-      }
-      else if (outstanding_gc_events.find(term_event) == 
-                outstanding_gc_events.end())
+
+      if (outstanding_gc_events.find(term_event) == outstanding_gc_events.end())
       {
         outstanding_gc_events.insert(term_event);
         return true;
@@ -4830,22 +4788,6 @@ namespace Legion {
       }
 #endif
     }
-
-    //--------------------------------------------------------------------------
-    void ReductionView::update_gc_events(const std::set<ApEvent> &term_events)
-    //--------------------------------------------------------------------------
-    {
-      {
-        AutoLock v_lock(view_lock);
-        for (std::set<ApEvent>::const_iterator it = term_events.begin();
-              it != term_events.end(); it++)
-        {
-          outstanding_gc_events.insert(*it);
-        }
-      }
-      collect_users(term_events);
-    }
-
 
     //--------------------------------------------------------------------------
     void ReductionView::send_view(AddressSpaceID target)
