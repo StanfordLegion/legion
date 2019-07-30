@@ -108,30 +108,30 @@ task main()
     end
     for color in cs do check(q[color], 2 * (k + 1) % 3) end
   end
-  --for color in cs do init(p[color]) end
-  --for k = 0, 3 do
-  --  __demand(__trace)
-  --  for i = 0, 2 do
-  --    for color in cs do inc(p[color]) end
-  --    for color in cs do step(p[color]) end
-  --    for color in cs do inc(q[color]) end
-  --    for color in cs do step(q[color]) end
-  --  end
-  --  for color in cs do check(q[color], 4 * (k + 1) % 3) end
-  --end
-  --for color in cs do init(p[color]) end
-  --for k = 0, 3 do
-  --  __demand(__trace)
-  --  do
-  --    for color in cs do inc(p[color]) end
-  --    for color in cs do step(p[color]) end
-  --  end
-  --  __demand(__trace)
-  --  do
-  --    for color in cs do inc(q[color]) end
-  --    for color in cs do step(q[color]) end
-  --  end
-  --end
-  --for color in cs do check(p[color], 0) end
+  for color in cs do init(p[color]) end
+  for k = 0, 3 do
+    __demand(__trace)
+    for i = 0, 2 do
+      for color in cs do inc(p[color]) end
+      for color in cs do step(p[color]) end
+      for color in cs do inc(q[color]) end
+      for color in cs do step(q[color]) end
+    end
+    for color in cs do check(q[color], 4 * (k + 1) % 3) end
+  end
+  for color in cs do init(p[color]) end
+  for k = 0, 2 do
+    __demand(__trace)
+    do
+      for color in cs do inc(p[color]) end
+      for color in cs do step(p[color]) end
+    end
+    __demand(__trace)
+    do
+      for color in cs do inc(q[color]) end
+      for color in cs do step(q[color]) end
+    end
+  end
+  for color in cs do check(p[color], 1) end
 end
 regentlib.start(main, cmapper.register_mappers)
