@@ -462,7 +462,7 @@ namespace Legion {
     private:
       mutable LocalLock trace_lock;
       PhysicalTemplate* current_template;
-      std::vector<PhysicalTemplate*> templates;
+      LegionVector<PhysicalTemplate*>::aligned templates;
       unsigned nonreplayable_count;
     private:
       ApEvent previous_template_completion;

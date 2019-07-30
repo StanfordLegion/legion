@@ -1681,8 +1681,8 @@ namespace Legion {
     PhysicalTrace::~PhysicalTrace()
     //--------------------------------------------------------------------------
     {
-      for (std::vector<PhysicalTemplate*>::iterator it = templates.begin();
-           it != templates.end(); ++it)
+      for (LegionVector<PhysicalTemplate*>::aligned::iterator it =
+           templates.begin(); it != templates.end(); ++it)
         delete (*it);
       templates.clear();
     }
@@ -1736,7 +1736,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       current_template = NULL;
-      for (std::vector<PhysicalTemplate*>::reverse_iterator it =
+      for (LegionVector<PhysicalTemplate*>::aligned::reverse_iterator it =
            templates.rbegin(); it != templates.rend(); ++it)
       {
         if ((*it)->check_preconditions(op))
