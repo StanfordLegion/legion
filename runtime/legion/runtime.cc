@@ -18190,13 +18190,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    TraceBeginOp* Runtime::get_available_begin_op(void)
-    //--------------------------------------------------------------------------
-    {
-      return get_available(begin_op_lock, available_begin_ops);
-    }
-
-    //--------------------------------------------------------------------------
     TraceSummaryOp* Runtime::get_available_summary_op(void)
     //--------------------------------------------------------------------------
     {
@@ -18491,14 +18484,6 @@ namespace Legion {
     {
       AutoLock t_lock(replay_op_lock);
       release_operation<false>(available_replay_ops, op);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::free_begin_op(TraceBeginOp *op)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock t_lock(begin_op_lock);
-      release_operation<false>(available_begin_ops, op);
     }
 
     //--------------------------------------------------------------------------
