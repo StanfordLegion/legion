@@ -590,8 +590,23 @@ namespace Legion {
     public:
       void finalize(Operation *op, bool has_blocking_call);
       void generate_conditions(void);
-      bool check_replayable(void) const;
-      bool check_subsumption(void) const;
+    public:
+      struct Replayable {
+        explicit Replayable(bool r)
+          : replayable(r), message()
+        {}
+        Replayable(bool r, const char *m)
+          : replayable(r), message(m)
+        {}
+        Replayable(const Replayable &r)
+          : replayable(r.replayable), message(r.message)
+        {}
+        operator bool(void) const { return replayable; }
+        bool replayable;
+        std::string message;
+      };
+    private:
+      Replayable check_replayable(bool has_blocking_call) const;
     public:
       void optimize(void);
     private:
@@ -623,7 +638,7 @@ namespace Legion {
     public:
       inline bool is_recording(void) const { return recording; }
       inline bool is_replaying(void) const { return !recording; }
-      inline bool is_replayable(void) const { return replayable; }
+      inline bool is_replayable(void) const { return replayable.replayable; }
     public:
       void record_mapper_output(SingleTask *task,
                                 const Mapper::MapTaskOutput &output,
@@ -755,7 +770,7 @@ namespace Legion {
     private:
       PhysicalTrace * const trace;
       volatile bool recording;
-      bool replayable;
+      Replayable replayable;
       mutable LocalLock template_lock;
       const unsigned fence_completion_id;
       const unsigned replay_parallelism;

@@ -46,6 +46,18 @@ namespace Legion {
       return out;
     }
 
+    std::ostream& operator<<(std::ostream &out,
+                             const PhysicalTemplate::Replayable &r)
+    {
+      if (r.replayable)
+        out << "Replayable";
+      else
+      {
+        out << "Non-replayable (" << r.message << ")";
+      }
+      return out;
+    }
+
     /////////////////////////////////////////////////////////////
     // LegionTrace 
     /////////////////////////////////////////////////////////////
@@ -2034,7 +2046,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     PhysicalTemplate::PhysicalTemplate(PhysicalTrace *t, ApEvent fence_event)
-      : trace(t), recording(true), replayable(true), fence_completion_id(0),
+      : trace(t), recording(true), replayable(false, "uninitialized"),
+        fence_completion_id(0),
         replay_parallelism(t->runtime->max_replay_parallelism),
         recording_done(RtUserEvent::NO_RT_USER_EVENT),
         pre(t->runtime->forest), post(t->runtime->forest),
@@ -2050,7 +2063,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     PhysicalTemplate::PhysicalTemplate(const PhysicalTemplate &rhs)
-      : trace(NULL), recording(true), replayable(true), fence_completion_id(0),
+      : trace(NULL), recording(true), replayable(false, "uninitialized"),
+        fence_completion_id(0),
         replay_parallelism(1), recording_done(RtUserEvent::NO_RT_USER_EVENT),
         pre(NULL), post(NULL), pre_reductions(NULL), post_reductions(NULL),
         consumed_reductions(NULL)
@@ -2180,26 +2194,29 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool PhysicalTemplate::check_replayable(void) const
+    PhysicalTemplate::Replayable PhysicalTemplate::check_replayable(
+                                                   bool has_blocking_call) const
     //--------------------------------------------------------------------------
     {
-      if (pre_fill_views.size() > 0 || !pre_reductions.empty())
-        return false;
+      if (has_blocking_call)
+        return Replayable(false, "blocking call");
+
+      if (!pre_fill_views.empty())
+        return Replayable(false, "external fill views");
+
+      if (!pre_reductions.empty())
+        return Replayable(false, "external reduction views");
 
       if (!post_reductions.subsumed_by(consumed_reductions))
-        return false;
+        return Replayable(false, "escaping reduction views");
 
       if (pre.has_refinements() || post.has_refinements())
-        return false;
+        return Replayable(false, "found refined equivalence sets");
 
-      return true;
-    }
+      if (!pre.subsumed_by(post))
+        return Replayable(false, "precondition not subsumed by postcondition");
 
-    //--------------------------------------------------------------------------
-    bool PhysicalTemplate::check_subsumption(void) const
-    //--------------------------------------------------------------------------
-    {
-      return pre.subsumed_by(post);
+      return Replayable(true);
     }
 
     //--------------------------------------------------------------------------
@@ -2264,8 +2281,7 @@ namespace Legion {
       if (!recording_done.has_triggered())
         Runtime::trigger_event(recording_done);
       recording = false;
-      replayable = !has_blocking_call && check_replayable();
-      replayable = replayable && check_subsumption();
+      replayable = check_replayable(has_blocking_call);
 
       if (!replayable)
       {
@@ -3128,8 +3144,7 @@ namespace Legion {
     void PhysicalTemplate::dump_template(void)
     //--------------------------------------------------------------------------
     {
-      std::cerr << "#### " << (replayable ? "Replayable" : "Non-replayable")
-                << " Template " << this << " ####" << std::endl;
+      std::cerr << "#### " << replayable << " " << this << " ####" << std::endl;
       for (unsigned sidx = 0; sidx < replay_parallelism; ++sidx)
       {
         std::cerr << "[Slice " << sidx << "]" << std::endl;
