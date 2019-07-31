@@ -1211,6 +1211,7 @@ namespace Legion {
     {
       log_mapper.spew("Default slice_task in %s", get_mapper_name());
 
+#if 0
       std::vector<VariantID> variants;
       runtime->find_valid_variants(ctx, task.task_id, variants);
       /* find if we have a procset variant for task */
@@ -1244,7 +1245,7 @@ namespace Legion {
           return;
         }
       }
- 
+#endif
 
       // Whatever kind of processor we are is the one this task should
       // be scheduled on as determined by select initial task
