@@ -6349,7 +6349,7 @@ class Operation(object):
             }[self.kind]
 
     def print_base_node(self, printer, dataflow):
-        title = str(self)+' (UID: '+str(self.uid)+')'
+        title = str(self).replace('<','&lt;').replace('>','&gt;')+' (UID: '+str(self.uid)+')'
         if self.task is not None and self.task.point.dim > 0:
             title += ' Point: ' + self.task.point.to_string()
         if self.replayed:
@@ -8791,18 +8791,18 @@ diff_expr_pat            = re.compile(
     prefix+"Index Space Difference (?P<expr>[0-9]+) (?P<left>[0-9]+) (?P<right>[0-9]+)")
 # Patterns for operations
 task_name_pat            = re.compile(
-    prefix+"Task ID Name (?P<tid>[0-9]+) (?P<name>[-$()\w. ]+)")
+    prefix+"Task ID Name (?P<tid>[0-9]+) (?P<name>[-$()<>:\w. ]+)")
 task_variant_pat         = re.compile(
     prefix+"Task Variant (?P<tid>[0-9]+) (?P<vid>[0-9]+) (?P<inner>[0-1]) "+
-    "(?P<leaf>[0-1]) (?P<idem>[0-1]+) (?P<name>[-$()\w. ]+)")
+    "(?P<leaf>[0-1]) (?P<idem>[0-1]+) (?P<name>[-$()<>:\w. ]+)")
 top_task_pat             = re.compile(
-    prefix+"Top Task (?P<tid>[0-9]+) (?P<uid>[0-9]+) (?P<name>[-$()\w. ]+)")
+    prefix+"Top Task (?P<tid>[0-9]+) (?P<uid>[0-9]+) (?P<name>[-$()<>:\w. ]+)")
 single_task_pat          = re.compile(
     prefix+"Individual Task (?P<ctx>[0-9]+) (?P<tid>[0-9]+) (?P<uid>[0-9]+) "+
-           "(?P<name>[-$()\w. ]+)")
+            "(?P<name>[-$()<>:\w. ]+)")
 index_task_pat           = re.compile(
     prefix+"Index Task (?P<ctx>[0-9]+) (?P<tid>[0-9]+) (?P<uid>[0-9]+) "+
-           "(?P<name>[-$()\w. ]+)")
+            "(?P<name>[-$()<>:\w. ]+)")
 mapping_pat              = re.compile(
     prefix+"Mapping Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
 close_pat                = re.compile(
