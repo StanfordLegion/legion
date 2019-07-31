@@ -2279,6 +2279,10 @@ namespace Legion {
     {
       TraceSummaryOp *op = trace->runtime->get_available_summary_op();
       op->initialize_summary(context, this, invalidator);
+#ifdef LEGION_SPY
+      LegionSpy::log_summary_op_creator(op->get_unique_op_id(),
+                                        invalidator->get_unique_op_id());
+#endif
       context->register_executing_child(op);
       op->execute_dependence_analysis();
     }
@@ -4405,7 +4409,8 @@ namespace Legion {
       events[lhs] = expr->issue_fill(trace_info, fields, 
                                      fill_value, fill_size,
 #ifdef LEGION_SPY
-                                     fill_uid, handle, tree_id,
+                                     trace_info.op->get_unique_op_id(),
+                                     handle, tree_id,
 #endif
                                      precondition, PredEvent::NO_PRED_EVENT,
                                      NULL, NULL);
