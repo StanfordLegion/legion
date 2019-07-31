@@ -1987,24 +1987,33 @@ namespace Legion {
       if (cached)
         return;
       cached = true;
+
+      typedef std::pair<RegionTreeID,EquivalenceSet*> Key;
+      LegionMap<Key,FieldMaskSet<InstanceView> >::aligned views_by_regions;
+
       for (ViewSet::iterator it = conditions.begin(); it != conditions.end();
            ++it)
+      {
+        RegionTreeID tid = it->first->get_manager()->tree_id;
         for (FieldMaskSet<EquivalenceSet>::iterator eit = it->second.begin();
              eit != it->second.end(); ++eit)
         {
-          views.push_back(FieldMaskSet<InstanceView>());
-          views.back().insert(it->first, eit->second);
+          EquivalenceSet *eq = eit->first;
+          Key key(tid, eq);
+          FieldMaskSet <InstanceView> &vset = views_by_regions[key];
+          vset.insert(it->first, eit->second);
         }
-      version_infos.resize(views.size());
+      }
+
       unsigned idx = 0;
-      for (ViewSet::iterator it = conditions.begin(); it != conditions.end();
-           ++it)
-        for (FieldMaskSet<EquivalenceSet>::iterator eit = it->second.begin();
-             eit != it->second.end(); ++eit)
-        {
-          version_infos[idx++].record_equivalence_set(NULL, UINT_MAX,
-                eit->first, eit->second);
-        }
+      version_infos.resize(views_by_regions.size());
+      for (LegionMap<Key,FieldMaskSet<InstanceView> >::aligned::iterator it =
+           views_by_regions.begin(); it != views_by_regions.end(); ++it)
+      {
+        views.push_back(it->second);
+        version_infos[idx++].record_equivalence_set(NULL, UINT_MAX,
+            it->first.second, it->second.get_valid_mask());
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -2287,7 +2296,6 @@ namespace Legion {
       {
         if (trace->runtime->dump_physical_traces)
         {
-          generate_conditions();
           optimize();
           dump_template();
         }
