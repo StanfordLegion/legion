@@ -1427,7 +1427,7 @@ namespace Legion {
     public:
       OverwriteAnalysis(Runtime *rt, Operation *op, unsigned index,
                         const RegionUsage &usage,
-                        VersionInfo *info, LogicalView *view,
+                        VersionInfo *info, const std::set<LogicalView*> &views,
                         const ApEvent precondition,
                         const RtEvent guard_event = RtEvent::NO_RT_EVENT,
                         const PredEvent pred_guard = PredEvent::NO_PRED_EVENT,
@@ -1435,7 +1435,8 @@ namespace Legion {
                         const bool add_restriction = false);
       OverwriteAnalysis(Runtime *rt, AddressSpaceID src, AddressSpaceID prev,
                         Operation *op, unsigned index, 
-                        const RegionUsage &usage, LogicalView *view,
+                        const RegionUsage &usage, 
+                        const std::set<LogicalView*> &views,
                         const ApEvent precondition,
                         const RtEvent guard_event,
                         const PredEvent pred_guard,
@@ -1470,7 +1471,7 @@ namespace Legion {
                                            AddressSpaceID previous); 
     public:
       const RegionUsage usage;
-      LogicalView *const view;
+      const std::set<LogicalView*> views;
       const ApEvent precondition;
       const RtEvent guard_event;
       const PredEvent pred_guard;

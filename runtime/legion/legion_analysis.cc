@@ -5793,11 +5793,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     OverwriteAnalysis::OverwriteAnalysis(Runtime *rt, Operation *o, 
                         unsigned idx, const RegionUsage &use,
-                        VersionInfo *info, LogicalView *v, const ApEvent pre,
-                        const RtEvent guard, const PredEvent pred,
-                        const bool track, const bool restriction)
+                        VersionInfo *info, const std::set<LogicalView*> &v, 
+                        const ApEvent pre, const RtEvent guard, 
+                        const PredEvent pred, const bool track, 
+                        const bool restriction)
       : PhysicalAnalysis(rt, o, idx, info, true/*on heap*/), usage(use), 
-        view(v), precondition(pre), guard_event(guard), pred_guard(pred), 
+        views(v), precondition(pre), guard_event(guard), pred_guard(pred), 
         track_effects(track), add_restriction(restriction), 
         output_aggregator(NULL)
     //--------------------------------------------------------------------------
@@ -5807,11 +5808,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     OverwriteAnalysis::OverwriteAnalysis(Runtime *rt, AddressSpaceID src, 
                         AddressSpaceID prev, Operation *o, unsigned idx, 
-                        const RegionUsage &use,LogicalView *v,const ApEvent pre,
-                        const RtEvent guard, const PredEvent pred,
-                        const bool track, const bool restriction)
+                        const RegionUsage &use, const std::set<LogicalView*> &v,
+                        const ApEvent pre, const RtEvent guard, 
+                        const PredEvent pred, const bool track, 
+                        const bool restriction)
       : PhysicalAnalysis(rt, src, prev, o, idx, true/*on heap*/), usage(use), 
-        view(v), precondition(pre), guard_event(guard), pred_guard(pred), 
+        views(v), precondition(pre), guard_event(guard), pred_guard(pred), 
         track_effects(track), add_restriction(restriction), 
         output_aggregator(NULL)
     //--------------------------------------------------------------------------
@@ -5820,7 +5822,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     OverwriteAnalysis::OverwriteAnalysis(const OverwriteAnalysis &rhs)
-      : PhysicalAnalysis(rhs), usage(rhs.usage), view(rhs.view),
+      : PhysicalAnalysis(rhs), usage(rhs.usage), views(rhs.views),
         precondition(rhs.precondition), guard_event(rhs.guard_event), 
         pred_guard(rhs.pred_guard), track_effects(rhs.track_effects), 
         add_restriction(rhs.add_restriction)
@@ -5903,13 +5905,16 @@ namespace Legion {
           op->pack_remote_operation(rez, rit->first);
           rez.serialize(index);
           rez.serialize(usage);
-          if (view != NULL)
+          rez.serialize<size_t>(views.size());
+          if (!views.empty())
           {
-            view->add_base_valid_ref(REMOTE_DID_REF, &mutator);
-            rez.serialize(view->did);
+            for (std::set<LogicalView*>::const_iterator it = 
+                  views.begin(); it != views.end(); it++)
+            {
+              (*it)->add_base_valid_ref(REMOTE_DID_REF, &mutator);
+              rez.serialize((*it)->did);  
+            }
           }
-          else
-            rez.serialize<DistributedID>(0);
           rez.serialize(pred_guard);
           rez.serialize(precondition);
           rez.serialize(guard_event);
@@ -6019,16 +6024,18 @@ namespace Legion {
       derez.deserialize(index);
       RegionUsage usage;
       derez.deserialize(usage);
-      DistributedID view_did;
-      derez.deserialize(view_did);
-      RtEvent view_ready;
-      LogicalView *local_view = NULL;
-      if (view_did > 0)
+      std::set<LogicalView*> views;
+      size_t num_views;
+      derez.deserialize(num_views);
+      for (unsigned idx = 0; idx < num_views; idx++)
       {
-        local_view = 
-          runtime->find_or_request_logical_view(view_did, view_ready);
-        if (view_ready.exists())
-          ready_events.insert(view_ready);
+        DistributedID did;
+        derez.deserialize(did);
+        RtEvent ready;
+        LogicalView *view = runtime->find_or_request_logical_view(did, ready);
+        if (ready.exists())
+          ready_events.insert(ready);
+        views.insert(view);
       }
       PredEvent pred_guard;
       derez.deserialize(pred_guard);
@@ -6045,7 +6052,7 @@ namespace Legion {
 
       // This takes ownership of the operation
       OverwriteAnalysis *analysis = new OverwriteAnalysis(runtime,
-          original_source, previous, op, index, usage, local_view,
+          original_source, previous, op, index, usage, views,
           precondition, guard_event, pred_guard, effects.exists(), 
           add_restriction);
       analysis->add_reference();
@@ -9784,18 +9791,22 @@ namespace Legion {
           if (!!reduce_filter)
             filter_reduction_instances(reduce_filter);
           filter_valid_instances(mask);
-          if (analysis.view != NULL)
+          if (!analysis.views.empty())
           {
-            FieldMaskSet<LogicalView>::iterator finder = 
-              valid_instances.find(analysis.view);
-            if (finder == valid_instances.end())
+            for (std::set<LogicalView*>::const_iterator it = 
+                  analysis.views.begin(); it != analysis.views.end(); it++)
             {
-              WrapperReferenceMutator mutator(applied_events);
-              analysis.view->add_nested_valid_ref(did, &mutator);
-              valid_instances.insert(analysis.view, mask);
+              FieldMaskSet<LogicalView>::iterator finder = 
+                valid_instances.find(*it);
+              if (finder == valid_instances.end())
+              {
+                WrapperReferenceMutator mutator(applied_events);
+                (*it)->add_nested_valid_ref(did, &mutator);
+                valid_instances.insert(*it, mask);
+              }
+              else
+                finder.merge(mask);
             }
-            else
-              finder.merge(mask);
           }
         }
         else
@@ -9809,18 +9820,22 @@ namespace Legion {
             if (!!reduce_filter)
               filter_reduction_instances(reduce_filter);
             filter_valid_instances(update_mask);
-            if (analysis.view != NULL)
+            if (!analysis.views.empty())
             {
-              FieldMaskSet<LogicalView>::iterator finder = 
-                valid_instances.find(analysis.view);
-              if (finder == valid_instances.end())
+              for (std::set<LogicalView*>::const_iterator it = 
+                    analysis.views.begin(); it != analysis.views.end(); it++)
               {
-                WrapperReferenceMutator mutator(applied_events);
-                analysis.view->add_nested_valid_ref(did, &mutator);
-                valid_instances.insert(analysis.view, update_mask);
+                FieldMaskSet<LogicalView>::iterator finder = 
+                  valid_instances.find(*it);
+                if (finder == valid_instances.end())
+                {
+                  WrapperReferenceMutator mutator(applied_events);
+                  (*it)->add_nested_valid_ref(did, &mutator);
+                  valid_instances.insert(*it, mask);
+                }
+                else
+                  finder.merge(mask);
               }
-              else
-                finder.merge(update_mask);
             }
           }
         }
@@ -9829,10 +9844,13 @@ namespace Legion {
         if (analysis.add_restriction)
         {
 #ifdef DEBUG_LEGION
-          assert(analysis.view != NULL);
-          assert(analysis.view->is_instance_view());
+          assert(analysis.views.size() == 1);
+          LogicalView *log_view = *(analysis.views.begin());
+          assert(log_view->is_instance_view());
+#else
+          LogicalView *log_view = *(analysis.views.begin());
 #endif
-          InstanceView *inst_view = analysis.view->as_instance_view();
+          InstanceView *inst_view = log_view->as_instance_view();
           FieldMaskSet<InstanceView>::iterator restricted_finder = 
             restricted_instances.find(inst_view);
           if (restricted_finder == restricted_instances.end())
@@ -9845,13 +9863,17 @@ namespace Legion {
             restricted_finder.merge(mask);
           restricted_fields |= mask; 
         }
-        else if (!!restricted_fields)
+        else if (!!restricted_fields && !analysis.views.empty())
         {
           // Check to see if we have any restricted outputs to write
           const FieldMask restricted_overlap = mask & restricted_fields;
           if (!!restricted_overlap)
-            copy_out(restricted_overlap, analysis.view, analysis.op, 
+          {
+            // Pick a random view and copy from it
+            LogicalView *log_view = *(analysis.views.begin());
+            copy_out(restricted_overlap, log_view, analysis.op, 
                      analysis.index, analysis.output_aggregator);
+          }
         }
       }
       if ((analysis.output_aggregator != NULL) &&
