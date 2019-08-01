@@ -20,6 +20,10 @@
 -- ]
 
 import "regent"
+import "bishop"
+
+mapper
+end
 
 task f(r : region(ispace(int1d), int))
 where
@@ -60,4 +64,4 @@ task main()
   check(r)
 end
 
-regentlib.start(main)
+regentlib.start(main, bishoplib.make_entry())
