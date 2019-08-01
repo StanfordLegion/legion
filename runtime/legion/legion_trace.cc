@@ -1514,11 +1514,10 @@ namespace Legion {
         assert(physical_trace->get_current_template() == NULL ||
                !physical_trace->get_current_template()->is_recording());
 #endif
-
-        // Register this fence with all previous users in the parent's context
-        execution_precondition = 
+        execution_precondition =
           parent_ctx->perform_fence_analysis(this, true, true);
-
+        physical_trace->set_current_execution_fence_event(
+            get_completion_event());
         fence_registered = true;
       }
 
@@ -1538,7 +1537,7 @@ namespace Legion {
       }
       else if (!fence_registered)
       {
-        execution_precondition = 
+        execution_precondition =
           parent_ctx->perform_fence_analysis(this, true, true);
         physical_trace->set_current_execution_fence_event(
             get_completion_event());
