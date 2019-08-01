@@ -52,18 +52,11 @@ void TracingMapper::slice_task(const MapperContext      ctx,
                                const SliceTaskInput&    input,
                                      SliceTaskOutput&   output)
 {
-  if (strcmp(task.get_task_name(), "inc") == 0 ||
-      strcmp(task.get_task_name(), "step") == 0 ||
-      strcmp(task.get_task_name(), "check") == 0)
-  {
-    DomainT<1,coord_t> point_space = input.domain;
-    Point<1,coord_t> num_blocks(local_cpus.size());
-    default_decompose_points<1>(point_space, local_cpus,
-                                num_blocks, false/*recurse*/,
-                                stealing_enabled, output.slices);
-  }
-  else
-    DefaultMapper::slice_task(ctx, task, input, output);
+  DomainT<1,coord_t> point_space = input.domain;
+  Point<1,coord_t> num_blocks(local_cpus.size());
+  default_decompose_points<1>(point_space, local_cpus,
+                              num_blocks, false/*recurse*/,
+                              stealing_enabled, output.slices);
 }
 
 void TracingMapper::map_task(const MapperContext ctx,
