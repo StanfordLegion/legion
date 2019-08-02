@@ -844,7 +844,6 @@ namespace Legion {
                                  RtEvent complete_event = RtEvent::NO_RT_EVENT);
     protected:
       void invoke_memoize_operation(MapperID mapper_id);
-      void set_memoize(bool memoize);
     public:
       virtual bool is_memoizing(void) const { return memo_state != NO_MEMO; }
       virtual bool is_recording(void) const { return memo_state == RECORD; }
