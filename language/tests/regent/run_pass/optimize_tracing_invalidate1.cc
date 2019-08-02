@@ -80,6 +80,7 @@ void TracingMapper::map_task(const MapperContext ctx,
     output.postmap_task = false;
     default_policy_select_target_processors(ctx, task, output.target_procs);
 
+    bool need_acquire = false;
     for (unsigned idx = 0; idx < task.regions.size(); ++idx)
     {
       const RegionRequirement &req = task.regions[idx];
@@ -112,9 +113,14 @@ void TracingMapper::map_task(const MapperContext ctx,
           output.chosen_instances[idx].push_back(result);
         }
         else
+        {
           output.chosen_instances[idx].push_back(finder->second);
+          need_acquire = true;
+        }
       }
     }
+    if (need_acquire)
+      runtime->acquire_instances(ctx, output.chosen_instances);
   }
   else
     DefaultMapper::map_task(ctx, task, input, output);
