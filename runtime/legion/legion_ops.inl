@@ -119,12 +119,6 @@ namespace Legion {
           assert(tpl->is_recording());
 #endif
           memo_state = RECORD;
-          // The context eagerly prunes out the current execution fence event,
-          // when it has been triggered, but we want to capture it correctly
-          // during tracing. So, we record the fence event from the physical
-          // trace.
-          OP::execution_fence_event =
-            physical_trace->get_current_execution_fence_event();
         }
       }
       need_prepipeline_stage = true;
