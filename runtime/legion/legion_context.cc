@@ -6269,7 +6269,13 @@ namespace Legion {
       if (current_execution_fence_event.exists())
       {
         if (current_execution_fence_event.has_triggered())
-          current_execution_fence_event = ApEvent::NO_AP_EVENT;
+        {
+          // We can only do this optimization safely if we're not 
+          // recording a physical trace, otherwise the physical
+          // trace needs to see this dependence
+          if ((current_trace == NULL) || !current_trace->is_recording())
+            current_execution_fence_event = ApEvent::NO_AP_EVENT;
+        }
         return current_execution_fence_event;
       }
       return ApEvent::NO_AP_EVENT;
