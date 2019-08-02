@@ -94,6 +94,7 @@ void TracingMapper::map_task(const MapperContext ctx,
           PhysicalInstance result;
           Machine::MemoryQuery valid_mems(machine);
           valid_mems.has_affinity_to(task.target_proc);
+          valid_mems.only_kind(Memory::SYSTEM_MEM);
           Memory target_memory = *valid_mems.begin();
 
           std::vector<LogicalRegion> target_regions(1, req.region);
@@ -119,8 +120,8 @@ void TracingMapper::map_task(const MapperContext ctx,
         }
       }
     }
-    if (need_acquire)
-      runtime->acquire_instances(ctx, output.chosen_instances);
+    if (need_acquire && !runtime->acquire_instances(ctx, output.chosen_instances))
+      assert(false);
   }
   else
     DefaultMapper::map_task(ctx, task, input, output);
