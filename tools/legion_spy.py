@@ -6383,7 +6383,7 @@ class Operation(object):
             }[self.kind]
 
     @property
-    def html_safe_name(self)
+    def html_safe_name(self):
         return str(self).replace('<','&lt;').replace('>','&gt;')
 
     def print_base_node(self, printer, dataflow):
