@@ -5071,7 +5071,7 @@ class Operation(object):
                  'logical_outgoing', 'physical_incoming', 'physical_outgoing', 
                  'eq_incoming', 'eq_outgoing', 'eq_privileges',
                  'start_event', 'finish_event', 'inter_close_ops',
-                 'summary_ops', 'task', 'task_id', 'predicate', 'predicate_result',
+                 'summary_op', 'task', 'task_id', 'predicate', 'predicate_result',
                  'futures', 'owner_shard', 'index_owner', 'points', 'launch_rect', 
                  'creator', 'realm_copies', 'realm_fills', 'realm_depparts', 
                  'version_numbers', 'internal_idx', 'partition_kind', 'partition_node', 
