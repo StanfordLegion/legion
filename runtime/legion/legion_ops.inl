@@ -79,23 +79,19 @@ namespace Legion {
     void MemoizableOp<OP>::execute_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
-      invoke_memoize_operation(OP::get_mappable()->map_id);
+#ifdef DEBUG_LEGION
+      assert(memo_state == NO_MEMO); // should always be no memo here
+#endif
+      PhysicalTrace *const physical_trace = (OP::trace == NULL) ? NULL :
+          OP::trace->get_physical_trace();
+      // Only invoke memoization if we are doing physical tracing
+      if (physical_trace != NULL)
+        invoke_memoize_operation(OP::get_mappable()->map_id);
 #ifdef DEBUG_LEGION
       assert(memo_state == NO_MEMO || memo_state == MEMO_REQ);
 #endif
       if (memo_state == MEMO_REQ)
       {
-#ifdef DEBUG_LEGION
-        assert(OP::trace != NULL);
-#endif
-        PhysicalTrace *physical_trace = OP::trace->get_physical_trace();
-        if (physical_trace == NULL)
-        {
-          REPORT_LEGION_ERROR(ERROR_INVALID_PHYSICAL_TRACING,
-              "Invalid memoization request. An operation cannot be memoized "
-              "when it is in a logical-only trace. Please change the mapper "
-              "not to request memoization or allow memoization for the trace.");
-        }
         tpl = physical_trace->get_current_template();
         if (tpl == NULL)
         {
@@ -186,39 +182,23 @@ namespace Legion {
     void MemoizableOp<OP>::invoke_memoize_operation(MapperID mapper_id)
     //--------------------------------------------------------------------------
     {
-      // If we're not in a trace or tracing isn't enabled then don't do anything
-      if ((OP::trace != NULL) && !this->runtime->no_tracing &&
-          !this->runtime->no_physical_tracing)
-      {
-        Mapper::MemoizeInput  input;
-        Mapper::MemoizeOutput output;
-        input.trace_id = OP::trace->get_trace_id();
-        output.memoize = false;
-        Processor mapper_proc = OP::parent_ctx->get_executing_processor();
-        MapperManager *mapper = OP::runtime->find_mapper(mapper_proc,mapper_id);
-        Mappable *mappable = OP::get_mappable();
 #ifdef DEBUG_LEGION
-        assert(mappable != NULL);
+      assert(OP::trace != NULL);
+      assert(!this->runtime->no_tracing);
+      assert(!this->runtime->no_physical_tracing);
 #endif
-        mapper->invoke_memoize_operation(mappable, &input, &output);
-        if (OP::trace == NULL && output.memoize)
-          REPORT_LEGION_ERROR(ERROR_INVALID_PHYSICAL_TRACING,
-              "Invalid mapper output from 'memoize_operation'. Mapper requested"
-              " memoization of an operation that is not being traced.");
-        set_memoize(output.memoize);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    template<typename OP>
-    void MemoizableOp<OP>::set_memoize(bool memoize)
-    //--------------------------------------------------------------------------
-    {
+      Mapper::MemoizeInput  input;
+      Mapper::MemoizeOutput output;
+      input.trace_id = OP::trace->get_trace_id();
+      output.memoize = false;
+      Processor mapper_proc = OP::parent_ctx->get_executing_processor();
+      MapperManager *mapper = OP::runtime->find_mapper(mapper_proc,mapper_id);
+      Mappable *mappable = OP::get_mappable();
 #ifdef DEBUG_LEGION
-      assert(memo_state == NO_MEMO);
+      assert(mappable != NULL);
 #endif
-      if (memoize && !this->runtime->no_tracing && 
-          !this->runtime->no_physical_tracing)
+      mapper->invoke_memoize_operation(mappable, &input, &output);
+      if (output.memoize)
         memo_state = MEMO_REQ;
     }
 
