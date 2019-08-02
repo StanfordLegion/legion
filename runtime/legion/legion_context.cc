@@ -11900,6 +11900,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void ReplicateContext::begin_trace(TraceID tid, bool logical_only)
+    //--------------------------------------------------------------------------
+    {
+      if (!logical_only)
+        log_run.warning("Physical tracing is not yet supported with control "
+            "replication. Downgrading trace %d in task %s (UID %lld) to a "
+            "logical-only trace.", tid, get_task_name(), get_unique_id());
+      InnerContext::begin_trace(tid, true/*logical only*/);
+    }
+
+    //--------------------------------------------------------------------------
     void ReplicateContext::record_dynamic_collective_contribution(
                                           DynamicCollective dc, const Future &f)
     //--------------------------------------------------------------------------

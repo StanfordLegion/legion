@@ -1615,6 +1615,7 @@ namespace Legion {
       virtual Future issue_timing_measurement(const TimingLauncher &launcher);
       virtual void issue_mapping_fence(void);
       virtual void issue_execution_fence(void);
+      virtual void begin_trace(TraceID tid, bool logical_only);
     public:
       virtual void record_dynamic_collective_contribution(DynamicCollective dc,
                                                           const Future &f);
