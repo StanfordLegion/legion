@@ -67,7 +67,6 @@ namespace Legion {
         TRACE_CAPTURE_OP_KIND,
         TRACE_COMPLETE_OP_KIND,
         TRACE_REPLAY_OP_KIND,
-        TRACE_BEGIN_OP_KIND,
         TRACE_SUMMARY_OP_KIND,
         TASK_OP_KIND,
         LAST_OP_KIND,
@@ -100,7 +99,6 @@ namespace Legion {
         "Trace Capture",            \
         "Trace Complete",           \
         "Trace Replay",             \
-        "Trace Begin",              \
         "Trace Summary",            \
         "Task",                     \
       } 
@@ -793,6 +791,8 @@ namespace Legion {
       virtual ApEvent compute_sync_precondition(
                       const PhysicalTraceInfo *info) const = 0;
       virtual void complete_replay(ApEvent complete_event) = 0;
+      virtual const VersionInfo& get_version_info(unsigned idx) const = 0;
+      virtual const RegionRequirement& get_requirement(unsigned idx) const = 0;
     };
 
     /**
@@ -840,6 +840,8 @@ namespace Legion {
       virtual Operation::OpKind get_memoizable_kind(void) const
         { return this->get_operation_kind(); }
       virtual ApEvent compute_init_precondition(const PhysicalTraceInfo &info);
+      virtual RtEvent complete_memoizable(
+                                 RtEvent complete_event = RtEvent::NO_RT_EVENT);
     protected:
       void invoke_memoize_operation(MapperID mapper_id);
       void set_memoize(bool memoize);
@@ -1097,6 +1099,8 @@ namespace Legion {
       virtual ApEvent compute_sync_precondition(
                       const PhysicalTraceInfo *info) const;
       virtual void complete_replay(ApEvent copy_complete_event);
+      virtual const VersionInfo& get_version_info(unsigned idx) const;
+      virtual const RegionRequirement& get_requirement(unsigned idx) const;
     protected:
       template<ReqType REQ_TYPE>
       static const char* get_req_type_name(void);
@@ -1684,6 +1688,8 @@ namespace Legion {
       virtual ApEvent compute_sync_precondition(
                       const PhysicalTraceInfo *info) const;
       virtual void complete_replay(ApEvent acquire_complete_event);
+      virtual const VersionInfo& get_version_info(unsigned idx) const;
+      virtual const RegionRequirement& get_requirement(unsigned idx) const;
     protected:
       void check_acquire_privilege(void);
       void compute_parent_index(void);
@@ -1785,6 +1791,8 @@ namespace Legion {
       virtual ApEvent compute_sync_precondition(
                               const PhysicalTraceInfo *info) const;
       virtual void complete_replay(ApEvent release_complete_event);
+      virtual const VersionInfo& get_version_info(unsigned idx) const;
+      virtual const RegionRequirement& get_requirement(unsigned idx) const;
     protected:
       void check_release_privilege(void);
       void compute_parent_index(void);
@@ -1850,6 +1858,10 @@ namespace Legion {
       virtual const DynamicCollective* as_dynamic_collective(void) const
         { return &collective; }
       virtual const MustEpoch* as_must_epoch(void) const { return NULL; }
+      virtual const VersionInfo& get_version_info(unsigned idx) const
+        { assert(false); return *(new VersionInfo()); }
+      virtual const RegionRequirement& get_requirement(unsigned idx) const
+        { assert(false); return *(new RegionRequirement()); }
     public:
       // From MemoizableOp
       virtual void replay_analysis(void);
@@ -2857,6 +2869,12 @@ namespace Legion {
       void compute_parent_index(void);
       ApEvent compute_sync_precondition(const PhysicalTraceInfo *info) const;
       void log_fill_requirement(void) const;
+    public:
+      // From Memoizable
+      virtual const VersionInfo& get_version_info(unsigned idx) const
+        { return version_info; }
+      virtual const RegionRequirement& get_requirement(unsigned idx) const
+        { return get_requirement(); }
     public:
       // From MemoizableOp
       virtual void replay_analysis(void);

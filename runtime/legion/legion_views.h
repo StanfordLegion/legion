@@ -234,7 +234,6 @@ namespace Legion {
     public:
       virtual void add_collectable_reference(ReferenceMutator *mutator) = 0;
       virtual bool remove_collectable_reference(ReferenceMutator *mutator) = 0;
-      virtual void update_gc_events(const std::set<ApEvent> &term_events) = 0;
       virtual void collect_users(const std::set<ApEvent> &to_collect) = 0;
     public:
       void defer_collect_user(PhysicalManager *manager, ApEvent term_event,
@@ -271,7 +270,6 @@ namespace Legion {
     public:
       virtual void add_collectable_reference(ReferenceMutator *mutator);
       virtual bool remove_collectable_reference(ReferenceMutator *mutator);
-      virtual void update_gc_events(const std::set<ApEvent> &term_events);
       virtual void collect_users(const std::set<ApEvent> &to_collect);
     public:
       void find_user_preconditions(const RegionUsage &usage,
@@ -742,7 +740,6 @@ namespace Legion {
       virtual void add_collectable_reference(ReferenceMutator *mutator);
       virtual bool remove_collectable_reference(ReferenceMutator *mutator);
       virtual void collect_users(const std::set<ApEvent> &term_events);
-      virtual void update_gc_events(const std::set<ApEvent> &term_events);
     public:
       virtual void send_view(AddressSpaceID target); 
     protected:

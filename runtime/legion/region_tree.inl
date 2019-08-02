@@ -105,7 +105,7 @@ namespace Legion {
 #ifdef LEGION_SPY
                                      fill_uid, handle, tree_id,
 #endif
-                                     precondition);
+                                     precondition, tracing_srcs, tracing_dsts);
       }
       return result;
     }
@@ -180,7 +180,8 @@ namespace Legion {
 #ifdef LEGION_SPY
                                      handle, src_tree_id, dst_tree_id,
 #endif
-                                     precondition, redop, reduction_fold);
+                                     precondition, redop, reduction_fold,
+                                     tracing_srcs, tracing_dsts);
       }
 #ifdef LEGION_SPY
       if (trace_info.op != NULL)

@@ -6251,10 +6251,10 @@ namespace Legion {
         if ((op_kind != Operation::FENCE_OP_KIND) &&
             (op_kind != Operation::FRAME_OP_KIND) &&
             (op_kind != Operation::DELETION_OP_KIND) &&
-            (op_kind != Operation::TRACE_BEGIN_OP_KIND) && 
             (op_kind != Operation::TRACE_COMPLETE_OP_KIND) &&
             (op_kind != Operation::TRACE_CAPTURE_OP_KIND) &&
-            (op_kind != Operation::TRACE_REPLAY_OP_KIND))
+            (op_kind != Operation::TRACE_REPLAY_OP_KIND) &&
+            (op_kind != Operation::TRACE_SUMMARY_OP_KIND))
         {
           const ApEvent merge = 
             Runtime::merge_events(NULL, previous_completion_events);
@@ -6291,10 +6291,10 @@ namespace Legion {
         assert((op_kind == Operation::FENCE_OP_KIND) || 
                (op_kind == Operation::FRAME_OP_KIND) || 
                (op_kind == Operation::DELETION_OP_KIND) ||
-               (op_kind == Operation::TRACE_BEGIN_OP_KIND) ||
                (op_kind == Operation::TRACE_COMPLETE_OP_KIND) ||
                (op_kind == Operation::TRACE_CAPTURE_OP_KIND) ||
-               (op_kind == Operation::TRACE_REPLAY_OP_KIND));
+               (op_kind == Operation::TRACE_REPLAY_OP_KIND) ||
+               (op_kind == Operation::TRACE_SUMMARY_OP_KIND));
       }
 #endif
       std::map<Operation*,GenerationID> previous_operations;
@@ -6569,10 +6569,8 @@ namespace Legion {
 #endif
       dynamic_trace->clear_blocking_call();
 
-      // Issue a begin op
-      TraceBeginOp *begin = runtime->get_available_begin_op();
-      begin->initialize_begin(this, dynamic_trace);
-      runtime->add_to_dependence_queue(this, executing_processor, begin);
+      // Issue a mapping fence
+      runtime->issue_mapping_fence(this);
 
       if (!logical_only)
       {

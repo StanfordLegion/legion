@@ -2000,6 +2000,11 @@ namespace Legion {
                 analysis->term_event, user_applied, trace_info, local_space);
             // Record the event as the precondition for the task
             targets[idx].set_ready_event(ready);
+            if (trace_info.recording)
+            {
+              PhysicalTraceInfo(trace_info, analysis->index).record_op_view(
+                  analysis->usage, inst_mask, analysis->target_views[idx]);
+            }
           }
           if (!user_applied.empty())
           {
@@ -2021,6 +2026,11 @@ namespace Legion {
                 trace_info, local_space);
             // Record the event as the precondition for the task
             targets[idx].set_ready_event(ready);
+            if (trace_info.recording)
+            {
+              PhysicalTraceInfo(trace_info, analysis->index).record_op_view(
+                analysis->usage, inst_mask, analysis->target_views[idx]);
+            }
           }
         }
       }
@@ -2104,7 +2114,7 @@ namespace Legion {
     {
       const DeferPhysicalRegistrationArgs *dargs = 
         (const DeferPhysicalRegistrationArgs*)args;
-      const PhysicalTraceInfo trace_info(dargs->analysis->op, false/*init*/);
+      const PhysicalTraceInfo trace_info(dargs->analysis->op);
       std::set<RtEvent> applied_events;
       dargs->result = physical_perform_registration(dargs->analysis, 
                         dargs->targets, trace_info, applied_events);
@@ -2873,14 +2883,19 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(req.handle_type == SINGULAR);
 #endif
-#if 0
       if (trace_info.recording)
-        trace_info.tpl->record_fill_view(fill_view, fill_mask);
-#endif
+      {
+        RegionNode *region_node = get_node(req.region);
+        FieldSpaceNode *fs_node = region_node->column_source;
+        trace_info.tpl->record_fill_view(fill_view,
+            fs_node->get_field_mask(req.privilege_fields));
+      }
       const FieldMaskSet<EquivalenceSet> &eq_sets = 
         version_info.get_equivalence_sets();     
+      std::set<LogicalView*> fill_views;
+      fill_views.insert(fill_view);
       OverwriteAnalysis *analysis = new OverwriteAnalysis(runtime, op, index, 
-          RegionUsage(req), &version_info, fill_view, precondition, 
+          RegionUsage(req), &version_info, fill_views, precondition, 
           RtEvent::NO_RT_EVENT/*reg guard*/, true_guard, true/*track effects*/);
       analysis->add_reference();
       std::set<RtEvent> deferral_events;
@@ -3009,8 +3024,10 @@ namespace Legion {
         if (guard_event.exists())
           map_applied_events.insert(guard_event);
       }
+      std::set<LogicalView*> registration_views;
+      registration_views.insert(registration_view);
       OverwriteAnalysis *analysis = new OverwriteAnalysis(runtime, attach_op,
-          index, RegionUsage(req), &version_info, registration_view, 
+          index, RegionUsage(req), &version_info, registration_views, 
           ApEvent::NO_AP_EVENT,  guard_event, PredEvent::NO_PRED_EVENT, 
           false/*track effects*/, restricted);
       analysis->add_reference();
@@ -3094,8 +3111,9 @@ namespace Legion {
       const FieldMaskSet<EquivalenceSet> &eq_sets = 
         version_info.get_equivalence_sets();
       const RegionUsage usage(READ_WRITE, EXCLUSIVE, 0);
+      std::set<LogicalView*> empty_views;
       OverwriteAnalysis *analysis = new OverwriteAnalysis(runtime, op, index,
-            usage, &version_info, NULL/*no view*/, ApEvent::NO_AP_EVENT);
+            usage, &version_info, empty_views, ApEvent::NO_AP_EVENT);
       analysis->add_reference();
       std::set<RtEvent> deferral_events;
       if (collective)
@@ -3173,17 +3191,23 @@ namespace Legion {
       const FieldMaskSet<EquivalenceSet> &eq_sets = 
         version_info.get_equivalence_sets();
       const RegionUsage usage(READ_WRITE, EXCLUSIVE, 0);
-      for (FieldMaskSet<InstanceView>::const_iterator vit = 
-            valid_views.begin(); vit != valid_views.end(); vit++)
+      // Sort the valid views into field mask sets
+      LegionList<FieldSet<InstanceView*> >::aligned view_sets;
+      valid_views.compute_field_sets(FieldMask(), view_sets);
+      for (LegionList<FieldSet<InstanceView*> >::aligned::const_iterator vit =
+            view_sets.begin(); vit != view_sets.end(); vit++)
       {
+        // Stupid container problem
+        const std::set<LogicalView*> *log_views = 
+          reinterpret_cast<const std::set<LogicalView*>*>(&vit->elements);
         OverwriteAnalysis *analysis = new OverwriteAnalysis(runtime, op, index,
-            usage, NULL/*no updates*/, vit->first, ApEvent::NO_AP_EVENT);
+            usage, NULL/*no updates*/, *log_views, ApEvent::NO_AP_EVENT);
         analysis->add_reference();
         std::set<RtEvent> deferral_events;
         for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
               eq_sets.begin(); it != eq_sets.end(); it++)
         {
-          const FieldMask overlap = it->second & vit->second;
+          const FieldMask overlap = it->second & vit->set_mask;
           if (!overlap)
             continue;
           // We don't bother tracking updates here since they could race
@@ -3196,7 +3220,7 @@ namespace Legion {
         if (traversal_done.exists() || analysis->has_remote_sets())
           analysis->perform_remote(traversal_done, map_applied_events);
         if (analysis->remove_reference())
-          delete analysis;
+          delete analysis;  
       }
     }
 

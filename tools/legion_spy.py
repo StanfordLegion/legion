@@ -88,7 +88,6 @@ TRACE_OP_KIND = 20
 TIMING_OP_KIND = 21
 PREDICATE_OP_KIND = 22
 MUST_EPOCH_OP_KIND = 23
-SUMMARY_OP_KIND = 24
 
 OPEN_NONE = 0
 OPEN_READ_ONLY = 1
@@ -4413,7 +4412,7 @@ class DataflowTraverser(object):
             # If we've already traversed this then we can skip the verification
             if fill.record_version_number(self.state):
                 return False
-            assert self.state.fill_op is fill.fill_op
+            assert self.state.fill_op is fill.fill_op or fill.fill_op.replayed
             if self.across:
                 fill.record_across_version_number(self.point, self.dst_field,
                                                   self.dst_tree, self.dst_version)
@@ -5100,7 +5099,7 @@ class Operation(object):
         self.start_event = state.get_no_event() 
         self.finish_event = state.get_no_event()
         self.inter_close_ops = None
-        self.summary_ops = None
+        self.summary_op = None
         self.realm_copies = None
         self.realm_depparts = None
         self.realm_fills = None
@@ -5142,7 +5141,7 @@ class Operation(object):
         return self.kind == INTER_CLOSE_OP_KIND or self.kind == POST_CLOSE_OP_KIND
 
     def is_internal(self):
-        return self.is_close() or self.kind == SUMMARY_OP_KIND
+        return self.is_close()
 
     def set_name(self, name):
         self.name = name
@@ -5169,9 +5168,8 @@ class Operation(object):
             for point in itervalues(self.points):
                 point.op.set_context(context, False)
         # Finaly recurse for any summary operations
-        if self.summary_ops:
-            for summary in self.summary_ops:
-                summary.set_context(context, False)
+        if self.summary_op is not None:
+            self.summary_op.set_context(context, False)
         if add:
             self.context.add_operation(self)
 
@@ -5203,17 +5201,13 @@ class Operation(object):
     def set_creator(self, creator, idx):
         # Better be an internal op kind
         assert self.kind == INTER_CLOSE_OP_KIND or \
-            self.kind == POST_CLOSE_OP_KIND or \
-            self.kind == SUMMARY_OP_KIND
+            self.kind == POST_CLOSE_OP_KIND
         self.creator = creator
         self.internal_idx = idx
         # If our parent context created us we don't need to be recorded 
         if creator is not self.context.op:
             assert self.kind != POST_CLOSE_OP_KIND
-            if self.kind == SUMMARY_OP_KIND:
-                creator.add_summary_operation(self)
-            else:
-                creator.add_close_operation(self)
+            creator.add_close_operation(self)
         else:
             assert self.kind == POST_CLOSE_OP_KIND
 
@@ -5242,10 +5236,8 @@ class Operation(object):
             self.inter_close_ops = list()
         self.inter_close_ops.append(close)
 
-    def add_summary_operation(self, summary):
-        if self.summary_ops is None:
-            self.summary_ops = list()
-        self.summary_ops.append(summary)
+    def set_summary_operation(self, summary):
+        self.summary_op = summary
 
     def get_depth(self):
         assert self.context is not None
@@ -5841,9 +5833,6 @@ class Operation(object):
 
     def perform_logical_analysis(self, perform_checks):
         if self.replayed:
-            if self.reqs is not None:
-                for idx in xrange(0,len(self.reqs)):
-                    self.context.check_restricted_coherence(self, self.reqs[idx])
             return True
         # We need a context to do this
         assert self.context is not None
@@ -5993,6 +5982,10 @@ class Operation(object):
 
     def check_for_spurious_realm_ops(self, perform_checks):
         if not perform_checks:
+            return True
+        # TODO: We would want Legion Spy to check if reduction instances
+        #       are initialized correctly before they are reused in a replay.
+        if self.replayed:
             return True
         if self.realm_copies:
             for copy in self.realm_copies:
@@ -6387,11 +6380,10 @@ class Operation(object):
             TIMING_OP_KIND : "turquoise",
             PREDICATE_OP_KIND : "olivedrab1",
             MUST_EPOCH_OP_KIND : "tomato",
-            SUMMARY_OP_KIND : "darkslategray4",
             }[self.kind]
 
     def print_base_node(self, printer, dataflow):
-        title = str(self)+' (UID: '+str(self.uid)+')'
+        title = str(self).replace('<','&lt;').replace('>','&gt;')+' (UID: '+str(self.uid)+')'
         if self.task is not None and self.task.point.dim > 0:
             title += ' Point: ' + self.task.point.to_string()
         if self.replayed:
@@ -6789,9 +6781,10 @@ class Task(object):
     def flatten_summary_operations(self):
         flattened = list()
         for op in self.operations:
-            if op.summary_ops is not None:
-                for summary in op.summary_ops:
-                    flattened.append(summary)
+            if op.summary_op == op:
+                continue
+            if op.summary_op is not None:
+                flattened.append(op.summary_op)
             flattened.append(op)
         self.operations = flattened
 
@@ -8932,18 +8925,18 @@ diff_expr_pat            = re.compile(
     prefix+"Index Space Difference (?P<expr>[0-9]+) (?P<left>[0-9]+) (?P<right>[0-9]+)")
 # Patterns for operations
 task_name_pat            = re.compile(
-    prefix+"Task ID Name (?P<tid>[0-9]+) (?P<name>[-$()\w. ]+)")
+    prefix+"Task ID Name (?P<tid>[0-9]+) (?P<name>[-$()<>:\w. ]+)")
 task_variant_pat         = re.compile(
     prefix+"Task Variant (?P<tid>[0-9]+) (?P<vid>[0-9]+) (?P<inner>[0-1]) "+
-    "(?P<leaf>[0-1]) (?P<idem>[0-1]+) (?P<name>[-$()\w. ]+)")
+    "(?P<leaf>[0-1]) (?P<idem>[0-1]+) (?P<name>[-$()<>:\w. ]+)")
 top_task_pat             = re.compile(
-    prefix+"Top Task (?P<tid>[0-9]+) (?P<uid>[0-9]+) (?P<name>[-$()\w. ]+)")
+    prefix+"Top Task (?P<tid>[0-9]+) (?P<uid>[0-9]+) (?P<name>[-$()<>:\w. ]+)")
 single_task_pat          = re.compile(
     prefix+"Individual Task (?P<ctx>[0-9]+) (?P<tid>[0-9]+) (?P<uid>[0-9]+) "+
-           "(?P<name>[-$()\w. ]+)")
+            "(?P<name>[-$()<>:\w. ]+)")
 index_task_pat           = re.compile(
     prefix+"Index Task (?P<ctx>[0-9]+) (?P<tid>[0-9]+) (?P<uid>[0-9]+) "+
-           "(?P<name>[-$()\w. ]+)")
+            "(?P<name>[-$()<>:\w. ]+)")
 mapping_pat              = re.compile(
     prefix+"Mapping Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
 close_pat                = re.compile(
@@ -9639,19 +9632,12 @@ def parse_legion_spy_line(line, state):
         op.set_op_kind(MUST_EPOCH_OP_KIND)
         # Don't add it to the context for now
         return True
-    m = summary_op_pat.match(line)
-    if m is not None:
-        op = state.get_operation(int(m.group('uid')))
-        op.set_op_kind(SUMMARY_OP_KIND)
-        op.set_name("Trace Summary Op "+m.group('uid'))
-        context = state.get_task(int(m.group('ctx')))
-        op.set_context(context, False)
-        return True
     m = summary_op_creator_pat.match(line)
     if m is not None:
         op = state.get_operation(int(m.group('uid')))
         creator = state.get_operation(int(m.group('cuid')))
-        op.set_creator(creator, None)
+        creator.set_summary_operation(op)
+        op.set_summary_operation(op)
         return True
     m = dep_partition_op_pat.match(line)
     if m is not None:

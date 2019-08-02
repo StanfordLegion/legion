@@ -256,28 +256,51 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    PhysicalTraceInfo::PhysicalTraceInfo(Operation *o, bool initialize)
+    PhysicalTraceInfo::PhysicalTraceInfo(Operation *o, unsigned idx, bool init)
     //--------------------------------------------------------------------------
-      : op(o), tpl((op == NULL) ? NULL : 
+      : op(o), index(idx), dst_index(idx), tpl((op == NULL) ? NULL :
           (op->get_memoizable() == NULL) ? NULL :
             op->get_memoizable()->get_template()),
-        recording((tpl == NULL) ? false : tpl->is_recording())
+        recording((tpl == NULL) ? false : tpl->is_recording()),
+        update_validity(true)
     {
-      if (recording && initialize)
+      if (recording && init)
         tpl->record_get_term_event(op->get_memoizable());
     }
 
     //--------------------------------------------------------------------------
-    PhysicalTraceInfo::PhysicalTraceInfo(Operation *o, Memoizable *memo)
-      : op(o), tpl(memo->get_template()),
-        recording((tpl == NULL) ? false : tpl->is_recording())
+    PhysicalTraceInfo::PhysicalTraceInfo(const PhysicalTraceInfo &info,
+                                         unsigned idx,
+                                         bool update)
+      : op(info.op), index(idx), dst_index(idx), tpl(info.tpl),
+        recording(info.recording), update_validity(update)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    PhysicalTraceInfo::PhysicalTraceInfo(const PhysicalTraceInfo &info,
+                                         unsigned src_idx,
+                                         unsigned dst_idx)
+      : op(info.op), index(src_idx), dst_index(dst_idx), tpl(info.tpl),
+        recording(info.recording), update_validity(info.update_validity)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    PhysicalTraceInfo::PhysicalTraceInfo(Operation *o, Memoizable &memo)
+      : op(o), index(-1U), dst_index(-1U), tpl(memo.get_template()),
+        recording((tpl == NULL) ? false : tpl->is_recording()),
+        update_validity(true)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     PhysicalTraceInfo::PhysicalTraceInfo(const PhysicalTraceInfo &rhs)
-      : op(rhs.op), tpl(rhs.tpl), recording(rhs.recording)
+      : op(rhs.op), index(rhs.index), dst_index(rhs.dst_index), tpl(rhs.tpl),
+        recording(rhs.recording), update_validity(rhs.update_validity)
     //--------------------------------------------------------------------------
     {
     }
@@ -288,9 +311,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(recording);
-      assert(tpl != NULL);
-      assert(tpl->is_recording());
+      sanity_check(false);
 #endif
       tpl->record_merge_events(result, e1, e2, op);      
     }
@@ -301,9 +322,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(recording);
-      assert(tpl != NULL);
-      assert(tpl->is_recording());
+      sanity_check(false);
 #endif
       tpl->record_merge_events(result, e1, e2, e3, op);
     }
@@ -314,9 +333,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(recording);
-      assert(tpl != NULL);
-      assert(tpl->is_recording());
+      sanity_check(false);
 #endif
       tpl->record_merge_events(result, events, op);
     }
@@ -326,63 +343,72 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(recording);
-      assert(tpl != NULL);
-      assert(tpl->is_recording());
+      sanity_check(false);
 #endif
       tpl->record_set_op_sync_event(result, op);
     }
 
     //--------------------------------------------------------------------------
     void PhysicalTraceInfo::record_issue_copy(ApEvent &result,
-                                 IndexSpaceExpression *expr,
-                                 const std::vector<CopySrcDstField>& src_fields,
-                                 const std::vector<CopySrcDstField>& dst_fields,
+                           IndexSpaceExpression *expr,
+                           const std::vector<CopySrcDstField>& src_fields,
+                           const std::vector<CopySrcDstField>& dst_fields,
 #ifdef LEGION_SPY
-                                 FieldSpace handle,
-                                 RegionTreeID src_tree_id,
-                                 RegionTreeID dst_tree_id,
+                           FieldSpace handle,
+                           RegionTreeID src_tree_id,
+                           RegionTreeID dst_tree_id,
 #endif
-                                 ApEvent precondition,
-                                 ReductionOpID redop,
-                                 bool reduction_fold) const
+                           ApEvent precondition,
+                           ReductionOpID redop,
+                           bool reduction_fold,
+                           const FieldMaskSet<InstanceView> *tracing_srcs,
+                           const FieldMaskSet<InstanceView> *tracing_dsts) const
     //--------------------------------------------------------------------------
     {
+      Memoizable *memo = op->get_memoizable();
 #ifdef DEBUG_LEGION
-      assert(recording);
-      assert(tpl != NULL);
-      assert(tpl->is_recording());
+      sanity_check(true);
+      assert(memo != NULL);
+      assert(tracing_srcs != NULL);
+      assert(tracing_dsts != NULL);
 #endif
-      tpl->record_issue_copy(op, result, expr, src_fields, dst_fields,
+      tpl->record_issue_copy(memo, index, dst_index,
+                             result, expr, src_fields, dst_fields,
 #ifdef LEGION_SPY
                              handle, src_tree_id, dst_tree_id,
 #endif
-                             precondition, redop, reduction_fold);
+                             precondition, redop, reduction_fold,
+                             *tracing_srcs, *tracing_dsts);
     }
 
     //--------------------------------------------------------------------------
     void PhysicalTraceInfo::record_issue_fill(ApEvent &result,
-                                     IndexSpaceExpression *expr,
-                                     const std::vector<CopySrcDstField> &fields,
-                                     const void *fill_value, size_t fill_size,
+                           IndexSpaceExpression *expr,
+                           const std::vector<CopySrcDstField> &fields,
+                           const void *fill_value, size_t fill_size,
 #ifdef LEGION_SPY
-                                     UniqueID fill_uid,
-                                     FieldSpace handle,
-                                     RegionTreeID tree_id,
+                           UniqueID fill_uid,
+                           FieldSpace handle,
+                           RegionTreeID tree_id,
 #endif
-                                     ApEvent precondition) const
+                           ApEvent precondition,
+                           const FieldMaskSet<FillView> *tracing_srcs,
+                           const FieldMaskSet<InstanceView> *tracing_dsts) const
     //--------------------------------------------------------------------------
     {
+      Memoizable *memo = op->get_memoizable();
 #ifdef DEBUG_LEGION
-      assert(recording);
-      assert(tpl != NULL);
-      assert(tpl->is_recording());
+      sanity_check(true);
+      assert(memo != NULL);
+      assert(tracing_srcs != NULL);
+      assert(tracing_dsts != NULL);
 #endif
-      tpl->record_issue_fill(op, result, expr, fields, fill_value, fill_size,
+      tpl->record_issue_fill(memo, index, result, expr, fields, fill_value,
+                             fill_size,
 #ifdef LEGION_SPY
                              fill_uid, handle, tree_id,
 #endif
-                             precondition);
+                             precondition, *tracing_srcs, *tracing_dsts);
     }
 
     //--------------------------------------------------------------------------
@@ -394,28 +420,41 @@ namespace Legion {
                                  ApEvent precondition) const
     //--------------------------------------------------------------------------
     {
+      Memoizable *memo = op->get_memoizable();
 #ifdef DEBUG_LEGION
-      assert(recording);
-      assert(tpl != NULL);
-      assert(tpl->is_recording());
+      sanity_check(true);
+      assert(memo != NULL);
 #endif
-      tpl->record_issue_indirect(op, result, expr, src_fields, dst_fields,
+      tpl->record_issue_indirect(memo, result, expr, src_fields, dst_fields,
                                  indirections, precondition);
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTraceInfo::record_empty_copy(DeferredView *view,
-                                              const FieldMask &copy_mask,
-                                              MaterializedView *dst) const
+    void PhysicalTraceInfo::record_op_view(const RegionUsage &usage,
+                                           const FieldMask &user_mask,
+                                           InstanceView *view) const
     //--------------------------------------------------------------------------
     {
+      Memoizable *memo = op->get_memoizable();
 #ifdef DEBUG_LEGION
+      sanity_check(true);
+      assert(memo != NULL);
+#endif
+      tpl->record_op_view(memo, index, view, usage, user_mask, update_validity);
+    }
+
+#ifdef DEBUG_LEGION
+    //--------------------------------------------------------------------------
+    inline void PhysicalTraceInfo::sanity_check(bool check_indices) const
+    //--------------------------------------------------------------------------
+    {
       assert(recording);
       assert(tpl != NULL);
       assert(tpl->is_recording());
-#endif
-      tpl->record_empty_copy(view, copy_mask, dst);
+      assert(!check_indices || index != -1U);
+      assert(!check_indices || dst_index != -1U);
     }
+#endif
 
     /////////////////////////////////////////////////////////////
     // ProjectionInfo
@@ -4951,7 +4990,7 @@ namespace Legion {
       {
         const bool needs_deferral = !already_deferred || 
           (input_aggregators.size() > 1);
-        const PhysicalTraceInfo trace_info(op, false/*initialize*/);
+        const PhysicalTraceInfo trace_info(op, index);
         for (std::map<RtEvent,CopyFillAggregator*>::const_iterator it = 
               input_aggregators.begin(); it != input_aggregators.end(); it++)
         {
@@ -5005,7 +5044,7 @@ namespace Legion {
         assert(!skip_output);
 #endif
         // Make sure we don't defer this
-        const PhysicalTraceInfo trace_info(op, false/*initialize*/);
+        const PhysicalTraceInfo trace_info(op, index);
         output_aggregator->issue_updates(trace_info, term_event);
         result = output_aggregator->summarize(trace_info);
         if (output_aggregator->release_guards(op->runtime, applied_events))
@@ -5538,7 +5577,7 @@ namespace Legion {
       if (release_aggregator != NULL)
       {
         std::set<RtEvent> guard_events;
-        const PhysicalTraceInfo trace_info(op, false/*initialize*/);
+        const PhysicalTraceInfo trace_info(op, index);
         release_aggregator->issue_updates(trace_info, precondition);
 #ifdef NON_AGGRESSIVE_AGGREGATORS
         if (release_aggregator->effects_applied.has_triggered())
@@ -5940,7 +5979,7 @@ namespace Legion {
             }
           }
         }
-        const PhysicalTraceInfo trace_info(op, false/*initialize*/);
+        const PhysicalTraceInfo trace_info(op, index);
         across_aggregator->issue_updates(trace_info, precondition,
             false/*has src preconditions*/, true/*has dst preconditions*/);
         // Need to wait before we can get the summary
@@ -5971,7 +6010,7 @@ namespace Legion {
         applied_events.insert(args.applied_event);
         return args.effects_event;
       }
-      const PhysicalTraceInfo trace_info(op, false/*initialize*/);
+      const PhysicalTraceInfo trace_info(op, index);
       if (across_aggregator != NULL)
       {
         const ApEvent result = across_aggregator->summarize(trace_info);
@@ -6152,11 +6191,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     OverwriteAnalysis::OverwriteAnalysis(Runtime *rt, Operation *o, 
                         unsigned idx, const RegionUsage &use,
-                        VersionInfo *info, LogicalView *v, const ApEvent pre,
-                        const RtEvent guard, const PredEvent pred,
-                        const bool track, const bool restriction)
+                        VersionInfo *info, const std::set<LogicalView*> &v, 
+                        const ApEvent pre, const RtEvent guard, 
+                        const PredEvent pred, const bool track, 
+                        const bool restriction)
       : PhysicalAnalysis(rt, o, idx, info, true/*on heap*/), usage(use), 
-        view(v), precondition(pre), guard_event(guard), pred_guard(pred), 
+        views(v), precondition(pre), guard_event(guard), pred_guard(pred), 
         track_effects(track), add_restriction(restriction), 
         output_aggregator(NULL)
     //--------------------------------------------------------------------------
@@ -6166,11 +6206,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     OverwriteAnalysis::OverwriteAnalysis(Runtime *rt, AddressSpaceID src, 
                         AddressSpaceID prev, Operation *o, unsigned idx, 
-                        const RegionUsage &use,LogicalView *v,const ApEvent pre,
-                        const RtEvent guard, const PredEvent pred,
-                        const bool track, const bool restriction)
+                        const RegionUsage &use, const std::set<LogicalView*> &v,
+                        const ApEvent pre, const RtEvent guard, 
+                        const PredEvent pred, const bool track, 
+                        const bool restriction)
       : PhysicalAnalysis(rt, src, prev, o, idx, true/*on heap*/), usage(use), 
-        view(v), precondition(pre), guard_event(guard), pred_guard(pred), 
+        views(v), precondition(pre), guard_event(guard), pred_guard(pred), 
         track_effects(track), add_restriction(restriction), 
         output_aggregator(NULL)
     //--------------------------------------------------------------------------
@@ -6179,7 +6220,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     OverwriteAnalysis::OverwriteAnalysis(const OverwriteAnalysis &rhs)
-      : PhysicalAnalysis(rhs), usage(rhs.usage), view(rhs.view),
+      : PhysicalAnalysis(rhs), usage(rhs.usage), views(rhs.views),
         precondition(rhs.precondition), guard_event(rhs.guard_event), 
         pred_guard(rhs.pred_guard), track_effects(rhs.track_effects), 
         add_restriction(rhs.add_restriction)
@@ -6262,13 +6303,16 @@ namespace Legion {
           op->pack_remote_operation(rez, rit->first);
           rez.serialize(index);
           rez.serialize(usage);
-          if (view != NULL)
+          rez.serialize<size_t>(views.size());
+          if (!views.empty())
           {
-            view->add_base_valid_ref(REMOTE_DID_REF, &mutator);
-            rez.serialize(view->did);
+            for (std::set<LogicalView*>::const_iterator it = 
+                  views.begin(); it != views.end(); it++)
+            {
+              (*it)->add_base_valid_ref(REMOTE_DID_REF, &mutator);
+              rez.serialize((*it)->did);  
+            }
           }
-          else
-            rez.serialize<DistributedID>(0);
           rez.serialize(pred_guard);
           rez.serialize(precondition);
           rez.serialize(guard_event);
@@ -6304,7 +6348,7 @@ namespace Legion {
         apply_update_equivalence_sets();
       if (output_aggregator != NULL)
       {
-        const PhysicalTraceInfo trace_info(op, false/*initialize*/);
+        const PhysicalTraceInfo trace_info(op, index);
         output_aggregator->issue_updates(trace_info, precondition);
         // Need to wait before we can get the summary
 #ifdef NON_AGGRESSIVE_AGGREGATORS
@@ -6334,7 +6378,7 @@ namespace Legion {
         applied_events.insert(args.applied_event);
         return args.effects_event;
       }
-      const PhysicalTraceInfo trace_info(op, false/*initialize*/);
+      const PhysicalTraceInfo trace_info(op, index);
       if (output_aggregator != NULL)
       {
         const ApEvent result = output_aggregator->summarize(trace_info); 
@@ -6378,16 +6422,18 @@ namespace Legion {
       derez.deserialize(index);
       RegionUsage usage;
       derez.deserialize(usage);
-      DistributedID view_did;
-      derez.deserialize(view_did);
-      RtEvent view_ready;
-      LogicalView *local_view = NULL;
-      if (view_did > 0)
+      std::set<LogicalView*> views;
+      size_t num_views;
+      derez.deserialize(num_views);
+      for (unsigned idx = 0; idx < num_views; idx++)
       {
-        local_view = 
-          runtime->find_or_request_logical_view(view_did, view_ready);
-        if (view_ready.exists())
-          ready_events.insert(view_ready);
+        DistributedID did;
+        derez.deserialize(did);
+        RtEvent ready;
+        LogicalView *view = runtime->find_or_request_logical_view(did, ready);
+        if (ready.exists())
+          ready_events.insert(ready);
+        views.insert(view);
       }
       PredEvent pred_guard;
       derez.deserialize(pred_guard);
@@ -6404,7 +6450,7 @@ namespace Legion {
 
       // This takes ownership of the operation
       OverwriteAnalysis *analysis = new OverwriteAnalysis(runtime,
-          original_source, previous, op, index, usage, local_view,
+          original_source, previous, op, index, usage, views,
           precondition, guard_event, pred_guard, effects.exists(), 
           add_restriction);
       analysis->add_reference();
@@ -10143,18 +10189,22 @@ namespace Legion {
           if (!!reduce_filter)
             filter_reduction_instances(reduce_filter);
           filter_valid_instances(mask);
-          if (analysis.view != NULL)
+          if (!analysis.views.empty())
           {
-            FieldMaskSet<LogicalView>::iterator finder = 
-              valid_instances.find(analysis.view);
-            if (finder == valid_instances.end())
+            for (std::set<LogicalView*>::const_iterator it = 
+                  analysis.views.begin(); it != analysis.views.end(); it++)
             {
-              WrapperReferenceMutator mutator(applied_events);
-              analysis.view->add_nested_valid_ref(did, &mutator);
-              valid_instances.insert(analysis.view, mask);
+              FieldMaskSet<LogicalView>::iterator finder = 
+                valid_instances.find(*it);
+              if (finder == valid_instances.end())
+              {
+                WrapperReferenceMutator mutator(applied_events);
+                (*it)->add_nested_valid_ref(did, &mutator);
+                valid_instances.insert(*it, mask);
+              }
+              else
+                finder.merge(mask);
             }
-            else
-              finder.merge(mask);
           }
         }
         else
@@ -10168,18 +10218,22 @@ namespace Legion {
             if (!!reduce_filter)
               filter_reduction_instances(reduce_filter);
             filter_valid_instances(update_mask);
-            if (analysis.view != NULL)
+            if (!analysis.views.empty())
             {
-              FieldMaskSet<LogicalView>::iterator finder = 
-                valid_instances.find(analysis.view);
-              if (finder == valid_instances.end())
+              for (std::set<LogicalView*>::const_iterator it = 
+                    analysis.views.begin(); it != analysis.views.end(); it++)
               {
-                WrapperReferenceMutator mutator(applied_events);
-                analysis.view->add_nested_valid_ref(did, &mutator);
-                valid_instances.insert(analysis.view, update_mask);
+                FieldMaskSet<LogicalView>::iterator finder = 
+                  valid_instances.find(*it);
+                if (finder == valid_instances.end())
+                {
+                  WrapperReferenceMutator mutator(applied_events);
+                  (*it)->add_nested_valid_ref(did, &mutator);
+                  valid_instances.insert(*it, mask);
+                }
+                else
+                  finder.merge(mask);
               }
-              else
-                finder.merge(update_mask);
             }
           }
         }
@@ -10188,10 +10242,13 @@ namespace Legion {
         if (analysis.add_restriction)
         {
 #ifdef DEBUG_LEGION
-          assert(analysis.view != NULL);
-          assert(analysis.view->is_instance_view());
+          assert(analysis.views.size() == 1);
+          LogicalView *log_view = *(analysis.views.begin());
+          assert(log_view->is_instance_view());
+#else
+          LogicalView *log_view = *(analysis.views.begin());
 #endif
-          InstanceView *inst_view = analysis.view->as_instance_view();
+          InstanceView *inst_view = log_view->as_instance_view();
           FieldMaskSet<InstanceView>::iterator restricted_finder = 
             restricted_instances.find(inst_view);
           if (restricted_finder == restricted_instances.end())
@@ -10204,13 +10261,17 @@ namespace Legion {
             restricted_finder.merge(mask);
           restricted_fields |= mask; 
         }
-        else if (!!restricted_fields)
+        else if (!!restricted_fields && !analysis.views.empty())
         {
           // Check to see if we have any restricted outputs to write
           const FieldMask restricted_overlap = mask & restricted_fields;
           if (!!restricted_overlap)
-            copy_out(restricted_overlap, analysis.view, analysis.op, 
+          {
+            // Pick a random view and copy from it
+            LogicalView *log_view = *(analysis.views.begin());
+            copy_out(restricted_overlap, log_view, analysis.op, 
                      analysis.index, analysis.output_aggregator);
+          }
         }
       }
       if ((analysis.output_aggregator != NULL) &&
@@ -12383,7 +12444,11 @@ namespace Legion {
       assert(previous_number <= version_number);
 #endif
       if (previous_number < version_number)
+      {
+        fprintf(stderr, "hit the shortcut: %p, version_number: %u, previous_number: %u\n",
+            this, version_number, previous_number);
         return;
+      }
       // Increment the version number so that we don't get stale updates
       version_number++;
       // Remove any sets from the old set that aren't in the new one

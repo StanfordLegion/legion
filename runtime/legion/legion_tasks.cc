@@ -1166,6 +1166,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    const VersionInfo& TaskOp::get_version_info(unsigned idx) const
+    //--------------------------------------------------------------------------
+    {
+      // This should never be called
+      assert(false);
+      return (*(new VersionInfo()));
+    }
+
+    //--------------------------------------------------------------------------
     RegionTreePath& TaskOp::get_privilege_path(unsigned idx)
     //--------------------------------------------------------------------------
     {
@@ -1732,7 +1741,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, EARLY_MAP_REGIONS_CALL);
-      const PhysicalTraceInfo trace_info(this, false/*initialize*/);
+      const PhysicalTraceInfo trace_info(this);
       ApEvent init_precondition = compute_init_precondition(trace_info);;
       // A little bit of suckinesss here, it's unclear if we have
       // our version infos with the proper versioning information
@@ -3772,7 +3781,8 @@ namespace Legion {
                                          defer_args, 1/*invocation count*/);
           }
         }
-        const PhysicalTraceInfo trace_info(this);
+        const PhysicalTraceInfo trace_info(this, -1U/*index*/,
+                                           true/*initialize*/);
         ApEvent init_precondition = compute_init_precondition(trace_info);
 #ifdef LEGION_SPY
         {
@@ -3803,7 +3813,8 @@ namespace Legion {
                 runtime->forest->physical_perform_updates_and_registration(
                     regions[0], version_infos[0], this, 0, 
                     init_precondition, local_termination_event,
-                    physical_instances[0], trace_info, map_applied_conditions,
+                    physical_instances[0], PhysicalTraceInfo(trace_info, 0),
+                                          map_applied_conditions,
 #ifdef DEBUG_LEGION
                                           get_logging_name(),
                                           unique_op_id,
@@ -3849,7 +3860,7 @@ namespace Legion {
                                           this, idx, init_precondition,
                                           local_termination_event,
                                           physical_instances[idx],
-                                          trace_info,
+                                          PhysicalTraceInfo(trace_info, idx),
                                           map_applied_conditions,
                                           analyses[idx],
 #ifdef DEBUG_LEGION
@@ -3876,7 +3887,8 @@ namespace Legion {
               else
                 effects[*it] = runtime->forest->physical_perform_registration(
                                           analyses[*it],physical_instances[*it],
-                                          trace_info, map_applied_conditions);
+                                          PhysicalTraceInfo(trace_info, *it),
+                                          map_applied_conditions);
             }
             // Wait for all the registrations to be done
             if (!registration_postconditions.empty())
@@ -3935,7 +3947,7 @@ namespace Legion {
         delete defer_args->effects;
         if (perform_postmap)
         {
-          const PhysicalTraceInfo trace_info(this, false/*initialize*/);
+          const PhysicalTraceInfo trace_info(this);
           perform_post_mapping(trace_info);
         }
       }
@@ -3945,7 +3957,7 @@ namespace Legion {
         shard_manager->extract_event_preconditions(physical_instances);
       if (is_recording())
       {
-        const PhysicalTraceInfo trace_info(this, false/*initialize*/);
+        const PhysicalTraceInfo trace_info(this);
 #ifdef DEBUG_LEGION
         assert(tpl != NULL && tpl->is_recording());
 #endif
@@ -3955,9 +3967,10 @@ namespace Legion {
           if (!virtual_mapped[idx] && !no_access_regions[idx])
             physical_instances[idx].update_wait_on_events(ready_events);
         }
+        tpl->get_reduction_ready_events(this, ready_events);
         ApEvent ready_event = Runtime::merge_events(&trace_info, ready_events);
         tpl->record_complete_replay(this, ready_event);
-      } 
+      }
       return RtEvent::NO_RT_EVENT;
     }
 
@@ -5550,6 +5563,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    const VersionInfo& IndividualTask::get_version_info(unsigned idx) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(idx < version_infos.size());
+#endif
+      return version_infos[idx];
+    }
+
+    //--------------------------------------------------------------------------
     RegionTreePath& IndividualTask::get_privilege_path(unsigned idx)
     //--------------------------------------------------------------------------
     {
@@ -5639,15 +5662,19 @@ namespace Legion {
             wait_on.wait();
         }
         must_epoch->notify_subop_complete(this);
-        complete_operation();
+        complete_operation(complete_memoizable());
       }
       else
       {
         // Mark that this operation is complete
         if (!completion_preconditions.empty())
-          complete_operation(Runtime::merge_events(completion_preconditions));
+        {
+          RtEvent complete_precondition =
+            Runtime::merge_events(completion_preconditions);
+          complete_operation(complete_memoizable(complete_precondition));
+        }
         else
-          complete_operation();
+          complete_operation(complete_memoizable());
       }
       if (need_commit)
         trigger_children_committed();
@@ -6415,6 +6442,17 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     VersionInfo& PointTask::get_version_info(unsigned idx)
+    //--------------------------------------------------------------------------
+    {
+      // See if we've copied over the versions from our slice
+      // if not we can just use our slice owner
+      if (idx < version_infos.size())
+        return version_infos[idx];
+      return slice_owner->get_version_info(idx);
+    }
+
+    //--------------------------------------------------------------------------
+    const VersionInfo& PointTask::get_version_info(unsigned idx) const
     //--------------------------------------------------------------------------
     {
       // See if we've copied over the versions from our slice

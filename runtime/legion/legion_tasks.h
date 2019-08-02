@@ -310,6 +310,7 @@ namespace Legion {
       virtual void update_atomic_locks(Reservation lock, bool exclusive);
       virtual unsigned find_parent_index(unsigned idx);
       virtual VersionInfo& get_version_info(unsigned idx);
+      virtual const VersionInfo& get_version_info(unsigned idx) const;
       virtual RegionTreePath& get_privilege_path(unsigned idx);
       virtual ApEvent compute_sync_precondition(
                                  const PhysicalTraceInfo *info) const;
@@ -364,6 +365,10 @@ namespace Legion {
       void compute_parent_indexes(void);
       void perform_intra_task_alias_analysis(bool is_tracing,
           LegionTrace *trace, std::vector<RegionTreePath> &privilege_paths);
+    public:
+      // From Memoizable
+      virtual const RegionRequirement& get_requirement(unsigned idx) const
+        { return regions[idx]; }
     public:
       // These methods get called once the task has executed
       // and all the children have either mapped, completed,
@@ -763,6 +768,7 @@ namespace Legion {
       virtual bool is_stealable(void) const;
       virtual bool can_early_complete(ApUserEvent &chain_event);
       virtual VersionInfo& get_version_info(unsigned idx);
+      virtual const VersionInfo& get_version_info(unsigned idx) const;
       virtual RegionTreePath& get_privilege_path(unsigned idx);
     public:
       virtual ApEvent get_task_completion(void) const;
@@ -859,6 +865,7 @@ namespace Legion {
       virtual bool is_stealable(void) const;
       virtual bool can_early_complete(ApUserEvent &chain_event);
       virtual VersionInfo& get_version_info(unsigned idx);
+      virtual const VersionInfo& get_version_info(unsigned idx) const;
     public:
       virtual ApEvent get_task_completion(void) const;
       virtual TaskKind get_task_kind(void) const;
