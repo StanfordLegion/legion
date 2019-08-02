@@ -1478,6 +1478,15 @@ namespace Legion {
     public:
       OverwriteAnalysis(Runtime *rt, Operation *op, unsigned index,
                         const RegionUsage &usage,
+                        VersionInfo *info, LogicalView *view,
+                        const ApEvent precondition,
+                        const RtEvent guard_event = RtEvent::NO_RT_EVENT,
+                        const PredEvent pred_guard = PredEvent::NO_PRED_EVENT,
+                        const bool track_effects = false,
+                        const bool add_restriction = false);
+      // Also local but with a full set of views
+      OverwriteAnalysis(Runtime *rt, Operation *op, unsigned index,
+                        const RegionUsage &usage,
                         VersionInfo *info, const std::set<LogicalView*> &views,
                         const ApEvent precondition,
                         const RtEvent guard_event = RtEvent::NO_RT_EVENT,

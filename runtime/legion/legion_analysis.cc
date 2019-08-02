@@ -6187,6 +6187,23 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
     // Overwrite Analysis
     /////////////////////////////////////////////////////////////
+    
+    //--------------------------------------------------------------------------
+    OverwriteAnalysis::OverwriteAnalysis(Runtime *rt, Operation *o, 
+                        unsigned idx, const RegionUsage &use,
+                        VersionInfo *info, LogicalView *view, 
+                        const ApEvent pre, const RtEvent guard, 
+                        const PredEvent pred, const bool track, 
+                        const bool restriction)
+      : PhysicalAnalysis(rt, o, idx, info, true/*on heap*/), usage(use), 
+        precondition(pre), guard_event(guard), pred_guard(pred), 
+        track_effects(track), add_restriction(restriction), 
+        output_aggregator(NULL)
+    //--------------------------------------------------------------------------
+    {
+      if (view != NULL)
+        const_cast<std::set<LogicalView*>*>(&views)->insert(view);
+    }
 
     //--------------------------------------------------------------------------
     OverwriteAnalysis::OverwriteAnalysis(Runtime *rt, Operation *o, 
@@ -12444,11 +12461,7 @@ namespace Legion {
       assert(previous_number <= version_number);
 #endif
       if (previous_number < version_number)
-      {
-        fprintf(stderr, "hit the shortcut: %p, version_number: %u, previous_number: %u\n",
-            this, version_number, previous_number);
         return;
-      }
       // Increment the version number so that we don't get stale updates
       version_number++;
       // Remove any sets from the old set that aren't in the new one

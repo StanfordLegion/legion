@@ -2892,10 +2892,8 @@ namespace Legion {
       }
       const FieldMaskSet<EquivalenceSet> &eq_sets = 
         version_info.get_equivalence_sets();     
-      std::set<LogicalView*> fill_views;
-      fill_views.insert(fill_view);
       OverwriteAnalysis *analysis = new OverwriteAnalysis(runtime, op, index, 
-          RegionUsage(req), &version_info, fill_views, precondition, 
+          RegionUsage(req), &version_info, fill_view, precondition, 
           RtEvent::NO_RT_EVENT/*reg guard*/, true_guard, true/*track effects*/);
       analysis->add_reference();
       std::set<RtEvent> deferral_events;
@@ -3024,10 +3022,8 @@ namespace Legion {
         if (guard_event.exists())
           map_applied_events.insert(guard_event);
       }
-      std::set<LogicalView*> registration_views;
-      registration_views.insert(registration_view);
       OverwriteAnalysis *analysis = new OverwriteAnalysis(runtime, attach_op,
-          index, RegionUsage(req), &version_info, registration_views, 
+          index, RegionUsage(req), &version_info, registration_view, 
           ApEvent::NO_AP_EVENT,  guard_event, PredEvent::NO_PRED_EVENT, 
           false/*track effects*/, restricted);
       analysis->add_reference();
@@ -3111,9 +3107,8 @@ namespace Legion {
       const FieldMaskSet<EquivalenceSet> &eq_sets = 
         version_info.get_equivalence_sets();
       const RegionUsage usage(READ_WRITE, EXCLUSIVE, 0);
-      std::set<LogicalView*> empty_views;
       OverwriteAnalysis *analysis = new OverwriteAnalysis(runtime, op, index,
-            usage, &version_info, empty_views, ApEvent::NO_AP_EVENT);
+            usage, &version_info, NULL/*view*/, ApEvent::NO_AP_EVENT);
       analysis->add_reference();
       std::set<RtEvent> deferral_events;
       if (collective)
