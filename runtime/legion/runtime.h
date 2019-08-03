@@ -417,6 +417,8 @@ namespace Legion {
                                          ReductionOpID redop);
       void fail_bounds_check(DomainPoint p, FieldID fid, PrivilegeMode mode);
       void fail_bounds_check(Domain d, FieldID fid, PrivilegeMode mode);
+      void report_incompatible_accessor(const char *accessor_kind,
+                             PhysicalInstance instance, FieldID fid);
     public:
       Runtime *const runtime;
       TaskContext *const context;

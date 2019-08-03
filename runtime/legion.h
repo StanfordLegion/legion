@@ -2177,6 +2177,8 @@ namespace Legion {
                              PrivilegeMode mode) const;
       void fail_bounds_check(Domain d, FieldID fid,
                              PrivilegeMode mode) const;
+      void report_incompatible_accessor(const char *accessor_kind,
+                             Realm::RegionInstance instance, FieldID fid) const;
     protected:
       void get_bounds(void *realm_is, TypeTag type_tag) const;
     };

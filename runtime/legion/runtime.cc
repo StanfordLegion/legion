@@ -1933,6 +1933,16 @@ namespace Legion {
       }
     }
 
+    //--------------------------------------------------------------------------
+    void PhysicalRegionImpl::report_incompatible_accessor(
+              const char *accessor_kind, PhysicalInstance instance, FieldID fid)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_ACCESSOR_COMPATIBILITY_CHECK,
+          "Unable to create Realm %s for field %d of instance %llx in task %s",
+          accessor_kind, fid, instance.id, context->get_task_name())
+    }
+
     /////////////////////////////////////////////////////////////
     // Grant Impl 
     /////////////////////////////////////////////////////////////
