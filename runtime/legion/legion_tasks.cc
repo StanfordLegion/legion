@@ -7942,7 +7942,6 @@ namespace Legion {
       {
 #ifdef DEBUG_LEGION
         assert(reduction_op != NULL);
-        assert(reduction_state_size == reduction_op->sizeof_rhs);
 #endif
         size_t reduc_size;
         derez.deserialize(reduc_size);
