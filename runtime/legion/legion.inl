@@ -1599,6 +1599,9 @@ namespace Legion {
           region.get_instance_info(READ_ONLY, fid, actual_field_size, &is,
               Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
+        if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, fid, 
+                                                          is.bounds))
+          region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,N,T>(instance, fid, is.bounds);
       }
       // With explicit bounds
@@ -1618,6 +1621,9 @@ namespace Legion {
           region.get_instance_info(READ_ONLY, fid, actual_field_size, &is,
               Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
+        if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, fid, 
+                                                          source_bounds))
+          region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,N,T>(instance, fid, source_bounds);
       }
       // With explicit transform
@@ -1638,6 +1644,9 @@ namespace Legion {
           region.get_instance_info(READ_ONLY, fid, actual_field_size, &is,
               Internal::NT_TemplateHelper::encode_tag<M,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
+        if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, 
+              transform.transform, transform.offset, fid))
+          region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,N,T>(instance, transform.transform,
             transform.offset, fid);
       }
@@ -1660,6 +1669,9 @@ namespace Legion {
           region.get_instance_info(READ_ONLY, fid, actual_field_size, &is,
               Internal::NT_TemplateHelper::encode_tag<M,T>(), warning_string, 
               silence_warnings, false/*generic accessor*/, check_field_size);
+        if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, 
+              transform.transform, transform.offset, fid, source_bounds))
+          region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,N,T>(instance, transform.transform,
             transform.offset, fid, source_bounds);
       }
@@ -1743,6 +1755,9 @@ namespace Legion {
           region.get_instance_info(READ_ONLY, fid, actual_field_size, &is,
               Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
+        if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, fid, 
+                                                          is.bounds))
+          region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,N,T>(instance, fid, is.bounds);
         bounds = AffineBounds::Tester<N,T>(is);
       }
@@ -1764,6 +1779,9 @@ namespace Legion {
           region.get_instance_info(READ_ONLY, fid, actual_field_size, &is,
               Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string, 
               silence_warnings, false/*generic accessor*/, check_field_size);
+        if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, fid, 
+                                                          source_bounds))
+          region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,N,T>(instance, fid, source_bounds);
         bounds = AffineBounds::Tester<N,T>(is, source_bounds);
       }
@@ -1785,6 +1803,9 @@ namespace Legion {
           region.get_instance_info(READ_ONLY, fid, actual_field_size, &is,
               Internal::NT_TemplateHelper::encode_tag<M,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
+        if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, 
+              transform.transform, transform.offset, fid))
+          region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,N,T>(instance, transform.transform,
             transform.offset, fid);
         bounds = AffineBounds::Tester<N,T>(is, transform);
@@ -1808,6 +1829,9 @@ namespace Legion {
           region.get_instance_info(READ_ONLY, fid, actual_field_size, &is,
               Internal::NT_TemplateHelper::encode_tag<M,T>(), warning_string, 
               silence_warnings, false/*generic accessor*/, check_field_size);
+        if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, 
+              transform.transform, transform.offset, fid, source_bounds))
+          region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,N,T>(instance, transform.transform,
             transform.offset, fid, source_bounds);
         bounds = AffineBounds::Tester<N,T>(is, source_bounds, transform);
@@ -1924,6 +1948,9 @@ namespace Legion {
           region.get_instance_info(READ_ONLY, fid, actual_field_size, &is,
               Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
+        if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, fid, 
+                                                          is.bounds))
+          region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,1,T>(instance, fid, is.bounds);
       }
       // With explicit bounds
@@ -1943,6 +1970,9 @@ namespace Legion {
           region.get_instance_info(READ_ONLY, fid, actual_field_size, &is,
               Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
+        if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, fid, 
+                                                          source_bounds))
+          region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,1,T>(instance, fid, source_bounds);
       }
       // With explicit transform
@@ -1963,6 +1993,9 @@ namespace Legion {
           region.get_instance_info(READ_ONLY, fid, actual_field_size, &is,
               Internal::NT_TemplateHelper::encode_tag<M,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
+        if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, 
+              transform.transform, transform.offset, fid))
+          region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,1,T>(instance, transform.transform,
             transform.offset, fid);
       }
@@ -1985,6 +2018,9 @@ namespace Legion {
           region.get_instance_info(READ_ONLY, fid, actual_field_size, &is,
               Internal::NT_TemplateHelper::encode_tag<M,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
+        if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, 
+              transform.transform, transform.offset, fid, source_bounds))
+          region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,1,T>(instance, transform.transform,
             transform.offset, fid, source_bounds);
       }
@@ -2058,6 +2094,9 @@ namespace Legion {
           region.get_instance_info(READ_ONLY, fid, actual_field_size, &is,
               Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
+        if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, fid, 
+                                                          is.bounds))
+          region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,1,T>(instance, fid, is.bounds);
         bounds = AffineBounds::Tester<1,T>(is);
       }
@@ -2079,6 +2118,9 @@ namespace Legion {
           region.get_instance_info(READ_ONLY, fid, actual_field_size, &is,
               Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
+        if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, fid, 
+                                                          source_bounds))
+          region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,1,T>(instance, fid, source_bounds);
         bounds = AffineBounds::Tester<1,T>(is, source_bounds);
       }
@@ -2101,6 +2143,9 @@ namespace Legion {
           region.get_instance_info(READ_ONLY, fid, actual_field_size, &is,
               Internal::NT_TemplateHelper::encode_tag<M,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
+        if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, 
+              transform.transform, transform.offset, fid))
+          region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,1,T>(instance, transform.transform,
             transform.offset, fid);
         bounds = AffineBounds::Tester<1,T>(is, transform);
@@ -2125,6 +2170,9 @@ namespace Legion {
           region.get_instance_info(READ_ONLY, fid, actual_field_size, &is,
               Internal::NT_TemplateHelper::encode_tag<M,T>(), warning_string, 
               silence_warnings, false/*generic accessor*/, check_field_size);
+        if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, 
+              transform.transform, transform.offset, fid, source_bounds))
+          region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,1,T>(instance, transform.transform,
             transform.offset, fid, source_bounds);
         bounds = AffineBounds::Tester<1,T>(is, source_bounds, transform);
@@ -2230,6 +2278,9 @@ namespace Legion {
           region.get_instance_info(READ_WRITE, fid, actual_field_size, &is,
               Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
+        if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, fid, 
+                                                          is.bounds))
+          region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,N,T>(instance, fid, is.bounds);
       }
       // With explicit bounds
@@ -2249,6 +2300,9 @@ namespace Legion {
           region.get_instance_info(READ_WRITE, fid, actual_field_size, &is,
               Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
+        if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, fid, 
+                                                          source_bounds))
+          region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,N,T>(instance, fid, source_bounds);
       }
       // With explicit transform
@@ -2269,6 +2323,9 @@ namespace Legion {
           region.get_instance_info(READ_WRITE, fid, actual_field_size, &is,
               Internal::NT_TemplateHelper::encode_tag<M,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
+        if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, 
+              transform.transform, transform.offset, fid))
+          region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,N,T>(instance, transform.transform,
             transform.offset, fid);
       }
@@ -2291,6 +2348,9 @@ namespace Legion {
           region.get_instance_info(READ_WRITE, fid, actual_field_size, &is,
               Internal::NT_TemplateHelper::encode_tag<M,T>(), warning_string, 
               silence_warnings, false/*generic accessor*/, check_field_size);
+        if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, 
+              transform.transform, transform.offset, fid, source_bounds))
+          region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,N,T>(instance, transform.transform,
             transform.offset, fid, source_bounds);
       }
@@ -2385,6 +2445,9 @@ namespace Legion {
           region.get_instance_info(READ_WRITE, fid, actual_field_size, &is,
               Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
+        if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, fid, 
+                                                          is.bounds))
+          region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,N,T>(instance, fid, is.bounds);
         bounds = AffineBounds::Tester<N,T>(is);
       }
@@ -2406,6 +2469,9 @@ namespace Legion {
           region.get_instance_info(READ_WRITE, fid, actual_field_size, &is,
               Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
+        if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, fid, 
+                                                          source_bounds))
+          region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,N,T>(instance, fid, source_bounds);
         bounds = AffineBounds::Tester<N,T>(is, source_bounds);
       }
@@ -2428,6 +2494,9 @@ namespace Legion {
           region.get_instance_info(READ_WRITE, fid, actual_field_size, &is,
               Internal::NT_TemplateHelper::encode_tag<M,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
+        if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, 
+              transform.transform, transform.offset, fid))
+          region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,N,T>(instance, transform.transform,
             transform.offset, fid);
         bounds = AffineBounds::Tester<N,T>(is, transform);
@@ -2452,6 +2521,9 @@ namespace Legion {
           region.get_instance_info(READ_WRITE, fid, actual_field_size, &is,
               Internal::NT_TemplateHelper::encode_tag<M,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
+        if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, 
+              transform.transform, transform.offset, fid, source_bounds))
+          region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,N,T>(instance, transform.transform,
             transform.offset, fid, source_bounds);
         bounds = AffineBounds::Tester<N,T>(is, source_bounds, transform);
@@ -2591,6 +2663,9 @@ namespace Legion {
           region.get_instance_info(READ_WRITE, fid, actual_field_size, &is,
               Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
+        if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, fid, 
+                                                          is.bounds))
+          region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,1,T>(instance, fid, is.bounds);
       }
       // With explicit bounds
@@ -2610,6 +2685,9 @@ namespace Legion {
           region.get_instance_info(READ_WRITE, fid, actual_field_size, &is,
               Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string, 
               silence_warnings, false/*generic accessor*/, check_field_size);
+        if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, fid, 
+                                                          source_bounds))
+          region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,1,T>(instance, fid, source_bounds);
       }
       // With explicit transform
@@ -2630,6 +2708,9 @@ namespace Legion {
           region.get_instance_info(READ_WRITE, fid, actual_field_size, &is,
               Internal::NT_TemplateHelper::encode_tag<M,T>(), warning_string, 
               silence_warnings, false/*generic accessor*/, check_field_size);
+        if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, 
+              transform.transform, transform.offset, fid))
+          region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,1,T>(instance, transform.transform,
             transform.offset, fid);
       }
@@ -2652,6 +2733,9 @@ namespace Legion {
           region.get_instance_info(READ_WRITE, fid, actual_field_size, &is,
               Internal::NT_TemplateHelper::encode_tag<M,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
+        if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, 
+              transform.transform, transform.offset, fid, source_bounds))
+          region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,1,T>(instance, transform.transform,
             transform.offset, fid, source_bounds);
       }
@@ -2736,6 +2820,9 @@ namespace Legion {
           region.get_instance_info(READ_WRITE, fid, actual_field_size, &is,
               Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
+        if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, fid, 
+                                                          is.bounds))
+          region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,1,T>(instance, fid, is.bounds);
         bounds = AffineBounds::Tester<1,T>(is);
       }
@@ -2757,6 +2844,9 @@ namespace Legion {
           region.get_instance_info(READ_WRITE, fid, actual_field_size, &is,
               Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
+        if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, fid, 
+                                                          source_bounds))
+          region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,1,T>(instance, fid, source_bounds);
         bounds = AffineBounds::Tester<1,T>(is, source_bounds);
       }
@@ -2779,6 +2869,9 @@ namespace Legion {
           region.get_instance_info(READ_WRITE, fid, actual_field_size, &is,
               Internal::NT_TemplateHelper::encode_tag<M,T>(), warning_string, 
               silence_warnings, false/*generic accessor*/, check_field_size);
+        if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, 
+              transform.transform, transform.offset, fid))
+          region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,1,T>(instance, transform.transform,
             transform.offset, fid);
         bounds = AffineBounds::Tester<1,T>(is, transform);
@@ -2803,6 +2896,9 @@ namespace Legion {
           region.get_instance_info(READ_WRITE, fid, actual_field_size, &is,
               Internal::NT_TemplateHelper::encode_tag<M,T>(), warning_string, 
               silence_warnings, false/*generic accessor*/, check_field_size);
+        if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, 
+              transform.transform, transform.offset, fid, source_bounds))
+          region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,1,T>(instance, transform.transform,
             transform.offset, fid, source_bounds);
         bounds = AffineBounds::Tester<1,T>(is, source_bounds, transform);
@@ -2931,6 +3027,9 @@ namespace Legion {
           region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
               Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
+        if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, fid, 
+                                                          is.bounds))
+          region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,N,T>(instance, fid, is.bounds);
       }
       // With explicit bounds
@@ -2950,6 +3049,9 @@ namespace Legion {
           region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
               Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
+        if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, fid, 
+                                                          source_bounds))
+          region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,N,T>(instance, fid, source_bounds);
       }
       // With explicit transform
@@ -2970,6 +3072,9 @@ namespace Legion {
           region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
               Internal::NT_TemplateHelper::encode_tag<M,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
+        if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, 
+              transform.transform, transform.offset, fid))
+          region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,N,T>(instance, transform.transform,
             transform.offset, fid);
       }
@@ -2992,6 +3097,9 @@ namespace Legion {
           region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
               Internal::NT_TemplateHelper::encode_tag<M,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
+        if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, 
+              transform.transform, transform.offset, fid, source_bounds))
+          region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,N,T>(instance, transform.transform,
             transform.offset, fid, source_bounds);
       }
@@ -3080,6 +3188,9 @@ namespace Legion {
           region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
               Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
+        if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, fid, 
+                                                          is.bounds))
+          region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,N,T>(instance, fid, is.bounds);
         bounds = AffineBounds::Tester<N,T>(is);
       }
@@ -3101,6 +3212,9 @@ namespace Legion {
           region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
               Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string, 
               silence_warnings, false/*generic accessor*/, check_field_size);
+        if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, fid, 
+                                                          source_bounds))
+          region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,N,T>(instance, fid, source_bounds);
         bounds = AffineBounds::Tester<N,T>(is, source_bounds);
       }
@@ -3123,6 +3237,9 @@ namespace Legion {
           region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
               Internal::NT_TemplateHelper::encode_tag<M,T>(), warning_string, 
               silence_warnings, false/*generic accessor*/, check_field_size);
+        if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, 
+              transform.transform, transform.offset, fid))
+          region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,N,T>(instance, transform.transform,
             transform.offset, fid);
         bounds = AffineBounds::Tester<N,T>(is, transform);
@@ -3147,6 +3264,9 @@ namespace Legion {
           region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
               Internal::NT_TemplateHelper::encode_tag<M,T>(), warning_string, 
               silence_warnings, false/*generic accessor*/, check_field_size);
+        if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, 
+              transform.transform, transform.offset, fid, source_bounds))
+          region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,N,T>(instance, transform.transform,
             transform.offset, fid, source_bounds);
         bounds = AffineBounds::Tester<N,T>(is, source_bounds, transform);
@@ -3274,6 +3394,9 @@ namespace Legion {
           region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
               Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
+        if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, fid, 
+                                                          is.bounds))
+          region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,1,T>(instance, fid, is.bounds);
       }
       // With explicit bounds
@@ -3293,6 +3416,9 @@ namespace Legion {
           region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
               Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
+        if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, fid, 
+                                                          source_bounds))
+          region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,1,T>(instance, fid, source_bounds);
       }
       // With explicit transform
@@ -3313,6 +3439,9 @@ namespace Legion {
           region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
               Internal::NT_TemplateHelper::encode_tag<M,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
+        if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, 
+              transform.transform, transform.offset, fid))
+          region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,1,T>(instance, transform.transform,
             transform.offset, fid);
       }
@@ -3335,6 +3464,9 @@ namespace Legion {
           region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
               Internal::NT_TemplateHelper::encode_tag<M,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
+        if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, 
+              transform.transform, transform.offset, fid, source_bounds))
+          region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,1,T>(instance, transform.transform,
             transform.offset, fid, source_bounds);
       }
@@ -3413,6 +3545,9 @@ namespace Legion {
           region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
               Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
+        if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, fid, 
+                                                          is.bounds))
+          region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,1,T>(instance, fid, is.bounds);
         bounds = AffineBounds::Tester<1,T>(is);
       }
@@ -3434,6 +3569,9 @@ namespace Legion {
           region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
               Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string, 
               silence_warnings, false/*generic accessor*/, check_field_size);
+        if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, fid, 
+                                                          source_bounds))
+          region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,1,T>(instance, fid, source_bounds);
         bounds = AffineBounds::Tester<1,T>(is, source_bounds);
       }
@@ -3456,6 +3594,9 @@ namespace Legion {
           region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
               Internal::NT_TemplateHelper::encode_tag<M,T>(), warning_string, 
               silence_warnings, false/*generic accessor*/, check_field_size);
+        if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, 
+              transform.transform, transform.offset, fid))
+          region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,1,T>(instance, transform.transform,
             transform.offset, fid);
         bounds = AffineBounds::Tester<1,T>(is, transform);
@@ -3480,6 +3621,9 @@ namespace Legion {
           region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
               Internal::NT_TemplateHelper::encode_tag<M,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
+        if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, 
+              transform.transform, transform.offset, fid, source_bounds))
+          region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,1,T>(instance, transform.transform,
             transform.offset, fid, source_bounds);
         bounds = AffineBounds::Tester<1,T>(is, source_bounds, transform);
@@ -3596,6 +3740,9 @@ namespace Legion {
           region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
               Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
+        if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, fid, 
+                                                          is.bounds))
+          region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,N,T>(instance, fid, is.bounds);
       }
       // With explicit bounds
@@ -3615,6 +3762,9 @@ namespace Legion {
           region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
               Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
+        if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, fid, 
+                                                          source_bounds))
+          region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,N,T>(instance, fid, source_bounds);
       }
       // With explicit transform
@@ -3635,6 +3785,9 @@ namespace Legion {
           region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
               Internal::NT_TemplateHelper::encode_tag<M,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
+        if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, 
+              transform.transform, transform.offset, fid))
+          region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,N,T>(instance, transform.transform,
             transform.offset, fid);
       }
@@ -3657,6 +3810,9 @@ namespace Legion {
           region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
               Internal::NT_TemplateHelper::encode_tag<M,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
+        if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, 
+              transform.transform, transform.offset, fid, source_bounds))
+          region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,N,T>(instance, transform.transform,
             transform.offset, fid, source_bounds);
       }
@@ -3740,6 +3896,9 @@ namespace Legion {
           region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
               Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
+        if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, fid, 
+                                                          is.bounds))
+          region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,N,T>(instance, fid, is.bounds);
         bounds = AffineBounds::Tester<N,T>(is);
       }
@@ -3761,6 +3920,9 @@ namespace Legion {
           region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
               Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string, 
               silence_warnings, false/*generic accessor*/, check_field_size);
+        if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, fid, 
+                                                          source_bounds))
+          region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,N,T>(instance, fid, source_bounds);
         bounds = AffineBounds::Tester<N,T>(is, source_bounds);
       }
@@ -3807,6 +3969,9 @@ namespace Legion {
           region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
               Internal::NT_TemplateHelper::encode_tag<M,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
+        if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, 
+              transform.transform, transform.offset, fid))
+          region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,N,T>(instance, transform.transform,
             transform.offset, fid, source_bounds);
         bounds = AffineBounds::Tester<N,T>(is, source_bounds, transform);
@@ -3923,6 +4088,9 @@ namespace Legion {
           region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
               Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string, 
               silence_warnings, false/*generic accessor*/, check_field_size);
+        if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, fid, 
+                                                          is.bounds))
+          region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,1,T>(instance, fid, is.bounds);
       }
       // With explicit bounds
@@ -3942,6 +4110,9 @@ namespace Legion {
           region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
               Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
+        if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, fid, 
+                                                          source_bounds))
+          region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,1,T>(instance, fid, source_bounds);
       }
       // With explicit transform
@@ -3962,6 +4133,9 @@ namespace Legion {
           region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
               Internal::NT_TemplateHelper::encode_tag<M,T>(), warning_string, 
               silence_warnings, false/*generic accessor*/, check_field_size);
+        if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, 
+              transform.transform, transform.offset, fid))
+          region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,1,T>(instance, transform.transform,
             transform.offset, fid);
       }
@@ -3984,6 +4158,9 @@ namespace Legion {
           region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
               Internal::NT_TemplateHelper::encode_tag<M,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
+        if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, 
+              transform.transform, transform.offset, fid, source_bounds))
+          region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,1,T>(instance, transform.transform,
             transform.offset, fid, source_bounds);
       }
@@ -4057,6 +4234,9 @@ namespace Legion {
           region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
               Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
+        if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, fid, 
+                                                          is.bounds))
+          region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,1,T>(instance, fid, is.bounds);
         bounds = AffineBounds::Tester<1,T>(is);
       }
@@ -4078,6 +4258,9 @@ namespace Legion {
           region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
               Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string, 
               silence_warnings, false/*generic accessor*/, check_field_size);
+        if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, fid, 
+                                                          source_bounds))
+          region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,1,T>(instance, fid, source_bounds);
         bounds = AffineBounds::Tester<1,T>(is, source_bounds);
       }
@@ -4100,6 +4283,9 @@ namespace Legion {
           region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
               Internal::NT_TemplateHelper::encode_tag<M,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
+        if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, 
+              transform.transform, transform.offset, fid))
+          region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,1,T>(instance, transform.transform,
             transform.offset, fid);
         bounds = AffineBounds::Tester<1,T>(is, transform);
@@ -4124,6 +4310,9 @@ namespace Legion {
           region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
               Internal::NT_TemplateHelper::encode_tag<M,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
+        if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, 
+              transform.transform, transform.offset, fid, source_bounds))
+          region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,1,T>(instance, transform.transform,
             transform.offset, fid, source_bounds);
         bounds = AffineBounds::Tester<1,T>(is, source_bounds, transform);
@@ -4224,6 +4413,9 @@ namespace Legion {
               &is, Internal::NT_TemplateHelper::encode_tag<N,T>(), 
               warning_string, silence_warnings, false/*generic accessor*/, 
               false/*check field size*/, redop);
+        if (!Realm::AffineAccessor<typename REDOP::RHS,N,T>::is_compatible(
+              instance, fid, is.bounds))
+          region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<typename REDOP::RHS,N,T>(
             instance, fid, is.bounds);
       }
@@ -4240,6 +4432,9 @@ namespace Legion {
               &is, Internal::NT_TemplateHelper::encode_tag<N,T>(), 
               warning_string, silence_warnings, false/*generic accessor*/, 
               false/*check field size*/, redop);
+        if (!Realm::AffineAccessor<typename REDOP::RHS,N,T>::is_compatible(
+              instance, fid, source_bounds))
+          region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<typename REDOP::RHS,N,T>(
             instance, fid, source_bounds);
       }
@@ -4257,6 +4452,9 @@ namespace Legion {
               &is, Internal::NT_TemplateHelper::encode_tag<M,T>(), 
               warning_string, silence_warnings, false/*generic accessor*/, 
               false/*check field size*/, redop);
+        if (!Realm::AffineAccessor<typename REDOP::RHS,N,T>::is_compatible(
+              instance, transform.transform, transform.offset, fid))
+          region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<typename REDOP::RHS,N,T>(instance, 
             transform.transform, transform.offset, fid);
       }
@@ -4275,6 +4473,9 @@ namespace Legion {
               &is, Internal::NT_TemplateHelper::encode_tag<M,T>(), 
               warning_string, silence_warnings, false/*generic accessor*/, 
               false/*check field size*/, redop);
+        if (!Realm::AffineAccessor<typename REDOP::RHS,N,T>::is_compatible(
+              instance,transform.transform,transform.offset,fid,source_bounds))
+          region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<typename REDOP::RHS,N,T>(instance, 
             transform.transform, transform.offset, fid, source_bounds);
       }
@@ -4361,6 +4562,9 @@ namespace Legion {
               &is, Internal::NT_TemplateHelper::encode_tag<N,T>(), 
               warning_string, silence_warnings, false/*generic accessor*/, 
               false/*check field size*/, redop);
+        if (!Realm::AffineAccessor<typename REDOP::RHS,N,T>::is_compatible(
+              instance, fid, is.bounds))
+          region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<typename REDOP::RHS,N,T>(
             instance, fid, is.bounds);
         bounds = AffineBounds::Tester<N,T>(is);
@@ -4379,6 +4583,9 @@ namespace Legion {
               &is, Internal::NT_TemplateHelper::encode_tag<N,T>(), 
               warning_string, silence_warnings, false/*generic accessor*/, 
               false/*check field size*/, redop);
+        if (!Realm::AffineAccessor<typename REDOP::RHS,N,T>::is_compatible(
+              instance, fid, source_bounds))
+          region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<typename REDOP::RHS,N,T>(
             instance, fid, source_bounds);
         bounds = AffineBounds::Tester<N,T>(is, source_bounds);
@@ -4398,6 +4605,9 @@ namespace Legion {
               &is, Internal::NT_TemplateHelper::encode_tag<M,T>(), 
               warning_string, silence_warnings, false/*generic accessor*/, 
               false/*check field size*/, redop);
+        if (!Realm::AffineAccessor<typename REDOP::RHS,N,T>::is_compatible(
+              instance, transform.transform, transform.offset, fid))
+          region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<typename REDOP::RHS,N,T>(
             instance, transform.transform,
                                                 transform.offset, fid);
@@ -4419,8 +4629,10 @@ namespace Legion {
               &is, Internal::NT_TemplateHelper::encode_tag<M,T>(), 
               warning_string, silence_warnings, false/*generic accessor*/, 
               false/*check field size*/, redop);
-        accessor = 
-          Realm::AffineAccessor<typename REDOP::RHS,N,T>(instance, 
+        if (!Realm::AffineAccessor<typename REDOP::RHS,N,T>::is_compatible(
+              instance,transform.transform,transform.offset,fid,source_bounds))
+          region.report_incompatible_accessor("AffineAccessor", instance, fid);
+        accessor = Realm::AffineAccessor<typename REDOP::RHS,N,T>(instance,
               transform.transform, transform.offset, fid, source_bounds);
         bounds = AffineBounds::Tester<N,T>(is, source_bounds, transform);
       }
@@ -4534,6 +4746,9 @@ namespace Legion {
               &is, Internal::NT_TemplateHelper::encode_tag<1,T>(), 
               warning_string, silence_warnings, false/*generic accessor*/, 
               false/*check field size*/, redop);
+        if (!Realm::AffineAccessor<typename REDOP::RHS,1,T>::is_compatible(
+              instance, fid, is.bounds))
+          region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<typename REDOP::RHS,1,T>(
             instance, fid, is.bounds);
       }
@@ -4550,6 +4765,9 @@ namespace Legion {
               &is, Internal::NT_TemplateHelper::encode_tag<1,T>(), 
               warning_string, silence_warnings, false/*generic accessor*/, 
               false/*check field size*/, redop);
+        if (!Realm::AffineAccessor<typename REDOP::RHS,1,T>::is_compatible(
+              instance, fid, source_bounds))
+          region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<typename REDOP::RHS,1,T>(
             instance, fid, source_bounds);
       }
@@ -4567,6 +4785,9 @@ namespace Legion {
               &is, Internal::NT_TemplateHelper::encode_tag<M,T>(), 
               warning_string, silence_warnings, false/*generic accessor*/, 
               false/*check field size*/, redop);
+        if (!Realm::AffineAccessor<typename REDOP::RHS,1,T>::is_compatible(
+              instance, transform.transform, transform.offset, fid))
+          region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<typename REDOP::RHS,1,T>(
             instance, transform.transform, transform.offset, fid);
       }
@@ -4585,6 +4806,9 @@ namespace Legion {
               &is, Internal::NT_TemplateHelper::encode_tag<M,T>(), 
               warning_string, silence_warnings, false/*generic accessor*/, 
               false/*check field size*/, redop);
+        if (!Realm::AffineAccessor<typename REDOP::RHS,1,T>::is_compatible(
+              instance,transform.transform,transform.offset,fid,source_bounds))
+          region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<typename REDOP::RHS,1,T>(instance, 
             transform.transform, transform.offset, fid, source_bounds);
       }
@@ -4660,6 +4884,9 @@ namespace Legion {
               &is, Internal::NT_TemplateHelper::encode_tag<1,T>(), 
               warning_string, silence_warnings, false/*generic accessor*/, 
               false/*check field size*/, redop);
+        if (!Realm::AffineAccessor<typename REDOP::RHS,1,T>::is_compatible(
+              instance, fid, is.bounds))
+          region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<typename REDOP::RHS,1,T>(
             instance, fid, is.bounds);
         bounds = AffineBounds::Tester<1,T>(is);
@@ -4678,8 +4905,10 @@ namespace Legion {
               &is, Internal::NT_TemplateHelper::encode_tag<1,T>(), 
               warning_string, silence_warnings, false/*generic accessor*/, 
               false/*check field size*/, redop);
-        accessor = 
-          Realm::AffineAccessor<typename REDOP::RHS,1,T>(
+        if (!Realm::AffineAccessor<typename REDOP::RHS,1,T>::is_compatible(
+              instance, fid, source_bounds))
+          region.report_incompatible_accessor("AffineAccessor", instance, fid);
+        accessor = Realm::AffineAccessor<typename REDOP::RHS,1,T>(
               instance, fid, source_bounds);
         bounds = AffineBounds::Tester<1,T>(is, source_bounds);
       }
@@ -4698,6 +4927,9 @@ namespace Legion {
               &is, Internal::NT_TemplateHelper::encode_tag<M,T>(), 
               warning_string, silence_warnings, false/*generic accessor*/, 
               false/*check field size*/, redop);
+        if (!Realm::AffineAccessor<typename REDOP::RHS,1,T>::is_compatible(
+              instance, transform.transform, transform.offset, fid))
+          region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<typename REDOP::RHS,1,T>(instance,
             transform.transform, transform.offset, fid);
         bounds = AffineBounds::Tester<1,T>(is, transform);
@@ -4718,6 +4950,9 @@ namespace Legion {
               &is, Internal::NT_TemplateHelper::encode_tag<M,T>(), 
               warning_string, silence_warnings, false/*generic accessor*/, 
               false/*check field size*/, redop);
+        if (!Realm::AffineAccessor<typename REDOP::RHS,1,T>::is_compatible(
+              instance,transform.transform,transform.offset,fid,source_bounds))
+          region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<typename REDOP::RHS,1,T>(instance, 
             transform.transform, transform.offset, fid, source_bounds);
         bounds = AffineBounds::Tester<1,T>(is, source_bounds, transform);
@@ -4900,6 +5135,9 @@ namespace Legion {
               Internal::NT_TemplateHelper::encode_tag<N,T>(), 
               warning_string, silence_warnings,
               false/*generic accessor*/, false/*check field size*/);
+        if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, fid, 
+                                                          is.bounds))
+          region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,N,T>(instance, fid, is.bounds);
       }
       // With explicit bounds
@@ -4914,6 +5152,9 @@ namespace Legion {
               Internal::NT_TemplateHelper::encode_tag<N,T>(), 
               warning_string, silence_warnings,
               false/*generic accessor*/, false/*check field size*/);
+        if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, fid, 
+                                                          source_bounds))
+          region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,N,T>(instance, fid, source_bounds);
       }
       // With explicit transform
@@ -4929,6 +5170,9 @@ namespace Legion {
               Internal::NT_TemplateHelper::encode_tag<M,T>(), 
               warning_string, silence_warnings,
               false/*generic accessor*/, false/*check field size*/);
+        if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, 
+              transform.transform, transform.offset, fid))
+          region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,N,T>(instance, transform.transform,
             transform.offset, fid);
       }
@@ -4946,6 +5190,9 @@ namespace Legion {
               Internal::NT_TemplateHelper::encode_tag<M,T>(), 
               warning_string, silence_warnings,
               false/*generic accessor*/, false/*check field size*/);
+        if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, 
+              transform.transform, transform.offset, fid, source_bounds))
+          region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,N,T>(instance, transform.transform,
             transform.offset, fid, source_bounds);
       }
@@ -5024,6 +5271,9 @@ namespace Legion {
               Internal::NT_TemplateHelper::encode_tag<1,T>(), 
               warning_string, silence_warnings,
               false/*generic accessor*/, false/*check field size*/);
+        if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, fid, 
+                                                          is.bounds))
+          region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,1,T>(instance, fid, is.bounds);
       }
       // With explicit bounds
@@ -5038,6 +5288,9 @@ namespace Legion {
               Internal::NT_TemplateHelper::encode_tag<1,T>(), 
               warning_string, silence_warnings,
               false/*generic accessor*/, false/*check field size*/);
+        if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, fid, 
+                                                          source_bounds))
+          region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,1,T>(instance, fid, source_bounds);
       }
       // With explicit transform
@@ -5053,6 +5306,9 @@ namespace Legion {
               Internal::NT_TemplateHelper::encode_tag<M,T>(), 
               warning_string, silence_warnings,
               false/*generic accessor*/, false/*check field size*/);
+        if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, 
+              transform.transform, transform.offset, fid))
+          region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,1,T>(instance, transform.transform,
             transform.offset, fid);
       }
@@ -5070,6 +5326,9 @@ namespace Legion {
               Internal::NT_TemplateHelper::encode_tag<M,T>(), 
               warning_string, silence_warnings,
               false/*generic accessor*/, false/*check field size*/);
+        if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, 
+              transform.transform, transform.offset, fid, source_bounds))
+          region.report_incompatible_accessor("AffineAccessor", instance, fid);
         accessor = Realm::AffineAccessor<FT,1,T>(instance, transform.transform,
             transform.offset, fid, source_bounds);
       }
@@ -5124,6 +5383,13 @@ namespace Legion {
                     memory, is, field_sizes, 0/*blocing factor*/, no_requests));
       if (wait_on.exists())
         wait_on.wait();
+#ifdef DEBUG_LEGION
+#ifndef NDEBUG
+      const bool is_compatible = 
+        Realm::AffineAccessor<T,1,coord_t>::is_compatible(instance, 0); 
+#endif
+      assert(is_compatible);
+#endif
       // We can make the accessor
       accessor = Realm::AffineAccessor<T,1,coord_t>(instance, 0/*field id*/);
       // Initialize the value
@@ -5351,6 +5617,13 @@ namespace Legion {
       instance.destroy(Processor::get_current_finish_event());
       if (wait_on.exists())
         wait_on.wait();
+#ifdef DEBUG_LEGION
+#ifndef NDEBUG
+      const bool is_compatible = 
+        Realm::AffineAccessor<FT,N,T>::is_compatible(instance, 0/*fid*/);
+#endif
+      assert(is_compatible);
+#endif
       // We can make the accessor
       accessor = Realm::AffineAccessor<FT,N,T>(instance, 0/*field id*/);
     }
@@ -5407,6 +5680,13 @@ namespace Legion {
       instance.destroy(Processor::get_current_finish_event());
       if (wait_on.exists())
         wait_on.wait();
+#ifdef DEBUG_LEGION
+#ifndef NDEBUG
+      const bool is_compatible = 
+        Realm::AffineAccessor<FT,N,T>::is_compatible(instance, 0/*fid*/);
+#endif
+      assert(is_compatible);
+#endif
       // We can make the accessor
       accessor = Realm::AffineAccessor<FT,N,T>(instance, 0/*field id*/);
     } 
@@ -5461,6 +5741,13 @@ namespace Legion {
       instance.destroy(Processor::get_current_finish_event());
       if (wait_on.exists())
         wait_on.wait();
+#ifdef DEBUG_LEGION
+#ifndef NDEBUG
+      const bool is_compatible = 
+        Realm::AffineAccessor<FT,N,T>::is_compatible(instance, 0/*fid*/);
+#endif
+      assert(is_compatible);
+#endif
       // We can make the accessor
       accessor = Realm::AffineAccessor<FT,N,T>(instance, 0/*field id*/);
     }
@@ -5516,6 +5803,13 @@ namespace Legion {
       instance.destroy(Processor::get_current_finish_event());
       if (wait_on.exists())
         wait_on.wait();
+#ifdef DEBUG_LEGION
+#ifndef NDEBUG
+      const bool is_compatible =
+        Realm::AffineAccessor<FT,N,T>::is_compatible(instance, 0/*fid*/);
+#endif
+      assert(is_compatible);
+#endif
       // We can make the accessor
       accessor = Realm::AffineAccessor<FT,N,T>(instance, 0/*field id*/);
     }
@@ -5696,6 +5990,13 @@ namespace Legion {
       instance.destroy(Processor::get_current_finish_event());
       if (wait_on.exists())
         wait_on.wait();
+#ifdef DEBUG_LEGION
+#ifndef NDEBUG
+      const bool is_compatible = 
+        Realm::AffineAccessor<FT,N,T>::is_compatible(instance, 0/*fid*/);
+#endif
+      assert(is_compatible);
+#endif
       // We can make the accessor
       accessor = Realm::AffineAccessor<FT,N,T>(instance, 0/*field id*/);
     }
@@ -5751,6 +6052,13 @@ namespace Legion {
       instance.destroy(Processor::get_current_finish_event());
       if (wait_on.exists())
         wait_on.wait();
+#ifdef DEBUG_LEGION
+#ifndef NDEBUG
+      const bool is_compatible =
+        Realm::AffineAccessor<FT,N,T>::is_compatible(instance, 0/*fid*/);
+#endif
+      assert(is_compatible);
+#endif
       // We can make the accessor
       accessor = Realm::AffineAccessor<FT,N,T>(instance, 0/*field id*/);
     } 
@@ -5805,6 +6113,13 @@ namespace Legion {
       instance.destroy(Processor::get_current_finish_event());
       if (wait_on.exists())
         wait_on.wait();
+#ifdef DEBUG_LEGION
+#ifndef NDEBUG
+      const bool is_compatible =
+        Realm::AffineAccessor<FT,N,T>::is_compatible(instance, 0/*fid*/);
+#endif
+      assert(is_compatible);
+#endif
       // We can make the accessor
       accessor = Realm::AffineAccessor<FT,N,T>(instance, 0/*field id*/);
     }
@@ -5860,6 +6175,13 @@ namespace Legion {
       instance.destroy(Processor::get_current_finish_event());
       if (wait_on.exists())
         wait_on.wait();
+#ifdef DEBUG_LEGION
+#ifndef NDEBUG
+      const bool is_compatible =
+        Realm::AffineAccessor<FT,N,T>::is_compatible(instance, 0/*fid*/);
+#endif
+      assert(is_compatible);
+#endif
       // We can make the accessor
       accessor = Realm::AffineAccessor<FT,N,T>(instance, 0/*field id*/);
     }

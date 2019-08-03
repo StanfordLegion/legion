@@ -2692,6 +2692,14 @@ namespace Legion {
       impl->fail_bounds_check(d, fid, mode);
     }
 
+    //--------------------------------------------------------------------------
+    void PhysicalRegion::report_incompatible_accessor(const char *accessor_kind,
+                              Realm::RegionInstance instance, FieldID fid) const
+    //--------------------------------------------------------------------------
+    {
+      impl->report_incompatible_accessor(accessor_kind, instance, fid);
+    }
+
 #ifdef __GNUC__
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"

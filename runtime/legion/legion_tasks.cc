@@ -7560,7 +7560,6 @@ namespace Legion {
       {
 #ifdef DEBUG_LEGION
         assert(reduction_op != NULL);
-        assert(reduction_state_size == reduction_op->sizeof_rhs);
 #endif
         // Unpack these futures and save them so we can do a
         // deterministic reduction fold operation later
@@ -7579,13 +7578,14 @@ namespace Legion {
       {
 #ifdef DEBUG_LEGION
         assert(reduction_op != NULL);
-        assert(reduction_state_size == reduction_op->sizeof_rhs);
 #endif
+        size_t reduc_size;
+        derez.deserialize(reduc_size);
         const void *reduc_ptr = derez.get_current_pointer();
-        fold_reduction_future(reduc_ptr, reduction_state_size,
+        fold_reduction_future(reduc_ptr, reduc_size,
                               false /*owner*/, false/*exclusive*/);
         // Advance the pointer on the deserializer
-        derez.advance_pointer(reduction_state_size);
+        derez.advance_pointer(reduc_size);
       }
       if (resources_returned.exists())
       {
@@ -8650,8 +8650,7 @@ namespace Legion {
       }
       else
       {
-        // Don't need to pack the size since they already 
-        // know it on the other side
+        rez.serialize<size_t>(reduction_state_size);
         rez.serialize(reduction_state,reduction_state_size);
       }
     }
