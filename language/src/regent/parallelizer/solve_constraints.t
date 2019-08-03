@@ -2658,13 +2658,13 @@ function solver_context:synthesize_partitions(existing_disjoint_partitions,
         end)
 
         mapping = mappings_by_range_sets[all_ranges]
-        local function all_affine_images(ranges)
-          return data.all(unpack(secondary_ranges:map(function(range)
-            --local pair = image_partitions[range]
-            --if pair then
-            --  local info, _ = unpack(pair)
-            --  return info:is_affine()
-            --end
+        local function any_affine_images(ranges)
+          return data.any(unpack(secondary_ranges:map(function(range)
+            local pair = image_partitions[range]
+            if pair then
+              local info, _ = unpack(pair)
+              return info:is_affine()
+            end
             return false
           end)))
         end
@@ -2672,9 +2672,9 @@ function solver_context:synthesize_partitions(existing_disjoint_partitions,
           mapping = data.newmap()
           if primary_range == nil then
             assert(not has_reduce)
-            local all_affine = all_affine_images(secondary_ranges)
-            if all_affine then
-              all_ranges:foreach(function(range) mapping[range] = range end)
+            local any_affine = any_affine_images(secondary_ranges)
+            if any_affine then
+              all_ranges:foreach(function(range) mapping[range] = terralib.newlist({range}) end)
             else
               local union_range, union_partition_stats =
                 create_union_partitions(secondary_ranges, union_partitions)
@@ -2695,8 +2695,8 @@ function solver_context:synthesize_partitions(existing_disjoint_partitions,
               self.loop_range_partitions[primary_range] = primary_partitions
             end
 
-            local all_affine = all_affine_images(secondary_ranges)
-            if all_affine then
+            local any_affine = any_affine_images(secondary_ranges)
+            if any_affine then
               secondary_ranges:map(function(range)
                 local ghost_range = diff_partitions[data.newtuple(range, primary_range)]
                 if ghost_range == nil then

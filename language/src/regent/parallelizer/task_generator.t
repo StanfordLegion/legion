@@ -39,6 +39,7 @@ local rewriter_context = {}
 rewriter_context.__index = rewriter_context
 
 function rewriter_context.new(accesses_to_region_params,
+                              node_ids_to_ranges,
                               reindexed_accesses,
                               region_params_to_partitions,
                               loop_var_to_regions,
@@ -50,6 +51,7 @@ function rewriter_context.new(accesses_to_region_params,
                               options)
   local cx = {
     accesses_to_region_params   = accesses_to_region_params,
+    node_ids_to_ranges          = node_ids_to_ranges,
     reindexed_accesses          = reindexed_accesses,
     region_params_to_partitions = region_params_to_partitions,
     loop_var_to_regions         = loop_var_to_regions,
@@ -378,10 +380,10 @@ local function find_index(expr)
   if expr:is(ast.typed.expr.FieldAccess) then
     return find_index(expr.value)
   elseif expr:is(ast.typed.expr.Deref) then
-    return expr.value
+    return expr.value, expr.node_id
   elseif expr:is(ast.typed.expr.IndexAccess) then
     if std.is_ref(expr.expr_type) then
-      return expr.index
+      return expr.index, expr.node_id
     else
       return find_index(expr.value)
     end
@@ -473,32 +475,15 @@ end
 local function split_region_access(cx, lhs, rhs, ref_type, reads, template)
   assert(#ref_type.bounds_symbols == 1)
   local region_symbol = ref_type.bounds_symbols[1]
-  local value_type = std.as_read(ref_type)
-  local field_paths = std.flatten_struct_fields(std.as_read(ref_type))
-  local keys = field_paths:map(function(field_path)
-    return data.newtuple(region_symbol, ref_type.field_path .. field_path)
-  end)
-  local region_params_set = hash_set.new()
-  local reindexed = false
-  keys:map(function(key)
-    region_params_set:insert_all(cx.accesses_to_region_params[key])
-    reindexed = reindexed or cx.reindexed_accesses:has(key)
-  end)
-  local region_params = region_params_set:to_list()
-  local primary_idx = 1
-  for idx, region_param in ipairs(region_params) do
-    local partition = cx.region_params_to_partitions[region_param]
-    if partition:gettype():is_disjoint() then
-      primary_idx = idx
-    end
-  end
 
   local index = nil
+  local node_id = nil
   if reads then
-    index = find_index(rhs)
+    index, node_id = find_index(rhs)
   else
-    index = find_index(lhs)
+    index, node_id = find_index(lhs)
   end
+  assert(node_id ~= nil)
   local cache = cx:get_incl_cache(index)
 
   local index_type = index.expr_type
@@ -527,6 +512,28 @@ local function split_region_access(cx, lhs, rhs, ref_type, reads, template)
       lhs = lhs,
       rhs = rhs,
     }
+  end
+
+  local value_type = std.as_read(ref_type)
+  local field_paths = std.flatten_struct_fields(std.as_read(ref_type))
+  local keys = field_paths:map(function(field_path)
+    return data.newtuple(region_symbol, ref_type.field_path .. field_path)
+  end)
+  local region_params_set = hash_set.new()
+  local reindexed = false
+  local range = cx.node_ids_to_ranges[node_id]
+  keys:map(function(key)
+    assert(cx.accesses_to_region_params[key][range] ~= nil)
+    region_params_set:insert_all(cx.accesses_to_region_params[key][range])
+    reindexed = reindexed or cx.reindexed_accesses:has(key)
+  end)
+  local region_params = region_params_set:to_list()
+  local primary_idx = 1
+  for idx, region_param in ipairs(region_params) do
+    local partition = cx.region_params_to_partitions[region_param]
+    if partition:gettype():is_disjoint() then
+      primary_idx = idx
+    end
   end
 
   local cases = region_params:map(function(region_param)
@@ -1046,16 +1053,19 @@ function task_generator.new(node)
           region_params:map(function(region_param)
             all_region_params:insert(region_param)
           end)
+
+          local key = data.newtuple(my_region_symbol, field_path)
+          find_or_create(my_accesses_to_region_params, key)[my_range] =
+            hash_set.from_list(region_params)
         end)
 
-        local key = data.newtuple(my_region_symbol, field_path)
         -- Force canonicalization
         all_region_params:hash()
-        my_accesses_to_region_params[key] = all_region_params
 
         -- Collect accesses that are mapped to multiple regions in order to
         -- generate colocation constraints later
         if all_region_params:size() > 1 then
+          local key = data.newtuple(my_region_symbol, field_path)
           if has_reduction then
             local reduction_params = data.filter(function(param)
                 local privileges = privileges_by_region_params[param][field_path]:to_list()
@@ -1285,6 +1295,7 @@ function task_generator.new(node)
       parallel_task:set_constraints(constraints)
       local rewriter_cx =
         rewriter_context.new(my_accesses_to_region_params,
+                             cx.node_ids_to_ranges,
                              reindexed_accesses,
                              region_params_to_partitions,
                              loop_var_to_regions,
