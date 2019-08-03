@@ -44,6 +44,7 @@ function parallel_task_context.new(task)
     sources_by_regions       = data.newmap(),
 
     field_accesses           = data.newmap(),
+    node_ids_to_ranges       = data.newmap(),
     field_accesses_summary   = data.newmap(),
 
     ranges_to_indices        = data.newmap(),
@@ -84,6 +85,10 @@ function parallel_task_context:print_all_constraints()
         field_path:mkstring("", ".", "") .. " @ " .. tostring(privilege))
     end
   end
+  print("* accesses by node ids:")
+  for node_id, range in self.node_ids_to_ranges:items() do
+    print("    " .. tostring(node_id) .. " ~> " .. tostring(range))
+  end
   print("================")
 end
 
@@ -92,7 +97,7 @@ local require_disjoint_partition = {
   ["reads_writes"] = true,
 }
 
-function parallel_task_context:add_field_access(region_symbol, range, field_path, privilege)
+function parallel_task_context:add_field_access(expr, region_symbol, range, field_path, privilege)
   local partition = self.constraints:get_partition(range)
   if not (partition == nil or partition.region == region_symbol) then
     local new_range =
@@ -111,6 +116,9 @@ function parallel_task_context:add_field_access(region_symbol, range, field_path
   else
     partition:meet_disjointness(require_disjoint_partition[join])
   end
+  assert(self.node_ids_to_ranges[expr.node_id] == nil or
+         self.node_ids_to_ranges[expr.node_id] == range)
+  self.node_ids_to_ranges[expr.node_id] = range
 end
 
 function parallel_task_context:summarize_accesses()
@@ -137,9 +145,10 @@ function parallel_task_context:summarize_accesses()
 
   if needs_unification then
     self.constraints = self.constraints:clone(range_mapping)
-    self.loop_ranges = self.loop_ranges:map(function(_, range)
-      return range_mapping[range] or range
-    end)
+
+    local function subst(_, range) return range_mapping[range] or range end
+    self.loop_ranges = self.loop_ranges:map(subst)
+    self.node_ids_to_ranges = self.node_ids_to_ranges:map(subst)
   end
   for region_symbol, all_field_accesses in self.field_accesses:items() do
     local accesses_summary = find_or_create(self.field_accesses_summary, region_symbol)
@@ -275,7 +284,7 @@ function infer_constraints.expr_index_access(cx, expr, privilege, field_path)
   local field_paths = std.flatten_struct_fields(field_type)
   field_paths:map(function(suffix)
     local field_path = field_path .. suffix
-    cx:add_field_access(region_symbol, index_range, field_path, privilege)
+    cx:add_field_access(expr, region_symbol, index_range, field_path, privilege)
   end)
   cx:record_index_of_range(index_range, expr.index)
 
