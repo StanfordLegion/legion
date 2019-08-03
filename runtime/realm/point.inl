@@ -86,13 +86,13 @@ namespace Realm {
     return acc;
   }
 
-  template <int N, typename T>
+  template <int N, typename T> __CUDA_HD__
   /*static*/ inline Point<N,T> Point<N,T>::ZEROES(void)
   {
     return Point<N,T>(static_cast<T>(0));
   }
 
-  template <int N, typename T>
+  template <int N, typename T> __CUDA_HD__
   /*static*/ inline Point<N,T> Point<N,T>::ONES(void)
   {
     return Point<N,T>(static_cast<T>(1));
