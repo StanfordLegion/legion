@@ -1401,6 +1401,7 @@ terra read_partitions(conf : config) : mesh_colorings
 end
 read_partitions:compile()
 
+if parallel then
 -- This is in a task so that it can be called from Python.
 task read_partitions_task2(rz_all : region(zone),
                            rp_all : region(point),
@@ -1452,6 +1453,8 @@ task read_partitions_task2(rz_all : region(zone),
   c.legion_coloring_destroy(colorings.rs_spans_c)
 
   return result
+end
+
 end
 
 if parallel then
