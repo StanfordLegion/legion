@@ -3563,6 +3563,7 @@ namespace Legion {
                                           bool update_validity)
     //--------------------------------------------------------------------------
     {
+      AutoLock tpl_lock(template_lock);
       TraceLocalID op_key = find_trace_local_id(memo);
       unsigned entry = find_memo_entry(memo);
 
@@ -3573,7 +3574,6 @@ namespace Legion {
           .compute_field_sets(user_mask, eqs);
       }
 
-      AutoLock tpl_lock(template_lock);
       FieldMaskSet<IndexSpaceExpression> &views = op_views[op_key][view];
       for (LegionList<FieldSet<EquivalenceSet*> >::aligned::iterator it =
            eqs.begin(); it != eqs.end(); ++it)
