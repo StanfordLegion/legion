@@ -125,6 +125,18 @@ ifeq ($(shell uname -s),FreeBSD)
 LEGION_LD_FLAGS	+= -lexecinfo -lpthread
 endif
 
+USE_HALF ?= 0
+ifeq ($(strip $(USE_HALF)),1)
+  CC_FLAGS += -DLEGION_REDOP_HALF
+  NVCC_FLAGS += -DLEGION_REDOP_HALF
+endif
+
+USE_COMPLEX ?= 0
+ifeq ($(strip $(USE_COMPLEX)),1)
+  CC_FLAGS += -DLEGION_REDOP_COMPLEX
+  NVCC_FLAGS += -DLEGION_REDOP_COMPLEX
+endif
+
 ifeq ($(strip $(USE_HWLOC)),1)
   ifndef HWLOC 
     $(error HWLOC variable is not defined, aborting build)
