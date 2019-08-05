@@ -541,8 +541,7 @@ static inline bool isnan(__half a)
 #if __CUDA_ARCH__ >= 530
   return __hisnan(a);
 #else
-  const float b = __half2float(a);
-  return (b != b);
+  return ::isnan(__half2float(a));
 #endif
 #else
   return std::isnan(static_cast<float>(a));

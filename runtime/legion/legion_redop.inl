@@ -606,13 +606,13 @@ namespace Legion {
   {
 #ifdef __CUDA_ARCH__
     int *target = (int *)&lhs;
-    union { int as_int; __half2 as_complex; } oldval, newval;
-    newval.as_int = *target;
+    int newval, oldval;
+    newval = *target;
     do {
       oldval = newval;
-      newval.as_complex = complex<__half>(newval.as_complex) + rhs;
-      newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
-    } while (oldval.as_int != newval.as_int);
+      newval = (complex<__half>(newval) + rhs).as_int();
+      newval = atomicCAS(target, oldval, newval);
+    } while (oldval != newval);
 #else
     volatile int *target = (int *)&lhs;
     int oldval, newval;
@@ -634,13 +634,13 @@ namespace Legion {
   {
 #ifdef __CUDA_ARCH__
     int *target = (int *)&rhs1;
-    union { int as_int; __half2 as_complex; } oldval, newval;
-    newval.as_int = *target;
+    int oldval, newval;
+    newval = *target;
     do {
       oldval = newval;
-      newval.as_complex = complex<__half(newval.as_complex) + rhs2;
-      newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
-    } while (oldval.as_int != newval.as_int);
+      newval = (complex<__half>(newval) + rhs2).as_int();
+      newval = atomicCAS(target, oldval, newval);
+    } while (oldval != newval);
 #else
     volatile int *target = (int *)&rhs1;
     int oldval, newval;
@@ -1231,13 +1231,13 @@ namespace Legion {
   {
 #ifdef __CUDA_ARCH__
     int *target = (int *)&lhs;
-    union { int as_int; __half2 as_complex; } oldval, newval;
-    newval.as_int = *target;
+    int oldval, newval;
+    newval = *target;
     do {
       oldval = newval;
-      newval.as_complex = complex<__half>(newval.as_complex) - rhs;
-      newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
-    } while (oldval.as_int != newval.as_int);
+      newval = (complex<__half>(newval) - rhs).as_int();
+      newval = atomicCAS(target, oldval, newval);
+    } while (oldval != newval);
 #else
     volatile int *target = (int *)&lhs;
     int oldval, newval;
@@ -1259,13 +1259,13 @@ namespace Legion {
   {
 #ifdef __CUDA_ARCH__
     int *target = (int *)&rhs1;
-    union { int as_int; __half2 as_complex; } oldval, newval;
-    newval.as_int = *target;
+    int oldval, newval;
+    newval = *target;
     do {
       oldval = newval;
-      newval.as_complex = complex<__half>(newval.as_complex) + rhs2;
-      newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
-    } while (oldval.as_int != newval.as_int);
+      newval = (complex<__half>(newval) + rhs2).as_int();
+      newval = atomicCAS(target, oldval, newval);
+    } while (oldval != newval);
 #else
     volatile int *target = (int *)&rhs1;
     int oldval, newval;
@@ -2007,13 +2007,13 @@ namespace Legion {
   {
 #ifdef __CUDA_ARCH__
     int *target = (int *)&lhs;
-    union { int as_int; __half2 as_complex; } oldval, newval;
-    newval.as_int = *target;
+    int oldval, newval;
+    newval = *target;
     do {
       oldval = newval;
-      newval.as_complex = complex<__half>(newval.as_complex) * rhs;
-      newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
-    } while (oldval.as_int != newval.as_int);
+      newval = (complex<__half>(newval) * rhs).as_int();
+      newval = atomicCAS(target, oldval, newval);
+    } while (oldval != newval);
 #else
     volatile int *target = (int *)&lhs;
     int oldval, newval;
@@ -2035,13 +2035,13 @@ namespace Legion {
   {
 #ifdef __CUDA_ARCH__
     int *target = (int *)&rhs1;
-    union { int as_int; __half2 as_complex; } oldval, newval;
-    newval.as_int = *target;
+    int oldval, newval;
+    newval = *target;
     do {
       oldval = newval;
-      newval.as_complex = complex<__half>(newval.as_complex) * rhs2;
-      newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
-    } while (oldval.as_int != newval.as_int);
+      newval = (complex<__half>(newval) * rhs2).as_int();
+      newval = atomicCAS(target, oldval, newval);
+    } while (oldval != newval);
 #else
     volatile int *target = (int *)&rhs1;
     int oldval, newval;
@@ -2719,13 +2719,13 @@ namespace Legion {
   {
 #ifdef __CUDA_ARCH__
     int *target = (int *)&lhs;
-    union { int as_int; __half2 as_complex; } oldval, newval;
-    newval.as_int = *target;
+    int oldval, newval;
+    newval = *target;
     do {
       oldval = newval;
-      newval.as_complex = complex<__half>(newval.as_complex) / rhs;
-      newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
-    } while (oldval.as_int != newval.as_int);
+      newval = (complex<__half>(newval) / rhs).as_int();
+      newval = atomicCAS(target, oldval, newval);
+    } while (oldval != newval);
 #else
     volatile int *target = (int *)&lhs;
     int oldval, newval;
@@ -2747,13 +2747,13 @@ namespace Legion {
   {
 #ifdef __CUDA_ARCH__
     int *target = (int *)&rhs1;
-    union { int as_int; __half2 as_complex; } oldval, newval;
-    newval.as_int = *target;
+    int oldval, newval;
+    newval = *target;
     do {
       oldval = newval;
-      newval.as_complex = complex<__half>(newval.as_complex) * rhs2;
-      newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
-    } while (oldval.as_int != newval.as_int);
+      newval = (complex<__half>(newval) * rhs2).as_int();
+      newval = atomicCAS(target, oldval, newval);
+    } while (oldval != newval);
 #else
     volatile int *target = (int *)&rhs1;
     int oldval, newval;
