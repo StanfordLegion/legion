@@ -3547,6 +3547,7 @@ namespace Legion {
                               Memoizable *memo, std::set<ApEvent> &ready_events)
     //--------------------------------------------------------------------------
     {
+      AutoLock t_lock(template_lock, 1, false/*exclusive*/);
       std::map<TraceLocalID,std::set<ApEvent> >::iterator finder =
         reduction_ready_events.find(find_trace_local_id(memo));
       if (finder != reduction_ready_events.end())
