@@ -262,6 +262,7 @@ list(APPEND LEGION_SRC
   legion/legion_types.h                 
   legion/legion_utilities.h             
   legion/legion_views.h                   legion/legion_views.cc
+  legion/legion_redop.h                   legion/legion_redop.cc
   legion/mapper_manager.h                 legion/mapper_manager.cc
   legion/rectangle_set.h                
   legion/region_tree.h                    legion/region_tree.cc
