@@ -39,7 +39,12 @@ template<>
 class complex<__half> {
 public:
   __CUDA_HD__
-  complex(void) : _real(__half(0.f)), _imag(__half(0.f)) { }
+  complex(void)
+#ifdef __CUDA_ARCH__
+    : _real(__float2half(0.f)), _imag(__float2half(0.f)) { }
+#else
+    : _real(__half(0.f)), _imag(__half(0.f)) { }
+#endif
   __CUDA_HD__
   complex(const __half val[2]) : _real(val[0]), _imag(val[1]) { }
   __CUDA_HD__
@@ -51,22 +56,32 @@ public:
   complex(__half2 val) : _real(val.x), _imag(val.y) { }
 #endif
 public:
-  // explicit reinterpret case from integer
+  // explicit reinterpret cast from integer
   __CUDA_HD__ 
   explicit complex(int val) 
     {
-      union { int as_int; short array[2]; } convert;
+      union { int as_int; unsigned short array[2]; } convert;
       convert.as_int = val;
-      _real = __half(convert.array[0], true/*raw*/);
-      _imag = __half(convert.array[1], true/*raw*/);
+#ifdef __CUDA_ARCH__
+      _real = __short_as_half(convert.array[0]);
+      _imag = __short_as_half(convert.array[1]);
+#else
+      _real = *(reinterpret_cast<const __half*>(&convert.array[0]));
+      _imag = *(reinterpret_cast<const __half*>(&convert.array[1]));
+#endif
     }
   // cast back to integer
   __CUDA_HD__
   inline int as_int(void) const
     {
-      union { int as_int; short array[2]; } convert;
-      convert.array[0] = _real.__x;
-      convert.array[1] = _imag.__x;
+      union { int as_int; unsigned short array[2]; } convert;
+#ifdef __CUDA_ARCH__
+      convert.array[0] = __half_as_short(_real);
+      convert.array[1] = __half_as_short(_imag);
+#else
+      convert.array[0] = *(reinterpret_cast<const unsigned short*>(&_real));
+      convert.array[1] = *(reinterpret_cast<const unsigned short*>(&_imag));
+#endif
       return convert.as_int;
     }
 #ifdef __CUDACC__
@@ -96,15 +111,15 @@ public:
   __CUDA_HD__
   inline complex<__half>& operator+=(const complex<__half> &rhs)
     {
-      _real += rhs.real();
-      _imag += rhs.imag();
+      _real = _real + rhs.real();
+      _imag = _imag + rhs.imag();
       return *this;
     }
   __CUDA_HD__
   inline complex<__half>& operator-=(const complex<__half> &rhs)
     {
-      _real -= rhs.real();
-      _imag -= rhs.imag();
+      _real = _real + rhs.real();
+      _imag = _imag + rhs.imag();
       return *this;
     }
   __CUDA_HD__
