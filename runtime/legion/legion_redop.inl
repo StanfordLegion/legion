@@ -33,14 +33,17 @@ namespace Legion {
   void SumReduction<bool>::apply<false>(LHS &lhs, RHS rhs)
   {
 #ifdef __CUDA_ARCH__
-    int *target = (int *)&lhs;
-    union { int as_int; bool as_bool; } oldval, newval;
+    // GPU atomics need 4 byte alignment
+    char *ptr = (char*)&lhs;
+    const unsigned offset = ((unsigned long long)ptr) % 4;
+    int *target = (int *)(ptr - offset);
+    union { int as_int; bool as_bool[4]; } oldval, newval;
     newval.as_int = *target;
     do {
       oldval.as_int = newval.as_int;
-      newval.as_bool = newval.as_bool || rhs;
+      newval.as_bool[offset] = newval.as_bool[offset] || rhs;
       newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
-    } while (oldval.as_bool != newval.as_bool);
+    } while (oldval.as_bool[offset] != newval.as_bool[offset]);
 #else
     // No atomic logical operations so use compare and swap
     volatile int8_t *target = (volatile int8_t *)&lhs;
@@ -62,14 +65,17 @@ namespace Legion {
   void SumReduction<bool>::fold<false>(RHS &rhs1, RHS rhs2)
   {
 #ifdef __CUDA_ARCH__
-    int *target = (int *)&rhs1;
-    union { int as_int; bool as_bool; } oldval, newval;
+    // GPU atomics need 4 byte alignment
+    char *ptr = (char*)&rhs1;
+    const unsigned offset = ((unsigned long long)ptr) % 4;
+    int *target = (int *)(ptr - offset);
+    union { int as_int; bool as_bool[4]; } oldval, newval;
     newval.as_int = *target;
     do {
       oldval.as_int = newval.as_int;
-      newval.as_bool = newval.as_bool || rhs2;
+      newval.as_bool[offset] = newval.as_bool[offset] || rhs2;
       newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
-    } while (oldval.as_bool != newval.as_bool);
+    } while (oldval.as_bool[offset] != newval.as_bool[offset]);
 #else
     // No atomic logical operations so use compare and swap
     volatile int8_t *target = (volatile int8_t *)&rhs1;
@@ -1382,14 +1388,17 @@ namespace Legion {
   void ProdReduction<bool>::apply<false>(LHS &lhs, RHS rhs)
   {
 #ifdef __CUDA_ARCH__
-    int *target = (int *)&lhs;
-    union { int as_int; bool as_bool; } oldval, newval;
+    // GPU atomics need 4 byte alignment
+    char *ptr = (char*)&lhs;
+    const unsigned offset = ((unsigned long long)ptr) % 4;
+    int *target = (int *)(ptr - offset);
+    union { int as_int; bool as_bool[4]; } oldval, newval;
     newval.as_int = *target;
     do {
       oldval.as_int = newval.as_int;
-      newval.as_bool = newval.as_bool && rhs;
+      newval.as_bool[offset] = newval.as_bool[offset] && rhs;
       newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
-    } while (oldval.as_bool != newval.as_bool);
+    } while (oldval.as_bool[offset] != newval.as_bool[offset]);
 #else
     // No atomic logical operations so use compare and swap
     volatile int8_t *target = (volatile int8_t *)&lhs;
@@ -1411,14 +1420,17 @@ namespace Legion {
   void ProdReduction<bool>::fold<false>(RHS &rhs1, RHS rhs2)
   {
 #ifdef __CUDA_ARCH__
-    int *target = (int *)&rhs1;
-    union { int as_int; bool as_bool; } oldval, newval;
+    // GPU atomics need 4 byte alignment
+    char *ptr = (char*)&rhs1;
+    const unsigned offset = ((unsigned long long)ptr) % 4;
+    int *target = (int *)(ptr - offset);
+    union { int as_int; bool as_bool[4]; } oldval, newval;
     newval.as_int = *target;
     do {
       oldval.as_int = newval.as_int;
-      newval.as_bool = newval.as_bool && rhs2;
+      newval.as_bool[offset] = newval.as_bool[offset] && rhs2;
       newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
-    } while (oldval.as_bool != newval.as_bool);
+    } while (oldval.as_bool[offset] != newval.as_bool[offset]);
 #else
     // No atomic logical operations so use compare and swap
     volatile int8_t *target = (volatile int8_t *)&rhs1;
@@ -2901,29 +2913,32 @@ namespace Legion {
   template<> __CUDA_HD__ inline
   void MaxReduction<bool>::apply<true>(LHS &lhs, RHS rhs)
   {
-    if (lhs && !rhs)
-      lhs = false;
+    if (!lhs && rhs)
+      lhs = true;
   }
 
   template<> __CUDA_HD__ inline
   void MaxReduction<bool>::apply<false>(LHS &lhs, RHS rhs)
   {
 #ifdef __CUDA_ARCH__
-    int *target = (int *)&lhs;
-    union { int as_int; bool as_bool; } oldval, newval;
+    // GPU atomics need 4 byte alignment
+    char *ptr = (char*)&lhs;
+    const unsigned offset = ((unsigned long long)ptr) % 4;
+    int *target = (int *)(ptr - offset);
+    union { int as_int; bool as_bool[4]; } oldval, newval;
     newval.as_int = *target;
     do {
       oldval.as_int = newval.as_int;
-      newval.as_bool = oldval.as_bool && rhs;
+      newval.as_bool[offset] = newval.as_bool[offset] || rhs;
       newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
-    } while (oldval.as_bool != newval.as_bool);
+    } while (oldval.as_bool[offset] != newval.as_bool[offset]);
 #else
     // No atomic logical operations so use compare and swap
     volatile int8_t *target = (volatile int8_t *)&lhs;
     union { int8_t as_int; bool as_bool; } oldval, newval;
     do {
       oldval.as_int = *target;
-      newval.as_bool = oldval.as_bool && rhs;
+      newval.as_bool = oldval.as_bool || rhs;
     } while (!__sync_bool_compare_and_swap(target, oldval.as_int, newval.as_int));
 #endif
   }
@@ -2931,8 +2946,8 @@ namespace Legion {
   template<> __CUDA_HD__ inline
   void MaxReduction<bool>::fold<true>(RHS &rhs1, RHS rhs2)
   {
-    if (rhs1 && !rhs2)
-      rhs1 = false;
+    if (!rhs1 && rhs2)
+      rhs1 = true;
   }
 
   template<> __CUDA_HD__ inline
@@ -2944,7 +2959,7 @@ namespace Legion {
     newval.as_int = *target;
     do {
       oldval.as_int = newval.as_int;
-      newval.as_bool = oldval.as_bool && rhs2;
+      newval.as_bool = oldval.as_bool || rhs2;
       newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
     } while (oldval.as_bool != newval.as_bool);
 #else
@@ -2953,7 +2968,7 @@ namespace Legion {
     union { int8_t as_int; bool as_bool; } oldval, newval;
     do {
       oldval.as_int = *target;
-      newval.as_bool = oldval.as_bool && rhs2;
+      newval.as_bool = oldval.as_bool || rhs2;
     } while (!__sync_bool_compare_and_swap(target, oldval.as_int, newval.as_int));
 #endif
   }
@@ -3687,16 +3702,17 @@ namespace Legion {
   void MinReduction<bool>::apply<false>(LHS &lhs, RHS rhs)
   {
 #ifdef __CUDA_ARCH__
-    int *target = (int *)&lhs;
-    union { int as_int; bool as_bool; } oldval, newval;
+    // GPU atomics need 4 byte alignment
+    char *ptr = (char*)&lhs;
+    const unsigned offset = ((unsigned long long)ptr) % 4;
+    int *target = (int *)(ptr - offset);
+    union { int as_int; bool as_bool[4]; } oldval, newval;
     newval.as_int = *target;
     do {
       oldval.as_int = newval.as_int;
-      newval.as_bool = oldval.as_bool && rhs;
-      if (newval.as_bool == oldval.as_bool)
-        break;
+      newval.as_bool[offset] = newval.as_bool[offset] && rhs;
       newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
-    } while (oldval.as_bool != newval.as_bool);
+    } while (oldval.as_bool[offset] != newval.as_bool[offset]);
 #else
     // No atomic logical operations so use compare and swap
     volatile int8_t *target = (volatile int8_t *)&lhs;
@@ -3721,16 +3737,17 @@ namespace Legion {
   void MinReduction<bool>::fold<false>(RHS &rhs1, RHS rhs2)
   {
 #ifdef __CUDA_ARCH__
-    int *target = (int *)&rhs1;
-    union { int as_int; bool as_bool; } oldval, newval;
+    // GPU atomics need 4 byte alignment
+    char *ptr = (char*)&rhs1;
+    const unsigned offset = ((unsigned long long)ptr) % 4;
+    int *target = (int *)(ptr - offset);
+    union { int as_int; bool as_bool[4]; } oldval, newval;
     newval.as_int = *target;
     do {
       oldval.as_int = newval.as_int;
-      newval.as_bool = oldval.as_bool && rhs2;
-      if (newval.as_bool == oldval.as_bool)
-        break;
+      newval.as_bool[offset] = newval.as_bool[offset] && rhs2;
       newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
-    } while (oldval.as_bool != newval.as_bool);
+    } while (oldval.as_bool[offset] != newval.as_bool[offset]);
 #else
     // No atomic logical operations so use compare and swap
     volatile int8_t *target = (volatile int8_t *)&rhs1;
