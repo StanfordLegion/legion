@@ -19,6 +19,14 @@
 #include <stdint.h>
 #include <cmath>
 
+#ifndef __CUDA_HD__
+#ifdef __CUDACC__
+#define __CUDA_HD__ __host__ __device__
+#else
+#define __CUDA_HD__
+#endif
+#endif
+
 // Still need this for doing conversions from floats
 static inline uint16_t __convert_float_to_halfint(float a)
 {
@@ -119,7 +127,162 @@ static inline float __convert_halfint_to_float(uint16_t __x)
 
 #ifdef __CUDACC__
 // This brings in __half from 
+#define __CUDA_NO_HALF_OPERATORS__
 #include <cuda_fp16.h>
+
+__CUDA_HD__
+inline __half operator-(const __half &one)
+{
+#ifdef __CUDA_ARCH__
+#if __CUDA_ARCH__ >= 530
+  return __hneg(one);
+#else
+  return __float2half(-__half2float(one));
+#endif
+#else
+  return __half(-(float(one)));
+#endif
+}
+
+__CUDA_HD__
+inline __half operator+(const __half &one, const __half &two)
+{
+#ifdef __CUDA_ARCH__
+#if __CUDA_ARCH__ >= 530
+  return __hadd(one, two);
+#else
+  return __float2half(__half2float(one) + __half2float(two));
+#endif
+#else
+  return __half(float(one) + float(two));
+#endif
+}
+
+__CUDA_HD__
+inline __half operator-(const __half &one, const __half &two)
+{
+#ifdef __CUDA_ARCH__
+#if __CUDA_ARCH__ >= 530
+  return __hsub(one, two);
+#else
+  return __float2half(__half2float(one) - __half2float(two));
+#endif
+#else
+  return __half(float(one) - float(two));
+#endif
+}
+
+__CUDA_HD__
+inline __half operator*(const __half &one, const __half &two)
+{
+#ifdef __CUDA_ARCH__
+#if __CUDA_ARCH__ >= 530
+  return __hmul(one, two);
+#else
+  return __float2half(__half2float(one) * __half2float(two));
+#endif
+#else
+  return __half(float(one) * float(two));
+#endif
+}
+
+__CUDA_HD__
+inline __half operator/(const __half &one, const __half &two)
+{
+#ifdef __CUDA_ARCH__
+#if __CUDA_ARCH__ >= 530
+  return __hdiv(one, two);
+#else
+  return __float2half(__half2float(one) / __half2float(two));
+#endif
+#else
+  return __half(float(one) / float(two));
+#endif
+}
+
+__CUDA_HD__
+inline bool operator==(const __half &one, const __half &two)
+{
+#ifdef __CUDA_ARCH__
+#if __CUDA_ARCH__ >= 530
+  return __heq(one, two);
+#else
+  return (__half2float(one) == __half2float(two));
+#endif
+#else
+  return (float(one) == float(two));
+#endif
+}
+
+__CUDA_HD__
+inline bool operator!=(const __half &one, const __half &two)
+{
+#ifdef __CUDA_ARCH__
+#if __CUDA_ARCH__ >= 530
+  return __hne(one, two);
+#else
+  return (__half2float(one) != __half2float(two));
+#endif
+#else
+  return (float(one) != float(two));
+#endif
+}
+
+__CUDA_HD__
+inline bool operator<(const __half &one, const __half &two)
+{
+#ifdef __CUDA_ARCH__
+#if __CUDA_ARCH__ >= 530
+  return __hlt(one, two);
+#else
+  return (__half2float(one) < __half2float(two));
+#endif
+#else
+  return (float(one) < float(two));
+#endif
+}
+
+__CUDA_HD__
+inline bool operator<=(const __half &one, const __half &two)
+{
+#ifdef __CUDA_ARCH__
+#if __CUDA_ARCH__ >= 530
+  return __hle(one, two);
+#else
+  return (__half2float(one) <= __half2float(two));
+#endif
+#else
+  return (float(one) <= float(two));
+#endif
+}
+
+__CUDA_HD__
+inline bool operator>(const __half &one, const __half &two)
+{
+#ifdef __CUDA_ARCH__
+#if __CUDA_ARCH__ >= 530
+  return __hgt(one, two);
+#else
+  return (__half2float(one) > __half2float(two));
+#endif
+#else
+  return (float(one) > float(two));
+#endif
+}
+
+__CUDA_HD__
+inline bool operator>=(const __half &one, const __half &two)
+{
+#ifdef __CUDA_ARCH__
+#if __CUDA_ARCH__ >= 530
+  return __hge(one, two);
+#else
+  return (__half2float(one) >= __half2float(two));
+#endif
+#else
+  return (float(one) >= float(two));
+#endif
+}
 #else
 struct __half
 {
@@ -174,42 +337,6 @@ struct __half
     this->__x = raw; 
   }
 
-  /// Comparison 
-  inline bool operator <(const __half &other) const
-  {
-    return (this->__x < other.__x);
-  }
-
-  /// Comparison 
-  inline bool operator <=(const __half &other) const
-  {
-    return (this->__x <= other.__x);
-  }
-
-  /// Equality
-  inline bool operator ==(const __half &other) const
-  {
-    return (this->__x == other.__x);
-  }
-
-  /// Inequality
-  inline bool operator !=(const __half &other) const
-  {
-    return (this->__x != other.__x);
-  }
-
-  /// Comparison 
-  inline bool operator >(const __half &other) const
-  {
-    return (this->__x > other.__x);
-  }
-
-  /// Comparison 
-  inline bool operator >=(const __half &other) const
-  {
-    return (this->__x >= other.__x);
-  }
-
   /// Increment
   inline __half& operator +=(const __half &rhs)
   {
@@ -238,39 +365,62 @@ struct __half
     return *this;
   }
 
-  /// Multiply
-  inline __half operator*(const __half &other) const
-  {
-    return __half(float(*this) * float(other));
-  }
-
-  /// Addition 
-  inline __half operator+(const __half &other) const
-  {
-    return __half(float(*this) + float(other));
-  }
-
-  /// Difference
-  inline __half operator-(const __half &other) const
-  {
-    return __half(float(*this) - float(other));
-  }
-
-  /// Negate
-  inline __half operator-(void) const
-  {
-    // xor with a sign bit flip
-    uint16_t raw = this->__x ^ (1 << 15);
-    return __half(raw, true/*raw*/);
-  }
-
-  /// Difference
-  inline __half operator/(const __half &other) const
-  {
-    return __half(float(*this) / float(other));
-  }
-
 };
+
+inline __half operator-(const __half &one)
+{
+  return __half(-(float(one)));
+}
+
+inline __half operator+(const __half &one, const __half &two)
+{
+  return __half(float(one) + float(two));
+}
+
+inline __half operator-(const __half &one, const __half &two)
+{
+  return __half(float(one) - float(two));
+}
+
+inline __half operator*(const __half &one, const __half &two)
+{
+  return __half(float(one) * float(two));
+}
+
+inline __half operator/(const __half &one, const __half &two)
+{
+  return __half(float(one) / float(two));
+}
+
+inline bool operator==(const __half &one, const __half &two)
+{
+  return (float(one) == float(two));
+}
+
+inline bool operator!=(const __half &one, const __half &two)
+{
+  return (float(one) != float(two));
+}
+
+inline bool operator<(const __half &one, const __half &two)
+{
+  return (float(one) < float(two));
+}
+
+inline bool operator<=(const __half &one, const __half &two)
+{
+  return (float(one) <= float(two));
+}
+
+inline bool operator>(const __half &one, const __half &two)
+{
+  return (float(one) > float(two));
+}
+
+inline bool operator>=(const __half &one, const __half &two)
+{
+  return (float(one) >= float(two));
+}
 #endif // Not nvcc
 
 static inline __half __convert_float_to_half(float a)
@@ -303,57 +453,78 @@ static inline __half atan(__half a)
   return ::atanf(a);
 }
 
-
+__CUDA_HD__
 static inline __half ceil(__half a)
 {
 #ifdef __CUDA_ARCH__
+#if __CUDA_ARCH__ >= 530
   return hceil(a);
+#else
+  return __float2half(ceilf(__half2float(a)));
+#endif
 #else
   return ::ceilf(a);
 #endif
 }
 
 
+__CUDA_HD__
 static inline __half cos(__half a)
 {
 #ifdef __CUDA_ARCH__
+#if __CUDA_ARCH__ >= 530
   return hcos(a);
+#else
+  return __float2half(cosf(__half2float(a)));
+#endif
 #else
   return ::cosf(a);
 #endif
 }
 
-
+__CUDA_HD__
 static inline __half exp(__half a)
 {
 #ifdef __CUDA_ARCH__
+#if __CUDA_ARCH__ >= 530
   return hexp(a);
+#else
+  return __float2half(expf(__half2float(a)));
+#endif
 #else
   return ::expf(a);
 #endif
 }
 
-
+__CUDA_HD__
 static inline __half fabs(__half a)
 {
 #ifdef __CUDA_ARCH__
-  return (a < __half(0.f)) ? -a : a;
+#if __CUDA_ARCH__ >= 530
+  return __hgt(a, __float2half(0.f)) ? __hneg(a) : a;
+#else
+  return __float2half(fabs(__half2float(a)));
+#endif
 #else
   return ::fabsf(a);
 #endif
 }
 
-
+__CUDA_HD__
 static inline __half floor(__half a)
 {
 #ifdef __CUDA_ARCH__
+#if __CUDA_ARCH__ >= 530
   return hfloor(a);
+#else
+  return __float2half(floorf(__half2float(a)));
+#endif
 #else
   return ::floorf(a);
 #endif
 }
 
-
+__CUDA_HD__
 static inline bool isinf(__half a)
 {
 #ifdef __CUDA_ARCH__
@@ -363,21 +534,29 @@ static inline bool isinf(__half a)
 #endif
 }
 
-
+__CUDA_HD__
 static inline bool isnan(__half a)
 {
 #ifdef __CUDA_ARCH__
+#if __CUDA_ARCH__ >= 530
   return __hisnan(a);
+#else
+  return ::isnan(__half2float(a));
+#endif
 #else
   return std::isnan(static_cast<float>(a));
 #endif
 }
 
-
+__CUDA_HD__
 static inline __half log(__half a)
 {
 #ifdef __CUDA_ARCH__
+#if __CUDA_ARCH__ >= 530
   return hlog(a);
+#else
+  return __float2half(logf(__half2float(a)));
+#endif
 #else
   return ::logf(a);
 #endif
@@ -389,11 +568,15 @@ static inline __half pow(__half x, __half exponent)
   return ::powf(x, exponent);
 }
 
-
+__CUDA_HD__
 static inline __half sin(__half a)
 {
 #ifdef __CUDA_ARCH__
+#if __CUDA_ARCH__ >= 530
   return hsin(a);
+#else
+  return __float2half(sinf(__half2float(a)));
+#endif
 #else
   return ::sinf(a);
 #endif
@@ -411,11 +594,15 @@ static inline __half tanh(__half a)
   return ::tanhf(a);
 }
 
-
+__CUDA_HD__
 static inline __half sqrt(__half a)
 {
 #ifdef __CUDA_ARCH__
+#if __CUDA_ARCH__ >= 530
   return hsqrt(a);
+#else
+  return __float2half(sqrtf(__half2float(a)));
+#endif
 #else
   return ::sqrtf(a);
 #endif

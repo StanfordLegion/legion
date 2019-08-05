@@ -919,7 +919,7 @@ namespace Legion {
     typedef bool LHS;
     typedef bool RHS;
 
-    static const bool identity = true;
+    static const bool identity = false;
     static const int REDOP_ID = LEGION_REDOP_MAX_BOOL;
 
     template<bool EXCLUSIVE> __CUDA_HD__

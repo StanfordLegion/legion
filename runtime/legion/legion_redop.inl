@@ -33,14 +33,17 @@ namespace Legion {
   void SumReduction<bool>::apply<false>(LHS &lhs, RHS rhs)
   {
 #ifdef __CUDA_ARCH__
-    int *target = (int *)&lhs;
-    union { int as_int; bool as_bool; } oldval, newval;
+    // GPU atomics need 4 byte alignment
+    char *ptr = (char*)&lhs;
+    const unsigned offset = ((unsigned long long)ptr) % 4;
+    int *target = (int *)(ptr - offset);
+    union { int as_int; bool as_bool[4]; } oldval, newval;
     newval.as_int = *target;
     do {
       oldval.as_int = newval.as_int;
-      newval.as_bool = newval.as_bool || rhs;
+      newval.as_bool[offset] = newval.as_bool[offset] || rhs;
       newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
-    } while (oldval.as_bool != newval.as_bool);
+    } while (oldval.as_bool[offset] != newval.as_bool[offset]);
 #else
     // No atomic logical operations so use compare and swap
     volatile int8_t *target = (volatile int8_t *)&lhs;
@@ -62,14 +65,17 @@ namespace Legion {
   void SumReduction<bool>::fold<false>(RHS &rhs1, RHS rhs2)
   {
 #ifdef __CUDA_ARCH__
-    int *target = (int *)&rhs1;
-    union { int as_int; bool as_bool; } oldval, newval;
+    // GPU atomics need 4 byte alignment
+    char *ptr = (char*)&rhs1;
+    const unsigned offset = ((unsigned long long)ptr) % 4;
+    int *target = (int *)(ptr - offset);
+    union { int as_int; bool as_bool[4]; } oldval, newval;
     newval.as_int = *target;
     do {
       oldval.as_int = newval.as_int;
-      newval.as_bool = newval.as_bool || rhs2;
+      newval.as_bool[offset] = newval.as_bool[offset] || rhs2;
       newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
-    } while (oldval.as_bool != newval.as_bool);
+    } while (oldval.as_bool[offset] != newval.as_bool[offset]);
 #else
     // No atomic logical operations so use compare and swap
     volatile int8_t *target = (volatile int8_t *)&rhs1;
@@ -398,7 +404,7 @@ namespace Legion {
   void SumReduction<__half>::apply<true>(LHS &lhs, RHS rhs)
   {
 #ifdef __CUDA_ARCH__
-    lhs += rhs;
+    lhs = lhs + rhs;
 #else
     lhs = __convert_float_to_half(
         __convert_halfint_to_float(*reinterpret_cast<uint16_t*>(&lhs)) + 
@@ -412,27 +418,16 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
     // GPU atomics need 4 byte alignment
     char *ptr = (char*)&lhs;
-    if ((((unsigned long long)ptr) % 4) == 0) {
-      // Aligned case
-      int *target = (int *)ptr;
-      union { int as_int; __half2 as_float; } oldval, newval;
-      newval.as_int = *target;
-      do {
-        oldval.as_int = newval.as_int;
-        newval.as_float.x += rhs;
-        newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
-      } while (oldval.as_int != newval.as_int);
-    } else {
-      // Unaligned case
-      int *target = (int *)(ptr-sizeof(__half));
-      union { int as_int; __half2 as_float; } oldval, newval;
-      newval.as_int = *target;
-      do {
-        oldval.as_int = newval.as_int;
-        newval.as_float.y += rhs;
-        newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
-      } while (oldval.as_int != newval.as_int);
-    }
+    const unsigned offset = (((unsigned long long)ptr) % 4) / sizeof(__half);
+    union { int as_int; short as_short[2]; } oldval, newval;
+    int *target = (int *)(ptr - (offset * sizeof(__half)));
+    newval.as_int = *target;
+    do {
+      oldval.as_int = newval.as_int;
+      newval.as_short[offset] = __half_as_short(
+          __short_as_half(newval.as_short[offset]) + rhs);
+      newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
+    } while (oldval.as_int != newval.as_int);
 #else
     // No atomic floating point operations so use compare and swap 
     volatile int *target = (volatile int*)&lhs;
@@ -450,7 +445,7 @@ namespace Legion {
   void SumReduction<__half>::fold<true>(RHS &rhs1, RHS rhs2)
   {
 #ifdef __CUDA_ARCH__
-    rhs1 += rhs2;
+    rhs1 = rhs1 + rhs2;
 #else
     rhs1= __convert_float_to_half(
         __convert_halfint_to_float(*reinterpret_cast<uint16_t*>(&rhs1)) + 
@@ -464,27 +459,16 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
     // GPU atomics need 4 byte alignment
     char *ptr = (char*)&rhs1;
-    if ((((unsigned long long)ptr) % 4) == 0) {
-      // Aligned case
-      int *target = (int *)ptr;
-      union { int as_int; __half2 as_float; } oldval, newval;
-      newval.as_int = *target;
-      do {
-        oldval.as_int = newval.as_int;
-        newval.as_float.x += rhs2; 
-        newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
-      } while (oldval.as_int != newval.as_int);
-    } else {
-      // Unaligned case
-      int *target = (int *)(ptr-sizeof(__half));
-      union { int as_int; __half2 as_float; } oldval, newval;
-      newval.as_int = *target;
-      do {
-        oldval.as_int = newval.as_int;
-        newval.as_float.y += rhs2; 
-        newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
-      } while (oldval.as_int != newval.as_int);
-    }
+    const unsigned offset = (((unsigned long long)ptr) % 4) / sizeof(__half);
+    union { int as_int; short as_short[2]; } oldval, newval;
+    int *target = (int *)(ptr - (offset * sizeof(__half)));
+    newval.as_int = *target;
+    do {
+      oldval.as_int = newval.as_int;
+      newval.as_short[offset] = __half_as_short(
+          __short_as_half(newval.as_short[offset]) + rhs2);
+      newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
+    } while (oldval.as_int != newval.as_int);
 #else
     // No atomic floating point operations so use compare and swap 
     volatile int *target = (volatile int*)&rhs1;
@@ -622,13 +606,13 @@ namespace Legion {
   {
 #ifdef __CUDA_ARCH__
     int *target = (int *)&lhs;
-    union { int as_int; __half2 as_complex; } oldval, newval;
-    newval.as_int = *target;
+    int newval, oldval;
+    newval = *target;
     do {
       oldval = newval;
-      newval.as_complex = complex<__half>(newval.as_complex) + rhs;
-      newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
-    } while (oldval.as_int != newval.as_int);
+      newval = (complex<__half>(newval) + rhs).as_int();
+      newval = atomicCAS(target, oldval, newval);
+    } while (oldval != newval);
 #else
     volatile int *target = (int *)&lhs;
     int oldval, newval;
@@ -650,13 +634,13 @@ namespace Legion {
   {
 #ifdef __CUDA_ARCH__
     int *target = (int *)&rhs1;
-    union { int as_int; __half2 as_complex; } oldval, newval;
-    newval.as_int = *target;
+    int oldval, newval;
+    newval = *target;
     do {
       oldval = newval;
-      newval.as_complex = complex<__half(newval.as_complex) + rhs2;
-      newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
-    } while (oldval.as_int != newval.as_int);
+      newval = (complex<__half>(newval) + rhs2).as_int();
+      newval = atomicCAS(target, oldval, newval);
+    } while (oldval != newval);
 #else
     volatile int *target = (int *)&rhs1;
     int oldval, newval;
@@ -1042,7 +1026,7 @@ namespace Legion {
   void DiffReduction<__half>::apply<true>(LHS &lhs, RHS rhs)
   {
 #ifdef __CUDA_ARCH__
-    lhs -= rhs;
+    lhs = lhs - rhs;
 #else
     lhs = __convert_float_to_half(
         __convert_halfint_to_float(*reinterpret_cast<uint16_t*>(&lhs)) - 
@@ -1056,27 +1040,16 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
     // GPU atomics need 4 byte alignment
     char *ptr = (char*)&lhs;
-    if ((((unsigned long long)ptr) % 4) == 0) {
-      // Aligned case
-      int *target = (int *)ptr;
-      union { int as_int; __half2 as_float; } oldval, newval;
-      newval.as_int = *target;
-      do {
-        oldval.as_int = newval.as_int;
-        newval.as_float.x -= rhs;
-        newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
-      } while (oldval.as_int != newval.as_int);
-    } else {
-      // Unaligned case
-      int *target = (int *)(ptr-sizeof(__half));
-      union { int as_int; __half2 as_float; } oldval, newval;
-      newval.as_int = *target;
-      do {
-        oldval.as_int = newval.as_int;
-        newval.as_float.y -= rhs;
-        newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
-      } while (oldval.as_int != newval.as_int);
-    }
+    const unsigned offset = (((unsigned long long)ptr) % 4) / sizeof(__half);
+    union { int as_int; short as_short[2]; } oldval, newval;
+    int *target = (int *)(ptr - (offset * sizeof(__half)));
+    newval.as_int = *target;
+    do {
+      oldval.as_int = newval.as_int;
+      newval.as_short[offset] = __half_as_short(
+          __short_as_half(newval.as_short[offset]) - rhs);
+      newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
+    } while (oldval.as_int != newval.as_int);
 #else
     // No atomic floating point operations so use compare and swap 
     volatile int *target = (volatile int*)&lhs;
@@ -1094,7 +1067,7 @@ namespace Legion {
   void DiffReduction<__half>::fold<true>(RHS &rhs1, RHS rhs2)
   {
 #ifdef __CUDA_ARCH__
-    rhs1 += rhs2;
+    rhs1 = rhs1 + rhs2;
 #else
     rhs1= __convert_float_to_half(
         __convert_halfint_to_float(*reinterpret_cast<uint16_t*>(&rhs1)) + 
@@ -1108,27 +1081,16 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
     // GPU atomics need 4 byte alignment
     char *ptr = (char*)&rhs1;
-    if ((((unsigned long long)ptr) % 4) == 0) {
-      // Aligned case
-      int *target = (int *)ptr;
-      union { int as_int; __half2 as_float; } oldval, newval;
-      newval.as_int = *target;
-      do {
-        oldval.as_int = newval.as_int;
-        newval.as_float.x += rhs2; 
-        newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
-      } while (oldval.as_int != newval.as_int);
-    } else {
-      // Unaligned case
-      int *target = (int *)(ptr-sizeof(__half));
-      union { int as_int; __half2 as_float; } oldval, newval;
-      newval.as_int = *target;
-      do {
-        oldval.as_int = newval.as_int;
-        newval.as_float.y += rhs2; 
-        newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
-      } while (oldval.as_int != newval.as_int);
-    }
+    const unsigned offset = (((unsigned long long)ptr) % 4) / sizeof(__half);
+    union { int as_int; short as_short[2]; } oldval, newval;
+    int *target = (int *)(ptr - (offset * sizeof(__half)));
+    newval.as_int = *target;
+    do {
+      oldval.as_int = newval.as_int;
+      newval.as_short[offset] = __half_as_short(
+          __short_as_half(newval.as_short[offset]) + rhs2);
+      newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
+    } while (oldval.as_int != newval.as_int);
 #else
     // No atomic floating point operations so use compare and swap 
     volatile int *target = (volatile int*)&rhs1;
@@ -1269,13 +1231,13 @@ namespace Legion {
   {
 #ifdef __CUDA_ARCH__
     int *target = (int *)&lhs;
-    union { int as_int; __half2 as_complex; } oldval, newval;
-    newval.as_int = *target;
+    int oldval, newval;
+    newval = *target;
     do {
       oldval = newval;
-      newval.as_complex = complex<__half>(newval.as_complex) - rhs;
-      newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
-    } while (oldval.as_int != newval.as_int);
+      newval = (complex<__half>(newval) - rhs).as_int();
+      newval = atomicCAS(target, oldval, newval);
+    } while (oldval != newval);
 #else
     volatile int *target = (int *)&lhs;
     int oldval, newval;
@@ -1297,13 +1259,13 @@ namespace Legion {
   {
 #ifdef __CUDA_ARCH__
     int *target = (int *)&rhs1;
-    union { int as_int; __half2 as_complex; } oldval, newval;
-    newval.as_int = *target;
+    int oldval, newval;
+    newval = *target;
     do {
       oldval = newval;
-      newval.as_complex = complex<__half>(newval.as_complex) + rhs2;
-      newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
-    } while (oldval.as_int != newval.as_int);
+      newval = (complex<__half>(newval) + rhs2).as_int();
+      newval = atomicCAS(target, oldval, newval);
+    } while (oldval != newval);
 #else
     volatile int *target = (int *)&rhs1;
     int oldval, newval;
@@ -1382,14 +1344,17 @@ namespace Legion {
   void ProdReduction<bool>::apply<false>(LHS &lhs, RHS rhs)
   {
 #ifdef __CUDA_ARCH__
-    int *target = (int *)&lhs;
-    union { int as_int; bool as_bool; } oldval, newval;
+    // GPU atomics need 4 byte alignment
+    char *ptr = (char*)&lhs;
+    const unsigned offset = ((unsigned long long)ptr) % 4;
+    int *target = (int *)(ptr - offset);
+    union { int as_int; bool as_bool[4]; } oldval, newval;
     newval.as_int = *target;
     do {
       oldval.as_int = newval.as_int;
-      newval.as_bool = newval.as_bool && rhs;
+      newval.as_bool[offset] = newval.as_bool[offset] && rhs;
       newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
-    } while (oldval.as_bool != newval.as_bool);
+    } while (oldval.as_bool[offset] != newval.as_bool[offset]);
 #else
     // No atomic logical operations so use compare and swap
     volatile int8_t *target = (volatile int8_t *)&lhs;
@@ -1411,14 +1376,17 @@ namespace Legion {
   void ProdReduction<bool>::fold<false>(RHS &rhs1, RHS rhs2)
   {
 #ifdef __CUDA_ARCH__
-    int *target = (int *)&rhs1;
-    union { int as_int; bool as_bool; } oldval, newval;
+    // GPU atomics need 4 byte alignment
+    char *ptr = (char*)&rhs1;
+    const unsigned offset = ((unsigned long long)ptr) % 4;
+    int *target = (int *)(ptr - offset);
+    union { int as_int; bool as_bool[4]; } oldval, newval;
     newval.as_int = *target;
     do {
       oldval.as_int = newval.as_int;
-      newval.as_bool = newval.as_bool && rhs2;
+      newval.as_bool[offset] = newval.as_bool[offset] && rhs2;
       newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
-    } while (oldval.as_bool != newval.as_bool);
+    } while (oldval.as_bool[offset] != newval.as_bool[offset]);
 #else
     // No atomic logical operations so use compare and swap
     volatile int8_t *target = (volatile int8_t *)&rhs1;
@@ -1831,7 +1799,7 @@ namespace Legion {
   void ProdReduction<__half>::apply<true>(LHS &lhs, RHS rhs)
   {
 #ifdef __CUDA_ARCH__
-    lhs *= rhs;
+    lhs = lhs * rhs;
 #else
     lhs = __convert_float_to_half(
         __convert_halfint_to_float(*reinterpret_cast<uint16_t*>(&lhs)) * 
@@ -1845,27 +1813,16 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
     // GPU atomics need 4 byte alignment
     char *ptr = (char*)&lhs;
-    if ((((unsigned long long)ptr) % 4) == 0) {
-      // Aligned case
-      int *target = (int *)ptr;
-      union { int as_int; __half2 as_float; } oldval, newval;
-      newval.as_int = *target;
-      do {
-        oldval.as_int = newval.as_int;
-        newval.as_float.x *= rhs;
-        newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
-      } while (oldval.as_int != newval.as_int);
-    } else {
-      // Unaligned case
-      int *target = (int *)(ptr-sizeof(__half));
-      union { int as_int; __half2 as_float; } oldval, newval;
-      newval.as_int = *target;
-      do {
-        oldval.as_int = newval.as_int;
-        newval.as_float.y *= rhs;
-        newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
-      } while (oldval.as_int != newval.as_int);
-    }
+    const unsigned offset = (((unsigned long long)ptr) % 4) / sizeof(__half);
+    union { int as_int; short as_short[2]; } oldval, newval;
+    int *target = (int *)(ptr - (offset * sizeof(__half)));
+    newval.as_int = *target;
+    do {
+      oldval.as_int = newval.as_int;
+      newval.as_short[offset] = __half_as_short(
+          __short_as_half(newval.as_short[offset]) * rhs);
+      newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
+    } while (oldval.as_int != newval.as_int);
 #else
     // No atomic floating point operations so use compare and swap 
     volatile int *target = (volatile int*)&lhs;
@@ -1883,7 +1840,7 @@ namespace Legion {
   void ProdReduction<__half>::fold<true>(RHS &rhs1, RHS rhs2)
   {
 #ifdef __CUDA_ARCH__
-    rhs1 *= rhs2;
+    rhs1 = rhs1 * rhs2;
 #else
     rhs1= __convert_float_to_half(
         __convert_halfint_to_float(*reinterpret_cast<uint16_t*>(&rhs1)) * 
@@ -1897,27 +1854,16 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
     // GPU atomics need 4 byte alignment
     char *ptr = (char*)&rhs1;
-    if ((((unsigned long long)ptr) % 4) == 0) {
-      // Aligned case
-      int *target = (int *)ptr;
-      union { int as_int; __half2 as_float; } oldval, newval;
-      newval.as_int = *target;
-      do {
-        oldval.as_int = newval.as_int;
-        newval.as_float.x *= rhs2;
-        newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
-      } while (oldval.as_int != newval.as_int);
-    } else {
-      // Unaligned case
-      int *target = (int *)(ptr-sizeof(__half));
-      union { int as_int; __half2 as_float; } oldval, newval;
-      newval.as_int = *target;
-      do {
-        oldval.as_int = newval.as_int;
-        newval.as_float.y *= rhs2;
-        newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
-      } while (oldval.as_int != newval.as_int);
-    }
+    const unsigned offset = (((unsigned long long)ptr) % 4) / sizeof(__half);
+    union { int as_int; short as_short[2]; } oldval, newval;
+    int *target = (int *)(ptr - (offset * sizeof(__half)));
+    newval.as_int = *target;
+    do {
+      oldval.as_int = newval.as_int;
+      newval.as_short[offset] = __half_as_short(
+          __short_as_half(newval.as_short[offset]) * rhs2);
+      newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
+    } while (oldval.as_int != newval.as_int);
 #else
     // No atomic floating point operations so use compare and swap 
     volatile int *target = (volatile int*)&rhs1;
@@ -2061,13 +2007,13 @@ namespace Legion {
   {
 #ifdef __CUDA_ARCH__
     int *target = (int *)&lhs;
-    union { int as_int; __half2 as_complex; } oldval, newval;
-    newval.as_int = *target;
+    int oldval, newval;
+    newval = *target;
     do {
       oldval = newval;
-      newval.as_complex = complex<__half>(newval.as_complex) * rhs;
-      newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
-    } while (oldval.as_int != newval.as_int);
+      newval = (complex<__half>(newval) * rhs).as_int();
+      newval = atomicCAS(target, oldval, newval);
+    } while (oldval != newval);
 #else
     volatile int *target = (int *)&lhs;
     int oldval, newval;
@@ -2089,13 +2035,13 @@ namespace Legion {
   {
 #ifdef __CUDA_ARCH__
     int *target = (int *)&rhs1;
-    union { int as_int; __half2 as_complex; } oldval, newval;
-    newval.as_int = *target;
+    int oldval, newval;
+    newval = *target;
     do {
       oldval = newval;
-      newval.as_complex = complex<__half>(newval.as_complex) * rhs2;
-      newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
-    } while (oldval.as_int != newval.as_int);
+      newval = (complex<__half>(newval) * rhs2).as_int();
+      newval = atomicCAS(target, oldval, newval);
+    } while (oldval != newval);
 #else
     volatile int *target = (int *)&rhs1;
     int oldval, newval;
@@ -2565,7 +2511,7 @@ namespace Legion {
   void DivReduction<__half>::apply<true>(LHS &lhs, RHS rhs)
   {
 #ifdef __CUDA_ARCH__
-    lhs /= rhs;
+    lhs = lhs / rhs;
 #else
     lhs = __convert_float_to_half(
         __convert_halfint_to_float(*reinterpret_cast<uint16_t*>(&lhs)) / 
@@ -2579,27 +2525,16 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
     // GPU atomics need 4 byte alignment
     char *ptr = (char*)&lhs;
-    if ((((unsigned long long)ptr) % 4) == 0) {
-      // Aligned case
-      int *target = (int *)ptr;
-      union { int as_int; __half2 as_float; } oldval, newval;
-      newval.as_int = *target;
-      do {
-        oldval.as_int = newval.as_int;
-        newval.as_float.x /= rhs;
-        newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
-      } while (oldval.as_int != newval.as_int);
-    } else {
-      // Unaligned case
-      int *target = (int *)(ptr-sizeof(__half));
-      union { int as_int; __half2 as_float; } oldval, newval;
-      newval.as_int = *target;
-      do {
-        oldval.as_int = newval.as_int;
-        newval.as_float.y /= rhs;
-        newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
-      } while (oldval.as_int != newval.as_int);
-    }
+    const unsigned offset = (((unsigned long long)ptr) % 4) / sizeof(__half);
+    union { int as_int; short as_short[2]; } oldval, newval;
+    int *target = (int *)(ptr - (offset * sizeof(__half)));
+    newval.as_int = *target;
+    do {
+      oldval.as_int = newval.as_int;
+      newval.as_short[offset] = __half_as_short(
+          __short_as_half(newval.as_short[offset]) / rhs);
+      newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
+    } while (oldval.as_int != newval.as_int);
 #else
     // No atomic floating point operations so use compare and swap 
     volatile int *target = (volatile int*)&lhs;
@@ -2617,7 +2552,7 @@ namespace Legion {
   void DivReduction<__half>::fold<true>(RHS &rhs1, RHS rhs2)
   {
 #ifdef __CUDA_ARCH__
-    rhs1 *= rhs2;
+    rhs1 = rhs1 * rhs2;
 #else
     rhs1= __convert_float_to_half(
         __convert_halfint_to_float(*reinterpret_cast<uint16_t*>(&rhs1)) * 
@@ -2631,27 +2566,16 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
     // GPU atomics need 4 byte alignment
     char *ptr = (char*)&rhs1;
-    if ((((unsigned long long)ptr) % 4) == 0) {
-      // Aligned case
-      int *target = (int *)ptr;
-      union { int as_int; __half2 as_float; } oldval, newval;
-      newval.as_int = *target;
-      do {
-        oldval.as_int = newval.as_int;
-        newval.as_float.x *= rhs2;
-        newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
-      } while (oldval.as_int != newval.as_int);
-    } else {
-      // Unaligned case
-      int *target = (int *)(ptr-sizeof(__half));
-      union { int as_int; __half2 as_float; } oldval, newval;
-      newval.as_int = *target;
-      do {
-        oldval.as_int = newval.as_int;
-        newval.as_float.y *= rhs2;
-        newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
-      } while (oldval.as_int != newval.as_int);
-    }
+    const unsigned offset = (((unsigned long long)ptr) % 4) / sizeof(__half);
+    union { int as_int; short as_short[2]; } oldval, newval;
+    int *target = (int *)(ptr - (offset * sizeof(__half)));
+    newval.as_int = *target;
+    do {
+      oldval.as_int = newval.as_int;
+      newval.as_short[offset] = __half_as_short(
+          __short_as_half(newval.as_short[offset]) * rhs2);
+      newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
+    } while (oldval.as_int != newval.as_int);
 #else
     // No atomic floating point operations so use compare and swap 
     volatile int *target = (volatile int*)&rhs1;
@@ -2795,13 +2719,13 @@ namespace Legion {
   {
 #ifdef __CUDA_ARCH__
     int *target = (int *)&lhs;
-    union { int as_int; __half2 as_complex; } oldval, newval;
-    newval.as_int = *target;
+    int oldval, newval;
+    newval = *target;
     do {
       oldval = newval;
-      newval.as_complex = complex<__half>(newval.as_complex) / rhs;
-      newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
-    } while (oldval.as_int != newval.as_int);
+      newval = (complex<__half>(newval) / rhs).as_int();
+      newval = atomicCAS(target, oldval, newval);
+    } while (oldval != newval);
 #else
     volatile int *target = (int *)&lhs;
     int oldval, newval;
@@ -2823,13 +2747,13 @@ namespace Legion {
   {
 #ifdef __CUDA_ARCH__
     int *target = (int *)&rhs1;
-    union { int as_int; __half2 as_complex; } oldval, newval;
-    newval.as_int = *target;
+    int oldval, newval;
+    newval = *target;
     do {
       oldval = newval;
-      newval.as_complex = complex<__half>(newval.as_complex) * rhs2;
-      newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
-    } while (oldval.as_int != newval.as_int);
+      newval = (complex<__half>(newval) * rhs2).as_int();
+      newval = atomicCAS(target, oldval, newval);
+    } while (oldval != newval);
 #else
     volatile int *target = (int *)&rhs1;
     int oldval, newval;
@@ -2901,29 +2825,32 @@ namespace Legion {
   template<> __CUDA_HD__ inline
   void MaxReduction<bool>::apply<true>(LHS &lhs, RHS rhs)
   {
-    if (lhs && !rhs)
-      lhs = false;
+    if (!lhs && rhs)
+      lhs = true;
   }
 
   template<> __CUDA_HD__ inline
   void MaxReduction<bool>::apply<false>(LHS &lhs, RHS rhs)
   {
 #ifdef __CUDA_ARCH__
-    int *target = (int *)&lhs;
-    union { int as_int; bool as_bool; } oldval, newval;
+    // GPU atomics need 4 byte alignment
+    char *ptr = (char*)&lhs;
+    const unsigned offset = ((unsigned long long)ptr) % 4;
+    int *target = (int *)(ptr - offset);
+    union { int as_int; bool as_bool[4]; } oldval, newval;
     newval.as_int = *target;
     do {
       oldval.as_int = newval.as_int;
-      newval.as_bool = oldval.as_bool && rhs;
+      newval.as_bool[offset] = newval.as_bool[offset] || rhs;
       newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
-    } while (oldval.as_bool != newval.as_bool);
+    } while (oldval.as_bool[offset] != newval.as_bool[offset]);
 #else
     // No atomic logical operations so use compare and swap
     volatile int8_t *target = (volatile int8_t *)&lhs;
     union { int8_t as_int; bool as_bool; } oldval, newval;
     do {
       oldval.as_int = *target;
-      newval.as_bool = oldval.as_bool && rhs;
+      newval.as_bool = oldval.as_bool || rhs;
     } while (!__sync_bool_compare_and_swap(target, oldval.as_int, newval.as_int));
 #endif
   }
@@ -2931,8 +2858,8 @@ namespace Legion {
   template<> __CUDA_HD__ inline
   void MaxReduction<bool>::fold<true>(RHS &rhs1, RHS rhs2)
   {
-    if (rhs1 && !rhs2)
-      rhs1 = false;
+    if (!rhs1 && rhs2)
+      rhs1 = true;
   }
 
   template<> __CUDA_HD__ inline
@@ -2944,7 +2871,7 @@ namespace Legion {
     newval.as_int = *target;
     do {
       oldval.as_int = newval.as_int;
-      newval.as_bool = oldval.as_bool && rhs2;
+      newval.as_bool = oldval.as_bool || rhs2;
       newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
     } while (oldval.as_bool != newval.as_bool);
 #else
@@ -2953,7 +2880,7 @@ namespace Legion {
     union { int8_t as_int; bool as_bool; } oldval, newval;
     do {
       oldval.as_int = *target;
-      newval.as_bool = oldval.as_bool && rhs2;
+      newval.as_bool = oldval.as_bool || rhs2;
     } while (!__sync_bool_compare_and_swap(target, oldval.as_int, newval.as_int));
 #endif
   }
@@ -3441,31 +3368,16 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
     // GPU atomics need 4 byte alignment
     char *ptr = (char*)&lhs;
-    if ((((unsigned long long)ptr) % 4) == 0) {
-      // Aligned case
-      int *target = (int *)ptr;
-      union { int as_int; __half2 as_float; } oldval, newval;
-      newval.as_int = *target;
-      do {
-        oldval.as_int = newval.as_int;
-        newval.as_float.x = __MAX__(oldval.as_float.x, rhs);
-        if (newval.as_float.x == oldval.as_float.x)
-          break;
-        newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
-      } while (oldval.as_int != newval.as_int);
-    } else {
-      // Unaligned case
-      int *target = (int *)(ptr-sizeof(__half));
-      union { int as_int; __half2 as_float; } oldval, newval;
-      newval.as_int = *target;
-      do {
-        oldval.as_int = newval.as_int;
-        newval.as_float.y = __MAX__(oldval.as_float.y, rhs);
-        if (newval.as_float.y == oldval.as_float.y)
-          break;
-        newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
-      } while (oldval.as_int != newval.as_int);
-    }
+    const unsigned offset = (((unsigned long long)ptr) % 4) / sizeof(__half);
+    union { int as_int; short as_short[2]; } oldval, newval;
+    int *target = (int *)(ptr - (offset * sizeof(__half)));
+    newval.as_int = *target;
+    do {
+      oldval.as_int = newval.as_int;
+      newval.as_short[offset] = __half_as_short(__MAX__(
+          __short_as_half(newval.as_short[offset]), rhs));
+      newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
+    } while (oldval.as_int != newval.as_int);
 #else
     // No atomic floating point operations so use compare and swap 
     volatile int *target = (volatile int*)&lhs;
@@ -3498,32 +3410,18 @@ namespace Legion {
   {
 #ifdef __CUDA_ARCH__
     // GPU atomics need 4 byte alignment
+    // GPU atomics need 4 byte alignment
     char *ptr = (char*)&rhs1;
-    if ((((unsigned long long)ptr) % 4) == 0) {
-      // Aligned case
-      int *target = (int *)ptr;
-      union { int as_int; __half2 as_float; } oldval, newval;
-      newval.as_int = *target;
-      do {
-        oldval.as_int = newval.as_int;
-        newval.as_float.x = __MAX__(oldval.as_float.x, rhs2);
-        if (newval.as_float.x == oldval.as_float.x)
-          break;
-        newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
-      } while (oldval.as_int != newval.as_int);
-    } else {
-      // Unaligned case
-      int *target = (int *)(ptr-sizeof(__half));
-      union { int as_int; __half2 as_float; } oldval, newval;
-      newval.as_int = *target;
-      do {
-        oldval.as_int = newval.as_int;
-        newval.as_float.y = __MAX__(oldval.as_float.y, rhs2);
-        if (newval.as_float.y == oldval.as_float.y)
-          break;
-        newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
-      } while (oldval.as_int != newval.as_int);
-    }
+    const unsigned offset = (((unsigned long long)ptr) % 4) / sizeof(__half);
+    union { int as_int; short as_short[2]; } oldval, newval;
+    int *target = (int *)(ptr - (offset * sizeof(__half)));
+    newval.as_int = *target;
+    do {
+      oldval.as_int = newval.as_int;
+      newval.as_short[offset] = __half_as_short(__MAX__(
+          __short_as_half(newval.as_short[offset]), rhs2));
+      newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
+    } while (oldval.as_int != newval.as_int);
 #else
     // No atomic floating point operations so use compare and swap 
     volatile int *target = (volatile int*)&rhs1;
@@ -3687,16 +3585,17 @@ namespace Legion {
   void MinReduction<bool>::apply<false>(LHS &lhs, RHS rhs)
   {
 #ifdef __CUDA_ARCH__
-    int *target = (int *)&lhs;
-    union { int as_int; bool as_bool; } oldval, newval;
+    // GPU atomics need 4 byte alignment
+    char *ptr = (char*)&lhs;
+    const unsigned offset = ((unsigned long long)ptr) % 4;
+    int *target = (int *)(ptr - offset);
+    union { int as_int; bool as_bool[4]; } oldval, newval;
     newval.as_int = *target;
     do {
       oldval.as_int = newval.as_int;
-      newval.as_bool = oldval.as_bool && rhs;
-      if (newval.as_bool == oldval.as_bool)
-        break;
+      newval.as_bool[offset] = newval.as_bool[offset] && rhs;
       newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
-    } while (oldval.as_bool != newval.as_bool);
+    } while (oldval.as_bool[offset] != newval.as_bool[offset]);
 #else
     // No atomic logical operations so use compare and swap
     volatile int8_t *target = (volatile int8_t *)&lhs;
@@ -3721,16 +3620,17 @@ namespace Legion {
   void MinReduction<bool>::fold<false>(RHS &rhs1, RHS rhs2)
   {
 #ifdef __CUDA_ARCH__
-    int *target = (int *)&rhs1;
-    union { int as_int; bool as_bool; } oldval, newval;
+    // GPU atomics need 4 byte alignment
+    char *ptr = (char*)&rhs1;
+    const unsigned offset = ((unsigned long long)ptr) % 4;
+    int *target = (int *)(ptr - offset);
+    union { int as_int; bool as_bool[4]; } oldval, newval;
     newval.as_int = *target;
     do {
       oldval.as_int = newval.as_int;
-      newval.as_bool = oldval.as_bool && rhs2;
-      if (newval.as_bool == oldval.as_bool)
-        break;
+      newval.as_bool[offset] = newval.as_bool[offset] && rhs2;
       newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
-    } while (oldval.as_bool != newval.as_bool);
+    } while (oldval.as_bool[offset] != newval.as_bool[offset]);
 #else
     // No atomic logical operations so use compare and swap
     volatile int8_t *target = (volatile int8_t *)&rhs1;
@@ -4225,30 +4125,16 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
     // GPU atomics need 4 byte alignment
     char *ptr = (char*)&lhs;
-    if ((((unsigned long long)ptr) % 4) == 0) {
-      // Aligned case
-      int *target = (int *)ptr;
-      union { int as_int; __half2 as_float; } oldval, newval;
-      newval.as_int = *target;
-      do {
-        newval.as_float.x = __MIN__(oldval.as_float.x, rhs);
-        if (newval.as_float.x == oldval.as_float.x)
-          break;
-        newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
-      } while (oldval.as_int != newval.as_int);
-    } else {
-      // Unaligned case
-      int *target = (int *)(ptr-sizeof(__half));
-      union { int as_int; __half2 as_float; } oldval, newval;
-      newval.as_int = *target;
-      do {
-        oldval.as_int = newval.as_int;
-        newval.as_float.y = __MIN__(oldval.as_float.y, rhs);
-        if (newval.as_float.y == oldval.as_float.y)
-          break;
-        newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
-      } while (oldval.as_int != newval.as_int);
-    }
+    const unsigned offset = (((unsigned long long)ptr) % 4) / sizeof(__half);
+    union { int as_int; short as_short[2]; } oldval, newval;
+    int *target = (int *)(ptr - (offset * sizeof(__half)));
+    newval.as_int = *target;
+    do {
+      oldval.as_int = newval.as_int;
+      newval.as_short[offset] = __half_as_short(__MIN__(
+          __short_as_half(newval.as_short[offset]), rhs));
+      newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
+    } while (oldval.as_int != newval.as_int);
 #else
     // No atomic floating point operations so use compare and swap 
     volatile int *target = (volatile int*)&lhs;
@@ -4282,31 +4168,16 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
     // GPU atomics need 4 byte alignment
     char *ptr = (char*)&rhs1;
-    if ((((unsigned long long)ptr) % 4) == 0) {
-      // Aligned case
-      int *target = (int *)ptr;
-      union { int as_int; __half2 as_float; } oldval, newval;
-      newval.as_int = *target;
-      do {
-        oldval.as_int = newval.as_int;
-        newval.as_float.x = __MIN__(oldval.as_float.x, rhs2);
-        if (newval.as_float.x == oldval.as_float.x)
-          break;
-        newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
-      } while (oldval.as_int != newval.as_int);
-    } else {
-      // Unaligned case
-      int *target = (int *)(ptr-sizeof(__half));
-      union { int as_int; __half2 as_float; } oldval, newval;
-      newval.as_int = *target;
-      do {
-        oldval.as_int = newval.as_int;
-        newval.as_float.y = __MIN__(oldval.as_float.y, rhs2);
-        if (newval.as_float.y == oldval.as_float.y)
-          break;
-        newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
-      } while (oldval.as_int != newval.as_int);
-    }
+    const unsigned offset = (((unsigned long long)ptr) % 4) / sizeof(__half);
+    union { int as_int; short as_short[2]; } oldval, newval;
+    int *target = (int *)(ptr - (offset * sizeof(__half)));
+    newval.as_int = *target;
+    do {
+      oldval.as_int = newval.as_int;
+      newval.as_short[offset] = __half_as_short(__MIN__(
+          __short_as_half(newval.as_short[offset]), rhs2));
+      newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
+    } while (oldval.as_int != newval.as_int);
 #else
     // No atomic floating point operations so use compare and swap 
     volatile int *target = (volatile int*)&rhs1;
