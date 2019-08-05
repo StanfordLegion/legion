@@ -21727,6 +21727,8 @@ namespace Legion {
       LEGION_FOREACH_NN(COLOR_RECTS)
 #undef COLOR_RECTS
 #endif
+      // Register builtin reduction operators
+      register_builtin_reduction_operators();
 
       // Need to pass argc and argv to low-level runtime before we can record 
       // their values as they might be changed by GASNet or MPI or whatever.

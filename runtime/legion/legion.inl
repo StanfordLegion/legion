@@ -575,6 +575,9 @@ namespace Legion {
           region.get_instance_info(READ_ONLY, fid, actual_field_size, &is,
               Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
               silence_warnings, true/*generic accessor*/, check_field_size);
+        if (!Realm::GenericAccessor<FT,N,T>::is_compatible(instance, fid, 
+                                                           is.bounds))
+          region.report_incompatible_accessor("GenericAccessor", instance, fid);
         accessor = Realm::GenericAccessor<FT,N,T>(instance, fid, is.bounds);
       }
     public:
@@ -623,6 +626,9 @@ namespace Legion {
           region.get_instance_info(READ_ONLY, fid, actual_field_size, &is,
               Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
               silence_warnings, true/*generic accessor*/, check_field_size);
+        if (!Realm::GenericAccessor<FT,N,T>::is_compatible(instance, fid, 
+                                                           is.bounds))
+          region.report_incompatible_accessor("GenericAccessor", instance, fid);
         accessor = Realm::GenericAccessor<FT,N,T>(instance, fid, is.bounds);
       }
     public:
@@ -676,6 +682,9 @@ namespace Legion {
           region.get_instance_info(READ_ONLY, fid, actual_field_size, &is,
               Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
               silence_warnings, true/*generic accessor*/, check_field_size);
+        if (!Realm::GenericAccessor<FT,1,T>::is_compatible(instance, fid, 
+                                                           is.bounds))
+          region.report_incompatible_accessor("GenericAccessor", instance, fid);
         accessor = Realm::GenericAccessor<FT,1,T>(instance, fid, is.bounds);
       }
     public:
@@ -717,6 +726,9 @@ namespace Legion {
           region.get_instance_info(READ_ONLY, fid, actual_field_size, &is,
               Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
               silence_warnings, true/*generic accessor*/, check_field_size);
+        if (!Realm::GenericAccessor<FT,1,T>::is_compatible(instance, fid, 
+                                                           is.bounds))
+          region.report_incompatible_accessor("GenericAccessor", instance, fid);
         accessor = Realm::GenericAccessor<FT,1,T>(instance, fid, is.bounds);
       }
     public:
@@ -761,6 +773,9 @@ namespace Legion {
           region.get_instance_info(READ_WRITE, fid, actual_field_size, &is,
               Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
               silence_warnings, true/*generic accessor*/, check_field_size);
+        if (!Realm::GenericAccessor<FT,N,T>::is_compatible(instance, fid, 
+                                                           is.bounds))
+          region.report_incompatible_accessor("GenericAccessor", instance, fid);
         accessor = Realm::GenericAccessor<FT,N,T>(instance, fid, is.bounds);
       }
     public:
@@ -814,6 +829,9 @@ namespace Legion {
           region.get_instance_info(READ_WRITE, fid, actual_field_size, &is,
               Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
               silence_warnings, true/*generic accessor*/, check_field_size);
+        if (!Realm::GenericAccessor<FT,N,T>::is_compatible(instance, fid, 
+                                                           is.bounds))
+          region.report_incompatible_accessor("GenericAccessor", instance, fid);
         accessor = Realm::GenericAccessor<FT,N,T>(instance, fid, is.bounds);
       }
     public:
@@ -874,6 +892,9 @@ namespace Legion {
           region.get_instance_info(READ_WRITE, fid, actual_field_size, &is,
               Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
               silence_warnings, true/*generic accessor*/, check_field_size);
+        if (!Realm::GenericAccessor<FT,1,T>::is_compatible(instance, fid, 
+                                                           is.bounds))
+          region.report_incompatible_accessor("GenericAccessor", instance, fid);
         accessor = Realm::GenericAccessor<FT,1,T>(instance, fid, is.bounds);
       }
     public:
@@ -919,6 +940,9 @@ namespace Legion {
           region.get_instance_info(READ_WRITE, fid, actual_field_size, &is,
               Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
               silence_warnings, true/*generic accessor*/, check_field_size);
+        if (!Realm::GenericAccessor<FT,1,T>::is_compatible(instance, fid, 
+                                                           is.bounds))
+          region.report_incompatible_accessor("GenericAccessor", instance, fid);
         accessor = Realm::GenericAccessor<FT,1,T>(instance, fid, is.bounds);
       }
     public:
@@ -970,6 +994,9 @@ namespace Legion {
           region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
               Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
               silence_warnings, true/*generic accessor*/, check_field_size);
+        if (!Realm::GenericAccessor<FT,N,T>::is_compatible(instance, fid, 
+                                                           is.bounds))
+          region.report_incompatible_accessor("GenericAccessor", instance, fid);
         accessor = Realm::GenericAccessor<FT,N,T>(instance, fid, is.bounds);
       }
     public:
@@ -1023,6 +1050,9 @@ namespace Legion {
           region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
               Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
               silence_warnings, true/*generic accessor*/, check_field_size);
+        if (!Realm::GenericAccessor<FT,N,T>::is_compatible(instance, fid, 
+                                                           is.bounds))
+          region.report_incompatible_accessor("GenericAccessor", instance, fid);
         accessor = Realm::GenericAccessor<FT,N,T>(instance, fid, is.bounds);
       }
     public:
@@ -1082,6 +1112,9 @@ namespace Legion {
           region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
               Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
               silence_warnings, true/*generic accessor*/, check_field_size);
+        if (!Realm::GenericAccessor<FT,1,T>::is_compatible(instance, fid, 
+                                                           is.bounds))
+          region.report_incompatible_accessor("GenericAccessor", instance, fid);
         accessor = Realm::GenericAccessor<FT,1,T>(instance, fid, is.bounds);
       }
     public:
@@ -1126,6 +1159,9 @@ namespace Legion {
           region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
               Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
               silence_warnings, true/*generic accessor*/, check_field_size);
+        if (!Realm::GenericAccessor<FT,1,T>::is_compatible(instance, fid, 
+                                                           is.bounds))
+          region.report_incompatible_accessor("GenericAccessor", instance, fid);
         accessor = Realm::GenericAccessor<FT,1,T>(instance, fid, is.bounds);
       }
     public:
@@ -1176,6 +1212,9 @@ namespace Legion {
           region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
               Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
               silence_warnings, true/*generic accessor*/, check_field_size);
+        if (!Realm::GenericAccessor<FT,N,T>::is_compatible(instance, fid, 
+                                                           is.bounds))
+          region.report_incompatible_accessor("GenericAccessor", instance, fid);
         accessor = Realm::GenericAccessor<FT,N,T>(instance, fid, is.bounds);
       }
     public:
@@ -1225,6 +1264,9 @@ namespace Legion {
           region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
               Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
               silence_warnings, true/*generic accessor*/, check_field_size);
+        if (!Realm::GenericAccessor<FT,N,T>::is_compatible(instance, fid, 
+                                                           is.bounds))
+          region.report_incompatible_accessor("GenericAccessor", instance, fid);
         accessor = Realm::GenericAccessor<FT,N,T>(instance, fid, is.bounds);
       }
     public:
@@ -1278,6 +1320,9 @@ namespace Legion {
           region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
               Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
               silence_warnings, true/*generic accessor*/, check_field_size);
+        if (!Realm::GenericAccessor<FT,1,T>::is_compatible(instance, fid, 
+                                                           is.bounds))
+          region.report_incompatible_accessor("GenericAccessor", instance, fid);
         accessor = Realm::GenericAccessor<FT,1,T>(instance, fid, is.bounds);
       }
     public:
@@ -1318,6 +1363,9 @@ namespace Legion {
           region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
               Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
               silence_warnings, true/*generic accessor*/, check_field_size);
+        if (!Realm::GenericAccessor<FT,1,T>::is_compatible(instance, fid, 
+                                                           is.bounds))
+          region.report_incompatible_accessor("GenericAccessor", instance, fid);
         accessor = Realm::GenericAccessor<FT,1,T>(instance, fid, is.bounds);
       }
     public:
@@ -5060,6 +5108,8 @@ namespace Legion {
               Internal::NT_TemplateHelper::encode_tag<N,T>(), 
               warning_string, silence_warnings, true/*generic accessor*/,
               false/*check field size*/);
+        if (!A::is_compatible(instance, fid, is.bounds))
+          region.report_incompatible_accessor("GenericAccessor", instance, fid);
         accessor = A(instance, fid, is.bounds);
       }
     public:
@@ -5101,6 +5151,9 @@ namespace Legion {
               Internal::NT_TemplateHelper::encode_tag<1,T>(), 
               warning_string, silence_warnings, true/*generic accessor*/,
               false/*check field size*/);
+        if (!Realm::GenericAccessor<FT,1,T>::is_compatible(instance, fid, 
+                                                           is.bounds))
+          region.report_incompatible_accessor("GenericAccessor", instance, fid);
         accessor = Realm::GenericAccessor<FT,1,T>(instance, fid, is.bounds);
       }
     public:

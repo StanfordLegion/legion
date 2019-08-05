@@ -3570,6 +3570,7 @@ namespace Legion {
     public:
       // Static methods for start-up and callback phases
       static int start(int argc, char **argv, bool background);
+      static void register_builtin_reduction_operators(void);
       static RealmRuntime initialize(int *argc, char ***argv);
       static LegionConfiguration parse_arguments(int argc, char **argv);
       static void perform_slow_config_checks(const LegionConfiguration &config);
