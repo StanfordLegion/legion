@@ -2591,7 +2591,7 @@ class IndexSpace(object):
                     break
             assert color is not None
             label += ' (color: %s)' % color
-        if self.shape is None:
+        if self.shape is None or self.shape.empty():
             label += '\nEmpty Bounds'
         else:
             if self.shape.dense:
@@ -3216,7 +3216,7 @@ class LogicalRegion(object):
             else:
                 label = 'subregion ('+self.gen_id()+')'
         shape = self.get_shape()
-        if shape is None:
+        if shape is None or shape.empty():
             label += '\nEmpty Bounds'
         else:
             if shape.dense:

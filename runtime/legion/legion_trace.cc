@@ -2994,8 +2994,11 @@ namespace Legion {
         if (instructions[idx]->get_kind() == MERGE_EVENT)
         {
           MergeEvent *merge = instructions[idx]->as_merge_event();
-          const std::vector<unsigned> &in_reduced =
-            incoming_reduced[inv_topo_order[merge->lhs]];
+          unsigned order = inv_topo_order[merge->lhs];
+#ifdef DEBUG_LEGION
+          assert(order != -1U);
+#endif
+          const std::vector<unsigned> &in_reduced = incoming_reduced[order];
           std::set<unsigned> new_rhs;
           for (unsigned iidx = 0; iidx < in_reduced.size(); ++iidx)
           {

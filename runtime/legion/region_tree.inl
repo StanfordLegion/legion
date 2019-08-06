@@ -1689,19 +1689,28 @@ namespace Legion {
                               const Realm::IndexSpace<DIM,T> &tight_space) const
     //--------------------------------------------------------------------------
     {
+      // Be careful, Realm can lie to us here
       if (!tight_space.empty())
       {
+        bool logged = false;
         // Iterate over the rectangles and print them out 
         for (Realm::IndexSpaceIterator<DIM,T> itr(tight_space); 
               itr.valid; itr.step())
         {
-          if (itr.rect.volume() == 1)
+          const size_t rect_volume = itr.rect.volume();
+          if (rect_volume == 0)
+            continue;
+          logged = true;
+          if (rect_volume == 1)
             LegionSpy::log_index_space_point(handle.get_id(), 
                                              Point<DIM,T>(itr.rect.lo));
           else
             LegionSpy::log_index_space_rect(handle.get_id(), 
                                             Rect<DIM,T>(itr.rect));
         }
+        // Handle the case where Realm lied to us about being empty
+        if (!logged)
+          LegionSpy::log_empty_index_space(handle.get_id());
       }
       else
         LegionSpy::log_empty_index_space(handle.get_id());

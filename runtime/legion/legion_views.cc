@@ -2387,6 +2387,9 @@ namespace Legion {
                                             const AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
+      // Quick test for empty index space expressions
+      if (user_expr->is_empty())
+        return manager->get_use_event();
       if (!is_logical_owner())
       {
 #ifdef DEBUG_LEGION
@@ -4525,6 +4528,9 @@ namespace Legion {
       else
         assert(IS_READ_ONLY(usage));
 #endif
+      // Quick test for empty index space expressions
+      if (user_expr->is_empty())
+        return manager->get_use_event();
       if (!is_logical_owner())
       {
 #ifdef DEBUG_LEGION
