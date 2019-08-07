@@ -433,6 +433,7 @@ namespace Legion {
     public:
       void clear_cached_template(void) { current_template = NULL; }
       void check_template_preconditions(TraceReplayOp *op);
+      void check_template_preconditions(ReplTraceReplayOp *op);
     public:
       PhysicalTemplate* get_current_template(void) { return current_template; }
       bool has_any_templates(void) const { return templates.size() > 0; }
@@ -617,8 +618,12 @@ namespace Legion {
       void prepare_parallel_replay(const std::vector<unsigned> &gen);
       void push_complete_replays(void);
     public:
+      // Variants for normal traces
       bool check_preconditions(TraceReplayOp *op);
       void apply_postcondition(TraceSummaryOp *op);
+      // Variants for control replication traces
+      bool check_preconditions(ReplTraceReplayOp *op);
+      void apply_postcondition(ReplTraceSummaryOp *op);
     public:
       void register_operation(Operation *op);
       void execute_all(void);

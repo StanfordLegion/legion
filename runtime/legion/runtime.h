@@ -3088,6 +3088,10 @@ namespace Legion {
       ReplMapOp*            get_available_repl_map_op(void);
       ReplAttachOp*         get_available_repl_attach_op(void);
       ReplDetachOp*         get_available_repl_detach_op(void);
+      ReplTraceCaptureOp*   get_available_repl_capture_op(void);
+      ReplTraceCompleteOp*  get_available_repl_trace_op(void);
+      ReplTraceReplayOp*    get_available_repl_replay_op(void);
+      ReplTraceSummaryOp*   get_available_repl_summary_op(void);
     public:
       void free_individual_task(IndividualTask *task);
       void free_point_task(PointTask *task);
@@ -3141,6 +3145,10 @@ namespace Legion {
       void free_repl_map_op(ReplMapOp *op);
       void free_repl_attach_op(ReplAttachOp *op);
       void free_repl_detach_op(ReplDetachOp *op);
+      void free_repl_capture_op(ReplTraceCaptureOp *op);
+      void free_repl_trace_op(ReplTraceCompleteOp *op);
+      void free_repl_replay_op(ReplTraceReplayOp *op);
+      void free_repl_summary_op(ReplTraceSummaryOp *op);
     public:
       RegionTreeContext allocate_region_tree_context(void);
       void free_region_tree_context(RegionTreeContext tree_ctx); 
@@ -3528,6 +3536,10 @@ namespace Legion {
       std::deque<ReplMapOp*>            available_repl_map_ops;
       std::deque<ReplAttachOp*>         available_repl_attach_ops;
       std::deque<ReplDetachOp*>         available_repl_detach_ops;
+      std::deque<ReplTraceCaptureOp*>   available_repl_capture_ops;
+      std::deque<ReplTraceCompleteOp*>  available_repl_trace_ops;
+      std::deque<ReplTraceReplayOp*>    available_repl_replay_ops;
+      std::deque<ReplTraceSummaryOp*>   available_repl_summary_ops;
 #ifdef DEBUG_LEGION
       TreeStateLogger *tree_state_logger;
       // For debugging purposes keep track of

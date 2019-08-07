@@ -10971,6 +10971,34 @@ namespace Legion {
         delete (*it);
       }
       available_repl_detach_ops.clear();
+      for (std::deque<ReplTraceCaptureOp*>::const_iterator it = 
+            available_repl_capture_ops.begin(); it !=
+            available_repl_capture_ops.end(); it++)
+      {
+        delete (*it);
+      }
+      available_repl_capture_ops.clear();
+      for (std::deque<ReplTraceCompleteOp*>::const_iterator it = 
+            available_repl_trace_ops.begin(); it !=
+            available_repl_trace_ops.end(); it++)
+      {
+        delete (*it);
+      }
+      available_repl_trace_ops.clear();
+      for (std::deque<ReplTraceReplayOp*>::const_iterator it = 
+            available_repl_replay_ops.begin(); it !=
+            available_repl_replay_ops.end(); it++)
+      {
+        delete (*it);
+      }
+      available_repl_replay_ops.clear();
+      for (std::deque<ReplTraceSummaryOp*>::const_iterator it = 
+            available_repl_summary_ops.begin(); it !=
+            available_repl_summary_ops.end(); it++)
+      {
+        delete (*it);
+      }
+      available_repl_summary_ops.clear();
       for (std::map<TaskID,TaskImpl*>::const_iterator it = 
             task_table.begin(); it != task_table.end(); it++)
       {
@@ -19936,6 +19964,34 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    ReplTraceCaptureOp* Runtime::get_available_repl_capture_op(void)
+    //--------------------------------------------------------------------------
+    {
+      return get_available(capture_op_lock, available_repl_capture_ops);
+    }
+
+    //--------------------------------------------------------------------------
+    ReplTraceCompleteOp* Runtime::get_available_repl_trace_op(void)
+    //--------------------------------------------------------------------------
+    {
+      return get_available(trace_op_lock, available_repl_trace_ops);
+    }
+
+    //--------------------------------------------------------------------------
+    ReplTraceReplayOp* Runtime::get_available_repl_replay_op(void)
+    //--------------------------------------------------------------------------
+    {
+      return get_available(replay_op_lock, available_repl_replay_ops);
+    }
+
+    //--------------------------------------------------------------------------
+    ReplTraceSummaryOp* Runtime::get_available_repl_summary_op(void)
+    //--------------------------------------------------------------------------
+    {
+      return get_available(summary_op_lock, available_repl_summary_ops);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::free_individual_task(IndividualTask *task)
     //--------------------------------------------------------------------------
     {
@@ -20361,6 +20417,38 @@ namespace Legion {
     {
       AutoLock d_lock(detach_op_lock);
       release_operation<false>(available_repl_detach_ops, op);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::free_repl_capture_op(ReplTraceCaptureOp *op)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock c_lock(capture_op_lock);
+      release_operation<false>(available_repl_capture_ops, op);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::free_repl_trace_op(ReplTraceCompleteOp *op)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock t_lock(trace_op_lock);
+      release_operation<false>(available_repl_trace_ops, op);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::free_repl_replay_op(ReplTraceReplayOp *op)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock t_lock(replay_op_lock);
+      release_operation<false>(available_repl_replay_ops, op);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::free_repl_summary_op(ReplTraceSummaryOp *op)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock t_lock(summary_op_lock);
+      release_operation<false>(available_repl_summary_ops, op);
     }
 
     //--------------------------------------------------------------------------

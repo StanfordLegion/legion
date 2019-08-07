@@ -22,6 +22,7 @@
 #include "legion/legion_instances.h"
 #include "legion/legion_views.h"
 #include "legion/legion_context.h"
+#include "legion/legion_replication.h"
 
 namespace Legion {
   namespace Internal {
@@ -1767,6 +1768,28 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void PhysicalTrace::check_template_preconditions(ReplTraceReplayOp *op)
+    //--------------------------------------------------------------------------
+    {
+      current_template = NULL;
+      for (LegionVector<PhysicalTemplate*>::aligned::reverse_iterator it =
+           templates.rbegin(); it != templates.rend(); ++it)
+      {
+        if ((*it)->check_preconditions(op))
+        {
+#ifdef DEBUG_LEGION
+          assert((*it)->is_replayable());
+#endif
+          // Reset the nonreplayable count when a replayable template satisfies
+          // the precondition
+          nonreplayable_count = 0;
+          current_template = *it;
+          return;
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
     PhysicalTemplate* PhysicalTrace::start_new_template(void)
     //--------------------------------------------------------------------------
     {
@@ -2198,6 +2221,20 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void PhysicalTemplate::apply_postcondition(TraceSummaryOp *op)
+    //--------------------------------------------------------------------------
+    {
+      post.ensure(op);
+    }
+
+    //--------------------------------------------------------------------------
+    bool PhysicalTemplate::check_preconditions(ReplTraceReplayOp *op)
+    //--------------------------------------------------------------------------
+    {
+      return pre.require(op);
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalTemplate::apply_postcondition(ReplTraceSummaryOp *op)
     //--------------------------------------------------------------------------
     {
       post.ensure(op);

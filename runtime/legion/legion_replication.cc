@@ -4841,6 +4841,628 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
+    // ReplTraceOp 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    ReplTraceOp::ReplTraceOp(Runtime *rt)
+      : ReplFenceOp(rt)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    ReplTraceOp::ReplTraceOp(const ReplTraceOp &rhs)
+      : ReplFenceOp(NULL)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    ReplTraceOp::~ReplTraceOp(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    ReplTraceOp& ReplTraceOp::operator=(const ReplTraceOp &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplTraceOp::execute_dependence_analysis(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(mapping_tracker == NULL);
+#endif
+      // Make a dependence tracker
+      mapping_tracker = new MappingDependenceTracker();
+      // See if we have any fence dependences
+      execution_fence_event = parent_ctx->register_fence_dependence(this);
+      parent_ctx->invalidate_trace_cache(local_trace, this);
+
+      trigger_dependence_analysis();
+      end_dependence_analysis();
+    }
+
+    /////////////////////////////////////////////////////////////
+    // ReplTraceCaptureOp 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    ReplTraceCaptureOp::ReplTraceCaptureOp(Runtime *rt)
+      : ReplTraceOp(rt)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    ReplTraceCaptureOp::ReplTraceCaptureOp(const ReplTraceCaptureOp &rhs)
+      : ReplTraceOp(NULL)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    ReplTraceCaptureOp::~ReplTraceCaptureOp(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    ReplTraceCaptureOp& ReplTraceCaptureOp::operator=(
+                                                  const ReplTraceCaptureOp &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplTraceCaptureOp::initialize_capture(ReplicateContext *ctx, 
+                                                bool has_block)
+    //--------------------------------------------------------------------------
+    {
+      initialize_repl_fence(ctx, EXECUTION_FENCE);
+#ifdef DEBUG_LEGION
+      assert(trace != NULL);
+      assert(trace->is_dynamic_trace());
+#endif
+      dynamic_trace = trace->as_dynamic_trace();
+      local_trace = dynamic_trace;
+      // Now mark our trace as NULL to avoid registering this operation
+      trace = NULL;
+      tracing = false;
+      current_template = NULL;
+      has_blocking_call = has_block;
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplTraceCaptureOp::activate(void)
+    //--------------------------------------------------------------------------
+    {
+      activate_operation();
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplTraceCaptureOp::deactivate(void)
+    //--------------------------------------------------------------------------
+    {
+      deactivate_operation();
+      runtime->free_repl_capture_op(this);
+    }
+
+    //--------------------------------------------------------------------------
+    const char* ReplTraceCaptureOp::get_logging_name(void) const
+    //--------------------------------------------------------------------------
+    {
+      return op_names[TRACE_CAPTURE_OP_KIND];
+    }
+
+    //--------------------------------------------------------------------------
+    Operation::OpKind ReplTraceCaptureOp::get_operation_kind(void) const
+    //--------------------------------------------------------------------------
+    {
+      return TRACE_CAPTURE_OP_KIND;
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplTraceCaptureOp::trigger_dependence_analysis(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(trace == NULL);
+      assert(local_trace != NULL);
+      assert(local_trace == dynamic_trace);
+#endif
+      // Indicate that we are done capturing this trace
+      dynamic_trace->end_trace_capture();
+      // Register this fence with all previous users in the parent's context
+      ReplFenceOp::trigger_dependence_analysis();
+      parent_ctx->record_previous_trace(local_trace);
+      if (local_trace->is_recording())
+      {
+#ifdef DEBUG_LEGION
+        assert(local_trace->get_physical_trace() != NULL);
+#endif
+        current_template =
+          local_trace->get_physical_trace()->get_current_template();
+        local_trace->get_physical_trace()->record_previous_template_completion(
+            get_completion_event());
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplTraceCaptureOp::trigger_mapping(void)
+    //--------------------------------------------------------------------------
+    {
+      // Now finish capturing the physical trace
+      if (local_trace->is_recording())
+      {
+#ifdef DEBUG_LEGION
+        assert(current_template != NULL);
+        assert(local_trace->get_physical_trace() != NULL);
+#endif
+        RtEvent pending_deletion =
+          local_trace->get_physical_trace()->fix_trace(current_template, this,
+              has_blocking_call);
+        if (pending_deletion.exists())
+          execution_precondition = Runtime::merge_events(NULL,
+              execution_precondition, ApEvent(pending_deletion));
+        local_trace->initialize_tracing_state();
+      }
+      ReplFenceOp::trigger_mapping();
+    }
+
+    /////////////////////////////////////////////////////////////
+    // ReplTraceCompleteOp 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    ReplTraceCompleteOp::ReplTraceCompleteOp(Runtime *rt)
+      : ReplTraceOp(rt)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    ReplTraceCompleteOp::ReplTraceCompleteOp(const ReplTraceCompleteOp &rhs)
+      : ReplTraceOp(NULL)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    ReplTraceCompleteOp::~ReplTraceCompleteOp(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    ReplTraceCompleteOp& ReplTraceCompleteOp::operator=(
+                                                 const ReplTraceCompleteOp &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplTraceCompleteOp::initialize_complete(ReplicateContext *ctx, 
+                                                  bool has_block)
+    //--------------------------------------------------------------------------
+    {
+      initialize_repl_fence(ctx, EXECUTION_FENCE);
+#ifdef DEBUG_LEGION
+      assert(trace != NULL);
+#endif
+      local_trace = trace;
+      // Now mark our trace as NULL to avoid registering this operation
+      trace = NULL;
+      current_template = NULL;
+      template_completion = ApEvent::NO_AP_EVENT;
+      replayed = false;
+      has_blocking_call = has_block;
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplTraceCompleteOp::activate(void)
+    //--------------------------------------------------------------------------
+    {
+      activate_operation();
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplTraceCompleteOp::deactivate(void)
+    //--------------------------------------------------------------------------
+    {
+      deactivate_operation();
+      runtime->free_repl_trace_op(this);
+    }
+
+    //--------------------------------------------------------------------------
+    const char* ReplTraceCompleteOp::get_logging_name(void) const
+    //--------------------------------------------------------------------------
+    {
+      return op_names[TRACE_COMPLETE_OP_KIND];
+    }
+
+    //--------------------------------------------------------------------------
+    Operation::OpKind ReplTraceCompleteOp::get_operation_kind(void) const
+    //--------------------------------------------------------------------------
+    {
+      return TRACE_COMPLETE_OP_KIND; 
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplTraceCompleteOp::trigger_dependence_analysis(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(trace == NULL);
+      assert(local_trace != NULL);
+#endif
+      if (local_trace->is_replaying())
+      {
+#ifdef DEBUG_LEGION
+        assert(local_trace->get_physical_trace() != NULL);
+#endif
+        PhysicalTemplate *current_template =
+          local_trace->get_physical_trace()->get_current_template();
+#ifdef DEBUG_LEGION
+        assert(current_template != NULL);
+#endif
+#ifdef LEGION_SPY
+        local_trace->perform_logging(
+            current_template->get_fence_uid(), unique_op_id);
+#endif
+        current_template->execute_all();
+        template_completion = current_template->get_completion();
+        Runtime::trigger_event(completion_event, template_completion);
+        local_trace->end_trace_execution(this);
+        parent_ctx->update_current_fence(this, true, true);
+        parent_ctx->record_previous_trace(local_trace);
+        local_trace->get_physical_trace()->record_previous_template_completion(
+            template_completion);
+        local_trace->initialize_tracing_state();
+        replayed = true;
+        return;
+      }
+      else if (local_trace->is_recording())
+      {
+#ifdef DEBUG_LEGION
+        assert(local_trace->get_physical_trace() != NULL);
+#endif
+        current_template =
+          local_trace->get_physical_trace()->get_current_template();
+        local_trace->get_physical_trace()->record_previous_template_completion(
+            get_completion_event());
+      }
+
+      // Indicate that this trace is done being captured
+      // This also registers that we have dependences on all operations
+      // in the trace.
+      local_trace->end_trace_execution(this);
+
+      // We always need to run the full fence analysis, otherwise
+      // the operations replayed in the following trace will race
+      // with those in the current trace
+      execution_precondition =
+        parent_ctx->perform_fence_analysis(this, true, true);
+
+      // Now update the parent context with this fence before we can complete
+      // the dependence analysis and possibly be deactivated
+      parent_ctx->update_current_fence(this, true, true);
+
+      // If this is a static trace, then we remove our reference when we're done
+      if (local_trace->is_static_trace())
+      {
+        StaticTrace *static_trace = static_cast<StaticTrace*>(local_trace);
+        if (static_trace->remove_reference())
+          delete static_trace;
+      }
+      parent_ctx->record_previous_trace(local_trace);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplTraceCompleteOp::trigger_mapping(void)
+    //--------------------------------------------------------------------------
+    {
+      // Now finish capturing the physical trace
+      if (local_trace->is_recording())
+      {
+#ifdef DEBUG_LEGION
+        assert(current_template != NULL);
+        assert(local_trace->get_physical_trace() != NULL);
+#endif
+        RtEvent pending_deletion =
+          local_trace->get_physical_trace()->fix_trace(current_template, this,
+              has_blocking_call);
+        if (pending_deletion.exists())
+          execution_precondition = Runtime::merge_events(NULL,
+              execution_precondition, ApEvent(pending_deletion));
+        local_trace->initialize_tracing_state();
+      }
+      else if (replayed)
+      {
+        complete_mapping();
+        need_completion_trigger = false;
+        if (!template_completion.has_triggered())
+        {
+          RtEvent wait_on = Runtime::protect_event(template_completion);
+          complete_execution(wait_on);
+        }
+        else
+          complete_execution();
+        return;
+      }
+      ReplFenceOp::trigger_mapping();
+    }
+
+    /////////////////////////////////////////////////////////////
+    // ReplTraceReplayOp
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    ReplTraceReplayOp::ReplTraceReplayOp(Runtime *rt)
+      : ReplTraceOp(rt)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    ReplTraceReplayOp::ReplTraceReplayOp(const ReplTraceReplayOp &rhs)
+      : ReplTraceOp(NULL)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    ReplTraceReplayOp::~ReplTraceReplayOp(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    ReplTraceReplayOp& ReplTraceReplayOp::operator=(
+                                                   const ReplTraceReplayOp &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplTraceReplayOp::initialize_replay(ReplicateContext *ctx, 
+                                              LegionTrace *trace)
+    //--------------------------------------------------------------------------
+    {
+      initialize_repl_fence(ctx, EXECUTION_FENCE);
+#ifdef DEBUG_LEGION
+      assert(trace != NULL);
+#endif
+      local_trace = trace;
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplTraceReplayOp::activate(void)
+    //--------------------------------------------------------------------------
+    {
+      activate_operation();
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplTraceReplayOp::deactivate(void)
+    //--------------------------------------------------------------------------
+    {
+      deactivate_operation();
+      runtime->free_repl_replay_op(this);
+    }
+
+    //--------------------------------------------------------------------------
+    const char* ReplTraceReplayOp::get_logging_name(void) const
+    //--------------------------------------------------------------------------
+    {
+      return op_names[TRACE_REPLAY_OP_KIND];
+    }
+
+    //--------------------------------------------------------------------------
+    Operation::OpKind ReplTraceReplayOp::get_operation_kind(void) const
+    //--------------------------------------------------------------------------
+    {
+      return TRACE_REPLAY_OP_KIND;
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplTraceReplayOp::trigger_dependence_analysis(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(trace == NULL);
+      assert(local_trace != NULL);
+#endif
+      PhysicalTrace *physical_trace = local_trace->get_physical_trace();
+#ifdef DEBUG_LEGION
+      assert(physical_trace != NULL);
+#endif
+      bool recurrent = true;
+      bool fence_registered = false;
+      bool is_recording = local_trace->is_recording();
+      if (physical_trace->get_current_template() == NULL || is_recording)
+      {
+        recurrent = false;
+        {
+          // Wait for the previous recordings to be done before checking
+          // template preconditions, otherwise no template would exist.
+          RtEvent mapped_event = parent_ctx->get_current_mapping_fence_event();
+          if (mapped_event.exists())
+            mapped_event.wait();
+        }
+#ifdef DEBUG_LEGION
+        assert(!(local_trace->is_recording() || local_trace->is_replaying()));
+#endif
+
+        if (physical_trace->get_current_template() == NULL)
+          physical_trace->check_template_preconditions(this);
+#ifdef DEBUG_LEGION
+        assert(physical_trace->get_current_template() == NULL ||
+               !physical_trace->get_current_template()->is_recording());
+#endif
+        execution_precondition =
+          parent_ctx->perform_fence_analysis(this, true, true);
+        physical_trace->set_current_execution_fence_event(
+            get_completion_event());
+        fence_registered = true;
+      }
+
+      if (physical_trace->get_current_template() != NULL)
+      {
+        if (!fence_registered)
+          execution_precondition =
+            parent_ctx->get_current_execution_fence_event();
+        ApEvent fence_completion =
+          recurrent ? physical_trace->get_previous_template_completion()
+                    : get_completion_event();
+        physical_trace->initialize_template(fence_completion, recurrent);
+        local_trace->set_state_replay();
+#ifdef LEGION_SPY
+        physical_trace->get_current_template()->set_fence_uid(unique_op_id);
+#endif
+      }
+      else if (!fence_registered)
+      {
+        execution_precondition =
+          parent_ctx->perform_fence_analysis(this, true, true);
+        physical_trace->set_current_execution_fence_event(
+            get_completion_event());
+      }
+
+      // Now update the parent context with this fence before we can complete
+      // the dependence analysis and possibly be deactivated
+      parent_ctx->update_current_fence(this, true, true);
+    }
+
+    /////////////////////////////////////////////////////////////
+    // ReplTraceSummaryOp
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    ReplTraceSummaryOp::ReplTraceSummaryOp(Runtime *rt)
+      : ReplTraceOp(rt)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    ReplTraceSummaryOp::ReplTraceSummaryOp(const ReplTraceSummaryOp &rhs)
+      : ReplTraceOp(NULL)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    ReplTraceSummaryOp::~ReplTraceSummaryOp(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    ReplTraceSummaryOp& ReplTraceSummaryOp::operator=(
+                                                  const ReplTraceSummaryOp &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplTraceSummaryOp::initialize_summary(ReplicateContext *ctx,
+                                                PhysicalTemplate *tpl,
+                                                Operation *invalidator)
+    //--------------------------------------------------------------------------
+    {
+      initialize_repl_fence(ctx, MAPPING_FENCE);
+      context_index = invalidator->get_ctx_index();
+      current_template = tpl;
+      // The summary could have been marked as being traced,
+      // so here we forcibly clear them out.
+      trace = NULL;
+      tracing = false;
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplTraceSummaryOp::activate(void)
+    //--------------------------------------------------------------------------
+    {
+      activate_operation();
+      current_template = NULL;
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplTraceSummaryOp::deactivate(void)
+    //--------------------------------------------------------------------------
+    {
+      deactivate_operation();
+      runtime->free_repl_summary_op(this);
+    }
+
+    //--------------------------------------------------------------------------
+    const char* ReplTraceSummaryOp::get_logging_name(void) const
+    //--------------------------------------------------------------------------
+    {
+      return op_names[TRACE_SUMMARY_OP_KIND];
+    }
+
+    //--------------------------------------------------------------------------
+    Operation::OpKind ReplTraceSummaryOp::get_operation_kind(void) const
+    //--------------------------------------------------------------------------
+    {
+      return TRACE_SUMMARY_OP_KIND;
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplTraceSummaryOp::trigger_dependence_analysis(void)
+    //--------------------------------------------------------------------------
+    {
+      perform_fence_analysis(true/*register fence also*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplTraceSummaryOp::trigger_ready(void)
+    //--------------------------------------------------------------------------
+    {
+      enqueue_ready_operation();
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplTraceSummaryOp::trigger_mapping(void)
+    //--------------------------------------------------------------------------
+    {
+      if (current_template->is_replayable())
+        current_template->apply_postcondition(this);
+      ReplFenceOp::trigger_mapping();
+    }
+
+    /////////////////////////////////////////////////////////////
     // Shard Manager 
     /////////////////////////////////////////////////////////////
 

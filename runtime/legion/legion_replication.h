@@ -18,6 +18,7 @@
 
 #include "legion/legion_ops.h"
 #include "legion/legion_tasks.h"
+#include "legion/legion_trace.h"
 
 namespace Legion {
   namespace Internal { 
@@ -1457,6 +1458,134 @@ namespace Legion {
                                   std::vector<unsigned> &ranking);
     public:
       RtBarrier resource_barrier;
+    };
+
+    /**
+     * \class ReplTraceOp
+     * Base class for all replicated trace operations
+     */
+    class ReplTraceOp : public ReplFenceOp {
+    public:
+      ReplTraceOp(Runtime *rt);
+      ReplTraceOp(const ReplTraceOp &rhs);
+      virtual ~ReplTraceOp(void);
+    public:
+      ReplTraceOp& operator=(const ReplTraceOp &rhs);
+    public:
+      virtual void execute_dependence_analysis(void);
+    protected:
+      LegionTrace *local_trace;
+    };
+    
+    /**
+     * \class ReplTraceCaptureOp
+     * Control replicated version of the TraceCaptureOp
+     */
+    class ReplTraceCaptureOp : public ReplTraceOp {
+    public:
+      static const AllocationType alloc_type = TRACE_CAPTURE_OP_ALLOC;
+    public:
+      ReplTraceCaptureOp(Runtime *rt);
+      ReplTraceCaptureOp(const ReplTraceCaptureOp &rhs);
+      virtual ~ReplTraceCaptureOp(void);
+    public:
+      ReplTraceCaptureOp& operator=(const ReplTraceCaptureOp &rhs);
+    public:
+      void initialize_capture(ReplicateContext *ctx, bool has_blocking_call);
+    public:
+      virtual void activate(void);
+      virtual void deactivate(void);
+      virtual const char* get_logging_name(void) const;
+      virtual OpKind get_operation_kind(void) const;
+      virtual void trigger_dependence_analysis(void);
+      virtual void trigger_mapping(void);
+    protected:
+      DynamicTrace *dynamic_trace;
+      PhysicalTemplate *current_template;
+      bool has_blocking_call;
+    };
+
+    /**
+     * \class ReplTraceCompleteOp
+     * Control replicated version of TraceCompleteOp
+     */
+    class ReplTraceCompleteOp : public ReplTraceOp {
+    public:
+      static const AllocationType alloc_type = TRACE_COMPLETE_OP_ALLOC;
+    public:
+      ReplTraceCompleteOp(Runtime *rt);
+      ReplTraceCompleteOp(const ReplTraceCompleteOp &rhs);
+      virtual ~ReplTraceCompleteOp(void);
+    public:
+      ReplTraceCompleteOp& operator=(const ReplTraceCompleteOp &rhs);
+    public:
+      void initialize_complete(ReplicateContext *ctx, bool has_blocking_call);
+    public:
+      virtual void activate(void);
+      virtual void deactivate(void);
+      virtual const char* get_logging_name(void) const;
+      virtual OpKind get_operation_kind(void) const;
+      virtual void trigger_dependence_analysis(void);
+      virtual void trigger_mapping(void);
+    protected:
+      PhysicalTemplate *current_template;
+      ApEvent template_completion;
+      bool replayed;
+      bool has_blocking_call;
+    };
+
+    /**
+     * \class ReplTraceReplayOp
+     * Control replicated version of TraceReplayOp
+     */
+    class ReplTraceReplayOp : public ReplTraceOp {
+    public:
+      static const AllocationType alloc_type = TRACE_REPLAY_OP_ALLOC;
+    public:
+      ReplTraceReplayOp(Runtime *rt);
+      ReplTraceReplayOp(const ReplTraceReplayOp &rhs);
+      virtual ~ReplTraceReplayOp(void);
+    public:
+      ReplTraceReplayOp& operator=(const ReplTraceReplayOp &rhs);
+    public:
+      void initialize_replay(ReplicateContext *ctx, LegionTrace *trace);
+    public:
+      virtual void activate(void);
+      virtual void deactivate(void);
+      virtual const char* get_logging_name(void) const;
+      virtual OpKind get_operation_kind(void) const;
+      virtual void trigger_dependence_analysis(void);
+    };
+
+    /**
+     * \class ReplTraceSummaryOp
+     * Control replicated version of TraceSummaryOp
+     */
+    class ReplTraceSummaryOp : public ReplTraceOp {
+    public:
+      static const AllocationType alloc_type = TRACE_SUMMARY_OP_ALLOC;
+    public:
+      ReplTraceSummaryOp(Runtime *rt);
+      ReplTraceSummaryOp(const ReplTraceSummaryOp &rhs);
+      virtual ~ReplTraceSummaryOp(void);
+    public:
+      ReplTraceSummaryOp& operator=(const ReplTraceSummaryOp &rhs);
+    public:
+      void initialize_summary(ReplicateContext *ctx,
+                              PhysicalTemplate *tpl,
+                              Operation *invalidator);
+      void perform_logging(void);
+    public:
+      virtual void activate(void);
+      virtual void deactivate(void);
+      virtual const char* get_logging_name(void) const;
+      virtual OpKind get_operation_kind(void) const;
+    public:
+      virtual void trigger_dependence_analysis(void);
+      virtual void trigger_ready(void);
+      virtual void trigger_mapping(void);
+    protected:
+      PhysicalTemplate *current_template;
     };
 
     /**
