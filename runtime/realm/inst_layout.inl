@@ -1042,7 +1042,7 @@ namespace Realm {
     return true;
   }
 
-  template <typename FT, int N, typename T>
+  template <typename FT, int N, typename T> __CUDA_HD__
   inline FT *AffineAccessor<FT,N,T>::ptr(const Point<N,T>& p) const
   {
     return this->get_ptr(p);
