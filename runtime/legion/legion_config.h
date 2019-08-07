@@ -179,10 +179,10 @@
 #endif
 // Maximum ID for an application reduction ID
 #ifndef LEGION_MAX_APPLICATION_REDOP_ID
-#define LEGION_MAX_APPLICATION_REDOP_ID       (1<<20)
+#ifdef LEGION_USE_PYTHON_CFFI
+#define LEGION_MAX_APPLICATION_REDOP_ID       1048576 
 #else
-#if defined(LEGION_USE_PYTHON_CFFI) && LEGION_MAX_APPLICATION_REDOP_ID != (1<<20)
-#error "Python CFFI is not allowed to overload LEGION_MAX_APPLICATION_REDOP_ID"
+#define LEGION_MAX_APPLICATION_REDOP_ID       (1<<20) // Python CFFI can't do this math
 #endif
 #endif
 // Maximum ID for an application serdez ID
@@ -1324,7 +1324,6 @@ enum {
   FIRST_AVAILABLE_SEMANTIC_TAG = 1,
 };
 
-// If you change this enum, update the hard-coded python cffi values
 typedef enum legion_type_id_t {
   LEGION_TYPE_BOOL = 0,
   LEGION_TYPE_INT16 = 1,
@@ -1341,22 +1340,49 @@ typedef enum legion_type_id_t {
   LEGION_TYPE_TOTAL = 12, // must be last
 } legion_type_id_t;
 
-// If you change this enum, update the hard-coded python cffi values
+// Do it like this because the Python CFFI parser is stupid
+#define LEGION_REDOP_KIND_SUM_VALUE 0
+#define LEGION_REDOP_KIND_DIFF_VALUE 1
+#define LEGION_REDOP_KIND_PROD_VALUE 2
+#define LEGION_REDOP_KIND_DIV_VALUE 3
+#define LEGION_REDOP_KIND_MAX_VALUE 4
+#define LEGION_REDOP_KIND_MIN_VALUE 5
+#define LEGION_REDOP_KIND_TOTAL_VALUE 6
+// Don't forget to undef after the legion_builtin_redop_t enum
+
 typedef enum legion_redop_kind_t {
-  LEGION_REDOP_KIND_SUM = 0,
-  LEGION_REDOP_KIND_DIFF = 1,
-  LEGION_REDOP_KIND_PROD = 2,
-  LEGION_REDOP_KIND_DIV = 3,
-  LEGION_REDOP_KIND_MAX = 4,
-  LEGION_REDOP_KIND_MIN = 5,
-  LEGION_REDOP_KIND_TOTAL = 6,
+  LEGION_REDOP_KIND_SUM = LEGION_REDOP_KIND_SUM_VALUE,
+  LEGION_REDOP_KIND_DIFF = LEGION_REDOP_KIND_DIFF_VALUE,
+  LEGION_REDOP_KIND_PROD = LEGION_REDOP_KIND_PROD_VALUE,
+  LEGION_REDOP_KIND_DIV = LEGION_REDOP_KIND_DIV_VALUE,
+  LEGION_REDOP_KIND_MAX = LEGION_REDOP_KIND_MAX_VALUE,
+  LEGION_REDOP_KIND_MIN = LEGION_REDOP_KIND_MIN_VALUE,
+  LEGION_REDOP_KIND_TOTAL = LEGION_REDOP_KIND_TOTAL_VALUE,
 } legion_redop_kind_t;
 
-
-typedef enum legion_builtin_redop_t {
 #ifndef LEGION_USE_PYTHON_CFFI
-#define LEGION_REDOP_VALUE(kind, type) \
-  LEGION_REDOP_BASE + LEGION_REDOP_KIND_##kind * LEGION_TYPE_TOTAL + LEGION_TYPE_##type
+// Normal way of doing things for sane compilers
+#define LEGION_REDOP_VALUE(kind, type) LEGION_REDOP_BASE + \
+  LEGION_REDOP_KIND_##kind * LEGION_TYPE_TOTAL + LEGION_TYPE_##type
+#else
+// Dumb stuff for the Python CFFI parser which can't multiply
+// so we'll do it the old-school way for them from a time 
+// before multiplication existed and all we had was addition
+#define MULTIPLY0(x) 0
+#define MULTIPLY1(x) (x)
+#define MULTIPLY2(x) (x) + (x)
+#define MULTIPLY3(x) (x) + MULTIPLY2(x)
+#define MULTIPLY4(x) (x) + MULTIPLY3(x)
+#define MULTIPLY5(x) (x) + MULTIPLY4(x)
+
+#define MULTIPLY_(x,y) MULTIPLY##x(y)
+#define MULTIPLY(x,y) MULTIPLY_(x,y) 
+
+#define LEGION_REDOP_VALUE(kind, type) LEGION_REDOP_BASE + \
+  MULTIPLY(LEGION_REDOP_KIND_##kind##_VALUE, LEGION_TYPE_TOTAL) + \
+  LEGION_TYPE_##type
+#endif
+typedef enum legion_builtin_redop_t {
   LEGION_REDOP_BASE           = LEGION_MAX_APPLICATION_REDOP_ID,
   ////////////////////////////////////////
   // Sum reductions
@@ -1478,132 +1504,26 @@ typedef enum legion_builtin_redop_t {
   LEGION_REDOP_MIN_FLOAT32    = LEGION_REDOP_VALUE(MIN,FLOAT32),
   LEGION_REDOP_MIN_FLOAT64    = LEGION_REDOP_VALUE(MIN,FLOAT64),
   // No definitions of min for complex types
-#else // LEGION_USE_PYTHON_CFFI
-  // The Python CFFI parser is dumb and cannot parse constant expressions
-  // so we have to manually inline them into constant values for it
-  LEGION_REDOP_BASE           = 1048576,
-  ////////////////////////////////////////
-  // Sum reductions
-  ////////////////////////////////////////
-  LEGION_REDOP_OR_BOOL        = 1048576,
-  LEGION_REDOP_SUM_INT16      = 1048577,
-  LEGION_REDOP_SUM_INT32      = 1048578,
-  LEGION_REDOP_SUM_INT64      = 1048579,
-  LEGION_REDOP_SUM_UINT16     = 1048580,
-  LEGION_REDOP_SUM_UINT32     = 1048581,
-  LEGION_REDOP_SUM_UINT64     = 1048582,
-#ifdef LEGION_REDOP_HALF
-  LEGION_REDOP_SUM_FLOAT16    = 1048583,
+} legion_builtin_redop_t;
+
+#undef LEGION_REDOP_KIND_SUM_VALUE
+#undef LEGION_REDOP_KIND_DIFF_VALUE
+#undef LEGION_REDOP_KIND_PROD_VALUE
+#undef LEGION_REDOP_KIND_DIV_VALUE
+#undef LEGION_REDOP_KIND_MAX_VALUE
+#undef LEGION_REDOP_KIND_MIN_VALUE
+#undef LEGION_REDOP_KIND_TOTAL_VALUE
+
+#ifdef LEGION_USE_PYTHON_CFFI
+#undef MULTIPLY0
+#undef MULTIPLY1
+#undef MULTIPLY2
+#undef MULTIPLY3
+#undef MULTIPLY4
+#undef MULTIPLY5
+#undef MULTIPLY_
+#undef MULTIPLY
 #endif
-  LEGION_REDOP_SUM_FLOAT32    = 1048584,
-  LEGION_REDOP_SUM_FLOAT64    = 1048585,
-#ifdef LEGION_REDOP_COMPLEX
-#ifdef LEGION_REDOP_HALF
-  LEGION_REDOP_SUM_COMPLEX32  = 1048586,
-#endif
-  LEGION_REDOP_SUM_COMPLEX64  = 1048587,
-  // TODO: LEGION_REDOP_SUM_COMPLEX128,
-#endif
-  ////////////////////////////////////////
-  // Difference reductions
-  ////////////////////////////////////////
-  // No difference for bools
-  LEGION_REDOP_DIFF_INT16     = 1048589,
-  LEGION_REDOP_DIFF_INT32     = 1048590,
-  LEGION_REDOP_DIFF_INT64     = 1048591,
-  LEGION_REDOP_DIFF_UINT16    = 1048592,
-  LEGION_REDOP_DIFF_UINT32    = 1048593,
-  LEGION_REDOP_DIFF_UINT64    = 1048594,
-#ifdef LEGION_REDOP_HALF
-  LEGION_REDOP_DIFF_FLOAT16   = 1048595,
-#endif
-  LEGION_REDOP_DIFF_FLOAT32   = 1048596,
-  LEGION_REDOP_DIFF_FLOAT64   = 1048597,
-#ifdef LEGION_REDOP_COMPLEX
-#ifdef LEGION_REDOP_HALF
-  LEGION_REDOP_DIFF_COMPLEX32 = 1048598,
-#endif
-  LEGION_REDOP_DIFF_COMPLEX64 = 1048599,
-  // TODO: LEGION_REDOP_DIFF_COMPLEX128,
-#endif
-  ////////////////////////////////////////
-  // Product reductions
-  ////////////////////////////////////////
-  LEGION_REDOP_AND_BOOL       = 1048600,
-  LEGION_REDOP_PROD_INT16     = 1048601,
-  LEGION_REDOP_PROD_INT32     = 1048602,
-  LEGION_REDOP_PROD_INT64     = 1048603,
-  LEGION_REDOP_PROD_UINT16    = 1048604,
-  LEGION_REDOP_PROD_UINT32    = 1048605,
-  LEGION_REDOP_PROD_UINT64    = 1048606,
-#ifdef LEGION_REDOP_HALF
-  LEGION_REDOP_PROD_FLOAT16   = 1048607,
-#endif
-  LEGION_REDOP_PROD_FLOAT32   = 1048608,
-  LEGION_REDOP_PROD_FLOAT64   = 1048609,
-#ifdef LEGION_REDOP_COMPLEX
-#ifdef LEGION_REDOP_HALF
-  LEGION_REDOP_PROD_COMPLEX32 = 1048610,
-#endif
-  LEGION_REDOP_PROD_COMPLEX64 = 1048611,
-  // TODO: LEGION_REDOP_PROD_COMPLEX128,
-#endif
-  ////////////////////////////////////////
-  // Division reductions
-  ////////////////////////////////////////
-  // No division for bools
-  LEGION_REDOP_DIV_INT16      = 1048613,
-  LEGION_REDOP_DIV_INT32      = 1048614,
-  LEGION_REDOP_DIV_INT64      = 1048615,
-  LEGION_REDOP_DIV_UINT16     = 1048616,
-  LEGION_REDOP_DIV_UINT32     = 1048617,
-  LEGION_REDOP_DIV_UINT64     = 1048618,
-#ifdef LEGION_REDOP_HALF
-  LEGION_REDOP_DIV_FLOAT16    = 1048619,
-#endif
-  LEGION_REDOP_DIV_FLOAT32    = 1048620,
-  LEGION_REDOP_DIV_FLOAT64    = 1048621,
-#ifdef LEGION_REDOP_COMPLEX
-#ifdef LEGION_REDOP_HALF
-  LEGION_REDOP_DIV_COMPLEX32  = 1048622,
-#endif
-  LEGION_REDOP_DIV_COMPLEX64  = 1048623,
-  // TODO: LEGION_REDOP_DIV_COMPLEX128,
-#endif
-  ////////////////////////////////////////
-  // Max reductions
-  ////////////////////////////////////////
-  LEGION_REDOP_MAX_BOOL       = 1048624,
-  LEGION_REDOP_MAX_INT16      = 1048625,
-  LEGION_REDOP_MAX_INT32      = 1048626,
-  LEGION_REDOP_MAX_INT64      = 1048627,
-  LEGION_REDOP_MAX_UINT16     = 1048628,
-  LEGION_REDOP_MAX_UINT32     = 1048629,
-  LEGION_REDOP_MAX_UINT64     = 1048630,
-#ifdef LEGION_REDOP_HALF
-  LEGION_REDOP_MAX_FLOAT16    = 1048631,
-#endif
-  LEGION_REDOP_MAX_FLOAT32    = 1048632,
-  LEGION_REDOP_MAX_FLOAT64    = 1048633,
-  // No definitions of max for complex types
-  ////////////////////////////////////////
-  // Min reductions
-  ////////////////////////////////////////
-  LEGION_REDOP_MIN_BOOL       = 1048636,
-  LEGION_REDOP_MIN_INT16      = 1048637,
-  LEGION_REDOP_MIN_INT32      = 1048638,
-  LEGION_REDOP_MIN_INT64      = 1048639,
-  LEGION_REDOP_MIN_UINT16     = 1048640,
-  LEGION_REDOP_MIN_UINT32     = 1048641,
-  LEGION_REDOP_MIN_UINT64     = 1048642,
-#ifdef LEGION_REDOP_HALF
-  LEGION_REDOP_MIN_FLOAT16    = 1048643,
-#endif
-  LEGION_REDOP_MIN_FLOAT32    = 1048644,
-  LEGION_REDOP_MIN_FLOAT64    = 1048645,
-  // No definitions of min for complex types
-#endif // LEGION_USE_PYTHON_CFFI
-} legion_builting_redop_t;
 
 typedef enum legion_execution_constraint_t {
   ISA_CONSTRAINT = 0, // instruction set architecture
