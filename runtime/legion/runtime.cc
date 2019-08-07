@@ -11013,6 +11013,13 @@ namespace Legion {
         delete (*it);
       }
       available_repl_replay_ops.clear();
+      for (std::deque<ReplTraceBeginOp*>::const_iterator it = 
+            available_repl_begin_ops.begin(); it !=
+            available_repl_begin_ops.end(); it++)
+      {
+        delete (*it);
+      }
+      available_repl_begin_ops.clear();
       for (std::deque<ReplTraceSummaryOp*>::const_iterator it = 
             available_repl_summary_ops.begin(); it !=
             available_repl_summary_ops.end(); it++)
@@ -20013,6 +20020,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    ReplTraceBeginOp* Runtime::get_available_repl_begin_op(void)
+    //--------------------------------------------------------------------------
+    {
+      return get_available(begin_op_lock, available_repl_begin_ops);
+    }
+
+    //--------------------------------------------------------------------------
     ReplTraceSummaryOp* Runtime::get_available_repl_summary_op(void)
     //--------------------------------------------------------------------------
     {
@@ -20477,6 +20491,14 @@ namespace Legion {
     {
       AutoLock t_lock(replay_op_lock);
       release_operation<false>(available_repl_replay_ops, op);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::free_repl_begin_op(ReplTraceBeginOp *op)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock t_lock(summary_op_lock);
+      release_operation<false>(available_repl_begin_ops, op);
     }
 
     //--------------------------------------------------------------------------

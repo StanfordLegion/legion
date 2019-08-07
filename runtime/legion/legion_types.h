@@ -1705,6 +1705,7 @@ namespace Legion {
     class ReplTraceCaptureOp;
     class ReplTraceCompleteOp;
     class ReplTraceReplayOp;
+    class ReplTraceBeginOp;
     class ReplTraceSummaryOp;
     class ShardMapping;
     class ShardManager;

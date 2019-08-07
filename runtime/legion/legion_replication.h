@@ -1558,6 +1558,28 @@ namespace Legion {
     };
 
     /**
+     * \class ReplTraceBeginOp
+     * Control replicated version of trace begin op
+     */
+    class ReplTraceBeginOp : public ReplTraceOp {
+    public:
+      static const AllocationType alloc_type = TRACE_BEGIN_OP_ALLOC;
+    public:
+      ReplTraceBeginOp(Runtime *rt);
+      ReplTraceBeginOp(const ReplTraceBeginOp &rhs);
+      virtual ~ReplTraceBeginOp(void);
+    public:
+      ReplTraceBeginOp& operator=(const ReplTraceBeginOp &rhs);
+    public:
+      void initialize_begin(ReplicateContext *ctx, LegionTrace *trace);
+    public:
+      virtual void activate(void);
+      virtual void deactivate(void);
+      virtual const char* get_logging_name(void) const;
+      virtual OpKind get_operation_kind(void) const;
+    };
+
+    /**
      * \class ReplTraceSummaryOp
      * Control replicated version of TraceSummaryOp
      */

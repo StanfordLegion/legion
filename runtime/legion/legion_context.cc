@@ -6622,7 +6622,7 @@ namespace Legion {
         // Already fixed, dump a complete trace op into the stream
         TraceCompleteOp *complete_op = runtime->get_available_trace_op();
         complete_op->initialize_complete(this, has_blocking_call);
-        runtime->add_to_dependence_queue(this, executing_processor, complete_op);
+        runtime->add_to_dependence_queue(this, executing_processor,complete_op);
       }
       else
       {
@@ -11913,11 +11913,107 @@ namespace Legion {
     void ReplicateContext::begin_trace(TraceID tid, bool logical_only)
     //--------------------------------------------------------------------------
     {
+#ifdef CTRL_REPL_TRACING
+      if (runtime->no_tracing) return;
+
+      AutoRuntimeCall call(this);
+#ifdef DEBUG_LEGION
+      log_run.debug("Beginning a trace in task %s (ID %lld)",
+                    get_task_name(), get_unique_id());
+#endif
+      // No need to hold the lock here, this is only ever called
+      // by the one thread that is running the task.
+      if (current_trace != NULL)
+        REPORT_LEGION_ERROR(ERROR_ILLEGAL_NESTED_TRACE,
+          "Illegal nested trace with ID %d attempted in "
+           "task %s (ID %lld)", tid, get_task_name(), get_unique_id())
+      std::map<TraceID,DynamicTrace*>::const_iterator finder = traces.find(tid);
+      DynamicTrace* dynamic_trace = NULL;
+      if (finder == traces.end())
+      {
+        // Trace does not exist yet, so make one and record it
+        dynamic_trace = new DynamicTrace(tid, this, logical_only);
+        dynamic_trace->add_reference();
+        traces[tid] = dynamic_trace;
+      }
+      else
+        dynamic_trace = finder->second;
+
+#ifdef DEBUG_LEGION
+      assert(dynamic_trace != NULL);
+#endif
+      dynamic_trace->clear_blocking_call();
+
+      // Issue a begin op
+      ReplTraceBeginOp *begin = runtime->get_available_repl_begin_op();
+      begin->initialize_begin(this, dynamic_trace);
+      runtime->add_to_dependence_queue(this, executing_processor, begin);
+
+      if (!logical_only)
+      {
+        // Issue a replay op
+        ReplTraceReplayOp *replay = runtime->get_available_repl_replay_op();
+        replay->initialize_replay(this, dynamic_trace);
+        runtime->add_to_dependence_queue(this, executing_processor, replay);
+      }
+
+      // Now mark that we are starting a trace
+      current_trace = dynamic_trace;
+#else
       if (!logical_only)
         log_run.warning("Physical tracing is not yet supported with control "
             "replication. Downgrading trace %d in task %s (UID %lld) to a "
             "logical-only trace.", tid, get_task_name(), get_unique_id());
       InnerContext::begin_trace(tid, true/*logical only*/);
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplicateContext::end_trace(TraceID tid)
+    //--------------------------------------------------------------------------
+    {
+#ifdef CTRL_REPL_TRACING
+      if (runtime->no_tracing) return;
+
+      AutoRuntimeCall call(this);
+#ifdef DEBUG_LEGION
+      log_run.debug("Ending a trace in task %s (ID %lld)",
+                    get_task_name(), get_unique_id());
+#endif
+      if (current_trace == NULL)
+        REPORT_LEGION_ERROR(ERROR_UMATCHED_END_TRACE,
+          "Unmatched end trace for ID %d in task %s (ID %lld)", 
+          tid, get_task_name(), get_unique_id())
+      else if (!current_trace->is_dynamic_trace())
+      {
+        REPORT_LEGION_ERROR(ERROR_ILLEGAL_END_TRACE_CALL,
+          "Illegal end trace call on a static trace in task %s (UID %lld)", 
+          get_task_name(), get_unique_id());
+      }
+      const bool has_blocking_call = current_trace->has_blocking_call();
+      if (current_trace->is_fixed())
+      {
+        // Already fixed, dump a complete trace op into the stream
+        ReplTraceCompleteOp *complete_op = 
+          runtime->get_available_repl_trace_op();
+        complete_op->initialize_complete(this, has_blocking_call);
+        runtime->add_to_dependence_queue(this, executing_processor, complete_op);
+      }
+      else
+      {
+        // Not fixed yet, dump a capture trace op into the stream
+        ReplTraceCaptureOp *capture_op = 
+          runtime->get_available_repl_capture_op();
+        capture_op->initialize_capture(this, has_blocking_call);
+        runtime->add_to_dependence_queue(this, executing_processor, capture_op);
+        // Mark that the current trace is now fixed
+        current_trace->as_dynamic_trace()->fix_trace();
+      }
+      // We no longer have a trace that we're executing 
+      current_trace = NULL;
+#else
+      InnerContext::end_trace(tid);
+#endif
     }
 
     //--------------------------------------------------------------------------
