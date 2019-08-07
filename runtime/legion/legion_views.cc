@@ -3021,6 +3021,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       manager->add_nested_gc_ref(did, mutator);
+      // If we're the logical owner, but not the original owner
+      // then we use a gc reference on the original owner to 
+      // keep all the views allive until we're done
+      if (is_logical_owner() && !is_owner())
+        send_remote_gc_increment(owner_space, mutator);
     }
 
     //--------------------------------------------------------------------------
@@ -3029,6 +3034,10 @@ namespace Legion {
     {
       // we have a resource reference on the manager so no need to check
       manager->remove_nested_gc_ref(did, mutator);
+      // If we're the logical owner but not the original owner
+      // then we remove the gc reference that we added
+      if (is_logical_owner() && !is_owner())
+        send_remote_gc_decrement(owner_space, RtEvent::NO_RT_EVENT, mutator);
     }
 
     //--------------------------------------------------------------------------
@@ -4719,6 +4728,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       manager->add_nested_gc_ref(did, mutator);
+      // If we're the logical owner, but not the original owner
+      // then we use a gc reference on the original owner to 
+      // keep all the views allive until we're done
+      if (is_logical_owner() && !is_owner())
+        send_remote_gc_increment(owner_space, mutator);
     }
 
     //--------------------------------------------------------------------------
@@ -4726,6 +4740,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       manager->remove_nested_gc_ref(did, mutator);
+      // If we're the logical owner but not the original owner
+      // then we remove the gc reference that we added
+      if (is_logical_owner() && !is_owner())
+        send_remote_gc_decrement(owner_space, RtEvent::NO_RT_EVENT, mutator);
     }
 
     //--------------------------------------------------------------------------
