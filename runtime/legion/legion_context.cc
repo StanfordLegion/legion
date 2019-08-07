@@ -6381,8 +6381,10 @@ namespace Legion {
 #endif
       dynamic_trace->clear_blocking_call();
 
-      // Issue a mapping fence
-      runtime->issue_mapping_fence(this);
+      // Issue a begin op
+      TraceBeginOp *begin = runtime->get_available_begin_op();
+      begin->initialize_begin(this, dynamic_trace);
+      runtime->add_to_dependence_queue(this, executing_processor, begin);
 
       if (!logical_only)
       {
