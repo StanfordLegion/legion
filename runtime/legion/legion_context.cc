@@ -6251,6 +6251,7 @@ namespace Legion {
         if ((op_kind != Operation::FENCE_OP_KIND) &&
             (op_kind != Operation::FRAME_OP_KIND) &&
             (op_kind != Operation::DELETION_OP_KIND) &&
+            (op_kind != Operation::TRACE_BEGIN_OP_KIND) && 
             (op_kind != Operation::TRACE_COMPLETE_OP_KIND) &&
             (op_kind != Operation::TRACE_CAPTURE_OP_KIND) &&
             (op_kind != Operation::TRACE_REPLAY_OP_KIND) &&
@@ -6297,6 +6298,7 @@ namespace Legion {
         assert((op_kind == Operation::FENCE_OP_KIND) || 
                (op_kind == Operation::FRAME_OP_KIND) || 
                (op_kind == Operation::DELETION_OP_KIND) ||
+               (op_kind == Operation::TRACE_BEGIN_OP_KIND) ||
                (op_kind == Operation::TRACE_COMPLETE_OP_KIND) ||
                (op_kind == Operation::TRACE_CAPTURE_OP_KIND) ||
                (op_kind == Operation::TRACE_REPLAY_OP_KIND) ||
@@ -6575,8 +6577,10 @@ namespace Legion {
 #endif
       dynamic_trace->clear_blocking_call();
 
-      // Issue a mapping fence
-      runtime->issue_mapping_fence(this);
+      // Issue a begin op
+      TraceBeginOp *begin = runtime->get_available_begin_op();
+      begin->initialize_begin(this, dynamic_trace);
+      runtime->add_to_dependence_queue(this, executing_processor, begin);
 
       if (!logical_only)
       {
