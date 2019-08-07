@@ -2536,7 +2536,6 @@ namespace Legion {
         // Find our constraints
         creation_constraints = runtime->find_layout_constraints(ctx, 
                                             inline_op.layout_constraint_id);
-        Memory target_memory;
         if (creation_constraints.memory_constraint.is_valid())
         {
           Machine::MemoryQuery valid_mems(machine);
