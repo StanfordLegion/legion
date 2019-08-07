@@ -9922,6 +9922,27 @@ namespace Legion {
         delete (*it);
       }
       available_trace_ops.clear();
+      for (std::deque<TraceReplayOp*>::const_iterator it = 
+            available_replay_ops.begin(); it !=
+            available_replay_ops.end(); it++)
+      {
+        delete (*it);
+      }
+      available_replay_ops.clear();
+      for (std::deque<TraceBeginOp*>::const_iterator it = 
+            available_begin_ops.begin(); it !=
+            available_begin_ops.end(); it++)
+      {
+        delete (*it);
+      }
+      available_begin_ops.clear();
+      for (std::deque<TraceSummaryOp*>::const_iterator it = 
+            available_summary_ops.begin(); it !=
+            available_summary_ops.end(); it++)
+      {
+        delete (*it);
+      }
+      available_summary_ops.clear();
       for (std::deque<MustEpochOp*>::const_iterator it = 
             available_epoch_ops.begin(); it !=
             available_epoch_ops.end(); it++)
