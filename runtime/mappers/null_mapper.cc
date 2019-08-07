@@ -118,6 +118,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void NullMapper::map_replicate_task(const MapperContext      ctx,
+                                        const Task&              task,
+                                        const MapTaskInput&      input,
+                                        const MapTaskOutput&     default_output,
+                                        MapReplicateTaskOutput&  output)
+    //--------------------------------------------------------------------------
+    {
+      report_unimplemented(__func__);
+    }
+
+    //--------------------------------------------------------------------------
     void NullMapper::select_task_variant(const MapperContext          ctx,
                                          const Task&                  task,
                                          const SelectVariantInput&    input,
