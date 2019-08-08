@@ -946,11 +946,11 @@
 #define MASK_FMT "llx"
 #else
 // SJT: this comes first because some systems require __STDC_FORMAT_MACROS
-//  to be defined before cinttypes.h is included anywhere
+//  to be defined before inttypes.h is included anywhere
 #ifndef __STDC_FORMAT_MACROS
 #define __STDC_FORMAT_MACROS
 #endif
-#include <cinttypes.h>
+#include <inttypes.h>
 #define MASK_FMT PRIx64
 #endif
     //--------------------------------------------------------------------------
