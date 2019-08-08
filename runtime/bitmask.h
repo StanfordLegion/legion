@@ -950,7 +950,11 @@
 #ifndef __STDC_FORMAT_MACROS
 #define __STDC_FORMAT_MACROS
 #endif
+#if __cplusplus >= 201103L
+#include <cinttypes>
+#else
 #include <inttypes.h>
+#endif
 #define MASK_FMT PRIx64
 #endif
     //--------------------------------------------------------------------------
