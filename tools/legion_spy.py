@@ -3775,6 +3775,9 @@ class LogicalState(object):
                           continue   
                         # Otherwise we're going to close it so no more upgrades
                         upgrade_child = False
+                    elif next_child is not None and \
+                            self.node.are_children_disjoint(child, next_child):
+                        continue
                     children_to_read_close[child] = False
                 closed = True
                 if not self.perform_close_operation(children_to_read_close,
@@ -5168,7 +5171,7 @@ class Operation(object):
             for point in itervalues(self.points):
                 point.op.set_context(context, False)
         # Finaly recurse for any summary operations
-        if self.summary_op is not None:
+        if self.summary_op is not None and self.summary_op != self:
             self.summary_op.set_context(context, False)
         if add:
             self.context.add_operation(self)
