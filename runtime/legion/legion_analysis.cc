@@ -278,12 +278,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    PhysicalTraceInfo::PhysicalTraceInfo(const PhysicalTraceInfo &info,
-                                         unsigned src_idx,
-                                         unsigned dst_idx)
-      : op(info.op), index(src_idx), dst_index(dst_idx), tpl(info.tpl),
-        recording(info.recording), update_validity(info.update_validity)
+    PhysicalTraceInfo::PhysicalTraceInfo(
+                               Operation *o, unsigned src_idx, unsigned dst_idx)
     //--------------------------------------------------------------------------
+      : op(o), index(src_idx), dst_index(dst_idx), tpl((op == NULL) ? NULL :
+          (op->get_memoizable() == NULL) ? NULL :
+            op->get_memoizable()->get_template()),
+        recording((tpl == NULL) ? false : tpl->is_recording()),
+        update_validity(true)
     {
     }
 
@@ -5620,7 +5622,7 @@ namespace Legion {
             }
           }
         }
-        const PhysicalTraceInfo trace_info(op, index);
+        const PhysicalTraceInfo trace_info(op, src_index, dst_index);
         across_aggregator->issue_updates(trace_info, precondition,
             false/*has src preconditions*/, true/*has dst preconditions*/);
         // Need to wait before we can get the summary
@@ -5651,7 +5653,7 @@ namespace Legion {
         applied_events.insert(args.applied_event);
         return args.effects_event;
       }
-      const PhysicalTraceInfo trace_info(op, index);
+      const PhysicalTraceInfo trace_info(op, src_index, dst_index);
       if (across_aggregator != NULL)
       {
         const ApEvent result = across_aggregator->summarize(trace_info);
