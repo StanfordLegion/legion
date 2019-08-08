@@ -5167,7 +5167,7 @@ class Operation(object):
             for point in itervalues(self.points):
                 point.op.set_context(context, False)
         # Finaly recurse for any summary operations
-        if self.summary_op is not None:
+        if self.summary_op is not None and self.summary_op != self:
             self.summary_op.set_context(context, False)
         if add:
             self.context.add_operation(self)
