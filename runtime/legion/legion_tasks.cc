@@ -4089,29 +4089,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void SingleTask::complete_replay(ApEvent instance_ready_event)
-    //--------------------------------------------------------------------------
-    {
-      if (!arrive_barriers.empty())
-      {
-        ApEvent done_event = get_task_completion();
-        for (std::vector<PhaseBarrier>::const_iterator it =
-             arrive_barriers.begin(); it !=
-             arrive_barriers.end(); it++)
-          Runtime::phase_barrier_arrive(*it, 1/*count*/, done_event);
-      }
-#ifdef DEBUG_LEGION
-      assert(is_leaf());
-#endif
-      for (std::deque<InstanceSet>::iterator it = physical_instances.begin();
-           it != physical_instances.end(); ++it)
-        for (unsigned idx = 0; idx < it->size(); ++idx)
-          (*it)[idx].set_ready_event(instance_ready_event);
-      update_no_access_regions();
-      launch_task();
-    }
-
-    //--------------------------------------------------------------------------
     void SingleTask::pack_profiling_requests(Serializer &rez) const
     //--------------------------------------------------------------------------
     {
@@ -5706,6 +5683,29 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void IndividualTask::complete_replay(ApEvent instance_ready_event)
+    //--------------------------------------------------------------------------
+    {
+      if (!arrive_barriers.empty())
+      {
+        ApEvent done_event = get_task_completion();
+        for (std::vector<PhaseBarrier>::const_iterator it =
+             arrive_barriers.begin(); it !=
+             arrive_barriers.end(); it++)
+          Runtime::phase_barrier_arrive(*it, 1/*count*/, done_event);
+      }
+#ifdef DEBUG_LEGION
+      assert(is_leaf());
+#endif
+      for (std::deque<InstanceSet>::iterator it = physical_instances.begin();
+           it != physical_instances.end(); ++it)
+        for (unsigned idx = 0; idx < it->size(); ++idx)
+          (*it)[idx].set_ready_event(instance_ready_event);
+      update_no_access_regions();
+      launch_task();
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ void IndividualTask::process_unpack_remote_complete(
                                                             Deserializer &derez)
     //--------------------------------------------------------------------------
@@ -6390,6 +6390,21 @@ namespace Legion {
 #endif
       tpl->register_operation(this);
       complete_mapping();
+    }
+
+    //--------------------------------------------------------------------------
+    void PointTask::complete_replay(ApEvent instance_ready_event)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(is_leaf());
+#endif
+      for (std::deque<InstanceSet>::iterator it = physical_instances.begin();
+           it != physical_instances.end(); ++it)
+        for (unsigned idx = 0; idx < it->size(); ++idx)
+          (*it)[idx].set_ready_event(instance_ready_event);
+      update_no_access_regions();
+      launch_task();
     }
 
     //--------------------------------------------------------------------------
