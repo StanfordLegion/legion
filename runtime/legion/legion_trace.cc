@@ -1665,7 +1665,11 @@ namespace Legion {
                                             Operation *invalidator)
     //--------------------------------------------------------------------------
     {
-      initialize(ctx, MAPPING_FENCE);
+      initialize_operation(ctx, false/*track*/);
+      fence_kind = MAPPING_FENCE;
+      if (runtime->legion_spy_enabled)
+        LegionSpy::log_fence_operation(parent_ctx->get_unique_id(),
+                                       unique_op_id);
       context_index = invalidator->get_ctx_index();
       current_template = tpl;
       // The summary could have been marked as being traced,
@@ -2358,7 +2362,6 @@ namespace Legion {
       LegionSpy::log_summary_op_creator(op->get_unique_op_id(),
                                         invalidator->get_unique_op_id());
 #endif
-      context->register_executing_child(op);
       op->execute_dependence_analysis();
     }
 
