@@ -4945,6 +4945,9 @@ namespace Legion {
       tracing = false;
       current_template = NULL;
       has_blocking_call = has_block;
+      // Get a collective ID to use for check all replayable
+      replayable_collective_id = 
+        ctx->get_next_collective_index(COLLECTIVE_LOC_85); 
     }
 
     //--------------------------------------------------------------------------
@@ -5012,13 +5015,32 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(current_template != NULL);
         assert(local_trace->get_physical_trace() != NULL);
+        assert(current_template->is_recording());
+        ReplicateContext *repl_ctx =dynamic_cast<ReplicateContext*>(parent_ctx);
+        assert(repl_ctx != NULL);
+#else
+        ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
-        RtEvent pending_deletion =
-          local_trace->get_physical_trace()->fix_trace(current_template, this,
-              has_blocking_call);
-        if (pending_deletion.exists())
-          execution_precondition = Runtime::merge_events(NULL,
-              execution_precondition, ApEvent(pending_deletion));
+        current_template->finalize(this, has_blocking_call);
+        PhysicalTrace *physical_trace = local_trace->get_physical_trace();
+        // Check to see if this template is replayable across all the shards
+        AllReduceCollective<ProdReduction<bool> > 
+          all_replayable_collective(repl_ctx, replayable_collective_id);
+        const bool all_replayable = 
+          all_replayable_collective.sync_all_reduce(
+              current_template->is_replayable());
+        if (!all_replayable)
+        {
+          const RtEvent pending_deletion = 
+            current_template->defer_template_deletion();
+          if (pending_deletion.exists())
+            execution_precondition = Runtime::merge_events(NULL,
+                execution_precondition, ApEvent(pending_deletion));  
+          physical_trace->record_failed_capture();
+        }
+        else
+          physical_trace->record_replayable_capture(current_template);
+        // Reset the local trace
         local_trace->initialize_tracing_state();
       }
       ReplFenceOp::trigger_mapping();
@@ -5076,6 +5098,9 @@ namespace Legion {
       template_completion = ApEvent::NO_AP_EVENT;
       replayed = false;
       has_blocking_call = has_block;
+      // Get a collective ID to use for check all replayable
+      replayable_collective_id = 
+        ctx->get_next_collective_index(COLLECTIVE_LOC_86);
     }
 
     //--------------------------------------------------------------------------
@@ -5187,13 +5212,31 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(current_template != NULL);
         assert(local_trace->get_physical_trace() != NULL);
+        assert(current_template->is_recording());
+        ReplicateContext *repl_ctx =dynamic_cast<ReplicateContext*>(parent_ctx);
+        assert(repl_ctx != NULL);
+#else
+        ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
-        RtEvent pending_deletion =
-          local_trace->get_physical_trace()->fix_trace(current_template, this,
-              has_blocking_call);
-        if (pending_deletion.exists())
-          execution_precondition = Runtime::merge_events(NULL,
-              execution_precondition, ApEvent(pending_deletion));
+        current_template->finalize(this, has_blocking_call);
+        PhysicalTrace *physical_trace = local_trace->get_physical_trace();
+        // Check to see if this template is replayable across all the shards
+        AllReduceCollective<ProdReduction<bool> > 
+          all_replayable_collective(repl_ctx, replayable_collective_id);
+        const bool all_replayable = 
+          all_replayable_collective.sync_all_reduce(
+              current_template->is_replayable());
+        if (!all_replayable)
+        {
+          const RtEvent pending_deletion = 
+            current_template->defer_template_deletion();
+          if (pending_deletion.exists())
+            execution_precondition = Runtime::merge_events(NULL,
+                execution_precondition, ApEvent(pending_deletion));  
+          physical_trace->record_failed_capture();
+        }
+        else
+          physical_trace->record_replayable_capture(current_template);
         local_trace->initialize_tracing_state();
       }
       else if (replayed)
@@ -7274,7 +7317,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void AllGatherCollective::construct_message(ShardID target, int stage,
-                                                Serializer &rez) const
+                                                Serializer &rez)
     //--------------------------------------------------------------------------
     {
       rez.serialize(manager->repl_id);
@@ -7455,6 +7498,139 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
+    // All Reduce Collective 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    template<typename REDOP>
+    AllReduceCollective<REDOP>::AllReduceCollective(CollectiveIndexLocation loc,
+                                                    ReplicateContext *ctx)
+      : AllGatherCollective(loc, ctx), current_stage(-1)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename REDOP>
+    AllReduceCollective<REDOP>::AllReduceCollective(ReplicateContext *ctx,
+                                                    CollectiveID id)
+      : AllGatherCollective(ctx, id), current_stage(-1)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename REDOP>
+    AllReduceCollective<REDOP>::~AllReduceCollective(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename REDOP>
+    void AllReduceCollective<REDOP>::pack_collective_stage(Serializer &rez,
+                                                           int stage)
+    //--------------------------------------------------------------------------
+    {
+      // The first time we pack a stage we merge any values that we had
+      // unpacked earlier as they are needed for sending this stage for
+      // the first time.
+      if (stage != current_stage)
+      {
+        if (!future_values.empty())
+        {
+          typename std::map<int,std::vector<typename REDOP::RHS> >::iterator 
+            next = future_values.begin();
+          for (typename std::vector<typename REDOP::RHS>::const_iterator it = 
+                next->second.begin(); it != next->second.end(); it++)
+            REDOP::template fold<true/*exclusive*/>(value, *it);
+          future_values.erase(next);
+        }
+        current_stage = stage;
+      }
+      rez.serialize(value);
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename REDOP>
+    void AllReduceCollective<REDOP>::unpack_collective_stage(
+                                                 Deserializer &derez, int stage)
+    //--------------------------------------------------------------------------
+    {
+      // We never eagerly do reductions as they can arrive out of order
+      // and we can't apply them too early or we'll get duplicate 
+      // applications of reductions
+      typename REDOP::RHS next;
+      derez.deserialize(next);
+      future_values[stage].push_back(next);
+    }
+    
+    //--------------------------------------------------------------------------
+    template<typename REDOP>
+    void AllReduceCollective<REDOP>::async_all_reduce(typename REDOP::RHS val)
+    //--------------------------------------------------------------------------
+    {
+      value = val;
+      perform_collective_async();
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename REDOP>
+    RtEvent AllReduceCollective<REDOP>::wait_all_reduce(bool block)
+    //--------------------------------------------------------------------------
+    {
+      return perform_collective_wait(block);
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename REDOP>
+    typename REDOP::RHS AllReduceCollective<REDOP>::sync_all_reduce(
+                                                        typename REDOP::RHS val)
+    //--------------------------------------------------------------------------
+    {
+      async_all_reduce(val);
+      return get_result();
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename REDOP>
+    typename REDOP::RHS AllReduceCollective<REDOP>::get_result(void)
+    //--------------------------------------------------------------------------
+    {
+      // Wait for the results to be ready
+      wait_all_reduce(true);
+      // Need to avoid races here so we have to always recompute the
+      // last stage
+      typename REDOP::RHS result = value;
+      if (!future_values.empty())
+      {
+#ifdef DEBUG_LEGION
+        // Should be at most one stage left
+        assert(future_values.size() == 1);
+#endif
+        const typename std::map<int,std::vector<typename REDOP::RHS> >::
+          const_iterator last = future_values.begin();
+        if (last->first == -1)
+        {
+          // Special case for the last stage which already includes our
+          // value so just do the overwrite
+#ifdef DEBUG_LEGION
+          assert(last->second.size() == 1);
+#endif
+          result = last->second.front();
+        }
+        else
+        {
+          // Do the reduction here
+          for (typename std::vector<typename REDOP::RHS>::const_iterator it =
+                last->second.begin(); it != last->second.end(); it++)
+            REDOP::template fold<true/*exclusive*/>(result, *it);
+        }
+      }
+      return result;
+    }
+
+    /////////////////////////////////////////////////////////////
     // Barrier Exchange Collective 
     /////////////////////////////////////////////////////////////
 
@@ -7544,7 +7720,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<typename BAR>
     void BarrierExchangeCollective<BAR>::pack_collective_stage(Serializer &rez, 
-                                                               int stage) const
+                                                               int stage)
     //--------------------------------------------------------------------------
     {
       rez.serialize(window_size);
@@ -7841,7 +8017,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void CrossProductCollective::pack_collective_stage(Serializer &rez, 
-                                                       int stage) const
+                                                       int stage)
     //--------------------------------------------------------------------------
     {
       rez.serialize<size_t>(non_empty_handles.size());
@@ -8035,7 +8211,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void IndirectRecordExchange::pack_collective_stage(Serializer &rez,
-                                                       int stage) const
+                                                       int stage)
     //--------------------------------------------------------------------------
     {
       rez.serialize(records.size());
@@ -8184,7 +8360,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void FieldDescriptorExchange::pack_collective_stage(Serializer &rez,
-                                                        int stage) const
+                                                        int stage)
     //--------------------------------------------------------------------------
     {
       // Always make a stage precondition and send it back
@@ -8572,7 +8748,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void FutureExchange::pack_collective_stage(Serializer &rez, int stage) const
+    void FutureExchange::pack_collective_stage(Serializer &rez, int stage)
     //--------------------------------------------------------------------------
     {
       rez.serialize<size_t>(results.size());
@@ -8671,8 +8847,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void FutureNameExchange::pack_collective_stage(Serializer &rez, 
-                                                   int stage) const
+    void FutureNameExchange::pack_collective_stage(Serializer &rez, int stage)
     //--------------------------------------------------------------------------
     {
       rez.serialize<size_t>(results.size());
@@ -8977,7 +9152,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void MustEpochMappingExchange::pack_collective_stage(Serializer &rez,
-                                                         int stage) const
+                                                         int stage)
     //--------------------------------------------------------------------------
     {
       rez.serialize<size_t>(processors.size());
@@ -9243,7 +9418,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void MustEpochDependenceExchange::pack_collective_stage(Serializer &rez,
-                                                            int stage) const
+                                                            int stage)
     //--------------------------------------------------------------------------
     {
       rez.serialize<size_t>(mapping_dependences.size());
@@ -9326,7 +9501,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void MustEpochCompletionExchange::pack_collective_stage(Serializer &rez,
-                                                            int stage) const
+                                                            int stage)
     //--------------------------------------------------------------------------
     {
       rez.serialize<size_t>(tasks_mapped.size());
@@ -9420,7 +9595,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ShardedMappingExchange::pack_collective_stage(Serializer &rez, 
-                                                       int stage) const
+                                                       int stage)
     //--------------------------------------------------------------------------
     {
       rez.serialize<size_t>(mappings.size());

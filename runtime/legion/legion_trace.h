@@ -473,9 +473,8 @@ namespace Legion {
         { return execution_fence_event; }
     public:
       PhysicalTemplate* start_new_template(void);
-      RtEvent fix_trace(PhysicalTemplate *tpl,
-                        Operation *op,
-                        bool has_blocking_call);
+      void record_replayable_capture(PhysicalTemplate *tpl);
+      void record_failed_capture(void);
     public:
       const std::vector<Processor> &get_replay_targets(void)
         { return replay_targets; }

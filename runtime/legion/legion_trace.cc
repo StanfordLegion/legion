@@ -1209,13 +1209,22 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(current_template != NULL);
         assert(local_trace->get_physical_trace() != NULL);
+        assert(current_template->is_recording());
 #endif
-        RtEvent pending_deletion =
-          local_trace->get_physical_trace()->fix_trace(current_template, this,
-              has_blocking_call);
-        if (pending_deletion.exists())
-          execution_precondition = Runtime::merge_events(NULL,
-              execution_precondition, ApEvent(pending_deletion));
+        current_template->finalize(this, has_blocking_call);
+        PhysicalTrace *physical_trace = local_trace->get_physical_trace();
+        if (!current_template->is_replayable())
+        {
+          const RtEvent pending_deletion = 
+            current_template->defer_template_deletion();
+          if (pending_deletion.exists())
+            execution_precondition = Runtime::merge_events(NULL,
+                execution_precondition, ApEvent(pending_deletion));  
+          physical_trace->record_failed_capture();
+        }
+        else
+          physical_trace->record_replayable_capture(current_template);
+        // Reset the local trace
         local_trace->initialize_tracing_state();
       }
       FenceOp::trigger_mapping();
@@ -1382,13 +1391,21 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(current_template != NULL);
         assert(local_trace->get_physical_trace() != NULL);
+        assert(current_template->is_recording());
 #endif
-        RtEvent pending_deletion =
-          local_trace->get_physical_trace()->fix_trace(current_template, this,
-              has_blocking_call);
-        if (pending_deletion.exists())
-          execution_precondition = Runtime::merge_events(NULL,
-              execution_precondition, ApEvent(pending_deletion));
+        current_template->finalize(this, has_blocking_call);
+        PhysicalTrace *physical_trace = local_trace->get_physical_trace();
+        if (!current_template->is_replayable())
+        {
+          const RtEvent pending_deletion = 
+            current_template->defer_template_deletion();
+          if (pending_deletion.exists())
+            execution_precondition = Runtime::merge_events(NULL,
+                execution_precondition, ApEvent(pending_deletion));  
+          physical_trace->record_failed_capture();
+        }
+        else
+          physical_trace->record_replayable_capture(current_template);
         local_trace->initialize_tracing_state();
       }
       else if (replayed)
@@ -1786,39 +1803,31 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RtEvent PhysicalTrace::fix_trace(
-                   PhysicalTemplate *tpl, Operation *op, bool has_blocking_call)
+    void PhysicalTrace::record_replayable_capture(PhysicalTemplate *tpl)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(tpl->is_recording());
-#endif
-      tpl->finalize(op, has_blocking_call);
-      RtEvent pending_deletion = RtEvent::NO_RT_EVENT;
-      if (!tpl->is_replayable())
+      templates.push_back(tpl);
+      // Reset the nonreplayable count when we find a replayable template
+      nonreplayable_count = 0;
+      current_template = NULL;
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalTrace::record_failed_capture(void)
+    //--------------------------------------------------------------------------
+    {
+      if (++nonreplayable_count > LEGION_NON_REPLAYABLE_WARNING)
       {
-        pending_deletion = tpl->defer_template_deletion();
-        current_template = NULL;
-        if (++nonreplayable_count > LEGION_NON_REPLAYABLE_WARNING)
-        {
-          REPORT_LEGION_WARNING(LEGION_WARNING_NON_REPLAYABLE_COUNT_EXCEEDED,
-              "WARNING: The runtime has failed to memoize the trace more than "
-              "%u times, due to the absence of a replayable template. It is "
-              "highly likely that trace %u will not be memoized for the rest "
-              "of execution. Please change the mapper to stop making "
-              "memoization requests.", LEGION_NON_REPLAYABLE_WARNING,
-              logical_trace->get_trace_id())
-          nonreplayable_count = 0;
-        }
-      }
-      else
-      {
-        // Reset the nonreplayable count when we find a replayable template
+        REPORT_LEGION_WARNING(LEGION_WARNING_NON_REPLAYABLE_COUNT_EXCEEDED,
+            "WARNING: The runtime has failed to memoize the trace more than "
+            "%u times, due to the absence of a replayable template. It is "
+            "highly likely that trace %u will not be memoized for the rest "
+            "of execution. Please change the mapper to stop making "
+            "memoization requests.", LEGION_NON_REPLAYABLE_WARNING,
+            logical_trace->get_trace_id())
         nonreplayable_count = 0;
-        current_template = NULL;
-        templates.push_back(tpl);
       }
-      return pending_deletion;
+      current_template = NULL;
     }
 
     //--------------------------------------------------------------------------
