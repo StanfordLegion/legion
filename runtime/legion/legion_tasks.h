@@ -586,7 +586,6 @@ namespace Legion {
       virtual void handle_misspeculation(void) = 0;
     public:
       // From Memoizable
-      virtual void complete_replay(ApEvent completion_event);
       virtual bool is_memoizable_task(void) const { return true; }
       virtual ApEvent get_memo_completion(bool replay)
         { const ApEvent result = get_task_completion();
@@ -802,6 +801,7 @@ namespace Legion {
     public:
       // From MemoizableOp
       virtual void replay_analysis(void);
+      virtual void complete_replay(ApEvent completion_event);
     public:
       static void process_unpack_remote_complete(Deserializer &derez);
       static void process_unpack_remote_commit(Deserializer &derez);
@@ -899,6 +899,7 @@ namespace Legion {
     public:
       // From MemoizableOp
       virtual void replay_analysis(void);
+      virtual void complete_replay(ApEvent completion_event);
     public:
       // From Memoizable
       virtual TraceLocalID get_trace_local_id() const;

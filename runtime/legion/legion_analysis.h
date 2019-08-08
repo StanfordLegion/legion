@@ -128,8 +128,7 @@ namespace Legion {
       PhysicalTraceInfo(const PhysicalTraceInfo &info, unsigned index,
                         bool update_validity = true);
       // Special case for copy across operations
-      PhysicalTraceInfo(const PhysicalTraceInfo &info, unsigned src_idx,
-                        unsigned dst_idx);
+      PhysicalTraceInfo(Operation *op, unsigned src_idx, unsigned dst_idx);
       PhysicalTraceInfo(Operation *op, Memoizable &memo);
       PhysicalTraceInfo(const PhysicalTraceInfo &rhs);
     public:
