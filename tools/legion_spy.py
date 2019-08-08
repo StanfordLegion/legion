@@ -3424,6 +3424,9 @@ class LogicalState(object):
                           continue   
                         # Otherwise we're going to close it so no more upgrades
                         upgrade_child = False
+                    elif next_child is not None and \
+                            self.node.are_children_disjoint(child, next_child):
+                        continue
                     children_to_read_close[child] = False
                 if not self.perform_close_operation(children_to_read_close,
                         True, False, op, req, previous_deps, perform_checks):
