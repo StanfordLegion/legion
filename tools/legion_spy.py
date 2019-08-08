@@ -6257,23 +6257,24 @@ class Operation(object):
             pass
         elif self.task and self.task.replicants:
             # Special case for if we are (control) replicated
-            self.compute_current_version_numbers()
-            assert self.mapping is None
-            # We have to do verification for all our replicatnts first
-            for shard in self.task.replicants.shards.itervalues():
-                self.mapping = shard.op.mapping
-                for index,req in self.reqs.iteritems():
-                    if not self.verify_physical_requirement(index, req, perform_checks):
-                        return False
-                self.mapping = None
-            # Then we do the registration for all our replicants
-            for shard in self.task.replicants.shards.itervalues():
-                self.mapping = shard.op.mapping
-                for index,req in self.reqs.iteritems():
-                    if not self.perform_verification_registration(index, req, 
-                                                                  perform_checks):
-                        return False
-                self.mapping = None
+            if self.reqs is not None:
+                self.compute_current_version_numbers()
+                assert self.mapping is None
+                # We have to do verification for all our replicatnts first
+                for shard in self.task.replicants.shards.itervalues():
+                    self.mapping = shard.op.mapping
+                    for index,req in self.reqs.iteritems():
+                        if not self.verify_physical_requirement(index, req, perform_checks):
+                            return False
+                    self.mapping = None
+                # Then we do the registration for all our replicants
+                for shard in self.task.replicants.shards.itervalues():
+                    self.mapping = shard.op.mapping
+                    for index,req in self.reqs.iteritems():
+                        if not self.perform_verification_registration(index, req, 
+                                                                      perform_checks):
+                            return False
+                    self.mapping = None
             # Last decided how to analyze each of the shards depending
             # on whether we are control replicated or not
             if self.task.replicants.control_replicated:
