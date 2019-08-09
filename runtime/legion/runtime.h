@@ -3715,13 +3715,17 @@ namespace Legion {
       static inline RtEvent protect_merge_events(
                                           const std::set<ApEvent> &events);
     public:
+      static inline ApBarrier get_previous_phase(const PhaseBarrier &bar);
       static inline void phase_barrier_arrive(const PhaseBarrier &bar, 
                 unsigned cnt, ApEvent precondition = ApEvent::NO_AP_EVENT,
                 const void *reduce_value = NULL, size_t reduce_value_size = 0);
+      static inline void advance_barrier(PhaseBarrier &bar);
       static inline void alter_arrival_count(PhaseBarrier &bar, int delta);
     public:
-      static inline ApBarrier get_previous_phase(const PhaseBarrier &bar);
-      static inline void advance_barrier(PhaseBarrier &bar);
+      static inline ApBarrier get_previous_phase(const ApBarrier &bar);
+      static inline void phase_barrier_arrive(const ApBarrier &bar, 
+                unsigned cnt, ApEvent precondition = ApEvent::NO_AP_EVENT,
+                const void *reduce_value = NULL, size_t reduce_value_size = 0);
       static inline void advance_barrier(ApBarrier &bar);
       static inline bool get_barrier_result(ApBarrier bar, void *result,
                                             size_t result_size);
@@ -4148,6 +4152,29 @@ namespace Legion {
     {
       Realm::Barrier copy = bar.phase_barrier;
       bar.phase_barrier = ApBarrier(copy.advance_barrier());
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ inline ApBarrier Runtime::get_previous_phase(
+                                                           const ApBarrier &bar)
+    //--------------------------------------------------------------------------
+    {
+      Realm::Barrier copy = bar;
+      return ApBarrier(copy.get_previous_phase());
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ inline void Runtime::phase_barrier_arrive(
+                  const ApBarrier &bar, unsigned count, ApEvent precondition,
+                  const void *reduce_value, size_t reduce_value_size)
+    //--------------------------------------------------------------------------
+    {
+      Realm::Barrier copy = bar;
+      copy.arrive(count, precondition, reduce_value, reduce_value_size);
+#ifdef LEGION_SPY
+      if (precondition.exists())
+        LegionSpy::log_event_dependence(precondition, bar);
+#endif
     }
 
     //--------------------------------------------------------------------------

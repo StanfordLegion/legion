@@ -832,6 +832,29 @@ namespace Legion {
     };
 
     /**
+     * \class TemplateIndexExchange
+     * A class for exchanging proposed templates for trace replay
+     */
+    class TemplateIndexExchange : public AllGatherCollective {
+    public:
+      TemplateIndexExchange(ReplicateContext *ctx, CollectiveID id);
+      TemplateIndexExchange(const TemplateIndexExchange &rhs);
+      virtual ~TemplateIndexExchange(void);
+    public:
+      TemplateIndexExchange& operator=(const TemplateIndexExchange &rhs);
+    public:
+      virtual void pack_collective_stage(Serializer &rez, int stage);
+      virtual void unpack_collective_stage(Deserializer &derez, int stage);
+    public:
+      void initiate_exchange(const std::vector<int> &indexes);
+      void complete_exchange(std::map<int,unsigned> &index_counts);
+    protected:
+      int current_stage;
+      std::map<int,unsigned> index_counts;
+      std::map<int,std::map<int,unsigned> > future_index_counts;
+    };
+
+    /**
      * \class ReplIndividualTask
      * An individual task that is aware that it is 
      * being executed in a control replication context.
@@ -1585,6 +1608,16 @@ namespace Legion {
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
       virtual void trigger_dependence_analysis(void);
+    protected:
+      // This a parameter that controls how many rounds of template
+      // selection we want shards to go through before giving up
+      // and doing a capture. The trick is to get all the shards to
+      // agree on the template. Each round will have each shard 
+      // propose twice as many viable traces the previous round so
+      // we get some nice exponential back-off properties. Increase
+      // the number of rounds if you want them to try for longer.
+      static const int TRACE_SELECTION_ROUNDS = 2;
+      CollectiveID trace_selection_collective_ids[TRACE_SELECTION_ROUNDS];
     };
 
     /**

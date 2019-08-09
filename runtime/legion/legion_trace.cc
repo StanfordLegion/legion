@@ -1853,26 +1853,67 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTrace::check_template_preconditions(ReplTraceReplayOp *op)
+    bool PhysicalTrace::find_viable_templates(ReplTraceReplayOp *op,
+                 unsigned templates_to_find, std::vector<int> &viable_templates)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(templates_to_find > 0);
+#endif
+      for (int index = viable_templates.empty() ? templates.size() - 1 : 
+            viable_templates.back() - 1; index >= 0; index--)
+      {
+        PhysicalTemplate *tpl = templates[index];
+        if (tpl->check_preconditions(op))
+        {
+          // A good tmplate so add it to the list
+          viable_templates.push_back(index);
+          // If we've found all our templates then we're done
+          if (--templates_to_find == 0)
+            return (index == 0); // whether we are done
+        }
+      }
+      return true; // Iterated over all the templates
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalTrace::select_template(ReplTraceReplayOp *op, unsigned index)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(index < templates.size());
+      assert(templates[index]->is_replayable());
+#endif
+      // Reset the nonreplayable count when a replayable template satisfies
+      // the precondition
+      nonreplayable_count = 0;
+      current_template = templates[index]; 
+    }
+
+#if 0
+    //--------------------------------------------------------------------------
+    int PhysicalTrace::check_template_preconditions(ReplTraceReplayOp *op)
     //--------------------------------------------------------------------------
     {
       current_template = NULL;
-      for (LegionVector<PhysicalTemplate*>::aligned::reverse_iterator it =
-           templates.rbegin(); it != templates.rend(); ++it)
+      for (int index = templates.size()-1; index >= 0; index--)
       {
-        if ((*it)->check_preconditions(op))
+        PhysicalTemplate *tpl = templates[index];
+        if (tpl->check_preconditions(op))
         {
 #ifdef DEBUG_LEGION
-          assert((*it)->is_replayable());
+          assert(tpl->is_replayable());
 #endif
           // Reset the nonreplayable count when a replayable template satisfies
           // the precondition
           nonreplayable_count = 0;
-          current_template = *it;
-          return;
+          current_template = tpl;
+          return index;
         }
       }
+      return -1;
     }
+#endif
 
     //--------------------------------------------------------------------------
     PhysicalTemplate* PhysicalTrace::start_new_template(void)

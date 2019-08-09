@@ -5156,7 +5156,11 @@ namespace Legion {
 #endif
         current_template->execute_all();
         template_completion = current_template->get_completion();
-        Runtime::trigger_event(completion_event, template_completion);
+        // Trigger the execution fence barrier with this event
+        Runtime::phase_barrier_arrive(execution_fence_barrier, 1/*count*/,
+                                      template_completion);
+        need_completion_trigger = false;
+        Runtime::trigger_event(completion_event, execution_fence_barrier);
         local_trace->end_trace_execution(this);
         parent_ctx->update_current_fence(this, true, true);
         parent_ctx->record_previous_trace(local_trace);
@@ -5241,11 +5245,12 @@ namespace Legion {
       }
       else if (replayed)
       {
-        complete_mapping();
-        need_completion_trigger = false;
-        if (!template_completion.has_triggered())
+        // Do our arrival on the mapping fence
+        Runtime::phase_barrier_arrive(mapping_fence_barrier, 1/*count*/);
+        complete_mapping(mapping_fence_barrier);
+        if (!execution_fence_barrier.has_triggered())
         {
-          RtEvent wait_on = Runtime::protect_event(template_completion);
+          RtEvent wait_on = Runtime::protect_event(execution_fence_barrier);
           complete_execution(wait_on);
         }
         else
@@ -5359,10 +5364,74 @@ namespace Legion {
         }
 #ifdef DEBUG_LEGION
         assert(!(local_trace->is_recording() || local_trace->is_replaying()));
+        ReplicateContext *repl_ctx =dynamic_cast<ReplicateContext*>(parent_ctx);
+        assert(repl_ctx != NULL);
+#else
+        ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
 
         if (physical_trace->get_current_template() == NULL)
-          physical_trace->check_template_preconditions(this);
+        {
+          int selected_template_index = -2;  
+          std::vector<int> viable_templates;
+          for (int round = 0; round < TRACE_SELECTION_ROUNDS; round++)
+          {
+            const int number_to_find = 1 << round;
+            if ((viable_templates.empty() || (viable_templates.back() >= 0)) &&
+                physical_trace->find_viable_templates(this, number_to_find, 
+                                                      viable_templates))
+            {
+              // If we checked all the templates figure out what kind of 
+              // guard to add:
+              // Use -1 to indicate that we're done but have viable templates
+              // Use -2 to indicate we have no viable templates
+              if (!viable_templates.empty())
+                viable_templates.push_back(-1);
+              else
+                viable_templates.push_back(-2);
+            }
+#ifdef DEBUG_LEGION
+            assert(!viable_templates.empty());
+#endif
+            // Perform an exchange to see if we have consensus
+            TemplateIndexExchange index_exchange(repl_ctx, 
+                    trace_selection_collective_ids[round]);
+            index_exchange.initiate_exchange(viable_templates);
+            std::map<int,unsigned> result_templates;
+            index_exchange.complete_exchange(result_templates);
+            // First, if we have at least one shard that says that it
+            // has no viable templates then we're done
+            if (result_templates.find(-2) == result_templates.end())
+            {
+              // Otherwise go through in reverse order and look for one that
+              // has consensus from all the shards
+              const size_t total_shards = repl_ctx->shard_manager->total_shards;
+              for (std::map<int,unsigned>::reverse_iterator rit = 
+                    result_templates.rbegin(); rit != 
+                    result_templates.rend(); rit++)
+              {
+                // If we have a template that is viable for all the shards
+                // then we've succesffully identified a template to use
+                if (rit->second == total_shards)
+                {
+                  // Note this could also be -1 in the case were all
+                  // the shards have identified all their viable templates
+                  selected_template_index = rit->first;
+                  break;
+                }
+              }
+            }
+            else
+              selected_template_index = -1;
+            // If we picked an index then we're done
+            if (selected_template_index != -2)
+              break;
+          }
+          // If we successfully identified a template for all the shards
+          // to use then we record that in the trace 
+          if (selected_template_index >= 0)
+            physical_trace->select_template(this, selected_template_index);
+        }
 #ifdef DEBUG_LEGION
         assert(physical_trace->get_current_template() == NULL ||
                !physical_trace->get_current_template()->is_recording());
@@ -7599,8 +7668,7 @@ namespace Legion {
     {
       // Wait for the results to be ready
       wait_all_reduce(true);
-      // Need to avoid races here so we have to always recompute the
-      // last stage
+      // Need to avoid races here so we have to always recompute the last stage
       typename REDOP::RHS result = value;
       if (!future_values.empty())
       {
@@ -9556,7 +9624,7 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
-    // Inline Mapping Exchange 
+    // Sharded Mapping Exchange 
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
@@ -9752,6 +9820,155 @@ namespace Legion {
                 "of control replciated task %s (UID %lld)", 
                 op->get_logging_name(), shard_id, it->first, 
                 ctx->get_task_name(), ctx->get_unique_id())
+          }
+        }
+      }
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Template Index Exchange 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    TemplateIndexExchange::TemplateIndexExchange(ReplicateContext *ctx,
+                                                 CollectiveID id)
+      : AllGatherCollective(ctx, id), current_stage(-1)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    TemplateIndexExchange::TemplateIndexExchange(
+                                               const TemplateIndexExchange &rhs)
+      : AllGatherCollective(rhs), current_stage(-1)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    TemplateIndexExchange::~TemplateIndexExchange(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    TemplateIndexExchange& TemplateIndexExchange::operator=(
+                                               const TemplateIndexExchange &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void TemplateIndexExchange::pack_collective_stage(Serializer &rez,int stage)
+    //--------------------------------------------------------------------------
+    {
+      // The first time we pack a stage we merge any values that we had
+      // unpacked earlier as they are needed for sending this stage for
+      // the first time.
+      if (stage != current_stage)
+      {
+        if (!future_index_counts.empty())
+        {
+          std::map<int,std::map<int,unsigned> >::iterator next = 
+            future_index_counts.begin();
+          for (std::map<int,unsigned>::const_iterator it = 
+                next->second.begin(); it != next->second.end(); it++)
+          {
+            std::map<int,unsigned>::iterator finder = 
+              index_counts.find(it->first);
+            if (finder == index_counts.end())
+              index_counts.insert(*it);
+            else
+              finder->second += it->second;
+          }
+          future_index_counts.erase(next);
+        }
+        current_stage = stage;
+      }
+      rez.serialize<size_t>(index_counts.size());
+      for (std::map<int,unsigned>::const_iterator it = 
+            index_counts.begin(); it != index_counts.end(); it++)
+      {
+        rez.serialize(it->first);
+        rez.serialize(it->second);
+      }
+    }
+    
+    //--------------------------------------------------------------------------
+    void TemplateIndexExchange::unpack_collective_stage(Deserializer &derez,
+                                                        int stage)
+    //--------------------------------------------------------------------------
+    {
+      // We never eagerly do reductions as they can arrive out of order
+      // and we can't apply them too early or we'll get duplicate 
+      // applications of reductions
+      std::map<int,unsigned> &next = future_index_counts[stage];
+      size_t num_counts;
+      derez.deserialize(num_counts);
+      for (unsigned idx = 0; idx < num_counts; idx++)
+      {
+        int index;
+        derez.deserialize(index);
+        unsigned count;
+        derez.deserialize(count);
+        std::map<int,unsigned>::iterator finder = next.find(index);
+        if (finder == next.end())
+          next[index] = count;
+        else
+          finder->second += count;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void TemplateIndexExchange::initiate_exchange(
+                                                const std::vector<int> &indexes)
+    //--------------------------------------------------------------------------
+    {
+      for (std::vector<int>::const_iterator it = indexes.begin();
+            it != indexes.end(); it++)
+        index_counts[*it] = 1;
+      perform_collective_async();
+    }
+
+    //--------------------------------------------------------------------------
+    void TemplateIndexExchange::complete_exchange(
+                                          std::map<int,unsigned> &result_counts)
+    //--------------------------------------------------------------------------
+    {
+      perform_collective_wait(true/*block*/);
+      result_counts = index_counts;
+      // Need to avoid races here so we have to always recompute the last stage
+      if (!future_index_counts.empty())
+      {
+#ifdef DEBUG_LEGION
+        // Should be at most one stage left
+        assert(future_index_counts.size() == 1);
+#endif
+        std::map<int,std::map<int,unsigned> >::const_iterator last = 
+          future_index_counts.begin();
+        if (last->first == -1)
+        {
+          // Special case for the last stage which already includes our
+          // value so just do the overwrite
+          result_counts = last->second;
+        }
+        else
+        {
+          // Do the reduction here
+          for (std::map<int,unsigned>::const_iterator it = 
+                last->second.begin(); it != last->second.end(); it++)
+          {
+            std::map<int,unsigned>::iterator finder = 
+              result_counts.find(it->first);
+            if (finder == result_counts.end())
+              result_counts.insert(*it);
+            else
+              finder->second += it->second;
           }
         }
       }
