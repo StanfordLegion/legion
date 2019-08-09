@@ -5379,7 +5379,9 @@ namespace Legion {
           std::vector<int> viable_templates;
           for (int round = 0; round < TRACE_SELECTION_ROUNDS; round++)
           {
-            const int number_to_find = 1 << round;
+            // Exponential back-off: the more rounds we go, the
+            // more templates we try to find to build consensus
+            const unsigned number_to_find = 1 << round;
             if ((viable_templates.empty() || (viable_templates.back() >= 0)) &&
                 physical_trace->find_viable_templates(this, number_to_find, 
                                                       viable_templates))
@@ -5400,7 +5402,7 @@ namespace Legion {
             TemplateIndexExchange index_exchange(repl_ctx, 
                     trace_selection_collective_ids[round]);
             index_exchange.initiate_exchange(viable_templates);
-            std::map<int,unsigned> result_templates;
+            std::map<int/*index*/,unsigned/*count*/> result_templates;
             index_exchange.complete_exchange(result_templates);
             // First, if we have at least one shard that says that it
             // has no viable templates then we're done
@@ -5413,6 +5415,9 @@ namespace Legion {
                     result_templates.rbegin(); rit != 
                     result_templates.rend(); rit++)
               {
+#ifdef DEBUG_LEGION
+                assert(rit->second <= total_shards);
+#endif
                 // If we have a template that is viable for all the shards
                 // then we've succesffully identified a template to use
                 if (rit->second == total_shards)
