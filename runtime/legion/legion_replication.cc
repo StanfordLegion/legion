@@ -5306,6 +5306,9 @@ namespace Legion {
       assert(trace != NULL);
 #endif
       local_trace = trace;
+      for (int idx = 0; idx < TRACE_SELECTION_ROUNDS; idx++)
+        trace_selection_collective_ids[idx] = 
+          ctx->get_next_collective_index(COLLECTIVE_LOC_87);
     }
 
     //--------------------------------------------------------------------------
