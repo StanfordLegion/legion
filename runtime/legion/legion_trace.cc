@@ -1186,13 +1186,14 @@ namespace Legion {
       parent_ctx->record_previous_trace(local_trace);
       if (local_trace->is_recording())
       {
+        PhysicalTrace *physical_trace = local_trace->get_physical_trace();
 #ifdef DEBUG_LEGION
-        assert(local_trace->get_physical_trace() != NULL);
+        assert(physical_trace != NULL);
 #endif
-        current_template =
-          local_trace->get_physical_trace()->get_current_template();
-        local_trace->get_physical_trace()->record_previous_template_completion(
+        physical_trace->record_previous_template_completion(
             get_completion_event());
+        current_template = physical_trace->get_current_template();
+        physical_trace->clear_cached_template();
       }
     }
 
@@ -1203,13 +1204,13 @@ namespace Legion {
       // Now finish capturing the physical trace
       if (local_trace->is_recording())
       {
+        PhysicalTrace *physical_trace = local_trace->get_physical_trace();
 #ifdef DEBUG_LEGION
         assert(current_template != NULL);
-        assert(local_trace->get_physical_trace() != NULL);
+        assert(physical_trace != NULL);
 #endif
         RtEvent pending_deletion =
-          local_trace->get_physical_trace()->fix_trace(current_template, this,
-              has_blocking_call);
+          physical_trace->fix_trace(current_template, this, has_blocking_call);
         if (pending_deletion.exists())
           execution_precondition = Runtime::merge_events(NULL,
               execution_precondition, ApEvent(pending_deletion));
@@ -1307,27 +1308,27 @@ namespace Legion {
       assert(trace == NULL);
       assert(local_trace != NULL);
 #endif
+      local_trace->end_trace_execution(this);
+      parent_ctx->record_previous_trace(local_trace);
+
       if (local_trace->is_replaying())
       {
+        PhysicalTrace *physical_trace = local_trace->get_physical_trace();
 #ifdef DEBUG_LEGION
-        assert(local_trace->get_physical_trace() != NULL);
+        assert(physical_trace != NULL);
 #endif
-        PhysicalTemplate *current_template =
-          local_trace->get_physical_trace()->get_current_template();
+        PhysicalTemplate *to_replay = physical_trace->get_current_template();
 #ifdef DEBUG_LEGION
-        assert(current_template != NULL);
+        assert(to_replay != NULL);
 #endif
 #ifdef LEGION_SPY
-        local_trace->perform_logging(
-            current_template->get_fence_uid(), unique_op_id);
+        local_trace->perform_logging(to_replay->get_fence_uid(), unique_op_id);
 #endif
-        current_template->execute_all();
-        template_completion = current_template->get_completion();
+        to_replay->execute_all();
+        template_completion = to_replay->get_completion();
         Runtime::trigger_event(completion_event, template_completion);
-        local_trace->end_trace_execution(this);
         parent_ctx->update_current_fence(this, true, true);
-        parent_ctx->record_previous_trace(local_trace);
-        local_trace->get_physical_trace()->record_previous_template_completion(
+        physical_trace->record_previous_template_completion(
             template_completion);
         local_trace->initialize_tracing_state();
         replayed = true;
@@ -1335,29 +1336,16 @@ namespace Legion {
       }
       else if (local_trace->is_recording())
       {
+        PhysicalTrace *physical_trace = local_trace->get_physical_trace();
 #ifdef DEBUG_LEGION
-        assert(local_trace->get_physical_trace() != NULL);
+        assert(physical_trace != NULL);
 #endif
-        current_template =
-          local_trace->get_physical_trace()->get_current_template();
-        local_trace->get_physical_trace()->record_previous_template_completion(
+        physical_trace->record_previous_template_completion(
             get_completion_event());
+        current_template = physical_trace->get_current_template();
+        physical_trace->clear_cached_template();
+
       }
-
-      // Indicate that this trace is done being captured
-      // This also registers that we have dependences on all operations
-      // in the trace.
-      local_trace->end_trace_execution(this);
-
-      // We always need to run the full fence analysis, otherwise
-      // the operations replayed in the following trace will race
-      // with those in the current trace
-      execution_precondition =
-        parent_ctx->perform_fence_analysis(this, true, true);
-
-      // Now update the parent context with this fence before we can complete
-      // the dependence analysis and possibly be deactivated
-      parent_ctx->update_current_fence(this, true, true);
 
       // If this is a static trace, then we remove our reference when we're done
       if (local_trace->is_static_trace())
@@ -1366,7 +1354,7 @@ namespace Legion {
         if (static_trace->remove_reference())
           delete static_trace;
       }
-      parent_ctx->record_previous_trace(local_trace);
+      FenceOp::trigger_dependence_analysis();
     }
 
     //--------------------------------------------------------------------------
@@ -1726,8 +1714,10 @@ namespace Legion {
     void TraceSummaryOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
-      if (current_template->is_replayable())
-        current_template->apply_postcondition(this);
+#ifdef DEBUG_LEGION
+      assert(current_template->is_replayable());
+#endif
+      current_template->apply_postcondition(this);
       FenceOp::trigger_mapping();
     }
 
@@ -1799,7 +1789,6 @@ namespace Legion {
       if (!tpl->is_replayable())
       {
         pending_deletion = tpl->defer_template_deletion();
-        current_template = NULL;
         if (++nonreplayable_count > LEGION_NON_REPLAYABLE_WARNING)
         {
           REPORT_LEGION_WARNING(LEGION_WARNING_NON_REPLAYABLE_COUNT_EXCEEDED,
@@ -1816,7 +1805,6 @@ namespace Legion {
       {
         // Reset the nonreplayable count when we find a replayable template
         nonreplayable_count = 0;
-        current_template = NULL;
         templates.push_back(tpl);
       }
       return pending_deletion;
