@@ -2893,7 +2893,7 @@ class LogicalRegion(object):
         self.children = dict() 
         self.name = None
         self.parent = None
-        self.logical_state = dict()
+        self.logical_state = dict() # only for top-level regions
         self.verification_state = dict() # only for top-level regions
         self.index_space.add_instance(self.tree_id, self)
         self.node_name = 'region_node_'+str(self.index_space.uid)+\
@@ -2912,6 +2912,13 @@ class LogicalRegion(object):
 
     def has_all_children(self):
         return len(self.children) == len(self.index_space.children)
+
+    def has_ancestor(self, target):
+        if self is target:
+            return True
+        if self.parent is None:
+            return False
+        return self.parent.has_ancestor(target)
 
     def get_index_node(self):
         return self.index_space
@@ -2969,7 +2976,7 @@ class LogicalRegion(object):
         return self.index_space.get_num_children()
 
     def reset_logical_state(self):
-        if self.logical_state:
+        if self.logical_state is not None:
             self.logical_state = dict()
 
     def reset_verification_state(self, depth):
@@ -3037,6 +3044,35 @@ class LogicalRegion(object):
         if field not in self.logical_state:
             return
         self.logical_state[field].close_logical_tree(closed_users)
+
+    def get_logical_state(self, field, point):
+        # Should always be at the root
+        assert not self.parent
+        key = (field,point)
+        if key not in self.logical_state:
+            result = LogicalVerificationState(self, field, point)
+            self.logical_state[key] = result
+            return result
+        return self.logical_state[key]
+
+    def perform_logical_verification(self, op, req, field, logical_op, 
+                                     previous_deps, point_set = None):
+        if point_set is None:
+            # First get the point set
+            return self.perform_logical_verification(op, req, field, logical_op,
+                                            previous_deps, self.get_point_set())
+        elif self.parent:
+            # Recurse up the tree to the root
+            return self.parent.parent.perform_logical_verification(op, req, field, 
+                                            logical_op, previous_deps, point_set)
+        else:
+            # Do the actual work
+            for point in point_set.iterator():
+                state = self.get_logical_state(field, point)
+                if not state.perform_logical_verification(op, req, logical_op,
+                                                            previous_deps):
+                    return False
+            return True
 
     def get_verification_state(self, depth, field, point):
         # Should always be at the root
@@ -3291,6 +3327,12 @@ class LogicalPartition(object):
     def has_all_children(self):
         return len(self.children) == len(self.index_partition.children)
 
+    def has_ancestor(self, target):
+        if self is target:
+            return True
+        assert self.parent is not None
+        return self.parent.has_ancestor(target)
+
     def get_index_node(self):
         return self.index_partition
 
@@ -3411,6 +3453,11 @@ class LogicalPartition(object):
             return
         self.logical_state[field].close_logical_tree(closed_users)
 
+    def perform_logical_verification(self, op, req, field, logical_op,
+                                     previous_deps):
+        return self.parent.perform_logical_verification(op, req, field, logical_op,
+                                                 previous_deps, self.get_point_set())
+
     def compute_current_version_numbers(self, depth, field, op, tree):
         self.parent.compute_current_version_numbers(depth, field, op, 
                                                     tree, self.get_point_set())
@@ -3474,6 +3521,87 @@ class LogicalPartition(object):
         print('%s%s Color: %s' % (prefix, self, self.index_partition.color.to_string()))
         for child in itervalues(self.children):
             child.print_tree()
+
+class LogicalVerificationState(object):
+    __slots__ = ['region', 'field', 'point', 'last_write',
+                 'current_epoch_users', 'previous_epoch_users']
+
+    def __init__(self, region, field, point):
+        self.region = region
+        self.field = field
+        self.point = point
+        self.last_write = None
+        self.current_epoch_users = list()
+        self.previous_epoch_users = list()
+
+    def perform_logical_verification(self, op, req, logical_op, previous_deps):
+        dominates,success = self.perform_epoch_analysis(self.current_epoch_users,
+                                                op, req, logical_op, previous_deps)
+        if not success:
+            return False
+        if not dominates:
+            _,success = self.perform_epoch_analysis(self.previous_epoch_users,
+                                            op, req, logical_op, previous_deps)
+            if not success:
+                return False
+        else:
+            self.previous_epoch_users = self.current_epoch_users
+            self.current_epoch_users = list()
+        self.current_epoch_users.append((op,req,logical_op))
+        if req.is_write():
+            self.last_write = req.logical_node
+        return True
+
+    def perform_epoch_analysis(self, epoch_users, op, req, logical_op, previous_deps):
+        dominates = True
+        for prev_op,prev_req,prev_log in epoch_users:
+            dep_type = compute_dependence_type(prev_req, req)
+            if dep_type is NO_DEPENDENCE:
+                dominates = False
+                continue
+            # Interfering operations should have been caught earlier
+            assert prev_op is not op
+            assert prev_log is not logical_op
+            # Deletions do no need close operations for now
+            if op.kind == DELETION_OP_KIND:
+                # Deletions of the same thing can race
+                if prev_op.kind == DELETION_OP_KIND:
+                    continue
+                need_close = False
+            # Now determine whether we need to have a close operation along the
+            # path between these two operations
+            elif prev_op.owner_shard != op.owner_shard and \
+                (prev_op is not prev_log or op is not logical_op):
+                print("Need shard close")
+                # Operations from two different shards with control
+                # replication always need a close operation if at
+                # least one of them is from an index space operation
+                need_close = True
+            elif req.is_read_only():
+                # If we're reading from a reduction we always need a close
+                if prev_req.is_reduce():
+                    need_close = not req.logical_node.has_ancestor(prev_req.logical_node)
+                else: 
+                    # Otherwise if we're not reading below the most 
+                    # recent write then we also need a close
+                    need_close = not req.logical_node.has_ancestor(self.last_write)
+            elif req.is_reduce():
+                # If we're reducing over a read we always need a close
+                if prev_req.is_read_only():
+                    need_close = not req.logical_node.has_ancestor(prev_req.logical_node)
+                else:
+                    # Otherwise if we're not reducing below the most
+                    # recent write then we also need a close
+                    need_close = not req.logical_node.has_ancestor(self.last_write)
+            else:
+                # If the previous thing is not directly above use then we need a close
+                need_close = not req.logical_node.has_ancestor(prev_req.logical_node)
+            if not logical_op.has_verification_mapping_dependence(
+                    logical_op.reqs[req.index], prev_log, prev_log.reqs[prev_req.index], 
+                                        dep_type, self.field, need_close,previous_deps):
+                return dominates,False
+        return dominates,True
+
 
 class LogicalState(object):
     __slots__ = ['node', 'field', 'open_children', 'open_redop',
@@ -5784,6 +5912,35 @@ class Operation(object):
             req.priv = REDUCE
         return True
 
+    def verify_logical_requirement(self, index, logical_op, previous_deps):
+        assert index in self.reqs
+        req = self.reqs[index]
+        # Special out for no access
+        if req.priv is NO_ACCESS:
+            return True
+        assert index in logical_op.reqs
+        # Destination requirements for copies are a little weird because
+        # they actually need to behave like READ_WRITE privileges
+        if self.kind == COPY_OP_KIND and len(self.reqs)/2 <= index:
+            if req.priv == REDUCE:
+                copy_reduce = True
+                req.priv = READ_WRITE
+            else:
+                copy_reduce = False
+        else:
+            copy_reduce = False
+        # See if we are restricted in any way
+        assert logical_op.context
+        # Now do the traversal for each of the fields
+        for field in req.fields: 
+            if not req.logical_node.perform_logical_verification(self, req, field,
+                                                        logical_op, previous_deps):
+                return False
+        # Restore the privileges if necessary
+        if copy_reduce:
+            req.priv = REDUCE
+        return True
+
     def analyze_logical_fence(self, perform_checks):
         # Find all the operations since the previous fence and then make sure
         # we either depend on them directly or we have a transitive dependence
@@ -5877,6 +6034,50 @@ class Operation(object):
                 return False
         return True
 
+    def perform_op_logical_verification(self, logical_op, previous_deps):
+        if self.replayed:
+            return True
+        # We need a context to do this
+        assert self.context is not None
+        # If this operation was predicated false, then there is nothing to do
+        if self.predicate and not self.predicate_result:
+            return True
+        # See if there is a fence in place for this context
+        if self.context.current_fence is not None:
+            if self.context.current_fence not in logical_op.logical_incoming: 
+                print("ERROR: missing logical fence dependence between "+
+                      str(self.context.current_fence)+" and "+str(logical_op))
+                if self.state.assert_on_error:
+                    assert False
+                return False
+        if self.reqs is None:
+            # If this is a fence, check or record dependences on everything from
+            # either the begining or from the previous fence
+            if self.kind == FENCE_OP_KIND:
+                assert logical_op is self
+                # Record dependences on all the users in the region tree 
+                if not self.analyze_logical_fence(True):
+                    return False
+                # Finally record ourselves as the next fence
+                self.context.current_fence = self
+        elif self.points is not None:
+            # For index space operations we'll perform all their operations
+            # separately so everything gets updated individually
+            if self.kind == INDEX_TASK_KIND:
+                for point in sorted(itervalues(self.points), key=lambda x: x.op.uid):
+                    if not point.op.perform_op_logical_verification(logical_op, previous_deps):
+                        return False
+            else:
+                for point in sorted(itervalues(self.points), key=lambda x: x.uid):
+                    if not point.perform_op_logical_verification(logical_op, previous_deps):
+                        return False
+        else: 
+            assert len(self.reqs) >= len(logical_op.reqs)
+            for idx in xrange(0,len(logical_op.reqs)):
+                if not self.verify_logical_requirement(idx, logical_op, previous_deps):
+                    return False
+        return True
+
     def has_mapping_dependence(self, req, prev_op, prev_req, dtype, field):
         if self.incoming:
             for dep in self.incoming:
@@ -5928,6 +6129,133 @@ class Operation(object):
                     continue
                 next_op.generation = next_gen
                 queue.append(next_op)
+        return False
+
+    def has_verification_mapping_dependence(self, req, prev_op, prev_req, dtype, 
+                                            field, need_close, previous_deps):
+        tree_id = req.logical_node.tree_id
+        # Do a quick check to see if it is in the previous deps
+        if prev_op in previous_deps:
+            if need_close:
+                # Check to see if the previous dependence had an intermediate close
+                if (field,tree_id) in previous_deps[prev_op]:
+                    return True
+            else:
+                # We already found this prev_op as a previous dependence
+                return True
+        self.has_verification_transitive_mapping_dependence(prev_op, need_close, 
+                                                    field, tree_id, previous_deps)
+        # Did not find it so issue the error and return false
+        if prev_op not in previous_deps:
+            print("ERROR: Missing mapping dependence on "+str(field)+" between region "+
+                  "requirement "+str(prev_req.index)+" of "+str(prev_op)+" (UID "+
+                  str(prev_op.uid)+") and region requriement "+str(req.index)+" of "+
+                  str(self)+" (UID "+str(self.uid)+")")
+            if self.state.assert_on_error:
+                assert False
+        elif need_close and (field,tree_id) not in previous_deps[prev_op]:
+            assert need_close
+            print("ERROR: Missing close operation on "+str(field)+" of tree "+
+                    str(tree_id)+" between region requirement "+str(prev_req.index)+
+                    " of "+str(prev_op)+" (UID "+str(prev_op.uid)+") and region "+
+                    "requriement "+str(req.index)+" of "+str(self)+" (UID "+
+                    str(self.uid)+")")
+            if self.state.assert_on_error:
+                assert False
+        else:
+            return True
+        return False
+
+    def has_verification_transitive_mapping_dependence(self, prev_op, need_close, 
+                                                    field, tree_id, previous_deps):
+        # If we don't need a close then we can do BFS which is much more efficient
+        # at finding dependences of things nearby in the graph
+        if not need_close:
+            next_gen = self.state.get_next_traversal_generation()
+            self.generation = next_gen
+            queue = collections.deque()
+            queue.append(self)
+            while queue:
+                current = queue.popleft()
+                if not current in previous_deps:
+                    previous_deps[current] = set()
+                if current is prev_op:
+                    return True
+                if not current.logical_incoming:
+                    continue
+                for next_op in current.logical_incoming:
+                    if next_op.generation == next_gen:
+                        continue
+                    next_op.generation = next_gen
+                    queue.append(next_op)
+        else:
+            # Otherwise start the traversal and look for a path that contains the close
+            # Since it's likely that the operation we're looking for is nearby in the
+            # graph we'll use a timeout to find it efficiently search ever increasing
+            # depths until we notice that we do not get a timeout
+            max_depth = 4 
+            close_map = dict()
+            timeout_counter = list()
+            timeout_counter.append(0)
+            while True:
+                timeout_counter[0] = 0    
+                assert len(close_map) == 0
+                if self.has_mapping_dependence_with_close(prev_op, field, tree_id, 
+                              previous_deps, close_map, max_depth, timeout_counter):
+                    return True
+                # If we didn't have any timeout it means we explore the whole graph
+                elif timeout_counter[0] == 0:
+                    break;
+                # Increase the depth for the next pass
+                max_depth *= 2
+        return False
+
+    def has_mapping_dependence_with_close(self, prev_op, field, tree_id, 
+                      previous_deps, close_map, timeout, timeout_counter):
+        # Record our dependence set in the previous deps
+        if not self.kind == INTER_CLOSE_OP_KIND:
+            if self not in previous_deps:
+                previous_deps[self] = set()
+            if close_map is not None and len(close_map) > 0:
+                for key in iterkeys(close_map):
+                    previous_deps[self].add(key)
+        # See if we arrived at the node we're looking for
+        if self is prev_op:
+            # Check to see if we have a close for our field and tree
+            if (field,tree_id) in close_map:
+                return True
+            else:
+                return False
+        # If there's no where to traverse we're done
+        if not self.logical_incoming:
+            return False
+        # If we timed out record it in the count
+        if timeout <= 0:
+            timeout_counter[0] += 1
+            return False
+        # Otherwise continue the traversal
+        if self.kind == INTER_CLOSE_OP_KIND:
+            # If we're a close op, add ourselves to the close map
+            assert self.reqs is not None and len(self.reqs) == 1
+            close_tid = self.reqs[0].logical_node.tree_id
+            for close_field in self.reqs[0].fields:
+                key = (close_field,close_tid)
+                if key in close_map:
+                    close_map[key] += 1
+                else:
+                    close_map[key] = 1
+        for next_op in self.logical_incoming:
+            if next_op.has_mapping_dependence_with_close(prev_op, field, tree_id, 
+                            previous_deps, close_map, timeout-1, timeout_counter):
+                # No need to prune close map entries, this is the fast path back
+                return True
+        if self.kind == INTER_CLOSE_OP_KIND:
+            # Remove our entries on the way back
+            for close_field in self.reqs[0].fields:
+                key = (close_field,close_tid)
+                close_map[key] -= 1
+                if close_map[key] == 0:
+                    del close_map[key]
         return False
 
     def analyze_previous_interference(self, next_op, next_req, reachable):
@@ -6796,6 +7124,75 @@ class Task(object):
             flattened.append(op)
         self.operations = flattened
 
+    def perform_task_logical_verification(self):
+        # If we are a shard then we don't need to do anything as 
+        # the original version of ourself will do the analysis
+        if self.shard is not None:
+            return True
+         # If we don't have any operations we are done
+        if not self.operations and self.replicants is None:
+            return True
+        # If this is the top-level task's context, we can skip it
+        # since we know there is only one task in it
+        if self.depth == 0:
+            assert len(self.operations) == 1
+            return True
+        print('Performing logical dependence verification for %s...' % str(self))
+        success = True
+        if self.replicants is not None:
+            # This is the control replicated path so we need to zip together
+            # the operations from all the different shards
+            num_ops = -1
+            for shard in itervalues(self.replicants.shards):
+                if num_ops == -1:
+                    num_ops = len(shard.operations)
+                else:
+                    assert num_ops == len(shard.operations)
+            for idx in xrange(num_ops):
+                # We'll use the logical operations from the first shard for
+                # doing the actual dependence analysis
+                logical_op = None
+                # Keep track of the previous dependences so we can 
+                # use them for adding/checking dependences on close operations
+                previous_deps = dict()
+                for shard in itervalues(self.replicants.shards):
+                    op = shard.operations[idx]
+                    # Do traversals for all index space operations as well
+                    # as for single operations for which this is the shard owner
+                    if op.points is not None or op.owner_shard == shard.shard:
+                        if logical_op is None:
+                            logical_op = op
+                        # Update the points with the right owner shard
+                        if op.points is not None:
+                            if op.kind == INDEX_TASK_KIND:
+                                for point in itervalues(op.points):
+                                    point.op.owner_shard = shard.shard
+                            else:
+                                for point in itervalues(op.points):
+                                    point.owner_shard = shard.shard
+                        print('Verifying '+str(op)+' of shard '+str(shard.shard))
+                        if not op.perform_op_logical_verification(logical_op, previous_deps):
+                            success = False
+                            break
+                if not success:
+                    break
+        else:
+            if self.op.state.verbose:
+                print('  Analyzing %d operations...' % len(self.operations))
+            # Iterate over all the operations in order and
+            # have them perform their analysis
+            for op in self.operations:
+                # Keep track of the previous dependences so we can 
+                # use them for adding/checking dependences on close operations
+                previous_deps = dict()
+                if not op.perform_op_logical_verification(op, previous_deps):
+                    success = False
+                    break
+        # Reset the logical state when we are done
+        self.op.state.reset_logical_state()
+        print("Pass" if success else "FAIL")
+        return success
+
     def perform_logical_dependence_analysis(self, perform_checks):
         # If we don't have any operations we are done
         if not self.operations:
@@ -6819,43 +7216,6 @@ class Task(object):
         self.op.state.reset_logical_state()
         print("Pass" if success else "FAIL")
         return success
-
-    def perform_logical_sanity_analysis(self):
-        # Run the old version of the checks that
-        # is more of a sanity check on our algorithm that
-        # doesn't depend on our implementation but doesn't
-        # really tell us what it means if something goes wrong
-        if not self.operations or len(self.operations) < 2:
-            return True
-        print('Performing logical sanity analysis for %s...' % str(self))
-        # Iterate over all operations from 1 to N and check all their
-        # dependences against all the previous operations in the context
-        for idx in xrange(1, len(self.operations)):
-            # Find all the backwards reachable operations
-            current_op = self.operations[idx]
-            # No need to do anything if there are no region requirements
-            if not current_op.reqs and current_op.kind != FENCE_OP_KIND:
-                continue
-            reachable = set()
-            current_op.get_logical_reachable(reachable, False) 
-            # Do something special for fence operations
-            if current_op.kind == FENCE_OP_KIND: # special path for fences
-                for prev in xrange(idx):
-                    if not prev in reachable:
-                        print("ERROR: Failed logical sanity check. No mapping "+
-                              "dependence between previous "+str(prev)+" and "+
-                              "later "+str(current_op))
-                        if self.op.state.assert_on_error:
-                            assert False
-                        return False
-            else: # The normal path
-                for prev in xrange(idx):
-                    if not current_op.analyze_logical_interference(
-                                  self.operations[prev], reachable):
-                        print("FAIL")
-                        return False
-        print("Pass")
-        return True
 
     def find_enclosing_context_depth(self, child_req, mappings):
         # Special case for the top-level task
@@ -6939,14 +7299,14 @@ class Task(object):
         if self.replicants:
             # Control-replicated path
             num_ops = -1
-            for shard in self.replicants.shards.itervalues():
+            for shard in itervalues(self.replicants.shards):
                 if num_ops == -1:
                     num_ops = len(shard.operations)
                 else:
                     assert num_ops == len(shard.operations)
             # Perform all the operations in order across the shards
             for idx in range(num_ops):
-                for shard in self.replicants.shards.itervalues():
+                for shard in itervalues(self.replicants.shards):
                     op = shard.operations[idx]
                     if not op.perform_op_physical_verification(perform_checks):
                         success = False
@@ -10530,19 +10890,17 @@ class State(object):
         return (True,parent_one)
 
     def perform_logical_analysis(self, perform_checks, sanity_checks):
-        # Run the full analysis first, this will confirm that
-        # the runtime did what we thought it should do
         for task in itervalues(self.tasks):
             # If we're only performing checks then we might break out early
             if not task.perform_logical_dependence_analysis(perform_checks):
                 return False
-            # If we're doing full on sanity checks, run them now
-            if perform_checks and sanity_checks:
-                if not task.perform_logical_sanity_analysis():
-                    return False 
+        if sanity_checks:
+            for task in itervalues(self.tasks):
+                if not task.perform_task_logical_verification():
+                    return False
         return True
 
-    def perform_physical_analysis(self, perform_checks, sanity_checks):
+    def perform_physical_analysis(self, perform_checks):
         assert self.top_level_uid is not None
         top_task = self.get_task(self.top_level_uid)
         if perform_checks:
@@ -10993,14 +11351,6 @@ class State(object):
         # Definitely run the garbage collector here
         gc.collect()
 
-    def reset_physical_state(self, depth):
-        for region in itervalues(self.regions):
-            region.reset_physical_state(depth)
-        for partition in itervalues(self.partitions):
-            partition.reset_physical_state(depth)
-        # Definitely run the garbage collector here
-        gc.collect()
-
     def reset_verification_state(self, depth):
         for region in itervalues(self.trees):
             region.reset_verification_state(depth)
@@ -11276,7 +11626,7 @@ def main(temp_dir):
         else:
             # Doing verification so we still need the equivalence class graphs
             state.compute_equivalence_graphs()
-        state.perform_physical_analysis(physical_checks, sanity_checks) 
+        state.perform_physical_analysis(physical_checks) 
         # If we generated the graph for printing, then simplify it 
         if need_physical and simplify_graphs:
             state.simplify_physical_graph(need_cycle_check=False)
