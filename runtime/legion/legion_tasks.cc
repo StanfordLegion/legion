@@ -7105,14 +7105,14 @@ namespace Legion {
           Runtime::merge_events(&trace_info, effects_postconditions);
         request_early_complete(done);
       }
-      if (!complete_preconditions.empty())
-        complete_operation(Runtime::merge_events(complete_preconditions));
-      else
-        complete_operation();
 #ifdef LEGION_SPY
       LegionSpy::log_operation_events(unique_op_id, ApEvent::NO_AP_EVENT,
                                       completion_event);
 #endif
+      if (!complete_preconditions.empty())
+        complete_operation(Runtime::merge_events(complete_preconditions));
+      else
+        complete_operation();
     }
 
     //--------------------------------------------------------------------------
