@@ -10738,6 +10738,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(!(restricted_mask - first->second));
 #endif
+        if (!first->first->is_instance_view())
+          assert(false); // TODO: handle sharded view case
         InstanceView *dst_view = first->first->as_instance_view();
         FieldMaskSet<LogicalView> srcs;
         for (unsigned idx = 0; idx < src_views.size(); idx++)
@@ -10774,6 +10776,8 @@ namespace Legion {
           const FieldMask overlap = it->second & restricted_mask;
           if (!overlap)
             continue;
+          if (!it->first->is_instance_view())
+            assert(false); // TODO: handle sharded view case
           InstanceView *dst_view = it->first->as_instance_view();
           if (aggregator == NULL)
             aggregator = new CopyFillAggregator(runtime->forest, op, index,
@@ -10790,6 +10794,8 @@ namespace Legion {
           const FieldMask dst_overlap = it->second & restricted_mask;
           if (!dst_overlap)
             continue;
+          if (!it->first->is_instance_view())
+            assert(false); // TODO: handle sharded view case
           InstanceView *dst_view = it->first->as_instance_view();
           FieldMaskSet<LogicalView> srcs;
           for (unsigned idx = 0; idx < src_views.size(); idx++)
@@ -10832,6 +10838,8 @@ namespace Legion {
         const FieldMask overlap = it->second & restricted_mask;
         if (!overlap)
           continue;
+        if (!it->first->is_instance_view())
+          assert(false); // TODO: handle sharded view case
         InstanceView *dst_view = it->first->as_instance_view();
         if (aggregator == NULL)
           aggregator = new CopyFillAggregator(runtime->forest, op, index,
