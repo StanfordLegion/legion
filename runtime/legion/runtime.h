@@ -2582,6 +2582,12 @@ namespace Legion {
       void handle_library_task_request(Deserializer &derez,
                                        AddressSpaceID source);
       void handle_library_task_response(Deserializer &derez);
+      void handle_library_redop_request(Deserializer &derez,
+                                        AddressSpaceID source);
+      void handle_library_redop_response(Deserializer &derez);
+      void handle_library_serdez_request(Deserializer &derez,
+                                         AddressSpaceID source);
+      void handle_library_serdez_response(Deserializer &derez);
       void handle_shutdown_notification(Deserializer &derez, 
                                         AddressSpaceID source);
       void handle_shutdown_response(Deserializer &derez);
