@@ -6707,12 +6707,16 @@ namespace Legion {
         Runtime::trigger_event(applied, Runtime::merge_events(applied_events));
       else
         Runtime::trigger_event(applied);
+      if (analysis->remove_reference())
+        delete analysis;
+      // Nasty race here: make sure the ready has triggered before
+      // removing the references here because the views are not valid
+      if (ready_event.exists() && !ready_event.has_triggered())
+        ready_event.wait();
       if (inst_view != NULL)
         inst_view->send_remote_valid_decrement(previous, applied);
       if (registration_view != NULL)
         registration_view->send_remote_valid_decrement(previous, applied);
-      if (analysis->remove_reference())
-        delete analysis;
     }
 
     /////////////////////////////////////////////////////////////
