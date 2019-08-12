@@ -4580,7 +4580,7 @@ namespace Legion {
           const ApEvent attach_event = 
             runtime->forest->overwrite_sharded(this, 0/*index*/, requirement,
                         sharded_view, version_info, ApEvent::NO_AP_EVENT,
-                        map_applied_conditions, true/*restrict*/);
+                        map_applied_conditions, restricted);
           Runtime::phase_barrier_arrive(broadcast_barrier, 1/*count*/, 
                                         attach_event);
         }
