@@ -1016,7 +1016,7 @@ class StatObject(object):
 
     def get_total_calls(self):
         total_calls = 0
-        for proc_calls in itervalues(self.total_calls.itervalues):
+        for proc_calls in itervalues(self.total_calls):
             total_calls += proc_calls
         return total_calls
 

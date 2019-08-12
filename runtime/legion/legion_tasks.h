@@ -746,8 +746,7 @@ namespace Legion {
     public:
       Future initialize_task(InnerContext *ctx,
                              const TaskLauncher &launcher, 
-                             bool track = true);
-      void set_top_level(void);
+                             bool track = true, bool top_level=false);
       void perform_base_dependence_analysis(void);
     public:
       virtual bool has_prepipeline_stage(void) const

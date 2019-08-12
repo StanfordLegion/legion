@@ -5198,7 +5198,7 @@ class MappingDependence(object):
         
 class Operation(object):
     __slots__ = ['state', 'uid', 'kind', 'context', 'name', 'reqs', 'mappings', 
-                 'incoming', 'outgoing', 'logical_incoming', 
+                 'fully_logged', 'incoming', 'outgoing', 'logical_incoming', 
                  'logical_outgoing', 'physical_incoming', 'physical_outgoing', 
                  'eq_incoming', 'eq_outgoing', 'eq_privileges',
                  'start_event', 'finish_event', 'inter_close_ops',
@@ -5218,6 +5218,7 @@ class Operation(object):
         self.name = None
         self.reqs = None
         self.mappings = None
+        self.fully_logged = False
         self.incoming = None # Mapping dependences
         self.outgoing = None # Mapping dependences
         self.logical_incoming = None # Operation dependences
@@ -5321,6 +5322,9 @@ class Operation(object):
             finish.add_incoming_op(self)
         self.start_event = start
         self.finish_event = finish
+        # We know that once we've seen this then all the logging 
+        # statements for the operation are done being performed
+        self.fully_logged = True
 
     def set_task_id(self, task_id):
         assert self.kind == SINGLE_TASK_KIND or self.kind == INDEX_TASK_KIND
@@ -5357,6 +5361,9 @@ class Operation(object):
 
     def set_replayed(self):
         self.replayed = True
+        # Once we see this then we know all the logging operations
+        # for the operation have been performed
+        self.fully_logged = True
 
     def get_index_launch_rect(self):
         assert self.launch_rect
@@ -5548,6 +5555,14 @@ class Operation(object):
         assert point in self.points
         return self.points[point]
 
+    def remove_incomplete(self):
+        assert not self.finish_event.exists()
+        if self.index_owner is not None:
+            self.index_owner.remove_incomplete()
+        elif self.context is not None:
+            self.context.operations.remove(self)
+        self.context = None
+
     def get_equivalence_privileges(self):
         if self.eq_privileges is None:
             self.eq_privileges = dict()
@@ -5594,6 +5609,7 @@ class Operation(object):
             assert self.context == other.context
         if self.name is None:
             self.name = other.name
+        self.fully_logged = self.fully_logged or other.fully_logged
         if not self.reqs:
             self.reqs = other.reqs
         elif other.reqs:
@@ -6961,7 +6977,8 @@ class Task(object):
     def __init__(self, state, op):
         self.state = state
         self.op = op
-        self.op.task = self
+        if op is not None:
+            self.op.task = self
         self.point = Point(0) 
         self.operations = list()
         self.depth = None
@@ -6980,7 +6997,9 @@ class Task(object):
         self.shard = None
 
     def __str__(self):
-        if self.shard is not None:
+        if self.op is None:
+            return "Root context"
+        elif self.shard is not None:
             return str(self.op)+" (Shard "+str(self.shard)+")"
         else:
             return str(self.op)
@@ -9298,7 +9317,7 @@ task_variant_pat         = re.compile(
     prefix+"Task Variant (?P<tid>[0-9]+) (?P<vid>[0-9]+) (?P<inner>[0-1]) "+
     "(?P<leaf>[0-1]) (?P<idem>[0-1]+) (?P<name>[-$()<>:\w. ]+)")
 top_task_pat             = re.compile(
-    prefix+"Top Task (?P<tid>[0-9]+) (?P<uid>[0-9]+) (?P<name>[-$()<>:\w. ]+)")
+    prefix+"Top Task (?P<tid>[0-9]+) (?P<ctxuid>[0-9]+) (?P<uid>[0-9]+) (?P<name>[-$()<>:\w. ]+)")
 single_task_pat          = re.compile(
     prefix+"Individual Task (?P<ctx>[0-9]+) (?P<tid>[0-9]+) (?P<uid>[0-9]+) "+
             "(?P<name>[-$()<>:\w. ]+)")
@@ -9485,7 +9504,7 @@ barrier_arrive_pat      = re.compile(
     prefix+"Phase Barrier Arrive (?P<uid>[0-9]+) (?P<iid>[0-9a-f]+)")
 barrier_wait_pat        = re.compile(
     prefix+"Phase Barrier Wait (?P<uid>[0-9]+) (?P<iid>[0-9a-f]+)")
-replay_op_pat    = re.compile(
+replay_op_pat           = re.compile(
     prefix+"Replay Operation (?P<uid>[0-9]+)")
 
 def parse_legion_spy_line(line, state):
@@ -9851,6 +9870,7 @@ def parse_legion_spy_line(line, state):
         op.set_task_id(int(m.group('tid')))
         # Save the top-level uid
         state.top_level_uid = int(m.group('uid'))
+        state.top_level_ctx_uid = int(m.group('ctxuid'))
         return True
     m = single_task_pat.match(line)
     if m is not None:
@@ -10301,7 +10321,8 @@ def parse_legion_spy_line(line, state):
     return False
 
 class State(object):
-    __slots__ = ['verbose', 'top_level_uid', 'traverser_gen', 'processors', 'memories',
+    __slots__ = ['verbose', 'top_level_uid', 'top_level_ctx_uid', 'traverser_gen', 
+                 'processors', 'memories',
                  'processor_kinds', 'memory_kinds', 'index_exprs', 'index_spaces', 
                  'index_partitions', 'field_spaces', 'regions', 'partitions', 'top_spaces', 
                  'trees', 'ops', 'unique_ops', 'tasks', 'task_names', 'variants', 
@@ -10318,6 +10339,7 @@ class State(object):
         self.assert_on_error = assert_on_error
         self.assert_on_warning = assert_on_warning
         self.top_level_uid = None
+        self.top_level_ctx_uid = None
         self.traverser_gen = 1
         # Machine things
         self.processors = dict()
@@ -10469,14 +10491,23 @@ class State(object):
                     point_termination = op.finish_event
                     index_termination = op.index_owner.finish_event
                     if point_termination.exists() and index_termination.exists():
-                        assert point_termination.exists()
-                        assert index_termination.exists()
-                    index_termination.add_incoming(point_termination)
-                    point_termination.add_outgoing(index_termination)
+                        index_termination.add_incoming(point_termination)
+                        point_termination.add_outgoing(index_termination)
             # Remove index operations from the event graph
             for op in index_owners:
                 if op.finish_event.incoming_ops:
                     op.finish_event.incoming_ops.remove(op)
+        # Check for any operations which look like they did not finish being
+        # fully logged because we died in the middle of the execution
+        for op in self.unique_ops:
+            if not op.fully_logged :
+                print(('Warning: operation %s (UID=%s) was not fully logged '+
+                        'and will be ignored. It is likely this occurred '+
+                        'because these logs are from a run that died in the '+
+                        'middle of execution.') % (str(op),str(op.uid)))
+                if self.assert_on_error:
+                    assert False
+                op.remove_incomplete()
         # Check for any interfering index space launches
         for op in self.unique_ops:
             if op.is_interfering_index_space_launch():
@@ -10485,22 +10516,18 @@ class State(object):
                     assert False
         # Fill in any task names
         for task in itervalues(self.tasks):
-            if task.op.task_id in self.task_names:
+            if task.op is not None and task.op.task_id in self.task_names:
                 task.op.set_name(self.task_names[task.op.task_id])
         # Assign the depth of the top context
         op = self.get_operation(self.top_level_uid)
         assert op.context is not None
         op.context.depth = 0
         # Check to see if we have any unknown operations
-        unknown = None
         for op in self.unique_ops:
             if op.kind is NO_OP_KIND:
-                unknown = op
-                break
-        if unknown is not None:
-            print('WARNING: operation %d has unknown operation kind!' % op.uid)
-            if self.assert_on_warning:
-                assert False
+                print('WARNING: operation %d has unknown operation kind!' % op.uid)
+                if self.assert_on_warning:
+                    assert False
         # Update the instance 
         for inst in itervalues(self.instances):
             inst.update_creator()
@@ -11234,10 +11261,14 @@ class State(object):
         return result
 
     def get_task(self, uid):
-        op = self.get_operation(uid)
-        if op in self.tasks:
-            return self.tasks[op]
-        op.set_op_kind(SINGLE_TASK_KIND)
+        assert self.top_level_ctx_uid is not None
+        if uid != self.top_level_ctx_uid:
+            op = self.get_operation(uid)
+            if op in self.tasks:
+                return self.tasks[op]
+            op.set_op_kind(SINGLE_TASK_KIND)
+        else:
+            op = None
         result = Task(self, op)
         self.tasks[op] = result
         return result

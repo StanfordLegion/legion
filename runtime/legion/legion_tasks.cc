@@ -5094,7 +5094,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     Future IndividualTask::initialize_task(InnerContext *ctx,
                                            const TaskLauncher &launcher,
-                                           bool track /*=true*/)
+                                           bool track /*=true*/,
+                                           bool top_level /*=false*/)
     //--------------------------------------------------------------------------
     {
       parent_ctx = ctx;
@@ -5176,8 +5177,19 @@ namespace Legion {
             runtime->get_available_distributed_id(), 
             runtime->address_space, this));
       check_empty_field_requirements(); 
+      // If this is the top-level task we can record some extra properties
+      if (top_level)
+      {
+        this->top_level_task = true;
+        // Top-level tasks never do dependence analysis, so we
+        // need to complete those stages now
+        resolve_speculation();
+      }
       if (runtime->legion_spy_enabled)
       {
+        if (top_level)
+          LegionSpy::log_top_level_task(task_id, parent_ctx->get_unique_id(),
+                                        unique_op_id, get_task_name());
         LegionSpy::log_individual_task(parent_ctx->get_unique_id(),
                                        unique_op_id,
                                        task_id, get_task_name());
@@ -5193,16 +5205,6 @@ namespace Legion {
       }
       return result;
     }
-
-    //--------------------------------------------------------------------------
-    void IndividualTask::set_top_level(void)
-    //--------------------------------------------------------------------------
-    {
-      this->top_level_task = true;
-      // Top-level tasks never do dependence analysis, so we
-      // need to complete those stages now
-      resolve_speculation();
-    } 
 
     //--------------------------------------------------------------------------
     void IndividualTask::trigger_prepipeline_stage(void)
@@ -8022,14 +8024,14 @@ namespace Legion {
           Runtime::merge_events(&trace_info, effects_postconditions);
         request_early_complete(done);
       }
-      if (!complete_preconditions.empty())
-        complete_operation(Runtime::merge_events(complete_preconditions));
-      else
-        complete_operation();
 #ifdef LEGION_SPY
       LegionSpy::log_operation_events(unique_op_id, ApEvent::NO_AP_EVENT,
                                       completion_event);
 #endif
+      if (!complete_preconditions.empty())
+        complete_operation(Runtime::merge_events(complete_preconditions));
+      else
+        complete_operation();
     }
 
     //--------------------------------------------------------------------------

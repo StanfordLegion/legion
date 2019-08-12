@@ -7573,6 +7573,27 @@ namespace Legion {
               runtime->handle_library_task_response(derez);
               break;
             }
+          case SEND_LIBRARY_REDOP_REQUEST:
+            {
+              runtime->handle_library_redop_request(derez,remote_address_space);
+              break;
+            }
+          case SEND_LIBRARY_REDOP_RESPONSE:
+            {
+              runtime->handle_library_redop_response(derez);
+              break;
+            }
+          case SEND_LIBRARY_SERDEZ_REQUEST:
+            {
+              runtime->handle_library_serdez_request(derez,
+                                      remote_address_space);
+              break;
+            }
+          case SEND_LIBRARY_SERDEZ_RESPONSE:
+            {
+              runtime->handle_library_serdez_response(derez);
+              break;
+            }
           case SEND_REMOTE_OP_REPORT_UNINIT:
             {
               runtime->handle_remote_op_report_uninitialized(derez);
@@ -11555,6 +11576,8 @@ namespace Legion {
       // If we are runtime 0 then we launch the top-level task
       if ((address_space == 0) && !this->implicit_top_level)
       {
+        if (legion_spy_enabled)
+          log_machine(machine);
 #ifdef DEBUG_LEGION
         assert(!local_procs.empty());
 #endif 
@@ -11587,8 +11610,8 @@ namespace Legion {
         TaskLauncher launcher(Runtime::legion_main_id, TaskArgument(),
                               Predicate::TRUE_PRED, legion_main_mapper_id);
         // Mark that this task is the top-level task
-        top_task->set_top_level();
-        top_task->initialize_task(top_context, launcher, false/*track parent*/);
+        top_task->initialize_task(top_context, launcher, 
+                                  false/*track parent*/,true/*top level task*/);
         // Set up the input arguments
         top_task->arglen = sizeof(InputArgs);
         top_task->args = malloc(top_task->arglen);
@@ -11596,13 +11619,6 @@ namespace Legion {
         // Set this to be the current processor
         top_task->set_current_proc(target);
         top_task->select_task_options();
-        if (legion_spy_enabled)
-        {
-          log_machine(machine);
-          LegionSpy::log_top_level_task(Runtime::legion_main_id,
-                                        top_task->get_unique_id(),
-                                        top_task->get_task_name());
-        }
         increment_outstanding_top_level_tasks();
         // Launch a task to deactivate the top-level context
         // when the top-level task is done
@@ -18532,6 +18548,120 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::handle_library_redop_request(Deserializer &derez,
+                                               AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      size_t string_length;
+      derez.deserialize(string_length);
+      const char *name = (const char*)derez.get_current_pointer();
+      derez.advance_pointer(string_length);
+      size_t count;
+      derez.deserialize(count);
+      RtUserEvent done;
+      derez.deserialize(done);
+      
+      ReductionOpID result = generate_library_reduction_ids(name, count);
+      Serializer rez;
+      {
+        RezCheck z2(rez);
+        rez.serialize(string_length);
+        rez.serialize(name, string_length);
+        rez.serialize(result);
+        rez.serialize(done);
+      }
+      send_library_redop_response(source, rez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_library_redop_response(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      size_t string_length;
+      derez.deserialize(string_length);
+      const char *name = (const char*)derez.get_current_pointer();
+      derez.advance_pointer(string_length);
+      ReductionOpID result;
+      derez.deserialize(result);
+      RtUserEvent done;
+      derez.deserialize(done);
+
+      const std::string library_name(name);
+      {
+        AutoLock l_lock(library_lock); 
+        std::map<std::string,LibraryRedopIDs>::iterator finder = 
+          library_redop_ids.find(library_name);
+#ifdef DEBUG_LEGION
+        assert(finder != library_redop_ids.end());
+        assert(!finder->second.result_set);
+        assert(finder->second.ready == done);
+#endif
+        finder->second.result = result;
+        finder->second.result_set = true;
+      }
+      Runtime::trigger_event(done);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_library_serdez_request(Deserializer &derez,
+                                                AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      size_t string_length;
+      derez.deserialize(string_length);
+      const char *name = (const char*)derez.get_current_pointer();
+      derez.advance_pointer(string_length);
+      size_t count;
+      derez.deserialize(count);
+      RtUserEvent done;
+      derez.deserialize(done);
+      
+      CustomSerdezID result = generate_library_serdez_ids(name, count);
+      Serializer rez;
+      {
+        RezCheck z2(rez);
+        rez.serialize(string_length);
+        rez.serialize(name, string_length);
+        rez.serialize(result);
+        rez.serialize(done);
+      }
+      send_library_serdez_response(source, rez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_library_serdez_response(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      size_t string_length;
+      derez.deserialize(string_length);
+      const char *name = (const char*)derez.get_current_pointer();
+      derez.advance_pointer(string_length);
+      CustomSerdezID result;
+      derez.deserialize(result);
+      RtUserEvent done;
+      derez.deserialize(done);
+
+      const std::string library_name(name);
+      {
+        AutoLock l_lock(library_lock); 
+        std::map<std::string,LibrarySerdezIDs>::iterator finder = 
+          library_serdez_ids.find(library_name);
+#ifdef DEBUG_LEGION
+        assert(finder != library_serdez_ids.end());
+        assert(!finder->second.result_set);
+        assert(finder->second.ready == done);
+#endif
+        finder->second.result = result;
+        finder->second.result_set = true;
+      }
+      Runtime::trigger_event(done);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::handle_remote_op_report_uninitialized(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
@@ -22012,6 +22142,8 @@ namespace Legion {
       }
       else
       {
+        if (the_runtime->legion_spy_enabled)
+          the_runtime->log_machine(the_runtime->machine);
         // Save the top-level task name if necessary
         if (task_name != NULL)
           the_runtime->attach_semantic_information(top_task_id, 
@@ -22052,15 +22184,8 @@ namespace Legion {
         TaskLauncher launcher(legion_main_id, TaskArgument(),
                               Predicate::TRUE_PRED, legion_main_mapper_id);
         // Mark that this task is the top-level task
-        top_task->set_top_level();
-        top_task->initialize_task(top_context, launcher, false/*track parent*/);
-        if (the_runtime->legion_spy_enabled)
-        {
-          the_runtime->log_machine(the_runtime->machine);
-          LegionSpy::log_top_level_task(legion_main_id,
-                                        top_task->get_unique_id(),
-                                        top_task->get_task_name());
-        }
+        top_task->initialize_task(top_context, launcher, 
+                                  false/*track parent*/,true/*top level task*/);
         the_runtime->increment_outstanding_top_level_tasks();
         top_context->increment_pending();
 #ifdef DEBUG_LEGION
