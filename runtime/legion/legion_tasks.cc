@@ -5504,6 +5504,11 @@ namespace Legion {
 #endif
         deferred_complete_mapping = Runtime::create_rt_user_event();
         applied_condition = deferred_complete_mapping;
+#ifdef LEGION_SPY
+        // Still need to do this for Legion Spy
+        LegionSpy::log_operation_events(unique_op_id,
+            ApEvent::NO_AP_EVENT, ApEvent::NO_AP_EVENT);
+#endif
       }
       // Mark that we have completed mapping
       complete_mapping(applied_condition);

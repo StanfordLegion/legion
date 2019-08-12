@@ -429,6 +429,7 @@ namespace Legion {
           if (!runtime->program_order_execution)
           {
             need_completion_trigger = false;
+            __sync_synchronize();
             Runtime::trigger_event(completion_event, chain_event);
             return true;
           }
@@ -440,6 +441,7 @@ namespace Legion {
           if (!runtime->program_order_execution)
           {
             need_completion_trigger = false;
+            __sync_synchronize();
             to_trigger = completion_event;
             return true;
           }

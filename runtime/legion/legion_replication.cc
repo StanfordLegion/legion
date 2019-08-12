@@ -349,6 +349,11 @@ namespace Legion {
       // If we own it we go on the queue, otherwise we complete early
       if (owner_shard != repl_ctx->owner_shard->shard_id)
       {
+#ifdef LEGION_SPY
+        // Still have to do this for legion spy
+        LegionSpy::log_operation_events(unique_op_id, 
+            ApEvent::NO_AP_EVENT, ApEvent::NO_AP_EVENT);
+#endif
         // We don't own it, so we can pretend like we
         // mapped and executed this copy already
         // Before we do this though we have to get the version state
@@ -620,6 +625,11 @@ namespace Legion {
       // If it's empty we're done, otherwise we go back on the queue
       if (!internal_space.exists())
       {
+#ifdef LEGION_SPY
+        // Still have to do this for legion spy
+        LegionSpy::log_operation_events(unique_op_id, 
+            ApEvent::NO_AP_EVENT, ApEvent::NO_AP_EVENT);
+#endif
         // We have no local points, so we can just trigger
         complete_mapping();
         complete_execution();
@@ -1011,6 +1021,11 @@ namespace Legion {
       // If we own it we go on the queue, otherwise we complete early
       if (owner_shard != repl_ctx->owner_shard->shard_id)
       {
+#ifdef LEGION_SPY
+        // Still have to do this for legion spy
+        LegionSpy::log_operation_events(unique_op_id, 
+            ApEvent::NO_AP_EVENT, ApEvent::NO_AP_EVENT);
+#endif
         // We don't own it, so we can pretend like we
         // mapped and executed this fill already
         // Before we do this though we have to get the version state
@@ -1167,6 +1182,11 @@ namespace Legion {
       // If it's empty we're done, otherwise we go back on the queue
       if (!local_space.exists())
       {
+#ifdef LEGION_SPY
+        // Still have to do this for legion spy
+        LegionSpy::log_operation_events(unique_op_id, 
+            ApEvent::NO_AP_EVENT, ApEvent::NO_AP_EVENT);
+#endif
         // We have no local points, so we can just trigger
         complete_mapping();
         complete_execution();
@@ -1331,6 +1351,11 @@ namespace Legion {
       // If we own it we go on the queue, otherwise we complete early
       if (owner_shard != repl_ctx->owner_shard->shard_id)
       {
+#ifdef LEGION_SPY
+        // Still have to do this for legion spy
+        LegionSpy::log_operation_events(unique_op_id, 
+            ApEvent::NO_AP_EVENT, ApEvent::NO_AP_EVENT);
+#endif
         // We don't own it, so we can pretend like we
         // mapped and executed this copy already
         // Before we do this though we have to get the version state
@@ -1544,6 +1569,11 @@ namespace Legion {
           for (unsigned idx = 0; idx < indirection_barriers.size(); idx++)
             Runtime::phase_barrier_arrive(indirection_barriers[idx],1/*count*/);
         }
+#ifdef LEGION_SPY
+        // Still have to do this for legion spy
+        LegionSpy::log_operation_events(unique_op_id, 
+            ApEvent::NO_AP_EVENT, ApEvent::NO_AP_EVENT);
+#endif
         // We have no local points, so we can just trigger
         complete_mapping();
         complete_execution();
@@ -2139,6 +2169,11 @@ namespace Legion {
                         runtime->address_space, applied);
         }
       }
+#ifdef LEGION_SPY
+      // Still have to do this for legion spy
+      LegionSpy::log_operation_events(unique_op_id, 
+          ApEvent::NO_AP_EVENT, ApEvent::NO_AP_EVENT);
+#endif
       if (!applied.empty())
         complete_operation(Runtime::merge_events(applied));
       else
@@ -2229,8 +2264,12 @@ namespace Legion {
       ApEvent ready_event = thunk->perform_shard(this, runtime->forest,
         repl_ctx->owner_shard->shard_id, repl_ctx->shard_manager->total_shards);
       complete_mapping();
-      Runtime::trigger_event(completion_event, ready_event);
-      need_completion_trigger = false;
+#ifdef LEGION_SPY
+      // Still have to do this call to let Legion Spy know we're done
+      LegionSpy::log_operation_events(unique_op_id, 
+          ApEvent::NO_AP_EVENT, ApEvent::NO_AP_EVENT);
+#endif
+      request_early_complete(ready_event);
       complete_execution(Runtime::protect_event(ready_event));
     }
 
@@ -2589,6 +2628,11 @@ namespace Legion {
         // If it's empty we're done, otherwise we go back on the queue
         if (!local_space.exists())
         {
+#ifdef LEGION_SPY
+          // Still have to do this for legion spy
+          LegionSpy::log_operation_events(unique_op_id, 
+              ApEvent::NO_AP_EVENT, ApEvent::NO_AP_EVENT);
+#endif
           // We aren't participating directly, but we still have to 
           // participate in the collective operations
           const ApEvent done_event = 
@@ -2624,6 +2668,11 @@ namespace Legion {
         // If we own it we go on the queue, otherwise we complete early
         if (repl_ctx->owner_shard->shard_id != 0)
         {
+#ifdef LEGION_SPY
+          // Still have to do this for legion spy
+          LegionSpy::log_operation_events(unique_op_id, 
+              ApEvent::NO_AP_EVENT, ApEvent::NO_AP_EVENT);
+#endif
           // We don't own it, so we can pretend like we
           // mapped and executed this task already
           RtEvent local_done = mapped_collective->get_local_event();
@@ -4802,6 +4851,15 @@ namespace Legion {
         RtEvent detached_event = manager->detach_external_instance();
         if (detached_event.exists())
           map_applied_conditions.insert(detached_event);
+        if (runtime->legion_spy_enabled)
+        {
+          runtime->forest->log_mapping_decision(unique_op_id, parent_ctx,
+                                      0/*idx*/, requirement, references);
+#ifdef LEGION_SPY
+          LegionSpy::log_operation_events(unique_op_id, detach_event,
+                                          completion_event);
+#endif
+        }
       }
       // Make sure that all the detach operations are done before 
       // we count any of them as being mapped
