@@ -10525,6 +10525,8 @@ namespace Legion {
       // If we are runtime 0 then we launch the top-level task
       if ((address_space == 0) && !this->implicit_top_level)
       {
+        if (legion_spy_enabled)
+          log_machine(machine);
 #ifdef DEBUG_LEGION
         assert(!local_procs.empty());
 #endif 
@@ -10557,8 +10559,8 @@ namespace Legion {
         TaskLauncher launcher(Runtime::legion_main_id, TaskArgument(),
                               Predicate::TRUE_PRED, legion_main_mapper_id);
         // Mark that this task is the top-level task
-        top_task->set_top_level();
-        top_task->initialize_task(top_context, launcher, false/*track parent*/);
+        top_task->initialize_task(top_context, launcher, 
+                                  false/*track parent*/,true/*top level task*/);
         // Set up the input arguments
         top_task->arglen = sizeof(InputArgs);
         top_task->args = malloc(top_task->arglen);
@@ -10566,13 +10568,6 @@ namespace Legion {
         // Set this to be the current processor
         top_task->set_current_proc(target);
         top_task->select_task_options();
-        if (legion_spy_enabled)
-        {
-          log_machine(machine);
-          LegionSpy::log_top_level_task(Runtime::legion_main_id,
-                                        top_task->get_unique_id(),
-                                        top_task->get_task_name());
-        }
         increment_outstanding_top_level_tasks();
         // Launch a task to deactivate the top-level context
         // when the top-level task is done
@@ -20201,6 +20196,8 @@ namespace Legion {
       }
       else
       {
+        if (the_runtime->legion_spy_enabled)
+          the_runtime->log_machine(the_runtime->machine);
         // Save the top-level task name if necessary
         if (task_name != NULL)
           the_runtime->attach_semantic_information(top_task_id, 
@@ -20241,15 +20238,8 @@ namespace Legion {
         TaskLauncher launcher(legion_main_id, TaskArgument(),
                               Predicate::TRUE_PRED, legion_main_mapper_id);
         // Mark that this task is the top-level task
-        top_task->set_top_level();
-        top_task->initialize_task(top_context, launcher, false/*track parent*/);
-        if (the_runtime->legion_spy_enabled)
-        {
-          the_runtime->log_machine(the_runtime->machine);
-          LegionSpy::log_top_level_task(legion_main_id,
-                                        top_task->get_unique_id(),
-                                        top_task->get_task_name());
-        }
+        top_task->initialize_task(top_context, launcher, 
+                                  false/*track parent*/,true/*top level task*/);
         the_runtime->increment_outstanding_top_level_tasks();
         top_context->increment_pending();
 #ifdef DEBUG_LEGION

@@ -514,11 +514,11 @@ namespace Legion {
       }
 
       static inline void log_top_level_task(Processor::TaskFuncID task_id,
-                                            UniqueID unique_id,
-                                            const char *name)
+                                            UniqueID parent_ctx_uid,
+                                            UniqueID unique_id,const char *name)
       {
-        log_spy.print("Top Task %u %llu %s", 
-		      task_id, unique_id, name);
+        log_spy.print("Top Task %u %llu %llu %s", 
+		      task_id, parent_ctx_uid, unique_id, name);
       }
 
       static inline void log_individual_task(UniqueID context,
@@ -1354,6 +1354,10 @@ namespace Legion {
         log_spy.print("Pred Event Trigger " IDFMT, event.id);
       }
 
+      // We use this call as a special guard call to know when 
+      // all the logging calls associated with an operation are 
+      // done which is useful for knowing when log files are 
+      // incomplete because a job crashes in the middle of a run
       static inline void log_operation_events(UniqueID uid,
                                               LgEvent pre, LgEvent post)
       {
@@ -1413,6 +1417,10 @@ namespace Legion {
                       op_unique_id, handle.get_id(), pre.id, post.id);
       }
 
+      // We use this call as a special guard call to know when 
+      // all the logging calls associated with an operation are 
+      // done which is useful for knowing when log files are 
+      // incomplete because a job crashes in the middle of a run
       static inline void log_replay_operation(UniqueID op_unique_id)
       {
         log_spy.print("Replay Operation %llu", op_unique_id);

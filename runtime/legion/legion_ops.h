@@ -1271,6 +1271,9 @@ namespace Legion {
     public:
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_mapping(void);
+#ifdef LEGION_SPY
+      virtual void trigger_complete(void);
+#endif
     protected:
       void perform_fence_analysis(bool update_fence = false);
       void update_current_fence(void);
@@ -1513,6 +1516,9 @@ namespace Legion {
       virtual const FieldMask& get_internal_mask(void) const;
     public:
       virtual unsigned find_parent_index(unsigned idx);
+#ifdef LEGION_SPY
+      virtual void trigger_complete(void);
+#endif
     protected:
       unsigned parent_req_index; 
     protected:
@@ -1601,6 +1607,9 @@ namespace Legion {
     public:
       virtual void trigger_dependence_analysis(void);
       virtual unsigned find_parent_index(unsigned idx);
+#ifdef LEGION_SPY
+      virtual void trigger_complete(void);
+#endif
     protected:
       unsigned parent_idx;
     };

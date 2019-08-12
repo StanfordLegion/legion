@@ -6672,6 +6672,18 @@ namespace Legion {
       }
     }
 
+#ifdef LEGION_SPY
+    //--------------------------------------------------------------------------
+    void FenceOp::trigger_complete(void)
+    //--------------------------------------------------------------------------
+    {
+      // Still need this to record that this operation is done for LegionSpy
+      LegionSpy::log_operation_events(unique_op_id, 
+          ApEvent::NO_AP_EVENT, ApEvent::NO_AP_EVENT);
+      complete_operation();
+    }
+#endif
+
     /////////////////////////////////////////////////////////////
     // Frame Operation 
     /////////////////////////////////////////////////////////////
@@ -7300,6 +7312,11 @@ namespace Legion {
           runtime->forest->destroy_logical_region(*it, runtime->address_space,
                                                   preconditions);
       }
+#ifdef LEGION_SPY
+      // Still have to do this call to let Legion Spy know we're done
+      LegionSpy::log_operation_events(unique_op_id, ApEvent::NO_AP_EVENT,
+                                      ApEvent::NO_AP_EVENT);
+#endif
       if (!preconditions.empty())
         complete_operation(Runtime::merge_events(preconditions));
       else
@@ -7731,6 +7748,18 @@ namespace Legion {
       return parent_req_index;
     }
 
+#ifdef LEGION_SPY
+    //--------------------------------------------------------------------------
+    void MergeCloseOp::trigger_complete(void)
+    //--------------------------------------------------------------------------
+    {
+      // Still need this to record that this operation is done for LegionSpy
+      LegionSpy::log_operation_events(unique_op_id, 
+          ApEvent::NO_AP_EVENT, ApEvent::NO_AP_EVENT);
+      complete_operation();
+    }
+#endif
+
     /////////////////////////////////////////////////////////////
     // Post Close Operation 
     /////////////////////////////////////////////////////////////
@@ -8155,6 +8184,18 @@ namespace Legion {
 #endif
       return parent_idx;
     }
+
+#ifdef LEGION_SPY
+    //--------------------------------------------------------------------------
+    void VirtualCloseOp::trigger_complete(void)
+    //--------------------------------------------------------------------------
+    {
+      // Still need this to record that this operation is done for LegionSpy
+      LegionSpy::log_operation_events(unique_op_id, 
+          ApEvent::NO_AP_EVENT, ApEvent::NO_AP_EVENT);
+      complete_operation();
+    }
+#endif
 
     /////////////////////////////////////////////////////////////
     // External Acquire
@@ -9923,6 +9964,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       future.impl->complete_future();
+#ifdef LEGION_SPY
+      LegionSpy::log_operation_events(unique_op_id,
+          ApEvent::NO_AP_EVENT, ApEvent::NO_AP_EVENT);
+#endif
       complete_operation(complete_memoizable());
     }
 
@@ -10940,6 +10985,11 @@ namespace Legion {
       if (need_complete)
       {
         result_map.impl->complete_all_futures();
+#ifdef LEGION_SPY
+        // Still need this for Legion Spy
+        LegionSpy::log_operation_events(unique_op_id,
+            ApEvent::NO_AP_EVENT, ApEvent::NO_AP_EVENT);
+#endif
         complete_operation();
       }
     }
@@ -11206,6 +11256,11 @@ namespace Legion {
       {
         // Complete all our futures
         result_map.impl->complete_all_futures();
+#ifdef LEGION_SPY
+        // Still need this for Legion Spy
+        LegionSpy::log_operation_events(unique_op_id,
+            ApEvent::NO_AP_EVENT, ApEvent::NO_AP_EVENT);
+#endif
         complete_operation();
       }
     }
@@ -11864,6 +11919,11 @@ namespace Legion {
       // Perform the partitioning operation
       ApEvent ready_event = thunk->perform(this, runtime->forest);
       complete_mapping();
+#ifdef LEGION_SPY
+      // Still have to do this call to let Legion Spy know we're done
+      LegionSpy::log_operation_events(unique_op_id, ApEvent::NO_AP_EVENT,
+                                      ApEvent::NO_AP_EVENT);
+#endif
       request_early_complete(ready_event);
       complete_execution(Runtime::protect_event(ready_event));
     }
