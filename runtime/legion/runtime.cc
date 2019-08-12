@@ -7158,6 +7158,27 @@ namespace Legion {
               runtime->handle_library_task_response(derez);
               break;
             }
+          case SEND_LIBRARY_REDOP_REQUEST:
+            {
+              runtime->handle_library_redop_request(derez,remote_address_space);
+              break;
+            }
+          case SEND_LIBRARY_REDOP_RESPONSE:
+            {
+              runtime->handle_library_redop_response(derez);
+              break;
+            }
+          case SEND_LIBRARY_SERDEZ_REQUEST:
+            {
+              runtime->handle_library_serdez_request(derez,
+                                      remote_address_space);
+              break;
+            }
+          case SEND_LIBRARY_SERDEZ_RESPONSE:
+            {
+              runtime->handle_library_serdez_response(derez);
+              break;
+            }
           case SEND_REMOTE_OP_REPORT_UNINIT:
             {
               runtime->handle_remote_op_report_uninitialized(derez);
@@ -16973,6 +16994,120 @@ namespace Legion {
           library_task_ids.find(library_name);
 #ifdef DEBUG_LEGION
         assert(finder != library_task_ids.end());
+        assert(!finder->second.result_set);
+        assert(finder->second.ready == done);
+#endif
+        finder->second.result = result;
+        finder->second.result_set = true;
+      }
+      Runtime::trigger_event(done);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_library_redop_request(Deserializer &derez,
+                                               AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      size_t string_length;
+      derez.deserialize(string_length);
+      const char *name = (const char*)derez.get_current_pointer();
+      derez.advance_pointer(string_length);
+      size_t count;
+      derez.deserialize(count);
+      RtUserEvent done;
+      derez.deserialize(done);
+      
+      ReductionOpID result = generate_library_reduction_ids(name, count);
+      Serializer rez;
+      {
+        RezCheck z2(rez);
+        rez.serialize(string_length);
+        rez.serialize(name, string_length);
+        rez.serialize(result);
+        rez.serialize(done);
+      }
+      send_library_redop_response(source, rez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_library_redop_response(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      size_t string_length;
+      derez.deserialize(string_length);
+      const char *name = (const char*)derez.get_current_pointer();
+      derez.advance_pointer(string_length);
+      ReductionOpID result;
+      derez.deserialize(result);
+      RtUserEvent done;
+      derez.deserialize(done);
+
+      const std::string library_name(name);
+      {
+        AutoLock l_lock(library_lock); 
+        std::map<std::string,LibraryRedopIDs>::iterator finder = 
+          library_redop_ids.find(library_name);
+#ifdef DEBUG_LEGION
+        assert(finder != library_redop_ids.end());
+        assert(!finder->second.result_set);
+        assert(finder->second.ready == done);
+#endif
+        finder->second.result = result;
+        finder->second.result_set = true;
+      }
+      Runtime::trigger_event(done);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_library_serdez_request(Deserializer &derez,
+                                                AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      size_t string_length;
+      derez.deserialize(string_length);
+      const char *name = (const char*)derez.get_current_pointer();
+      derez.advance_pointer(string_length);
+      size_t count;
+      derez.deserialize(count);
+      RtUserEvent done;
+      derez.deserialize(done);
+      
+      CustomSerdezID result = generate_library_serdez_ids(name, count);
+      Serializer rez;
+      {
+        RezCheck z2(rez);
+        rez.serialize(string_length);
+        rez.serialize(name, string_length);
+        rez.serialize(result);
+        rez.serialize(done);
+      }
+      send_library_serdez_response(source, rez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_library_serdez_response(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      size_t string_length;
+      derez.deserialize(string_length);
+      const char *name = (const char*)derez.get_current_pointer();
+      derez.advance_pointer(string_length);
+      CustomSerdezID result;
+      derez.deserialize(result);
+      RtUserEvent done;
+      derez.deserialize(done);
+
+      const std::string library_name(name);
+      {
+        AutoLock l_lock(library_lock); 
+        std::map<std::string,LibrarySerdezIDs>::iterator finder = 
+          library_serdez_ids.find(library_name);
+#ifdef DEBUG_LEGION
+        assert(finder != library_serdez_ids.end());
         assert(!finder->second.result_set);
         assert(finder->second.ready == done);
 #endif
