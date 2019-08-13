@@ -5218,7 +5218,8 @@ class Operation(object):
         self.name = None
         self.reqs = None
         self.mappings = None
-        self.fully_logged = False
+        # If we didn't do detailed logging just assumed we are fully logged
+        self.fully_logged = not self.state.detailed_logging
         self.incoming = None # Mapping dependences
         self.outgoing = None # Mapping dependences
         self.logical_incoming = None # Operation dependences
@@ -5554,14 +5555,6 @@ class Operation(object):
         assert self.kind == INDEX_TASK_KIND
         assert point in self.points
         return self.points[point]
-
-    def remove_incomplete_logged(self):
-        assert not self.finish_event.exists()
-        if self.index_owner is not None:
-            self.index_owner.remove_incomplete_logged()
-        elif self.context is not None:
-            self.context.operations.remove(self)
-        self.context = None
 
     def get_equivalence_privileges(self):
         if self.eq_privileges is None:
@@ -7232,6 +7225,12 @@ class Task(object):
         # have them perform their analysis
         success = True
         for op in self.operations:
+            if not op.fully_logged:
+                print(('Warning: skipping logical analysis of %s because it '+
+                        'was not fully logged...') % str(op))
+                if op.state.assert_on_warning:
+                    assert False
+                continue
             if not op.perform_logical_analysis(perform_checks):
                 success = False
                 break
@@ -7343,6 +7342,12 @@ class Task(object):
         else:
             # Normal path
             for op in self.operations:
+                if not op.fully_logged:
+                    print(('Warning: skipping physical verification of %s '+
+                            'because it was not fully logged...') % str(op))
+                    if op.state.assert_on_warning:
+                        assert False
+                    continue
                 if not op.perform_op_physical_verification(perform_checks):
                     success = False
                     break
@@ -7355,6 +7360,8 @@ class Task(object):
     def print_task_mapping_decisions(self):
         depth = self.get_depth()
         for op in self.operations:
+            if not op.fully_logged:
+                continue
             op.print_op_mapping_decisions(depth)
 
     def print_dataflow_graph(self, path, simplify_graphs, zoom_graphs):
@@ -7362,19 +7369,27 @@ class Task(object):
             return 0
         if len(self.operations) == 1:
             op = self.operations[0]
-            if not op.inter_close_ops:
+            if not op.inter_close_ops or not op.fully_logged:
                 return 0
         name = str(self)
         filename = 'dataflow_'+name.replace(' ', '_')+'_'+str(self.op.uid)
         printer = GraphPrinter(path,filename)
         # First emit the nodes
         for op in self.operations:
+            if not op.fully_logged:
+                print(('Warning: skipping dataflow printing of %s because it '+
+                        'was not fully logged...') % str(op))
+                if op.state.assert_on_warning:
+                    assert False
+                continue
             op.print_dataflow_node(printer)
         # Simplify our graph if necessary
         if simplify_graphs:
             print("Simplifying dataflow graph for "+str(self)+"...")
             all_ops = list()
             for op in self.operations:
+                if not op.fully_logged:
+                    continue
                 # Add any close operations first
                 if op.inter_close_ops:
                     for close in op.inter_close_ops:
@@ -7450,6 +7465,12 @@ class Task(object):
         else:
             previous_pairs = set()
             for op in self.operations:
+                if not op.fully_logged:
+                    print(('Warning: skipping dataflow printing of %s because it '+
+                            'was not fully logged...') % str(op))
+                    if op.state.assert_on_warning:
+                        assert False
+                    continue
                 op.print_incoming_dataflow_edges(printer, previous_pairs)
         printer.print_pdf_after_close(False, zoom_graphs)
         # We printed our dataflow graph
@@ -7507,6 +7528,12 @@ class Task(object):
             printer.println(self.op.node_name + ' [shape=point,style=invis];')
         # Generate the sub-graph
         for op in self.operations:
+            if not op.fully_logged:
+                print(('Warning: skipping event graph printing of %s because it '+
+                            'was not fully logged...') % str(op))
+                if op.state.assert_on_warning:
+                    assert False
+                continue
             op.print_event_graph(printer, elevate, all_nodes, False)
         # Find our local nodes
         local_nodes = list()
@@ -10509,18 +10536,6 @@ class State(object):
             for op in index_owners:
                 if op.finish_event.incoming_ops:
                     op.finish_event.incoming_ops.remove(op)
-        # Check for any operations which look like they did not finish being
-        # fully logged because we died in the middle of the execution
-        for op in self.unique_ops:
-            if not op.fully_logged :
-                print(('Warning: operation %s (UID=%s) was not fully logged '+
-                        'and will be ignored. It is likely this occurred '+
-                        'because these logs are from a run that died in the '+
-                        'middle of execution.') % (str(op),str(op.uid)))
-                if self.assert_on_warning:
-                    assert False
-                if op.kind != INTER_CLOSE_OP_KIND:
-                    op.remove_incomplete_logged()
         # Check for any interfering index space launches
         for op in self.unique_ops:
             if op.is_interfering_index_space_launch():
