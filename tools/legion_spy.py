@@ -7186,6 +7186,10 @@ class Task(object):
                     if op.points is not None or op.owner_shard == shard.shard:
                         if logical_op is None:
                             logical_op = op
+                        else:
+                            assert op.kind == logical_op.kind
+                            if op.task is not None:
+                                assert op.task_id == logical_op.task_id
                         # Update the points with the right owner shard
                         if op.points is not None:
                             if op.kind == INDEX_TASK_KIND:
