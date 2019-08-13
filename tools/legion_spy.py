@@ -6772,6 +6772,7 @@ class Task(object):
                         'was not fully logged...') % str(op))
                 if op.state.assert_on_warning:
                     assert False
+                continue
             if not op.perform_logical_analysis(perform_checks):
                 success = False
                 break
@@ -6890,6 +6891,7 @@ class Task(object):
                         'because it was not fully logged...') % str(op))
                 if op.state.assert_on_warning:
                     assert False
+                continue
             if not op.perform_op_physical_verification(perform_checks): 
                 success = False
                 break
