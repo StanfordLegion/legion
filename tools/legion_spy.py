@@ -7156,14 +7156,22 @@ class Task(object):
             # the operations from all the different shards
             num_ops = -1
             for shard in itervalues(self.replicants.shards):
+                shard_ops = 0
+                for op in shard.operations:
+                    if not op.fully_logged:
+                        break
+                    else:
+                        shard_ops += 1
                 if num_ops == -1:
-                    num_ops = len(shard.operations)
-                elif num_ops != len(shard.operations):
-                    print(('Warning: shard %s has %d operations which is '+
-                            'different than %d operations in other shards. '+
+                    num_ops = shard_ops
+                elif num_ops != shard_ops:
+                    print(('Warning: shard %s has %s operations which is '+
+                            'different than %s operations in other shards. '+
                             'This is likely the result of a crash in a run.') %
-                            (str(shard.shard),str(len(shard.operations)),str(num_ops)))
-                    num_ops = min(len(shard.operations),num_ops)
+                            (str(shard.shard),str(shard_ops),str(num_ops)))
+                    if self.state.assert_on_warning:
+                        assert False
+                    num_ops = min(shard_ops,num_ops)
             for idx in xrange(num_ops):
                 # We'll use the logical operations from the first shard for
                 # doing the actual dependence analysis
@@ -7322,14 +7330,22 @@ class Task(object):
             # Control-replicated path
             num_ops = -1
             for shard in itervalues(self.replicants.shards):
+                shard_ops = 0
+                for op in shard.operations:
+                    if not op.fully_logged:
+                        break
+                    else:
+                        shard_ops += 1
                 if num_ops == -1:
-                    num_ops = len(shard.operations)
-                elif num_ops != len(shard.operations):
-                    print(('Warning: shard %s has %d operations which is '+
-                            'different than %d operations in other shards. '+
+                    num_ops = shard_ops
+                elif num_ops != shard_ops:
+                    print(('Warning: shard %s has %s operations which is '+
+                            'different than %s operations in other shards. '+
                             'This is likely the result of a crash in a run.') %
-                            (str(shard.shard),str(len(shard.operations)),str(num_ops)))
-                    num_ops = min(len(shard.operations),num_ops)
+                            (str(shard.shard),str(shard_ops),str(num_ops)))
+                    if self.state.assert_on_warning:
+                        assert False
+                    num_ops = min(shard_ops,num_ops)
             # Perform all the operations in order across the shards
             for idx in range(num_ops):
                 for shard in itervalues(self.replicants.shards):
@@ -7484,14 +7500,22 @@ class Task(object):
                 # operations across shards so they have the same operation name
                 num_ops = -1
                 for shard in self.replicants.shards.itervalues():
+                    shard_ops = 0
+                    for op in shard.operations:
+                        if not op.fully_logged:
+                            break
+                        else:
+                            shard_ops += 1
                     if num_ops == -1:
-                        num_ops = len(shard.operations)
-                    elif num_ops != len(shard.operations):
-                        print(('Warning: shard %s has %d operations which is '+
-                                'different than %d operations in other shards. '+
+                        num_ops = shard_ops
+                    elif num_ops != shard_ops:
+                        print(('Warning: shard %s has %s operations which is '+
+                                'different than %s operations in other shards. '+
                                 'This is likely the result of a crash in a run.') %
-                                (str(shard.shard),str(len(shard.operations)),str(num_ops)))
-                        num_ops = min(len(shard.operations),num_ops)
+                                (str(shard.shard),str(shard_ops),str(num_ops)))
+                        if self.state.assert_on_warning:
+                            assert False
+                        num_ops = min(shard_ops,num_ops)
                 for idx in range(num_ops):
                     owner_op = None
                     # See if we have an owner op
