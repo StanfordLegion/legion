@@ -3572,7 +3572,6 @@ class LogicalVerificationState(object):
             # path between these two operations
             elif prev_op.owner_shard != op.owner_shard and \
                 (prev_op is not prev_log or op is not logical_op):
-                print("Need shard close")
                 # Operations from two different shards with control
                 # replication always need a close operation if at
                 # least one of them is from an index space operation
