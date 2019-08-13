@@ -5422,10 +5422,10 @@ class Operation(object):
         assert point in self.points
         return self.points[point]
 
-    def remove_incomplete(self):
+    def remove_incomplete_logged(self):
         assert not self.finish_event.exists()
         if self.index_owner is not None:
-            self.index_owner.remove_incomplete()
+            self.index_owner.remove_incomplete_logged()
         elif self.context is not None:
             self.context.operations.remove(self)
         self.context = None
@@ -9977,9 +9977,10 @@ class State(object):
                         'and will be ignored. It is likely this occurred '+
                         'because these logs are from a run that died in the '+
                         'middle of execution.') % (str(op),str(op.uid)))
-                if self.assert_on_error:
+                if self.assert_on_warning:
                     assert False
-                op.remove_incomplete()
+                if op.kind != INTER_CLOSE_OP_KIND:
+                    op.remove_incomplete_logged()
         # Check for any interfering index space launches
         for op in self.unique_ops:
             if op.is_interfering_index_space_launch():
