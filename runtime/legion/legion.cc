@@ -3687,7 +3687,6 @@ namespace Legion {
       destroy_logical_region(ctx, temp_lr);
       destroy_field_space(ctx, temp_fs);
       destroy_index_space(ctx, temp_is);
-      destroy_index_space(ctx, index_color_space);
       return result;
 #else // DISABLE_PARTITION_SHIM
       log_run.error("THE PARTITION SHIM HAS BEEN DISABLED!");
@@ -3794,7 +3793,6 @@ namespace Legion {
       destroy_logical_region(ctx, temp_lr);
       destroy_field_space(ctx, temp_fs);
       destroy_index_space(ctx, temp_is);
-      destroy_index_space(ctx, index_color_space);
       return result;
 #else // DISABLE_PARTITION_SHIM
       log_run.error("THE PARTITION SHIM HAS BEEN DISABLED!");
@@ -3887,7 +3885,6 @@ namespace Legion {
       destroy_logical_region(ctx, temp_lr);
       destroy_field_space(ctx, temp_fs);
       destroy_index_space(ctx, temp_is);
-      destroy_index_space(ctx, index_color_space);
       return result;
 #else // DISABLE_PARTITION_SHIM
       log_run.error("THE PARTITION SHIM HAS BEEN DISABLED!");
@@ -3970,7 +3967,6 @@ namespace Legion {
       destroy_logical_region(ctx, temp_lr);
       destroy_field_space(ctx, temp_fs);
       destroy_index_space(ctx, temp_is);
-      destroy_index_space(ctx, index_color_space);
       return result;
 #else // DISABLE_PARTITION_SHIM
       log_run.error("THE PARTITION SHIM HAS BEEN DISABLED!");
@@ -4066,7 +4062,6 @@ namespace Legion {
       destroy_logical_region(ctx, temp_lr);
       destroy_field_space(ctx, temp_fs);
       destroy_index_space(ctx, temp_is);
-      destroy_index_space(ctx, index_color_space);
       return result;
 #else // DISABLE_PARTITION_SHIM
       log_run.error("THE PARTITION SHIM HAS BEEN DISABLED!");
@@ -4151,7 +4146,6 @@ namespace Legion {
       destroy_logical_region(ctx, temp_lr);
       destroy_field_space(ctx, temp_fs);
       destroy_index_space(ctx, temp_is);
-      destroy_index_space(ctx, index_color_space);
       return result;
 #else // DISABLE_PARTITION_SHIM
       log_run.error("THE PARTITION SHIM HAS BEEN DISABLED!");
