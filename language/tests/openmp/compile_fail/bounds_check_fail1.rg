@@ -12,8 +12,11 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
+-- runs-with:
+-- [["-ll:ocpu", "1", "-fopenmp-strict", "1"]]
+
 -- fails-with:
--- bounds_check_fail1.rg:29: pointer int1d(int32, $r) is out-of-bounds
+-- bounds_check_fail1.rg:32: pointer int1d(int32, $r) is out-of-bounds
 
 import "regent"
 
@@ -32,6 +35,7 @@ end
 
 task main()
   var r = region(ispace(int1d, 1), int)
+  fill(r, 1)
   should_fail(r)
 end
 
