@@ -13,7 +13,7 @@
 -- limitations under the License.
 
 -- runs-with:
--- [["-ll:ocpu", "1", "-fopenmp-strict", "1"]]
+-- [["-ll:ocpu", "1", "-ll:othr", "4", "-fopenmp-strict", "1"]]
 
 -- fails-with:
 -- bounds_check_fail1.rg:32: pointer int1d(int32, $r) is out-of-bounds
@@ -29,12 +29,16 @@ do
   var sum = 0
   __demand(__openmp)
   for i in r do
-    sum += r[i + 1]
+    if int(i) < 50 then
+      sum += r[i]
+    else
+      sum += r[i + 1]
+    end
   end
 end
 
 task main()
-  var r = region(ispace(int1d, 1), int)
+  var r = region(ispace(int1d, 100), int)
   fill(r, 1)
   should_fail(r)
 end
