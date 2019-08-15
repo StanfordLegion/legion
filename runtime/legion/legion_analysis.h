@@ -1985,8 +1985,7 @@ namespace Legion {
                            const bool already_deferred);
       inline RtEvent chain_deferral_events(RtUserEvent deferral_event)
       {
-        volatile Realm::Event::id_t *ptr = 
-          (volatile Realm::Event::id_t*)&next_deferral_precondition.id;
+        volatile Realm::Event::id_t *ptr = &next_deferral_precondition.id;
         RtEvent continuation_pre;
         do {
           continuation_pre.id = *ptr;
@@ -2049,7 +2048,7 @@ namespace Legion {
       // and when analyses are done on remote nodes for migration
       RtUserEvent waiting_event;
       // An event to order to deferral tasks
-      RtEvent next_deferral_precondition;
+      volatile RtEvent next_deferral_precondition;
     protected:
       // If we have sub sets then we track those here
       // If this data structure is not empty, everything above is invalid
