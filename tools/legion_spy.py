@@ -7151,56 +7151,62 @@ class Task(object):
         print('Performing logical dependence verification for %s...' % str(self))
         success = True
         if self.replicants is not None:
-            # This is the control replicated path so we need to zip together
-            # the operations from all the different shards
-            num_ops = -1
-            for shard in itervalues(self.replicants.shards):
-                shard_ops = 0
-                for op in shard.operations:
-                    if not op.fully_logged:
-                        break
-                    else:
-                        shard_ops += 1
-                if num_ops == -1:
-                    num_ops = shard_ops
-                elif num_ops != shard_ops:
-                    print(('Warning: shard %s has %s operations which is '+
-                            'different than %s operations in other shards. '+
-                            'This is likely the result of a crash in a run.') %
-                            (str(shard.shard),str(shard_ops),str(num_ops)))
-                    if self.state.assert_on_warning:
-                        assert False
-                    num_ops = min(shard_ops,num_ops)
-            for idx in xrange(num_ops):
-                # We'll use the logical operations from the first shard for
-                # doing the actual dependence analysis
-                logical_op = None
-                # Keep track of the previous dependences so we can 
-                # use them for adding/checking dependences on close operations
-                previous_deps = dict()
-                for shard in itervalues(self.replicants.shards):
-                    op = shard.operations[idx]
-                    # Do traversals for all index space operations as well
-                    # as for single operations for which this is the shard owner
-                    if op.points is not None or op.owner_shard == shard.shard:
-                        if logical_op is None:
-                            logical_op = op
-                        else:
-                            assert op.kind == logical_op.kind
-                            if op.task is not None:
-                                assert op.task_id == logical_op.task_id
-                        # Update the points with the right owner shard
+            # We need to do a verification for the logical analysis in each shard
+            for logical_shard in itervalues(self.replicants.shards):
+                print('Verifying shard %s...' % str(logical_shard.shard))
+                for idx in xrange(len(logical_shard.operations)):
+                    logical_op = logical_shard.operations[idx]
+                    if not logical_op.fully_logged:
+                        print(('Warning: shard %s has operation %s which is '+
+                                'not fully logged and therefore being skipped. '+
+                                'This is likely the result of a crash in a run.') %
+                                (str(logical_shard.shard),str(logical_op)))
+                        if logical_op.state.assert_on_warning:
+                            assert False
+                        continue
+                    # Run this analysis for all the points from each shard
+                    for shard in itervalues(self.replicants.shards):
+                        # Handle cases where shards have different numbers
+                        # of operations because of a crash
+                        if idx >= len(shard.operations):
+                            continue
+                        op = shard.operations[idx]
                         if op.points is not None:
                             if op.kind == INDEX_TASK_KIND:
                                 for point in itervalues(op.points):
+                                    if not point.op.fully_logged:
+                                        assert not op.fully_logged
+                                        break
                                     point.op.owner_shard = shard.shard
                             else:
                                 for point in itervalues(op.points):
+                                    if not point.fully_logged:
+                                        assert not op.fully_logged
+                                        break
                                     point.owner_shard = shard.shard
+                        elif shard is not logical_shard:
+                            # Skip individual operations not from our shard
+                            # as we only need to verify individual operations
+                            # once in each logical dependence pattern
+                            continue
+                        if not op.fully_logged:
+                            print(('Warning: shard %s has operation %s which is '+
+                                    'not fully logged and therefore being skipped. '+
+                                    'This is likely the result of a crash in a run.') %
+                                    (str(shard.shard),str(op)))
+                            if op.state.assert_on_warning:
+                                assert False
+                            continue
+                        # Can finally do the verification for this shard
                         print('Verifying '+str(op)+' of shard '+str(shard.shard))
-                        if not op.perform_op_logical_verification(logical_op, previous_deps):
+                        previous_deps = dict()
+                        if not op.perform_op_logical_verification(logical_op,previous_deps):
                             success = False
                             break
+                    if not success:
+                        break
+                # Clear out the logical analysis for the next shard
+                self.op.state.reset_logical_state()
                 if not success:
                     break
         else:
@@ -7215,8 +7221,8 @@ class Task(object):
                 if not op.perform_op_logical_verification(op, previous_deps):
                     success = False
                     break
-        # Reset the logical state when we are done
-        self.op.state.reset_logical_state()
+            # Reset the logical state when we are done
+            self.op.state.reset_logical_state()
         print("Pass" if success else "FAIL")
         return success
 
