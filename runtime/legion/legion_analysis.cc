@@ -11122,13 +11122,8 @@ namespace Legion {
           // If we haven't already been deferred then we need to 
           // add ourselves to the back of the list of deferrals
           deferral_event = Runtime::create_rt_user_event();
-          volatile Realm::Event::id_t *ptr = 
-            (volatile Realm::Event::id_t*)&next_deferral_precondition.id;
-          RtEvent continuation_pre;
-          do {
-            continuation_pre.id = *ptr;
-          } while (!__sync_bool_compare_and_swap(ptr,
-                    continuation_pre.id, deferral_event.id));
+          const RtEvent continuation_pre = 
+            chain_deferral_events(deferral_event);
           DeferSubsetRequestArgs args(this, source, deferral_event);
           runtime->issue_runtime_meta_task(args, 
                           LG_LATENCY_DEFERRED_PRIORITY, continuation_pre);
