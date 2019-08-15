@@ -2526,6 +2526,7 @@ class IndexSpace(object):
     def get_shape(self):
         if self.shape is None:
             print("No shape for %s" % self)
+            return
         assert self.shape is not None
         return self.shape
 

@@ -8158,6 +8158,7 @@ local function collect_symbols(cx, node)
   -- Base pointers need a special treatment to find them
   local base_pointers = data.newmap()
   local strides = data.newmap()
+  local lrs = data.newmap()
   for node, _ in accesses:items() do
     local value_type = std.as_read(node.expr_type)
     node.expr_type:bounds():map(function(region)
@@ -8169,6 +8170,7 @@ local function collect_symbols(cx, node)
         base_pointers[cx:region(region):base_pointer(field_path)] = true
         local stride = cx:region(region):stride(field_path)
         for idx = 2, #stride do strides[stride[idx]] = true end
+        lrs[cx:region(region).logical_region] = true
       end)
     end)
   end
@@ -8182,8 +8184,15 @@ local function collect_symbols(cx, node)
     if std.is_symbol(symbol) then symbol = symbol:getsymbol() end
     result:insert(symbol)
   end
+  if std.config["bounds-checks"] then
+    result:insert(cx.runtime)
+    result:insert(cx.context)
+    for lr, _ in lrs:items() do
+      result:insert(lr)
+    end
+  end
 
-  return result, reduction_variables
+  return result, reduction_variables, lrs
 end
 
 function codegen.stat_for_list(cx, node)
@@ -8327,7 +8336,7 @@ function codegen.stat_for_list(cx, node)
     end
 
   else
-    local symbols, reductions = collect_symbols(cx, node)
+    local symbols, reductions, lrs = collect_symbols(cx, node)
     if openmp then
       symbols:insert(rect)
       local can_change = { [rect] = true }
@@ -8376,8 +8385,24 @@ function codegen.stat_for_list(cx, node)
       preamble = launch_init
       postamble = launcher_cleanup
 
+      -- Legion's safe cast is not thread-safe, because it might update the internal cache
+      -- Here we force the cache to get initialized so all OpenMP worker threads would only
+      -- read the cache.
+      if std.config["bounds-checks"] then
+        preamble = quote
+          [preamble];
+          [lrs:map_list(function(lr) return
+            quote
+              var p = [lr.type:ispace().index_type:zero()]
+              c.legion_domain_point_safe_cast([cx.runtime], [cx.context],
+                p:to_domain_point(), [lr].impl)
+            end
+          end)]
+        end
+      end
     else -- if openmp then
       assert(cuda)
+      assert(not std.config["bounds-checks"], "bounds checks with CUDA are unsupported")
       local lower_bounds = indices:map(function(symbol)
         return terralib.newsymbol(c.coord_t, "lo_" .. symbol.id)
       end)

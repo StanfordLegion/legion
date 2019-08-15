@@ -334,6 +334,9 @@ def get_test_specs(legion_dir, use_run, use_spy, use_prof, use_hdf5, use_openmp,
          )),
     ]
     openmp = [
+        ('compile_fail', (test_compile_fail, (['-fbounds-checks', '1', "-fopenmp", "1", "-fopenmp-offline", "1"] + extra_flags, base_env)),
+         (os.path.join('tests', 'openmp', 'compile_fail'),
+         )),
         ('run_pass', (test_run_pass, ([] + extra_flags, run_env)),
          (os.path.join('tests', 'openmp', 'run_pass'),
          )),

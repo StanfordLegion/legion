@@ -1972,7 +1972,7 @@ namespace Realm {
       BarrierImpl *impl = get_runtime()->get_barrier_impl(args.barrier);
       EventImpl::gen_t gen = ID(args.barrier).barrier_generation();
       impl->adjust_arrival(gen, args.delta, args.barrier.timestamp, args.wait_on,
-			   sender, args.forwarded,
+			   args.sender, args.forwarded,
 			   datalen ? data : 0, datalen);
     }
 
@@ -1984,6 +1984,7 @@ namespace Realm {
       amsg->barrier = barrier;
       amsg->delta = delta;
       amsg->wait_on = wait_on;
+      amsg->sender = sender;
       amsg->forwarded = forwarded;
       amsg.add_payload(data, datalen);
       amsg.commit();
