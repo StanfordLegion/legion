@@ -78,7 +78,7 @@ namespace Realm {
   {
     log_task.info() << "task " << (void *)this << " ready: func=" << func_id
 		    << " proc=" << proc << " arglen=" << arglen
-		    << " before=" << before_event << " after=" << finish_event;
+		    << " before=" << before_event << " after=" << get_finish_event();
     return Operation::mark_ready();
   }
 
@@ -86,7 +86,7 @@ namespace Realm {
   {
     log_task.info() << "task " << (void *)this << " started: func=" << func_id
 		    << " proc=" << proc << " arglen=" << arglen
-		    << " before=" << before_event << " after=" << finish_event;
+		    << " before=" << before_event << " after=" << get_finish_event();
     return Operation::mark_started();
   }
 
@@ -94,7 +94,7 @@ namespace Realm {
   {
     log_task.info() << "task " << (void *)this << " completed: func=" << func_id
 		    << " proc=" << proc << " arglen=" << arglen
-		    << " before=" << before_event << " after=" << finish_event;
+		    << " before=" << before_event << " after=" << get_finish_event();
     Operation::mark_completed();
   }
 
