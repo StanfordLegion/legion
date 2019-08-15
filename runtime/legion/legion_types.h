@@ -246,18 +246,7 @@ namespace Legion {
     // redop IDs - none used in HLR right now, but 0 isn't allowed
     enum {
       REDOP_ID_AVAILABLE    = 1,
-    };
-
-    // Runtime task numbering 
-    enum {
-      LG_INITIALIZE_TASK_ID   = Realm::Processor::TASK_ID_PROCESSOR_INIT,
-      LG_SHUTDOWN_TASK_ID     = Realm::Processor::TASK_ID_PROCESSOR_SHUTDOWN,
-      LG_TASK_ID              = Realm::Processor::TASK_ID_FIRST_AVAILABLE,
-      LG_LEGION_PROFILING_ID  = Realm::Processor::TASK_ID_FIRST_AVAILABLE+1,
-      LG_STARTUP_TASK_ID      = Realm::Processor::TASK_ID_FIRST_AVAILABLE+2,
-      LG_ENDPOINT_TASK_ID     = Realm::Processor::TASK_ID_FIRST_AVAILABLE+3,
-      LG_TASK_ID_AVAILABLE    = Realm::Processor::TASK_ID_FIRST_AVAILABLE+4,
-    };
+    }; 
 
     // Realm dependent partitioning kinds
     enum DepPartOpKind {
@@ -377,6 +366,29 @@ namespace Legion {
       LG_RETRY_SHUTDOWN_TASK_ID,
       LG_LAST_TASK_ID, // This one should always be last
     }; 
+
+    // Runtime task numbering 
+#ifdef LEGION_SEPARATE_META_TASKS
+    enum {
+      LG_INITIALIZE_TASK_ID   = Realm::Processor::TASK_ID_PROCESSOR_INIT,
+      LG_SHUTDOWN_TASK_ID     = Realm::Processor::TASK_ID_PROCESSOR_SHUTDOWN,
+      LG_TASK_ID              = Realm::Processor::TASK_ID_FIRST_AVAILABLE,
+      LG_LEGION_PROFILING_ID  = Realm::Processor::TASK_ID_FIRST_AVAILABLE+LG_LAST_TASK_ID+1,
+      LG_STARTUP_TASK_ID      = Realm::Processor::TASK_ID_FIRST_AVAILABLE+LG_LAST_TASK_ID+2,
+      LG_ENDPOINT_TASK_ID     = Realm::Processor::TASK_ID_FIRST_AVAILABLE+LG_LAST_TASK_ID+3,
+      LG_TASK_ID_AVAILABLE    = Realm::Processor::TASK_ID_FIRST_AVAILABLE+LG_LAST_TASK_ID+4,
+    };
+#else
+    enum {
+      LG_INITIALIZE_TASK_ID   = Realm::Processor::TASK_ID_PROCESSOR_INIT,
+      LG_SHUTDOWN_TASK_ID     = Realm::Processor::TASK_ID_PROCESSOR_SHUTDOWN,
+      LG_TASK_ID              = Realm::Processor::TASK_ID_FIRST_AVAILABLE,
+      LG_LEGION_PROFILING_ID  = Realm::Processor::TASK_ID_FIRST_AVAILABLE+1,
+      LG_STARTUP_TASK_ID      = Realm::Processor::TASK_ID_FIRST_AVAILABLE+2,
+      LG_ENDPOINT_TASK_ID     = Realm::Processor::TASK_ID_FIRST_AVAILABLE+3,
+      LG_TASK_ID_AVAILABLE    = Realm::Processor::TASK_ID_FIRST_AVAILABLE+4,
+    };
+#endif
 
     // Make this a macro so we can keep it close to 
     // declaration of the task IDs themselves

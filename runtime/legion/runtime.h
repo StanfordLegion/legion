@@ -3440,12 +3440,22 @@ namespace Legion {
       {
         Realm::ProfilingRequestSet requests;
         profiler->add_meta_request(requests, T::TASK_ID, args.provenance);
+#ifdef LEGION_SEPARATE_META_TASKS
+        return RtEvent(target.spawn(LG_TASK_ID + T::TASK_ID, &args, sizeof(T),
+                                    requests, precondition, priority));
+#else
         return RtEvent(target.spawn(LG_TASK_ID, &args, sizeof(T),
                                     requests, precondition, priority));
+#endif
       }
       else
+#ifdef LEGION_SEPARATE_META_TASKS
+        return RtEvent(target.spawn(LG_TASK_ID + T::TASK_ID, &args, sizeof(T),
+                                    precondition, priority));
+#else
         return RtEvent(target.spawn(LG_TASK_ID, &args, sizeof(T), 
                                     precondition, priority));
+#endif
     }
 
     //--------------------------------------------------------------------------
