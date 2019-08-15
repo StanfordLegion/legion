@@ -8192,7 +8192,7 @@ local function collect_symbols(cx, node)
     end
   end
 
-  return result, reduction_variables
+  return result, reduction_variables, lrs
 end
 
 function codegen.stat_for_list(cx, node)
@@ -8336,7 +8336,7 @@ function codegen.stat_for_list(cx, node)
     end
 
   else
-    local symbols, reductions = collect_symbols(cx, node)
+    local symbols, reductions, lrs = collect_symbols(cx, node)
     if openmp then
       symbols:insert(rect)
       local can_change = { [rect] = true }
@@ -8385,6 +8385,21 @@ function codegen.stat_for_list(cx, node)
       preamble = launch_init
       postamble = launcher_cleanup
 
+      -- Legion's safe cast is not thread-safe, because it might update the internal cache
+      -- Here we force the cache to get initialized so all OpenMP worker threads would only
+      -- read the cache.
+      if std.config["bounds-checks"] then
+        preamble = quote
+          [preamble];
+          [lrs:map_list(function(lr) return
+            quote
+              var p = [lr.type:ispace().index_type:zero()]
+              c.legion_domain_point_safe_cast([cx.runtime], [cx.context],
+                p:to_domain_point(), [lr].impl)
+            end
+          end)]
+        end
+      end
     else -- if openmp then
       assert(cuda)
       assert(not std.config["bounds-checks"], "bounds checks with CUDA are unsupported")
