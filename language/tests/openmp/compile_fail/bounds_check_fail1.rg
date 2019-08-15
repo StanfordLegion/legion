@@ -16,7 +16,7 @@
 -- [["-ll:ocpu", "1", "-ll:othr", "4", "-fopenmp-strict", "1"]]
 
 -- fails-with:
--- bounds_check_fail1.rg:32: pointer int1d(int32, $r) is out-of-bounds
+-- bounds_check_fail1.rg:35: pointer int1d(int32, $r) is out-of-bounds
 
 import "regent"
 
