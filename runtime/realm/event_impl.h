@@ -339,7 +339,7 @@ namespace Realm {
   };
 
   struct BarrierAdjustMessage {
-    //bool forwarded;  no room to store this, so encoded as: sender < 0
+    NodeID sender;
     int forwarded;
     int delta;
     Barrier barrier;
