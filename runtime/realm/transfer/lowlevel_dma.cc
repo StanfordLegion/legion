@@ -2278,7 +2278,7 @@ namespace Realm {
 
       log_dma.info() << "dma request " << (void *)this << " deserialized - is="
 		     << *domain << " fill dst=" << dst.inst << "[" << dst.field_id << "+" << dst.subfield_offset << "] size="
-		     << fill_size << " before=" << _before_fill << " after=" << _after_fill;
+		     << fill_size << " before=" << _before_fill << " after=" << get_finish_event();
     }
 
     FillRequest::FillRequest(const TransferDomain *_domain, //const Domain &d, 
