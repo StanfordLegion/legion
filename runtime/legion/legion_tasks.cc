@@ -458,7 +458,7 @@ namespace Legion {
       rez.serialize(steal_count);
       // No need to pack remote, it will get set
       rez.serialize(speculated);
-      rez.serialize<unsigned>(get_context_index());
+      rez.serialize<size_t>(get_context_index());
     }
 
     //--------------------------------------------------------------------------
@@ -554,7 +554,7 @@ namespace Legion {
       derez.deserialize(orig_proc);
       derez.deserialize(steal_count);
       derez.deserialize(speculated);
-      unsigned ctx_index;
+      size_t ctx_index;
       derez.deserialize(ctx_index);
       set_context_index(ctx_index);
     }
@@ -720,14 +720,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    unsigned TaskOp::get_context_index(void) const
+    size_t TaskOp::get_context_index(void) const
     //--------------------------------------------------------------------------
     {
       return context_index;
     }
 
     //--------------------------------------------------------------------------
-    void TaskOp::set_context_index(unsigned index)
+    void TaskOp::set_context_index(size_t index)
     //--------------------------------------------------------------------------
     {
       context_index = index;

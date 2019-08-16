@@ -2666,7 +2666,7 @@ namespace Legion {
       // Return the number of operations that came before
       // this operation in the same context (close operations
       // return number of previous close operations)
-      virtual unsigned get_context_index(void) const = 0;
+      virtual size_t get_context_index(void) const = 0;
       // Return the depth of this operation in the task tree
       virtual int get_depth(void) const = 0;
     public:

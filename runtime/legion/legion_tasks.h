@@ -104,7 +104,7 @@ namespace Legion {
       void unpack_external_task(Deserializer &derez, Runtime *runtime,
                                 ReferenceMutator *mutator);
     public:
-      virtual void set_context_index(unsigned index) = 0;
+      virtual void set_context_index(size_t index) = 0;
     protected:
       AllocManager *arg_manager;
     public:
@@ -224,8 +224,8 @@ namespace Legion {
       virtual ~TaskOp(void);
     public:
       virtual UniqueID get_unique_id(void) const;
-      virtual unsigned get_context_index(void) const;
-      virtual void set_context_index(unsigned index);
+      virtual size_t get_context_index(void) const;
+      virtual void set_context_index(size_t index);
       virtual const char* get_task_name(void) const;
     public:
       bool is_remote(void) const;

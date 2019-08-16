@@ -811,15 +811,15 @@ namespace Legion {
       }
 
       static inline void log_child_operation_index(UniqueID parent_id, 
-                                       unsigned index, UniqueID child_id)
+                                       size_t index, UniqueID child_id)
       {
-        log_spy.print("Operation Index %llu %d %llu", parent_id,index,child_id);
+        log_spy.print("Operation Index %llu %zd %llu",parent_id,index,child_id);
       }
 
       static inline void log_close_operation_index(UniqueID parent_id,
-                                        unsigned index, UniqueID child_id)
+                                        size_t index, UniqueID child_id)
       {
-        log_spy.print("Close Index %llu %d %llu", parent_id, index, child_id);
+        log_spy.print("Close Index %llu %zd %llu", parent_id, index, child_id);
       }
 
       static inline void log_predicated_false_op(UniqueID unique_id)

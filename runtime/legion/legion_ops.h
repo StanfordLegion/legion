@@ -273,7 +273,7 @@ namespace Legion {
       inline bool already_traced(void) const 
         { return ((trace != NULL) && !tracing); }
       inline LegionTrace* get_trace(void) const { return trace; }
-      inline unsigned get_ctx_index(void) const { return context_index; }
+      inline size_t get_ctx_index(void) const { return context_index; }
     public:
       // Be careful using this call as it is only valid when the operation
       // actually has a parent task.  Right now the only place it is used
@@ -566,7 +566,7 @@ namespace Legion {
       GenerationID gen;
       UniqueID unique_op_id;
       // The issue index of this operation in the context
-      unsigned context_index;
+      size_t context_index;
       // Operations on which this operation depends
       std::map<Operation*,GenerationID> incoming;
       // Operations which depend on this operation
@@ -868,7 +868,7 @@ namespace Legion {
       virtual void record_restrict_postcondition(ApEvent postcondition);
     public:
       virtual UniqueID get_unique_id(void) const;
-      virtual unsigned get_context_index(void) const;
+      virtual size_t get_context_index(void) const;
       virtual int get_depth(void) const;
     protected:
       void check_privilege(void);
@@ -959,7 +959,7 @@ namespace Legion {
       virtual void record_restrict_postcondition(ApEvent postcondition);
     public:
       virtual UniqueID get_unique_id(void) const;
-      virtual unsigned get_context_index(void) const;
+      virtual size_t get_context_index(void) const;
       virtual int get_depth(void) const;
       virtual const ProjectionInfo* get_projection_info(unsigned idx);
     protected:
@@ -1383,7 +1383,7 @@ namespace Legion {
       CloseOp& operator=(const CloseOp &rhs);
     public:
       virtual UniqueID get_unique_id(void) const;
-      virtual unsigned get_context_index(void) const;
+      virtual size_t get_context_index(void) const;
       virtual int get_depth(void) const;
       virtual Mappable* get_mappable(void);
     public:
@@ -1675,7 +1675,7 @@ namespace Legion {
       virtual ApEvent get_restrict_precondition(void) const;
     public: 
       virtual UniqueID get_unique_id(void) const;
-      virtual unsigned get_context_index(void) const;
+      virtual size_t get_context_index(void) const;
       virtual int get_depth(void) const;
     public:
       const RegionRequirement& get_requirement(void) const;
@@ -1761,7 +1761,7 @@ namespace Legion {
       virtual ApEvent get_restrict_precondition(void) const;
     public:
       virtual UniqueID get_unique_id(void) const;
-      virtual unsigned get_context_index(void) const;
+      virtual size_t get_context_index(void) const;
       virtual int get_depth(void) const;
     public:
       const RegionRequirement& get_requirement(void) const;
@@ -1820,7 +1820,7 @@ namespace Legion {
     public:
       // From Mappable
       virtual UniqueID get_unique_id(void) const { return unique_op_id; }
-      virtual unsigned get_context_index(void) const;
+      virtual size_t get_context_index(void) const;
       virtual int get_depth(void) const;
       virtual MappableType get_mappable_type(void) const
         { return DYNAMIC_COLLECTIVE_MAPPABLE; }
@@ -2619,7 +2619,7 @@ namespace Legion {
     public:
       virtual PartitionKind get_partition_kind(void) const;
       virtual UniqueID get_unique_id(void) const;
-      virtual unsigned get_context_index(void) const;
+      virtual size_t get_context_index(void) const;
       virtual int get_depth(void) const;
     public:
       virtual void activate(void);
@@ -2746,7 +2746,7 @@ namespace Legion {
       virtual OpKind get_operation_kind(void) const;
       virtual Mappable* get_mappable(void);
       virtual UniqueID get_unique_id(void) const;
-      virtual unsigned get_context_index(void) const;
+      virtual size_t get_context_index(void) const;
       virtual int get_depth(void) const;
     public:
       virtual bool has_prepipeline_stage(void) const

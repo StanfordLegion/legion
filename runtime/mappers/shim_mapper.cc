@@ -140,7 +140,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    unsigned ShimMapper::Task::get_context_index(void) const
+    size_t ShimMapper::Task::get_context_index(void) const
     //--------------------------------------------------------------------------
     {
       return context_index;
@@ -220,7 +220,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    unsigned ShimMapper::Inline::get_context_index(void) const
+    size_t ShimMapper::Inline::get_context_index(void) const
     //--------------------------------------------------------------------------
     {
       return context_index;
@@ -293,7 +293,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    unsigned ShimMapper::Copy::get_context_index(void) const
+    size_t ShimMapper::Copy::get_context_index(void) const
     //--------------------------------------------------------------------------
     {
       return context_index;

@@ -2763,7 +2763,7 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
-    unsigned MapOp::get_context_index(void) const
+    size_t MapOp::get_context_index(void) const
     //--------------------------------------------------------------------------
     {
       return context_index;
@@ -4403,7 +4403,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    unsigned CopyOp::get_context_index(void) const
+    size_t CopyOp::get_context_index(void) const
     //--------------------------------------------------------------------------
     {
       return context_index;
@@ -7255,7 +7255,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    unsigned CloseOp::get_context_index(void) const
+    size_t CloseOp::get_context_index(void) const
     //--------------------------------------------------------------------------
     {
       return context_index;
@@ -8967,7 +8967,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    unsigned AcquireOp::get_context_index(void) const
+    size_t AcquireOp::get_context_index(void) const
     //--------------------------------------------------------------------------
     {
       return context_index;
@@ -9726,7 +9726,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    unsigned ReleaseOp::get_context_index(void) const
+    size_t ReleaseOp::get_context_index(void) const
     //--------------------------------------------------------------------------
     {
       return context_index;
@@ -10074,7 +10074,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    unsigned DynamicCollectiveOp::get_context_index(void) const
+    size_t DynamicCollectiveOp::get_context_index(void) const
     //--------------------------------------------------------------------------
     {
       return context_index;
@@ -13119,7 +13119,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    unsigned DependentPartitionOp::get_context_index(void) const
+    size_t DependentPartitionOp::get_context_index(void) const
     //--------------------------------------------------------------------------
     {
       return context_index;
@@ -13671,7 +13671,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    unsigned FillOp::get_context_index(void) const
+    size_t FillOp::get_context_index(void) const
     //--------------------------------------------------------------------------
     {
       return context_index; 
