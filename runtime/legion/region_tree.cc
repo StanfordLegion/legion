@@ -8561,7 +8561,6 @@ namespace Legion {
 #ifdef DEBUG_LEGION
           assert(disjoint_ready.exists());
 #endif
-          disjoint_ready = RtEvent::NO_RT_EVENT;
           // We have to send notifications before any other remote
           // requests can record themselves so we need to do it 
           // while we are holding the lock
@@ -8608,8 +8607,6 @@ namespace Legion {
     bool IndexPartNode::is_disjoint(bool app_query)
     //--------------------------------------------------------------------------
     {
-      // Assuming 64-bit reads/write are atomic operations here
-      // since we're not using the lock to protect these reads
       if (disjoint_ready.exists() && !disjoint_ready.has_triggered())
         disjoint_ready.wait();
       return disjoint;

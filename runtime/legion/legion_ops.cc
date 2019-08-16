@@ -6811,54 +6811,18 @@ namespace Legion {
     {
       // Increment the number of mapped frames
       parent_ctx->increment_frame();
-      // Mark that we finished our mapping now
-      complete_mapping();
-      // Go through and launch a completion task dependent upon
-      // all the completion events of our incoming dependences.
-      // Make sure that the events that we pulled out our still valid.
-      // Note since we are performing this operation, then we know
-      // that we are mapped and therefore our set of input dependences
-      // have been fixed so we can read them without holding the lock.
-      std::set<ApEvent> trigger_events;
-      // Include our previous completion event if necessary
-      if (previous_completion.exists())
-        trigger_events.insert(previous_completion);
-      for (std::map<Operation*,GenerationID>::const_iterator it = 
-            incoming.begin(); it != incoming.end(); it++)
-      {
-        ApEvent complete = it->first->get_completion_event();
-        if (it->second == it->first->get_generation())
-          trigger_events.insert(complete);
-      }
-#ifdef LEGION_SPY
-      // If we're doing Legion Spy verification, we also need to 
-      // validate that we have all the completion events from ALL
-      // the previous events in the context since the last fence
-      trigger_events.insert(execution_precondition);   
-#endif
-      ApEvent done = Runtime::merge_events(NULL, trigger_events);
-      // We can always trigger the completion event when these are done
-      request_early_complete(done);
-      if (!done.has_triggered())
-      {
-        RtEvent wait_on = Runtime::protect_event(done);
-        DeferredExecuteArgs deferred_execute_args(this);
-        runtime->issue_runtime_meta_task(deferred_execute_args,
-                       LG_THROUGHPUT_DEFERRED_PRIORITY, wait_on);
-      }
-      else
-        deferred_execute();
+      FenceOp::trigger_mapping();
     }
 
     //--------------------------------------------------------------------------
-    void FrameOp::deferred_execute(void)
+    void FrameOp::trigger_complete(void)
     //--------------------------------------------------------------------------
     {
       // This frame has finished executing so it is no longer mapped
       parent_ctx->decrement_frame();
       // This frame is also finished so we can tell the context
       parent_ctx->finish_frame(completion_event);
-      complete_execution();
+      FenceOp::trigger_complete();
     }
 
     /////////////////////////////////////////////////////////////
