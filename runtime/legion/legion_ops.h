@@ -1309,7 +1309,7 @@ namespace Legion {
       virtual OpKind get_operation_kind(void) const;
     public:
       virtual void trigger_mapping(void);
-      virtual void deferred_execute(void); 
+      virtual void trigger_complete(void);
     protected:
       ApEvent previous_completion;
     };
