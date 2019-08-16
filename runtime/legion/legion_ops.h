@@ -267,7 +267,7 @@ namespace Legion {
       inline bool already_traced(void) const 
         { return ((trace != NULL) && !tracing); }
       inline LegionTrace* get_trace(void) const { return trace; }
-      inline unsigned get_ctx_index(void) const { return context_index; }
+      inline size_t get_ctx_index(void) const { return context_index; }
     public:
       // Be careful using this call as it is only valid when the operation
       // actually has a parent task.  Right now the only place it is used
@@ -557,7 +557,7 @@ namespace Legion {
       GenerationID gen;
       UniqueID unique_op_id;
       // The issue index of this operation in the context
-      unsigned context_index;
+      size_t context_index;
       // Operations on which this operation depends
       std::map<Operation*,GenerationID> incoming;
       // Operations which depend on this operation
@@ -636,7 +636,7 @@ namespace Legion {
      */
     class ExternalMappable {
     public:
-      virtual void set_context_index(unsigned index) = 0;
+      virtual void set_context_index(size_t index) = 0;
     public:
       static void pack_mappable(const Mappable &mappable, Serializer &rez);
       static void pack_index_space_requirement(
@@ -868,7 +868,7 @@ namespace Legion {
     public:
       ExternalMapping(void);
     public:
-      virtual void set_context_index(unsigned index) = 0;
+      virtual void set_context_index(size_t index) = 0;
     public:
       void pack_external_mapping(Serializer &rez, AddressSpaceID target) const;
       void unpack_external_mapping(Deserializer &derez, Runtime *runtime);
@@ -930,8 +930,8 @@ namespace Legion {
       virtual void record_reference_mutation_effect(RtEvent event);
     public:
       virtual UniqueID get_unique_id(void) const;
-      virtual unsigned get_context_index(void) const;
-      virtual void set_context_index(unsigned index);
+      virtual size_t get_context_index(void) const;
+      virtual void set_context_index(size_t index);
       virtual int get_depth(void) const;
     protected:
       void check_privilege(void);
@@ -972,7 +972,7 @@ namespace Legion {
     public:
       ExternalCopy(void);
     public:
-      virtual void set_context_index(unsigned index) = 0;
+      virtual void set_context_index(size_t index) = 0;
     public:
       void pack_external_copy(Serializer &rez, AddressSpaceID target) const;
       void unpack_external_copy(Deserializer &derez, Runtime *runtime);
@@ -1068,8 +1068,8 @@ namespace Legion {
       virtual void record_reference_mutation_effect(RtEvent event);
     public:
       virtual UniqueID get_unique_id(void) const;
-      virtual unsigned get_context_index(void) const;
-      virtual void set_context_index(unsigned index);
+      virtual size_t get_context_index(void) const;
+      virtual void set_context_index(size_t index);
       virtual int get_depth(void) const;
     protected:
       void check_copy_privileges(const bool permit_projection);
@@ -1436,7 +1436,7 @@ namespace Legion {
     public:
       ExternalClose(void);
     public:
-      virtual void set_context_index(unsigned index) = 0;
+      virtual void set_context_index(size_t index) = 0;
     public:
       void pack_external_close(Serializer &rez, AddressSpaceID target) const;
       void unpack_external_close(Deserializer &derez, Runtime *runtime);
@@ -1461,8 +1461,8 @@ namespace Legion {
       CloseOp& operator=(const CloseOp &rhs);
     public:
       virtual UniqueID get_unique_id(void) const;
-      virtual unsigned get_context_index(void) const;
-      virtual void set_context_index(unsigned index);
+      virtual size_t get_context_index(void) const;
+      virtual void set_context_index(size_t index);
       virtual int get_depth(void) const;
       virtual Mappable* get_mappable(void);
     public:
@@ -1623,7 +1623,7 @@ namespace Legion {
     public:
       ExternalAcquire(void);
     public:
-      virtual void set_context_index(unsigned index) = 0;
+      virtual void set_context_index(size_t index) = 0;
     public:
       void pack_external_acquire(Serializer &rez, AddressSpaceID target) const;
       void unpack_external_acquire(Deserializer &derez, Runtime *runtime);
@@ -1672,8 +1672,8 @@ namespace Legion {
       virtual void record_reference_mutation_effect(RtEvent event);
     public: 
       virtual UniqueID get_unique_id(void) const;
-      virtual unsigned get_context_index(void) const;
-      virtual void set_context_index(unsigned index);
+      virtual size_t get_context_index(void) const;
+      virtual void set_context_index(size_t index);
       virtual int get_depth(void) const;
     public:
       const RegionRequirement& get_requirement(void) const;
@@ -1723,7 +1723,7 @@ namespace Legion {
     public:
       ExternalRelease(void);
     public:
-      virtual void set_context_index(unsigned index) = 0;
+      virtual void set_context_index(size_t index) = 0;
     public:
       void pack_external_release(Serializer &rez, AddressSpaceID target) const;
       void unpack_external_release(Deserializer &derez, Runtime *runtime);
@@ -1775,8 +1775,8 @@ namespace Legion {
       virtual void record_reference_mutation_effect(RtEvent event);
     public:
       virtual UniqueID get_unique_id(void) const;
-      virtual unsigned get_context_index(void) const;
-      virtual void set_context_index(unsigned index);
+      virtual size_t get_context_index(void) const;
+      virtual void set_context_index(size_t index);
       virtual int get_depth(void) const;
     public:
       const RegionRequirement& get_requirement(void) const;
@@ -1840,7 +1840,7 @@ namespace Legion {
     public:
       // From Mappable
       virtual UniqueID get_unique_id(void) const { return unique_op_id; }
-      virtual unsigned get_context_index(void) const;
+      virtual size_t get_context_index(void) const;
       virtual int get_depth(void) const;
       virtual MappableType get_mappable_type(void) const
         { return DYNAMIC_COLLECTIVE_MAPPABLE; }
@@ -2500,7 +2500,7 @@ namespace Legion {
     public:
       ExternalPartition(void);
     public:
-      virtual void set_context_index(unsigned index) = 0;
+      virtual void set_context_index(size_t index) = 0;
     public:
       void pack_external_partition(Serializer &rez,AddressSpaceID target) const;
       void unpack_external_partition(Deserializer &derez, Runtime *runtime);
@@ -2658,8 +2658,8 @@ namespace Legion {
     public:
       virtual PartitionKind get_partition_kind(void) const;
       virtual UniqueID get_unique_id(void) const;
-      virtual unsigned get_context_index(void) const;
-      virtual void set_context_index(unsigned index);
+      virtual size_t get_context_index(void) const;
+      virtual void set_context_index(size_t index);
       virtual int get_depth(void) const;
       virtual Mappable* get_mappable(void);
     public:
@@ -2765,7 +2765,7 @@ namespace Legion {
     public:
       ExternalFill(void);
     public:
-      virtual void set_context_index(unsigned index) = 0;
+      virtual void set_context_index(size_t index) = 0;
     public:
       void pack_external_fill(Serializer &rez, AddressSpaceID target) const;
       void unpack_external_fill(Deserializer &derez, Runtime *runtime);
@@ -2800,8 +2800,8 @@ namespace Legion {
       virtual OpKind get_operation_kind(void) const;
       virtual Mappable* get_mappable(void);
       virtual UniqueID get_unique_id(void) const;
-      virtual unsigned get_context_index(void) const;
-      virtual void set_context_index(unsigned index);
+      virtual size_t get_context_index(void) const;
+      virtual void set_context_index(size_t index);
       virtual int get_depth(void) const;
       virtual std::map<PhysicalManager*,std::pair<unsigned,bool> >*
                                        get_acquired_instances_ref(void);
@@ -3160,8 +3160,8 @@ namespace Legion {
       RemoteMapOp& operator=(const RemoteMapOp &rhs); 
     public:
       virtual UniqueID get_unique_id(void) const;
-      virtual unsigned get_context_index(void) const;
-      virtual void set_context_index(unsigned index);
+      virtual size_t get_context_index(void) const;
+      virtual void set_context_index(size_t index);
       virtual int get_depth(void) const;
     public:
       virtual const char* get_logging_name(void) const;
@@ -3188,8 +3188,8 @@ namespace Legion {
       RemoteCopyOp& operator=(const RemoteCopyOp &rhs);
     public:
       virtual UniqueID get_unique_id(void) const;
-      virtual unsigned get_context_index(void) const;
-      virtual void set_context_index(unsigned index);
+      virtual size_t get_context_index(void) const;
+      virtual void set_context_index(size_t index);
       virtual int get_depth(void) const;
     public:
       virtual const char* get_logging_name(void) const;
@@ -3216,8 +3216,8 @@ namespace Legion {
       RemoteCloseOp& operator=(const RemoteCloseOp &rhs);
     public:
       virtual UniqueID get_unique_id(void) const;
-      virtual unsigned get_context_index(void) const;
-      virtual void set_context_index(unsigned index);
+      virtual size_t get_context_index(void) const;
+      virtual void set_context_index(size_t index);
       virtual int get_depth(void) const;
     public:
       virtual const char* get_logging_name(void) const;
@@ -3244,8 +3244,8 @@ namespace Legion {
       RemoteAcquireOp& operator=(const RemoteAcquireOp &rhs);
     public:
       virtual UniqueID get_unique_id(void) const;
-      virtual unsigned get_context_index(void) const;
-      virtual void set_context_index(unsigned index);
+      virtual size_t get_context_index(void) const;
+      virtual void set_context_index(size_t index);
       virtual int get_depth(void) const;
     public:
       virtual const char* get_logging_name(void) const;
@@ -3272,8 +3272,8 @@ namespace Legion {
       RemoteReleaseOp& operator=(const RemoteReleaseOp &rhs);
     public:
       virtual UniqueID get_unique_id(void) const;
-      virtual unsigned get_context_index(void) const;
-      virtual void set_context_index(unsigned index);
+      virtual size_t get_context_index(void) const;
+      virtual void set_context_index(size_t index);
       virtual int get_depth(void) const;
     public:
       virtual const char* get_logging_name(void) const;
@@ -3300,8 +3300,8 @@ namespace Legion {
       RemoteFillOp& operator=(const RemoteFillOp &rhs);
     public:
       virtual UniqueID get_unique_id(void) const;
-      virtual unsigned get_context_index(void) const;
-      virtual void set_context_index(unsigned index);
+      virtual size_t get_context_index(void) const;
+      virtual void set_context_index(size_t index);
       virtual int get_depth(void) const;
     public:
       virtual const char* get_logging_name(void) const;
@@ -3328,8 +3328,8 @@ namespace Legion {
       RemotePartitionOp& operator=(const RemotePartitionOp &rhs);
     public:
       virtual UniqueID get_unique_id(void) const;
-      virtual unsigned get_context_index(void) const;
-      virtual void set_context_index(unsigned index);
+      virtual size_t get_context_index(void) const;
+      virtual void set_context_index(size_t index);
       virtual int get_depth(void) const;
       virtual PartitionKind get_partition_kind(void) const;
     public:
@@ -3359,8 +3359,8 @@ namespace Legion {
       RemoteAttachOp& operator=(const RemoteAttachOp &rhs);
     public:
       virtual UniqueID get_unique_id(void) const;
-      virtual unsigned get_context_index(void) const;
-      virtual void set_context_index(unsigned index);
+      virtual size_t get_context_index(void) const;
+      virtual void set_context_index(size_t index);
       virtual int get_depth(void) const;
     public:
       virtual const char* get_logging_name(void) const;
@@ -3387,8 +3387,8 @@ namespace Legion {
       RemoteDetachOp& operator=(const RemoteDetachOp &rhs);
     public:
       virtual UniqueID get_unique_id(void) const;
-      virtual unsigned get_context_index(void) const;
-      virtual void set_context_index(unsigned index);
+      virtual size_t get_context_index(void) const;
+      virtual void set_context_index(size_t index);
       virtual int get_depth(void) const;
     public:
       virtual const char* get_logging_name(void) const;
@@ -3415,8 +3415,8 @@ namespace Legion {
       RemoteDeletionOp& operator=(const RemoteDeletionOp &rhs);
     public:
       virtual UniqueID get_unique_id(void) const;
-      virtual unsigned get_context_index(void) const;
-      virtual void set_context_index(unsigned index);
+      virtual size_t get_context_index(void) const;
+      virtual void set_context_index(size_t index);
       virtual int get_depth(void) const;
     public:
       virtual const char* get_logging_name(void) const;

@@ -2880,11 +2880,12 @@ namespace Legion {
         parent_req_indexes(parent_indexes), virtual_mapped(virt_mapped), 
         total_children_count(0), total_close_count(0), total_summary_count(0),
         outstanding_children_count(0), outstanding_prepipeline(0),
-        outstanding_dependence(false), current_trace(NULL),previous_trace(NULL),
-        valid_wait_event(false), outstanding_subtasks(0), pending_subtasks(0), 
-        pending_frames(0), currently_active_context(false),
-        current_mapping_fence(NULL), mapping_fence_gen(0), 
-        current_mapping_fence_index(0), current_execution_fence_index(0) 
+        outstanding_dependence(false), post_task_index(ULONG_MAX), 
+        current_trace(NULL), previous_trace(NULL), valid_wait_event(false), 
+        outstanding_subtasks(0), pending_subtasks(0), pending_frames(0), 
+        currently_active_context(false), current_mapping_fence(NULL), 
+        mapping_fence_gen(0), current_mapping_fence_index(0), 
+        current_execution_fence_index(0) 
     //--------------------------------------------------------------------------
     {
       // Set some of the default values for a context
@@ -5515,15 +5516,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    unsigned InnerContext::register_new_child_operation(Operation *op,
+    size_t InnerContext::register_new_child_operation(Operation *op,
                       const std::vector<StaticDependence> *dependences)
     //--------------------------------------------------------------------------
     {
       // If we are performing a trace mark that the child has a trace
       if (current_trace != NULL)
         op->set_trace(current_trace, !current_trace->is_fixed(), dependences);
-      unsigned result = total_children_count++;
-      const unsigned outstanding_count = 
+      size_t result = total_children_count++;
+      const size_t outstanding_count = 
         __sync_add_and_fetch(&outstanding_children_count,1);
       // Only need to check if we are not tracing by frames
       if ((context_configuration.min_frames_to_schedule == 0) && 
@@ -5537,11 +5538,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    unsigned InnerContext::register_new_close_operation(CloseOp *op)
+    size_t InnerContext::register_new_close_operation(CloseOp *op)
     //--------------------------------------------------------------------------
     {
       // For now we just bump our counter
-      unsigned result = total_close_count++;
+      size_t result = total_close_count++;
       if (runtime->legion_spy_enabled)
         LegionSpy::log_close_operation_index(get_context_uid(), result, 
                                              op->get_unique_op_id());
@@ -5549,12 +5550,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    unsigned InnerContext::register_new_summary_operation(TraceSummaryOp *op)
+    size_t InnerContext::register_new_summary_operation(TraceSummaryOp *op)
     //--------------------------------------------------------------------------
     {
       // For now we just bump our counter
-      unsigned result = total_summary_count++;
-      const unsigned outstanding_count = 
+      size_t result = total_summary_count++;
+      const size_t outstanding_count = 
         __sync_add_and_fetch(&outstanding_children_count,1);
       // Only need to check if we are not tracing by frames
       if ((context_configuration.min_frames_to_schedule == 0) && 
@@ -5779,18 +5780,27 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       bool issue_task = false;
+      const size_t task_index = ctx->get_owner_task()->get_context_index();
       {
         AutoLock p_lock(post_task_lock);
-        if (post_task_queue.empty())
+        // If this is a lower index than the current outstanding index
+        // then we need to launch a task for when it is ready
+        if (task_index < post_task_index)
+        {
           issue_task = true;
-        post_task_queue.push_back(PostTaskArgs(ctx, result, size,inst,wait_on));
+          // Update the post_task_index
+          post_task_index = task_index;
+          // Add a reference to the context the first time we defer this
+          add_reference();
+        }
+        post_task_queue.push_back(
+            PostTaskArgs(ctx, task_index, result, size, inst, wait_on));
       }
       if (issue_task)
       {
-        // Add a reference to the context the first time we defer this
-        add_reference();
         PostEndArgs args(ctx->owner_task, this);
-        runtime->issue_runtime_meta_task(args, LG_THROUGHPUT_WORK_PRIORITY);
+        runtime->issue_runtime_meta_task(args, 
+            LG_THROUGHPUT_WORK_PRIORITY, wait_on);
       }
     }
 
@@ -5800,52 +5810,84 @@ namespace Legion {
     {
       std::vector<PostTaskArgs> to_perform;
       to_perform.reserve(context_configuration.meta_task_vector_width);
-      TaskOp *launch_next_op = NULL;
+      TaskOp *next_op = NULL;
+      RtEvent next_precondition;
       {
+        size_t next_index = ULONG_MAX;
         AutoLock p_lock(post_task_lock);
-        // First time through, we prefer tasks whose events have triggered
+        // Go through and find any ones that are ready, also keep track of
+        // the earliest task that is not ready since that is the one we'll
+        // choose to wait on before doing the next batch
         for (std::list<PostTaskArgs>::iterator it = post_task_queue.begin();
               it != post_task_queue.end(); /*nothing*/)
         {
           if (!it->wait_on.exists() || it->wait_on.has_triggered())
           {
-            to_perform.push_back(*it);
+            if (to_perform.size() >= context_configuration.meta_task_vector_width)
+            {
+              // If we've already exceeded the maximum vector width then we'll
+              // still handle them now if they are less than or equal to the
+              // current post task index
+              if (it->index > post_task_index)
+              {
+                if (it->index < next_index)
+                {
+                  next_index = it->index;
+                  next_precondition = it->wait_on;
+                  next_op = it->context->owner_task;
+                }
+                it++;
+                continue;
+              }
+              else
+                to_perform.push_back(*it);
+            }
+            else
+              to_perform.push_back(*it);
             it = post_task_queue.erase(it);
-            if (to_perform.size() == 
-                context_configuration.meta_task_vector_width)
-              break;
           }
           else
+          {
+            if (it->index < next_index)
+            {
+              next_index = it->index;
+              next_precondition = it->wait_on;
+              next_op = it->context->owner_task;
+            }
             it++;
+          }
         }
-        // If we didn't find enough ready ones, we'll launch some 
-        // ones that are not ready yet
-        while (to_perform.size() < context_configuration.meta_task_vector_width)
-        {
-          if (post_task_queue.empty())
-            break;
-          to_perform.push_back(post_task_queue.front());
-          post_task_queue.pop_front();
-        }
-        if (!post_task_queue.empty())
-          launch_next_op = post_task_queue.front().context->owner_task;
+        // Update the new next index
+        post_task_index = next_index;
       }
-      for (std::vector<PostTaskArgs>::iterator it =
-            to_perform.begin(); it != to_perform.end(); it++)
+      // Launch this first to get it in flight so it can run when ready
+      if (next_op != NULL)
       {
-        DeferredPostTaskArgs args(*it);
+        PostEndArgs args(next_op, this);
         runtime->issue_runtime_meta_task(args, 
-              LG_THROUGHPUT_DEFERRED_PRIORITY, it->wait_on);
+            LG_THROUGHPUT_WORK_PRIORITY, next_precondition);
       }
-      if (launch_next_op != NULL)
+      // Now perform our operations
+      if (!to_perform.empty())
       {
-        PostEndArgs args(launch_next_op, this);
-        runtime->issue_runtime_meta_task(args, LG_THROUGHPUT_WORK_PRIORITY);
-        // Not done iterating so reference keeps going with PostEndArgs
-        return false;
+        // Sort these into order by their index before we perform them 
+        // so we do them in order or we could risk a hang
+        std::sort(to_perform.begin(), to_perform.end());
+        for (std::vector<PostTaskArgs>::const_iterator it = 
+              to_perform.begin(); it != to_perform.end(); it++)
+        {
+          if (it->instance.exists())
+          {
+            it->context->post_end_task(it->result, it->size, false/*owned*/);
+            // Once we've copied the data then we can destroy the instance
+            it->instance.destroy();
+          }
+          else
+            it->context->post_end_task(it->result, it->size, true/*owned*/);
+        }
       }
-      else
-        return true;
+      // If we didn't launch a next op, then we can remove the reference
+      return (next_op == NULL);
     }
 
     //--------------------------------------------------------------------------
@@ -7775,24 +7817,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void InnerContext::handle_deferred_post_end_task(
-                                                               const void *args)
-    //--------------------------------------------------------------------------
-    {
-      const DeferredPostTaskArgs *pargs = ((const DeferredPostTaskArgs*)args);
-      if (pargs->instance.exists())
-      {
-        pargs->context->post_end_task(
-                                    pargs->result, pargs->size, false/*owned*/);
-        // Once we've copied the data then we can destroy the instance
-        pargs->instance.destroy();
-      }
-      else
-        pargs->context->post_end_task(
-                                     pargs->result, pargs->size, true/*owned*/);
-    }
-
-    //--------------------------------------------------------------------------
     void InnerContext::inline_child_task(TaskOp *child)
     //--------------------------------------------------------------------------
     {
@@ -8252,14 +8276,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    unsigned RemoteTask::get_context_index(void) const
+    size_t RemoteTask::get_context_index(void) const
     //--------------------------------------------------------------------------
     {
       return context_index;
     }
 
     //--------------------------------------------------------------------------
-    void RemoteTask::set_context_index(unsigned index)
+    void RemoteTask::set_context_index(size_t index)
     //--------------------------------------------------------------------------
     {
       context_index = index;
@@ -9708,7 +9732,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    unsigned LeafContext::register_new_child_operation(Operation *op,
+    size_t LeafContext::register_new_child_operation(Operation *op,
                     const std::vector<StaticDependence> *dependences)
     //--------------------------------------------------------------------------
     {
@@ -9717,7 +9741,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    unsigned LeafContext::register_new_close_operation(CloseOp *op)
+    size_t LeafContext::register_new_close_operation(CloseOp *op)
     //--------------------------------------------------------------------------
     {
       assert(false);
@@ -9725,7 +9749,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    unsigned LeafContext::register_new_summary_operation(TraceSummaryOp *op)
+    size_t LeafContext::register_new_summary_operation(TraceSummaryOp *op)
     //--------------------------------------------------------------------------
     {
       assert(false);
@@ -10913,7 +10937,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    unsigned InlineContext::register_new_child_operation(Operation *op,
+    size_t InlineContext::register_new_child_operation(Operation *op,
                       const std::vector<StaticDependence> *dependences)
     //--------------------------------------------------------------------------
     {
@@ -10921,14 +10945,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    unsigned InlineContext::register_new_close_operation(CloseOp *op)
+    size_t InlineContext::register_new_close_operation(CloseOp *op)
     //--------------------------------------------------------------------------
     {
       return enclosing->register_new_close_operation(op);
     }
 
     //--------------------------------------------------------------------------
-    unsigned InlineContext::register_new_summary_operation(TraceSummaryOp *op)
+    size_t InlineContext::register_new_summary_operation(TraceSummaryOp *op)
     //--------------------------------------------------------------------------
     {
       return enclosing->register_new_summary_operation(op);

@@ -2760,14 +2760,14 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
-    unsigned MapOp::get_context_index(void) const
+    size_t MapOp::get_context_index(void) const
     //--------------------------------------------------------------------------
     {
       return context_index;
     }
 
     //--------------------------------------------------------------------------
-    void MapOp::set_context_index(unsigned index)
+    void MapOp::set_context_index(size_t index)
     //--------------------------------------------------------------------------
     {
       context_index = index;
@@ -4687,14 +4687,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    unsigned CopyOp::get_context_index(void) const
+    size_t CopyOp::get_context_index(void) const
     //--------------------------------------------------------------------------
     {
       return context_index;
     }
 
     //--------------------------------------------------------------------------
-    void CopyOp::set_context_index(unsigned index)
+    void CopyOp::set_context_index(size_t index)
     //--------------------------------------------------------------------------
     {
       context_index = index;
@@ -7471,14 +7471,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    unsigned CloseOp::get_context_index(void) const
+    size_t CloseOp::get_context_index(void) const
     //--------------------------------------------------------------------------
     {
       return context_index;
     }
 
     //--------------------------------------------------------------------------
-    void CloseOp::set_context_index(unsigned index)
+    void CloseOp::set_context_index(size_t index)
     //--------------------------------------------------------------------------
     {
       context_index = index;
@@ -8602,14 +8602,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    unsigned AcquireOp::get_context_index(void) const
+    size_t AcquireOp::get_context_index(void) const
     //--------------------------------------------------------------------------
     {
       return context_index;
     }
 
     //--------------------------------------------------------------------------
-    void AcquireOp::set_context_index(unsigned index)
+    void AcquireOp::set_context_index(size_t index)
     //--------------------------------------------------------------------------
     {
       context_index = index;
@@ -9407,14 +9407,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    unsigned ReleaseOp::get_context_index(void) const
+    size_t ReleaseOp::get_context_index(void) const
     //--------------------------------------------------------------------------
     {
       return context_index;
     }
 
     //--------------------------------------------------------------------------
-    void ReleaseOp::set_context_index(unsigned index)
+    void ReleaseOp::set_context_index(size_t index)
     //--------------------------------------------------------------------------
     {
       context_index = index;
@@ -9813,7 +9813,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    unsigned DynamicCollectiveOp::get_context_index(void) const
+    size_t DynamicCollectiveOp::get_context_index(void) const
     //--------------------------------------------------------------------------
     {
       return context_index;
@@ -12898,14 +12898,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    unsigned DependentPartitionOp::get_context_index(void) const
+    size_t DependentPartitionOp::get_context_index(void) const
     //--------------------------------------------------------------------------
     {
       return context_index;
     }
 
     //--------------------------------------------------------------------------
-    void DependentPartitionOp::set_context_index(unsigned index)
+    void DependentPartitionOp::set_context_index(size_t index)
     //--------------------------------------------------------------------------
     {
       context_index = index;
@@ -13669,14 +13669,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    unsigned FillOp::get_context_index(void) const
+    size_t FillOp::get_context_index(void) const
     //--------------------------------------------------------------------------
     {
       return context_index; 
     }
 
     //--------------------------------------------------------------------------
-    void FillOp::set_context_index(unsigned index)
+    void FillOp::set_context_index(size_t index)
     //--------------------------------------------------------------------------
     {
       context_index = index;
@@ -16194,14 +16194,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    unsigned RemoteMapOp::get_context_index(void) const
+    size_t RemoteMapOp::get_context_index(void) const
     //--------------------------------------------------------------------------
     {
       return context_index;
     }
 
     //--------------------------------------------------------------------------
-    void RemoteMapOp::set_context_index(unsigned index)
+    void RemoteMapOp::set_context_index(size_t index)
     //--------------------------------------------------------------------------
     {
       context_index = index;
@@ -16311,14 +16311,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    unsigned RemoteCopyOp::get_context_index(void) const
+    size_t RemoteCopyOp::get_context_index(void) const
     //--------------------------------------------------------------------------
     {
       return context_index;
     }
 
     //--------------------------------------------------------------------------
-    void RemoteCopyOp::set_context_index(unsigned index)
+    void RemoteCopyOp::set_context_index(size_t index)
     //--------------------------------------------------------------------------
     {
       context_index = index;
@@ -16428,14 +16428,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    unsigned RemoteCloseOp::get_context_index(void) const
+    size_t RemoteCloseOp::get_context_index(void) const
     //--------------------------------------------------------------------------
     {
       return context_index;
     }
 
     //--------------------------------------------------------------------------
-    void RemoteCloseOp::set_context_index(unsigned index)
+    void RemoteCloseOp::set_context_index(size_t index)
     //--------------------------------------------------------------------------
     {
       context_index = index;
@@ -16546,14 +16546,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    unsigned RemoteAcquireOp::get_context_index(void) const
+    size_t RemoteAcquireOp::get_context_index(void) const
     //--------------------------------------------------------------------------
     {
       return context_index;
     }
 
     //--------------------------------------------------------------------------
-    void RemoteAcquireOp::set_context_index(unsigned index)
+    void RemoteAcquireOp::set_context_index(size_t index)
     //--------------------------------------------------------------------------
     {
       context_index = index;
@@ -16652,14 +16652,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    unsigned RemoteReleaseOp::get_context_index(void) const
+    size_t RemoteReleaseOp::get_context_index(void) const
     //--------------------------------------------------------------------------
     {
       return context_index;
     }
 
     //--------------------------------------------------------------------------
-    void RemoteReleaseOp::set_context_index(unsigned index)
+    void RemoteReleaseOp::set_context_index(size_t index)
     //--------------------------------------------------------------------------
     {
       context_index = index;
@@ -16769,14 +16769,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    unsigned RemoteFillOp::get_context_index(void) const
+    size_t RemoteFillOp::get_context_index(void) const
     //--------------------------------------------------------------------------
     {
       return context_index;
     }
 
     //--------------------------------------------------------------------------
-    void RemoteFillOp::set_context_index(unsigned index)
+    void RemoteFillOp::set_context_index(size_t index)
     //--------------------------------------------------------------------------
     {
       context_index = index;
@@ -16874,14 +16874,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    unsigned RemotePartitionOp::get_context_index(void) const
+    size_t RemotePartitionOp::get_context_index(void) const
     //--------------------------------------------------------------------------
     {
       return context_index;
     }
 
     //--------------------------------------------------------------------------
-    void RemotePartitionOp::set_context_index(unsigned index)
+    void RemotePartitionOp::set_context_index(size_t index)
     //--------------------------------------------------------------------------
     {
       context_index = index;
@@ -17002,14 +17002,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    unsigned RemoteAttachOp::get_context_index(void) const
+    size_t RemoteAttachOp::get_context_index(void) const
     //--------------------------------------------------------------------------
     {
       return context_index;
     }
 
     //--------------------------------------------------------------------------
-    void RemoteAttachOp::set_context_index(unsigned index)
+    void RemoteAttachOp::set_context_index(size_t index)
     //--------------------------------------------------------------------------
     {
       context_index = index;
@@ -17105,14 +17105,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    unsigned RemoteDetachOp::get_context_index(void) const
+    size_t RemoteDetachOp::get_context_index(void) const
     //--------------------------------------------------------------------------
     {
       return context_index;
     }
 
     //--------------------------------------------------------------------------
-    void RemoteDetachOp::set_context_index(unsigned index)
+    void RemoteDetachOp::set_context_index(size_t index)
     //--------------------------------------------------------------------------
     {
       context_index = index;
@@ -17207,14 +17207,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    unsigned RemoteDeletionOp::get_context_index(void) const
+    size_t RemoteDeletionOp::get_context_index(void) const
     //--------------------------------------------------------------------------
     {
       return context_index;
     }
 
     //--------------------------------------------------------------------------
-    void RemoteDeletionOp::set_context_index(unsigned index)
+    void RemoteDeletionOp::set_context_index(size_t index)
     //--------------------------------------------------------------------------
     {
       context_index = index;

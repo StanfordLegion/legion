@@ -308,10 +308,10 @@ namespace Legion {
       // commit_operations performed by an operation.  Every
       // one of those calls invokes the corresponding one of
       // these calls to notify the parent context.
-      virtual unsigned register_new_child_operation(Operation *op,
+      virtual size_t register_new_child_operation(Operation *op,
                const std::vector<StaticDependence> *dependences) = 0;
-      virtual unsigned register_new_close_operation(CloseOp *op) = 0;
-      virtual unsigned register_new_summary_operation(TraceSummaryOp *op) = 0;
+      virtual size_t register_new_close_operation(CloseOp *op) = 0;
+      virtual size_t register_new_summary_operation(TraceSummaryOp *op) = 0;
       virtual void add_to_prepipeline_queue(Operation *op) = 0;
       virtual void add_to_dependence_queue(Operation *op) = 0;
       virtual void add_to_post_task_queue(TaskContext *ctx, RtEvent wait_on,
@@ -649,30 +649,20 @@ namespace Legion {
       };
       struct PostTaskArgs {
       public:
-        PostTaskArgs(TaskContext *ctx, const void *r, size_t s, 
-                     PhysicalInstance i, RtEvent w)
-          : context(ctx), result(r), size(s), instance(i), wait_on(w) { }
+        PostTaskArgs(TaskContext *ctx, size_t idx, const void *r, 
+                     size_t s, PhysicalInstance i, RtEvent w)
+          : context(ctx), index(idx), result(r), size(s), 
+            instance(i), wait_on(w) { }
+      public:
+        inline bool operator<(const PostTaskArgs &rhs) const
+          { return index < rhs.index; }
       public:
         TaskContext *context;
+        size_t index;
         const void *result;
         size_t size;
         PhysicalInstance instance;
         RtEvent wait_on;
-      };
-      struct DeferredPostTaskArgs : public LgTaskArgs<DeferredPostTaskArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_DEFERRED_POST_END_ID;
-      public:
-        DeferredPostTaskArgs(const PostTaskArgs &a)
-          : LgTaskArgs<DeferredPostTaskArgs>(
-              a.context->owner_task->get_unique_op_id()),
-            context(a.context), result(a.result), size(a.size),
-            instance(a.instance) { }
-      public:
-        TaskContext *context;
-        const void *result;
-        const size_t size;
-        PhysicalInstance instance;
       };
       struct PostDecrementArgs : public LgTaskArgs<PostDecrementArgs> {
       public:
@@ -959,10 +949,10 @@ namespace Legion {
       // commit_operations performed by an operation.  Every
       // one of those calls invokes the corresponding one of
       // these calls to notify the parent context.
-      virtual unsigned register_new_child_operation(Operation *op,
+      virtual size_t register_new_child_operation(Operation *op,
                 const std::vector<StaticDependence> *dependences);
-      virtual unsigned register_new_close_operation(CloseOp *op);
-      virtual unsigned register_new_summary_operation(TraceSummaryOp *op);
+      virtual size_t register_new_close_operation(CloseOp *op);
+      virtual size_t register_new_summary_operation(TraceSummaryOp *op);
       virtual void add_to_prepipeline_queue(Operation *op);
       bool process_prepipeline_stage(void);
       virtual void add_to_dependence_queue(Operation *op);
@@ -1058,7 +1048,6 @@ namespace Legion {
       static void handle_prepipeline_stage(const void *args);
       static void handle_dependence_stage(const void *args);
       static void handle_post_end_task(const void *args);
-      static void handle_deferred_post_end_task(const void *args);
     public:
       void free_remote_contexts(void);
       void send_remote_context(AddressSpaceID remote_instance, 
@@ -1098,10 +1087,10 @@ namespace Legion {
     protected:
       mutable LocalLock                     child_op_lock;
       // Track whether this task has finished executing
-      unsigned total_children_count; // total number of sub-operations
-      unsigned total_close_count; 
-      unsigned total_summary_count;
-      unsigned outstanding_children_count;
+      size_t total_children_count; // total number of sub-operations
+      size_t total_close_count; 
+      size_t total_summary_count;
+      size_t outstanding_children_count;
       LegionMap<Operation*,GenerationID,
                 EXECUTING_CHILD_ALLOC>::tracked executing_children;
       LegionMap<Operation*,GenerationID,
@@ -1132,6 +1121,7 @@ namespace Legion {
     protected:
       mutable LocalLock                               post_task_lock;
       std::list<PostTaskArgs>                         post_task_queue;
+      size_t                                          post_task_index;
     protected:
       // Traces for this task's execution
       LegionMap<TraceID,DynamicTrace*,TASK_TRACES_ALLOC>::tracked traces;
@@ -1242,8 +1232,8 @@ namespace Legion {
     public:
       virtual int get_depth(void) const;
       virtual UniqueID get_unique_id(void) const;
-      virtual unsigned get_context_index(void) const; 
-      virtual void set_context_index(unsigned index);
+      virtual size_t get_context_index(void) const; 
+      virtual void set_context_index(size_t index);
       virtual const char* get_task_name(void) const;
       virtual bool has_trace(void) const;
     public:
@@ -1565,10 +1555,10 @@ namespace Legion {
       // commit_operations performed by an operation.  Every
       // one of those calls invokes the corresponding one of
       // these calls to notify the parent context.
-      virtual unsigned register_new_child_operation(Operation *op,
+      virtual size_t register_new_child_operation(Operation *op,
                 const std::vector<StaticDependence> *dependences);
-      virtual unsigned register_new_close_operation(CloseOp *op);
-      virtual unsigned register_new_summary_operation(TraceSummaryOp *op);
+      virtual size_t register_new_close_operation(CloseOp *op);
+      virtual size_t register_new_summary_operation(TraceSummaryOp *op);
       virtual void add_to_prepipeline_queue(Operation *op);
       virtual void add_to_dependence_queue(Operation *op);
       virtual void add_to_post_task_queue(TaskContext *ctx, RtEvent wait_on,
@@ -1886,10 +1876,10 @@ namespace Legion {
       // commit_operations performed by an operation.  Every
       // one of those calls invokes the corresponding one of
       // these calls to notify the parent context.
-      virtual unsigned register_new_child_operation(Operation *op,
+      virtual size_t register_new_child_operation(Operation *op,
                 const std::vector<StaticDependence> *dependences);
-      virtual unsigned register_new_close_operation(CloseOp *op);
-      virtual unsigned register_new_summary_operation(TraceSummaryOp *op);
+      virtual size_t register_new_close_operation(CloseOp *op);
+      virtual size_t register_new_summary_operation(TraceSummaryOp *op);
       virtual void add_to_prepipeline_queue(Operation *op);
       virtual void add_to_dependence_queue(Operation *op);
       virtual void add_to_post_task_queue(TaskContext *ctx, RtEvent wait_on,
