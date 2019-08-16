@@ -3322,9 +3322,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::record_get_term_event(Memoizable* memo)
+    void PhysicalTemplate::record_get_term_event(Operation *op)
     //--------------------------------------------------------------------------
     {
+      Memoizable *memo = op->get_memoizable();
+#ifdef DEBUG_LEGION
+      assert(memo != NULL);
+#endif
       const ApEvent lhs = memo->get_memo_completion(false/*replay*/);
       AutoLock tpl_lock(template_lock);
 #ifdef DEBUG_LEGION
@@ -3456,7 +3460,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::record_issue_copy(Memoizable *memo,
+    void PhysicalTemplate::record_issue_copy(Operation *op,
                                              unsigned src_idx,
                                              unsigned dst_idx,
                                              ApEvent &lhs,
@@ -3475,6 +3479,10 @@ namespace Legion {
                                  const FieldMaskSet<InstanceView> &tracing_dsts)
     //--------------------------------------------------------------------------
     {
+      Memoizable *memo = op->get_memoizable();
+#ifdef DEBUG_LEGION
+      assert(memo != NULL);
+#endif
       if (!lhs.exists())
       {
         Realm::UserEvent rename(Realm::UserEvent::create_user_event());
@@ -3505,7 +3513,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::record_issue_indirect(Memoizable *memo, ApEvent &lhs,
+    void PhysicalTemplate::record_issue_indirect(Operation *op, ApEvent &lhs,
                              IndexSpaceExpression *expr,
                              const std::vector<CopySrcDstField>& src_fields,
                              const std::vector<CopySrcDstField>& dst_fields,
@@ -3518,7 +3526,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::record_issue_fill(Memoizable *memo,
+    void PhysicalTemplate::record_issue_fill(Operation *op,
                                              unsigned idx,
                                              ApEvent &lhs,
                                              IndexSpaceExpression *expr,
@@ -3535,6 +3543,10 @@ namespace Legion {
                                  const FieldMaskSet<InstanceView> &tracing_dsts)
     //--------------------------------------------------------------------------
     {
+      Memoizable *memo = op->get_memoizable();
+#ifdef DEBUG_LEGION
+      assert(memo != NULL);
+#endif
       if (!lhs.exists())
       {
         Realm::UserEvent rename(Realm::UserEvent::create_user_event());
@@ -3625,7 +3637,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::record_op_view(Memoizable *memo,
+    void PhysicalTemplate::record_op_view(Operation *op,
                                           unsigned idx,
                                           InstanceView *view,
                                           const RegionUsage &usage,
@@ -3633,6 +3645,10 @@ namespace Legion {
                                           bool update_validity)
     //--------------------------------------------------------------------------
     {
+      Memoizable *memo = op->get_memoizable();
+#ifdef DEBUG_LEGION
+      assert(memo != NULL);
+#endif
       AutoLock tpl_lock(template_lock);
       TraceLocalID op_key = find_trace_local_id(memo);
       unsigned entry = find_memo_entry(memo);

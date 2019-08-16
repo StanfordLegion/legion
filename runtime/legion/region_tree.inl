@@ -62,8 +62,8 @@ namespace Legion {
         ApEvent pred_pre = 
           Runtime::merge_events(&trace_info, precondition, ApEvent(pred_guard));
         if (trace_info.recording)
-          trace_info.tpl->record_merge_events(pred_pre, precondition,
-                                  ApEvent(pred_guard), trace_info.op);
+          trace_info.record_merge_events(pred_pre, precondition,
+                                          ApEvent(pred_guard));
 #ifdef LEGION_SPY
         result = Runtime::ignorefaults(space.fill(realm_dst_fields, requests, 
                                               fill_value, fill_size, pred_pre));
@@ -154,8 +154,8 @@ namespace Legion {
         ApEvent pred_pre = 
           Runtime::merge_events(&trace_info, precondition, ApEvent(pred_guard));
         if (trace_info.recording)
-          trace_info.tpl->record_merge_events(pred_pre, precondition,
-                                  ApEvent(pred_guard), trace_info.op);
+          trace_info.record_merge_events(pred_pre, precondition,
+                                          ApEvent(pred_guard));
 #ifdef LEGION_SPY
         result = Runtime::ignorefaults(space.copy(realm_src_fields, 
               realm_dst_fields, requests, pred_pre, redop, reduction_fold));
@@ -328,8 +328,8 @@ namespace Legion {
         ApEvent pred_pre = 
           Runtime::merge_events(&trace_info, precondition, ApEvent(pred_guard));
         if (trace_info.recording)
-          trace_info.tpl->record_merge_events(pred_pre, precondition,
-                                  ApEvent(pred_guard), trace_info.op);
+          trace_info.record_merge_events(pred_pre, precondition,
+                                          ApEvent(pred_guard));
 #ifdef LEGION_SPY
         result = Runtime::ignorefaults(space.copy(realm_src_fields, 
                           realm_dst_fields, indirections, requests, pred_pre));

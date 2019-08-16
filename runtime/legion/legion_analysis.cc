@@ -257,21 +257,21 @@ namespace Legion {
     //--------------------------------------------------------------------------
     PhysicalTraceInfo::PhysicalTraceInfo(Operation *o, unsigned idx, bool init)
     //--------------------------------------------------------------------------
-      : op(o), index(idx), dst_index(idx), tpl((op == NULL) ? NULL :
+      : op(o), index(idx), dst_index(idx), rec((op == NULL) ? NULL :
           (op->get_memoizable() == NULL) ? NULL :
             op->get_memoizable()->get_template()),
-        recording((tpl == NULL) ? false : tpl->is_recording()),
+        recording((rec == NULL) ? false : rec->is_recording()),
         update_validity(true)
     {
       if (recording && init)
-        tpl->record_get_term_event(op->get_memoizable());
+        rec->record_get_term_event(op);
     }
 
     //--------------------------------------------------------------------------
     PhysicalTraceInfo::PhysicalTraceInfo(const PhysicalTraceInfo &info,
                                          unsigned idx,
                                          bool update)
-      : op(info.op), index(idx), dst_index(idx), tpl(info.tpl),
+      : op(info.op), index(idx), dst_index(idx), rec(info.rec),
         recording(info.recording), update_validity(update)
     //--------------------------------------------------------------------------
     {
@@ -281,18 +281,18 @@ namespace Legion {
     PhysicalTraceInfo::PhysicalTraceInfo(
                                Operation *o, unsigned src_idx, unsigned dst_idx)
     //--------------------------------------------------------------------------
-      : op(o), index(src_idx), dst_index(dst_idx), tpl((op == NULL) ? NULL :
+      : op(o), index(src_idx), dst_index(dst_idx), rec((op == NULL) ? NULL :
           (op->get_memoizable() == NULL) ? NULL :
             op->get_memoizable()->get_template()),
-        recording((tpl == NULL) ? false : tpl->is_recording()),
+        recording((rec == NULL) ? false : rec->is_recording()),
         update_validity(true)
     {
     }
 
     //--------------------------------------------------------------------------
     PhysicalTraceInfo::PhysicalTraceInfo(Operation *o, Memoizable &memo)
-      : op(o), index(-1U), dst_index(-1U), tpl(memo.get_template()),
-        recording((tpl == NULL) ? false : tpl->is_recording()),
+      : op(o), index(-1U), dst_index(-1U), rec(memo.get_template()),
+        recording((rec == NULL) ? false : rec->is_recording()),
         update_validity(true)
     //--------------------------------------------------------------------------
     {
@@ -300,162 +300,11 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     PhysicalTraceInfo::PhysicalTraceInfo(const PhysicalTraceInfo &rhs)
-      : op(rhs.op), index(rhs.index), dst_index(rhs.dst_index), tpl(rhs.tpl),
+      : op(rhs.op), index(rhs.index), dst_index(rhs.dst_index), rec(rhs.rec),
         recording(rhs.recording), update_validity(rhs.update_validity)
     //--------------------------------------------------------------------------
     {
     }
-
-    //--------------------------------------------------------------------------
-    void PhysicalTraceInfo::record_merge_events(ApEvent &result,
-                                                ApEvent e1, ApEvent e2) const
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      sanity_check(false);
-#endif
-      tpl->record_merge_events(result, e1, e2, op);      
-    }
-    
-    //--------------------------------------------------------------------------
-    void PhysicalTraceInfo::record_merge_events(ApEvent &result,
-                                       ApEvent e1, ApEvent e2, ApEvent e3) const
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      sanity_check(false);
-#endif
-      tpl->record_merge_events(result, e1, e2, e3, op);
-    }
-
-    //--------------------------------------------------------------------------
-    void PhysicalTraceInfo::record_merge_events(ApEvent &result,
-                                          const std::set<ApEvent> &events) const
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      sanity_check(false);
-#endif
-      tpl->record_merge_events(result, events, op);
-    }
-
-    //--------------------------------------------------------------------------
-    void PhysicalTraceInfo::record_op_sync_event(ApEvent &result) const
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      sanity_check(false);
-#endif
-      tpl->record_set_op_sync_event(result, op);
-    }
-
-    //--------------------------------------------------------------------------
-    void PhysicalTraceInfo::record_issue_copy(ApEvent &result,
-                           IndexSpaceExpression *expr,
-                           const std::vector<CopySrcDstField>& src_fields,
-                           const std::vector<CopySrcDstField>& dst_fields,
-#ifdef LEGION_SPY
-                           FieldSpace handle,
-                           RegionTreeID src_tree_id,
-                           RegionTreeID dst_tree_id,
-#endif
-                           ApEvent precondition,
-                           ReductionOpID redop,
-                           bool reduction_fold,
-                           const FieldMaskSet<InstanceView> *tracing_srcs,
-                           const FieldMaskSet<InstanceView> *tracing_dsts) const
-    //--------------------------------------------------------------------------
-    {
-      Memoizable *memo = op->get_memoizable();
-#ifdef DEBUG_LEGION
-      sanity_check(true);
-      assert(memo != NULL);
-      assert(tracing_srcs != NULL);
-      assert(tracing_dsts != NULL);
-#endif
-      tpl->record_issue_copy(memo, index, dst_index,
-                             result, expr, src_fields, dst_fields,
-#ifdef LEGION_SPY
-                             handle, src_tree_id, dst_tree_id,
-#endif
-                             precondition, redop, reduction_fold,
-                             *tracing_srcs, *tracing_dsts);
-    }
-
-    //--------------------------------------------------------------------------
-    void PhysicalTraceInfo::record_issue_fill(ApEvent &result,
-                           IndexSpaceExpression *expr,
-                           const std::vector<CopySrcDstField> &fields,
-                           const void *fill_value, size_t fill_size,
-#ifdef LEGION_SPY
-                           UniqueID fill_uid,
-                           FieldSpace handle,
-                           RegionTreeID tree_id,
-#endif
-                           ApEvent precondition,
-                           const FieldMaskSet<FillView> *tracing_srcs,
-                           const FieldMaskSet<InstanceView> *tracing_dsts) const
-    //--------------------------------------------------------------------------
-    {
-      Memoizable *memo = op->get_memoizable();
-#ifdef DEBUG_LEGION
-      sanity_check(true);
-      assert(memo != NULL);
-      assert(tracing_srcs != NULL);
-      assert(tracing_dsts != NULL);
-#endif
-      tpl->record_issue_fill(memo, index, result, expr, fields, fill_value,
-                             fill_size,
-#ifdef LEGION_SPY
-                             fill_uid, handle, tree_id,
-#endif
-                             precondition, *tracing_srcs, *tracing_dsts);
-    }
-
-    //--------------------------------------------------------------------------
-    void PhysicalTraceInfo::record_issue_indirect(ApEvent &result,
-                                 IndexSpaceExpression *expr,
-                                 const std::vector<CopySrcDstField>& src_fields,
-                                 const std::vector<CopySrcDstField>& dst_fields,
-                                 const std::vector<void*> &indirections,
-                                 ApEvent precondition) const
-    //--------------------------------------------------------------------------
-    {
-      Memoizable *memo = op->get_memoizable();
-#ifdef DEBUG_LEGION
-      sanity_check(true);
-      assert(memo != NULL);
-#endif
-      tpl->record_issue_indirect(memo, result, expr, src_fields, dst_fields,
-                                 indirections, precondition);
-    }
-
-    //--------------------------------------------------------------------------
-    void PhysicalTraceInfo::record_op_view(const RegionUsage &usage,
-                                           const FieldMask &user_mask,
-                                           InstanceView *view) const
-    //--------------------------------------------------------------------------
-    {
-      Memoizable *memo = op->get_memoizable();
-#ifdef DEBUG_LEGION
-      sanity_check(true);
-      assert(memo != NULL);
-#endif
-      tpl->record_op_view(memo, index, view, usage, user_mask, update_validity);
-    }
-
-#ifdef DEBUG_LEGION
-    //--------------------------------------------------------------------------
-    inline void PhysicalTraceInfo::sanity_check(bool check_indices) const
-    //--------------------------------------------------------------------------
-    {
-      assert(recording);
-      assert(tpl != NULL);
-      assert(tpl->is_recording());
-      assert(!check_indices || index != -1U);
-      assert(!check_indices || dst_index != -1U);
-    }
-#endif
 
     /////////////////////////////////////////////////////////////
     // ProjectionInfo 

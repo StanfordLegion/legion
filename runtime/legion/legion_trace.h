@@ -19,6 +19,7 @@
 
 #include "legion.h"
 #include "legion/legion_ops.h"
+#include "legion/legion_analysis.h"
 
 namespace Legion {
   namespace Internal {
@@ -555,7 +556,8 @@ namespace Legion {
      * the interpreter state (operations and events). These are initialized
      * before the template gets executed.
      */
-    class PhysicalTemplate : public LegionHeapify<PhysicalTemplate> {
+    class PhysicalTemplate : public PhysicalTraceRecorder,
+                             public LegionHeapify<PhysicalTemplate> {
     public:
       struct ReplaySliceArgs : public LgTaskArgs<ReplaySliceArgs> {
       public:
@@ -605,7 +607,7 @@ namespace Legion {
       PhysicalTemplate(PhysicalTrace *trace, ApEvent fence_event);
       PhysicalTemplate(const PhysicalTemplate &rhs);
     private:
-      ~PhysicalTemplate(void);
+      virtual ~PhysicalTemplate(void);
     public:
       void initialize(Runtime *runtime, ApEvent fence_completion,
                       bool recurrent);
@@ -660,7 +662,7 @@ namespace Legion {
       UniqueID get_fence_uid(void) const { return prev_fence_uid; }
 #endif
     public:
-      inline bool is_recording(void) const { return recording; }
+      virtual bool is_recording(void) const { return recording; }
       inline bool is_replaying(void) const { return !recording; }
       inline bool is_replayable(void) const { return replayable.replayable; }
     public:
@@ -674,19 +676,20 @@ namespace Legion {
                              std::vector<Processor> &target_proc,
                              std::deque<InstanceSet> &physical_instances) const;
     public:
-      void record_get_term_event(Memoizable* memo);
+      virtual void record_get_term_event(Operation *op);
       void record_create_ap_user_event(ApUserEvent lhs, Operation *owner);
       void record_trigger_event(ApUserEvent lhs, ApEvent rhs);
     public:
-      void record_merge_events(ApEvent &lhs, ApEvent rhs, Operation *owner);
-      void record_merge_events(ApEvent &lhs, ApEvent e1, ApEvent e2,
-                               Operation *owner);
-      void record_merge_events(ApEvent &lhs, ApEvent e1, ApEvent e2,
-                               ApEvent e3, Operation *owner);
-      void record_merge_events(ApEvent &lhs, const std::set<ApEvent>& rhs,
-                               Operation *owner);
+      virtual void record_merge_events(ApEvent &lhs, 
+                                       ApEvent rhs, Operation *owner);
+      virtual void record_merge_events(ApEvent &lhs, ApEvent e1, 
+                                       ApEvent e2, Operation *owner);
+      virtual void record_merge_events(ApEvent &lhs, ApEvent e1, ApEvent e2,
+                                       ApEvent e3, Operation *owner);
+      virtual void record_merge_events(ApEvent &lhs, 
+                            const std::set<ApEvent>& rhs, Operation *owner);
     public:
-      void record_issue_copy(Memoizable *memo,
+      virtual void record_issue_copy(Operation *op,
                              unsigned src_idx,
                              unsigned dst_idx,
                              ApEvent &lhs,
@@ -703,13 +706,13 @@ namespace Legion {
                              bool reduction_fold,
                              const FieldMaskSet<InstanceView> &tracing_srcs,
                              const FieldMaskSet<InstanceView> &tracing_dsts);
-      void record_issue_indirect(Memoizable *memo, ApEvent &lhs,
+      virtual void record_issue_indirect(Operation *op, ApEvent &lhs,
                              IndexSpaceExpression *expr,
                              const std::vector<CopySrcDstField>& src_fields,
                              const std::vector<CopySrcDstField>& dst_fields,
                              const std::vector<void*> &indirections,
                              ApEvent precondition);
-      void record_issue_fill(Memoizable *memo, unsigned idx,
+      virtual void record_issue_fill(Operation *op, unsigned idx,
                              ApEvent &lhs,
                              IndexSpaceExpression *expr,
                              const std::vector<CopySrcDstField> &fields,
@@ -732,13 +735,13 @@ namespace Legion {
       void get_reduction_ready_events(Memoizable *memo,
                                       std::set<ApEvent> &ready_events);
     public:
-      void record_op_view(Memoizable *memo,
-                          unsigned idx,
-                          InstanceView *view,
-                          const RegionUsage &usage,
-                          const FieldMask &user_mask,
-                          bool update_validity);
-      void record_fill_view(FillView *view, const FieldMask &user_mask);
+      virtual void record_op_view(Operation *op,
+                                  unsigned idx,
+                                  InstanceView *view,
+                                  const RegionUsage &usage,
+                                  const FieldMask &user_mask,
+                                  bool update_validity);
+      virtual void record_fill_view(FillView *view, const FieldMask &user_mask);
     private:
       void record_views(Memoizable *memo,
                         unsigned idx,
@@ -760,7 +763,7 @@ namespace Legion {
                              const FieldMaskSet<InstanceView> &views);
       void record_fill_views(const FieldMaskSet<FillView> &views);
     public:
-      void record_set_op_sync_event(ApEvent &lhs, Operation *op);
+      virtual void record_set_op_sync_event(ApEvent &lhs, Operation *op);
       void record_complete_replay(Operation *op, ApEvent rhs);
     public:
       RtEvent defer_template_deletion(void);
