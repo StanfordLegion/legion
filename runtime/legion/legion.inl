@@ -1435,9 +1435,9 @@ namespace Legion {
           {
             case 0:
               break;
-              // C++ is stupid, apparently the `using` statement is not 
+              // C++11 is stupid, apparently the `using` statement is not 
               // smart enough to rename explicit destructor invocations, FML
-#if __cplusplus >= 201103L
+#if __cplusplus == 201103L
 #define DIMFUNC(DIM) \
             case DIM: \
               { \
