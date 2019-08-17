@@ -2249,7 +2249,7 @@ namespace Legion {
         pack_phase_barrier(arrive_barriers[idx], rez);
       rez.serialize(layout_constraint_id);
       pack_mappable(*this, rez);
-      rez.serialize<unsigned>(get_context_index());
+      rez.serialize<size_t>(get_context_index());
     }
 
     //--------------------------------------------------------------------------
@@ -2276,7 +2276,7 @@ namespace Legion {
         unpack_phase_barrier(arrive_barriers[idx], derez);
       derez.deserialize(layout_constraint_id);
       unpack_mappable(*this, derez);
-      unsigned index;
+      size_t index;
       derez.deserialize(index);
       set_context_index(index);
     }
@@ -3305,7 +3305,7 @@ namespace Legion {
       rez.serialize(index_domain);
       rez.serialize(index_point);
       pack_mappable(*this, rez);
-      rez.serialize<unsigned>(get_context_index());
+      rez.serialize<size_t>(get_context_index());
     }
 
     //--------------------------------------------------------------------------
@@ -3353,7 +3353,7 @@ namespace Legion {
       derez.deserialize(index_domain);
       derez.deserialize(index_point);
       unpack_mappable(*this, derez);
-      unsigned index;
+      size_t index;
       derez.deserialize(index);
       set_context_index(index);
     }
@@ -7414,7 +7414,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       pack_region_requirement(requirement, rez);
-      rez.serialize(get_context_index());
+      rez.serialize<size_t>(get_context_index());
     }
 
     //--------------------------------------------------------------------------
@@ -7423,7 +7423,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       unpack_region_requirement(requirement, derez);
-      unsigned index;
+      size_t index;
       derez.deserialize(index);
       set_context_index(index);
     }
@@ -8193,7 +8193,7 @@ namespace Legion {
       for (unsigned idx = 0; idx < arrive_barriers.size(); idx++)
         pack_phase_barrier(arrive_barriers[idx], rez);
       pack_mappable(*this, rez);
-      rez.serialize<unsigned>(get_context_index());
+      rez.serialize<size_t>(get_context_index());
     }
 
     //--------------------------------------------------------------------------
@@ -8228,7 +8228,7 @@ namespace Legion {
       for (unsigned idx = 0; idx < arrive_barriers.size(); idx++)
         unpack_phase_barrier(arrive_barriers[idx], derez);
       unpack_mappable(*this, derez);
-      unsigned index;
+      size_t index;
       derez.deserialize(index);
       set_context_index(index);
     }
@@ -8979,7 +8979,7 @@ namespace Legion {
       for (unsigned idx = 0; idx < arrive_barriers.size(); idx++)
         pack_phase_barrier(arrive_barriers[idx], rez);
       pack_mappable(*this, rez);
-      rez.serialize<unsigned>(get_context_index());
+      rez.serialize<size_t>(get_context_index());
     }
 
     //--------------------------------------------------------------------------
@@ -9014,7 +9014,7 @@ namespace Legion {
       for (unsigned idx = 0; idx < arrive_barriers.size(); idx++)
         unpack_phase_barrier(arrive_barriers[idx], derez);
       unpack_mappable(*this, derez);
-      unsigned index;
+      size_t index;
       derez.deserialize(index);
       set_context_index(index);
     }
@@ -12020,7 +12020,7 @@ namespace Legion {
       rez.serialize(index_domain);
       rez.serialize(index_point);
       pack_mappable(*this, rez);
-      rez.serialize<unsigned>(get_context_index());
+      rez.serialize<size_t>(get_context_index());
     }
 
     //--------------------------------------------------------------------------
@@ -12034,7 +12034,7 @@ namespace Legion {
       derez.deserialize(index_domain);
       derez.deserialize(index_point);
       unpack_mappable(*this, derez);
-      unsigned index;
+      size_t index;
       derez.deserialize(index);
       set_context_index(index);
     }
@@ -13474,7 +13474,7 @@ namespace Legion {
       rez.serialize(index_domain);
       rez.serialize(index_point);
       pack_mappable(*this, rez);
-      rez.serialize<unsigned>(get_context_index());
+      rez.serialize<size_t>(get_context_index());
     }
 
     //--------------------------------------------------------------------------
@@ -13503,7 +13503,7 @@ namespace Legion {
       derez.deserialize(index_domain);
       derez.deserialize(index_point);
       unpack_mappable(*this, derez);
-      unsigned index;
+      size_t index;
       derez.deserialize(index);
       set_context_index(index);
     }
