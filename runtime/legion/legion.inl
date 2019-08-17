@@ -1435,14 +1435,13 @@ namespace Legion {
           {
             case 0:
               break;
-              // Need to handle very old versions of GCC that are broken
-              // in some circumstances with templates for explicit  
-              // destructor invocations
-#if defined(__GNUC__) && (__GNUC__ <= 4)
+              // C++11 is stupid, apparently the `using` statement is not 
+              // smart enough to rename explicit destructor invocations, FML
+#if __cplusplus == 201103L
 #define DIMFUNC(DIM) \
             case DIM: \
               { \
-                reinterpret_cast<DomainT<DIM,T>*>(bounds)->~DomainT(); \
+                reinterpret_cast<DomainT<DIM,T>*>(bounds)->~IndexSpace(); \
                 if (has_transform) \
                   reinterpret_cast<AffineTransform<DIM,N,T>*>(transform)-> \
                     ~AffineTransform(); \

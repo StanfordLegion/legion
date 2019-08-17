@@ -279,7 +279,6 @@ namespace Legion {
       LG_DEFERRED_EXECUTE_ID,
       LG_DEFERRED_COMPLETE_ID,
       LG_DEFERRED_COMMIT_ID,
-      LG_DEFERRED_POST_END_ID,
       LG_DEFERRED_COLLECT_ID,
       LG_PRE_PIPELINE_ID,
       LG_TRIGGER_DEPENDENCE_ID,
@@ -408,7 +407,6 @@ namespace Legion {
         "Deferred Execute",                                       \
         "Deferred Complete",                                      \
         "Deferred Commit",                                        \
-        "Deferred Post-Task Execution",                           \
         "Garbage Collection",                                     \
         "Prepipeline Stage",                                      \
         "Logical Dependence Analysis",                            \

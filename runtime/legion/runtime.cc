@@ -23479,11 +23479,6 @@ namespace Legion {
             InnerContext::handle_post_end_task(args); 
             break;
           }
-        case LG_DEFERRED_POST_END_ID:
-          {
-            InnerContext::handle_deferred_post_end_task(args);
-            break;
-          }
         case LG_DEFERRED_READY_TRIGGER_ID:
           {
             const Operation::DeferredReadyArgs *deferred_ready_args = 

@@ -2887,7 +2887,7 @@ namespace Legion {
       {
         RegionNode *region_node = get_node(req.region);
         FieldSpaceNode *fs_node = region_node->column_source;
-        trace_info.tpl->record_fill_view(fill_view,
+        trace_info.record_fill_view(fill_view,
             fs_node->get_field_mask(req.privilege_fields));
       }
       const FieldMaskSet<EquivalenceSet> &eq_sets = 
