@@ -1441,8 +1441,7 @@ namespace Legion {
 #define DIMFUNC(DIM) \
             case DIM: \
               { \
-                reinterpret_cast<DomainT<DIM,T>*>(bounds)-> \
-                  ~IndexSpace<DIM,T>(); \
+                reinterpret_cast<DomainT<DIM,T>*>(bounds)->~IndexSpace(); \
                 if (has_transform) \
                   reinterpret_cast<AffineTransform<DIM,N,T>*>(transform)-> \
                     ~AffineTransform(); \
