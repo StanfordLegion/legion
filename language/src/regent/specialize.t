@@ -722,6 +722,13 @@ function specialize.expr_raw_runtime(cx, node, allow_lists)
   }
 end
 
+function specialize.expr_raw_task(cx, node, allow_lists)
+  return ast.specialized.expr.RawTask {
+    annotations = node.annotations,
+    span = node.span,
+  }
+end
+
 function specialize.expr_raw_value(cx, node, allow_lists)
   return ast.specialized.expr.RawValue {
     value = specialize.expr(cx, node.value),
@@ -1228,6 +1235,9 @@ function specialize.expr(cx, node, allow_lists)
 
   elseif node:is(ast.unspecialized.expr.RawRuntime) then
     return specialize.expr_raw_runtime(cx, node, allow_lists)
+
+  elseif node:is(ast.unspecialized.expr.RawTask) then
+    return specialize.expr_raw_task(cx, node, allow_lists)
 
   elseif node:is(ast.unspecialized.expr.RawValue) then
     return specialize.expr_raw_value(cx, node, allow_lists)

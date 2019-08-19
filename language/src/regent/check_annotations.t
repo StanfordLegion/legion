@@ -111,6 +111,7 @@ local node_allow_annotations = {
   [ast.typed.expr.RawFields]                  = deny_all,
   [ast.typed.expr.RawPhysical]                = deny_all,
   [ast.typed.expr.RawRuntime]                 = deny_all,
+  [ast.typed.expr.RawTask]                    = deny_all,
   [ast.typed.expr.RawValue]                   = deny_all,
   [ast.typed.expr.Isnull]                     = deny_all,
   [ast.typed.expr.Null]                       = deny_all,

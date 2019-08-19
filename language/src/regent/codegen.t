@@ -3670,6 +3670,14 @@ function codegen.expr_raw_runtime(cx, node)
     value_type)
 end
 
+function codegen.expr_raw_task(cx, node)
+  local value_type = std.as_read(node.expr_type)
+  return values.value(
+    node,
+    expr.just(emit_debuginfo(node), cx.task),
+    value_type)
+end
+
 function codegen.expr_raw_value(cx, node)
   local value = codegen.expr(cx, node.value):read(cx)
   local value_type = std.as_read(node.value.expr_type)
@@ -7815,6 +7823,9 @@ function codegen.expr(cx, node)
 
   elseif node:is(ast.typed.expr.RawRuntime) then
     return codegen.expr_raw_runtime(cx, node)
+
+  elseif node:is(ast.typed.expr.RawTask) then
+    return codegen.expr_raw_task(cx, node)
 
   elseif node:is(ast.typed.expr.RawValue) then
     return codegen.expr_raw_value(cx, node)

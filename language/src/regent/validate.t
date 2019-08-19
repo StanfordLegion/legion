@@ -146,6 +146,7 @@ local node_vars_are_valid = {
   [ast.typed.expr.RawFields]                  = continue,
   [ast.typed.expr.RawPhysical]                = continue,
   [ast.typed.expr.RawRuntime]                 = continue,
+  [ast.typed.expr.RawTask]                    = continue,
   [ast.typed.expr.RawValue]                   = continue,
   [ast.typed.expr.Isnull]                     = continue,
   [ast.typed.expr.Null]                       = continue,
