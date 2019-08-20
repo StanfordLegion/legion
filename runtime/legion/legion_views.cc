@@ -1746,7 +1746,7 @@ namespace Legion {
                         MATERIALIZED_VIEW_FILTER_LOCAL_USERS_CALL);
       // Don't do this if we are in Legion Spy since we want to see
       // all of the dependences on an instance
-#if !defined(LEGION_SPY) && !defined(EVENT_GRAPH_TRACE)
+#ifndef LEGION_DISABLE_EVENT_PRUNING
       EventFieldUsers::iterator current_finder = 
         current_epoch_users.find(term_event);
       if (current_finder != current_epoch_users.end())
@@ -1890,7 +1890,7 @@ namespace Legion {
       {
         if (cit->first == term_event)
           continue;
-#if !defined(LEGION_SPY) && !defined(EVENT_GRAPH_TRACE)
+#ifndef LEGION_DISABLE_EVENT_PRUNING
         // We're about to do a bunch of expensive tests, 
         // so first do something cheap to see if we can 
         // skip all the tests.
@@ -1969,7 +1969,7 @@ namespace Legion {
       {
         if (pit->first == term_event)
           continue;
-#if !defined(LEGION_SPY) && !defined(EVENT_GRAPH_TRACE)
+#ifndef LEGION_DISABLE_EVENT_PRUNING
         // We're about to do a bunch of expensive tests, 
         // so first do something cheap to see if we can 
         // skip all the tests.
@@ -2021,7 +2021,7 @@ namespace Legion {
       for (EventFieldUsers::const_iterator cit = current_epoch_users.begin(); 
             cit != current_epoch_users.end(); cit++)
       {
-#if !defined(LEGION_SPY) && !defined(EVENT_GRAPH_TRACE)
+#ifndef LEGION_DISABLE_EVENT_PRUNING
         // We're about to do a bunch of expensive tests, 
         // so first do something cheap to see if we can 
         // skip all the tests.
@@ -2103,7 +2103,7 @@ namespace Legion {
             previous_epoch_users.begin(); pit != 
             previous_epoch_users.end(); pit++)
       {
-#if !defined(LEGION_SPY) && !defined(EVENT_GRAPH_TRACE)
+#ifndef LEGION_DISABLE_EVENT_PRUNING
         // We're about to do a bunch of expensive tests, 
         // so first do something cheap to see if we can 
         // skip all the tests.
@@ -4193,8 +4193,7 @@ namespace Legion {
               it != initial_user_events.end(); it++)
           filter_local_users(*it);
       }
-#if !defined(LEGION_SPY) && !defined(EVENT_GRAPH_TRACE) && \
-      defined(DEBUG_LEGION)
+#if !defined(LEGION_DISABLE_EVENT_PRUNING) && defined(LEGION_DEBUG)
       assert(reduction_users.empty());
       assert(reading_users.empty());
       assert(outstanding_gc_events.empty());
@@ -4803,7 +4802,7 @@ namespace Legion {
     {
       // Do not do this if we are in LegionSpy so we can see 
       // all of the dependences
-#if !defined(LEGION_SPY) && !defined(EVENT_GRAPH_TRACE)
+#ifndef LEGION_DISABLE_EVENT_PRUNING
       AutoLock v_lock(view_lock);
       for (std::set<ApEvent>::const_iterator it = term_events.begin();
             it != term_events.end(); it++)

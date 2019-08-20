@@ -3439,7 +3439,7 @@ namespace Legion {
       if (rhs_.size() == 0)
         rhs_.insert(fence_completion_id);
 
-#ifndef LEGION_SPY
+#ifndef LEGION_DISABLE_EVENT_PRUNING
       if (!lhs.exists() || (rhs.find(lhs) != rhs.end()))
       {
         Realm::UserEvent rename(Realm::UserEvent::create_user_event());
