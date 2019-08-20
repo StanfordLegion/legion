@@ -223,6 +223,7 @@ local rewrite_accesses_expr_table = {
   [ast.typed.expr.RawPhysical]                = rewrite_accesses.pass_through_expr,
   [ast.typed.expr.RawRuntime]                 = rewrite_accesses.pass_through_expr,
   [ast.typed.expr.RawValue]                   = rewrite_accesses.pass_through_expr,
+  [ast.typed.expr.RawTask]                    = rewrite_accesses.pass_through_expr,
   [ast.typed.expr.ListInvert]                 = rewrite_accesses.pass_through_expr,
   [ast.typed.expr.ListRange]                  = rewrite_accesses.pass_through_expr,
   [ast.typed.expr.ListIspace]                 = rewrite_accesses.pass_through_expr,
