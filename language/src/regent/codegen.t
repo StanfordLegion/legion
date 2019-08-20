@@ -10151,6 +10151,9 @@ local unpack_param_helper = terralib.memoize(function(param_type)
     end
   end
   unpack_param:setinlined(false)
+  if param_type:isstruct() then
+    unpack_param:setoptimized(false)
+  end
   return unpack_param
 end)
 
