@@ -10151,6 +10151,8 @@ local unpack_param_helper = terralib.memoize(function(param_type)
     end
   end
   unpack_param:setinlined(false)
+  -- FIXME: This hack is to avoid excessive compile time when the size of struct is big.
+  --        (https://github.com/zdevito/terra/issues/372)
   if param_type:isstruct() then
     unpack_param:setoptimized(false)
   end
