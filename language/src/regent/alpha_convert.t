@@ -234,6 +234,7 @@ local node_alpha_conversion = {
   [ast.specialized.expr.RawFields]                  = pass_through,
   [ast.specialized.expr.RawPhysical]                = pass_through,
   [ast.specialized.expr.RawRuntime]                 = pass_through,
+  [ast.specialized.expr.RawTask]                    = pass_through,
   [ast.specialized.expr.RawValue]                   = pass_through,
   [ast.specialized.expr.Isnull]                     = pass_through,
   [ast.specialized.expr.Partition]                  = pass_through,

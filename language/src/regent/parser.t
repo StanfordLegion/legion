@@ -576,6 +576,14 @@ function parser.expr_prefix(p)
       span = ast.span(start, p),
     }
 
+  elseif p:nextif("__task") then
+    p:expect("(")
+    p:expect(")")
+    return ast.unspecialized.expr.RawTask {
+      annotations = ast.default_annotations(),
+      span = ast.span(start, p),
+    }
+
   elseif p:nextif("isnull") then
     p:expect("(")
     local pointer = p:expr()

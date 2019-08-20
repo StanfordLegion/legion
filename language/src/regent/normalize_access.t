@@ -151,6 +151,7 @@ local normalize_access_expr_table = {
   [ast.typed.expr.RawFields]                  = normalize_access.pass_through_expr,
   [ast.typed.expr.RawPhysical]                = normalize_access.pass_through_expr,
   [ast.typed.expr.RawRuntime]                 = normalize_access.pass_through_expr,
+  [ast.typed.expr.RawTask]                    = normalize_access.pass_through_expr,
   [ast.typed.expr.RawValue]                   = normalize_access.pass_through_expr,
   [ast.typed.expr.ListInvert]                 = normalize_access.pass_through_expr,
   [ast.typed.expr.ListRange]                  = normalize_access.pass_through_expr,

@@ -385,6 +385,10 @@ function pretty.expr_raw_runtime(cx, node)
   return text.Line { value = "__runtime()"}
 end
 
+function pretty.expr_raw_task(cx, node)
+  return text.Line { value = "__task()"}
+end
+
 function pretty.expr_raw_value(cx, node)
   return join({"__raw(", pretty.expr(cx, node.value), ")"})
 end
@@ -776,6 +780,9 @@ function pretty.expr(cx, node)
 
   elseif node:is(ast.typed.expr.RawRuntime) then
     return pretty.expr_raw_runtime(cx, node)
+
+  elseif node:is(ast.typed.expr.RawTask) then
+    return pretty.expr_raw_task(cx, node)
 
   elseif node:is(ast.typed.expr.RawValue) then
     return pretty.expr_raw_value(cx, node)

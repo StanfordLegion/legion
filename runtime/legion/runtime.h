@@ -3845,7 +3845,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       ApEvent result(Realm::Event::merge_events(e1, e2)); 
-#ifdef LEGION_SPY
+#ifdef LEGION_DISABLE_EVENT_PRUNING
       if (!result.exists() || (result == e1) || (result == e2))
       {
         Realm::UserEvent rename(Realm::UserEvent::create_user_event());
@@ -3857,6 +3857,8 @@ namespace Legion {
           rename.trigger();
         result = ApEvent(rename);
       }
+#endif
+#ifdef LEGION_SPY
       LegionSpy::log_event_dependence(e1, result);
       LegionSpy::log_event_dependence(e2, result);
 #endif
@@ -3871,7 +3873,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       ApEvent result(Realm::Event::merge_events(e1, e2, e3)); 
-#ifdef LEGION_SPY
+#ifdef LEGION_DISABLE_EVENT_PRUNING
       if (!result.exists() || (result == e1) || (result == e2) ||(result == e3))
       {
         Realm::UserEvent rename(Realm::UserEvent::create_user_event());
@@ -3885,6 +3887,8 @@ namespace Legion {
           rename.trigger();
         result = ApEvent(rename);
       }
+#endif
+#ifdef LEGION_SPY
       LegionSpy::log_event_dependence(e1, result);
       LegionSpy::log_event_dependence(e2, result);
       LegionSpy::log_event_dependence(e3, result);
@@ -3899,7 +3903,7 @@ namespace Legion {
                  const PhysicalTraceInfo *info, const std::set<ApEvent> &events)
     //--------------------------------------------------------------------------
     {
-#ifndef LEGION_SPY
+#ifndef LEGION_DISABLE_EVENT_PRUNING
       if (events.empty())
       {
         // Still need to do this for tracing because of merge filter code
@@ -3928,7 +3932,7 @@ namespace Legion {
       const std::set<Realm::Event> *realm_events = 
         reinterpret_cast<const std::set<Realm::Event>*>(&events);
       ApEvent result(Realm::Event::merge_events(*realm_events));
-#ifdef LEGION_SPY
+#ifdef LEGION_DISABLE_EVENT_PRUNING
       if (!result.exists() || (events.find(result) != events.end()))
       {
         Realm::UserEvent rename(Realm::UserEvent::create_user_event());
@@ -3938,6 +3942,8 @@ namespace Legion {
           rename.trigger();
         result = ApEvent(rename);
       }
+#endif
+#ifdef LEGION_SPY
       for (std::set<ApEvent>::const_iterator it = events.begin();
             it != events.end(); it++)
         LegionSpy::log_event_dependence(*it, result);
@@ -3969,7 +3975,7 @@ namespace Legion {
                                                 const std::set<RtEvent> &events)
     //--------------------------------------------------------------------------
     {
-#ifndef LEGION_SPY
+#ifndef LEGION_DISABLE_EVENT_PRUNING
       if (events.empty())
         return RtEvent::NO_RT_EVENT;
       if (events.size() == 1)
@@ -4098,14 +4104,16 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       ApEvent result(Realm::Event::ignorefaults(e));
-#ifdef LEGION_SPY
+#ifdef LEGION_DISABLE_EVENT_PRUNING
       if (!result.exists())
       {
         Realm::UserEvent rename(Realm::UserEvent::create_user_event());
         rename.trigger();
         result = ApEvent(rename);
       }
+#ifdef LEGION_SPY
       LegionSpy::log_event_dependence(ApEvent(e), result);
+#endif
 #endif
       return ApEvent(result);
     }
@@ -4258,13 +4266,15 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       ApEvent result(r.acquire(exclusive ? 0 : 1, exclusive, precondition));
-#ifdef LEGION_SPY
+#ifdef LEGION_DISABLE_EVENT_PRUNING
       if (precondition.exists() && !result.exists())
       {
         Realm::UserEvent rename(Realm::UserEvent::create_user_event());
         rename.trigger();
         result = ApEvent(rename);
       }
+#endif
+#ifdef LEGION_SPY
       if (precondition.exists())
         LegionSpy::log_event_dependence(precondition, result);
 #endif

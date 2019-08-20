@@ -1216,6 +1216,14 @@ function type_check.expr_raw_runtime(cx, node)
   }
 end
 
+function type_check.expr_raw_task(cx, node)
+  return ast.typed.expr.RawTask {
+    expr_type = std.c.legion_task_t,
+    annotations = node.annotations,
+    span = node.span,
+  }
+end
+
 function type_check.expr_raw_value(cx, node)
   local value = type_check.expr(cx, node.value)
   local value_type = std.check_read(cx, value)
@@ -3356,6 +3364,7 @@ local type_check_expr_node = {
   [ast.specialized.expr.RawFields]                  = type_check.expr_raw_fields,
   [ast.specialized.expr.RawPhysical]                = type_check.expr_raw_physical,
   [ast.specialized.expr.RawRuntime]                 = type_check.expr_raw_runtime,
+  [ast.specialized.expr.RawTask]                    = type_check.expr_raw_task,
   [ast.specialized.expr.RawValue]                   = type_check.expr_raw_value,
   [ast.specialized.expr.Isnull]                     = type_check.expr_isnull,
   [ast.specialized.expr.New]                        = type_check.expr_new,

@@ -51,6 +51,13 @@
 #endif
 #endif
 
+// If we're doing full LEGION_SPY then turn off event pruning
+#ifdef LEGION_SPY
+#ifndef LEGION_DISABLE_EVENT_PRUNING
+#define LEGION_DISABLE_EVENT_PRUNING
+#endif
+#endif
+
 // forward declarations from bitmask.h
 template<typename T, unsigned int MAX,
          unsigned SHIFT, unsigned MASK> class BitMask;

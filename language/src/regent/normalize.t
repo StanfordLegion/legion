@@ -96,6 +96,9 @@ local function get_num_accessed_fields(node)
   elseif node:is(ast.specialized.expr.RawRuntime) then
     return 1
 
+  elseif node:is(ast.specialized.expr.RawTask) then
+    return 1
+
   elseif node:is(ast.specialized.expr.RawValue) then
     return 1
 
@@ -523,6 +526,7 @@ local normalize_expr_table = {
   [ast.specialized.expr.RawFields]                  = pass_through_expr,
   [ast.specialized.expr.RawPhysical]                = pass_through_expr,
   [ast.specialized.expr.RawRuntime]                 = pass_through_expr,
+  [ast.specialized.expr.RawTask]                    = pass_through_expr,
   [ast.specialized.expr.RawValue]                   = pass_through_expr,
   [ast.specialized.expr.Partition]                  = pass_through_expr,
   [ast.specialized.expr.PartitionEqual]             = pass_through_expr,
