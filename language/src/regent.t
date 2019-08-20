@@ -81,6 +81,7 @@ local language = {
     "__replicable",
     "__runtime",
     "__spmd",
+    "__task",
     "__trace",
     "__unroll",
     "__vectorize",

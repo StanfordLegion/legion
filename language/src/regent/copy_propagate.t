@@ -271,6 +271,7 @@ local copy_propagate_expr_table = {
   [ast.typed.expr.RawFields]                  = copy_propagate.pass_through_expr,
   [ast.typed.expr.RawPhysical]                = copy_propagate.pass_through_expr,
   [ast.typed.expr.RawRuntime]                 = copy_propagate.pass_through_expr,
+  [ast.typed.expr.RawTask]                    = copy_propagate.pass_through_expr,
   [ast.typed.expr.RawValue]                   = copy_propagate.pass_through_expr,
   [ast.typed.expr.ListInvert]                 = copy_propagate.pass_through_expr,
   [ast.typed.expr.ListRange]                  = copy_propagate.pass_through_expr,

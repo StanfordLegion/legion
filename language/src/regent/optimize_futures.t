@@ -160,6 +160,7 @@ function analyze_var_flow.expr(cx, node)
     node:is(ast.typed.expr.RawFields) or
     node:is(ast.typed.expr.RawPhysical) or
     node:is(ast.typed.expr.RawRuntime) or
+    node:is(ast.typed.expr.RawTask) or
     node:is(ast.typed.expr.RawValue) or
     node:is(ast.typed.expr.Isnull) or
     node:is(ast.typed.expr.Null) or
@@ -1021,6 +1022,9 @@ function optimize_futures.expr(cx, node)
     return optimize_futures.expr_raw_physical(cx, node)
 
   elseif node:is(ast.typed.expr.RawRuntime) then
+    return node
+
+  elseif node:is(ast.typed.expr.RawTask) then
     return node
 
   elseif node:is(ast.typed.expr.RawValue) then
