@@ -599,7 +599,9 @@ namespace Legion {
                                   ApEvent term_event, UniqueID op_id, 
                                   const unsigned index,
                                   const bool trace_recording);
+      template<bool NEED_EXPR_LOCK>
       void clean_cache(void);
+      // Must be called while holding the replication lock
       void update_remote_replication_state(std::set<RtEvent> &applied_events);
     public:
       void find_atomic_reservations(const FieldMask &mask, 
