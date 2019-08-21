@@ -2506,7 +2506,7 @@ namespace Legion {
           // them here too since the owner isn't going to send us any
           // updates itself, Do this after sending the message to make
           // sure that we see a sound set of local fields
-          AutoLock r_lock(replicated_lock,1,false/*exclusive*/);
+          AutoLock r_lock(replicated_lock);
           // Only need to add it if it's still replicated
           const FieldMask local_mask = user_mask & replicated_fields;
           if (!!local_mask)
@@ -2557,7 +2557,7 @@ namespace Legion {
             }
             if (!!buffer_mask)
             {
-              AutoLock e_lock(expr_lock);
+              // Protected by exclusive replicated lock
               if (remote_pending_users == NULL)
                 remote_pending_users = new std::list<RemotePendingUser*>();
               remote_pending_users->push_back(
@@ -2880,7 +2880,7 @@ namespace Legion {
         // Now see if we have any local fields we need to apply here 
         unsigned current_added_users = 0;
         {
-          AutoLock r_lock(replicated_lock,1,false/*exclusive*/);
+          AutoLock r_lock(replicated_lock);
           // Only need to add it if it's still replicated
           const FieldMask local_mask = copy_mask & replicated_fields;
           // If we have local fields to handle do that here
@@ -2933,7 +2933,7 @@ namespace Legion {
             }
             if (!!buffer_mask)
             {
-              AutoLock e_lock(expr_lock);
+              // Protected by exclusive replicated lock
               if (remote_pending_users == NULL)
                 remote_pending_users = new std::list<RemotePendingUser*>();
               remote_pending_users->push_back(
@@ -3041,14 +3041,6 @@ namespace Legion {
       assert(!is_logical_owner());
 #endif
       AutoLock r_lock(replicated_lock);
-#ifdef DEBUG_LEGION
-      assert(repl_ptr.replicated_requests != NULL);
-#endif
-      LegionMap<RtUserEvent,FieldMask>::aligned::iterator finder = 
-        repl_ptr.replicated_requests->find(done);
-#ifdef DEBUG_LEGION
-      assert(finder != repl_ptr.replicated_requests->end());
-#endif
       {
         // Take the view lock so we can modify the cache as well
         // as part of our unpacking
@@ -3070,27 +3062,35 @@ namespace Legion {
         // Remove references from all our users
         for (unsigned idx = 0; idx < users.size(); idx++)
           if (users[idx]->remove_reference())
-            delete users[idx];
-        // Go through and apply any pending remote users we've recorded 
-        if (remote_pending_users != NULL)
+            delete users[idx]; 
+      }
+#ifdef DEBUG_LEGION
+      assert(repl_ptr.replicated_requests != NULL);
+#endif
+      LegionMap<RtUserEvent,FieldMask>::aligned::iterator finder = 
+        repl_ptr.replicated_requests->find(done);
+#ifdef DEBUG_LEGION
+      assert(finder != repl_ptr.replicated_requests->end());
+#endif
+      // Go through and apply any pending remote users we've recorded 
+      if (remote_pending_users != NULL)
+      {
+        for (std::list<RemotePendingUser*>::iterator it = 
+              remote_pending_users->begin(); it != 
+              remote_pending_users->end(); /*nothing*/)
         {
-          for (std::list<RemotePendingUser*>::iterator it = 
-                remote_pending_users->begin(); it != 
-                remote_pending_users->end(); /*nothing*/)
+          if ((*it)->apply(this, finder->second))
           {
-            if ((*it)->apply(this, finder->second))
-            {
-              delete (*it);
-              it = remote_pending_users->erase(it);
-            }
-            else
-              it++;
+            delete (*it);
+            it = remote_pending_users->erase(it);
           }
-          if (remote_pending_users->empty())
-          {
-            delete remote_pending_users;
-            remote_pending_users = NULL;
-          }
+          else
+            it++;
+        }
+        if (remote_pending_users->empty())
+        {
+          delete remote_pending_users;
+          remote_pending_users = NULL;
         }
       }
       // Record that these fields are now replicated
