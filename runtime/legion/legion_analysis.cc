@@ -2620,7 +2620,7 @@ namespace Legion {
               const FieldMask &copy_mask = dit->second.get_valid_mask();
               RtEvent pre_ready = dit->first->find_copy_preconditions(
                               false/*reading*/, copy_mask, copy_expr, op_id, 
-                              dst_index, *this, trace_info, local_space);
+                              dst_index,*this,trace_info.recording,local_space);
               if (pre_ready.exists())
                 preconditions_ready.insert(pre_ready);
             }
@@ -2639,8 +2639,8 @@ namespace Legion {
                   *(it->elements.begin()) : 
                   forest->union_index_spaces(it->elements);
                 RtEvent pre_ready = dit->first->find_copy_preconditions(
-                                false/*reading*/, copy_mask, copy_expr, op_id,
-                                dst_index, *this, trace_info, local_space);
+                          false/*reading*/, copy_mask, copy_expr, op_id,
+                          dst_index, *this, trace_info.recording, local_space);
                 if (pre_ready.exists())
                   preconditions_ready.insert(pre_ready);
               }
@@ -2660,7 +2660,7 @@ namespace Legion {
               const FieldMask &copy_mask = sit->second.get_valid_mask();
               RtEvent pre_ready = sit->first->find_copy_preconditions(
                             true/*reading*/, copy_mask, copy_expr, op_id, 
-                            src_index, *this, trace_info, local_space);
+                            src_index, *this, trace_info.recording,local_space);
               if (pre_ready.exists())
                 preconditions_ready.insert(pre_ready);
             }
@@ -2679,8 +2679,8 @@ namespace Legion {
                   *(it->elements.begin()) : 
                   forest->union_index_spaces(it->elements);
                 RtEvent pre_ready = sit->first->find_copy_preconditions(
-                              true/*reading*/, copy_mask, copy_expr, op_id,
-                              src_index, *this, trace_info, local_space);
+                          true/*reading*/, copy_mask, copy_expr, op_id,
+                          src_index, *this, trace_info.recording, local_space);
                 if (pre_ready.exists())
                   preconditions_ready.insert(pre_ready);
               }
@@ -2948,8 +2948,8 @@ namespace Legion {
             const FieldMask dst_mask = 
                 update->across_helper->convert_src_to_dst(fill_mask);
             target->add_copy_user(false/*reading*/,
-                                  result, dst_mask, fill_expr, op_id, 
-                                  dst_index, effects, trace_info, local_space);
+                                  result, dst_mask, fill_expr, op_id, dst_index,
+                                  effects, trace_info.recording, local_space);
             // Record this for the next iteration if necessary
             if (has_dst_preconditions)
               record_precondition(target, false/*reading*/, result, 
@@ -2958,8 +2958,8 @@ namespace Legion {
           else
           {
             target->add_copy_user(false/*reading*/,
-                                  result, fill_mask, fill_expr, op_id, 
-                                  dst_index, effects, trace_info, local_space);
+                                  result, fill_mask, fill_expr, op_id,dst_index,
+                                  effects, trace_info.recording, local_space);
             // Record this for the next iteration if necessary
             if (has_dst_preconditions)
               record_precondition(target, false/*reading*/, result,
@@ -3033,8 +3033,8 @@ namespace Legion {
           if (result.exists())
           {
             target->add_copy_user(false/*reading*/,
-                                  result, dst_mask, fill_expr, op_id, 
-                                  dst_index, effects, trace_info, local_space);
+                                  result, dst_mask, fill_expr, op_id, dst_index,
+                                  effects, trace_info.recording, local_space);
             if (track_events)
               events.insert(result);
             // Record this for the next iteration if necessary
@@ -3118,15 +3118,15 @@ namespace Legion {
           if (result.exists())
           {
             source->add_copy_user(true/*reading*/,
-                                  result, copy_mask, copy_expr, op_id, 
-                                  src_index, effects, trace_info, local_space);
+                                  result, copy_mask, copy_expr, op_id,src_index,
+                                  effects, trace_info.recording, local_space);
             if (update->across_helper != NULL)
             {
               const FieldMask dst_mask = 
                 update->across_helper->convert_src_to_dst(copy_mask);
               target->add_copy_user(false/*reading*/,
-                                    result, dst_mask, copy_expr, op_id, 
-                                    dst_index, effects, trace_info,local_space);
+                                  result, dst_mask, copy_expr, op_id, dst_index,
+                                  effects, trace_info.recording, local_space);
               // Record this for the next iteration if necessary
               if (has_dst_preconditions)
                 record_precondition(target, false/*reading*/, result,
@@ -3135,8 +3135,8 @@ namespace Legion {
             else
             {
               target->add_copy_user(false/*reading*/,
-                                    result, copy_mask, copy_expr, op_id, 
-                                    dst_index, effects, trace_info,local_space);
+                                  result, copy_mask, copy_expr, op_id,dst_index,
+                                  effects, trace_info.recording, local_space);
               // Record this for the next iteration if necessary
               if (has_dst_preconditions)
                 record_precondition(target, false/*reading*/, result,
@@ -3207,11 +3207,11 @@ namespace Legion {
             if (result.exists())
             {
               it->first->add_copy_user(true/*reading*/,
-                                    result, copy_mask, copy_expr, op_id, 
-                                    src_index, effects, trace_info,local_space);
+                                  result, copy_mask, copy_expr, op_id,src_index,
+                                  effects, trace_info.recording, local_space);
               target->add_copy_user(false/*reading*/,
-                                    result, dst_mask, copy_expr, op_id, 
-                                    dst_index, effects, trace_info,local_space);
+                                  result, dst_mask, copy_expr, op_id, dst_index,
+                                  effects, trace_info.recording, local_space);
               if (track_events)
                 events.insert(result);
               // Record this for the next iteration if necessary
