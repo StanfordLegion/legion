@@ -435,7 +435,8 @@ namespace Legion {
       virtual bool apply(MaterializedView *view, const FieldMask &mask) = 0;
     };
   
-    class PendingTaskUser : public RemotePendingUser {
+    class PendingTaskUser : public RemotePendingUser,
+                            public LegionHeapify<PendingTaskUser> {
     public:
       PendingTaskUser(const RegionUsage &usage, const FieldMask &user_mask,
                       IndexSpaceNode *user_expr, const UniqueID op_id,
@@ -452,7 +453,8 @@ namespace Legion {
       const ApEvent term_event;
     };
 
-    class PendingCopyUser : public RemotePendingUser {
+    class PendingCopyUser : public RemotePendingUser, 
+                            public LegionHeapify<PendingCopyUser> {
     public:
       PendingCopyUser(const bool reading, const FieldMask &copy_mask,
                       IndexSpaceExpression *copy_expr, const UniqueID op_id,
