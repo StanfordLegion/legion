@@ -424,6 +424,52 @@ namespace Legion {
     };
 
     /**
+     * \interface RemotePendingUser 
+     * This is an interface for capturing users that are deferred
+     * on remote views until they become valid replicated views.
+     */
+    class RemotePendingUser {
+    public:
+      virtual ~RemotePendingUser(void) { }
+    public:
+      virtual bool apply(MaterializedView *view, const FieldMask &mask) = 0;
+    };
+  
+    class PendingTaskUser : public RemotePendingUser {
+    public:
+      PendingTaskUser(const RegionUsage &usage, const FieldMask &user_mask,
+                      IndexSpaceNode *user_expr, const UniqueID op_id,
+                      const unsigned index, const ApEvent term_event);
+      virtual ~PendingTaskUser(void);
+    public:
+      virtual bool apply(MaterializedView *view, const FieldMask &mask);
+    public:
+      const RegionUsage usage;
+      FieldMask user_mask;
+      IndexSpaceNode *const user_expr;
+      const UniqueID op_id;
+      const unsigned index;
+      const ApEvent term_event;
+    };
+
+    class PendingCopyUser : public RemotePendingUser {
+    public:
+      PendingCopyUser(const bool reading, const FieldMask &copy_mask,
+                      IndexSpaceExpression *copy_expr, const UniqueID op_id,
+                      const unsigned index, const ApEvent term_event);
+      virtual ~PendingCopyUser(void);
+    public:
+      virtual bool apply(MaterializedView *view, const FieldMask &mask);
+    public:
+      const bool reading;
+      FieldMask copy_mask;
+      IndexSpaceExpression *const copy_expr;
+      const UniqueID op_id;
+      const unsigned index;
+      const ApEvent term_event;
+    };
+
+    /**
      * \class MaterializedView 
      * The MaterializedView class is used for representing a given
      * logical view onto a single physical instance.
@@ -537,19 +583,19 @@ namespace Legion {
     public:
       virtual void send_view(AddressSpaceID target); 
     protected:
+      friend class PendingTaskUser;
+      friend class PendingCopyUser;
       void add_internal_task_user(const RegionUsage &usage,
                                   IndexSpaceExpression *user_expr,
                                   const FieldMask &user_mask,
                                   ApEvent term_event, UniqueID op_id, 
                                   const unsigned index,
-                                  std::set<RtEvent> &applied_events,
                                   const bool trace_recording);
       void add_internal_copy_user(const RegionUsage &usage,
                                   IndexSpaceExpression *user_expr,
                                   const FieldMask &user_mask,
                                   ApEvent term_event, UniqueID op_id, 
                                   const unsigned index,
-                                  std::set<RtEvent> &applied_events,
                                   const bool trace_recording);
       void clean_cache(void);
       void update_remote_replication_state(std::set<RtEvent> &applied_events);
@@ -614,6 +660,8 @@ namespace Legion {
       // used for copy queries
       FieldMask remote_copy_pre_fields;
       unsigned remote_added_users; 
+      // Users that we need to apply once we receive an update from the owner
+      std::list<RemotePendingUser*> *remote_pending_users;
       // Keep track of the current version numbers for each field
       // This will allow us to detect when physical instances are no
       // longer valid from a particular view when doing rollbacks for

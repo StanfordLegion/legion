@@ -2186,6 +2186,73 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
+    // PendingTaskUser
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    PendingTaskUser::PendingTaskUser(const RegionUsage &u, const FieldMask &m,
+                                     IndexSpaceNode *expr, const UniqueID id,
+                                     const unsigned idx, const ApEvent term)
+      : usage(u), user_mask(m), user_expr(expr), op_id(id), 
+        index(idx), term_event(term)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    PendingTaskUser::~PendingTaskUser(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    bool PendingTaskUser::apply(MaterializedView *view, const FieldMask &mask)
+    //--------------------------------------------------------------------------
+    {
+      const FieldMask overlap = user_mask & mask;
+      if (!overlap)
+        return false;
+      view->add_internal_task_user(usage, user_expr, overlap, term_event, 
+                                   op_id, index, false/*tracing*/);
+      user_mask -= overlap;
+      return !user_mask;
+    }
+
+    /////////////////////////////////////////////////////////////
+    // PendingCopyUser
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    PendingCopyUser::PendingCopyUser(const bool read, const FieldMask &mask,
+                                     IndexSpaceExpression *e, const UniqueID id,
+                                     const unsigned idx, const ApEvent term)
+      : reading(read), copy_mask(mask), copy_expr(e), op_id(id), 
+        index(idx), term_event(term)
+    //--------------------------------------------------------------------------
+    {
+    }
+    
+    //--------------------------------------------------------------------------
+    PendingCopyUser::~PendingCopyUser(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    bool PendingCopyUser::apply(MaterializedView *view, const FieldMask &mask)
+    //--------------------------------------------------------------------------
+    {
+      const FieldMask overlap = copy_mask & mask;
+      if (!overlap)
+        return false;
+      const RegionUsage usage(reading ? READ_ONLY : READ_WRITE, EXCLUSIVE, 0);
+      view->add_internal_copy_user(usage, copy_expr, overlap, term_event,
+                                   op_id, index, false/*trace recording*/);
+      copy_mask -= overlap;
+      return !copy_mask;
+    }
+
+    /////////////////////////////////////////////////////////////
     // MaterializedView 
     /////////////////////////////////////////////////////////////
 
@@ -2198,7 +2265,7 @@ namespace Legion {
       : InstanceView(ctx, encode_materialized_did(did), own_addr,
                      log_own, own_ctx, register_now), 
         manager(man), expr_cache_uses(0), outstanding_additions(0),
-        remote_added_users(0)
+        remote_added_users(0), remote_pending_users(NULL)
     //--------------------------------------------------------------------------
     {
       // Otherwise the instance lock will get filled in when we are unpacked
@@ -2262,6 +2329,9 @@ namespace Legion {
         // If there are replicated requests that is very bad
         delete repl_ptr.replicated_copies;
       }
+#ifdef DEBUG_LEGION
+      assert(remote_pending_users == NULL);
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -2436,28 +2506,8 @@ namespace Legion {
           // updates itself, Do this after sending the message to make
           // sure that we see a sound set of local fields
           AutoLock r_lock(replicated_lock,1,false/*exclusive*/);
-          // Only need to add it if it's still replicated or we've
-          // requested for it to be replicated because once we request
-          // it then the owner will stop sending us our own updates
-          FieldMask local_mask = user_mask & replicated_fields;
-          if (repl_ptr.replicated_requests != NULL)
-          {
-#ifdef DEBUG_LEGION
-            assert(!repl_ptr.replicated_requests->empty());
-#endif
-            for (LegionMap<RtUserEvent,FieldMask>::aligned::const_iterator
-                  it = repl_ptr.replicated_requests->begin();
-                  it != repl_ptr.replicated_requests->end(); it++)
-            {
-              const FieldMask overlap = user_mask & it->second;
-              if (!overlap)
-                continue;
-#ifdef DEBUG_LEGION
-              assert(overlap * local_mask);
-#endif
-              local_mask |= overlap;
-            }
-          }
+          // Only need to add it if it's still replicated
+          const FieldMask local_mask = user_mask & replicated_fields;
           if (!!local_mask)
           {
             // See if we need to make the current users data structure
@@ -2475,8 +2525,44 @@ namespace Legion {
             }
             // Add our local user
             add_internal_task_user(usage, user_expr, local_mask, term_event,
-                           op_id, index, applied_events, trace_info.recording);
+                                   op_id, index, trace_info.recording);
             current_added_users = __sync_add_and_fetch(&remote_added_users, 1);
+          }
+          // If we have outstanding requests to be made a replicated
+          // copy then we need to buffer this user so it can be applied
+          // later once we actually do get the update from the owner
+          // This only applies to updates from the local node though since
+          // any remote updates will be sent to us again by the owner
+          if ((repl_ptr.replicated_requests != NULL) && (source == local_space))
+          {
+#ifdef DEBUG_LEGION
+            assert(!repl_ptr.replicated_requests->empty());
+#endif
+            FieldMask buffer_mask;
+            for (LegionMap<RtUserEvent,FieldMask>::aligned::const_iterator
+                  it = repl_ptr.replicated_requests->begin();
+                  it != repl_ptr.replicated_requests->end(); it++)
+            {
+              const FieldMask overlap = user_mask & it->second;
+              if (!overlap)
+                continue;
+#ifdef DEBUG_LEGION
+              assert(overlap * buffer_mask);
+#endif
+              buffer_mask |= overlap;
+              // This user isn't fully applied until the request comes
+              // back to make this view valid and the user gets applied
+              applied_events.insert(it->first);
+            }
+            if (!!buffer_mask)
+            {
+              AutoLock e_lock(expr_lock);
+              if (remote_pending_users == NULL)
+                remote_pending_users = new std::list<RemotePendingUser*>();
+              remote_pending_users->push_back(
+                  new PendingTaskUser(usage, buffer_mask, user_expr, op_id,
+                                      index, term_event));
+            }
           }
         }
         if (current_added_users >= user_cache_timeout)
@@ -2544,8 +2630,8 @@ namespace Legion {
                             op_id, index, wait_on_events, trace_info.recording);
         }
         // Add our local user
-        add_internal_task_user(usage, user_expr, user_mask, term_event, op_id,
-                               index, applied_events, trace_info.recording);
+        add_internal_task_user(usage, user_expr, user_mask, term_event, 
+                               op_id, index, trace_info.recording);
         // At this point tasks shouldn't be allowed to wait on themselves
 #ifdef DEBUG_LEGION
         if (term_event.exists())
@@ -2794,28 +2880,8 @@ namespace Legion {
         unsigned current_added_users = 0;
         {
           AutoLock r_lock(replicated_lock,1,false/*exclusive*/);
-          // Only need to add it if it's still replicated or we've
-          // requested for it to be replicated because once we request
-          // it then the owner will stop sending us our own updates
-          FieldMask local_mask = copy_mask & replicated_fields;
-          if (repl_ptr.replicated_requests != NULL)
-          {
-#ifdef DEBUG_LEGION
-            assert(!repl_ptr.replicated_requests->empty());
-#endif
-            for (LegionMap<RtUserEvent,FieldMask>::aligned::const_iterator
-                  it = repl_ptr.replicated_requests->begin();
-                  it != repl_ptr.replicated_requests->end(); it++)
-            {
-              const FieldMask overlap = copy_mask & it->second;
-              if (!overlap)
-                continue;
-#ifdef DEBUG_LEGION
-              assert(overlap * local_mask);
-#endif
-              local_mask |= overlap;
-            }
-          }
+          // Only need to add it if it's still replicated
+          const FieldMask local_mask = copy_mask & replicated_fields;
           // If we have local fields to handle do that here
           if (!!local_mask)
           {
@@ -2834,9 +2900,45 @@ namespace Legion {
             }
             const RegionUsage usage(reading ? READ_ONLY:READ_WRITE,EXCLUSIVE,0);
             add_internal_copy_user(usage, copy_expr, local_mask, term_event, 
-                                 op_id, index, applied_events, trace_recording);
+                                   op_id, index, trace_recording);
             // Increment the remote added users count
             current_added_users = __sync_add_and_fetch(&remote_added_users, 1);
+          }
+          // If we have pending replicated requests that overlap with this
+          // user then we need to record this as a pending user to be applied
+          // once we receive the update from the owner node
+          // This only applies to updates from the local node though since
+          // any remote updates will be sent to us again by the owner
+          if ((repl_ptr.replicated_requests != NULL) && (source == local_space))
+          {
+#ifdef DEBUG_LEGION
+            assert(!repl_ptr.replicated_requests->empty());
+#endif
+            FieldMask buffer_mask;
+            for (LegionMap<RtUserEvent,FieldMask>::aligned::const_iterator
+                  it = repl_ptr.replicated_requests->begin();
+                  it != repl_ptr.replicated_requests->end(); it++)
+            {
+              const FieldMask overlap = copy_mask & it->second;
+              if (!overlap)
+                continue;
+#ifdef DEBUG_LEGION
+              assert(overlap * buffer_mask);
+#endif
+              buffer_mask |= overlap;
+              // This user isn't fully applied until the request comes
+              // back to make this view valid and the user gets applied
+              applied_events.insert(it->first);
+            }
+            if (!!buffer_mask)
+            {
+              AutoLock e_lock(expr_lock);
+              if (remote_pending_users == NULL)
+                remote_pending_users = new std::list<RemotePendingUser*>();
+              remote_pending_users->push_back(
+                  new PendingCopyUser(reading, buffer_mask, copy_expr, op_id,
+                                      index, term_event));
+            }
           }
         }
         if (current_added_users >= user_cache_timeout)
@@ -2887,7 +2989,7 @@ namespace Legion {
         // Now we can do our local analysis
         const RegionUsage usage(reading ? READ_ONLY : READ_WRITE, EXCLUSIVE, 0);
         add_internal_copy_user(usage, copy_expr, copy_mask, term_event, 
-                               op_id, index, applied_events, trace_recording);
+                               op_id, index, trace_recording);
       }
     }
 
@@ -2938,16 +3040,24 @@ namespace Legion {
       assert(!is_logical_owner());
 #endif
       AutoLock r_lock(replicated_lock);
-      if (current_users == NULL)
-      {
-        current_users = 
-          new ExprView(context, manager, this, manager->instance_domain);
-        current_users->add_reference();
-      }
+#ifdef DEBUG_LEGION
+      assert(repl_ptr.replicated_requests != NULL);
+#endif
+      LegionMap<RtUserEvent,FieldMask>::aligned::iterator finder = 
+        repl_ptr.replicated_requests->find(done);
+#ifdef DEBUG_LEGION
+      assert(finder != repl_ptr.replicated_requests->end());
+#endif
       {
         // Take the view lock so we can modify the cache as well
         // as part of our unpacking
         AutoLock v_lock(view_lock);
+        if (current_users == NULL)
+        {
+          current_users = 
+            new ExprView(context, manager, this, manager->instance_domain);
+          current_users->add_reference();
+        }
         // We need to hold the expr lock here since we might have to 
         // make ExprViews and we need this to be atomic with other
         // operations that might also try to mutate the tree 
@@ -2960,15 +3070,28 @@ namespace Legion {
         for (unsigned idx = 0; idx < users.size(); idx++)
           if (users[idx]->remove_reference())
             delete users[idx];
+        // Go through and apply any pending remote users we've recorded 
+        if (remote_pending_users != NULL)
+        {
+          for (std::list<RemotePendingUser*>::iterator it = 
+                remote_pending_users->begin(); it != 
+                remote_pending_users->end(); /*nothing*/)
+          {
+            if ((*it)->apply(this, finder->second))
+            {
+              delete (*it);
+              it = remote_pending_users->erase(it);
+            }
+            else
+              it++;
+          }
+          if (remote_pending_users->empty())
+          {
+            delete remote_pending_users;
+            remote_pending_users = NULL;
+          }
+        }
       }
-#ifdef DEBUG_LEGION
-      assert(repl_ptr.replicated_requests != NULL);
-#endif
-      LegionMap<RtUserEvent,FieldMask>::aligned::iterator finder = 
-        repl_ptr.replicated_requests->find(done);
-#ifdef DEBUG_LEGION
-      assert(finder != repl_ptr.replicated_requests->end());
-#endif
       // Record that these fields are now replicated
       replicated_fields |= finder->second;
       repl_ptr.replicated_requests->erase(finder);
@@ -3077,7 +3200,6 @@ namespace Legion {
                                             const FieldMask &user_mask,
                                             ApEvent term_event, UniqueID op_id,
                                             const unsigned index,
-                                            std::set<RtEvent> &applied_events,
                                             const bool trace_recording)
     //--------------------------------------------------------------------------
     {
@@ -3199,7 +3321,6 @@ namespace Legion {
                                             const FieldMask &user_mask,
                                             ApEvent term_event, UniqueID op_id,
                                             const unsigned index,
-                                            std::set<RtEvent> &applied_events,
                                             const bool trace_recording)
     //--------------------------------------------------------------------------
     { 
@@ -3382,7 +3503,12 @@ namespace Legion {
         for (LegionMap<RtUserEvent,FieldMask>::aligned::const_iterator it = 
               repl_ptr.replicated_requests->begin(); it !=
               repl_ptr.replicated_requests->end(); it++)
+        {
+#ifdef DEBUG_LEGION
+          assert(it->second * deactivate_mask);
+#endif
           remote_copy_pre_fields |= it->second;
+        }
       }
       // If we don't have any fields to deactivate then we're done
       if (!deactivate_mask)
