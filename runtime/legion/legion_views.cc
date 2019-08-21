@@ -1574,36 +1574,19 @@ namespace Legion {
     void ExprView::deactivate_replication(const FieldMask &deactivate_mask)
     //--------------------------------------------------------------------------
     {
-      // Filter out any subviews we no longer need
-      // This is protected by the expr_lock at the top of the tree
-      if (!subviews.empty())
+      // Traverse any subviews and do the deactivates in those nodes first
+      // No need to get the lock here since we're protected by the 
+      // exclusive expr_lock at the top of the tree
+      // Don't worry about pruning, when we clean the cache after doing
+      // this pass then that will also go through and prune out any 
+      // expr views which no longer have users in any subtrees
+      for (FieldMaskSet<ExprView>::const_iterator it = 
+            subviews.begin(); it != subviews.end(); it++)
       {
-        bool need_tighten = false;
-        std::vector<ExprView*> to_delete;
-        for (FieldMaskSet<ExprView>::iterator it = 
-              subviews.begin(); it != subviews.end(); it++)
-        {
-          const FieldMask overlap = it->second & deactivate_mask;
-          if (!overlap)
-            continue;
-          it->first->deactivate_replication(overlap);
-          need_tighten = true;
-          it.filter(overlap);
-          if (!it->second)
-            to_delete.push_back(it->first);
-        }
-        if (!to_delete.empty())
-        {
-          for (std::vector<ExprView*>::const_iterator it = 
-                to_delete.begin(); it != to_delete.end(); it++)
-          {
-            subviews.erase(*it);
-            if ((*it)->remove_reference())
-              delete (*it);
-          }
-        }
-        if ((subviews.size() > 1) && need_tighten)
-          subviews.tighten_valid_mask();
+        const FieldMask overlap = it->second & deactivate_mask;
+        if (!overlap)
+          continue;
+        it->first->deactivate_replication(overlap);
       }
       // Need a read-write lock since we're going to be mutating the structures
       AutoLock v_lock(view_lock);
@@ -2500,73 +2483,71 @@ namespace Legion {
           runtime->send_view_register_user(logical_owner, rez);
           applied_events.insert(applied_event);
         }
-        unsigned current_added_users = 0;
+        // If we have any local fields then we also need to update
+        // them here too since the owner isn't going to send us any
+        // updates itself, Do this after sending the message to make
+        // sure that we see a sound set of local fields
+        AutoLock r_lock(replicated_lock);
+        // Only need to add it if it's still replicated
+        const FieldMask local_mask = user_mask & replicated_fields;
+        if (!!local_mask)
         {
-          // If we have any local fields then we also need to update
-          // them here too since the owner isn't going to send us any
-          // updates itself, Do this after sending the message to make
-          // sure that we see a sound set of local fields
-          AutoLock r_lock(replicated_lock);
-          // Only need to add it if it's still replicated
-          const FieldMask local_mask = user_mask & replicated_fields;
-          if (!!local_mask)
+          // See if we need to make the current users data structure
+          if (current_users == NULL)
           {
-            // See if we need to make the current users data structure
+            // Prevent races between multiple added users at the same time
+            AutoLock v_lock(view_lock);
+            // See if we lost the race
             if (current_users == NULL)
             {
-              // Prevent races between multiple added users at the same time
-              AutoLock v_lock(view_lock);
-              // See if we lost the race
-              if (current_users == NULL)
-              {
-                current_users = 
-                 new ExprView(context, manager, this, manager->instance_domain);
-                current_users->add_reference();
-              }
+              current_users = 
+               new ExprView(context, manager, this, manager->instance_domain);
+              current_users->add_reference();
             }
-            // Add our local user
-            add_internal_task_user(usage, user_expr, local_mask, term_event,
-                                   op_id, index, trace_info.recording);
-            current_added_users = __sync_add_and_fetch(&remote_added_users, 1);
           }
-          // If we have outstanding requests to be made a replicated
-          // copy then we need to buffer this user so it can be applied
-          // later once we actually do get the update from the owner
-          // This only applies to updates from the local node though since
-          // any remote updates will be sent to us again by the owner
-          if ((repl_ptr.replicated_requests != NULL) && (source == local_space))
+          // Add our local user
+          add_internal_task_user(usage, user_expr, local_mask, term_event,
+                                 op_id, index, trace_info.recording);
+          // Increment the number of remote added users
+          remote_added_users++;
+        }
+        // If we have outstanding requests to be made a replicated
+        // copy then we need to buffer this user so it can be applied
+        // later once we actually do get the update from the owner
+        // This only applies to updates from the local node though since
+        // any remote updates will be sent to us again by the owner
+        if ((repl_ptr.replicated_requests != NULL) && (source == local_space))
+        {
+#ifdef DEBUG_LEGION
+          assert(!repl_ptr.replicated_requests->empty());
+#endif
+          FieldMask buffer_mask;
+          for (LegionMap<RtUserEvent,FieldMask>::aligned::const_iterator
+                it = repl_ptr.replicated_requests->begin();
+                it != repl_ptr.replicated_requests->end(); it++)
           {
+            const FieldMask overlap = user_mask & it->second;
+            if (!overlap)
+              continue;
 #ifdef DEBUG_LEGION
-            assert(!repl_ptr.replicated_requests->empty());
+            assert(overlap * buffer_mask);
 #endif
-            FieldMask buffer_mask;
-            for (LegionMap<RtUserEvent,FieldMask>::aligned::const_iterator
-                  it = repl_ptr.replicated_requests->begin();
-                  it != repl_ptr.replicated_requests->end(); it++)
-            {
-              const FieldMask overlap = user_mask & it->second;
-              if (!overlap)
-                continue;
-#ifdef DEBUG_LEGION
-              assert(overlap * buffer_mask);
-#endif
-              buffer_mask |= overlap;
-              // This user isn't fully applied until the request comes
-              // back to make this view valid and the user gets applied
-              applied_events.insert(it->first);
-            }
-            if (!!buffer_mask)
-            {
-              // Protected by exclusive replicated lock
-              if (remote_pending_users == NULL)
-                remote_pending_users = new std::list<RemotePendingUser*>();
-              remote_pending_users->push_back(
-                  new PendingTaskUser(usage, buffer_mask, user_expr, op_id,
-                                      index, term_event));
-            }
+            buffer_mask |= overlap;
+            // This user isn't fully applied until the request comes
+            // back to make this view valid and the user gets applied
+            applied_events.insert(it->first);
+          }
+          if (!!buffer_mask)
+          {
+            // Protected by exclusive replicated lock
+            if (remote_pending_users == NULL)
+              remote_pending_users = new std::list<RemotePendingUser*>();
+            remote_pending_users->push_back(
+                new PendingTaskUser(usage, buffer_mask, user_expr, op_id,
+                                    index, term_event));
           }
         }
-        if (current_added_users >= user_cache_timeout)
+        if (remote_added_users >= user_cache_timeout)
           update_remote_replication_state(applied_events);
         return ready_event;
       }
@@ -2738,10 +2719,10 @@ namespace Legion {
 #ifndef DISABLE_VIEW_REPLICATION
           // Need the lock for this next part
           AutoLock r_lock(replicated_lock);
+          // Record these fields as being sampled
+          remote_copy_pre_fields |= (new_remote_fields & replicated_fields);
           // Recompute this to make sure we didn't lose any races
           request_mask = copy_mask - replicated_fields;
-          // Record these fields as being sampled
-          remote_copy_pre_fields |= new_remote_fields;
           if (!!request_mask && (repl_ptr.replicated_requests != NULL))
           {
             for (LegionMap<RtUserEvent,FieldMask>::aligned::const_iterator it = 
@@ -2779,7 +2760,7 @@ namespace Legion {
         {
           AutoLock r_lock(replicated_lock);
           // Record any new fields which are still replicated
-          remote_copy_pre_fields = (new_remote_fields & replicated_fields);
+          remote_copy_pre_fields |= (new_remote_fields & replicated_fields);
           // Then fall through like normal
         }
         return ready_event;
@@ -2877,72 +2858,68 @@ namespace Legion {
           runtime->send_view_add_copy_user(logical_owner, rez);
           applied_events.insert(applied_event);
         }
-        // Now see if we have any local fields we need to apply here 
-        unsigned current_added_users = 0;
+        AutoLock r_lock(replicated_lock);
+        // Only need to add it if it's still replicated
+        const FieldMask local_mask = copy_mask & replicated_fields;
+        // If we have local fields to handle do that here
+        if (!!local_mask)
         {
-          AutoLock r_lock(replicated_lock);
-          // Only need to add it if it's still replicated
-          const FieldMask local_mask = copy_mask & replicated_fields;
-          // If we have local fields to handle do that here
-          if (!!local_mask)
+          // See if we need to make the current users data structure
+          if (current_users == NULL)
           {
-            // See if we need to make the current users data structure
+            // Prevent races between multiple added users at the same time
+            AutoLock v_lock(view_lock);
+            // See if we lost the race
             if (current_users == NULL)
             {
-              // Prevent races between multiple added users at the same time
-              AutoLock v_lock(view_lock);
-              // See if we lost the race
-              if (current_users == NULL)
-              {
-                current_users = 
-                 new ExprView(context, manager, this, manager->instance_domain);
-                current_users->add_reference();
-              }
+              current_users = 
+               new ExprView(context, manager, this, manager->instance_domain);
+              current_users->add_reference();
             }
-            const RegionUsage usage(reading ? READ_ONLY:READ_WRITE,EXCLUSIVE,0);
-            add_internal_copy_user(usage, copy_expr, local_mask, term_event, 
-                                   op_id, index, trace_recording);
-            // Increment the remote added users count
-            current_added_users = __sync_add_and_fetch(&remote_added_users, 1);
           }
-          // If we have pending replicated requests that overlap with this
-          // user then we need to record this as a pending user to be applied
-          // once we receive the update from the owner node
-          // This only applies to updates from the local node though since
-          // any remote updates will be sent to us again by the owner
-          if ((repl_ptr.replicated_requests != NULL) && (source == local_space))
+          const RegionUsage usage(reading ? READ_ONLY:READ_WRITE,EXCLUSIVE,0);
+          add_internal_copy_user(usage, copy_expr, local_mask, term_event, 
+                                 op_id, index, trace_recording);
+          // Increment the remote added users count
+          remote_added_users++;
+        }
+        // If we have pending replicated requests that overlap with this
+        // user then we need to record this as a pending user to be applied
+        // once we receive the update from the owner node
+        // This only applies to updates from the local node though since
+        // any remote updates will be sent to us again by the owner
+        if ((repl_ptr.replicated_requests != NULL) && (source == local_space))
+        {
+#ifdef DEBUG_LEGION
+          assert(!repl_ptr.replicated_requests->empty());
+#endif
+          FieldMask buffer_mask;
+          for (LegionMap<RtUserEvent,FieldMask>::aligned::const_iterator
+                it = repl_ptr.replicated_requests->begin();
+                it != repl_ptr.replicated_requests->end(); it++)
           {
+            const FieldMask overlap = copy_mask & it->second;
+            if (!overlap)
+              continue;
 #ifdef DEBUG_LEGION
-            assert(!repl_ptr.replicated_requests->empty());
+            assert(overlap * buffer_mask);
 #endif
-            FieldMask buffer_mask;
-            for (LegionMap<RtUserEvent,FieldMask>::aligned::const_iterator
-                  it = repl_ptr.replicated_requests->begin();
-                  it != repl_ptr.replicated_requests->end(); it++)
-            {
-              const FieldMask overlap = copy_mask & it->second;
-              if (!overlap)
-                continue;
-#ifdef DEBUG_LEGION
-              assert(overlap * buffer_mask);
-#endif
-              buffer_mask |= overlap;
-              // This user isn't fully applied until the request comes
-              // back to make this view valid and the user gets applied
-              applied_events.insert(it->first);
-            }
-            if (!!buffer_mask)
-            {
-              // Protected by exclusive replicated lock
-              if (remote_pending_users == NULL)
-                remote_pending_users = new std::list<RemotePendingUser*>();
-              remote_pending_users->push_back(
-                  new PendingCopyUser(reading, buffer_mask, copy_expr, op_id,
-                                      index, term_event));
-            }
+            buffer_mask |= overlap;
+            // This user isn't fully applied until the request comes
+            // back to make this view valid and the user gets applied
+            applied_events.insert(it->first);
+          }
+          if (!!buffer_mask)
+          {
+            // Protected by exclusive replicated lock
+            if (remote_pending_users == NULL)
+              remote_pending_users = new std::list<RemotePendingUser*>();
+            remote_pending_users->push_back(
+                new PendingCopyUser(reading, buffer_mask, copy_expr, op_id,
+                                    index, term_event));
           }
         }
-        if (current_added_users >= user_cache_timeout)
+        if (remote_added_users >= user_cache_timeout)
           update_remote_replication_state(applied_events);
       }
       else
@@ -3308,7 +3285,7 @@ namespace Legion {
               wait_on.wait();
               v_lock.reacquire();
             }
-            clean_cache();
+            clean_cache<true/*need expr lock*/>();
           }
         }
       }
@@ -3450,6 +3427,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    template<bool NEED_EXPR_LOCK>
     void MaterializedView::clean_cache(void)
     //--------------------------------------------------------------------------
     {
@@ -3462,18 +3440,37 @@ namespace Legion {
       // remove because they no longer have live users
       FieldMask dummy_mask; 
       FieldMaskSet<ExprView> clean_set;
-      // Take the lock in exclusive mode since we might be modifying the tree
-      AutoLock e_lock(expr_lock);
-      current_users->clean_views(dummy_mask, clean_set);
-      // We can safely repopulate the cache with any view expressions which
-      // are still valid, remove all the references for views in the clean set 
-      for (FieldMaskSet<ExprView>::const_iterator it = 
-            clean_set.begin(); it != clean_set.end(); it++)
+      if (NEED_EXPR_LOCK)
       {
-        if (!!(~(it->first->invalid_fields)))
-          expr_cache[it->first->view_expr->expr_id] = it->first;
-        if (it->first->remove_reference())
-          delete it->first;
+        // Take the lock in exclusive mode since we might be modifying the tree
+        AutoLock e_lock(expr_lock);
+        current_users->clean_views(dummy_mask, clean_set);
+        // We can safely repopulate the cache with any view expressions which
+        // are still valid, remove all references for views in the clean set 
+        for (FieldMaskSet<ExprView>::const_iterator it = 
+              clean_set.begin(); it != clean_set.end(); it++)
+        {
+          if (!!(~(it->first->invalid_fields)))
+            expr_cache[it->first->view_expr->expr_id] = it->first;
+          if (it->first->remove_reference())
+            delete it->first;
+        }
+      }
+      else
+      {
+        // Same as above, but without needing to acquire the lock
+        // because the caller promised that they already have it
+        current_users->clean_views(dummy_mask, clean_set);
+        // We can safely repopulate the cache with any view expressions which
+        // are still valid, remove all references for views in the clean set 
+        for (FieldMaskSet<ExprView>::const_iterator it = 
+              clean_set.begin(); it != clean_set.end(); it++)
+        {
+          if (!!(~(it->first->invalid_fields)))
+            expr_cache[it->first->view_expr->expr_id] = it->first;
+          if (it->first->remove_reference())
+            delete it->first;
+        }
       }
     }
 
@@ -3482,20 +3479,18 @@ namespace Legion {
                                               std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
-      AutoLock r_lock(replicated_lock);
-      // Check to see if we lost the race to this update
-      if (remote_added_users < user_cache_timeout)
-        return;
 #ifdef DEBUG_LEGION
       assert(!is_logical_owner());
       assert(!!replicated_fields);
       assert(current_users != NULL);
+      assert(remote_added_users >= user_cache_timeout);
 #endif
       // We can reset the counter now
       remote_added_users = 0;
       // See what fields haven't been sampled recently and therefore
       // we should stop maintaining as remote duplicates
-      FieldMask deactivate_mask = replicated_fields - remote_copy_pre_fields; 
+      const FieldMask deactivate_mask = 
+        replicated_fields - remote_copy_pre_fields; 
       // We can clear this now for the next epoch
       remote_copy_pre_fields.clear();
       // If we have any outstanding requests though keep those
@@ -3535,13 +3530,14 @@ namespace Legion {
         // because we're already protected by the replication lock
         assert(outstanding_additions == 0);
 #endif
-        // Clean the cache
-        expr_cache.clear();
-        // Reset the cache use counter
-        expr_cache_uses = 0;
+        // Go through and remove any users for the deactivate mask
         // Need an exclusive copy of the expr_lock to do this
         AutoLock e_lock(expr_lock);
         current_users->deactivate_replication(deactivate_mask);
+        // Then clean the cache since we likely invalidated some
+        // things. This will also go through and remove any views
+        // that no longer have any active users
+        clean_cache<false/*need expr lock*/>();
       }
       // Record that these fields are no longer replicated 
       replicated_fields -= deactivate_mask;
