@@ -313,6 +313,11 @@ namespace Legion {
       TraceInfo(Operation *op, Memoizable *memo, 
                 PhysicalTraceRecorder *rec, bool recording);
     public:
+      inline void record_create_ap_user_event(ApUserEvent result) const
+        {
+          base_sanity_check();
+          rec->record_create_ap_user_event(result, memo);
+        }
       inline void record_merge_events(ApEvent &result, 
                                       ApEvent e1, ApEvent e2) const
         {

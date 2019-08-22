@@ -4324,16 +4324,10 @@ namespace Legion {
         int src_composite = -1;
         // Make a user event for when this copy across is done
         // and add it to the set of copy complete events
-        ApUserEvent local_completion = Runtime::create_ap_user_event();
+        ApUserEvent local_completion = 
+          Runtime::create_ap_user_event(&trace_info);
         std::set<RtEvent> local_applied_events;
         copy_complete_events.insert(local_completion);
-        if (is_recording())
-        {
-#ifdef DEBUG_LEGION
-          assert(tpl != NULL && tpl->is_recording());
-#endif
-          tpl->record_create_ap_user_event(local_completion, this);
-        }
         // Do the conversion and check for errors
         src_composite = 
           perform_conversion<SRC_REQ>(idx, src_requirements[idx],
