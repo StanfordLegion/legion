@@ -4258,7 +4258,7 @@ class DataflowTraverser(object):
         if privilege == READ_ONLY or first:
             # Check to see if the version number is the same, if this
             # is an operation from a previous version then we can't traverse it
-            if node.eq_incoming:
+            if node.eq_incoming and eq_key in node.eq_incoming:
                 incoming = node.eq_incoming[eq_key]
                 if incoming:
                     for next_node in incoming:
