@@ -6559,35 +6559,31 @@ local function expr_acquire_setup_region(
   assert(std.is_region(dst_type))
   assert(std.type_supports_privileges(dst_container_type))
 
-  local dst_all_fields = std.flatten_struct_fields(dst_type:fspace())
-
   local actions = terralib.newlist()
-  for i, dst_field in ipairs(dst_fields) do
-    local dst_copy_fields = data.filter(
-      function(field) return field:starts_with(dst_field) end,
-      dst_all_fields)
+  local dst_copy_fields = std.get_absolute_field_paths(
+    dst_type:fspace(), dst_fields)
+  local dst_parent = get_container_root(
+    cx, `([dst_value].impl), dst_container_type, dst_copy_fields)
+  local launcher = terralib.newsymbol(c.legion_acquire_launcher_t, "launcher")
+  actions:insert(quote
+    var tag = 0
+    [codegen_hooks.gen_update_mapping_tag(tag, cx.task)]
+    var [launcher] = c.legion_acquire_launcher_create(
+      [dst_value].impl, [dst_parent],
+      c.legion_predicate_true(), 0, tag)
+  end)
+  for j, dst_copy_field in ipairs(dst_copy_fields) do
+    local dst_field_id = cx:region_or_list(dst_container_type):field_id(dst_copy_field)
+    local dst_field_type = cx:region_or_list(dst_container_type):field_type(dst_copy_field)
 
-    local dst_parent = get_container_root(
-      cx, `([dst_value].impl), dst_container_type, dst_copy_fields)
-
-    for j, dst_copy_field in ipairs(dst_copy_fields) do
-      local dst_field_id = cx:region_or_list(dst_container_type):field_id(dst_copy_field)
-      local dst_field_type = cx:region_or_list(dst_container_type):field_type(dst_copy_field)
-
-      local tag = terralib.newsymbol(c.legion_mapping_tag_id_t, "tag")
-      actions:insert(quote
-        var [tag] = 0
-        [codegen_hooks.gen_update_mapping_tag(tag, cx.task)]
-        var launcher = c.legion_acquire_launcher_create(
-          [dst_value].impl, [dst_parent],
-          c.legion_predicate_true(), 0, [tag])
-        c.legion_acquire_launcher_add_field(
-          launcher, dst_field_id)
-        [expr_acquire_issue_phase_barriers(condition_values, condition_kinds, launcher)]
-        c.legion_acquire_launcher_execute([cx.runtime], [cx.context], [launcher])
-      end)
-    end
+    actions:insert(quote
+      c.legion_acquire_launcher_add_field([launcher], dst_field_id)
+    end)
   end
+  actions:insert(quote
+    [expr_acquire_issue_phase_barriers(condition_values, condition_kinds, launcher)]
+    c.legion_acquire_launcher_execute([cx.runtime], [cx.context], [launcher])
+  end)
   return actions
 end
 
@@ -6687,35 +6683,31 @@ local function expr_release_setup_region(
   assert(std.is_region(dst_type))
   assert(std.type_supports_privileges(dst_container_type))
 
-  local dst_all_fields = std.flatten_struct_fields(dst_type:fspace())
-
   local actions = terralib.newlist()
-  for i, dst_field in ipairs(dst_fields) do
-    local dst_copy_fields = data.filter(
-      function(field) return field:starts_with(dst_field) end,
-      dst_all_fields)
+  local dst_copy_fields = std.get_absolute_field_paths(
+    dst_type:fspace(), dst_fields)
+  local dst_parent = get_container_root(
+    cx, `([dst_value].impl), dst_container_type, dst_copy_fields)
+  local launcher = terralib.newsymbol(c.legion_release_launcher_t, "launcher")
+  actions:insert(quote
+    var tag = 0
+    [codegen_hooks.gen_update_mapping_tag(tag, cx.task)]
+    var [launcher] = c.legion_release_launcher_create(
+      [dst_value].impl, [dst_parent],
+      c.legion_predicate_true(), 0, tag)
+  end)
+  for j, dst_copy_field in ipairs(dst_copy_fields) do
+    local dst_field_id = cx:region_or_list(dst_container_type):field_id(dst_copy_field)
+    local dst_field_type = cx:region_or_list(dst_container_type):field_type(dst_copy_field)
 
-    local dst_parent = get_container_root(
-      cx, `([dst_value].impl), dst_container_type, dst_copy_fields)
-
-    for j, dst_copy_field in ipairs(dst_copy_fields) do
-      local dst_field_id = cx:region_or_list(dst_container_type):field_id(dst_copy_field)
-      local dst_field_type = cx:region_or_list(dst_container_type):field_type(dst_copy_field)
-
-      local tag = terralib.newsymbol(c.legion_mapping_tag_id_t, "tag")
-      actions:insert(quote
-        var [tag] = 0
-        [codegen_hooks.gen_update_mapping_tag(tag, cx.task)]
-        var launcher = c.legion_release_launcher_create(
-          [dst_value].impl, [dst_parent],
-          c.legion_predicate_true(), 0, [tag])
-        c.legion_release_launcher_add_field(
-          launcher, dst_field_id)
-        [expr_release_issue_phase_barriers(condition_values, condition_kinds, launcher)]
-        c.legion_release_launcher_execute([cx.runtime], [cx.context], [launcher])
-      end)
-    end
+    actions:insert(quote
+      c.legion_release_launcher_add_field([launcher], dst_field_id)
+    end)
   end
+  actions:insert(quote
+    [expr_release_issue_phase_barriers(condition_values, condition_kinds, launcher)]
+    c.legion_release_launcher_execute([cx.runtime], [cx.context], [launcher])
+  end)
   return actions
 end
 
