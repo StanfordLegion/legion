@@ -772,9 +772,10 @@ namespace Legion {
           wait_on.wait();
         }
         // Now we can do the invalidations
+        const PhysicalTraceInfo trace_info(NULL, -1U/*idx*/, false/*init*/);
         for (unsigned idx = 0; idx < deletion_requirements.size(); idx++)
           runtime->forest->invalidate_fields(owner_task, idx, 
-                          version_infos[idx], preconditions);
+                          version_infos[idx], trace_info, preconditions);
         // Wait for the invalidations to be done
         if (!preconditions.empty())
         {
@@ -12722,9 +12723,11 @@ namespace Legion {
           // For this case we actually need to go through and prune out any
           // valid instances for these fields in the equivalence sets in order
           // to be able to free up the resources.
+          const PhysicalTraceInfo trace_info(NULL, -1U/*idx*/, false/*init*/);
           for (unsigned idx = 0; idx < deletion_requirements.size(); idx++)
             runtime->forest->invalidate_fields(owner_shard, idx, 
-              version_infos[idx],preconditions,is_total_sharding/*collective*/);
+              version_infos[idx], trace_info, preconditions,
+              is_total_sharding/*collective*/);
           // Wait for the invalidations to be done
           if (!preconditions.empty())
           {

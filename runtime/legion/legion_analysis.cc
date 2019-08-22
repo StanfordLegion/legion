@@ -252,48 +252,396 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
+    // Remote Trace Recorder
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    RemoteTraceRecorder::RemoteTraceRecorder(AddressSpaceID origin,
+                                    AddressSpaceID local, Memoizable *memo, 
+                                    PhysicalTemplate *tpl, RtUserEvent applied)
+      : origin_space(origin), local_space(local), memoizable(memo),
+        remote_tpl(tpl), applied_event(applied)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(remote_tpl != NULL);
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    RemoteTraceRecorder::RemoteTraceRecorder(const RemoteTraceRecorder &rhs)
+      : origin_space(rhs.origin_space), local_space(rhs.local_space),
+        memoizable(rhs.memoizable), remote_tpl(rhs.remote_tpl), 
+        applied_event(rhs.applied_event)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    RemoteTraceRecorder::~RemoteTraceRecorder(void)
+    //--------------------------------------------------------------------------
+    {
+      if (!applied_events.empty())
+        Runtime::trigger_event(applied_event, 
+            Runtime::merge_events(applied_events));
+      else
+        Runtime::trigger_event(applied_event);
+      // Clean up our memoizable object if necessary
+      if (memoizable->get_origin_space() != local_space)
+        delete memoizable;
+    }
+
+    //--------------------------------------------------------------------------
+    RemoteTraceRecorder& RemoteTraceRecorder::operator=(
+                                                 const RemoteTraceRecorder &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void RemoteTraceRecorder::add_recorder_reference(void)
+    //--------------------------------------------------------------------------
+    {
+      add_reference();
+    }
+
+    //--------------------------------------------------------------------------
+    bool RemoteTraceRecorder::remove_recorder_reference(void)
+    //--------------------------------------------------------------------------
+    {
+      return remove_reference();
+    }
+
+    //--------------------------------------------------------------------------
+    void RemoteTraceRecorder::pack_recorder(Serializer &rez,
+               std::set<RtEvent> &external_applied, const AddressSpaceID target)
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize(origin_space);
+      rez.serialize(target);
+      rez.serialize(remote_tpl);
+      RtUserEvent remote_applied = Runtime::create_rt_user_event();
+      rez.serialize(remote_applied);
+      // Only need to store this one locally since we already hooked our whole 
+      // chain of events into the operations applied set on the origin node
+      // See PhysicalTemplate::pack_recorder
+      applied_events.insert(remote_applied);
+    }
+
+    //--------------------------------------------------------------------------
+    void RemoteTraceRecorder::record_get_term_event(Memoizable *memo)
+    //--------------------------------------------------------------------------
+    {
+      if (local_space != origin_space)
+      {
+        // TODO
+        assert(false);
+      }
+      else
+        remote_tpl->record_get_term_event(memo);
+    }
+
+    //--------------------------------------------------------------------------
+    void RemoteTraceRecorder::record_create_ap_user_event(
+                                              ApUserEvent lhs, Memoizable *memo)
+    //--------------------------------------------------------------------------
+    {
+      if (local_space != origin_space)
+      {
+        // TODO
+        assert(false);
+      }
+      else
+        remote_tpl->record_create_ap_user_event(lhs, memo);
+    }
+
+    //--------------------------------------------------------------------------
+    void RemoteTraceRecorder::record_trigger_event(ApUserEvent lhs, ApEvent rhs)
+    //--------------------------------------------------------------------------
+    {
+      if (local_space != origin_space)
+      {
+        // TODO
+        assert(false);
+      }
+      else
+        remote_tpl->record_trigger_event(lhs, rhs);
+    }
+
+    //--------------------------------------------------------------------------
+    void RemoteTraceRecorder::record_merge_events(ApEvent &lhs, ApEvent rhs,
+                                                  Memoizable *memo)
+    //--------------------------------------------------------------------------
+    {
+      if (local_space != origin_space)
+      {
+        // TODO
+        assert(false);
+      }
+      else
+        remote_tpl->record_merge_events(lhs, rhs, memo);
+    }
+
+    //--------------------------------------------------------------------------
+    void RemoteTraceRecorder::record_merge_events(ApEvent &lhs, ApEvent e1,
+                                                  ApEvent e2, Memoizable *memo)
+    //--------------------------------------------------------------------------
+    {
+      if (local_space != origin_space)
+      {
+        // TODO
+        assert(false);
+      }
+      else
+        remote_tpl->record_merge_events(lhs, e1, e2, memo);
+    }
+
+    //--------------------------------------------------------------------------
+    void RemoteTraceRecorder::record_merge_events(ApEvent &lhs, ApEvent e1,
+                                                  ApEvent e2, ApEvent e3,
+                                                  Memoizable *memo)
+    //--------------------------------------------------------------------------
+    {
+      if (local_space != origin_space)
+      {
+        // TODO
+        assert(false);
+      }
+      else
+        remote_tpl->record_merge_events(lhs, e1, e2, e3, memo);
+    }
+
+    //--------------------------------------------------------------------------
+    void RemoteTraceRecorder::record_merge_events(ApEvent &lhs,
+                                                  const std::set<ApEvent>& rhs,
+                                                  Memoizable *memo)
+    //--------------------------------------------------------------------------
+    {
+      if (local_space != origin_space)
+      {
+        // TODO
+        assert(false);
+      }
+      else
+        remote_tpl->record_merge_events(lhs, rhs, memo);
+    }
+
+    //--------------------------------------------------------------------------
+    void RemoteTraceRecorder::record_issue_copy(Memoizable *memo,
+                                             unsigned src_idx,
+                                             unsigned dst_idx,
+                                             ApEvent &lhs,
+                                             IndexSpaceExpression *expr,
+                                 const std::vector<CopySrcDstField>& src_fields,
+                                 const std::vector<CopySrcDstField>& dst_fields,
+#ifdef LEGION_SPY
+                                             FieldSpace handle,
+                                             RegionTreeID src_tree_id,
+                                             RegionTreeID dst_tree_id,
+#endif
+                                             ApEvent precondition,
+                                             ReductionOpID redop,
+                                             bool reduction_fold,
+                                 const FieldMaskSet<InstanceView> &tracing_srcs,
+                                 const FieldMaskSet<InstanceView> &tracing_dsts)
+    //--------------------------------------------------------------------------
+    {
+      if (local_space != origin_space)
+      {
+        // TODO
+        assert(false);
+      }
+      else
+        remote_tpl->record_issue_copy(memo, src_idx, dst_idx, lhs, expr,
+                                      src_fields, dst_fields,
+#ifdef LEGION_SPY
+                                      handle, src_tree_id, dst_tree_id,
+#endif
+                                      precondition, redop, reduction_fold,
+                                      tracing_srcs, tracing_dsts);
+    }
+
+    //--------------------------------------------------------------------------
+    void RemoteTraceRecorder::record_issue_indirect(Memoizable *memo, 
+                             ApEvent &lhs, IndexSpaceExpression *expr,
+                             const std::vector<CopySrcDstField>& src_fields,
+                             const std::vector<CopySrcDstField>& dst_fields,
+                             const std::vector<void*> &indirections,
+                             ApEvent precondition)
+    //--------------------------------------------------------------------------
+    {
+      if (local_space != origin_space)
+      {
+        // TODO
+        assert(false);
+      }
+      else
+        remote_tpl->record_issue_indirect(memo, lhs, expr,src_fields,dst_fields,
+                                          indirections, precondition);
+    }
+
+    //--------------------------------------------------------------------------
+    void RemoteTraceRecorder::record_issue_fill(Memoizable *memo,
+                                             unsigned idx,
+                                             ApEvent &lhs,
+                                             IndexSpaceExpression *expr,
+                                 const std::vector<CopySrcDstField> &fields,
+                                             const void *fill_value, 
+                                             size_t fill_size,
+#ifdef LEGION_SPY
+                                             UniqueID fill_uid,
+                                             FieldSpace handle,
+                                             RegionTreeID tree_id,
+#endif
+                                             ApEvent precondition,
+                                 const FieldMaskSet<FillView> &tracing_srcs,
+                                 const FieldMaskSet<InstanceView> &tracing_dsts)
+    //--------------------------------------------------------------------------
+    {
+      if (local_space != origin_space)
+      {
+        // TODO
+        assert(false);
+      }
+      else
+        remote_tpl->record_issue_fill(memo, idx, lhs, expr, fields,
+                                      fill_value, fill_size,
+#ifdef LEGION_SPY
+                                      fill_uid, handle, tree_id,
+#endif
+                                      precondition, tracing_srcs, tracing_dsts);
+    }
+
+    //--------------------------------------------------------------------------
+    void RemoteTraceRecorder::record_fill_view(FillView *view,
+                                               const FieldMask &user_mask)
+    //--------------------------------------------------------------------------
+    {
+      // this should never be called on remote nodes
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void RemoteTraceRecorder::record_op_view(Memoizable *memo,
+                                             unsigned idx,
+                                             InstanceView *view,
+                                             const RegionUsage &usage,
+                                             const FieldMask &user_mask,
+                                             bool update_validity)
+    //--------------------------------------------------------------------------
+    {
+      if (local_space != origin_space)
+      {
+        // TODO
+        assert(false);
+      }
+      else
+        remote_tpl->record_op_view(memo, idx, view, usage, 
+                                   user_mask, update_validity);
+    }
+
+    //--------------------------------------------------------------------------
+    void RemoteTraceRecorder::record_set_op_sync_event(ApEvent &lhs, 
+                                                       Memoizable *memo)
+    //--------------------------------------------------------------------------
+    {
+      if (local_space != origin_space)
+      {
+        // TODO
+        assert(false);
+      }
+      else
+        remote_tpl-> record_set_op_sync_event(lhs, memo);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ RemoteTraceRecorder* RemoteTraceRecorder::unpack_remote_recorder(
+                                          Deserializer &derez, Memoizable *memo)
+    //--------------------------------------------------------------------------
+    {
+      AddressSpaceID origin_space, local_space;
+      derez.deserialize(origin_space);
+      derez.deserialize(local_space);
+      PhysicalTemplate *remote_tpl;
+      derez.deserialize(remote_tpl);
+      RtUserEvent applied_event;
+      derez.deserialize(applied_event);
+      return new RemoteTraceRecorder(origin_space, local_space,
+                                     memo, remote_tpl, applied_event);
+    }
+
+    /////////////////////////////////////////////////////////////
+    // TraceInfo
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    TraceInfo::TraceInfo(Operation *o, bool init)
+      : op(o), memo((op == NULL) ? NULL : op->get_memoizable()), 
+        rec((memo == NULL) ? NULL : memo->get_template()),
+        recording((rec == NULL) ? false : rec->is_recording())
+    //--------------------------------------------------------------------------
+    {
+      if (recording && init)
+        rec->record_get_term_event(memo);
+      if (rec != NULL)
+        rec->add_recorder_reference();
+    }
+
+    //--------------------------------------------------------------------------
+    TraceInfo::TraceInfo(const TraceInfo &rhs)
+      : op(rhs.op), memo(rhs.memo), rec(rhs.rec), recording(rhs.recording)
+    //--------------------------------------------------------------------------
+    {
+      if (rec != NULL)
+        rec->add_recorder_reference();
+    }
+
+    //--------------------------------------------------------------------------
+    TraceInfo::~TraceInfo(void)
+    //--------------------------------------------------------------------------
+    {
+      if ((rec != NULL) && rec->remove_recorder_reference())
+        delete rec;
+    }
+
+    //--------------------------------------------------------------------------
+    TraceInfo::TraceInfo(Operation *o, Memoizable *m, 
+                         PhysicalTraceRecorder *r, const bool record)
+      : op(o), memo(m), rec(r), recording(record)
+    //--------------------------------------------------------------------------
+    {
+      if (rec != NULL)
+        rec->add_recorder_reference();
+    }
+
+    /////////////////////////////////////////////////////////////
     // PhysicalTraceInfo
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
     PhysicalTraceInfo::PhysicalTraceInfo(Operation *o, unsigned idx, bool init)
-    //--------------------------------------------------------------------------
-      : op(o), index(idx), dst_index(idx), rec((op == NULL) ? NULL :
-          (op->get_memoizable() == NULL) ? NULL :
-            op->get_memoizable()->get_template()),
-        recording((rec == NULL) ? false : rec->is_recording()),
-        update_validity(true)
-    {
-      if (recording && init)
-        rec->record_get_term_event(op);
-    }
-
-    //--------------------------------------------------------------------------
-    PhysicalTraceInfo::PhysicalTraceInfo(const PhysicalTraceInfo &info,
-                                         unsigned idx,
-                                         bool update)
-      : op(info.op), index(idx), dst_index(idx), rec(info.rec),
-        recording(info.recording), update_validity(update)
+      : TraceInfo(o, init), index(idx), dst_index(idx), update_validity(true)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
-    PhysicalTraceInfo::PhysicalTraceInfo(
-                               Operation *o, unsigned src_idx, unsigned dst_idx)
+    PhysicalTraceInfo::PhysicalTraceInfo(const TraceInfo &info, 
+                                         unsigned idx, bool update/*=true*/)
+      : TraceInfo(info), index(idx), dst_index(idx), update_validity(update)
     //--------------------------------------------------------------------------
-      : op(o), index(src_idx), dst_index(dst_idx), rec((op == NULL) ? NULL :
-          (op->get_memoizable() == NULL) ? NULL :
-            op->get_memoizable()->get_template()),
-        recording((rec == NULL) ? false : rec->is_recording()),
-        update_validity(true)
     {
     }
 
     //--------------------------------------------------------------------------
-    PhysicalTraceInfo::PhysicalTraceInfo(Operation *o, Memoizable &memo)
-      : op(o), index(-1U), dst_index(-1U), rec(memo.get_template()),
-        recording((rec == NULL) ? false : rec->is_recording()),
+    PhysicalTraceInfo::PhysicalTraceInfo(unsigned src_idx, 
+                                         const TraceInfo &info,unsigned dst_idx)
+      : TraceInfo(info), index(src_idx), dst_index(dst_idx), 
         update_validity(true)
     //--------------------------------------------------------------------------
     {
@@ -301,10 +649,120 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     PhysicalTraceInfo::PhysicalTraceInfo(const PhysicalTraceInfo &rhs)
-      : op(rhs.op), index(rhs.index), dst_index(rhs.dst_index), rec(rhs.rec),
-        recording(rhs.recording), update_validity(rhs.update_validity)
+      : TraceInfo(rhs), index(rhs.index), dst_index(rhs.dst_index),
+        update_validity(rhs.update_validity)
     //--------------------------------------------------------------------------
     {
+    }
+
+    //--------------------------------------------------------------------------
+    PhysicalTraceInfo::PhysicalTraceInfo(Operation *o, Memoizable *m, 
+        unsigned src_idx,unsigned dst_idx,bool update,PhysicalTraceRecorder *r)
+      : TraceInfo(o, m, r, (m != NULL)), index(src_idx), dst_index(dst_idx),
+        update_validity(update)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    template<>
+    void PhysicalTraceInfo::pack_trace_info<true>(Serializer &rez,
+                                            std::set<RtEvent> &applied, 
+                                            const AddressSpaceID target) const
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize<bool>(recording);
+      if (recording)
+      {
+#ifdef DEBUG_LEGION
+        assert(op != NULL);
+        assert(memo != NULL);
+        assert(rec != NULL);
+#endif
+        op->pack_remote_operation(rez, target);
+        memo->pack_remote_memoizable(rez, target);
+        rez.serialize(index);
+        rez.serialize(dst_index);
+        rez.serialize<bool>(update_validity);
+        rec->pack_recorder(rez, applied, target); 
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    template<>
+    void PhysicalTraceInfo::pack_trace_info<false>(Serializer &rez,
+                                            std::set<RtEvent> &applied, 
+                                            const AddressSpaceID target) const
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize<bool>(recording);
+      if (recording)
+      {
+#ifdef DEBUG_LEGION
+        assert(memo != NULL);
+        assert(rec != NULL);
+#endif
+        memo->pack_remote_memoizable(rez, target);
+        rez.serialize(index);
+        rez.serialize(dst_index);
+        rez.serialize<bool>(update_validity);
+        rec->pack_recorder(rez, applied, target); 
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ PhysicalTraceInfo PhysicalTraceInfo::unpack_trace_info(
+         Deserializer &derez, Runtime *runtime, std::set<RtEvent> &ready_events)
+    //--------------------------------------------------------------------------
+    {
+      bool recording;
+      derez.deserialize(recording);
+      if (recording)
+      {
+        RemoteOp *op = 
+          RemoteOp::unpack_remote_operation(derez, runtime, ready_events);
+        Memoizable *memo = 
+          RemoteMemoizable::unpack_remote_memoizable(derez, op, runtime);
+        unsigned index, dst_index;
+        derez.deserialize(index);
+        derez.deserialize(dst_index);
+        bool update_validity;
+        derez.deserialize(update_validity);
+        PhysicalTraceRecorder *recorder = 
+          RemoteTraceRecorder::unpack_remote_recorder(derez, memo);
+        return PhysicalTraceInfo(op, memo, index, dst_index,
+                                 update_validity, recorder);
+      }
+      else
+        return PhysicalTraceInfo(NULL, -1U, false);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ PhysicalTraceInfo PhysicalTraceInfo::unpack_trace_info(
+                           Deserializer &derez, Runtime *runtime, Operation *op)
+    //--------------------------------------------------------------------------
+    {
+      bool recording;
+      derez.deserialize(recording);
+      if (recording)
+      {
+#ifdef DEBUG_LEGION
+        assert(op != NULL);
+#endif
+        Memoizable *memo = 
+          RemoteMemoizable::unpack_remote_memoizable(derez, op, runtime);
+        unsigned index, dst_index;
+        derez.deserialize(index);
+        derez.deserialize(dst_index);
+        bool update_validity;
+        derez.deserialize(update_validity);
+        RemoteTraceRecorder *recorder = 
+          RemoteTraceRecorder::unpack_remote_recorder(derez, memo);
+        return PhysicalTraceInfo(op, memo, index, dst_index,
+                                 update_validity, recorder);
+      }
+      else
+        return PhysicalTraceInfo(NULL, -1U, false);
     }
 
     /////////////////////////////////////////////////////////////
@@ -3572,9 +4030,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       const CopyFillAggregation *cfargs = (const CopyFillAggregation*)args;
-      cfargs->aggregator->issue_updates(cfargs->info, cfargs->pre,
+      cfargs->aggregator->issue_updates(*cfargs, cfargs->pre,
           cfargs->has_src, cfargs->has_dst, false/*needs deferral*/, 
           cfargs->pass, cfargs->need_pass_preconditions);
+      cfargs->remove_recorder_reference();
     } 
 
     /////////////////////////////////////////////////////////////
@@ -4635,14 +5094,16 @@ namespace Legion {
                      VersionInfo *info, const RegionRequirement &req,
                      RegionNode *rn, const InstanceSet &target_insts,
                      std::vector<InstanceView*> &target_vws,
+                     const PhysicalTraceInfo &t_info,
                      const ApEvent pre, const ApEvent term,
                      const bool track, const bool check, 
                      const bool record, const bool skip)
       : PhysicalAnalysis(rt, o, idx, info, true/*on heap*/), usage(req), 
         node(rn), target_instances(target_insts), target_views(target_vws), 
-        precondition(pre), term_event(term), track_effects(track), 
-        check_initialized(check && !IS_DISCARD(usage) && !IS_SIMULT(usage)), 
-        record_valid(record), skip_output(skip), output_aggregator(NULL)
+        trace_info(t_info), precondition(pre), term_event(term), 
+        track_effects(track), check_initialized(check && !IS_DISCARD(usage) && 
+            !IS_SIMULT(usage)), record_valid(record), skip_output(skip), 
+        output_aggregator(NULL)
     //--------------------------------------------------------------------------
     {
     }
@@ -4653,14 +5114,16 @@ namespace Legion {
                      const RegionUsage &use, RegionNode *rn, 
                      InstanceSet &target_insts,
                      std::vector<InstanceView*> &target_vws,
+                     const PhysicalTraceInfo &info,
                      const RtEvent user_reg, const ApEvent pre, 
                      const ApEvent term, const bool track, 
                      const bool check, const bool record, const bool skip)
       : PhysicalAnalysis(rt, src, prev, o, idx, true/*on heap*/), usage(use), 
         node(rn), target_instances(target_insts), target_views(target_vws), 
-        precondition(pre), term_event(term), track_effects(track), 
-        check_initialized(check), record_valid(record), skip_output(skip), 
-        output_aggregator(NULL), remote_user_registered(user_reg)
+        trace_info(info), precondition(pre), term_event(term), 
+        track_effects(track), check_initialized(check), record_valid(record), 
+        skip_output(skip), output_aggregator(NULL), 
+        remote_user_registered(user_reg)
     //--------------------------------------------------------------------------
     {
     }
@@ -4669,8 +5132,8 @@ namespace Legion {
     UpdateAnalysis::UpdateAnalysis(const UpdateAnalysis &rhs)
       : PhysicalAnalysis(rhs), usage(rhs.usage), node(rhs.node), 
         target_instances(rhs.target_instances), target_views(rhs.target_views),
-        precondition(rhs.precondition), term_event(rhs.term_event), 
-        track_effects(rhs.track_effects), 
+        trace_info(rhs.trace_info), precondition(rhs.precondition), 
+        term_event(rhs.term_event), track_effects(rhs.track_effects), 
         check_initialized(rhs.check_initialized),record_valid(rhs.record_valid),
         skip_output(rhs.skip_output)
     //--------------------------------------------------------------------------
@@ -4790,6 +5253,7 @@ namespace Legion {
             rez.serialize(target_views[idx]->did);
             rez.serialize(ref.get_valid_fields());
           }
+          trace_info.pack_trace_info<false>(rez, applied_events, rit->first);
           rez.serialize(precondition);
           rez.serialize(term_event);
           rez.serialize(updated);
@@ -4841,7 +5305,6 @@ namespace Legion {
       {
         const bool needs_deferral = !already_deferred || 
           (input_aggregators.size() > 1);
-        const PhysicalTraceInfo trace_info(op, index);
         for (std::map<RtEvent,CopyFillAggregator*>::const_iterator it = 
               input_aggregators.begin(); it != input_aggregators.end(); it++)
         {
@@ -4895,7 +5358,6 @@ namespace Legion {
         assert(!skip_output);
 #endif
         // Make sure we don't defer this
-        const PhysicalTraceInfo trace_info(op, index);
         output_aggregator->issue_updates(trace_info, term_event);
         result = output_aggregator->summarize(trace_info);
         if (output_aggregator->release_guards(op->runtime, applied_events))
@@ -4959,6 +5421,8 @@ namespace Legion {
         derez.deserialize(valid_fields);
         targets[idx] = InstanceRef(manager, valid_fields);
       }
+      PhysicalTraceInfo trace_info = 
+        PhysicalTraceInfo::unpack_trace_info(derez, runtime, op);
       ApEvent precondition;
       derez.deserialize(precondition);
       ApEvent term_event;
@@ -4982,7 +5446,7 @@ namespace Legion {
       RegionNode *node = runtime->forest->get_node(handle);
       // This takes ownership of the remote operation
       UpdateAnalysis *analysis = new UpdateAnalysis(runtime, original_source,
-          previous, op, index, usage, node, targets, target_views, 
+          previous, op, index, usage, node, targets, target_views, trace_info, 
           remote_user_registered, precondition, term_event, track_effects, 
           check_initialized, record_valid, skip_output);
       analysis->add_reference();
@@ -5271,9 +5735,11 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ReleaseAnalysis::ReleaseAnalysis(Runtime *rt, Operation *o, unsigned idx, 
-                                     ApEvent pre, VersionInfo *info)
+                                     ApEvent pre, VersionInfo *info,
+                                     const PhysicalTraceInfo &t_info)
       : PhysicalAnalysis(rt, o, idx, info, false/*on heap*/), 
-        precondition(pre), target(this), release_aggregator(NULL)
+        precondition(pre), target(this), trace_info(t_info),
+        release_aggregator(NULL)
     //--------------------------------------------------------------------------
     {
     }
@@ -5281,16 +5747,17 @@ namespace Legion {
     //--------------------------------------------------------------------------
     ReleaseAnalysis::ReleaseAnalysis(Runtime *rt, AddressSpaceID src, 
             AddressSpaceID prev, Operation *o, unsigned idx, ApEvent pre,
-            ReleaseAnalysis *t)
+            ReleaseAnalysis *t, const PhysicalTraceInfo &info)
       : PhysicalAnalysis(rt, src, prev, o, idx, true/*on heap*/), 
-        precondition(pre), target(t), release_aggregator(NULL)
+        precondition(pre), target(t), trace_info(info), 
+        release_aggregator(NULL)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     ReleaseAnalysis::ReleaseAnalysis(const ReleaseAnalysis &rhs)
-      : PhysicalAnalysis(rhs), target(rhs.target)
+      : PhysicalAnalysis(rhs), target(rhs.target), trace_info(rhs.trace_info)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -5372,6 +5839,7 @@ namespace Legion {
           rez.serialize(returned);
           rez.serialize(applied);
           rez.serialize(target);
+          trace_info.pack_trace_info<false>(rez, applied_events, rit->first);
         }
         runtime->send_equivalence_set_remote_releases(rit->first, rez);
         applied_events.insert(applied);
@@ -5428,7 +5896,6 @@ namespace Legion {
       if (release_aggregator != NULL)
       {
         std::set<RtEvent> guard_events;
-        const PhysicalTraceInfo trace_info(op, index);
         release_aggregator->issue_updates(trace_info, precondition);
 #ifdef NON_AGGRESSIVE_AGGREGATORS
         if (release_aggregator->effects_applied.has_triggered())
@@ -5480,9 +5947,11 @@ namespace Legion {
       derez.deserialize(applied);
       ReleaseAnalysis *target;
       derez.deserialize(target);
+      const PhysicalTraceInfo trace_info = 
+        PhysicalTraceInfo::unpack_trace_info(derez, runtime, op);
 
       ReleaseAnalysis *analysis = new ReleaseAnalysis(runtime, original_source,
-          previous, op, index, precondition, target);
+          previous, op, index, precondition, target, trace_info);
       analysis->add_reference();
       std::set<RtEvent> deferral_events, applied_events;
       RtEvent ready_event;
@@ -5534,7 +6003,8 @@ namespace Legion {
         const std::vector<InstanceView*> &target_vws, const ApEvent pre,
         const PredEvent pred, const ReductionOpID red,
         const std::vector<unsigned> &src_idxes,
-        const std::vector<unsigned> &dst_idxes, const bool perf)
+        const std::vector<unsigned> &dst_idxes, 
+        const PhysicalTraceInfo &t_info, const bool perf)
       : PhysicalAnalysis(rt, o, dst_idx, info, true/*on heap*/), 
         src_mask(perf ? FieldMask() : initialize_mask(src_idxes)), 
         dst_mask(perf ? FieldMask() : initialize_mask(dst_idxes)),
@@ -5546,7 +6016,7 @@ namespace Legion {
         across_helpers(perf ? std::vector<CopyAcrossHelper*>() :
               create_across_helpers(src_mask, dst_mask, target_instances,
                                     src_indexes, dst_indexes)),
-        perfect(perf), across_aggregator(NULL)
+        trace_info(t_info), perfect(perf), across_aggregator(NULL)
     //--------------------------------------------------------------------------
     {
     }
@@ -5560,7 +6030,8 @@ namespace Legion {
         const std::vector<InstanceView*> &target_vws, const ApEvent pre,
         const PredEvent pred, const ReductionOpID red,
         const std::vector<unsigned> &src_idxes,
-        const std::vector<unsigned> &dst_idxes, const bool perf)
+        const std::vector<unsigned> &dst_idxes, 
+        const PhysicalTraceInfo &t_info, const bool perf)
       : PhysicalAnalysis(rt, src, prev, o, dst_idx, true/*on heap*/), 
         src_mask(perf ? FieldMask() : initialize_mask(src_idxes)), 
         dst_mask(perf ? FieldMask() : initialize_mask(dst_idxes)),
@@ -5572,7 +6043,7 @@ namespace Legion {
         across_helpers(perf ? std::vector<CopyAcrossHelper*>() :
               create_across_helpers(src_mask, dst_mask, target_instances,
                                     src_indexes, dst_indexes)),
-        perfect(perf), across_aggregator(NULL)
+        trace_info(t_info), perfect(perf), across_aggregator(NULL)
     //--------------------------------------------------------------------------
     {
     }
@@ -5586,7 +6057,8 @@ namespace Legion {
         target_views(rhs.target_views), precondition(rhs.precondition),
         pred_guard(rhs.pred_guard), redop(rhs.redop), 
         src_indexes(rhs.src_indexes), dst_indexes(rhs.dst_indexes),
-        across_helpers(rhs.across_helpers), perfect(rhs.perfect)
+        across_helpers(rhs.across_helpers), trace_info(rhs.trace_info),
+        perfect(rhs.perfect)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -5717,6 +6189,7 @@ namespace Legion {
           }
           rez.serialize(applied);
           rez.serialize(copy);
+          trace_info.pack_trace_info<false>(rez, applied_events, rit->first);
         }
         runtime->send_equivalence_set_remote_copies_across(rit->first, rez);
         applied_events.insert(applied);
@@ -5830,7 +6303,6 @@ namespace Legion {
             }
           }
         }
-        const PhysicalTraceInfo trace_info(op, src_index, dst_index);
         across_aggregator->issue_updates(trace_info, precondition,
             false/*has src preconditions*/, true/*has dst preconditions*/);
         // Need to wait before we can get the summary
@@ -5861,7 +6333,6 @@ namespace Legion {
         applied_events.insert(args.applied_event);
         return args.effects_event;
       }
-      const PhysicalTraceInfo trace_info(op, src_index, dst_index);
       if (across_aggregator != NULL)
       {
         const ApEvent result = across_aggregator->summarize(trace_info);
@@ -5954,6 +6425,8 @@ namespace Legion {
       derez.deserialize(applied);
       ApUserEvent copy;
       derez.deserialize(copy);
+      const PhysicalTraceInfo trace_info =
+        PhysicalTraceInfo::unpack_trace_info(derez, runtime, op); 
 
       std::vector<CopyAcrossHelper*> across_helpers;
       std::set<RtEvent> deferral_events, applied_events;
@@ -5971,7 +6444,7 @@ namespace Legion {
           original_source, previous, op, src_index, dst_index,
           src_usage, dst_usage, src_handle, dst_handle, 
           dst_instances, dst_views, precondition, pred_guard, redop, 
-          src_indexes, dst_indexes, perfect);
+          src_indexes, dst_indexes, trace_info, perfect);
       analysis->add_reference();
       for (unsigned idx = 0; idx < eq_sets.size(); idx++)
       {
@@ -6043,12 +6516,13 @@ namespace Legion {
     OverwriteAnalysis::OverwriteAnalysis(Runtime *rt, Operation *o, 
                         unsigned idx, const RegionUsage &use,
                         VersionInfo *info, LogicalView *view, 
+                        const PhysicalTraceInfo &t_info,
                         const ApEvent pre, const RtEvent guard, 
                         const PredEvent pred, const bool track, 
                         const bool restriction)
       : PhysicalAnalysis(rt, o, idx, info, true/*on heap*/), usage(use), 
-        precondition(pre), guard_event(guard), pred_guard(pred), 
-        track_effects(track), add_restriction(restriction), 
+        trace_info(t_info), precondition(pre), guard_event(guard), 
+        pred_guard(pred), track_effects(track), add_restriction(restriction), 
         output_aggregator(NULL)
     //--------------------------------------------------------------------------
     {
@@ -6060,12 +6534,13 @@ namespace Legion {
     OverwriteAnalysis::OverwriteAnalysis(Runtime *rt, Operation *o, 
                         unsigned idx, const RegionUsage &use,
                         VersionInfo *info, const std::set<LogicalView*> &v, 
+                        const PhysicalTraceInfo &t_info,
                         const ApEvent pre, const RtEvent guard, 
                         const PredEvent pred, const bool track, 
                         const bool restriction)
       : PhysicalAnalysis(rt, o, idx, info, true/*on heap*/), usage(use), 
-        views(v), precondition(pre), guard_event(guard), pred_guard(pred), 
-        track_effects(track), add_restriction(restriction), 
+        views(v), trace_info(t_info), precondition(pre), guard_event(guard), 
+        pred_guard(pred), track_effects(track), add_restriction(restriction), 
         output_aggregator(NULL)
     //--------------------------------------------------------------------------
     {
@@ -6075,12 +6550,13 @@ namespace Legion {
     OverwriteAnalysis::OverwriteAnalysis(Runtime *rt, AddressSpaceID src, 
                         AddressSpaceID prev, Operation *o, unsigned idx, 
                         const RegionUsage &use, const std::set<LogicalView*> &v,
+                        const PhysicalTraceInfo &info,
                         const ApEvent pre, const RtEvent guard, 
                         const PredEvent pred, const bool track, 
                         const bool restriction)
       : PhysicalAnalysis(rt, src, prev, o, idx, true/*on heap*/), usage(use), 
-        views(v), precondition(pre), guard_event(guard), pred_guard(pred), 
-        track_effects(track), add_restriction(restriction), 
+        views(v), trace_info(info), precondition(pre), guard_event(guard), 
+        pred_guard(pred), track_effects(track), add_restriction(restriction), 
         output_aggregator(NULL)
     //--------------------------------------------------------------------------
     {
@@ -6089,9 +6565,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     OverwriteAnalysis::OverwriteAnalysis(const OverwriteAnalysis &rhs)
       : PhysicalAnalysis(rhs), usage(rhs.usage), views(rhs.views),
-        precondition(rhs.precondition), guard_event(rhs.guard_event), 
-        pred_guard(rhs.pred_guard), track_effects(rhs.track_effects), 
-        add_restriction(rhs.add_restriction)
+        trace_info(rhs.trace_info), precondition(rhs.precondition), 
+        guard_event(rhs.guard_event), pred_guard(rhs.pred_guard), 
+        track_effects(rhs.track_effects), add_restriction(rhs.add_restriction)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -6181,6 +6657,7 @@ namespace Legion {
               rez.serialize((*it)->did);  
             }
           }
+          trace_info.pack_trace_info<false>(rez, applied_events, rit->first);
           rez.serialize(pred_guard);
           rez.serialize(precondition);
           rez.serialize(guard_event);
@@ -6216,7 +6693,6 @@ namespace Legion {
         apply_update_equivalence_sets();
       if (output_aggregator != NULL)
       {
-        const PhysicalTraceInfo trace_info(op, index);
         output_aggregator->issue_updates(trace_info, precondition);
         // Need to wait before we can get the summary
 #ifdef NON_AGGRESSIVE_AGGREGATORS
@@ -6246,7 +6722,6 @@ namespace Legion {
         applied_events.insert(args.applied_event);
         return args.effects_event;
       }
-      const PhysicalTraceInfo trace_info(op, index);
       if (output_aggregator != NULL)
       {
         const ApEvent result = output_aggregator->summarize(trace_info); 
@@ -6303,6 +6778,8 @@ namespace Legion {
           ready_events.insert(ready);
         views.insert(view);
       }
+      const PhysicalTraceInfo trace_info = 
+        PhysicalTraceInfo::unpack_trace_info(derez, runtime, op);
       PredEvent pred_guard;
       derez.deserialize(pred_guard);
       ApEvent precondition;
@@ -6318,7 +6795,7 @@ namespace Legion {
 
       // This takes ownership of the operation
       OverwriteAnalysis *analysis = new OverwriteAnalysis(runtime,
-          original_source, previous, op, index, usage, views,
+          original_source, previous, op, index, usage, views, trace_info,
           precondition, guard_event, pred_guard, effects.exists(), 
           add_restriction);
       analysis->add_reference();

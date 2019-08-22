@@ -2220,7 +2220,7 @@ namespace Legion {
                   constraints.field_constraint.get_field_set();
                 layout->compute_copy_offsets(fill_fields, result, dsts);
               }
-              PhysicalTraceInfo fake_info(NULL);
+              const PhysicalTraceInfo fake_info(NULL, -1U, false);
 #ifdef LEGION_SPY
               ApEvent filled = instance_domain->issue_fill(fake_info, dsts,
                     fill_buffer, reduction_op->sizeof_rhs, 0/*uid*/, 

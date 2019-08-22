@@ -670,9 +670,15 @@ namespace Legion {
       UniqueID get_fence_uid(void) const { return prev_fence_uid; }
 #endif
     public:
-      virtual bool is_recording(void) const { return recording; }
       inline bool is_replaying(void) const { return !recording; }
       inline bool is_replayable(void) const { return replayable.replayable; }
+    public:
+      virtual bool is_recording(void) const { return recording; }
+      virtual void add_recorder_reference(void) { /*do nothing*/ }
+      virtual bool remove_recorder_reference(void) 
+        { /*do nothing, never delete*/ return false; }
+      virtual void pack_recorder(Serializer &rez, 
+          std::set<RtEvent> &applied, const AddressSpaceID target);
     public:
       void record_mapper_output(SingleTask *task,
                                 const Mapper::MapTaskOutput &output,
@@ -684,20 +690,20 @@ namespace Legion {
                              std::vector<Processor> &target_proc,
                              std::deque<InstanceSet> &physical_instances) const;
     public:
-      virtual void record_get_term_event(Operation *op);
-      void record_create_ap_user_event(ApUserEvent lhs, Operation *owner);
+      virtual void record_get_term_event(Memoizable *memo);
+      void record_create_ap_user_event(ApUserEvent lhs, Memoizable *memo);
       void record_trigger_event(ApUserEvent lhs, ApEvent rhs);
     public:
       virtual void record_merge_events(ApEvent &lhs, 
-                                       ApEvent rhs, Operation *owner);
+                                       ApEvent rhs, Memoizable *memo);
       virtual void record_merge_events(ApEvent &lhs, ApEvent e1, 
-                                       ApEvent e2, Operation *owner);
+                                       ApEvent e2, Memoizable *memo);
       virtual void record_merge_events(ApEvent &lhs, ApEvent e1, ApEvent e2,
-                                       ApEvent e3, Operation *owner);
+                                       ApEvent e3, Memoizable *memo);
       virtual void record_merge_events(ApEvent &lhs, 
-                            const std::set<ApEvent>& rhs, Operation *owner);
+                            const std::set<ApEvent>& rhs, Memoizable *memo);
     public:
-      virtual void record_issue_copy(Operation *op,
+      virtual void record_issue_copy(Memoizable *memo,
                              unsigned src_idx,
                              unsigned dst_idx,
                              ApEvent &lhs,
@@ -714,13 +720,13 @@ namespace Legion {
                              bool reduction_fold,
                              const FieldMaskSet<InstanceView> &tracing_srcs,
                              const FieldMaskSet<InstanceView> &tracing_dsts);
-      virtual void record_issue_indirect(Operation *op, ApEvent &lhs,
+      virtual void record_issue_indirect(Memoizable *memo, ApEvent &lhs,
                              IndexSpaceExpression *expr,
                              const std::vector<CopySrcDstField>& src_fields,
                              const std::vector<CopySrcDstField>& dst_fields,
                              const std::vector<void*> &indirections,
                              ApEvent precondition);
-      virtual void record_issue_fill(Operation *op, unsigned idx,
+      virtual void record_issue_fill(Memoizable *memo, unsigned idx,
                              ApEvent &lhs,
                              IndexSpaceExpression *expr,
                              const std::vector<CopySrcDstField> &fields,
@@ -743,7 +749,7 @@ namespace Legion {
       void get_reduction_ready_events(Memoizable *memo,
                                       std::set<ApEvent> &ready_events);
     public:
-      virtual void record_op_view(Operation *op,
+      virtual void record_op_view(Memoizable *memo,
                                   unsigned idx,
                                   InstanceView *view,
                                   const RegionUsage &usage,
@@ -771,7 +777,7 @@ namespace Legion {
                              const FieldMaskSet<InstanceView> &views);
       void record_fill_views(const FieldMaskSet<FillView> &views);
     public:
-      virtual void record_set_op_sync_event(ApEvent &lhs, Operation *op);
+      virtual void record_set_op_sync_event(ApEvent &lhs, Memoizable *memo);
       void record_complete_replay(Operation *op, ApEvent rhs);
     public:
       RtEvent defer_template_deletion(void);

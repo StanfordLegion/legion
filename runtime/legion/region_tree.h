@@ -111,15 +111,28 @@ namespace Legion {
         const RtUserEvent ready;
       };   
       struct DeferPhysicalRegistrationArgs : 
-        public LgTaskArgs<DeferPhysicalRegistrationArgs> {
+        public LgTaskArgs<DeferPhysicalRegistrationArgs>, 
+        public PhysicalTraceInfo {
       public:
         static const LgTaskID TASK_ID = LG_DEFER_PHYSICAL_REGISTRATION_TASK_ID;
       public:
         DeferPhysicalRegistrationArgs(UniqueID uid, UpdateAnalysis *ana,
-                  InstanceSet &t, RtUserEvent map_applied, ApEvent &res)
-          : LgTaskArgs<DeferPhysicalRegistrationArgs>(uid), analysis(ana), 
+                  InstanceSet &t, RtUserEvent map_applied, ApEvent &res,
+                  const PhysicalTraceInfo &info)
+          : LgTaskArgs<DeferPhysicalRegistrationArgs>(uid), 
+            PhysicalTraceInfo(info), analysis(ana), 
             map_applied_done(map_applied), targets(t), result(res) 
-          { analysis->add_reference(); }
+          // This is kind of scary, Realm is about to make a copy of this
+          // without our knowledge, but we need to preserve the correctness
+          // of reference counting on PhysicalTraceRecorders, so just add
+          // an extra reference here that we will remove when we're handled.
+          { 
+            analysis->add_reference(); 
+            if (rec != NULL) rec->add_recorder_reference();
+          }
+      public:
+        inline void remove_recorder_reference(void) const
+          { if ((rec != NULL) && rec->remove_recorder_reference()) delete rec; }
       public:
         UpdateAnalysis *const analysis;
         RtUserEvent map_applied_done;
@@ -482,7 +495,7 @@ namespace Legion {
       RtEvent defer_physical_perform_registration(RtEvent register_pre,
                            UpdateAnalysis *analysis, InstanceSet &targets,
                            std::set<RtEvent> &map_applied_events,
-                           ApEvent &result);
+                           ApEvent &result, const PhysicalTraceInfo &info);
       void handle_defer_registration(const void *args);
       ApEvent acquire_restrictions(const RegionRequirement &req,
                                    VersionInfo &version_info,
@@ -560,6 +573,7 @@ namespace Legion {
       ApEvent overwrite_sharded(Operation *op, const unsigned index,
                                 const RegionRequirement &req,
                                 ShardedView *view, VersionInfo &version_info,
+                                const PhysicalTraceInfo &trace_info,
                                 const ApEvent precondition,
                                 std::set<RtEvent> &map_applied_events,
                                 const bool add_restriction);
@@ -585,6 +599,7 @@ namespace Legion {
                               LogicalView *registration_view = NULL);
       void invalidate_fields(Operation *op, unsigned index,
                              VersionInfo &version_info,
+                             const PhysicalTraceInfo &trace_info,
                              std::set<RtEvent> &map_applied_events,
                              const bool collective = false);
       // Support for tracing
@@ -596,6 +611,7 @@ namespace Legion {
       void update_valid_instances(Operation *op, unsigned index,
                                   VersionInfo &version_info,
                                   const FieldMaskSet<InstanceView> &valid_views,
+                                  const PhysicalTraceInfo &trace_info,
                                   std::set<RtEvent> &map_applied_events);
     public:
       int physical_convert_mapping(Operation *op,

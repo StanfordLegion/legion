@@ -1919,9 +1919,11 @@ namespace Legion {
           // For this case we actually need to go through and prune out any
           // valid instances for these fields in the equivalence sets in order
           // to be able to free up the resources.
+          const TraceInfo trace_info(this);
           for (unsigned idx = 0; idx < deletion_requirements.size(); idx++)
             runtime->forest->invalidate_fields(this, idx, version_infos[idx],
-                        map_applied_events, is_total_sharding/*collective*/);
+                PhysicalTraceInfo(trace_info, idx), map_applied_events, 
+                is_total_sharding/*collective*/);
         }
       }
       // Complete our mapping as necessary
@@ -4006,7 +4008,7 @@ namespace Legion {
     void ReplMapOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
-      const PhysicalTraceInfo trace_info(this);
+      const PhysicalTraceInfo trace_info(this, 0/*index*/, true/*init*/);
       // If we have any wait preconditions from phase barriers or 
       // grants then we use them to compute a precondition for doing
       // any copies or anything else for this operation
@@ -4061,7 +4063,7 @@ namespace Legion {
           UpdateAnalysis *analysis = new UpdateAnalysis(runtime, this, 
                                       0/*index*/, &version_info,
                                       requirement, node, mapped_instances,
-                                      mapped_views, init_precondition,
+                                      mapped_views,trace_info,init_precondition,
                                       termination_event, true/*track effects*/,
                                       false/*check initialized*/, record_valid,
                                       false/*skip output*/);
@@ -4096,7 +4098,7 @@ namespace Legion {
         UpdateAnalysis *analysis = new UpdateAnalysis(runtime, this, 
                                       0/*index*/, &version_info,
                                       requirement, node, mapped_instances,
-                                      mapped_views, init_precondition,
+                                      mapped_views,trace_info,init_precondition,
                                       termination_event, true/*track effects*/,
                                       false/*check initialized*/, record_valid,
                                       false/*skip output*/);
@@ -4125,7 +4127,7 @@ namespace Legion {
           inline_barrier.wait(); 
           effects_done = 
               runtime->forest->overwrite_sharded(this, 0/*index*/, requirement,
-                  sharded_view, version_info, init_precondition, 
+                  sharded_view, version_info, trace_info, init_precondition, 
                   map_applied_conditions, false/*restrict*/);
         }
         Runtime::advance_barrier(inline_barrier);
@@ -4221,7 +4223,7 @@ namespace Legion {
             // Now we can do the replacement
             effects_done = 
               runtime->forest->overwrite_sharded(this, 0/*index*/, requirement,
-                sharded_view, version_info, init_precondition, 
+                sharded_view, version_info, trace_info, init_precondition, 
                 map_applied_conditions, false/*restrict*/);
           }
           Runtime::advance_barrier(inline_barrier);
@@ -4549,13 +4551,13 @@ namespace Legion {
         ApUserEvent termination_event;
         if (mapping)
           termination_event = Runtime::create_ap_user_event();
+        const PhysicalTraceInfo trace_info(this, 0/*idx*/, true/*init*/);
         UpdateAnalysis *analysis = new UpdateAnalysis(runtime, this, 0/*index*/,
           &version_info, requirement, node, attach_instances, attach_views,
-          ApEvent::NO_AP_EVENT, mapping ? termination_event : completion_event, 
-          false/*track effects*/, false/*check initialized*/, 
-          true/*record valid*/, true/*skip output*/);
+          trace_info, ApEvent::NO_AP_EVENT, mapping ? termination_event : 
+            completion_event, false/*track effects*/, 
+          false/*check initialized*/, true/*record valid*/,true/*skip output*/);
         analysis->add_reference();
-        const PhysicalTraceInfo trace_info(this);
         // Have each operation do its own registration
         // Note this will clean up the analysis allocation above
         runtime->forest->physical_perform_registration(analysis, 
@@ -4579,8 +4581,8 @@ namespace Legion {
           // Now we can do the replacement
           const ApEvent attach_event = 
             runtime->forest->overwrite_sharded(this, 0/*index*/, requirement,
-                        sharded_view, version_info, ApEvent::NO_AP_EVENT,
-                        map_applied_conditions, restricted);
+                    sharded_view, version_info, trace_info,
+                    ApEvent::NO_AP_EVENT, map_applied_conditions, restricted);
           Runtime::phase_barrier_arrive(broadcast_barrier, 1/*count*/, 
                                         attach_event);
         }
@@ -4648,7 +4650,7 @@ namespace Legion {
           // We can't broadcast the DID until after doing the attach
           // to the memory in case we update the reference state
           did_broadcast->broadcast(external_instance.get_manager()->did);
-          const PhysicalTraceInfo trace_info(this);
+          const PhysicalTraceInfo trace_info(this, 0/*idx*/, true/*init*/);
           InnerContext *context = find_physical_context(0/*index*/,requirement);
           std::vector<InstanceView*> attach_views;
           context->convert_target_views(attach_instances, attach_views);
@@ -4815,7 +4817,7 @@ namespace Legion {
       ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
       const bool is_owner_shard = (repl_ctx->owner_shard->shard_id == 0);
-      const PhysicalTraceInfo trace_info(this);
+      const PhysicalTraceInfo trace_info(this, 0/*index*/, true/*init*/);
       // Actual unmap of an inline mapped region was deferred to here
       if (region.impl->is_mapped())
         region.impl->unmap_region();

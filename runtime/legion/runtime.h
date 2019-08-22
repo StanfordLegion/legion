@@ -2658,6 +2658,8 @@ namespace Legion {
                                                Serializer &rez);
       void send_remote_op_profiling_count_update(AddressSpaceID target,
                                                  Serializer &rez);
+      //void send_remote_trace_message(AddressSpaceID target, Serializer &rez);
+      //void send_remote_trace_response(AddressSpaceID target, Serializer &rez);
       void send_shutdown_notification(AddressSpaceID target, Serializer &rez);
       void send_shutdown_response(AddressSpaceID target, Serializer &rez);
     public:
@@ -3691,18 +3693,19 @@ namespace Legion {
       // Static member variables for MPI interop
       static int mpi_rank;
     public:
-      static inline ApEvent merge_events(const PhysicalTraceInfo *info,
+      static inline ApEvent merge_events(const TraceInfo *info,
                                          ApEvent e1, ApEvent e2);
-      static inline ApEvent merge_events(const PhysicalTraceInfo *info,
+      static inline ApEvent merge_events(const TraceInfo *info,
                                          ApEvent e1, ApEvent e2, ApEvent e3);
-      static inline ApEvent merge_events(const PhysicalTraceInfo *info,
+      static inline ApEvent merge_events(const TraceInfo *info,
                                          const std::set<ApEvent> &events);
     public:
       static inline RtEvent merge_events(RtEvent e1, RtEvent e2);
       static inline RtEvent merge_events(RtEvent e1, RtEvent e2, RtEvent e3);
       static inline RtEvent merge_events(const std::set<RtEvent> &events);
     public:
-      static inline ApUserEvent create_ap_user_event(void);
+      static inline ApUserEvent create_ap_user_event(
+                                                  const TraceInfo *info = NULL);
       static inline void trigger_event(ApUserEvent to_trigger,
                                    ApEvent precondition = ApEvent::NO_AP_EVENT);
       static inline void poison_event(ApUserEvent to_poison);
@@ -3841,7 +3844,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ inline ApEvent Runtime::merge_events(
-                          const PhysicalTraceInfo *info, ApEvent e1, ApEvent e2)
+                                  const TraceInfo *info, ApEvent e1, ApEvent e2)
     //--------------------------------------------------------------------------
     {
       ApEvent result(Realm::Event::merge_events(e1, e2)); 
@@ -3869,7 +3872,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ inline ApEvent Runtime::merge_events(
-              const PhysicalTraceInfo *info, ApEvent e1, ApEvent e2, ApEvent e3) 
+                      const TraceInfo *info, ApEvent e1, ApEvent e2, ApEvent e3) 
     //--------------------------------------------------------------------------
     {
       ApEvent result(Realm::Event::merge_events(e1, e2, e3)); 
@@ -3900,7 +3903,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ inline ApEvent Runtime::merge_events(
-                 const PhysicalTraceInfo *info, const std::set<ApEvent> &events)
+                         const TraceInfo *info, const std::set<ApEvent> &events)
     //--------------------------------------------------------------------------
     {
 #ifndef LEGION_DISABLE_EVENT_PRUNING
@@ -3988,16 +3991,19 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ inline ApUserEvent Runtime::create_ap_user_event(void)
+    /*static*/ inline ApUserEvent Runtime::create_ap_user_event(
+                                                          const TraceInfo *info)
     //--------------------------------------------------------------------------
     {
 #ifdef LEGION_SPY
       ApUserEvent result(Realm::UserEvent::create_user_event());
       LegionSpy::log_ap_user_event(result);
-      return result;
 #else
-      return ApUserEvent(Realm::UserEvent::create_user_event());
+      ApUserEvent result(Realm::UserEvent::create_user_event());
 #endif
+      if ((info != NULL) && info->recording)
+        info->record_create_ap_user_event(result);
+      return result;
     }
 
     //--------------------------------------------------------------------------

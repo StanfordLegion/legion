@@ -2298,7 +2298,6 @@ namespace Realm {
       memcpy(fill_buffer, _fill_value, fill_size);
 
       assert(dst.size == fill_size);
-
       log_dma.info() << "dma request " << (void *)this << " created - is="
 		     << *domain << " fill dst=" << dst.inst << "[" << dst.field_id << "+" << dst.subfield_offset << "] size="
 		     << fill_size << " before=" << _before_fill << " after=" << get_finish_event();
@@ -2437,13 +2436,48 @@ namespace Realm {
       return false;
     }
 
-#define SPECIALIZE_FILL(TYPE, N)                                   \
-    {                                                              \
-      TYPE *ptr = (TYPE *)rep_buffer;                              \
-      for(size_t ofs = 0; ofs < rep_size; ofs += N * sizeof(TYPE)) \
-        for (size_t i = 0; i < N; ++i)                             \
-          *ptr++ = ((TYPE*)fill_buffer)[i];                        \
-    }                                                              \
+    static void repeat_fill(void *dst, const void *src, size_t bytes, size_t count)
+    {
+#define SPECIALIZE_FILL(TYPE, N)                                        \
+      {									\
+	TYPE *dsttyped = reinterpret_cast<TYPE *>(dst);			\
+	const TYPE *srctyped = reinterpret_cast<const TYPE *>(src);	\
+	for(size_t i = 0; i < count; i++)				\
+	  for(size_t j = 0; j < N; j++)					\
+	    *dsttyped++ = srctyped[j];					\
+      }
+
+      switch(bytes) {
+      case sizeof(uint32_t):
+	{
+	  SPECIALIZE_FILL(uint32_t, 1);
+	  break;
+	}
+      case sizeof(uint64_t):
+	{
+	  SPECIALIZE_FILL(uint64_t, 1);
+	  break;
+	}
+      case 2 * sizeof(uint64_t):
+	{
+	  SPECIALIZE_FILL(uint64_t, 2);
+	  break;
+	}
+      case 4 * sizeof(uint64_t):
+	{
+	  SPECIALIZE_FILL(uint64_t, 4);
+	  break;
+	}
+      default:
+	{
+	  for(size_t i = 0; i < count; i++)
+	    memcpy(reinterpret_cast<char *>(dst) + (bytes * i), src, bytes);
+	  break;
+	}
+      }
+
+#undef SPECIALIZE_FILL
+    }
 
     void FillRequest::perform_dma(void)
     {
@@ -2536,26 +2570,46 @@ namespace Realm {
 	  }
 
 	  // HDF5 doesn't seem to offer a way to fill a file without building
-	  //  an equivalently-sized memory buffer first, so just do point-wise
-	  //  iteration and hope that libhdf5 does some buffering
+	  //  an equivalently-sized memory buffer first, and we can't do
+          //  point-wise because libhdf5 doesn't buffer, so try to find a 
+	  //  reasonably-sized chunk to do fills with - this code is still
+	  //  limited to each dimension being all-or-nothing
 	  int dims = info.extent.size();
+	  size_t max_chunk_elems = (32 << 20) / fill_size; // 32MB
+	  size_t chunk_elems = 1;
+	  int chunk_dim = 0;
+	  while(chunk_dim < dims) {
+	    size_t new_elems = chunk_elems * info.extent[chunk_dim];
+	    if(new_elems > max_chunk_elems) break;
+	    chunk_elems = new_elems;
+	    chunk_dim++;
+	  }
+	  void *chunk_data = fill_buffer;
+	  if(chunk_elems > 1) {
+	    chunk_data = malloc(chunk_elems * fill_size);
+	    assert(chunk_data != 0);
+	    repeat_fill(chunk_data, fill_buffer, fill_size, chunk_elems);
+	  }
+	  //  iteration and hope that libhdf5 does some buffering
 	  std::vector<hsize_t> mem_dims(dims, 1);
+	  for(int i = 0; i < chunk_dim; i++)
+	    mem_dims[i] = info.extent[i];
 	  hid_t mem_space_id, file_space_id;
 	  CHECK_HDF5( mem_space_id = H5Screate_simple(dims, mem_dims.data(),
 						      NULL) );
 	  CHECK_HDF5( file_space_id = H5Dget_space(dset_id) );
 
 	  std::vector<hsize_t> cur_pos(info.offset);
-	  std::vector<hsize_t> cur_size(dims, 1);
+	  std::vector<hsize_t> cur_size = mem_dims;
 	  while(true) {
 	    CHECK_HDF5( H5Sselect_hyperslab(file_space_id, H5S_SELECT_SET,
 					    cur_pos.data(), 0,
 					    cur_size.data(), 0) );
 	    CHECK_HDF5( H5Dwrite(dset_id, dtype_id,
 				 mem_space_id, file_space_id,
-				 H5P_DEFAULT, fill_buffer) );
+				 H5P_DEFAULT, chunk_data) );
 	    // advance to next position
-	    int d = 0;
+	    int d = chunk_dim;
 	    while(d < dims) {
 	      if(++cur_pos[d] < (info.offset[d] + info.extent[d]))
 		break;
@@ -2564,6 +2618,9 @@ namespace Realm {
 	    }
 	    if(d >= dims) break;
 	  }
+
+	  if(chunk_data != fill_buffer)
+	    free(chunk_data);
 
 	  CHECK_HDF5( H5Sclose(mem_space_id) );
 	  CHECK_HDF5( H5Sclose(file_space_id) );
@@ -2601,35 +2658,7 @@ namespace Realm {
 	    rep_size = rep_elems * fill_size;
 	    rep_buffer = malloc(rep_size);
 	    assert(rep_buffer != 0);
-            switch (fill_size)
-            {
-              case sizeof(uint32_t):
-                {
-                  SPECIALIZE_FILL(uint32_t, 1);
-                  break;
-                }
-              case sizeof(uint64_t):
-                {
-                  SPECIALIZE_FILL(uint64_t, 1);
-                  break;
-                }
-              case 2 * sizeof(uint64_t):
-                {
-                  SPECIALIZE_FILL(uint64_t, 2);
-                  break;
-                }
-              case 4 * sizeof(uint64_t):
-                {
-                  SPECIALIZE_FILL(uint64_t, 4);
-                  break;
-                }
-              default:
-                {
-                  for(size_t ofs = 0; ofs < rep_size; ofs += fill_size)
-                    memcpy(((char *)rep_buffer)+ofs, fill_buffer, fill_size);
-                  break;
-                }
-            }
+	    repeat_fill(rep_buffer, fill_buffer, fill_size, rep_elems);
 	  }
 	  use_buffer = rep_buffer;
 	  use_size = rep_size;

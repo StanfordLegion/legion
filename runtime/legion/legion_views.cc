@@ -154,7 +154,7 @@ namespace Legion {
 #endif
       InstanceView *inst_view = view->as_instance_view();
       std::set<RtEvent> applied_events;
-      const PhysicalTraceInfo trace_info(NULL);
+      const PhysicalTraceInfo trace_info(NULL, -1U, false);
       ApEvent pre = inst_view->register_user(usage, user_mask, user_expr,
                                              op_id, index, term_event,
                                              applied_events, trace_info,source);

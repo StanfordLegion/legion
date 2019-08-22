@@ -2639,7 +2639,8 @@ static void *bytedup(const void *data, size_t datalen)
 	    impl->held_triggers.erase(it);
 	  }
 
-	  impl->generation = trigger_gen;
+	  if(trigger_gen > impl->generation)
+	    impl->generation = trigger_gen;
 
 	  // now iterate through any generations up to and including the latest triggered
 	  //  generation, and accumulate local waiters to notify
