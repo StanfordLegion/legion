@@ -575,16 +575,15 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
-    // PhysicalTraceInfo
+    // TraceInfo
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    PhysicalTraceInfo::PhysicalTraceInfo(Operation *o, unsigned idx, bool init)
+    TraceInfo::TraceInfo(Operation *o, bool init)
+      : op(o), memo((op == NULL) ? NULL : op->get_memoizable()), 
+        rec((memo == NULL) ? NULL : memo->get_template()),
+        recording((rec == NULL) ? false : rec->is_recording())
     //--------------------------------------------------------------------------
-      : op(o), memo((op == NULL) ? NULL : op->get_memoizable()), index(idx), 
-        dst_index(idx), rec((memo == NULL) ? NULL : memo->get_template()),
-        recording((rec == NULL) ? false : rec->is_recording()),
-        update_validity(true)
     {
       if (recording && init)
         rec->record_get_term_event(memo);
@@ -593,10 +592,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    PhysicalTraceInfo::PhysicalTraceInfo(const PhysicalTraceInfo &info,
-                                         unsigned idx, bool update)
-      : op(info.op), memo(info.memo), index(idx), dst_index(idx), rec(info.rec),
-        recording(info.recording), update_validity(update)
+    TraceInfo::TraceInfo(const TraceInfo &rhs)
+      : op(rhs.op), memo(rhs.memo), rec(rhs.rec), recording(rhs.recording)
     //--------------------------------------------------------------------------
     {
       if (rec != NULL)
@@ -604,57 +601,66 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    PhysicalTraceInfo::PhysicalTraceInfo(
-                               Operation *o, unsigned src_idx, unsigned dst_idx)
+    TraceInfo::~TraceInfo(void)
     //--------------------------------------------------------------------------
-      : op(o), memo((op == NULL) ? NULL : op->get_memoizable()), index(src_idx), 
-        dst_index(dst_idx), rec((memo == NULL) ? NULL : memo->get_template()),
-        recording((rec == NULL) ? false : rec->is_recording()),
-        update_validity(true)
+    {
+      if ((rec != NULL) && rec->remove_recorder_reference())
+        delete rec;
+    }
+
+    //--------------------------------------------------------------------------
+    TraceInfo::TraceInfo(Operation *o, Memoizable *m, 
+                         PhysicalTraceRecorder *r, const bool record)
+      : op(o), memo(m), rec(r), recording(record)
+    //--------------------------------------------------------------------------
     {
       if (rec != NULL)
         rec->add_recorder_reference();
     }
 
+    /////////////////////////////////////////////////////////////
+    // PhysicalTraceInfo
+    /////////////////////////////////////////////////////////////
+
     //--------------------------------------------------------------------------
-    PhysicalTraceInfo::PhysicalTraceInfo(Operation *o, Memoizable &m)
-      : op(o), memo(&m), index(-1U), dst_index(-1U), rec(m.get_template()),
-        recording((rec == NULL) ? false : rec->is_recording()),
+    PhysicalTraceInfo::PhysicalTraceInfo(Operation *o, unsigned idx, bool init)
+      : TraceInfo(o, init), index(idx), dst_index(idx), update_validity(true)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    PhysicalTraceInfo::PhysicalTraceInfo(const TraceInfo &info, 
+                                         unsigned idx, bool update/*=true*/)
+      : TraceInfo(info), index(idx), dst_index(idx), update_validity(update)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    PhysicalTraceInfo::PhysicalTraceInfo(unsigned src_idx, 
+                                         const TraceInfo &info,unsigned dst_idx)
+      : TraceInfo(info), index(src_idx), dst_index(dst_idx), 
         update_validity(true)
     //--------------------------------------------------------------------------
     {
-      if (rec != NULL)
-        rec->add_recorder_reference();
     }
 
     //--------------------------------------------------------------------------
     PhysicalTraceInfo::PhysicalTraceInfo(const PhysicalTraceInfo &rhs)
-      : op(rhs.op), memo(rhs.memo), index(rhs.index), dst_index(rhs.dst_index),
-        rec(rhs.rec), recording(rhs.recording), 
+      : TraceInfo(rhs), index(rhs.index), dst_index(rhs.dst_index),
         update_validity(rhs.update_validity)
     //--------------------------------------------------------------------------
     {
-      if (rec != NULL)
-        rec->add_recorder_reference();
     }
 
     //--------------------------------------------------------------------------
     PhysicalTraceInfo::PhysicalTraceInfo(Operation *o, Memoizable *m, 
         unsigned src_idx,unsigned dst_idx,bool update,PhysicalTraceRecorder *r)
-      : op(o), memo(m), index(src_idx), dst_index(dst_idx), rec(r), 
-        recording(memo != NULL), update_validity(update)
+      : TraceInfo(o, m, r, (m != NULL)), index(src_idx), dst_index(dst_idx),
+        update_validity(update)
     //--------------------------------------------------------------------------
     {
-      if (rec != NULL)
-        rec->add_recorder_reference();
-    }
-
-    //--------------------------------------------------------------------------
-    PhysicalTraceInfo::~PhysicalTraceInfo(void)
-    //--------------------------------------------------------------------------
-    {
-      if ((rec != NULL) && rec->remove_recorder_reference())
-        delete rec;
     }
 
     //--------------------------------------------------------------------------
@@ -727,7 +733,7 @@ namespace Legion {
                                  update_validity, recorder);
       }
       else
-        return PhysicalTraceInfo(NULL);
+        return PhysicalTraceInfo(NULL, -1U, false);
     }
 
     //--------------------------------------------------------------------------
@@ -755,7 +761,7 @@ namespace Legion {
                                  update_validity, recorder);
       }
       else
-        return PhysicalTraceInfo(NULL);
+        return PhysicalTraceInfo(NULL, -1U, false);
     }
 
     /////////////////////////////////////////////////////////////
@@ -3681,9 +3687,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       const CopyFillAggregation *cfargs = (const CopyFillAggregation*)args;
-      cfargs->aggregator->issue_updates(cfargs->info, cfargs->pre,
+      cfargs->aggregator->issue_updates(*cfargs, cfargs->pre,
           cfargs->has_src, cfargs->has_dst, false/*needs deferral*/, 
           cfargs->pass, cfargs->need_pass_preconditions);
+      cfargs->remove_recorder_reference();
     } 
 
     /////////////////////////////////////////////////////////////

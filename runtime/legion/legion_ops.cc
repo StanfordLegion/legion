@@ -548,7 +548,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ ApEvent Operation::merge_sync_preconditions(
-                                 const PhysicalTraceInfo &trace_info,
+                                 const TraceInfo &trace_info,
                                  const std::vector<Grant> &grants, 
                                  const std::vector<PhaseBarrier> &wait_barriers)
     //--------------------------------------------------------------------------
@@ -593,7 +593,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ApEvent Operation::compute_init_precondition(const PhysicalTraceInfo &info)
+    ApEvent Operation::compute_init_precondition(const TraceInfo &info)
     //--------------------------------------------------------------------------
     {
       return execution_fence_event;
@@ -1494,7 +1494,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ApEvent RemoteMemoizable::compute_sync_precondition(
-                                      const PhysicalTraceInfo *trace_info) const
+                                              const TraceInfo *trace_info) const
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -2700,7 +2700,7 @@ namespace Legion {
     void MapOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
-      const PhysicalTraceInfo trace_info(this);
+      const PhysicalTraceInfo trace_info(this, 0/*index*/, true/*init*/);
       // If we have any wait preconditions from phase barriers or 
       // grants then we use them to compute a precondition for doing
       // any copies or anything else for this operation
@@ -4209,7 +4209,7 @@ namespace Legion {
     void CopyOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
-      const PhysicalTraceInfo trace_info(this,-1U /*index*/,true/*initialize*/);
+      const TraceInfo trace_info(this, true/*initialize*/);
       std::vector<InstanceSet> valid_src_instances(src_requirements.size());
       std::vector<InstanceSet> valid_dst_instances(dst_requirements.size());
       std::vector<InstanceSet> valid_gather_instances(
@@ -4374,7 +4374,7 @@ namespace Legion {
           set_mapping_state(idx);
           // Don't track source views of copy across operations here,
           // as they will do later when the realm copies are recorded.
-          PhysicalTraceInfo src_info(trace_info, idx, false/*update_validity*/);
+          PhysicalTraceInfo src_info(trace_info, idx, false/*update validity*/);
           const bool record_valid = (output.untracked_valid_srcs.find(idx) ==
                                      output.untracked_valid_srcs.end());
           runtime->forest->physical_perform_updates_and_registration(
@@ -4509,6 +4509,8 @@ namespace Legion {
         // If we have local completion events then we need to make
         // sure that all those effects have been applied before we
         // can perform the copy across operation, so defer it if necessary
+        PhysicalTraceInfo physical_trace_info(idx, trace_info,
+                                idx + src_requirements.size());
         if (!local_applied_events.empty())
         {
           InstanceSet *deferred_src = new InstanceSet();
@@ -4528,7 +4530,8 @@ namespace Legion {
             deferred_scatter->swap(scatter_targets);
           }
           RtUserEvent deferred_applied = Runtime::create_rt_user_event();
-          DeferredCopyAcross args(this, idx, local_init_precondition,
+          DeferredCopyAcross args(this, physical_trace_info, 
+                                  idx, local_init_precondition,
                                   local_completion, predication_guard,
                                   deferred_applied, deferred_src, deferred_dst,
                                   deferred_gather, deferred_scatter);
@@ -4542,7 +4545,7 @@ namespace Legion {
                               predication_guard, src_targets, dst_targets, 
                               gather_targets.empty() ? NULL : &gather_targets,
                               scatter_targets.empty() ? NULL : &scatter_targets,
-                              trace_info, map_applied_conditions);
+                              physical_trace_info, map_applied_conditions);
       }
       ApEvent copy_complete_event = 
         Runtime::merge_events(&trace_info, copy_complete_events);
@@ -4629,15 +4632,13 @@ namespace Legion {
       {
         if (gather_targets == NULL)
         {
-          unsigned dst_index = index + src_requirements.size();
           // Normal copy across
           copy_done = runtime->forest->copy_across( 
               src_requirements[index], dst_requirements[index],
               src_versions[index], dst_versions[index],
-              src_targets, dst_targets, this, index, dst_index,
+              src_targets, dst_targets, this, index, trace_info.dst_index,
               local_init_precondition, predication_guard, 
-              PhysicalTraceInfo(trace_info, index, dst_index),
-              applied_conditions);
+              trace_info, applied_conditions);
         }
         else
         {
@@ -4696,12 +4697,10 @@ namespace Legion {
     {
       const DeferredCopyAcross *dargs = (const DeferredCopyAcross*)args;
       std::set<RtEvent> applied_conditions;
-      const PhysicalTraceInfo trace_info(dargs->copy);
       dargs->copy->perform_copy_across(dargs->index, dargs->precondition,
                             dargs->done, dargs->guard, *dargs->src_targets, 
                             *dargs->dst_targets, dargs->gather_targets,
-                            dargs->scatter_targets, trace_info, 
-                            applied_conditions);
+                            dargs->scatter_targets, *dargs, applied_conditions);
       if (!applied_conditions.empty())
         Runtime::trigger_event(dargs->applied, 
             Runtime::merge_events(applied_conditions));
@@ -4713,6 +4712,7 @@ namespace Legion {
         delete dargs->gather_targets;
       if (dargs->scatter_targets != NULL)
         delete dargs->scatter_targets;
+      dargs->remove_recorder_reference();
     }
 
     //--------------------------------------------------------------------------
@@ -5309,8 +5309,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ApEvent CopyOp::compute_sync_precondition(
-                                            const PhysicalTraceInfo *info) const
+    ApEvent CopyOp::compute_sync_precondition(const TraceInfo *info) const
     //--------------------------------------------------------------------------
     {
       ApEvent result;
@@ -7321,7 +7320,7 @@ namespace Legion {
         // For this case we actually need to go through and prune out any
         // valid instances for these fields in the equivalence sets in order
         // to be able to free up the resources.
-        const PhysicalTraceInfo trace_info(this);
+        const PhysicalTraceInfo trace_info(this, -1U, false/*init*/);
         for (unsigned idx = 0; idx < deletion_requirements.size(); idx++)
           runtime->forest->invalidate_fields(this, idx, version_infos[idx],
                                              trace_info, map_applied_events);
@@ -8043,7 +8042,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(completion_event.exists());
 #endif
-      const PhysicalTraceInfo trace_info(this);
+      const PhysicalTraceInfo trace_info(this, 0/*index*/, false/*init*/);
       ApUserEvent close_event = Runtime::create_ap_user_event();
       ApEvent effects_done = 
         runtime->forest->physical_perform_updates_and_registration(
@@ -8824,8 +8823,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ApEvent AcquireOp::compute_sync_precondition(
-                                            const PhysicalTraceInfo *info) const
+    ApEvent AcquireOp::compute_sync_precondition(const TraceInfo *info) const
     //--------------------------------------------------------------------------
     {
       ApEvent result;
@@ -9629,8 +9627,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ApEvent ReleaseOp::compute_sync_precondition(
-                                            const PhysicalTraceInfo *info) const
+    ApEvent ReleaseOp::compute_sync_precondition(const TraceInfo *info) const
     //--------------------------------------------------------------------------
     {
       ApEvent result;
@@ -12674,7 +12671,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(requirement.handle_type == SINGULAR);
 #endif
-      const PhysicalTraceInfo trace_info(this);
+      const PhysicalTraceInfo trace_info(this, 0/*index*/, true/*init*/);
       // Perform the mapping call to get the physical isntances 
       InstanceSet mapped_instances;
       const bool record_valid = invoke_mapper(mapped_instances);
@@ -14092,7 +14089,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(fill_view == NULL);
 #endif
-      const PhysicalTraceInfo trace_info(this, 0/*index*/);
+      const PhysicalTraceInfo trace_info(this, 0/*index*/, false/*init*/);
       // Make a copy of the future value since the region tree
       // will want to take ownership of the buffer
       size_t result_size = future.impl->get_untyped_size();
@@ -14340,8 +14337,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ApEvent FillOp::compute_sync_precondition(
-                                            const PhysicalTraceInfo *info) const
+    ApEvent FillOp::compute_sync_precondition(const TraceInfo *info) const
     //--------------------------------------------------------------------------
     {
       ApEvent result;
@@ -15148,7 +15144,7 @@ namespace Legion {
         memory_manager->attach_external_instance(external_manager);
       if (attached.exists())
         attached.wait();
-      const PhysicalTraceInfo trace_info(this, 0);
+      const PhysicalTraceInfo trace_info(this, 0/*idx*/, true/*init*/);
       InstanceSet external(1);
       external[0] = external_instance;
       InnerContext *context = find_physical_context(0/*index*/, requirement);
@@ -15688,7 +15684,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(!manager->is_reduction_manager()); 
 #endif
-      const PhysicalTraceInfo trace_info(this, 0);
+      const PhysicalTraceInfo trace_info(this, 0/*idx*/, true/*init*/);
       std::set<ApEvent> detach_events;
       // If we need to flush then register this operation to bring the
       // data that it has up to date, use READ-ONLY privileges since we're

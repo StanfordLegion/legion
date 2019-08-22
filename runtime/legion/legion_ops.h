@@ -378,7 +378,7 @@ namespace Legion {
       // Update the set of atomic locks for this operation
       virtual void update_atomic_locks(Reservation lock, bool exclusive);
       // Get the restrict precondition for this operation
-      static ApEvent merge_sync_preconditions(const PhysicalTraceInfo &info,
+      static ApEvent merge_sync_preconditions(const TraceInfo &info,
                                 const std::vector<Grant> &grants,
                                 const std::vector<PhaseBarrier> &wait_barriers);
       virtual void add_copy_profiling_request(
@@ -388,7 +388,7 @@ namespace Legion {
                                   const Realm::ProfilingResponse &result);
       virtual void handle_profiling_update(int count);
       // Compute the initial precondition for this operation
-      virtual ApEvent compute_init_precondition(const PhysicalTraceInfo &info);
+      virtual ApEvent compute_init_precondition(const TraceInfo &info);
     protected:
       void filter_copy_request_kinds(MapperManager *mapper,
           const std::set<ProfilingMeasurementID> &requests,
@@ -792,8 +792,7 @@ namespace Legion {
       // Return a trace local unique ID for this operation
       typedef std::pair<unsigned, DomainPoint> TraceLocalID;
       virtual TraceLocalID get_trace_local_id(void) const = 0;
-      virtual ApEvent compute_sync_precondition(
-                      const PhysicalTraceInfo *info) const = 0;
+      virtual ApEvent compute_sync_precondition(const TraceInfo *in) const = 0;
       virtual void complete_replay(ApEvent complete_event) = 0;
       virtual const VersionInfo& get_version_info(unsigned idx) const = 0;
       virtual const RegionRequirement& get_requirement(unsigned idx) const = 0;
@@ -821,8 +820,7 @@ namespace Legion {
       // Return a trace local unique ID for this operation
       typedef std::pair<unsigned, DomainPoint> TraceLocalID;
       virtual TraceLocalID get_trace_local_id(void) const;
-      virtual ApEvent compute_sync_precondition(
-                      const PhysicalTraceInfo *info) const;
+      virtual ApEvent compute_sync_precondition(const TraceInfo *info) const;
       virtual void complete_replay(ApEvent complete_event);
       virtual const VersionInfo& get_version_info(unsigned idx) const;
       virtual const RegionRequirement& get_requirement(unsigned idx) const;
@@ -876,8 +874,7 @@ namespace Legion {
       // From Memoizable
       virtual TraceLocalID get_trace_local_id() const;
       virtual PhysicalTemplate* get_template(void) const;
-      virtual ApEvent compute_sync_precondition(
-                      const PhysicalTraceInfo *info) const
+      virtual ApEvent compute_sync_precondition(const TraceInfo *info) const
         { assert(false); return ApEvent::NO_AP_EVENT; }
       virtual void complete_replay(ApEvent complete_event)
         { assert(false); }
@@ -885,7 +882,7 @@ namespace Legion {
         { return this->get_completion_event(); }
       virtual Operation::OpKind get_memoizable_kind(void) const
         { return this->get_operation_kind(); }
-      virtual ApEvent compute_init_precondition(const PhysicalTraceInfo &info);
+      virtual ApEvent compute_init_precondition(const TraceInfo &info);
       virtual RtEvent complete_memoizable(
                                  RtEvent complete_event = RtEvent::NO_RT_EVENT);
     protected:
@@ -1043,18 +1040,29 @@ namespace Legion {
         SCATTER_REQ = 3,
       };
     public:
-      struct DeferredCopyAcross : public LgTaskArgs<DeferredCopyAcross> {
+      struct DeferredCopyAcross : public LgTaskArgs<DeferredCopyAcross>,
+                                  public PhysicalTraceInfo {
       public:
         static const LgTaskID TASK_ID = LG_DEFERRED_COPY_ACROSS_TASK_ID;
       public:
-        DeferredCopyAcross(CopyOp *op, unsigned idx, ApEvent pre, ApUserEvent d,
+        DeferredCopyAcross(CopyOp *op, const PhysicalTraceInfo &info,
+                           unsigned idx, ApEvent pre, ApUserEvent d,
                            PredEvent g, RtUserEvent a, 
                            InstanceSet *src, InstanceSet *dst,
                            InstanceSet *gather, InstanceSet *scatter)
-          : LgTaskArgs<DeferredCopyAcross>(op->get_unique_op_id()), copy(op),
+          : LgTaskArgs<DeferredCopyAcross>(op->get_unique_op_id()), 
+            PhysicalTraceInfo(info), copy(op),
             index(idx), precondition(pre), done(d), guard(g), applied(a),
             src_targets(src), dst_targets(dst), gather_targets(gather),
-            scatter_targets(scatter) { }
+            scatter_targets(scatter) 
+          // This is kind of scary, Realm is about to make a copy of this
+          // without our knowledge, but we need to preserve the correctness
+          // of reference counting on PhysicalTraceRecorders, so just add
+          // an extra reference here that we will remove when we're handled.
+          { if (rec != NULL) rec->add_recorder_reference(); }
+      public:
+        inline void remove_recorder_reference(void) const
+          { if ((rec != NULL) && rec->remove_recorder_reference()) delete rec; }
       public:
         CopyOp *const copy;
         const unsigned index;
@@ -1140,8 +1148,7 @@ namespace Legion {
       virtual void replay_analysis(void);
     public:
       // From Memoizable
-      virtual ApEvent compute_sync_precondition(
-                      const PhysicalTraceInfo *info) const;
+      virtual ApEvent compute_sync_precondition(const TraceInfo *info) const;
       virtual void complete_replay(ApEvent copy_complete_event);
       virtual const VersionInfo& get_version_info(unsigned idx) const;
       virtual const RegionRequirement& get_requirement(unsigned idx) const;
@@ -1728,8 +1735,7 @@ namespace Legion {
       virtual void replay_analysis(void);
     public:
       // From Memoizable
-      virtual ApEvent compute_sync_precondition(
-                      const PhysicalTraceInfo *info) const;
+      virtual ApEvent compute_sync_precondition(const TraceInfo *info) const;
       virtual void complete_replay(ApEvent acquire_complete_event);
       virtual const VersionInfo& get_version_info(unsigned idx) const;
       virtual const RegionRequirement& get_requirement(unsigned idx) const;
@@ -1831,8 +1837,7 @@ namespace Legion {
       virtual void replay_analysis(void);
     public:
       // From Memoizable
-      virtual ApEvent compute_sync_precondition(
-                              const PhysicalTraceInfo *info) const;
+      virtual ApEvent compute_sync_precondition(const TraceInfo *info) const;
       virtual void complete_replay(ApEvent release_complete_event);
       virtual const VersionInfo& get_version_info(unsigned idx) const;
       virtual const RegionRequirement& get_requirement(unsigned idx) const;
@@ -2872,7 +2877,7 @@ namespace Legion {
     public:
       void check_fill_privilege(void);
       void compute_parent_index(void);
-      ApEvent compute_sync_precondition(const PhysicalTraceInfo *info) const;
+      ApEvent compute_sync_precondition(const TraceInfo *info) const;
       void log_fill_requirement(void) const;
     public:
       // From Memoizable

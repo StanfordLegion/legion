@@ -2108,12 +2108,12 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(cached);
 #endif
-      const PhysicalTraceInfo trace_info(op);
+      const TraceInfo trace_info(op, false/*init*/);
       for (unsigned idx = 0; idx < views.size(); ++idx)
       {
         std::set<RtEvent> map_applied_events;
         forest->update_valid_instances(op, idx, version_infos[idx], views[idx],
-            trace_info, map_applied_events);
+            PhysicalTraceInfo(trace_info, idx), map_applied_events);
       }
     }
 
@@ -4382,7 +4382,7 @@ namespace Legion {
 #endif
       Memoizable *memo = operations[owner];
       ApEvent precondition = events[precondition_idx];
-      const PhysicalTraceInfo trace_info(memo->get_operation(), *memo);
+      const PhysicalTraceInfo trace_info(memo->get_operation(), -1U, false);
       events[lhs] = expr->issue_copy(trace_info, dst_fields, src_fields,
 #ifdef LEGION_SPY
                                      handle, src_tree_id, dst_tree_id,
@@ -4495,7 +4495,7 @@ namespace Legion {
 #endif
       Memoizable *memo = operations[owner];
       ApEvent precondition = events[precondition_idx];
-      const PhysicalTraceInfo trace_info(memo->get_operation(), *memo);
+      const PhysicalTraceInfo trace_info(memo->get_operation(), -1U, false);
       events[lhs] = expr->issue_fill(trace_info, fields, 
                                      fill_value, fill_size,
 #ifdef LEGION_SPY

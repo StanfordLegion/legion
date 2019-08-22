@@ -1735,10 +1735,8 @@ namespace Legion {
             // Record the event as the precondition for the task
             targets[idx].set_ready_event(ready);
             if (trace_info.recording)
-            {
-              PhysicalTraceInfo(trace_info, analysis->index).record_op_view(
+              trace_info.record_op_view(
                   analysis->usage, inst_mask, analysis->target_views[idx]);
-            }
           }
           if (!user_applied.empty())
           {
@@ -1761,10 +1759,8 @@ namespace Legion {
             // Record the event as the precondition for the task
             targets[idx].set_ready_event(ready);
             if (trace_info.recording)
-            {
-              PhysicalTraceInfo(trace_info, analysis->index).record_op_view(
+              trace_info.record_op_view(
                 analysis->usage, inst_mask, analysis->target_views[idx]);
-            }
           }
         }
       }
@@ -1831,13 +1827,13 @@ namespace Legion {
     RtEvent RegionTreeForest::defer_physical_perform_registration(RtEvent pre,
                          UpdateAnalysis *analysis, InstanceSet &targets,
                          std::set<RtEvent> &map_applied_events,
-                         ApEvent &result)
+                         ApEvent &result, const PhysicalTraceInfo &info)
     //--------------------------------------------------------------------------
     {
       RtUserEvent map_applied_done = Runtime::create_rt_user_event();
       map_applied_events.insert(map_applied_done);
       DeferPhysicalRegistrationArgs args(analysis->op->get_unique_op_id(),
-                             analysis, targets, map_applied_done, result);
+                             analysis, targets, map_applied_done, result, info);
       return runtime->issue_runtime_meta_task(args, 
                     LG_LATENCY_WORK_PRIORITY, pre);
     }
@@ -1848,10 +1844,9 @@ namespace Legion {
     {
       const DeferPhysicalRegistrationArgs *dargs = 
         (const DeferPhysicalRegistrationArgs*)args;
-      const PhysicalTraceInfo trace_info(dargs->analysis->op);
       std::set<RtEvent> applied_events;
       dargs->result = physical_perform_registration(dargs->analysis, 
-                        dargs->targets, trace_info, applied_events);
+                        dargs->targets, *dargs, applied_events);
       if (!applied_events.empty())
         Runtime::trigger_event(dargs->map_applied_done,
             Runtime::merge_events(applied_events));
@@ -1859,6 +1854,7 @@ namespace Legion {
         Runtime::trigger_event(dargs->map_applied_done);
       if (dargs->analysis->remove_reference())
         delete dargs->analysis;
+      dargs->remove_recorder_reference();
     }
 
     //--------------------------------------------------------------------------

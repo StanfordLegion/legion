@@ -284,8 +284,7 @@ namespace Legion {
       virtual VersionInfo& get_version_info(unsigned idx);
       virtual const VersionInfo& get_version_info(unsigned idx) const;
       virtual RegionTreePath& get_privilege_path(unsigned idx);
-      virtual ApEvent compute_sync_precondition(
-                                 const PhysicalTraceInfo *info) const;
+      virtual ApEvent compute_sync_precondition(const TraceInfo *info) const;
     public:
       virtual void early_map_task(void) = 0;
       virtual bool distribute_task(void) = 0;
@@ -496,7 +495,7 @@ namespace Legion {
       void invoke_mapper(MustEpochOp *must_epoch_owner);
       RtEvent map_all_regions(ApEvent user_event, MustEpochOp *must_epoch_owner,
                               const DeferMappingArgs *defer_args);
-      void perform_post_mapping(const PhysicalTraceInfo &trace_info);
+      void perform_post_mapping(const TraceInfo &trace_info);
     protected:
       void pack_single_task(Serializer &rez, AddressSpaceID target);
       void unpack_single_task(Deserializer &derez, 

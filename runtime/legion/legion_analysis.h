@@ -302,46 +302,73 @@ namespace Legion {
     };
 
     /**
-     * \struct PhysicalTraceInfo
+     * \struct TraceInfo
      */
-    struct PhysicalTraceInfo {
+    struct TraceInfo {
     public:
-      explicit PhysicalTraceInfo(Operation *op, unsigned index = -1U,
-                                 bool initialize = false);
-      PhysicalTraceInfo(const PhysicalTraceInfo &info, unsigned index,
-                        bool update_validity = true);
-      // Special case for copy across operations
-      PhysicalTraceInfo(Operation *op, unsigned src_idx, unsigned dst_idx);
-      PhysicalTraceInfo(Operation *op, Memoizable &memo);
-      PhysicalTraceInfo(const PhysicalTraceInfo &rhs);
-      ~PhysicalTraceInfo(void);
+      explicit TraceInfo(Operation *op, bool initialize = false);
+      TraceInfo(const TraceInfo &info);
+      ~TraceInfo(void);
     protected:
-      PhysicalTraceInfo(Operation *op, Memoizable *memo, unsigned src_idx, 
-          unsigned dst_idx, bool update_validity, PhysicalTraceRecorder *rec);
+      TraceInfo(Operation *op, Memoizable *memo, 
+                PhysicalTraceRecorder *rec, bool recording);
     public:
       inline void record_merge_events(ApEvent &result, 
                                       ApEvent e1, ApEvent e2) const
         {
-          sanity_check(false);
+          base_sanity_check();
           rec->record_merge_events(result, e1, e2, memo);
         }
       inline void record_merge_events(ApEvent &result, ApEvent e1, 
                                       ApEvent e2, ApEvent e3) const
         {
-          sanity_check(false);
+          base_sanity_check();
           rec->record_merge_events(result, e1, e2, e3, memo);
         }
       inline void record_merge_events(ApEvent &result, 
                                       const std::set<ApEvent> &events) const
         {
-          sanity_check(false);
+          base_sanity_check();
           rec->record_merge_events(result, events, memo);
         }
       inline void record_op_sync_event(ApEvent &result) const
         {
-          sanity_check(false);
+          base_sanity_check();
           rec->record_set_op_sync_event(result, memo);
         }
+    protected:
+      inline void base_sanity_check(void) const
+        {
+#ifdef DEBUG_LEGION
+          assert(recording);
+          assert(rec != NULL);
+          assert(rec->is_recording());
+#endif
+        }
+    public:
+      Operation *const op;
+      Memoizable *const memo;
+    protected:
+      PhysicalTraceRecorder *const rec;
+    public:
+      const bool recording;
+    };
+
+    /**
+     * \struct PhysicalTraceInfo
+     */
+    struct PhysicalTraceInfo : public TraceInfo {
+    public:
+      PhysicalTraceInfo(Operation *op, unsigned index, bool init);
+      PhysicalTraceInfo(const TraceInfo &info, unsigned index, 
+                        bool update_validity = true);
+      // Weird argument order to help the compiler avoid ambiguity
+      PhysicalTraceInfo(unsigned src_idx, const TraceInfo &info, 
+                        unsigned dst_idx);
+      PhysicalTraceInfo(const PhysicalTraceInfo &rhs);
+    protected:
+      PhysicalTraceInfo(Operation *op, Memoizable *memo, unsigned src_idx, 
+          unsigned dst_idx, bool update_validity, PhysicalTraceRecorder *rec);
     public:
       inline void record_issue_copy(ApEvent &result,
                           IndexSpaceExpression *expr,
@@ -358,7 +385,7 @@ namespace Legion {
                           const FieldMaskSet<InstanceView> *tracing_srcs,
                           const FieldMaskSet<InstanceView> *tracing_dsts) const
         {
-          sanity_check(true);
+          sanity_check();
 #ifdef DEBUG_LEGION
           assert(tracing_srcs != NULL);
           assert(tracing_dsts != NULL);
@@ -384,7 +411,7 @@ namespace Legion {
                           const FieldMaskSet<FillView> *tracing_srcs,
                           const FieldMaskSet<InstanceView> *tracing_dsts) const
         {
-          sanity_check(true);
+          sanity_check();
 #ifdef DEBUG_LEGION
           assert(tracing_srcs != NULL);
           assert(tracing_dsts != NULL);
@@ -399,7 +426,7 @@ namespace Legion {
       inline void record_fill_view(FillView *view, 
                                    const FieldMask &user_mask) const
         {
-          sanity_check(false);
+          sanity_check();
           rec->record_fill_view(view, user_mask);
         }
       inline void record_issue_indirect(ApEvent &result,
@@ -409,7 +436,7 @@ namespace Legion {
                              const std::vector<void*> &indirections,
                              ApEvent precondition) const
         {
-          sanity_check(true);
+          sanity_check();
           rec->record_issue_indirect(memo, result, expr, src_fields, dst_fields,
                                      indirections, precondition);
         }
@@ -417,7 +444,7 @@ namespace Legion {
                                  const FieldMask &user_mask,
                                  InstanceView *view) const
         {
-          sanity_check(true);
+          sanity_check();
           rec->record_op_view(memo,index,view,usage,user_mask,update_validity);
         }
     public:
@@ -429,25 +456,17 @@ namespace Legion {
       static PhysicalTraceInfo unpack_trace_info(Deserializer &derez,
                                      Runtime *runtime, Operation *op);
     private:
-      inline void sanity_check(bool check_indices) const
+      inline void sanity_check(void) const
         {
 #ifdef DEBUG_LEGION
-          assert(recording);
-          assert(rec != NULL);
-          assert(rec->is_recording());
-          assert(!check_indices || index != -1U);
-          assert(!check_indices || dst_index != -1U);
+          base_sanity_check();
+          assert(index != -1U);
+          assert(dst_index != -1U);
 #endif
         }
     public:
-      Operation *const op;
-      Memoizable *const memo;
       const unsigned index;
       const unsigned dst_index;
-    protected:
-      PhysicalTraceRecorder *const rec;
-    public:
-      const bool recording;
       const bool update_validity;
     };
 
@@ -986,19 +1005,27 @@ namespace Legion {
                                public CopyFillGuard,
                                public LegionHeapify<CopyFillAggregator> {
     public:
-      struct CopyFillAggregation : public LgTaskArgs<CopyFillAggregation> {
+      struct CopyFillAggregation : public LgTaskArgs<CopyFillAggregation>,
+                                   public PhysicalTraceInfo {
       public:
         static const LgTaskID TASK_ID = LG_COPY_FILL_AGGREGATION_TASK_ID;
       public:
         CopyFillAggregation(CopyFillAggregator *a, const PhysicalTraceInfo &i,
                       ApEvent p, const bool src, const bool dst, UniqueID uid,
                       unsigned ps, const bool need_pass_pre)
-          : LgTaskArgs<CopyFillAggregation>(uid), 
-            aggregator(a), info(i), pre(p), pass(ps), has_src(src), 
-            has_dst(dst), need_pass_preconditions(need_pass_pre) { }
+          : LgTaskArgs<CopyFillAggregation>(uid), PhysicalTraceInfo(i),
+            aggregator(a), pre(p), pass(ps), has_src(src), 
+            has_dst(dst), need_pass_preconditions(need_pass_pre) 
+          // This is kind of scary, Realm is about to make a copy of this
+          // without our knowledge, but we need to preserve the correctness
+          // of reference counting on PhysicalTraceRecorders, so just add
+          // an extra reference here that we will remove when we're handled.
+          { if (rec != NULL) rec->add_recorder_reference(); }
+      public:
+        inline void remove_recorder_reference(void) const
+          { if ((rec != NULL) && rec->remove_recorder_reference()) delete rec; }
       public:
         CopyFillAggregator *const aggregator;
-        const PhysicalTraceInfo info;
         const ApEvent pre;
         const unsigned pass;
         const bool has_src;

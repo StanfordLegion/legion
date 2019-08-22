@@ -144,7 +144,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<typename OP>
     ApEvent MemoizableOp<OP>::compute_init_precondition(
-                                            const PhysicalTraceInfo &trace_info)
+                                                    const TraceInfo &trace_info)
     //--------------------------------------------------------------------------
     {
       ApEvent sync_precondition = compute_sync_precondition(&trace_info);

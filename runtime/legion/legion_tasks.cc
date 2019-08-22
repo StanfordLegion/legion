@@ -1156,8 +1156,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ApEvent TaskOp::compute_sync_precondition(
-                                            const PhysicalTraceInfo *info) const
+    ApEvent TaskOp::compute_sync_precondition(const TraceInfo *info) const
     //--------------------------------------------------------------------------
     {
       ApEvent result;
@@ -1712,7 +1711,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, EARLY_MAP_REGIONS_CALL);
-      const PhysicalTraceInfo trace_info(this);
+      const TraceInfo trace_info(this);
       ApEvent init_precondition = compute_init_precondition(trace_info);;
       // A little bit of suckinesss here, it's unclear if we have
       // our version infos with the proper versioning information
@@ -1906,7 +1905,9 @@ namespace Legion {
           runtime->forest->physical_perform_updates_and_registration(
                               regions[*it], version_info, 
                               this, *it, init_precondition, completion_event,
-                              chosen_instances, trace_info, applied_conditions,
+                              chosen_instances, 
+                              PhysicalTraceInfo(trace_info, *it), 
+                              applied_conditions,
 #ifdef DEBUG_LEGION
                               get_logging_name(), unique_op_id,
 #endif
@@ -3451,8 +3452,7 @@ namespace Legion {
                                          defer_args, 1/*invocation count*/);
           }
         }
-        const PhysicalTraceInfo trace_info(this, -1U/*index*/,
-                                           true/*initialize*/);
+        const TraceInfo trace_info(this, true/*initialize*/);
         ApEvent init_precondition = compute_init_precondition(trace_info);
 #ifdef LEGION_SPY
         {
@@ -3551,7 +3551,8 @@ namespace Legion {
                   runtime->forest->defer_physical_perform_registration(
                                           reg_pre[*it], analyses[*it],
                                           physical_instances[*it],
-                                          map_applied_conditions, effects[*it]);
+                                          map_applied_conditions, effects[*it],
+                                          PhysicalTraceInfo(trace_info, *it));
                 registration_postconditions.insert(registration_post);
               }
               else
@@ -3617,13 +3618,13 @@ namespace Legion {
         delete defer_args->effects;
         if (perform_postmap)
         {
-          const PhysicalTraceInfo trace_info(this);
+          const TraceInfo trace_info(this);
           perform_post_mapping(trace_info);
         }
       }
       if (is_recording())
       {
-        const PhysicalTraceInfo trace_info(this);
+        const TraceInfo trace_info(this);
 #ifdef DEBUG_LEGION
         assert(tpl != NULL && tpl->is_recording());
 #endif
@@ -3641,7 +3642,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void SingleTask::perform_post_mapping(const PhysicalTraceInfo &trace_info)
+    void SingleTask::perform_post_mapping(const TraceInfo &trace_info)
     //--------------------------------------------------------------------------
     {
       Mapper::PostMapInput input;
@@ -3810,7 +3811,8 @@ namespace Legion {
                           regions[idx], local_version_info, this, idx,
                           completion_event/*wait for task to be done*/,
                           ApEvent::NO_AP_EVENT/*done immediately*/, 
-                          result, trace_info, map_applied_conditions,
+                          result, PhysicalTraceInfo(trace_info, idx), 
+                          map_applied_conditions,
 #ifdef DEBUG_LEGION
                           get_logging_name(), unique_op_id,
 #endif
@@ -5090,7 +5092,7 @@ namespace Legion {
         ApEvent done_event = get_task_completion();
         if (!effects_postconditions.empty())
         {
-          const PhysicalTraceInfo trace_info(this);
+          const TraceInfo trace_info(this);
           effects_postconditions.insert(done_event);
           done_event = 
             Runtime::merge_events(&trace_info, effects_postconditions);
@@ -6006,7 +6008,7 @@ namespace Legion {
         }
         if (!effects_postconditions.empty())
         {
-          const PhysicalTraceInfo trace_info(this);
+          const TraceInfo trace_info(this);
           effects_condition = 
             Runtime::merge_events(&trace_info, effects_postconditions);
           effects_postconditions.clear();
@@ -6252,7 +6254,7 @@ namespace Legion {
       {
         if (!effects_postconditions.empty())
         {
-          const PhysicalTraceInfo trace_info(this);
+          const TraceInfo trace_info(this);
           Runtime::trigger_event(deferred_effects,
             Runtime::merge_events(&trace_info, effects_postconditions));
         }
@@ -7102,7 +7104,7 @@ namespace Legion {
       }
       if (!effects_postconditions.empty())
       {
-        const PhysicalTraceInfo trace_info(this);
+        const TraceInfo trace_info(this);
         ApEvent done = 
           Runtime::merge_events(&trace_info, effects_postconditions);
         request_early_complete(done);
@@ -8499,7 +8501,7 @@ namespace Legion {
 #endif
         if (!effects_postconditions.empty())
         {
-          const PhysicalTraceInfo trace_info(this);
+          const TraceInfo trace_info(this);
           ApEvent effects_done = 
             Runtime::merge_events(&trace_info, effects_postconditions);
           index_owner->return_slice_mapped(points.size(), denominator,
@@ -8597,7 +8599,7 @@ namespace Legion {
       rez.serialize(applied_condition);
       if (!effects_postconditions.empty())
       {
-        const PhysicalTraceInfo trace_info(this);
+        const TraceInfo trace_info(this);
         ApEvent effects_done =
           Runtime::merge_events(&trace_info, effects_postconditions);
         rez.serialize(effects_done);

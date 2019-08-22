@@ -3327,11 +3327,11 @@ namespace Legion {
       // Static member variables for MPI interop
       static int mpi_rank;
     public:
-      static inline ApEvent merge_events(const PhysicalTraceInfo *info,
+      static inline ApEvent merge_events(const TraceInfo *info,
                                          ApEvent e1, ApEvent e2);
-      static inline ApEvent merge_events(const PhysicalTraceInfo *info,
+      static inline ApEvent merge_events(const TraceInfo *info,
                                          ApEvent e1, ApEvent e2, ApEvent e3);
-      static inline ApEvent merge_events(const PhysicalTraceInfo *info,
+      static inline ApEvent merge_events(const TraceInfo *info,
                                          const std::set<ApEvent> &events);
     public:
       static inline RtEvent merge_events(RtEvent e1, RtEvent e2);
@@ -3462,7 +3462,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ inline ApEvent Runtime::merge_events(
-                          const PhysicalTraceInfo *info, ApEvent e1, ApEvent e2)
+                                  const TraceInfo *info, ApEvent e1, ApEvent e2)
     //--------------------------------------------------------------------------
     {
       ApEvent result(Realm::Event::merge_events(e1, e2)); 
@@ -3490,7 +3490,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ inline ApEvent Runtime::merge_events(
-              const PhysicalTraceInfo *info, ApEvent e1, ApEvent e2, ApEvent e3) 
+                      const TraceInfo *info, ApEvent e1, ApEvent e2, ApEvent e3) 
     //--------------------------------------------------------------------------
     {
       ApEvent result(Realm::Event::merge_events(e1, e2, e3)); 
@@ -3521,7 +3521,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ inline ApEvent Runtime::merge_events(
-                 const PhysicalTraceInfo *info, const std::set<ApEvent> &events)
+                         const TraceInfo *info, const std::set<ApEvent> &events)
     //--------------------------------------------------------------------------
     {
 #ifndef LEGION_DISABLE_EVENT_PRUNING
