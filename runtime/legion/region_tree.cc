@@ -1673,8 +1673,9 @@ namespace Legion {
 #endif
       analysis = new UpdateAnalysis(runtime, op, index, &version_info, req, 
                                     region_node, targets, target_views, 
-                                    precondition, term_event, track_effects,
-                                    check_initialized, record_valid);
+                                    trace_info, precondition, term_event, 
+                                    track_effects, check_initialized, 
+                                    record_valid);
       analysis->add_reference();
       // Iterate over all the equivalence classes and perform the analysis
       // Only need to check for uninitialized data for things not discarding
@@ -1953,7 +1954,8 @@ namespace Legion {
       const FieldMaskSet<EquivalenceSet> &eq_sets = 
         version_info.get_equivalence_sets();
       std::set<RtEvent> deferral_events;
-      ReleaseAnalysis analysis(runtime, op, index, precondition, &version_info);
+      ReleaseAnalysis analysis(runtime, op, index, precondition, 
+                               &version_info, trace_info);
       for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
             eq_sets.begin(); it != eq_sets.end(); it++)
       {
@@ -2200,7 +2202,7 @@ namespace Legion {
       CopyAcrossAnalysis *analysis = new CopyAcrossAnalysis(runtime, op, 
           src_index, dst_index, &src_version_info, src_req, dst_req, 
           dst_targets, target_views, precondition, guard, dst_req.redop,
-          src_indexes, dst_indexes, perfect);
+          src_indexes, dst_indexes, trace_info, perfect);
       analysis->add_reference();
       std::set<RtEvent> deferral_events;
       for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
@@ -2626,7 +2628,7 @@ namespace Legion {
       const FieldMaskSet<EquivalenceSet> &eq_sets = 
         version_info.get_equivalence_sets();     
       OverwriteAnalysis *analysis = new OverwriteAnalysis(runtime, op, index, 
-          RegionUsage(req), &version_info, fill_view, precondition, 
+          RegionUsage(req), &version_info, fill_view, trace_info, precondition, 
           RtEvent::NO_RT_EVENT/*reg guard*/, true_guard, true/*track effects*/);
       analysis->add_reference();
       std::set<RtEvent> deferral_events;
@@ -2705,7 +2707,7 @@ namespace Legion {
           map_applied_events.insert(guard_event);
       }
       OverwriteAnalysis *analysis = new OverwriteAnalysis(runtime, attach_op,
-          index, RegionUsage(req), &version_info, registration_view, 
+          index, RegionUsage(req), &version_info, registration_view, trace_info,
           ApEvent::NO_AP_EVENT,  guard_event, PredEvent::NO_PRED_EVENT, 
           false/*track effects*/, restricted);
       analysis->add_reference();
@@ -2782,6 +2784,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void RegionTreeForest::invalidate_fields(Operation *op, unsigned index,
                                              VersionInfo &version_info,
+                                            const PhysicalTraceInfo &trace_info,
                                           std::set<RtEvent> &map_applied_events)  
     //--------------------------------------------------------------------------
     {
@@ -2789,7 +2792,7 @@ namespace Legion {
         version_info.get_equivalence_sets();
       const RegionUsage usage(READ_WRITE, EXCLUSIVE, 0);
       OverwriteAnalysis *analysis = new OverwriteAnalysis(runtime, op, index,
-            usage, &version_info, NULL/*view*/, ApEvent::NO_AP_EVENT);
+          usage, &version_info, NULL/*view*/, trace_info, ApEvent::NO_AP_EVENT);
       analysis->add_reference();
       std::set<RtEvent> deferral_events;
       for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
@@ -2842,6 +2845,7 @@ namespace Legion {
     void RegionTreeForest::update_valid_instances(Operation *op, unsigned index,
                                                   VersionInfo &version_info,
                                   const FieldMaskSet<InstanceView> &valid_views,
+                                          const PhysicalTraceInfo &trace_info,
                                           std::set<RtEvent> &map_applied_events)
     //--------------------------------------------------------------------------
     {
@@ -2858,7 +2862,7 @@ namespace Legion {
         const std::set<LogicalView*> *log_views = 
           reinterpret_cast<const std::set<LogicalView*>*>(&vit->elements);
         OverwriteAnalysis *analysis = new OverwriteAnalysis(runtime, op, index,
-            usage, NULL/*no updates*/, *log_views, ApEvent::NO_AP_EVENT);
+           usage,NULL/*no updates*/,*log_views,trace_info,ApEvent::NO_AP_EVENT);
         analysis->add_reference();
         std::set<RtEvent> deferral_events;
         for (FieldMaskSet<EquivalenceSet>::const_iterator it = 

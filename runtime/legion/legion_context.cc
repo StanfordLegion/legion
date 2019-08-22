@@ -828,9 +828,10 @@ namespace Legion {
           wait_on.wait();
         }
         // Now we can do the invalidations
+        const PhysicalTraceInfo trace_info(NULL);
         for (unsigned idx = 0; idx < deletion_requirements.size(); idx++)
           runtime->forest->invalidate_fields(owner_task, idx, 
-                          version_infos[idx], preconditions);
+                          version_infos[idx], trace_info, preconditions);
         // Wait for the invalidations to be done
         if (!preconditions.empty())
         {

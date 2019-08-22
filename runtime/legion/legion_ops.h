@@ -778,14 +778,16 @@ namespace Legion {
      * \class Memoizable
      * An abstract class for retrieving trace local ids in physical tracing.
      */
-    class Memoizable
-    {
+    class Memoizable {
     public:
+      virtual ~Memoizable(void) { }
       virtual bool is_memoizable_task(void) const = 0;
       virtual bool is_recording(void) const = 0;
+      virtual bool is_memoizing(void) const = 0;
+      virtual AddressSpaceID get_origin_space(void) const = 0;
       virtual PhysicalTemplate* get_template(void) const = 0;
       virtual ApEvent get_memo_completion(bool replay) = 0;
-      virtual Operation* get_operation(void) = 0;
+      virtual Operation* get_operation(void) const = 0;
       virtual Operation::OpKind get_memoizable_kind(void) const = 0;
       // Return a trace local unique ID for this operation
       typedef std::pair<unsigned, DomainPoint> TraceLocalID;
@@ -795,6 +797,48 @@ namespace Legion {
       virtual void complete_replay(ApEvent complete_event) = 0;
       virtual const VersionInfo& get_version_info(unsigned idx) const = 0;
       virtual const RegionRequirement& get_requirement(unsigned idx) const = 0;
+    public:
+      virtual void pack_remote_memoizable(Serializer &rez, 
+                                          AddressSpaceID target) const;
+    };
+
+    class RemoteMemoizable : public Memoizable {
+    public:
+      RemoteMemoizable(Operation *op, Memoizable *original, 
+                       AddressSpaceID origin, Operation::OpKind kind,
+                       TraceLocalID tid, bool is_memoizable_task,
+                        bool is_memoizing);
+      virtual ~RemoteMemoizable(void);
+    public:
+      virtual bool is_memoizable_task(void) const;
+      virtual bool is_recording(void) const;
+      virtual bool is_memoizing(void) const;
+      virtual AddressSpaceID get_origin_space(void) const;
+      virtual PhysicalTemplate* get_template(void) const;
+      virtual ApEvent get_memo_completion(bool replay);
+      virtual Operation* get_operation(void) const;
+      virtual Operation::OpKind get_memoizable_kind(void) const;
+      // Return a trace local unique ID for this operation
+      typedef std::pair<unsigned, DomainPoint> TraceLocalID;
+      virtual TraceLocalID get_trace_local_id(void) const;
+      virtual ApEvent compute_sync_precondition(
+                      const PhysicalTraceInfo *info) const;
+      virtual void complete_replay(ApEvent complete_event);
+      virtual const VersionInfo& get_version_info(unsigned idx) const;
+      virtual const RegionRequirement& get_requirement(unsigned idx) const;
+    public:
+      virtual void pack_remote_memoizable(Serializer &rez, 
+                                          AddressSpaceID target) const;
+      static Memoizable* unpack_remote_memoizable(Deserializer &derez,
+                                      Operation *op, Runtime *runtime);
+    public:
+      Operation *const op;
+      Memoizable *const original; // not a valid pointer
+      const AddressSpaceID origin;
+      const Operation::OpKind kind;
+      const TraceLocalID trace_local_id;
+      const bool is_mem_task;
+      const bool is_memo;
     };
 
     /**
@@ -806,8 +850,7 @@ namespace Legion {
      * to determine whether to memoize their physical analysis.
      */
     template<typename OP>
-    class MemoizableOp : public OP, public Memoizable
-    {
+    class MemoizableOp : public OP, public Memoizable {
     public:
       enum MemoizableState {
         NO_MEMO,   // The operation is not subject to memoization
@@ -818,7 +861,8 @@ namespace Legion {
     public:
       MemoizableOp(Runtime *rt);
       void initialize_memoizable(void);
-      virtual Operation* get_operation(void) { return this; }
+      virtual Operation* get_operation(void) const 
+        { return const_cast<MemoizableOp<OP>*>(this); }
       virtual Memoizable* get_memoizable(void) { return this; }
     protected:
       void pack_memoizable(Serializer &rez);
@@ -851,6 +895,8 @@ namespace Legion {
       virtual bool is_recording(void) const { return memo_state == RECORD; }
       inline bool is_replaying(void) const { return memo_state == REPLAY; }
       virtual bool is_memoizable_task(void) const { return false; }
+      virtual AddressSpaceID get_origin_space(void) const 
+        { return this->runtime->address_space; }
     protected:
       // The physical trace for this operation if any
       PhysicalTemplate *tpl;

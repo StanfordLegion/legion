@@ -2108,11 +2108,12 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(cached);
 #endif
+      const PhysicalTraceInfo trace_info(op);
       for (unsigned idx = 0; idx < views.size(); ++idx)
       {
         std::set<RtEvent> map_applied_events;
         forest->update_valid_instances(op, idx, version_infos[idx], views[idx],
-            map_applied_events);
+            trace_info, map_applied_events);
       }
     }
 
@@ -3267,6 +3268,19 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void PhysicalTemplate::pack_recorder(Serializer &rez,
+                 std::set<RtEvent> &applied_events, const AddressSpaceID target)
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize(trace->runtime->address_space);
+      rez.serialize(target);
+      rez.serialize(this);
+      RtUserEvent remote_applied = Runtime::create_rt_user_event();
+      rez.serialize(remote_applied);
+      applied_events.insert(remote_applied);
+    }
+
+    //--------------------------------------------------------------------------
     void PhysicalTemplate::record_mapper_output(SingleTask *task,
                                             const Mapper::MapTaskOutput &output,
                               const std::deque<InstanceSet> &physical_instances)
@@ -3322,10 +3336,9 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::record_get_term_event(Operation *op)
+    void PhysicalTemplate::record_get_term_event(Memoizable *memo)
     //--------------------------------------------------------------------------
     {
-      Memoizable *memo = op->get_memoizable();
 #ifdef DEBUG_LEGION
       assert(memo != NULL);
 #endif
@@ -3341,11 +3354,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void PhysicalTemplate::record_create_ap_user_event(
-                                              ApUserEvent lhs, Operation *owner)
+                                              ApUserEvent lhs, Memoizable *memo)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(lhs.exists());
+      assert(memo != NULL);
 #endif
       AutoLock tpl_lock(template_lock);
 #ifdef DEBUG_LEGION
@@ -3356,10 +3370,6 @@ namespace Legion {
       user_events.resize(events.size());
       user_events.push_back(lhs);
 
-      Memoizable *memo = owner->get_memoizable();
-#ifdef DEBUG_LEGION
-      assert(memo != NULL);
-#endif
       insert_instruction(new CreateApUserEvent(*this, lhs_,
             find_trace_local_id(memo)));
     }
@@ -3385,44 +3395,47 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void PhysicalTemplate::record_merge_events(ApEvent &lhs, ApEvent rhs_,
-                                               Operation *owner)
+                                               Memoizable *memo)
     //--------------------------------------------------------------------------
     {
       std::set<ApEvent> rhs;
       rhs.insert(rhs_);
-      record_merge_events(lhs, rhs, owner);
+      record_merge_events(lhs, rhs, memo);
     }
 
     //--------------------------------------------------------------------------
     void PhysicalTemplate::record_merge_events(ApEvent &lhs, ApEvent e1,
-                                               ApEvent e2, Operation *owner)
+                                               ApEvent e2, Memoizable *memo)
     //--------------------------------------------------------------------------
     {
       std::set<ApEvent> rhs;
       rhs.insert(e1);
       rhs.insert(e2);
-      record_merge_events(lhs, rhs, owner);
+      record_merge_events(lhs, rhs, memo);
     }
 
     //--------------------------------------------------------------------------
     void PhysicalTemplate::record_merge_events(ApEvent &lhs, ApEvent e1,
                                                ApEvent e2, ApEvent e3,
-                                               Operation *owner)
+                                               Memoizable *memo)
     //--------------------------------------------------------------------------
     {
       std::set<ApEvent> rhs;
       rhs.insert(e1);
       rhs.insert(e2);
       rhs.insert(e3);
-      record_merge_events(lhs, rhs, owner);
+      record_merge_events(lhs, rhs, memo);
     }
 
     //--------------------------------------------------------------------------
     void PhysicalTemplate::record_merge_events(ApEvent &lhs,
                                                const std::set<ApEvent>& rhs,
-                                               Operation *owner)
+                                               Memoizable *memo)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(memo != NULL);
+#endif
       AutoLock tpl_lock(template_lock);
 #ifdef DEBUG_LEGION
       assert(is_recording());
@@ -3451,16 +3464,12 @@ namespace Legion {
       }
 #endif
 
-      Memoizable *memo = owner->get_memoizable();
-#ifdef DEBUG_LEGION
-      assert(memo != NULL);
-#endif
       insert_instruction(new MergeEvent(*this, convert_event(lhs), rhs_,
             memo->get_trace_local_id()));
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::record_issue_copy(Operation *op,
+    void PhysicalTemplate::record_issue_copy(Memoizable *memo,
                                              unsigned src_idx,
                                              unsigned dst_idx,
                                              ApEvent &lhs,
@@ -3479,7 +3488,6 @@ namespace Legion {
                                  const FieldMaskSet<InstanceView> &tracing_dsts)
     //--------------------------------------------------------------------------
     {
-      Memoizable *memo = op->get_memoizable();
 #ifdef DEBUG_LEGION
       assert(memo != NULL);
 #endif
@@ -3513,7 +3521,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::record_issue_indirect(Operation *op, ApEvent &lhs,
+    void PhysicalTemplate::record_issue_indirect(Memoizable *memo, ApEvent &lhs,
                              IndexSpaceExpression *expr,
                              const std::vector<CopySrcDstField>& src_fields,
                              const std::vector<CopySrcDstField>& dst_fields,
@@ -3526,7 +3534,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::record_issue_fill(Operation *op,
+    void PhysicalTemplate::record_issue_fill(Memoizable *memo,
                                              unsigned idx,
                                              ApEvent &lhs,
                                              IndexSpaceExpression *expr,
@@ -3543,7 +3551,6 @@ namespace Legion {
                                  const FieldMaskSet<InstanceView> &tracing_dsts)
     //--------------------------------------------------------------------------
     {
-      Memoizable *memo = op->get_memoizable();
 #ifdef DEBUG_LEGION
       assert(memo != NULL);
 #endif
@@ -3637,7 +3644,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::record_op_view(Operation *op,
+    void PhysicalTemplate::record_op_view(Memoizable *memo,
                                           unsigned idx,
                                           InstanceView *view,
                                           const RegionUsage &usage,
@@ -3645,7 +3652,6 @@ namespace Legion {
                                           bool update_validity)
     //--------------------------------------------------------------------------
     {
-      Memoizable *memo = op->get_memoizable();
 #ifdef DEBUG_LEGION
       assert(memo != NULL);
 #endif
@@ -3859,27 +3865,25 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::record_set_op_sync_event(ApEvent &lhs, Operation *op)
+    void PhysicalTemplate::record_set_op_sync_event(ApEvent &lhs, 
+                                                    Memoizable *memo)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(memo != NULL);
+      assert(memo->is_memoizing());
+#endif
       if (!lhs.exists())
       {
         Realm::UserEvent rename(Realm::UserEvent::create_user_event());
         rename.trigger();
         lhs = ApEvent(rename);
       }
-#ifdef DEBUG_LEGION
-      assert(op->is_memoizing());
-#endif
       AutoLock tpl_lock(template_lock);
 #ifdef DEBUG_LEGION
       assert(is_recording());
 #endif
 
-      Memoizable *memo = op->get_memoizable();
-#ifdef DEBUG_LEGION
-      assert(memo != NULL);
-#endif
       insert_instruction(new SetOpSyncEvent(*this, convert_event(lhs),
             find_trace_local_id(memo)));
     }

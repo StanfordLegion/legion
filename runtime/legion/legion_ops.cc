@@ -1386,6 +1386,188 @@ namespace Legion {
     }
 
     ///////////////////////////////////////////////////////////// 
+    // Remote Memoizable
+    /////////////////////////////////////////////////////////////
+    
+    //--------------------------------------------------------------------------
+    void Memoizable::pack_remote_memoizable(Serializer &rez, 
+                                            AddressSpaceID target) const
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize<Memoizable*>(const_cast<Memoizable*>(this));
+      const AddressSpaceID origin_space = get_origin_space();
+#ifdef DEBUG_LEGION
+      assert(origin_space != target);
+#endif
+      rez.serialize(origin_space);
+      rez.serialize<Operation::OpKind>(get_memoizable_kind());
+      TraceLocalID tid = get_trace_local_id();
+      rez.serialize(tid.first);
+      rez.serialize(tid.second);
+      rez.serialize<bool>(is_memoizable_task());
+      rez.serialize<bool>(is_memoizing());
+    }
+
+    //--------------------------------------------------------------------------
+    RemoteMemoizable::RemoteMemoizable(Operation *o, Memoizable *orig,
+                                       AddressSpaceID orgn, Operation::OpKind k,
+                                       TraceLocalID tid, bool is_mem, bool is_m)
+      : op(o), original(orig), origin(orgn), kind(k), trace_local_id(tid),
+        is_mem_task(is_mem), is_memo(is_m)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    RemoteMemoizable::~RemoteMemoizable(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    bool RemoteMemoizable::is_memoizable_task(void) const
+    //--------------------------------------------------------------------------
+    {
+      return is_mem_task;
+    }
+
+    //--------------------------------------------------------------------------
+    bool RemoteMemoizable::is_recording(void) const
+    //--------------------------------------------------------------------------
+    {
+      // Has to be true if we made this
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    bool RemoteMemoizable::is_memoizing(void) const
+    //--------------------------------------------------------------------------
+    {
+      return is_memo;
+    }
+
+    //--------------------------------------------------------------------------
+    AddressSpaceID RemoteMemoizable::get_origin_space(void) const
+    //--------------------------------------------------------------------------
+    {
+      return origin;
+    }
+
+    //--------------------------------------------------------------------------
+    PhysicalTemplate* RemoteMemoizable::get_template(void) const
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return NULL;
+    }
+
+    //--------------------------------------------------------------------------
+    ApEvent RemoteMemoizable::get_memo_completion(bool replay)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return ApEvent::NO_AP_EVENT;
+    }
+
+    //--------------------------------------------------------------------------
+    Operation* RemoteMemoizable::get_operation(void) const
+    //--------------------------------------------------------------------------
+    {
+      return op;
+    }
+
+    //--------------------------------------------------------------------------
+    Operation::OpKind RemoteMemoizable::get_memoizable_kind(void) const
+    //--------------------------------------------------------------------------
+    {
+      return kind;
+    }
+
+    //--------------------------------------------------------------------------
+    TraceLocalID RemoteMemoizable::get_trace_local_id(void) const
+    //--------------------------------------------------------------------------
+    {
+      return trace_local_id;
+    }
+
+    //--------------------------------------------------------------------------
+    ApEvent RemoteMemoizable::compute_sync_precondition(
+                                      const PhysicalTraceInfo *trace_info) const
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return ApEvent::NO_AP_EVENT;
+    }
+
+    //--------------------------------------------------------------------------
+    void RemoteMemoizable::complete_replay(ApEvent complete_event)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    const VersionInfo& RemoteMemoizable::get_version_info(unsigned idx) const
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *new VersionInfo();
+    }
+
+    //--------------------------------------------------------------------------
+    const RegionRequirement& RemoteMemoizable::get_requirement(unsigned x) const
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *new RegionRequirement();
+    }
+
+    //--------------------------------------------------------------------------
+    void RemoteMemoizable::pack_remote_memoizable(Serializer &rez,
+                                                  AddressSpaceID target) const
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize(original);
+      rez.serialize(origin);
+      if (origin == target)
+        return;
+      rez.serialize(kind);
+      rez.serialize(trace_local_id.first);
+      rez.serialize(trace_local_id.second);
+      rez.serialize<bool>(is_mem_task);
+      rez.serialize<bool>(is_memo);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ Memoizable* RemoteMemoizable::unpack_remote_memoizable(
+                           Deserializer &derez, Operation *op, Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      Memoizable *original;
+      derez.deserialize(original);
+      AddressSpaceID origin;
+      derez.deserialize(origin);
+      if (origin == runtime->address_space)
+        return original;
+      Operation::OpKind kind;
+      derez.deserialize(kind);
+      TraceLocalID tid;
+      derez.deserialize(tid.first);
+      derez.deserialize(tid.second);
+      bool is_mem_task, is_memo;
+      derez.deserialize<bool>(is_mem_task);
+      derez.deserialize<bool>(is_memo);
+      return new RemoteMemoizable(op, original, origin, kind, tid,
+                                  is_mem_task, is_memo);
+    }
+
+    ///////////////////////////////////////////////////////////// 
     // External Op 
     /////////////////////////////////////////////////////////////
 
@@ -7139,9 +7321,10 @@ namespace Legion {
         // For this case we actually need to go through and prune out any
         // valid instances for these fields in the equivalence sets in order
         // to be able to free up the resources.
+        const PhysicalTraceInfo trace_info(this);
         for (unsigned idx = 0; idx < deletion_requirements.size(); idx++)
           runtime->forest->invalidate_fields(this, idx, version_infos[idx],
-                                             map_applied_events);
+                                             trace_info, map_applied_events);
       }
       // Mark that we're done mapping and defer the execution as appropriate
       if (!map_applied_events.empty())

@@ -130,22 +130,26 @@ namespace Legion {
       virtual ~PhysicalTraceRecorder(void) { }
     public:
       virtual bool is_recording(void) const = 0;
+      virtual void add_recorder_reference(void) = 0;
+      virtual bool remove_recorder_reference(void) = 0;
+      virtual void pack_recorder(Serializer &rez, 
+          std::set<RtEvent> &applied, const AddressSpaceID target) = 0; 
     public:
-      virtual void record_get_term_event(Operation *op) = 0;
+      virtual void record_get_term_event(Memoizable *memo) = 0;
       virtual void record_create_ap_user_event(ApUserEvent lhs, 
-                                               Operation *owner) = 0;
+                                               Memoizable *memo) = 0;
       virtual void record_trigger_event(ApUserEvent lhs, ApEvent rhs) = 0;
     public:
       virtual void record_merge_events(ApEvent &lhs, 
-                                       ApEvent rhs, Operation *owner) = 0;
+                                       ApEvent rhs, Memoizable *memo) = 0;
       virtual void record_merge_events(ApEvent &lhs, ApEvent e1, 
-                                       ApEvent e2, Operation *owner) = 0;
+                                       ApEvent e2, Memoizable *memo) = 0;
       virtual void record_merge_events(ApEvent &lhs, ApEvent e1, ApEvent e2,
-                                       ApEvent e3, Operation *owner) = 0;
+                                       ApEvent e3, Memoizable *memo) = 0;
       virtual void record_merge_events(ApEvent &lhs, 
-                            const std::set<ApEvent>& rhs, Operation *owner) = 0;
+                            const std::set<ApEvent>& rhs, Memoizable *memo) = 0;
     public:
-      virtual void record_issue_copy(Operation *op,
+      virtual void record_issue_copy(Memoizable *memo,
                            unsigned src_idx,
                            unsigned dst_idx,
                            ApEvent &lhs,
@@ -162,13 +166,13 @@ namespace Legion {
                            bool reduction_fold,
                            const FieldMaskSet<InstanceView> &tracing_srcs,
                            const FieldMaskSet<InstanceView> &tracing_dsts) = 0;
-      virtual void record_issue_indirect(Operation *op, ApEvent &lhs,
+      virtual void record_issue_indirect(Memoizable *memo, ApEvent &lhs,
                            IndexSpaceExpression *expr,
                            const std::vector<CopySrcDstField>& src_fields,
                            const std::vector<CopySrcDstField>& dst_fields,
                            const std::vector<void*> &indirections,
                            ApEvent precondition) = 0;
-      virtual void record_issue_fill(Operation *op, unsigned idx,
+      virtual void record_issue_fill(Memoizable *memo, unsigned idx,
                            ApEvent &lhs,
                            IndexSpaceExpression *expr,
                            const std::vector<CopySrcDstField> &fields,
@@ -184,13 +188,117 @@ namespace Legion {
       virtual void record_fill_view(FillView *view, 
                            const FieldMask &user_mask) = 0;
     public:
-      virtual void record_op_view(Operation *op,
+      virtual void record_op_view(Memoizable *memo,
                           unsigned idx,
                           InstanceView *view,
                           const RegionUsage &usage,
                           const FieldMask &user_mask,
                           bool update_validity) = 0;
-      virtual void record_set_op_sync_event(ApEvent &lhs, Operation *op) = 0;
+      virtual void record_set_op_sync_event(ApEvent &lhs, Memoizable *memo) = 0;
+    };
+
+    /**
+     * \class RemoteTraceRecorder
+     * This class is used for handling tracing calls that are 
+     * performed on remote nodes from where the trace is being captured.
+     */
+    class RemoteTraceRecorder : public PhysicalTraceRecorder, 
+                                public Collectable {
+    public:
+      enum RemoteTraceKind {
+        REMOTE_RECORD_GET_TERM,
+        REMOTE_CREATE_USER_EVENT,
+        REMOTE_TRIGGER_EVENT,
+        REMOTE_MERGE_EVENTS,
+        REMOTE_ISSUE_COPY,
+        REMOTE_ISSUE_FILL,
+        REMOTE_RECORD_OP_VIEW,
+        REMOTE_SET_OP_SYNC,
+      };
+    public:
+      RemoteTraceRecorder(AddressSpaceID origin, AddressSpace local,
+          Memoizable *memo, PhysicalTemplate *tpl, RtUserEvent applied_event);
+      RemoteTraceRecorder(const RemoteTraceRecorder &rhs);
+      virtual ~RemoteTraceRecorder(void);
+    public:
+      RemoteTraceRecorder& operator=(const RemoteTraceRecorder &rhs);
+    public:
+      virtual bool is_recording(void) const { return true; }
+      virtual void add_recorder_reference(void);
+      virtual bool remove_recorder_reference(void);
+      virtual void pack_recorder(Serializer &rez, 
+          std::set<RtEvent> &applied, const AddressSpaceID target);
+    public:
+      virtual void record_get_term_event(Memoizable *memo);
+      virtual void record_create_ap_user_event(ApUserEvent lhs, 
+                                               Memoizable *memo);
+      virtual void record_trigger_event(ApUserEvent lhs, ApEvent rhs);
+    public:
+      virtual void record_merge_events(ApEvent &lhs, 
+                                       ApEvent rhs, Memoizable *memo);
+      virtual void record_merge_events(ApEvent &lhs, ApEvent e1, 
+                                       ApEvent e2, Memoizable *memo);
+      virtual void record_merge_events(ApEvent &lhs, ApEvent e1, ApEvent e2,
+                                       ApEvent e3, Memoizable *memo);
+      virtual void record_merge_events(ApEvent &lhs, 
+                            const std::set<ApEvent>& rhs, Memoizable *memo);
+    public:
+      virtual void record_issue_copy(Memoizable *memo,
+                           unsigned src_idx,
+                           unsigned dst_idx,
+                           ApEvent &lhs,
+                           IndexSpaceExpression *expr,
+                           const std::vector<CopySrcDstField>& src_fields,
+                           const std::vector<CopySrcDstField>& dst_fields,
+#ifdef LEGION_SPY
+                           FieldSpace handle,
+                           RegionTreeID src_tree_id,
+                           RegionTreeID dst_tree_id,
+#endif
+                           ApEvent precondition,
+                           ReductionOpID redop,
+                           bool reduction_fold,
+                           const FieldMaskSet<InstanceView> &tracing_srcs,
+                           const FieldMaskSet<InstanceView> &tracing_dsts);
+      virtual void record_issue_indirect(Memoizable *memo, ApEvent &lhs,
+                           IndexSpaceExpression *expr,
+                           const std::vector<CopySrcDstField>& src_fields,
+                           const std::vector<CopySrcDstField>& dst_fields,
+                           const std::vector<void*> &indirections,
+                           ApEvent precondition);
+      virtual void record_issue_fill(Memoizable *memo, unsigned idx,
+                           ApEvent &lhs,
+                           IndexSpaceExpression *expr,
+                           const std::vector<CopySrcDstField> &fields,
+                           const void *fill_value, size_t fill_size,
+#ifdef LEGION_SPY
+                           UniqueID fill_uid,
+                           FieldSpace handle,
+                           RegionTreeID tree_id,
+#endif
+                           ApEvent precondition,
+                           const FieldMaskSet<FillView> &tracing_srcs,
+                           const FieldMaskSet<InstanceView> &tracing_dsts);
+      virtual void record_fill_view(FillView *view, 
+                           const FieldMask &user_mask);
+    public:
+      virtual void record_op_view(Memoizable *memo,
+                          unsigned idx,
+                          InstanceView *view,
+                          const RegionUsage &usage,
+                          const FieldMask &user_mask,
+                          bool update_validity);
+      virtual void record_set_op_sync_event(ApEvent &lhs, Memoizable *memo);
+    public:
+      static RemoteTraceRecorder* unpack_remote_recorder(Deserializer &derez,
+                                                         Memoizable *memo);
+    protected:
+      const AddressSpaceID origin_space;
+      const AddressSpaceID local_space;
+      Memoizable *const memoizable;
+      PhysicalTemplate *const remote_tpl;
+      const RtUserEvent applied_event;
+      std::set<RtEvent> applied_events;
     };
 
     /**
@@ -206,29 +314,33 @@ namespace Legion {
       PhysicalTraceInfo(Operation *op, unsigned src_idx, unsigned dst_idx);
       PhysicalTraceInfo(Operation *op, Memoizable &memo);
       PhysicalTraceInfo(const PhysicalTraceInfo &rhs);
+      ~PhysicalTraceInfo(void);
+    protected:
+      PhysicalTraceInfo(Operation *op, Memoizable *memo, unsigned src_idx, 
+          unsigned dst_idx, bool update_validity, PhysicalTraceRecorder *rec);
     public:
       inline void record_merge_events(ApEvent &result, 
                                       ApEvent e1, ApEvent e2) const
         {
           sanity_check(false);
-          rec->record_merge_events(result, e1, e2, op);
+          rec->record_merge_events(result, e1, e2, memo);
         }
       inline void record_merge_events(ApEvent &result, ApEvent e1, 
                                       ApEvent e2, ApEvent e3) const
         {
           sanity_check(false);
-          rec->record_merge_events(result, e1, e2, e3, op);
+          rec->record_merge_events(result, e1, e2, e3, memo);
         }
       inline void record_merge_events(ApEvent &result, 
                                       const std::set<ApEvent> &events) const
         {
           sanity_check(false);
-          rec->record_merge_events(result, events, op);
+          rec->record_merge_events(result, events, memo);
         }
       inline void record_op_sync_event(ApEvent &result) const
         {
           sanity_check(false);
-          rec->record_set_op_sync_event(result, op);
+          rec->record_set_op_sync_event(result, memo);
         }
     public:
       inline void record_issue_copy(ApEvent &result,
@@ -251,7 +363,7 @@ namespace Legion {
           assert(tracing_srcs != NULL);
           assert(tracing_dsts != NULL);
 #endif
-          rec->record_issue_copy(op, index, dst_index,
+          rec->record_issue_copy(memo, index, dst_index,
                                  result, expr, src_fields, dst_fields,
 #ifdef LEGION_SPY
                                  handle, src_tree_id, dst_tree_id,
@@ -277,7 +389,7 @@ namespace Legion {
           assert(tracing_srcs != NULL);
           assert(tracing_dsts != NULL);
 #endif
-          rec->record_issue_fill(op, index, result, expr, fields, 
+          rec->record_issue_fill(memo, index, result, expr, fields, 
                                  fill_value, fill_size,
 #ifdef LEGION_SPY
                                  fill_uid, handle, tree_id,
@@ -298,7 +410,7 @@ namespace Legion {
                              ApEvent precondition) const
         {
           sanity_check(true);
-          rec->record_issue_indirect(op, result, expr, src_fields, dst_fields,
+          rec->record_issue_indirect(memo, result, expr, src_fields, dst_fields,
                                      indirections, precondition);
         }
       inline void record_op_view(const RegionUsage &usage,
@@ -306,8 +418,16 @@ namespace Legion {
                                  InstanceView *view) const
         {
           sanity_check(true);
-          rec->record_op_view(op,index,view,usage,user_mask,update_validity);
+          rec->record_op_view(memo,index,view,usage,user_mask,update_validity);
         }
+    public:
+      template<bool PACK_OPERATION>
+      void pack_trace_info(Serializer &rez, std::set<RtEvent> &applied,
+                           const AddressSpaceID target) const;
+      static PhysicalTraceInfo unpack_trace_info(Deserializer &derez,
+              Runtime *runtime, std::set<RtEvent> &ready_events);
+      static PhysicalTraceInfo unpack_trace_info(Deserializer &derez,
+                                     Runtime *runtime, Operation *op);
     private:
       inline void sanity_check(bool check_indices) const
         {
@@ -321,6 +441,7 @@ namespace Legion {
         }
     public:
       Operation *const op;
+      Memoizable *const memo;
       const unsigned index;
       const unsigned dst_index;
     protected:
@@ -1339,6 +1460,7 @@ namespace Legion {
                      VersionInfo *info, const RegionRequirement &req,
                      RegionNode *node, const InstanceSet &target_instances,
                      std::vector<InstanceView*> &target_views,
+                     const PhysicalTraceInfo &trace_info,
                      const ApEvent precondition, const ApEvent term_event,
                      const bool track_effects, const bool check_initialized,
                      const bool record_valid);
@@ -1346,6 +1468,7 @@ namespace Legion {
                      Operation *op, unsigned index, const RegionUsage &usage,
                      RegionNode *node, InstanceSet &target_instances,
                      std::vector<InstanceView*> &target_views,
+                     const PhysicalTraceInfo &trace_info,
                      const RtEvent user_registered,
                      const ApEvent precondition, const ApEvent term_event,
                      const bool track_effects, const bool check_initialized,
@@ -1383,6 +1506,7 @@ namespace Legion {
       RegionNode *const node;
       const InstanceSet target_instances;
       const std::vector<InstanceView*> target_views;
+      const PhysicalTraceInfo trace_info;
       const ApEvent precondition;
       const ApEvent term_event;
       const bool track_effects;
@@ -1446,10 +1570,11 @@ namespace Legion {
                             public LegionHeapify<ReleaseAnalysis> {
     public:
       ReleaseAnalysis(Runtime *rt, Operation *op, unsigned index,
-                      ApEvent precondition, VersionInfo *info);
+                      ApEvent precondition, VersionInfo *info,
+                      const PhysicalTraceInfo &trace_info);
       ReleaseAnalysis(Runtime *rt, AddressSpaceID src, AddressSpaceID prev,
                       Operation *op, unsigned index, ApEvent precondition,
-                      ReleaseAnalysis *target);
+                      ReleaseAnalysis *target, const PhysicalTraceInfo &info);
       ReleaseAnalysis(const ReleaseAnalysis &rhs);
       virtual ~ReleaseAnalysis(void);
     public:
@@ -1474,6 +1599,7 @@ namespace Legion {
     public:
       const ApEvent precondition;
       ReleaseAnalysis *const target;
+      const PhysicalTraceInfo trace_info;
     public:
       // Can only safely be accessed when analysis is locked
       CopyFillAggregator *release_aggregator;
@@ -1496,6 +1622,7 @@ namespace Legion {
                          const PredEvent pred_guard, const ReductionOpID redop,
                          const std::vector<unsigned> &src_indexes,
                          const std::vector<unsigned> &dst_indexes,
+                         const PhysicalTraceInfo &trace_info,
                          const bool perfect);
       CopyAcrossAnalysis(Runtime *rt, AddressSpaceID src, AddressSpaceID prev,
                          Operation *op, unsigned src_index, unsigned dst_index,
@@ -1509,6 +1636,7 @@ namespace Legion {
                          const PredEvent pred_guard, const ReductionOpID redop,
                          const std::vector<unsigned> &src_indexes,
                          const std::vector<unsigned> &dst_indexes,
+                         const PhysicalTraceInfo &trace_info,
                          const bool perfect);
       CopyAcrossAnalysis(const CopyAcrossAnalysis &rhs);
       virtual ~CopyAcrossAnalysis(void);
@@ -1564,6 +1692,7 @@ namespace Legion {
       const std::vector<unsigned> src_indexes;
       const std::vector<unsigned> dst_indexes;
       const std::vector<CopyAcrossHelper*> across_helpers;
+      const PhysicalTraceInfo trace_info;
       const bool perfect;
     public:
       // Can only safely be accessed when analysis is locked
@@ -1587,6 +1716,7 @@ namespace Legion {
       OverwriteAnalysis(Runtime *rt, Operation *op, unsigned index,
                         const RegionUsage &usage,
                         VersionInfo *info, LogicalView *view,
+                        const PhysicalTraceInfo &trace_info,
                         const ApEvent precondition,
                         const RtEvent guard_event = RtEvent::NO_RT_EVENT,
                         const PredEvent pred_guard = PredEvent::NO_PRED_EVENT,
@@ -1596,6 +1726,7 @@ namespace Legion {
       OverwriteAnalysis(Runtime *rt, Operation *op, unsigned index,
                         const RegionUsage &usage,
                         VersionInfo *info, const std::set<LogicalView*> &views,
+                        const PhysicalTraceInfo &trace_info,
                         const ApEvent precondition,
                         const RtEvent guard_event = RtEvent::NO_RT_EVENT,
                         const PredEvent pred_guard = PredEvent::NO_PRED_EVENT,
@@ -1605,6 +1736,7 @@ namespace Legion {
                         Operation *op, unsigned index, 
                         const RegionUsage &usage, 
                         const std::set<LogicalView*> &views,
+                        const PhysicalTraceInfo &trace_info,
                         const ApEvent precondition,
                         const RtEvent guard_event,
                         const PredEvent pred_guard,
@@ -1640,6 +1772,7 @@ namespace Legion {
     public:
       const RegionUsage usage;
       const std::set<LogicalView*> views;
+      const PhysicalTraceInfo trace_info;
       const ApEvent precondition;
       const RtEvent guard_event;
       const PredEvent pred_guard;
