@@ -19,7 +19,11 @@
 
 local tasklib = {}
 
-terralib.linklibrary("libregent.so")
+if os.execute("bash -c \"[ `uname` == 'Darwin' ]\"") == 0 then
+  terralib.linklibrary("libregent.dylib")
+else
+  terralib.linklibrary("libregent.so")
+end
 
 local c = terralib.includecstring([[
 #include "legion.h"
