@@ -596,6 +596,11 @@ namespace Realm {
 	if(it->serdez_id != 0) {
 	  const CustomSerdezUntyped *serdez_op = get_runtime()->custom_serdez_table.get(it->serdez_id, 0);
 	  assert(serdez_op != 0);
+	  // sanity-check max_serialized_size
+	  if(serdez_op->max_serialized_size > IB_MAX_SIZE) {
+	    log_dma.fatal() << "FATAL: serdez " << it->serdez_id << " reports a maximum serialized size of " << serdez_op->max_serialized_size << " bytes - does not fit into max intermediate buffer size of " << IB_MAX_SIZE << " bytes";
+	    abort();
+	  }
 	  ib_elmnt_size += serdez_op->max_serialized_size;
 	  if(serdez_op->max_serialized_size > serdez_pad)
 	    serdez_pad = serdez_op->max_serialized_size;
@@ -2577,12 +2582,14 @@ namespace Realm {
 	  int dims = info.extent.size();
 	  size_t max_chunk_elems = (32 << 20) / fill_size; // 32MB
 	  size_t chunk_elems = 1;
-	  int chunk_dim = 0;
-	  while(chunk_dim < dims) {
-	    size_t new_elems = chunk_elems * info.extent[chunk_dim];
+	  // because HDF5 uses C data ordering, we need to group from the last
+	  //  dim backwards
+	  int step_dims = dims;
+	  while(step_dims > 0) {
+	    size_t new_elems = chunk_elems * info.extent[step_dims - 1];
 	    if(new_elems > max_chunk_elems) break;
 	    chunk_elems = new_elems;
-	    chunk_dim++;
+	    step_dims--;
 	  }
 	  void *chunk_data = fill_buffer;
 	  if(chunk_elems > 1) {
@@ -2590,9 +2597,8 @@ namespace Realm {
 	    assert(chunk_data != 0);
 	    repeat_fill(chunk_data, fill_buffer, fill_size, chunk_elems);
 	  }
-	  //  iteration and hope that libhdf5 does some buffering
 	  std::vector<hsize_t> mem_dims(dims, 1);
-	  for(int i = 0; i < chunk_dim; i++)
+	  for(int i = step_dims; i < dims; i++)
 	    mem_dims[i] = info.extent[i];
 	  hid_t mem_space_id, file_space_id;
 	  CHECK_HDF5( mem_space_id = H5Screate_simple(dims, mem_dims.data(),
@@ -2609,14 +2615,14 @@ namespace Realm {
 				 mem_space_id, file_space_id,
 				 H5P_DEFAULT, chunk_data) );
 	    // advance to next position
-	    int d = chunk_dim;
-	    while(d < dims) {
+	    int d = 0;
+	    while(d < step_dims) {
 	      if(++cur_pos[d] < (info.offset[d] + info.extent[d]))
 		break;
 	      cur_pos[d] = info.offset[d];
 	      d++;
 	    }
-	    if(d >= dims) break;
+	    if(d >= step_dims) break;
 	  }
 
 	  if(chunk_data != fill_buffer)
