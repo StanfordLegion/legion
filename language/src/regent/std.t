@@ -1331,20 +1331,13 @@ function std.compute_serialized_size(value_type, value)
 end
 
 local function serialize_inner(value_type, value, fixed_ptr, data_ptr)
-  local actions
-  if not value_type:isstruct() then
-    -- Force unaligned access because malloc does not provide
-    -- blocks aligned for all purposes (e.g. SSE vectors).
-    local value_type_alignment = 1 -- data.min(terralib.sizeof(value_type), 8)
-    actions = quote
-      terralib.attrstore(
-        [&value_type](fixed_ptr), value,
-        { align = [value_type_alignment] })
-    end
-  else
-    -- FIXME: This hack is to avoid excessive compile time when the size of struct is big.
-    --        (https://github.com/zdevito/terra/issues/372)
-    actions = quote c.memcpy(fixed_ptr, &value, [sizeof(value_type)]) end
+  -- Force unaligned access because malloc does not provide
+  -- blocks aligned for all purposes (e.g. SSE vectors).
+  local value_type_alignment = 1 -- data.min(terralib.sizeof(value_type), 8)
+  local actions = quote
+    terralib.attrstore(
+      [&value_type](fixed_ptr), value,
+      { align = [value_type_alignment] })
   end
 
   if std.is_list(value_type) then
