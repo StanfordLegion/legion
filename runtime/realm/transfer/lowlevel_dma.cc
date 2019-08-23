@@ -596,6 +596,11 @@ namespace Realm {
 	if(it->serdez_id != 0) {
 	  const CustomSerdezUntyped *serdez_op = get_runtime()->custom_serdez_table.get(it->serdez_id, 0);
 	  assert(serdez_op != 0);
+	  // sanity-check max_serialized_size
+	  if(serdez_op->max_serialized_size > IB_MAX_SIZE) {
+	    log_dma.fatal() << "FATAL: serdez " << it->serdez_id << " reports a maximum serialized size of " << serdez_op->max_serialized_size << " bytes - does not fit into max intermediate buffer size of " << IB_MAX_SIZE << " bytes";
+	    abort();
+	  }
 	  ib_elmnt_size += serdez_op->max_serialized_size;
 	  if(serdez_op->max_serialized_size > serdez_pad)
 	    serdez_pad = serdez_op->max_serialized_size;
