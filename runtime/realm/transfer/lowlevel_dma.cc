@@ -2597,7 +2597,6 @@ namespace Realm {
 	    assert(chunk_data != 0);
 	    repeat_fill(chunk_data, fill_buffer, fill_size, chunk_elems);
 	  }
-	  //  iteration and hope that libhdf5 does some buffering
 	  std::vector<hsize_t> mem_dims(dims, 1);
 	  for(int i = step_dims; i < dims; i++)
 	    mem_dims[i] = info.extent[i];
