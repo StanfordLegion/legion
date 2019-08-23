@@ -285,6 +285,15 @@ if(Legion_USE_HWLOC)
 endif()
 
 #------------------------------------------------------------------------------#
+# zlib configuration
+#------------------------------------------------------------------------------#
+option(Legion_USE_ZLIB "Enable support for zlib" ON)
+if(Legion_USE_ZLIB)
+  # define variable for legion_defines.h
+  set(USE_ZLIB ON)
+endif()
+
+#------------------------------------------------------------------------------#
 # Miscelaneous other options
 #------------------------------------------------------------------------------#
 set(Legion_MAX_DIM 3 CACHE STRING "Maximum number of dimensions")

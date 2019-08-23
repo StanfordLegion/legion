@@ -39,7 +39,11 @@ end
 -- #################
 
 if data.is_luajit() then
-  terralib.linklibrary("libregent.so")
+  if os.execute("bash -c \"[ `uname` == 'Darwin' ]\"") == 0 then
+    terralib.linklibrary("libregent.dylib")
+  else
+    terralib.linklibrary("libregent.so")
+  end
 end
 local c = terralib.includecstring([[
 #include "legion.h"

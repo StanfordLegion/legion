@@ -28,7 +28,12 @@ ALT_MAPPERS     ?= 0		# Include alternative mappers (not recommended)
 USE_SPY         ?= 0    # Include detailed Legion Spy support
 
 # Put the binary file name here
+ifeq ($(shell uname), Darwin)
+OUTFILE		?= libregent.dylib
+else
 OUTFILE		?= libregent.so
+endif
+
 # List all the application source files here
 GEN_SRC		?= regent.cc regent_partitions.cc bishop_mapper.cc bishop_c.cc murmur_hash3.cc # .cc files
 GEN_GPU_SRC	?=		# .cu files
