@@ -727,7 +727,8 @@ if os.getenv('SAVEOBJ') == '1' then
   local link_flags = terralib.newlist({"-L" .. out_dir, "-lcircuit_mapper", "-lm"})
 
   if os.getenv('STANDALONE') == '1' then
-    os.execute('cp ' .. os.getenv('LG_RT_DIR') .. '/../bindings/regent/libregent.so ' .. out_dir)
+    os.execute('cp ' .. os.getenv('LG_RT_DIR') .. '/../bindings/regent/' ..
+        regentlib.binding_library .. ' ' .. out_dir)
   end
 
   local exe = os.getenv('OBJNAME') or "circuit"

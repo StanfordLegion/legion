@@ -38,12 +38,13 @@ end
 -- ## Legion Bindings
 -- #################
 
+if os.execute("bash -c \"[ `uname` == 'Darwin' ]\"") == 0 then
+  base.binding_library = "libregent.dylib"
+else
+  base.binding_library = "libregent.so"
+end
 if data.is_luajit() then
-  if os.execute("bash -c \"[ `uname` == 'Darwin' ]\"") == 0 then
-    terralib.linklibrary("libregent.dylib")
-  else
-    terralib.linklibrary("libregent.so")
-  end
+  terralib.linklibrary(base.binding_library)
 end
 local c = terralib.includecstring([[
 #include "legion.h"

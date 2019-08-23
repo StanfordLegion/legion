@@ -30,6 +30,7 @@ local report = require("common/report")
 local std = {}
 
 std.config, std.args = base.config, base.args
+std.binding_library = base.binding_library
 
 local max_dim = std.config["legion-dim"]
 
