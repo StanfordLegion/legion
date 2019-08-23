@@ -1344,12 +1344,7 @@ local function serialize_inner(value_type, value, fixed_ptr, data_ptr)
   else
     -- FIXME: This hack is to avoid excessive compile time when the size of struct is big.
     --        (https://github.com/zdevito/terra/issues/372)
-    actions = quote
-      do
-        var tmp = value
-        c.memcpy(fixed_ptr, &tmp, [sizeof(value_type)])
-      end
-    end
+    actions = quote c.memcpy(fixed_ptr, &value, [sizeof(value_type)]) end
   end
 
   if std.is_list(value_type) then
