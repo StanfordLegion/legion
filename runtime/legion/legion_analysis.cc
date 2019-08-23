@@ -7288,8 +7288,8 @@ namespace Legion {
           const FieldMask overlap = it->second & clone_mask;
           if (!overlap)
             continue;
-          if (it->first->record_guard_set(this))
-            update_guards.insert(it->first, overlap);
+          if (update_guards.insert(it->first, overlap))
+            it->first->record_guard_set(this);
         }
       }
       // Return our space since we stored the data here
