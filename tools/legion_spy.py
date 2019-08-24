@@ -387,7 +387,7 @@ class Shape(object):
                 hi = point.copy()
             else:
                 for d in xrange(point.dim):
-                    if point.vals[dx] > hi.vals[d]:
+                    if point.vals[d] > hi.vals[d]:
                         hi.vals[d] = point.vals[d]
         for rect in self.rects:
             if lo is None:

@@ -762,7 +762,7 @@ namespace Legion {
                                  update_validity, recorder);
       }
       else
-        return PhysicalTraceInfo(NULL, -1U, false);
+        return PhysicalTraceInfo(op, -1U, false);
     }
 
     /////////////////////////////////////////////////////////////
@@ -11591,9 +11591,11 @@ namespace Legion {
         }
         else
         {
-          for (LegionColor color = 0; 
-                color < partition->max_linearized_color; color++)
+          ColorSpaceIterator *itr = 
+            partition->color_space->create_color_space_iterator();
+          while (itr->is_valid())
           {
+            const LegionColor color = itr->yield_color();
             if (current_colors.find(color) != current_colors.end())
               continue;
             if (!partition->color_space->contains_color(color))
@@ -11606,6 +11608,7 @@ namespace Legion {
                                      child, runtime->address_space);
             dis->children[child] = child_set;
           }
+          delete itr;
         }
       }
       if (!partition->is_complete())
