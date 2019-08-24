@@ -274,6 +274,85 @@ function substitute.block(cx, node)
   }
 end
 
+local find_lvalues = {}
+
+local function find_lvalues_expr_address_of(cx, node)
+  assert(node.value:is(ast.specialized.expr.ID))
+  cx.lvalues[node.value.value] = true
+end
+
+local find_lvalues_expr_table = {
+  [ast.specialized.expr.AddressOf] = find_lvalues_expr_address_of,
+  [ast.specialized.expr]           = pass_through,
+  [ast.specialized.region]         = pass_through,
+  [ast.condition_kind]             = pass_through,
+  [ast.disjointness_kind]          = pass_through,
+  [ast.fence_kind]                 = pass_through,
+  [ast.location]                   = pass_through,
+  [ast.annotation]                 = pass_through,
+}
+
+local find_lvalues_expr = ast.make_single_dispatch(
+  find_lvalues_expr_table,
+  {})
+
+function find_lvalues.expr(cx, node)
+  return ast.map_node_postorder(find_lvalues_expr(cx), node)
+end
+
+local function find_lvalues_stat_if(cx, node)
+  find_lvalues.block(cx, node.then_block)
+  find_lvalues.block(cx, node.else_block)
+end
+
+local function find_lvalues_stat_block(cx, node)
+  find_lvalues.block(cx, node.block)
+end
+
+local function find_lvalues_stat_var(cx, node)
+  if node.values then find_lvalues.expr(cx, node.values) end
+end
+
+local function find_lvalues_lhs(cx, expr)
+  if expr:is(ast.specialized.expr.ID) then
+    cx.lvalues[expr.value] = true
+  elseif expr:is(ast.specialized.expr.FieldAccess) then
+    find_lvalues_lhs(cx, expr.value)
+  end
+end
+
+local function find_lvalues_stat_assignment_or_reduce(cx, node)
+  find_lvalues_lhs(cx, node.lhs)
+  find_lvalues.expr(cx, node.rhs)
+end
+
+local find_lvalues_stat_table = {
+  [ast.specialized.stat.If]              = find_lvalues_stat_if,
+  [ast.specialized.stat.Elseif]          = unreachable,
+  [ast.specialized.stat.While]           = find_lvalues_stat_block,
+  [ast.specialized.stat.ForNum]          = find_lvalues_stat_block,
+  [ast.specialized.stat.ForList]         = find_lvalues_stat_block,
+  [ast.specialized.stat.Repeat]          = find_lvalues_stat_block,
+  [ast.specialized.stat.MustEpoch]       = find_lvalues_stat_block,
+  [ast.specialized.stat.Block]           = find_lvalues_stat_block,
+  [ast.specialized.stat.Var]             = find_lvalues_stat_var,
+  [ast.specialized.stat.Assignment]      = find_lvalues_stat_assignment_or_reduce,
+  [ast.specialized.stat.Reduce]          = find_lvalues_stat_assignment_or_reduce,
+  [ast.specialized.stat]                 = pass_through,
+}
+
+local find_lvalues_stat = ast.make_single_dispatch(
+  find_lvalues_stat_table,
+  {})
+
+function find_lvalues.stat(cx, node)
+  find_lvalues_stat(cx)(node)
+end
+
+function find_lvalues.block(cx, node)
+  node.stats:map(function(stat) find_lvalues.stat(cx, stat) end)
+end
+
 -- To be able to correctly type check the task call after inlining,
 -- we preserve the original expression in an if statement that never executes.
 local function preserve_task_call(node)
@@ -332,19 +411,39 @@ function inline_tasks.expr_call(stats, call)
   -- Preserve the original call expression for type checking
   stats:insert(preserve_task_call(call))
 
-  -- Make assignments to temporary variables.
+  -- Find parameters used as l-values, as they cannot be directly replaced with arguments
   local params = task_ast.params:map(function(param) return param.symbol end)
+  local lvalues = data.newmap()
+  -- Initially, we assume no parameter is used as an l-value
+  params:map(function(param) lvalues[param] = false end)
+  find_lvalues.block({ lvalues = lvalues }, task_ast.body)
+
+  -- Make assignments to temporary variables.
   local param_types = params:map(function(param) return param:gettype() end)
   local symbol_mapping = {}
   local expr_mapping = {}
   data.zip(params, param_types, args):map(function(tuple)
     local param, param_type, arg = unpack(tuple)
-    if is_singleton_type(param_type) and arg:is(ast.specialized.expr.ID) then
-      expr_mapping[param] = arg
+    if not lvalues[param] and not param_type:ispointer() and
+       arg:is(ast.specialized.expr.ID)
+    then
       symbol_mapping[param] = arg.value
+      if not is_singleton_type(param_type) then
+        arg = ast.specialized.expr.Cast {
+          fn = ast.specialized.expr.Function {
+            value = std.type_sub(param_type, symbol_mapping),
+            span = arg.span,
+            annotations = arg.annotations,
+          },
+          args = terralib.newlist({arg}),
+          span = arg.span,
+          annotations = arg.annotations,
+        }
+      end
+      expr_mapping[param] = arg
     else
       local symbol_type = nil
-      if param_type:isprimitive() or param_type:ispointer() then
+      if not is_singleton_type(param_type) then
         symbol_type = param_type
       end
       local new_symbol = std.newsymbol(symbol_type, param:hasname())
