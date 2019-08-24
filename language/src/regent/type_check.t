@@ -1089,13 +1089,17 @@ function type_check.expr_cast(cx, node)
     end
   end
 
-  return ast.typed.expr.Cast {
-    fn = fn,
-    arg = arg,
-    expr_type = to_type,
-    annotations = node.annotations,
-    span = node.span,
-  }
+  if std.type_eq(from_type, to_type) then
+    return arg
+  else
+    return ast.typed.expr.Cast {
+      fn = fn,
+      arg = arg,
+      expr_type = to_type,
+      annotations = node.annotations,
+      span = node.span,
+    }
+  end
 end
 
 function type_check.expr_ctor_list_field(cx, node)

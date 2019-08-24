@@ -7614,6 +7614,16 @@ namespace Legion {
               runtime->handle_remote_op_profiling_count_update(derez);
               break;
             }
+          case SEND_REMOTE_TRACE_UPDATE:
+            {
+              runtime->handle_remote_tracing_update(derez,remote_address_space);
+              break;
+            }
+          case SEND_REMOTE_TRACE_RESPONSE:
+            {
+              runtime->handle_remote_tracing_response(derez);
+              break;
+            }
           case SEND_SHUTDOWN_NOTIFICATION:
             {
 #ifdef DEBUG_LEGION
@@ -7937,6 +7947,21 @@ namespace Legion {
         runtime->issue_runtime_meta_task(args, LG_LOW_PRIORITY,
                                          precondition);
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_remote_tracing_update(Deserializer &derez,
+                                               AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      RemoteTraceRecorder::handle_remote_update(derez, this, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_remote_tracing_response(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      RemoteTraceRecorder::handle_remote_response(derez);
     }
 
     //--------------------------------------------------------------------------
@@ -16971,6 +16996,24 @@ namespace Legion {
       find_messenger(target)->send_message(rez, 
           SEND_REMOTE_OP_PROFILING_COUNT_UPDATE, 
           DEFAULT_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_remote_trace_update(AddressSpaceID target, 
+                                           Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_REMOTE_TRACE_UPDATE,
+                                  DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_remote_trace_response(AddressSpaceID target, 
+                                             Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_REMOTE_TRACE_RESPONSE,
+                  DEFAULT_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
     }
 
     //--------------------------------------------------------------------------

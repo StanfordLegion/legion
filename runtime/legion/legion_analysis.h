@@ -206,17 +206,17 @@ namespace Legion {
                                 public Collectable {
     public:
       enum RemoteTraceKind {
-        REMOTE_RECORD_GET_TERM,
-        REMOTE_CREATE_USER_EVENT,
-        REMOTE_TRIGGER_EVENT,
-        REMOTE_MERGE_EVENTS,
-        REMOTE_ISSUE_COPY,
-        REMOTE_ISSUE_FILL,
-        REMOTE_RECORD_OP_VIEW,
-        REMOTE_SET_OP_SYNC,
+        REMOTE_TRACE_RECORD_GET_TERM,
+        REMOTE_TRACE_CREATE_USER_EVENT,
+        REMOTE_TRACE_TRIGGER_EVENT,
+        REMOTE_TRACE_MERGE_EVENTS,
+        REMOTE_TRACE_ISSUE_COPY,
+        REMOTE_TRACE_ISSUE_FILL,
+        REMOTE_TRACE_RECORD_OP_VIEW,
+        REMOTE_TRACE_SET_OP_SYNC,
       };
     public:
-      RemoteTraceRecorder(AddressSpaceID origin, AddressSpace local,
+      RemoteTraceRecorder(Runtime *rt, AddressSpaceID origin,AddressSpace local,
           Memoizable *memo, PhysicalTemplate *tpl, RtUserEvent applied_event);
       RemoteTraceRecorder(const RemoteTraceRecorder &rhs);
       virtual ~RemoteTraceRecorder(void);
@@ -291,13 +291,21 @@ namespace Legion {
       virtual void record_set_op_sync_event(ApEvent &lhs, Memoizable *memo);
     public:
       static RemoteTraceRecorder* unpack_remote_recorder(Deserializer &derez,
-                                                         Memoizable *memo);
+                                          Runtime *runtime, Memoizable *memo);
+      static void handle_remote_update(Deserializer &derez, 
+                  Runtime *runtime, AddressSpaceID source);
+      static void handle_remote_response(Deserializer &derez);
     protected:
+      static void pack_src_dst_field(Serializer &rez, const CopySrcDstField &f);
+      static void unpack_src_dst_field(Deserializer &derez, CopySrcDstField &f);
+    protected:
+      Runtime *const runtime;
       const AddressSpaceID origin_space;
       const AddressSpaceID local_space;
       Memoizable *const memoizable;
       PhysicalTemplate *const remote_tpl;
       const RtUserEvent applied_event;
+      mutable LocalLock applied_lock;
       std::set<RtEvent> applied_events;
     };
 

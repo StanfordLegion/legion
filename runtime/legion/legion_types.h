@@ -838,6 +838,8 @@ namespace Legion {
       SEND_LIBRARY_SERDEZ_RESPONSE,
       SEND_REMOTE_OP_REPORT_UNINIT,
       SEND_REMOTE_OP_PROFILING_COUNT_UPDATE,
+      SEND_REMOTE_TRACE_UPDATE,
+      SEND_REMOTE_TRACE_RESPONSE,
       SEND_SHUTDOWN_NOTIFICATION,
       SEND_SHUTDOWN_RESPONSE,
       LAST_SEND_KIND, // This one must be last
@@ -1008,6 +1010,8 @@ namespace Legion {
         "Send Library Serdez Response",                               \
         "Remote Op Report Uninitialized",                             \
         "Remote Op Profiling Count Update",                           \
+        "Send Remote Trace Update",                                   \
+        "Send Remote Trace Response",                                 \
         "Send Shutdown Notification",                                 \
         "Send Shutdown Response",                                     \
       };
