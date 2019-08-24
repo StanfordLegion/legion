@@ -761,7 +761,7 @@ namespace Legion {
                                  update_validity, recorder);
       }
       else
-        return PhysicalTraceInfo(NULL, -1U, false);
+        return PhysicalTraceInfo(op, -1U, false);
     }
 
     /////////////////////////////////////////////////////////////
