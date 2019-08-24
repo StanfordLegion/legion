@@ -106,10 +106,13 @@ end
 
 function collect_kills.stat_var(cx, stat)
   local value = stat.value
-  if value and value:is(ast.typed.expr.Cast) and
-     value.fn.value:ispointer()
-  then
+  if not value then
+    return
+  elseif value:is(ast.typed.expr.Cast) and value.fn.value:ispointer() then
     local symbol = strip_expr(value.arg)
+    if symbol then cx:update_kill(symbol) end
+  elseif value:is(ast.typed.expr.AddressOf) then
+    local symbol = strip_expr(value.value)
     if symbol then cx:update_kill(symbol) end
   end
 end
