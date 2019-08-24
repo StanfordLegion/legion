@@ -41,3 +41,7 @@
 #ifndef LEGION_USE_CUDA
 #cmakedefine LEGION_USE_CUDA
 #endif
+
+#ifndef USE_ZLIB
+#cmakedefine USE_ZLIB
+#endif

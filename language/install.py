@@ -271,8 +271,6 @@ def install_bindings(regent_dir, legion_dir, bindings_dir, runtime_dir,
         subprocess.check_call(
             [make_exe] + flags + ['-j', str(thread_count)],
             cwd=bindings_dir)
-        symlink(os.path.join(bindings_dir, 'libregent.so'),
-                os.path.join(bindings_dir, 'libregent%s' % dylib_ext))
 
         # This last bit is necessary because Mac OS X shared libraries
         # have paths hard-coded into them, and in this case those paths
@@ -290,7 +288,7 @@ def install_bindings(regent_dir, legion_dir, bindings_dir, runtime_dir,
             subprocess.check_call(
                 ['install_name_tool', '-change',
                  '/usr/local/lib/libluajit-5.1.2.dylib', 'libluajit-5.1.2.dylib',
-                 os.path.join(bindings_dir, 'libregent.so')])
+                 os.path.join(bindings_dir, 'libregent.dylib')])
 
 def get_cmake_config(cmake, regent_dir, default=None):
     config_filename = os.path.join(regent_dir, '.cmake.json')
