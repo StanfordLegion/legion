@@ -2408,8 +2408,8 @@ namespace Legion {
                                                Serializer &rez);
       void send_remote_op_profiling_count_update(AddressSpaceID target,
                                                  Serializer &rez);
-      //void send_remote_trace_message(AddressSpaceID target, Serializer &rez);
-      //void send_remote_trace_response(AddressSpaceID target, Serializer &rez);
+      void send_remote_trace_update(AddressSpaceID target, Serializer &rez);
+      void send_remote_trace_response(AddressSpaceID target, Serializer &rez);
       void send_shutdown_notification(AddressSpaceID target, Serializer &rez);
       void send_shutdown_response(AddressSpaceID target, Serializer &rez);
     public:
@@ -2639,6 +2639,9 @@ namespace Legion {
       void handle_library_serdez_response(Deserializer &derez);
       void handle_remote_op_report_uninitialized(Deserializer &derez);
       void handle_remote_op_profiling_count_update(Deserializer &derez);
+      void handle_remote_tracing_update(Deserializer &derez,
+                                        AddressSpaceID source);
+      void handle_remote_tracing_response(Deserializer &derez);
       void handle_shutdown_notification(Deserializer &derez, 
                                         AddressSpaceID source);
       void handle_shutdown_response(Deserializer &derez);
