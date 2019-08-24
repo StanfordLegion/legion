@@ -4999,8 +4999,16 @@ namespace Legion {
       ApEvent result;
       if (output_aggregator != NULL)
       {
-        // Make sure we don't defer this
         output_aggregator->issue_updates(trace_info, term_event);
+        // We need to wait for the aggregator updates to be applied
+        // here before we can summarize the output
+#ifdef NON_AGGRESSIVE_AGGREGATORS
+        if (!output_aggregator->effects_applied.has_triggered())
+          output_aggregator->effects_applied.wait();
+#else
+        if (!output_aggregator->guard_postcondition.has_triggered())
+          output_aggregator->guard_postcondition.wait();
+#endif
         result = output_aggregator->summarize(trace_info);
         if (output_aggregator->release_guards(op->runtime, applied_events))
           delete output_aggregator;
