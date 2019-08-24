@@ -6979,9 +6979,7 @@ namespace Legion {
     void ShardTask::trigger_task_complete(bool deferred /*=false*/)
     //--------------------------------------------------------------------------
     {
-      // First invoke the method on the shard manager 
-      shard_manager->trigger_task_complete(true/*local*/);
-      // Then do the normal clean-up operations
+      // First do the normal clean-up operations
       // Remove profiling our guard and trigger the profiling event if necessary
       if ((__sync_add_and_fetch(&outstanding_profiling_requests, -1) == 0) &&
           profiling_reported.exists())
@@ -6991,6 +6989,8 @@ namespace Legion {
       execution_context->invalidate_region_tree_contexts();
       if (runtime->legion_spy_enabled)
         execution_context->log_created_requirements();
+      // Then invoke the method on the shard manager 
+      shard_manager->trigger_task_complete(true/*local*/);
       // See if we need to trigger that our children are complete
       const bool need_commit = execution_context->attempt_children_commit();
       // Mark that this operation is complete
