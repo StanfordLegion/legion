@@ -3571,11 +3571,14 @@ class LogicalVerificationState(object):
                 need_close = False
             # Now determine whether we need to have a close operation along the
             # path between these two operations
-            elif prev_op.owner_shard != op.owner_shard and \
-                (prev_op is not prev_log or op is not logical_op):
+            elif prev_op.owner_shard != op.owner_shard and prev_op is not prev_log:
                 # Operations from two different shards with control
-                # replication always need a close operation if at
-                # least one of them is from an index space operation
+                # replication always need a close operation if the
+                # first one is an index space operation. If the first
+                # one is an individual operation then we know its mapping
+                # dependences are explicitly broadcast across the shards
+                # Note that the converse is not true, individual ops do
+                # not perform collective incoming dependences
                 need_close = True
             elif req.is_read_only():
                 # If we're reading from a reduction we always need a close
@@ -6047,15 +6050,15 @@ class Operation(object):
         if self.replayed:
             return True
         # We need a context to do this
-        assert self.context is not None
+        assert logical_op.context is not None
         # If this operation was predicated false, then there is nothing to do
         if self.predicate and not self.predicate_result:
             return True
         # See if there is a fence in place for this context
-        if self.context.current_fence is not None:
-            if self.context.current_fence not in logical_op.logical_incoming: 
+        if logical_op.context.current_fence is not None:
+            if logical_op.context.current_fence not in logical_op.logical_incoming: 
                 print("ERROR: missing logical fence dependence between "+
-                      str(self.context.current_fence)+" and "+str(logical_op))
+                      str(logical_op.context.current_fence)+" and "+str(logical_op))
                 if self.state.assert_on_error:
                     assert False
                 return False
@@ -6068,7 +6071,7 @@ class Operation(object):
                 if not self.analyze_logical_fence(True):
                     return False
                 # Finally record ourselves as the next fence
-                self.context.current_fence = self
+                logical_op.context.current_fence = self
         elif self.points is not None:
             # For index space operations we'll perform all their operations
             # separately so everything gets updated individually
@@ -7136,6 +7139,10 @@ class Task(object):
             flattened.append(op)
         self.operations = flattened
 
+    def reset_logical_state(self):
+        # Just need to reset the fence for now
+        self.current_fence = None
+
     def perform_task_logical_verification(self):
         # If we are a shard then we don't need to do anything as 
         # the original version of ourself will do the analysis
@@ -7155,6 +7162,7 @@ class Task(object):
             # We need to do a verification for the logical analysis in each shard
             for logical_shard in itervalues(self.replicants.shards):
                 print('Verifying shard %s...' % str(logical_shard.shard))
+                logical_shard.reset_logical_state()
                 for idx in xrange(len(logical_shard.operations)):
                     logical_op = logical_shard.operations[idx]
                     if not logical_op.fully_logged:
@@ -7213,6 +7221,7 @@ class Task(object):
         else:
             if self.op.state.verbose:
                 print('  Analyzing %d operations...' % len(self.operations))
+            self.reset_logical_state()
             # Iterate over all the operations in order and
             # have them perform their analysis
             for op in self.operations:
