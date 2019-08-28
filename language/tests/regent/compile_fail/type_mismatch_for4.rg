@@ -13,7 +13,7 @@
 -- limitations under the License.
 
 -- fails-with:
--- type_mismatch_for4.rg:23: iterator for loop expected ispace, region or list, got int32
+-- type_mismatch_for4.rg:23: iterator for loop expected ispace, region, rect or list, got int32
 --   for x in 1 do end
 --     ^
 

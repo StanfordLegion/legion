@@ -2861,6 +2861,10 @@ local function make_partition_projection_functor(cx, expr, loop_index, color_spa
     symbol_setup = quote
       var [symbol] = [symbol_type]({ __ptr = [symbol_type.index_type]([point]) })
     end
+  elseif std.is_index_type(symbol_type) then
+    symbol_setup = quote
+      var [symbol] = [symbol_type]([point])
+    end
   else
     -- Otherwise symbol_type has to be some simple integral type.
     assert(symbol_type:isintegral())
@@ -9005,6 +9009,10 @@ local function stat_index_launch_setup(cx, node, domain, actions)
     symbol_setup = quote
       var [symbol] = [symbol_type]({ __ptr = [symbol_type.index_type]([point]) })
     end
+  elseif std.is_index_type(symbol_type) then
+    symbol_setup = quote
+      var [symbol] = [symbol_type]([point])
+    end
   else
     -- Otherwise symbol_type has to be some simple integral type.
     assert(symbol_type:isintegral())
@@ -9225,6 +9233,11 @@ function codegen.stat_index_launch_list(cx, node)
       [value.actions]
       var [domain] = c.legion_index_space_get_domain(
         [cx.runtime], [value.value].impl.index_space)
+    end
+  elseif std.is_rect_type(value_type) then
+    actions = quote
+      [value.actions]
+      var [domain] = [value.value]:to_domain()
     end
   else
     assert(false)
