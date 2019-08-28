@@ -65,7 +65,7 @@ task main()
   c.legion_coloring_destroy(rc)
 
   -- not optimized: body is not a bare function call
-  __demand(__parallel)
+  __demand(__index_launch)
   for i in cs do
     var x = f(p_disjoint[i])
   end

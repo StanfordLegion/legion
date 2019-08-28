@@ -59,8 +59,8 @@ task k() : int
 
 -- KEY 3: error only occurs with an index launch - individual task launches for
 --  each subregion works fine
-    __demand(__parallel)
-    -- __forbid(__parallel)
+    __demand(__index_launch)
+    -- __forbid(__index_launch)
     for i = 0, 3 do
       g(p[i], 20)
     end

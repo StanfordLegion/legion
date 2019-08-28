@@ -23,7 +23,7 @@ end
 task main()
   var low : uint = 0
   var high : uint = 0
-  __demand(__parallel)
+  __demand(__index_launch)
   for i = low, high do
     f()
   end

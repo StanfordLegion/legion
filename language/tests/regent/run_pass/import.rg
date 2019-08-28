@@ -139,11 +139,11 @@ function gen_test(import_ispace, import_region1, import_region2, import_partitio
     fill([y], 0.0)
 
     for idx = 0, 5 do
-      __demand(__parallel)
+      __demand(__index_launch)
       for color in [cs] do
         daxpy([p][color], [q][color], 0.5)
       end
-      __demand(__parallel)
+      __demand(__index_launch)
       for color in [cs] do
         check([q][color])
       end

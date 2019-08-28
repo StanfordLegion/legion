@@ -21,7 +21,7 @@ import "regent"
 
 task main()
   var cs = ispace(int1d, 4)
-  __demand(__parallel)
+  __demand(__index_launch)
   for i in cs do
   end
 end

@@ -65,7 +65,7 @@ task main()
   c.legion_coloring_destroy(rc)
 
   -- not optimized: can't analyze loop-variant argument
-  __demand(__parallel)
+  __demand(__index_launch)
   for i in cs do
     f(p_disjoint[(int(i) + 1) % n])
   end

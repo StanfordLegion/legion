@@ -40,7 +40,7 @@ task foo(x : int)
 end
 
 task toplevel()
-  __demand(__parallel)
+  __demand(__index_launch)
   for i = 0, 8 do
     foo(i)
   end

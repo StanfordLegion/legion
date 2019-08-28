@@ -32,7 +32,7 @@ task main()
   var r = region(ispace(int2d, {4, 4}), double)
   var p = partition(equal, r, ispace(int2d, {2, 2}))
   fill(r, 4.0)
-  __forbid(__parallel)
+  __forbid(__index_launch)
   for c in p.colors do reduce(p[c]) end
   check(r)
 end

@@ -26,7 +26,7 @@ task main()
   var r = region(ispace(ptr, 5), int)
   var p = partition(equal, r, cs)
 
-  __demand(__parallel)
+  __demand(__index_launch)
   for i in cs do
     var x = f(p[i])
     f(p[i])

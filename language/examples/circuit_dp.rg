@@ -1064,23 +1064,23 @@ task toplevel()
       var dt : float = DELTAT
       var first_wires : &c.legion_ptr_t = colorings.first_wires
       var num_wires : uint = conf.wires_per_piece
-      __demand(__parallel)
+      __demand(__index_launch)
       for i = 0, conf.num_pieces do
         dense_calculate_new_currents(steps, dt, first_wires[i], num_wires,
                                      rp_private[i], rp_shared[i], rp_ghost[i],
                                      rp_all_wires[i])
       end
     else
-      __demand(__parallel)
+      __demand(__index_launch)
       for i = 0, conf.num_pieces do
         calculate_new_currents(steps, rp_private[i], rp_shared[i], rp_ghost[i], rp_all_wires[i])
       end
     end
-    __demand(__parallel)
+    __demand(__index_launch)
     for i = 0, conf.num_pieces do
       distribute_charge(rp_private[i], rp_shared[i], rp_ghost[i], rp_all_wires[i])
     end
-    __demand(__parallel)
+    __demand(__index_launch)
     for i = 0, conf.num_pieces do
       update_voltages(rp_private[i], rp_shared[i])
     end

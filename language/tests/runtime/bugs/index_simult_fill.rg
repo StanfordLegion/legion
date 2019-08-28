@@ -69,8 +69,8 @@ task k() : int
 
 -- KEY 1: error only occurs with an index launch - individual task launches
 --  work fine
-    __demand(__parallel)
-    -- __forbid(__parallel)
+    __demand(__index_launch)
+    -- __forbid(__index_launch)
     for i = 0, 3 do
       h(p[0], p[1], p[2], 20, i)
     end

@@ -31,7 +31,7 @@ task main()
 
   fill(r, 0)
 
-  __demand(__parallel)
+  __demand(__index_launch)
   for i in s do
     g(p[i.x + i.y * 2])
   end

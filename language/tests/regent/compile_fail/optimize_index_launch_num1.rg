@@ -64,7 +64,7 @@ task main()
   c.legion_coloring_destroy(rc)
 
   -- not optimized: can't analyze stride
-  __demand(__parallel)
+  __demand(__index_launch)
   for i = 0, n, 2 do
     f(p_disjoint[i])
   end

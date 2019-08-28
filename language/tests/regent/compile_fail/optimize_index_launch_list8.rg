@@ -65,7 +65,7 @@ task main()
   c.legion_coloring_destroy(rc)
 
   -- not optimized: loop-variant argument is interfering
-  __demand(__parallel)
+  __demand(__index_launch)
   for i in cs do
     g(p_aliased[i])
   end

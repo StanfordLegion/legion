@@ -29,7 +29,7 @@ task g()
   var e = r.bounds
   var p = restrict(r, t, e, cs)
   -- not optimized: argument is not projectable
-  __demand(__parallel)
+  __demand(__index_launch)
   for i in cs do
     fill((p[i]), 1)
   end

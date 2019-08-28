@@ -22,7 +22,7 @@ import "regent"
 __forbid(__leaf)
 __demand(__inner)
 task main()
-  __demand(__parallel)
+  __demand(__index_launch)
   for i = 0, 4 do
   end
 end

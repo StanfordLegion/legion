@@ -26,7 +26,7 @@ end
 task main()
   var r = region(ispace(ptr, 4), int)
   var p = partition(equal, r, ispace(int1d, 4))
-  __demand(__parallel)
+  __demand(__index_launch)
   for i = 0, 4 do
     hello2(p[i])
   end

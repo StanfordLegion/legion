@@ -162,17 +162,17 @@ do
     c.legion_runtime_begin_trace(__runtime(), __context(), 0, false)
 
     var count = 0
-    __demand(__parallel)
+    __demand(__index_launch)
     for i = 0, subgraphs do
       sssp_update_private(i, nodes_subgraph, pdst[i], pe[i])
     end
 
-    __demand(__parallel)
+    __demand(__index_launch)
     for i = 0, subgraphs do
       sssp_update_shared(i, nodes_subgraph, psrc[i], pdst[i], pe[i])
     end
 
-    __demand(__parallel)
+    __demand(__index_launch)
     for i = 0, subgraphs do
       count += sssp_collect(pdst[i])
     end
@@ -274,7 +274,7 @@ task toplevel()
   var pe = preimage(re, pdst, re.n2)
   var psrc = image(rn, pe, re.n1)
 
-  __demand(__parallel)
+  __demand(__index_launch)
   for i = 0, subgraphs do
     mark_edges_from_private(pdst[i], rn, pe[i])
   end

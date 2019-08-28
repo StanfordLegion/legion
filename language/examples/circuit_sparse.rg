@@ -647,7 +647,7 @@ task toplevel()
   var rp_ghost_ranges = partition(equal, ghost_ranges, launch_domain)
 
   for j = 0, 1 do
-    __demand(__parallel)
+    __demand(__index_launch)
     for i = 0, num_superpieces do
       init_piece(i, conf, rp_ghost_ranges[i],
                  rp_private[i], rp_shared[i], all_shared, rp_wires[i])

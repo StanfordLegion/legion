@@ -32,7 +32,7 @@ task main()
   var r = region(ispace(ptr, n), int)
   var p = partition(equal, r, ispace(int1d, 5))
 
-  __demand(__parallel)
+  __demand(__index_launch)
   for i = 0, 2 do
     g2(p[i], p[i+1])
   end

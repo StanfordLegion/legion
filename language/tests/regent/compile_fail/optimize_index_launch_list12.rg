@@ -34,7 +34,7 @@ end
 
 task h(cs : ispace(int1d), x : phase_barrier)
   -- not optimized: argument is not invariant
-  __demand(__parallel)
+  __demand(__index_launch)
   for i in cs do
     f(g(x))
   end

@@ -73,7 +73,7 @@ task with_partitions(r0 : region(int), p0_disjoint : partition(disjoint, r0),
 where reads(r0, r1), writes(r0, r1) do
 
   -- not optimized: loop-variant argument is (statically) interfering
-  __demand(__parallel)
+  __demand(__index_launch)
   for i = 0, n do
     g2(p0_disjoint[i], p1_disjoint[i])
   end
