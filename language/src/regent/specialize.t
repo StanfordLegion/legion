@@ -1456,6 +1456,32 @@ local function make_symbol(cx, node, var_name, var_type)
   report.error(node, "mismatch in specialization: expected a symbol but got value of type " .. tostring(type(var_name)))
 end
 
+local function convert_index_launch_annotations(node)
+  if node.annotations.parallel:is(ast.annotation.Demand) then
+    if not (node.annotations.index_launch:is(ast.annotation.Allow) or
+              node.annotations.index_launch:is(ast.annotation.Demand))
+    then
+      report.error(node, "conflicting annotations for __parallel and __index_launch")
+    end
+    return node.annotations {
+      parallel = ast.annotation.Allow { value = false },
+      index_launch = ast.annotation.Demand { value = false },
+    }
+  elseif node.annotations.parallel:is(ast.annotation.Forbid) then
+    if not (node.annotations.index_launch:is(ast.annotation.Allow) or
+              node.annotations.index_launch:is(ast.annotation.Forbid))
+    then
+      report.error(node, "conflicting annotations for __parallel and __index_launch")
+    end
+    return node.annotations {
+      parallel = ast.annotation.Allow { value = false },
+      index_launch = ast.annotation.Forbid { value = false },
+    }
+  else
+    return node.annotations
+  end
+end
+
 function specialize.stat_for_num(cx, node)
   local values = node.values:map(
     function(value) return specialize.expr(cx, value) end)
@@ -1487,7 +1513,7 @@ function specialize.stat_for_num(cx, node)
     symbol = symbol,
     values = values,
     block = block,
-    annotations = node.annotations,
+    annotations = convert_index_launch_annotations(node),
     span = node.span,
   }
 end
@@ -1522,7 +1548,7 @@ function specialize.stat_for_list(cx, node)
     symbol = symbol,
     value = value,
     block = block,
-    annotations = node.annotations,
+    annotations = convert_index_launch_annotations(node),
     span = node.span,
   }
 end
@@ -1532,7 +1558,7 @@ function specialize.stat_repeat(cx, node)
   return ast.specialized.stat.Repeat {
     block = specialize.block(cx, node.block),
     until_cond = specialize.expr(cx, node.until_cond),
-    annotations = node.annotations,
+    annotations = convert_index_launch_annotations(node),
     span = node.span,
   }
 end
