@@ -289,6 +289,7 @@ endif()
 #------------------------------------------------------------------------------#
 option(Legion_USE_ZLIB "Enable support for zlib" ON)
 if(Legion_USE_ZLIB)
+  find_package(ZLIB REQUIRED)
   # define variable for legion_defines.h
   set(USE_ZLIB ON)
 endif()
