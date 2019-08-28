@@ -259,7 +259,7 @@ before_script:
     - free
     - $TEST_PYTHON_EXE ./test.py
   retry:
-    max: 2
+    max: 0
     when:
       - runner_system_failure
       - unknown_failure
