@@ -184,7 +184,13 @@ if(Legion_USE_GASNet)
 endif()
 
 if(Legion_USE_LLVM)
-  target_link_libraries(RealmRuntime PRIVATE LLVM::LLVM)
+  if(Legion_LINK_LLVM_LIBS)
+    target_link_libraries(RealmRuntime PRIVATE LLVM::LLVM)
+  else()
+    # even if we dont link, we still need the LLVM include directories
+    get_target_property(llvm_incdir LLVM::LLVM INTERFACE_INCLUDE_DIRECTORIES)
+    target_include_directories(RealmRuntime PRIVATE ${llvm_incdir})
+  endif()
 endif()
 
 if(Legion_USE_CUDA)
