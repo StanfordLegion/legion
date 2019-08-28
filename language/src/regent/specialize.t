@@ -1463,6 +1463,7 @@ local function convert_index_launch_annotations(node)
     then
       report.error(node, "conflicting annotations for __parallel and __index_launch")
     end
+    report.warn(node, "__demand(__parallel) is deprecated, please use __demand(__index_launch)")
     return node.annotations {
       parallel = ast.annotation.Allow { value = false },
       index_launch = ast.annotation.Demand { value = false },
@@ -1473,6 +1474,7 @@ local function convert_index_launch_annotations(node)
     then
       report.error(node, "conflicting annotations for __parallel and __index_launch")
     end
+    report.warn(node, "__forbid(__parallel) is deprecated, please use __forbid(__index_launch)")
     return node.annotations {
       parallel = ast.annotation.Allow { value = false },
       index_launch = ast.annotation.Forbid { value = false },
