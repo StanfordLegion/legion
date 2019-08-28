@@ -1261,8 +1261,10 @@ function vectorize_loops.stat(node)
     end
 
   elseif node:is(ast.typed.stat.ForList) then
-    if std.is_bounded_type(node.symbol:gettype()) or
-       std.is_index_type(node.symbol:gettype()) then
+    if (std.is_bounded_type(node.symbol:gettype()) or
+        std.is_index_type(node.symbol:gettype())) and
+       not std.is_rect_type(std.as_read(node.value.expr_type))
+    then
       return vectorize_loops.stat_for_list(node)
     else
       return node { block = vectorize_loops.block(node.block) }
