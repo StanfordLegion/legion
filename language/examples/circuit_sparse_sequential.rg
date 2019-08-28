@@ -183,7 +183,6 @@ terra parse_input_args(conf : Config)
   return conf
 end
 
-__demand(__parallel)
 task init_nodes(rn : region(ispace(ptr), node))
 where
   reads writes(rn)
