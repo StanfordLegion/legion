@@ -14,7 +14,7 @@
 
 import "regent"
 
-local embed_tasks_lib = require("embed_tasks")
+local embed_tasks_dir = require("embed_tasks")
 
 -- Compile and execute embed.cc
 local exe
@@ -24,11 +24,7 @@ do
   local binding_dir = root_dir .. "../../bindings/regent/"
 
   local embed_cc = root_dir .. "embed.cc"
-  if os.getenv('SAVEOBJ') == '1' then
-    exe = root_dir .. "embed.exe"
-  else
-    exe = os.tmpname()
-  end
+  exe = embed_tasks_dir .. "embed.exe"
 
   local cxx = os.getenv('CXX') or 'c++'
 
@@ -43,7 +39,8 @@ do
   end
   local cmd = (cxx .. " " .. cxx_flags .. " -I " .. runtime_dir .. " " ..
                  embed_cc ..
-                 " -L " .. root_dir .. " " .. " -l" .. embed_tasks_lib .. " " ..
+		 " -I " .. embed_tasks_dir ..
+                 " -L " .. embed_tasks_dir .. " " .. " -lembed_tasks " ..
                  " -L " .. lib_dir .. " " .. libs .. " " ..
                  " -o " .. exe)
   if os.execute(cmd) ~= 0 then
@@ -54,9 +51,9 @@ end
 
 local env = ""
 if os.getenv("DYLD_LIBRARY_PATH") then
-  env = "DYLD_LIBRARY_PATH=" .. os.getenv("DYLD_LIBRARY_PATH") .. ":" .. root_dir .. " "
+  env = "DYLD_LIBRARY_PATH=" .. os.getenv("DYLD_LIBRARY_PATH") .. ":" .. embed_tasks_dir .. " "
 elseif os.getenv("LD_LIBRARY_PATH") then
-  env = "LD_LIBRARY_PATH=" .. os.getenv("LD_LIBRARY_PATH") .. ":" .. root_dir .. " "
+  env = "LD_LIBRARY_PATH=" .. os.getenv("LD_LIBRARY_PATH") .. ":" .. embed_tasks_dir .. " "
 end
 
 -- Pass the arguments along so that the child process is able to
@@ -67,3 +64,11 @@ for _, arg in ipairs(rawget(_G, "arg")) do
 end
 
 assert(os.execute(env .. exe .. args) == 0)
+
+-- clean up our mess
+if os.getenv('SAVEOBJ') ~= '1' then
+  os.execute("rm " .. embed_tasks_dir .. "embed_tasks.h")
+  os.execute("rm " .. embed_tasks_dir .. "libembed_tasks.*")
+  os.execute("rm " .. embed_tasks_dir .. "embed.exe")
+  os.execute("rmdir " .. embed_tasks_dir)
+end
