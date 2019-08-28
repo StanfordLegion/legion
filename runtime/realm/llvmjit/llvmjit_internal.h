@@ -16,6 +16,7 @@
 #ifndef LLVMJIT_INTERNAL_H
 #define LLVMJIT_INTERNAL_H
 
+#include "realm/realm_config.h"
 #include "realm/bytearray.h"
 
 #include <string>
