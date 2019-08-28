@@ -86,7 +86,7 @@ local default_options = {
   ["parallelize-time-deppart"] = false,
   ["parallelize-tight-pvs"] = false,
   ["parallelize-use-pvs"] = true,
-  ["parallelize-use-colocation"] = false,
+  ["parallelize-use-colocation"] = true,
 
   -- Miscellaneous, internal or special-purpose flags:
   ["aligned-instances"] = false,
