@@ -827,7 +827,10 @@ function optimize_index_launch.stat_for_list(cx, node)
   end
 
   local value_type = std.as_read(node.value.expr_type)
-  if not (std.is_ispace(value_type) or std.is_region(value_type)) then
+  if not (std.is_rect_type(value_type) or
+          std.is_ispace(value_type) or
+          std.is_region(value_type))
+  then
     report_fail(node, "loop optimization failed: domain is not a ispace or region")
     return node
   end

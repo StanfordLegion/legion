@@ -2861,6 +2861,10 @@ local function make_partition_projection_functor(cx, expr, loop_index, color_spa
     symbol_setup = quote
       var [symbol] = [symbol_type]({ __ptr = [symbol_type.index_type]([point]) })
     end
+  elseif std.is_index_type(symbol_type) then
+    symbol_setup = quote
+      var [symbol] = [symbol_type]([point])
+    end
   else
     -- Otherwise symbol_type has to be some simple integral type.
     assert(symbol_type:isintegral())
@@ -8218,6 +8222,45 @@ function codegen.stat_for_list(cx, node)
       end
       ::[break_label]::
     end
+  -- or a rectangle
+  elseif std.is_rect_type(value_type) then
+    local index_type = value_type.index_type
+    local dim = index_type.dim
+    local indices = terralib.newlist()
+    for idx = 1, dim do
+      indices:insert(terralib.newsymbol(int64, "x" .. tostring(idx)))
+    end
+    local body
+    if dim == 1 then
+      body = quote
+        for [ indices[1] ] = [value.value].lo.__ptr,
+                             [value.value].hi.__ptr + 1
+        do
+          var [symbol] = [index_type]({ __ptr = [ indices[1] ] })
+          [cleanup_after(cx, codegen.block(cx, node.block))]
+        end
+      end
+    else
+      local fields = index_type.fields
+      body = quote
+        var [symbol] =
+          [index_type]({ __ptr = [index_type.base_type]{ [indices] } })
+        [cleanup_after(cx, codegen.block(cx, node.block))]
+      end
+      for idx = 1, dim do
+        body = quote
+          for [ indices[idx] ] = [value.value].lo.__ptr.[ fields[idx] ],
+                                 [value.value].hi.__ptr.[ fields[idx] ] + 1
+          do
+            [body]
+          end
+        end
+      end
+    end
+    return quote
+      [body]
+      ::[break_label]::
+    end
   end
 
   local ispace_type, is
@@ -8966,6 +9009,10 @@ local function stat_index_launch_setup(cx, node, domain, actions)
     symbol_setup = quote
       var [symbol] = [symbol_type]({ __ptr = [symbol_type.index_type]([point]) })
     end
+  elseif std.is_index_type(symbol_type) then
+    symbol_setup = quote
+      var [symbol] = [symbol_type]([point])
+    end
   else
     -- Otherwise symbol_type has to be some simple integral type.
     assert(symbol_type:isintegral())
@@ -9186,6 +9233,11 @@ function codegen.stat_index_launch_list(cx, node)
       [value.actions]
       var [domain] = c.legion_index_space_get_domain(
         [cx.runtime], [value.value].impl.index_space)
+    end
+  elseif std.is_rect_type(value_type) then
+    actions = quote
+      [value.actions]
+      var [domain] = [value.value]:to_domain()
     end
   else
     assert(false)
