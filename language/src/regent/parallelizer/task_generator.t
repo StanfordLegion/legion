@@ -1330,7 +1330,7 @@ function task_generator.new(node)
 
         parallel_task:get_variants():map(function(variant)
           colocation_constraints:map(function(colocation_constraint)
-            variant:set_name("colocation")
+            variant:set_name("colocation" .. variant:get_name())
             variant:add_execution_constraint(colocation_constraint)
           end)
         end)
