@@ -117,7 +117,7 @@ void StencilMapper::map_task(const MapperContext      ctx,
   {
     const char *variant_name =
       runtime->find_task_variant_name(ctx, task.task_id, variants[idx]);
-    if (strcmp(variant_name, "colocation") == 0)
+    if (strncmp(variant_name, "colocation", 10) == 0)
     {
       chosen_variant = variants[idx];
       break;
