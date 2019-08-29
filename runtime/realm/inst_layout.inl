@@ -717,8 +717,14 @@ namespace Realm {
   template <typename FT, int N, typename T>
   __CUDA_HD__
   inline AffineAccessor<FT,N,T>::AffineAccessor(void)
-    : base(0)
   {}  
+
+  template <typename FT, int N, typename T>
+  __CUDA_HD__
+  inline void AffineAccessor<FT,N,T>::reset()
+  {
+    base = 0;
+  }
 
   // NOTE: these constructors will die horribly if the conversion is not
   //  allowed - call is_compatible(...) first if you're not sure
@@ -728,6 +734,14 @@ namespace Realm {
   inline AffineAccessor<FT,N,T>::AffineAccessor(RegionInstance inst,
 						FieldID field_id,
 						size_t subfield_offset /*= 0*/)
+  {
+    reset(inst, field_id, subfield_offset);
+  }
+    
+  template <typename FT, int N, typename T>
+  inline void AffineAccessor<FT,N,T>::reset(RegionInstance inst,
+					    FieldID field_id,
+					    size_t subfield_offset /*= 0*/)
   {
     const InstanceLayout<N,T> *layout = checked_cast<const InstanceLayout<N,T> *>(inst.get_layout());
     std::map<FieldID, InstanceLayoutGeneric::FieldLayout>::const_iterator it = layout->fields.find(field_id);
@@ -762,6 +776,14 @@ namespace Realm {
   AffineAccessor<FT,N,T>::AffineAccessor(RegionInstance inst,
 					 FieldID field_id, const Rect<N,T>& subrect,
 					 size_t subfield_offset /*= 0*/)
+  {
+    reset(inst, field_id, subrect, subfield_offset);
+  }
+  
+  template <typename FT, int N, typename T>
+  void AffineAccessor<FT,N,T>::reset(RegionInstance inst,
+				     FieldID field_id, const Rect<N,T>& subrect,
+				     size_t subfield_offset /*= 0*/)
   {
     const InstanceLayout<N,T> *layout = checked_cast<const InstanceLayout<N,T> *>(inst.get_layout());
     std::map<FieldID, InstanceLayoutGeneric::FieldLayout>::const_iterator it = layout->fields.find(field_id);
@@ -800,6 +822,17 @@ namespace Realm {
 						const Point<N2, T2>& offset,
 						FieldID field_id,
 						size_t subfield_offset /*= 0*/)
+  {
+    reset(inst, transform, offset, field_id, subfield_offset);
+  }
+  
+  template <typename FT, int N, typename T>
+  template <int N2, typename T2>
+  inline void AffineAccessor<FT,N,T>::reset(RegionInstance inst,
+					    const Matrix<N2, N, T2>& transform,
+					    const Point<N2, T2>& offset,
+					    FieldID field_id,
+					    size_t subfield_offset /*= 0*/)
   {
     // instance's dimensionality should be <N2,T2>
     const InstanceLayout<N2,T2> *layout = checked_cast<const InstanceLayout<N2,T2> *>(inst.get_layout());
@@ -851,6 +884,18 @@ namespace Realm {
 						FieldID field_id,
 						const Rect<N,T>& subrect,
 						size_t subfield_offset /*= 0*/)
+  {
+    reset(inst, transform, offset, field_id, subrect, subfield_offset);
+  }
+  
+  template <typename FT, int N, typename T>
+  template <int N2, typename T2>
+  inline void AffineAccessor<FT,N,T>::reset(RegionInstance inst,
+					    const Matrix<N2, N, T2>& transform,
+					    const Point<N2, T2>& offset,
+					    FieldID field_id,
+					    const Rect<N,T>& subrect,
+					    size_t subfield_offset /*= 0*/)
   {
     // instance's dimensionality should be <N2,T2>
     const InstanceLayout<N2,T2> *layout = checked_cast<const InstanceLayout<N2,T2> *>(inst.get_layout());
