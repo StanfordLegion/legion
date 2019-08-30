@@ -1194,15 +1194,73 @@ namespace Realm {
 
     size_t count = datalen / redop->sizeof_rhs;
 
-    void *lhs = get_runtime()->get_memory_impl(args.mem)->get_direct_ptr(args.offset, args.stride * count);
-    assert(lhs);
+    MemoryImpl *m_impl = get_runtime()->get_memory_impl(args.mem);
+    void *lhs = m_impl->get_direct_ptr(args.offset, args.stride * count);
+    if(lhs && (m_impl->kind != MemoryImpl::MKIND_GPUFB)) {
+      // directly apply/fold to memory contents
+      if(red_fold)
+	redop->fold_strided(lhs, data,
+			    args.stride, redop->sizeof_rhs,
+			    count, false /*not exclusive*/);
+      else
+	redop->apply_strided(lhs, data, 
+			     args.stride, redop->sizeof_rhs,
+			     count, false /*not exclusive*/);
+    } else {
+      // need to use an intermediate buffer in sysmem
+      size_t MAX_BUFFER_SIZE = 1 << 20; // 1MB
+      size_t lhs_size = (red_fold ? redop->sizeof_rhs : redop->sizeof_lhs);
+      size_t max_chunk_count = ((lhs_size >= MAX_BUFFER_SIZE) ?
+				  1 :
+				(  MAX_BUFFER_SIZE / lhs_size));
+      char *lhs_buffer = reinterpret_cast<char *>(malloc(lhs_size *
+							 max_chunk_count));
+      assert(lhs_buffer != 0);
+      size_t chunk_start = 0;
+      while(chunk_start < count) {
+	size_t chunk_size = std::min(count - chunk_start, max_chunk_count);
+	if(size_t(args.stride) == lhs_size) {
+	  m_impl->get_bytes(args.offset + (chunk_start * args.stride),
+			    lhs_buffer,
+			    lhs_size * chunk_size);
+	} else {
+	  // no 2d version of get_bytes
+	  for(size_t i = 0; i < chunk_size; i++)
+	    m_impl->get_bytes(args.offset + ((chunk_start + i) * args.stride),
+			      lhs_buffer + (i * lhs_size),
+			      lhs_size);
+	}
 
-    if(red_fold)
-      redop->fold_strided(lhs, data,
-			  args.stride, redop->sizeof_rhs, count, false /*not exclusive*/);
-    else
-      redop->apply_strided(lhs, data, 
-			   args.stride, redop->sizeof_rhs, count, false /*not exclusive*/);
+	// apply/fold to local buffer
+	if(red_fold)
+	  redop->fold_strided(lhs_buffer,
+			      reinterpret_cast<const char *>(data) + (chunk_start * redop->sizeof_rhs),
+			      lhs_size, redop->sizeof_rhs,
+			      chunk_size, true /*exclusive*/);
+	else
+	  redop->apply_strided(lhs_buffer,
+			       reinterpret_cast<const char *>(data) + (chunk_start * redop->sizeof_rhs),
+			       lhs_size, redop->sizeof_rhs,
+			       chunk_size, true /*exclusive*/);
+
+	// and copy updated bytes back
+	if(size_t(args.stride) == lhs_size) {
+	  m_impl->put_bytes(args.offset + (chunk_start * args.stride),
+			    lhs_buffer,
+			    lhs_size * chunk_size);
+	} else {
+	  // no 2d version of put_bytes
+	  for(size_t i = 0; i < chunk_size; i++)
+	    m_impl->put_bytes(args.offset + ((chunk_start + i) * args.stride),
+			      lhs_buffer + (i * lhs_size),
+			      lhs_size);
+	}
+
+	chunk_start += chunk_size;
+      }
+
+      free(lhs_buffer);
+    }
 
     // track the sequence ID to know when the full RDMA is done
     if(args.sequence_id > 0) {
