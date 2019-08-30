@@ -66,7 +66,7 @@ task main()
   -- not optimized: can't analyze stride
   do
     var s = 1
-    __demand(__parallel)
+    __demand(__index_launch)
     for i = 0, n, s do
       f(p_disjoint[i])
     end

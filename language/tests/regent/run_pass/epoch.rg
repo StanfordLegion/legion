@@ -47,7 +47,7 @@ task k() : int
   @y2 = 4000000
 
   must_epoch
-    __demand(__parallel)
+    __demand(__index_launch)
     for i = 0, 3 do
       g(p[i], 20)
     end

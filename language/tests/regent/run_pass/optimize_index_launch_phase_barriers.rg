@@ -39,12 +39,12 @@ task main()
   var n = 2
   var z = phase_barrier(1)
   must_epoch
-    __demand(__parallel)
+    __demand(__index_launch)
     for i = 0, n do
       k1(z)
     end
     z = advance(z)
-    __demand(__parallel)
+    __demand(__index_launch)
     for i = 0, n do
       k2(z)
     end
@@ -54,7 +54,7 @@ task main()
   end
 
   var a = phase_barrier(1)
-  __demand(__parallel)
+  __demand(__index_launch)
   for i = 0, n do
     -- This is opaque to the compiler, but that's ok because we're not
     -- actually using the barrier as an arrival or wait.

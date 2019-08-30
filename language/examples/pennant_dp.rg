@@ -1035,16 +1035,16 @@ do
   while continue_simulation(cycle, cstop, time, tstop) do
     c.legion_runtime_begin_trace(__runtime(), __context(), 0, false)
 
-    __demand(__parallel)
+    __demand(__index_launch)
     for i = 0, conf.npieces do
       init_step_points(rp_all_private_p[i], enable)
     end
-    __demand(__parallel)
+    __demand(__index_launch)
     for i = 0, conf.npieces do
       init_step_points(rp_all_shared_p[i], enable)
     end
 
-    __demand(__parallel)
+    __demand(__index_launch)
     for i = 0, conf.npieces do
       init_step_zones(rz_all_p[i], enable)
     end
@@ -1058,16 +1058,16 @@ do
       last_time = current_time
     end
 
-    __demand(__parallel)
+    __demand(__index_launch)
     for i = 0, conf.npieces do
       adv_pos_half(rp_all_private_p[i], dt, enable)
     end
-    __demand(__parallel)
+    __demand(__index_launch)
     for i = 0, conf.npieces do
       adv_pos_half(rp_all_shared_p[i], dt, enable)
     end
 
-    __demand(__parallel)
+    __demand(__index_launch)
     for i = 0, conf.npieces do
       calc_centers(rz_all_p[i],
                    rp_all_private_p[i],
@@ -1075,7 +1075,7 @@ do
                    rs_all_p[i], enable)
     end
 
-    __demand(__parallel)
+    __demand(__index_launch)
     for i = 0, conf.npieces do
       calc_volumes(rz_all_p[i],
                    rp_all_private_p[i],
@@ -1083,7 +1083,7 @@ do
                    rs_all_p[i], enable)
     end
 
-    __demand(__parallel)
+    __demand(__index_launch)
     for i = 0, conf.npieces do
       calc_char_len(rz_all_p[i],
                     rp_all_private_p[i],
@@ -1091,12 +1091,12 @@ do
                     rs_all_p[i], enable)
     end
 
-    __demand(__parallel)
+    __demand(__index_launch)
     for i = 0, conf.npieces do
       calc_rho_half(rz_all_p[i], enable)
     end
 
-    __demand(__parallel)
+    __demand(__index_launch)
     for i = 0, conf.npieces do
       sum_point_mass(rz_all_p[i],
                      rp_all_private_p[i],
@@ -1104,12 +1104,12 @@ do
                      rs_all_p[i], enable)
     end
 
-    __demand(__parallel)
+    __demand(__index_launch)
     for i = 0, conf.npieces do
       calc_state_at_half(rz_all_p[i], gamma, ssmin, dt, enable)
     end
 
-    __demand(__parallel)
+    __demand(__index_launch)
     for i = 0, conf.npieces do
       calc_force_pgas_tts(rz_all_p[i],
                           rp_all_private_p[i],
@@ -1118,7 +1118,7 @@ do
                           alfa, ssmin, enable)
     end
 
-    __demand(__parallel)
+    __demand(__index_launch)
     for i = 0, conf.npieces do
       qcs_zone_center_velocity(
         rz_all_p[i],
@@ -1127,7 +1127,7 @@ do
         rs_all_p[i], enable)
     end
 
-    __demand(__parallel)
+    __demand(__index_launch)
     for i = 0, conf.npieces do
       qcs_corner_divergence(
         rz_all_p[i],
@@ -1136,7 +1136,7 @@ do
         rs_all_p[i], enable)
     end
 
-    __demand(__parallel)
+    __demand(__index_launch)
     for i = 0, conf.npieces do
       qcs_qcn_force(
         rz_all_p[i],
@@ -1146,7 +1146,7 @@ do
         gamma, q1, q2, enable)
     end
 
-    __demand(__parallel)
+    __demand(__index_launch)
     for i = 0, conf.npieces do
       qcs_force(
         rz_all_p[i],
@@ -1155,7 +1155,7 @@ do
         rs_all_p[i], enable)
     end
 
-    __demand(__parallel)
+    __demand(__index_launch)
     for i = 0, conf.npieces do
       qcs_vel_diff(
         rz_all_p[i],
@@ -1165,7 +1165,7 @@ do
         q1, q2, enable)
     end
 
-    __demand(__parallel)
+    __demand(__index_launch)
     for i = 0, conf.npieces do
       sum_point_force(rz_all_p[i],
                       rp_all_private_p[i],
@@ -1173,25 +1173,25 @@ do
                       rs_all_p[i], enable)
     end
 
-    __demand(__parallel)
+    __demand(__index_launch)
     for i = 0, conf.npieces do
       apply_boundary_conditions(rp_all_private_p[i], enable)
     end
-    __demand(__parallel)
+    __demand(__index_launch)
     for i = 0, conf.npieces do
       apply_boundary_conditions(rp_all_shared_p[i], enable)
     end
 
-    __demand(__parallel)
+    __demand(__index_launch)
     for i = 0, conf.npieces do
       adv_pos_full(rp_all_private_p[i], dt, enable)
     end
-    __demand(__parallel)
+    __demand(__index_launch)
     for i = 0, conf.npieces do
       adv_pos_full(rp_all_shared_p[i], dt, enable)
     end
 
-    __demand(__parallel)
+    __demand(__index_launch)
     for i = 0, conf.npieces do
       calc_centers_full(rz_all_p[i],
                         rp_all_private_p[i],
@@ -1199,7 +1199,7 @@ do
                         rs_all_p[i], enable)
     end
 
-    __demand(__parallel)
+    __demand(__index_launch)
     for i = 0, conf.npieces do
       calc_volumes_full(rz_all_p[i],
                         rp_all_private_p[i],
@@ -1207,7 +1207,7 @@ do
                         rs_all_p[i], enable)
     end
 
-    __demand(__parallel)
+    __demand(__index_launch)
     for i = 0, conf.npieces do
       calc_work(rz_all_p[i],
                 rp_all_private_p[i],
@@ -1216,13 +1216,13 @@ do
                 dt, enable)
     end
 
-    __demand(__parallel)
+    __demand(__index_launch)
     for i = 0, conf.npieces do
       calc_work_rate_energy_rho_full(rz_all_p[i], dt, enable)
     end
 
     dthydro = dtmax
-    __demand(__parallel)
+    __demand(__index_launch)
     for i = 0, conf.npieces do
       dthydro min= calc_dt_hydro(rz_all_p[i], dt, dtmax, cfl, cflv, enable)
     end

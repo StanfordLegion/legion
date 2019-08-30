@@ -50,7 +50,7 @@ task main()
    fill(r.y, 0.0)
    fill(s.y, 0.0)
 
-   __demand(__parallel)
+   __demand(__index_launch)
    for c in cr do
       doStuff(pr[c], ps[int2d{c.x,c.y}]) -- Note: This cast was causing the issue.
    end

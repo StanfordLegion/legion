@@ -96,13 +96,13 @@ end
 --   end
 
 --   -- optimized: loop-variant argument is non-interfering
---   __demand(__parallel)
+--   __demand(__index_launch)
 --   for i = 0, n do
 --     h2(p0_disjoint[i], p1_disjoint[i])
 --   end
 
 --   -- optimized: loop-variant argument is non-interfering
---   __demand(__parallel)
+--   __demand(__index_launch)
 --   for i = 0, n do
 --     g(p0_disjoint[i])
 --   end
@@ -201,56 +201,56 @@ task main()
   -- optimized: loop-invariant argument is read-only
   do
     var j = 3
-    __demand(__parallel)
+    __demand(__index_launch)
     for i = 0, n do
       f(p_disjoint[(j + 1) % n])
     end
   end
 
   -- optimized: loop-variant argument is non-interfering
-  __demand(__parallel)
+  __demand(__index_launch)
   for i = 0, n do
     f(p_disjoint[i])
   end
 
   -- optimized: loop-variant argument is non-interfering
-  __demand(__parallel)
+  __demand(__index_launch)
   for i = 0, n do
     f(p_aliased[i])
   end
 
   -- optimized: loop-variant argument is non-interfering
-  __demand(__parallel)
+  __demand(__index_launch)
   for i = 0, n do
     h(p_aliased[i])
   end
 
   -- optimized: loop-variant argument is non-interfering
-  __demand(__parallel)
+  __demand(__index_launch)
   for i = 0, n do
     g2(p0_disjoint[i], p1_disjoint[i])
   end
 
   -- optimized: loop-variant argument is non-interfering
-  __demand(__parallel)
+  __demand(__index_launch)
   for i = 0, n do
     g(p_disjoint[i])
   end
 
   -- optimized: reduction is non-interfering
   var y = 0
-  __demand(__parallel)
+  __demand(__index_launch)
   for i = 0, n do
     y += f(p_disjoint[i])
   end
   regentlib.assert(y == 25, "test failed")
 
   -- optimized: loop-variant argument is non-interfering
-  __demand(__parallel)
+  __demand(__index_launch)
   for i = 0, n do
     fill((p_disjoint[i]), 12345)
   end
-  __demand(__parallel)
+  __demand(__index_launch)
   for i = 0, n do
     check(p_disjoint[i], 12345)
   end
@@ -258,23 +258,30 @@ task main()
   var v = return_2468()
   var p_disjoint_copy = return_partition(r, p_disjoint)
 
-  __demand(__parallel)
+  __demand(__index_launch)
   for i = 0, n do
     fill((p_disjoint_copy[i]), 12345)
   end
-  __demand(__parallel)
+  __demand(__index_launch)
   for i = 0, n do
     check(p_disjoint[i], 12345)
   end
 
-  __demand(__parallel)
+  __demand(__index_launch)
   for i = 0, n do
     fill((p0_disjoint[i]), v)
   end
-  __demand(__parallel)
+  __demand(__index_launch)
   for i = 0, n do
     check(p0_disjoint[i], 2468)
   end
+  __demand(__index_launch)
+  for i = 0, n do
+    check(p1_disjoint[i], 12345)
+  end
+
+  -- __demand(__parallel) is deprecated and should issue a warning, but is still currently supported
+  -- https://github.com/StanfordLegion/legion/issues/520
   __demand(__parallel)
   for i = 0, n do
     check(p1_disjoint[i], 12345)

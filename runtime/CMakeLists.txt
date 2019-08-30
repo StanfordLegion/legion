@@ -184,7 +184,13 @@ if(Legion_USE_GASNet)
 endif()
 
 if(Legion_USE_LLVM)
-  target_link_libraries(RealmRuntime PRIVATE LLVM::LLVM)
+  if(Legion_LINK_LLVM_LIBS)
+    target_link_libraries(RealmRuntime PRIVATE LLVM::LLVM)
+  else()
+    # even if we dont link, we still need the LLVM include directories
+    get_target_property(llvm_incdir LLVM::LLVM INTERFACE_INCLUDE_DIRECTORIES)
+    target_include_directories(RealmRuntime PRIVATE ${llvm_incdir})
+  endif()
 endif()
 
 if(Legion_USE_CUDA)
@@ -275,7 +281,7 @@ list(APPEND LEGION_SRC
 add_library(LegionRuntime ${MAPPER_SRC} ${LEGION_SRC})
 target_link_libraries(LegionRuntime PUBLIC RealmRuntime)
 if(Legion_USE_ZLIB)
-  target_link_libraries(LegionRuntime PRIVATE z)
+  target_link_libraries(LegionRuntime PRIVATE ZLIB::ZLIB)
 endif()
 set_target_properties(LegionRuntime PROPERTIES POSITION_INDEPENDENT_CODE ON)
 set_target_properties(LegionRuntime PROPERTIES OUTPUT_NAME "legion${INSTALL_SUFFIX}")

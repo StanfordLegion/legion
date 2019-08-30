@@ -71,7 +71,7 @@ task main()
   c.legion_coloring_destroy(rc)
 
   -- not optimized: argument 1 is not side-effect free
-  __demand(__parallel)
+  __demand(__index_launch)
   for i in cs do
     f(p_disjoint[i], @x0)
   end

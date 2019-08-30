@@ -61,6 +61,8 @@ function parser.annotation_name(p, required)
     return "external"
   elseif p:nextif("__idempotent") then
     return "idempotent"
+  elseif p:nextif("__index_launch") then
+    return "index_launch"
   elseif p:nextif("__inline") then
     return "inline"
   elseif p:nextif("__inner") then

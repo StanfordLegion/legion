@@ -330,6 +330,26 @@ namespace Realm {
 			      const Point<N2, T2>& offset,
 			      FieldID field_id, const Rect<N,T>& subrect);
 
+    // used by constructors or can be called directly
+    __CUDA_HD__
+    void reset();
+    void reset(RegionInstance inst,
+	       FieldID field_id, size_t subfield_offset = 0);
+    void reset(RegionInstance inst,
+	       FieldID field_id, const Rect<N,T>& subrect,
+	       size_t subfield_offset = 0);
+    template <int N2, typename T2>
+    void reset(RegionInstance inst,
+	       const Matrix<N2, N, T2>& transform,
+	       const Point<N2, T2>& offset,
+	       FieldID field_id, size_t subfield_offset = 0);
+    template <int N2, typename T2>
+    void reset(RegionInstance inst,
+	       const Matrix<N2, N, T2>& transform,
+	       const Point<N2, T2>& offset,
+	       FieldID field_id, const Rect<N,T>& subrect,
+	       size_t subfield_offset = 0);
+  
     __CUDA_HD__
     FT *ptr(const Point<N,T>& p) const;
     __CUDA_HD__

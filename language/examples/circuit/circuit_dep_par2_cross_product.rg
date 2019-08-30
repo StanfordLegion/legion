@@ -183,7 +183,7 @@ task toplevel()
                       pn_ghost, pw_outgoing)
   end
 
-  __demand(__parallel)
+  __demand(__index_launch)
   for i = 0, conf.num_pieces do
     helper.validate_pointers(pn_sub_private[i],
                              pn_sub_shared[i],
@@ -199,7 +199,7 @@ task toplevel()
   for j = 0, conf.num_loops do
     c.legion_runtime_begin_trace(__runtime(), __context(), 0, false)
 
-    __demand(__parallel)
+    __demand(__index_launch)
     for i = 0, conf.num_pieces do
       calculate_new_currents(steps,
                              pn_sub_private[i],
@@ -207,18 +207,18 @@ task toplevel()
                              pn_sub_ghost[i],
                              pw_outgoing[i])
     end
-    __demand(__parallel)
+    __demand(__index_launch)
     for i = 0, conf.num_pieces do
       distribute_charge(pn_sub_private[i],
                         pn_sub_shared[i],
                         pn_sub_ghost[i],
                         pw_outgoing[i])
     end
-    __demand(__parallel)
+    __demand(__index_launch)
     for i = 0, conf.num_pieces do
       update_voltages(pn_sub_private[i])
     end
-    __demand(__parallel)
+    __demand(__index_launch)
     for i = 0, conf.num_pieces do
       update_voltages(pn_sub_shared[i])
     end

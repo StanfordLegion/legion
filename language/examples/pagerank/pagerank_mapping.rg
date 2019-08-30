@@ -271,13 +271,13 @@ task main()
       ts_start = c.legion_get_current_time_in_micros()
     end
     if iter % 2 == 0 then
-      __demand(__parallel)
+      __demand(__index_launch)
       for p in pieces do
         pagerank(part_nodes[p], part_edges[p],
                  pr_score0, part_score1[p], part_workspace[p], 0.9f, conf.num_nodes)
       end
     else
-      __demand(__parallel)
+      __demand(__index_launch)
       for p in pieces do
         pagerank(part_nodes[p], part_edges[p],
                  pr_score1, part_score0[p], part_workspace[p], 0.9f, conf.num_nodes)

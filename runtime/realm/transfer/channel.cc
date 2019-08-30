@@ -1884,6 +1884,12 @@ namespace Realm {
 	  write_bytes_total += hdf5_bytes;
 
 	  requests[idx++] = new_req;
+
+	  // make sure iteration_completed is set appropriately before we
+	  //  process the request (so that multi-hop successors are notified
+	  //  properly)
+	  if(hdf5_iter->done())
+	    iteration_completed = true;
 	}
 
 	return idx;

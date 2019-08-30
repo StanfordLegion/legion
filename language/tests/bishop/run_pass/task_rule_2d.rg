@@ -46,7 +46,7 @@ task toplevel()
   var procs = c.bishop_all_processors()
 
   var is = ispace(int2d, { x = 4, y = 4 })
-  __demand(__parallel)
+  __demand(__index_launch)
   for i in is do
     foo(i)
   end
