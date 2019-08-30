@@ -42,12 +42,12 @@ task main()
   var p2 = partition(aliased, s, rc)
   c.legion_coloring_destroy(rc)
 
-  __demand(__parallel)
+  __demand(__index_launch)
   for idx = 0, 1 do
     f(p1[0], p1[1])
   end
 
-  __demand(__parallel)
+  __demand(__index_launch)
   for idx = 0, 1 do
     f(p2[0], p2[1])
   end

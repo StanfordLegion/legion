@@ -592,15 +592,15 @@ task toplevel()
   for j = 0, conf.num_loops do
     --c.legion_runtime_begin_trace(__runtime(), __context(), 0, false)
 
-    __demand(__parallel)
+    __demand(__index_launch)
     for i = 0, conf.num_pieces do
       calculate_new_currents(steps, rp_private[i], rp_shared[i], rp_ghost[i], rp_all_wires[i])
     end
-    __demand(__parallel)
+    __demand(__index_launch)
     for i = 0, conf.num_pieces do
       distribute_charge(rp_private[i], rp_shared[i], rp_ghost[i], rp_all_wires[i])
     end
-    __demand(__parallel)
+    __demand(__index_launch)
     for i = 0, conf.num_pieces do
       update_voltages(rp_private[i], rp_shared[i])
     end

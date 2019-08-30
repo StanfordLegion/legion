@@ -59,7 +59,7 @@ task toplevel()
     c.legion_runtime_get_executing_processor(__runtime(), __context())
   var procs = c.bishop_all_processors()
   bar()
-  __demand(__parallel)
+  __demand(__index_launch)
   for i = 0, 4 do
     foo(i)
   end

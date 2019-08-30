@@ -232,6 +232,13 @@ def install_bindings(regent_dir, legion_dir, bindings_dir, runtime_dir,
             (['-DGASNet_CONDUIT=%s' % conduit] if conduit is not None else []) +
             (['-DCMAKE_CXX_COMPILER=%s' % os.environ['CXX']] if 'CXX' in os.environ else []) +
             (['-DCMAKE_CXX_FLAGS=%s' % cc_flags] if cc_flags else []))
+        if llvm:
+            # mess with a few things so that Realm uses terra's LLVM
+            flags.append('-DLegion_ALLOW_MISSING_LLVM_LIBS=ON')
+            flags.append('-DLegion_LINK_LLVM_LIBS=OFF')
+            # pass through LLVM_CONFIG, if set
+            if 'LLVM_CONFIG' in os.environ:
+                flags.append('-DLLVM_CONFIG_EXECUTABLE=%s' % os.environ['LLVM_CONFIG'])
         make_flags = ['VERBOSE=1'] if verbose else []
         try:
             subprocess.check_output([cmake_exe, '--version'])

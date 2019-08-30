@@ -29,7 +29,7 @@ task g()
   var r = region(cs, int)
   var p = partition(equal, r, cs)
   -- not optimized: argument is not invariant
-  __demand(__parallel)
+  __demand(__index_launch)
   for i in cs do
     fill((p[i]), f())
   end

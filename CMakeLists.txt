@@ -235,6 +235,7 @@ endif()
 #------------------------------------------------------------------------------#
 option(Legion_USE_LLVM "Use LLVM JIT operations" OFF)
 option(Legion_ALLOW_MISSING_LLVM_LIBS "Allow LLVM libraries to be missing at runtime" OFF)
+option(Legion_LINK_LLVM_LIBS "Link LLVM libraries into Realm" ON)
 if(Legion_USE_LLVM)
   set(Legion_LLVM_COMPONENTS irreader jit mcjit x86)
   find_package(LLVM REQUIRED COMPONENTS ${Legion_LLVM_COMPONENTS})
@@ -289,6 +290,7 @@ endif()
 #------------------------------------------------------------------------------#
 option(Legion_USE_ZLIB "Enable support for zlib" ON)
 if(Legion_USE_ZLIB)
+  find_package(ZLIB REQUIRED)
   # define variable for legion_defines.h
   set(USE_ZLIB ON)
 endif()

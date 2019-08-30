@@ -119,12 +119,12 @@ do
     c.legion_runtime_begin_trace(__runtime(), __context(), 0, false)
 
     var count = 0
-    __demand(__parallel)
+    __demand(__index_launch)
     for i = 0, subgraphs do
       sssp_update(psrc[i], pdst[i], pe[i])
     end
 
-    __demand(__parallel)
+    __demand(__index_launch)
     for i = 0, subgraphs do
       count += sssp_collect(pdst[i])
     end
@@ -210,7 +210,7 @@ task toplevel()
   var pe_disjoint = partition(equal, re, colors)
 
   -- parallel load of edge data
-  __demand(__parallel)
+  __demand(__index_launch)
   for i = 0, subgraphs do
     read_edge_data(graph, pe_disjoint[i])
   end

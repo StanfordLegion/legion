@@ -37,12 +37,12 @@ task main()
 
   var s = ispace(int2d, { 2, 1 })
 
-  __demand(__parallel)
+  __demand(__index_launch)
   for i in s do
     g(p[i + { 0, 0 }])
   end
 
-  __demand(__parallel)
+  __demand(__index_launch)
   for i in s do
     g(p[i + { 1, 1 }])
   end
@@ -50,37 +50,37 @@ task main()
   var s1 = ispace(int2d, { 2, 1 }, { 1, 1 })
   var s2 = ispace(int2d, { 1, 1 }, { 3, 1 })
 
-  __demand(__parallel)
+  __demand(__index_launch)
   for i in s1 do
     g(p[i - { 0, 0 }])
   end
 
-  __demand(__parallel)
+  __demand(__index_launch)
   for i in s1 do
     g(p[i - { 1, 0 }])
   end
 
-  __demand(__parallel)
+  __demand(__index_launch)
   for i in s1 do
     fill((p[i - { 0, 0 }]), 12345)
   end
 
-  __demand(__parallel)
+  __demand(__index_launch)
   for i in s1 do
     check(p[i - { 0, 0 }], 12345)
   end
 
-  __demand(__parallel)
+  __demand(__index_launch)
   for i in s1 do
     fill((p[i - { 1, 0 }]), 2468)
   end
 
-  __demand(__parallel)
+  __demand(__index_launch)
   for i in s1 do
     check(p[i - { 1, 0 }], 2468)
   end
 
-  __demand(__parallel)
+  __demand(__index_launch)
   for i in s2 do
     check(p[i - { 1, 0 }], 12345)
   end

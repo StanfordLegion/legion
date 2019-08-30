@@ -115,12 +115,12 @@ do
     var count = 0
     fill(rn.dist_next, INFINITY)
 
-    __demand(__parallel)
+    __demand(__index_launch)
     for i = 0, subgraphs do
       sssp_update(g, rn, pe[i])
     end
 
-    __demand(__parallel)
+    __demand(__index_launch)
     for i = 0, subgraphs do
       count += sssp_collect(g, pn[i])
     end
@@ -205,7 +205,7 @@ task toplevel()
   var pe = partition(equal, re, colors)
 
   -- parallel load of edge data
-  __demand(__parallel)
+  __demand(__index_launch)
   for i = 0, subgraphs do
     read_edge_data(graph, rn, pe[i])
   end

@@ -319,10 +319,10 @@ gcc49_cxx98_release_legion:
   <<: [*linux, *image, *tests]
   variables:
     <<: [*gcc49, *terra38, *release, *cxx98_normal, *legion]
-gcc49_cxx98_release_cmake_regent:
+gcc49_cxx98_release_llvm_cmake_regent:
   <<: [*linux_compute, *image, *tests]
   variables:
-    <<: [*gcc49, *terra38, *release, *cxx98_normal, *cmake, *regent, *incremental]
+    <<: [*gcc49, *terra38, *release, *cxx98_normal, *llvm, *cmake, *regent, *incremental]
 #   * Debug (Privilege and Bounds Checks)
 gcc49_cxx98_debug_checks_legion:
   <<: [*linux, *image, *tests]
@@ -451,10 +451,10 @@ clang38_cxx98_release_legion:
   <<: [*linux, *image_clang, *tests]
   variables:
     <<: [*clang38, *terra38, *release, *cxx98_normal, *legion]
-clang38_cxx98_release_cmake_regent:
+clang38_cxx98_release_llvm_cmake_regent:
   <<: [*linux_compute, *image_clang, *tests]
   variables:
-    <<: [*clang38, *terra38, *release, *cxx98_normal, *cmake, *regent, *incremental]
+    <<: [*clang38, *terra38, *release, *cxx98_normal, *llvm, *cmake, *regent, *incremental]
 #   * Debug (Privilege and Bounds Checks)
 clang38_cxx98_debug_checks_legion:
   <<: [*linux, *image_clang, *tests]

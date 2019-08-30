@@ -28,7 +28,7 @@ task g()
   var p = partition(equal, r, cs)
   var n = 1
   -- not optimized: argument is not projectable
-  __demand(__parallel)
+  __demand(__index_launch)
   for i in cs do
     fill(r, 1)
   end

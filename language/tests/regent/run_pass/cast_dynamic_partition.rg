@@ -43,7 +43,7 @@ task main()
   var cs = p_aliased.colors
   var p_disjoint = dynamic_cast(partition(disjoint, r, cs), p_aliased)
 
-  __demand(__parallel)
+  __demand(__index_launch)
   for i = 0, 4 do
     f(p_disjoint[i])
   end

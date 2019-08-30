@@ -64,7 +64,7 @@ task main()
   c.legion_coloring_destroy(rc)
 
   -- not optimized: function is not a task
-  __demand(__parallel)
+  __demand(__index_launch)
   for i = 0, n do
     e(i)
   end

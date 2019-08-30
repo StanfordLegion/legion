@@ -64,7 +64,7 @@ task main()
   c.legion_coloring_destroy(rc)
 
   -- not optimized: body is not a single statement
-  __demand(__parallel)
+  __demand(__index_launch)
   for i = 0, n do
     f(p_disjoint[i])
     f(p_disjoint[i])

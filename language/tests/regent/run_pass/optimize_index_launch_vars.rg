@@ -46,7 +46,7 @@ task main()
 
   fill(r, 0)
 
-  __demand(__parallel)
+  __demand(__index_launch)
   for i = 0, 5 do
     var j = i + 1
     f(p[i], j)

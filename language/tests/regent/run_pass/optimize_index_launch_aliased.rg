@@ -27,7 +27,7 @@ task toplevel()
   var p = partition(equal, r, cs)
 
   var sum = 0
-  __demand(__parallel)
+  __demand(__index_launch)
   for c in cs do
     sum += foo(p[c], p[c])
   end

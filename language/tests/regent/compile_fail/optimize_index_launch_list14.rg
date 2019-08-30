@@ -29,7 +29,7 @@ task g()
   var x : int[1]
   var y = [&int](x)
   -- not optimized: argument is not side-effect free
-  __demand(__parallel)
+  __demand(__index_launch)
   for i in cs do
     fill((p[i]), @y)
   end

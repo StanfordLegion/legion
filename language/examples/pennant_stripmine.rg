@@ -1190,7 +1190,7 @@ task toplevel()
   do
     -- Initialization
     for _ = 0, par_init do
-      -- __demand(__parallel)
+      -- __demand(__index_launch)
       for i = 0, npieces do
         initialize_topology(conf, i, rz_all_p[i],
                             rp_all_private_p[i],
@@ -1283,7 +1283,7 @@ task toplevel()
 
     print_ts = requested_print_ts and cycle == prune
 
-    -- __demand(__parallel)
+    -- __demand(__index_launch)
     for i = 0, npieces do
       adv_pos_half(rp_all_private_p[i],
                    rp_spans_private[i],
@@ -1291,7 +1291,7 @@ task toplevel()
                    nspans_points,
                    enable, print_ts)
     end
-    -- __demand(__parallel)
+    -- __demand(__index_launch)
     for i = 0, npieces do
       adv_pos_half(rp_all_shared_p[i],
                    rp_spans_shared[i],
@@ -1300,7 +1300,7 @@ task toplevel()
                    enable, print_ts)
     end
 
-    -- __demand(__parallel)
+    -- __demand(__index_launch)
     for i = 0, npieces do
       calc_everything(rz_all_p[i],
                       rp_all_private_p[i],
@@ -1314,7 +1314,7 @@ task toplevel()
                       enable)
     end
 
-    -- __demand(__parallel)
+    -- __demand(__index_launch)
     for i = 0, npieces do
       adv_pos_full(rp_all_private_p[i],
                    rp_spans_private[i],
@@ -1322,7 +1322,7 @@ task toplevel()
                    nspans_points,
                    enable)
     end
-    -- __demand(__parallel)
+    -- __demand(__index_launch)
     for i = 0, npieces do
       adv_pos_full(rp_all_shared_p[i],
                    rp_spans_shared[i],
@@ -1331,7 +1331,7 @@ task toplevel()
                    enable)
     end
 
-    -- __demand(__parallel)
+    -- __demand(__index_launch)
     for i = 0, npieces do
       calc_everything_full(rz_all_p[i],
                            rp_all_private_p[i],
@@ -1347,7 +1347,7 @@ task toplevel()
     print_ts = requested_print_ts and cycle == cstop - 1 - prune
 
     dthydro = dtmax
-    -- __demand(__parallel)
+    -- __demand(__index_launch)
     for i = 0, npieces do
       dthydro min= calc_dt_hydro(rz_all_p[i],
                                  rz_spans[i],

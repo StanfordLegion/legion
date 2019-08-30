@@ -67,6 +67,7 @@ local language = {
     "__import_ispace",
     "__import_region",
     "__import_partition",
+    "__index_launch",
     "__inline",
     "__inner",
     "__leaf",

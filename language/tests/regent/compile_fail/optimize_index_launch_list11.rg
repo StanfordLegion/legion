@@ -73,7 +73,7 @@ task with_partitions(cs : ispace(int1d),
 where reads(r0, r1), writes(r0, r1) do
 
   -- not optimized: loop-variant argument is (statically) interfering
-  __demand(__parallel)
+  __demand(__index_launch)
   for i in cs do
     h2b(p0_disjoint[i], p1_disjoint[i])
   end

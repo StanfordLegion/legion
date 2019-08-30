@@ -36,7 +36,7 @@ task main()
   var s = cross_product(p, q)
 
   for i = 0, 2 do
-    __demand(__parallel)
+    __demand(__index_launch)
     for j = 0, 2 do
       g(s[i][j])
     end

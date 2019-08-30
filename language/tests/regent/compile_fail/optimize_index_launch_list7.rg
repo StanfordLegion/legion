@@ -67,7 +67,7 @@ task main()
   -- not optimized: loop-invariant argument is interfering
   do
     var j = 3
-    __demand(__parallel)
+    __demand(__index_launch)
     for i in cs do
       g(p_disjoint[(j + 1) % n])
     end
