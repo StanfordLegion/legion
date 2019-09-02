@@ -4491,8 +4491,10 @@ void %s(void);
   header_basename)
 end
 
-local function write_header(header_filename)
-  local registration_name = header_helper.normalize_name(header_filename) .. "_register"
+local function write_header(header_filename, registration_name)
+  if not registration_name then
+    registration_name = header_helper.normalize_name(header_filename) .. "_register"
+  end
 
   local task_c_iface, task_cxx_iface, task_impl = generate_task_interfaces()
 
@@ -4504,10 +4506,10 @@ local function write_header(header_filename)
   return registration_name, task_impl
 end
 
-function std.save_tasks(header_filename, filename, filetype, link_flags)
+function std.save_tasks(header_filename, filename, filetype, link_flags, registration_name)
   assert(header_filename and filename)
   local task_wrappers = make_task_wrappers()
-  local registration_name, task_impl = write_header(header_filename)
+  local registration_name, task_impl = write_header(header_filename, registration_name)
   local _, names = std.setup(nil, nil, task_wrappers, registration_name)
   local use_cmake = os.getenv("USE_CMAKE") == "1"
   local lib_dir = os.getenv("LG_RT_DIR") .. "/../bindings/regent"
