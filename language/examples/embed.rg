@@ -43,8 +43,8 @@ do
   end
   local cmd = (cxx .. " " .. cxx_flags .. " -I " .. runtime_dir .. " " ..
                  embed_cc ..
-                 " -L " .. root_dir .. " " .. " -l" .. embed_tasks_lib .. " " ..
                  " -L " .. lib_dir .. " " .. libs .. " " ..
+                 " -L " .. root_dir .. " " .. " -l" .. embed_tasks_lib .. " " ..
                  " -o " .. exe)
   if os.execute(cmd) ~= 0 then
     print("Error: failed to compile " .. embed_cc)
