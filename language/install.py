@@ -115,17 +115,33 @@ def install_rdir(rdir, legion_dir, regent_dir):
     if rdir != 'skip':
         dump_json_config(config_filename, rdir)
 
-def build_terra(terra_dir, terra_branch, thread_count, llvm):
+def build_terra(terra_dir, terra_branch, use_cmake, cmake_exe, thread_count, llvm):
+    build_dir = os.path.join(terra_dir, 'build')
+    release_dir = os.path.join(terra_dir, 'release')
+    if use_cmake is None:
+        use_cmake = os.path.exists(os.path.join(build_dir, 'CMakeCache.txt'))
+        if use_cmake:
+            print('Detected previous CMake build in Terra, enabling Terra CMake build...')
+
     flags = []
     if llvm:
+        assert not use_cmake, "LLVM mode not supported with Terra CMake build, see https://github.com/zdevito/terra/issues/394"
         flags.extend(['REEXPORT_LLVM_COMPONENTS=irreader mcjit x86'])
 
-    subprocess.check_call(
-        [make_exe, 'all', '-j', str(thread_count)] + flags,
-        cwd=terra_dir)
+    if use_cmake:
+        subprocess.check_call(
+            [cmake_exe, '..', '-DCMAKE_INSTALL_PREFIX=%s' % release_dir],
+            cwd=build_dir)
+        subprocess.check_call(
+            [make_exe, 'install', '-j', str(thread_count)],
+            cwd=build_dir)
+    else:
+        subprocess.check_call(
+            [make_exe, 'all', '-j', str(thread_count)] + flags,
+            cwd=terra_dir)
 
-def install_terra(terra_dir, terra_url, terra_branch, external_terra_dir,
-                  thread_count, llvm):
+def install_terra(terra_dir, terra_url, terra_branch, use_cmake, cmake_exe,
+                  external_terra_dir, thread_count, llvm):
     if external_terra_dir is not None:
         if terra_url is not None or terra_branch is not None:
             raise Exception('Terra URL/branch are incompatible with setting an external installation directory')
@@ -168,7 +184,7 @@ def install_terra(terra_dir, terra_url, terra_branch, external_terra_dir,
         if terra_url is not None or terra_branch is not None:
             raise Exception('Terra URL/branch must be set on first install, please delete the terra directory and try again')
         git_update(terra_dir)
-    build_terra(terra_dir, terra_branch, thread_count, llvm)
+    build_terra(terra_dir, terra_branch, use_cmake, cmake_exe, thread_count, llvm)
 
 def symlink(from_path, to_path):
     if not os.path.lexists(to_path):
@@ -298,7 +314,7 @@ def get_cmake_config(cmake, regent_dir, default=None):
 def install(gasnet=False, cuda=False, openmp=False, hdf=False, llvm=False,
             spy=False, conduit=None, cmake=None, rdir=None,
             cmake_exe=None, cmake_build_dir=None,
-            terra_url=None, terra_branch=None, external_terra_dir=None,
+            terra_url=None, terra_branch=None, terra_use_cmake=None, external_terra_dir=None,
             gasnet_dir=None, debug=False, clean_first=True, extra_flags=[],
             thread_count=None, verbose=False):
     regent_dir = os.path.dirname(os.path.realpath(__file__))
@@ -331,8 +347,8 @@ def install(gasnet=False, cuda=False, openmp=False, hdf=False, llvm=False,
     install_rdir(rdir, legion_dir, regent_dir)
 
     terra_dir = os.path.join(regent_dir, 'terra')
-    install_terra(terra_dir, terra_url, terra_branch, external_terra_dir,
-                  thread_count, llvm)
+    install_terra(terra_dir, terra_url, terra_branch, terra_use_cmake, cmake_exe,
+                  external_terra_dir, thread_count, llvm)
 
     bindings_dir = os.path.join(legion_dir, 'bindings', 'regent')
     install_bindings(regent_dir, legion_dir, bindings_dir, runtime_dir,
@@ -350,6 +366,14 @@ def driver():
     parser.add_argument(
         '--terra-branch', dest='terra_branch', metavar='BRANCH', required=False,
         help='Name of Terra branch to clone (optional).')
+    parser.add_argument(
+        '--terra-cmake', dest='terra_use_cmake', action='store_true', required=False,
+        default=None,
+        help='Build Terra with CMake.')
+    parser.add_argument(
+        '--no-terra-cmake', dest='terra_use_cmake', action='store_false', required=False,
+        default=None,
+        help="Don't build Terra with CMake (instead use GNU Make).")
     parser.add_argument(
         '--with-terra', dest='external_terra_dir', metavar='DIR', required=False,
         help='Path to Terra installation directory (optional).')
