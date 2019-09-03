@@ -35,8 +35,19 @@ where reads writes(r.{x, y}, s.z), reads(r.z, s.x), reduces+(s.y) do
   regentlib.c.printf("Task with two region requirements\n")
 end
 
--- Save tasks to libembed_tasks.so
-local embed_tasks_h = root_dir .. "embed_tasks.h"
-local embed_tasks_so = root_dir .. "libembed_tasks.so"
-regentlib.save_tasks(embed_tasks_h, embed_tasks_so)
-return "embed_tasks"
+local embed_tasks_dir
+if os.getenv('SAVEOBJ') == '1' then
+  embed_tasks_dir = root_dir
+else
+  -- use os.tmpname to get a hopefully-unique directory to work in
+  local tmpfile = os.tmpname()
+  embed_tasks_dir = tmpfile .. ".d/"
+  local res = os.execute("mkdir " .. embed_tasks_dir)
+  assert(res == 0)
+  os.remove(tmpfile)  -- remove this now that we have our directory
+end
+
+local embed_tasks_h = embed_tasks_dir .. "embed_tasks.h"
+local embed_tasks_so = embed_tasks_dir .. "libembed_tasks.so"
+regentlib.save_tasks(embed_tasks_h, embed_tasks_so, nil, nil, "embed_tasks_register")
+return embed_tasks_dir

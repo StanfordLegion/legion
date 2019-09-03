@@ -13,14 +13,17 @@
 -- limitations under the License.
 
 -- fails-with:
--- type_mismatch_static_cast1.rg:24: static_cast requires partition or ptr type as argument 1, got int32
---   var y = static_cast(int, x)
+-- type_mismatch_static_cast_partition4.rg:27: the region $r is not a subregion of $s
+--   var y = static_cast(partition(disjoint, s, cs), p)
 --                     ^
 
 import "regent"
 
 task f()
-  var x = 5
-  var y = static_cast(int, x)
+  var r = region(ispace(int1d, 4), int)
+  var s = region(ispace(int1d, 4), int)
+  var cs = ispace(int1d, 2)
+  var p = partition(equal, r, cs)
+  var y = static_cast(partition(disjoint, s, cs), p)
 end
 f:compile()

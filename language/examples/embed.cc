@@ -119,7 +119,7 @@ int main(int argc, char **argv)
     Runtime::preregister_task_variant<top_level_task>(registrar, "top_level");
   }
 
-  embed_tasks_h_register();
+  embed_tasks_register();
 
   return Runtime::start(argc, argv);
 }

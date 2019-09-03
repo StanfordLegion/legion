@@ -13,14 +13,14 @@
 -- limitations under the License.
 
 -- fails-with:
--- type_mismatch_static_cast1.rg:24: static_cast requires partition or ptr type as argument 1, got int32
---   var y = static_cast(int, x)
+-- type_mismatch_static_cast_partition1.rg:24: static_cast requires partition type as argument 2, got int32
+--   var y = static_cast(partition(disjoint, r, ispace(int1d)), 1)
 --                     ^
 
 import "regent"
 
 task f()
-  var x = 5
-  var y = static_cast(int, x)
+  var r : region(ispace(int1d), int)
+  var y = static_cast(partition(disjoint, r, ispace(int1d)), 1)
 end
 f:compile()
