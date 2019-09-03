@@ -2026,6 +2026,12 @@ std.rect_type = terralib.memoize(function(index_type)
     assert(false)
   end
 
+  for method, combinator in pairs(arithmetic_combinators) do
+    st.metamethods[method] = terra(a : st, b : st.index_type)
+      return [st]{ lo = [combinator(`(a.lo), b)], hi = [combinator(`(a.hi), b)] }
+    end
+  end
+
   terra st:to_domain()
     return [c["legion_domain_from_rect_" .. tostring(st.dim) .. "d"]](@self)
   end
