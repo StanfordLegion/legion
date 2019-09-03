@@ -3887,6 +3887,14 @@ function codegen.expr_static_cast(cx, node)
     [value.actions];
     [emit_debuginfo(node)]
   end
+  if std.is_partition(expr_type) then
+    local result = terralib.newsymbol(expr_type)
+    actions = quote
+      [actions];
+      var [result] = [expr_type] { impl = [value.value].impl }
+    end
+    return values.value(node, expr.just(actions, result), expr_type)
+  end
   local input = value.value
   local result
   if #(expr_type:bounds()) == 1 then

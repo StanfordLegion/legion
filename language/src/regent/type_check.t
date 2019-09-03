@@ -1341,8 +1341,35 @@ function type_check.expr_static_cast(cx, node)
   local value_type = std.check_read(cx, value)
   local expr_type = node.expr_type
 
-  if not std.is_bounded_type(expr_type) then
-    report.error(node, "static_cast requires ptr type as argument 1, got " .. tostring(expr_type))
+  if std.is_partition(expr_type) then
+    if not std.is_partition(value_type) then
+      report.error(node, "static_cast requires partition type as argument 2, got " .. tostring(value_type))
+    end
+    if expr_type.disjointness ~= value_type.disjointness then
+      report.error(node, tostring(value_type.disjointness) .. " partitions cannot be casted to " ..
+          tostring(expr_type.disjointness) .. " partitions")
+    end
+    if not std.type_eq(expr_type:colors(), value_type:colors()) then
+      report.error(node, "type mismatch in argument 2: expected " .. tostring(expr_type:colors()) ..
+            " for color space but got " .. tostring(value_type:colors()))
+    end
+    local value_region_symbol = value_type.parent_region_symbol
+    local expr_region_symbol = expr_type.parent_region_symbol
+    local constraint = std.constraint(value_region_symbol, expr_region_symbol, std.subregion)
+    if not std.check_constraint(cx, constraint) then
+      report.error(node,
+          "the region " .. tostring(value_region_symbol) .. " is not a subregion of " .. tostring(expr_region_symbol))
+    end
+    local parent_region_map = {}
+    return ast.typed.expr.StaticCast {
+      value = value,
+      parent_region_map = parent_region_map,
+      expr_type = expr_type,
+      annotations = node.annotations,
+      span = node.span,
+    }
+  elseif not std.is_bounded_type(expr_type) then
+    report.error(node, "static_cast requires partition or ptr type as argument 1, got " .. tostring(expr_type))
   end
   if not std.is_bounded_type(value_type) then
     report.error(node, "static_cast requires ptr as argument 2, got " .. tostring(value_type))

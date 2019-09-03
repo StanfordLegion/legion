@@ -13,14 +13,15 @@
 -- limitations under the License.
 
 -- fails-with:
--- type_mismatch_static_cast1.rg:24: static_cast requires partition or ptr type as argument 1, got int32
---   var y = static_cast(int, x)
+-- type_mismatch_static_cast_partition2.rg:25: aliased partitions cannot be casted to disjoint partitions
+--   var y = static_cast(partition(disjoint, r, ispace(int1d)), p)
 --                     ^
 
 import "regent"
 
 task f()
-  var x = 5
-  var y = static_cast(int, x)
+  var r : region(ispace(int1d), int)
+  var p : partition(aliased, r, ispace(int1d))
+  var y = static_cast(partition(disjoint, r, ispace(int1d)), p)
 end
 f:compile()
