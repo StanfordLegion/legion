@@ -28,5 +28,11 @@ task main()
   regentlib.assert(int1d( 1) % rect1d { -1, 2 } == int1d( 1), "test failed")
   regentlib.assert(int1d( 2) % rect1d { -1, 2 } == int1d( 2), "test failed")
   regentlib.assert(int1d( 3) % rect1d { -1, 2 } == int1d(-1), "test failed")
+
+  regentlib.assert(rect1d { 2, 3 } + int1d(2) == rect1d { 4, 5 }, "test failed")
+  regentlib.assert(rect1d { 2, 3 } - int1d(2) == rect1d { 0, 1 }, "test failed")
+  regentlib.assert(rect1d { 2, 3 } * int1d(2) == rect1d { 4, 6 }, "test failed")
+  regentlib.assert(rect1d { 2, 3 } / int1d(2) == rect1d { 1, 1 }, "test failed")
+  regentlib.assert(rect1d { 2, 3 } % int1d(2) == rect1d { 0, 1 }, "test failed")
 end
 regentlib.start(main)
