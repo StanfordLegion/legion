@@ -90,6 +90,7 @@ local default_options = {
   ["no-dynamic-branches-assert"] = false,
   ["override-demand-openmp"] = false,
   ["override-demand-cuda"] = false,
+  ["allow-multi-field-expansion"] = false,
   ["pretty"] = false,
   ["pretty-verbose"] = false,
   ["layout-constraints"] = true,

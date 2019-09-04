@@ -106,7 +106,11 @@ task main()
   if true then
     regentlib.c.printf("test 1\n")
     fill_region(r1, 2)
-    for x in r2 do x.{a, b, c} = 1 end -- force an inline mapping
+    for x in r2 do
+      x.a = 1
+      x.b = 1
+      x.c = 1
+    end -- force an inline mapping
 
     attach(hdf5, r2.{a, b, c}, filename, regentlib.file_read_write)
     acquire(r2)

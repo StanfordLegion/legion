@@ -68,8 +68,14 @@ where
   reads writes(r, s)
 do
   for p in is do
-    r[p].{x, y, z, w} = p.x * 3 + p.y * 11 + p.y * 123
-    s[p].{x, y, z, w} = p.x * 7 + p.y * 13 + p.y * 129
+    r[p].x = p.x * 3 + p.y * 11 + p.y * 123
+    r[p].y = p.x * 3 + p.y * 11 + p.y * 123
+    r[p].z = p.x * 3 + p.y * 11 + p.y * 123
+    r[p].w = p.x * 3 + p.y * 11 + p.y * 123
+    s[p].x = p.x * 7 + p.y * 13 + p.y * 129
+    s[p].y = p.x * 7 + p.y * 13 + p.y * 129
+    s[p].z = p.x * 7 + p.y * 13 + p.y * 129
+    s[p].w = p.x * 7 + p.y * 13 + p.y * 129
   end
 end
 
@@ -80,8 +86,14 @@ where
   reads writes(r, s)
 do
   for p in is do
-    r[p].{x, y, z, w} = p.x * 3 + p.y * 11 + p.y * 123
-    s[p].{x, y, z, w} = p.x * 7 + p.y * 13 + p.y * 129
+    r[p].x = p.x * 3 + p.y * 11 + p.y * 123
+    r[p].y = p.x * 3 + p.y * 11 + p.y * 123
+    r[p].z = p.x * 3 + p.y * 11 + p.y * 123
+    r[p].w = p.x * 3 + p.y * 11 + p.y * 123
+    s[p].x = p.x * 7 + p.y * 13 + p.y * 129
+    s[p].y = p.x * 7 + p.y * 13 + p.y * 129
+    s[p].z = p.x * 7 + p.y * 13 + p.y * 129
+    s[p].w = p.x * 7 + p.y * 13 + p.y * 129
   end
 end
 
