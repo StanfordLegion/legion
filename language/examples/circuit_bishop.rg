@@ -266,8 +266,27 @@ do
   var max_shared_node_id = 0
   var min_shared_node_id = num_shared_nodes
   for wire in rw do
-    wire.current.{_0, _1, _2, _3, _4, _5, _6, _7, _8, _9} = 0.0
-    wire.voltage.{_0, _1, _2, _3, _4, _5, _6, _7, _8} = 0.0
+    wire.current._0 = 0.0
+    wire.current._1 = 0.0
+    wire.current._2 = 0.0
+    wire.current._3 = 0.0
+    wire.current._4 = 0.0
+    wire.current._5 = 0.0
+    wire.current._6 = 0.0
+    wire.current._7 = 0.0
+    wire.current._8 = 0.0
+    wire.current._9 = 0.0
+
+    wire.voltage._0 = 0.0
+    wire.voltage._1 = 0.0
+    wire.voltage._2 = 0.0
+    wire.voltage._3 = 0.0
+    wire.voltage._4 = 0.0
+    wire.voltage._5 = 0.0
+    wire.voltage._6 = 0.0
+    wire.voltage._7 = 0.0
+    wire.voltage._8 = 0.0
+
     wire.resistance = drand48() * 10.0 + 1.0
 
     -- Keep inductance on the order of 1e-3 * dt to avoid resonance problems

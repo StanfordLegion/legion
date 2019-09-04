@@ -55,8 +55,11 @@ do
     var ptr_offset = p * npp
     for i = 0, wpp do
       var wire = dynamic_cast(ptr(Wire(rn, rn, rn), rw), ptr(p * wpp + i))
-      wire.current.{_0, _1, _2} = 0.0
-      wire.voltage.{_0, _1} = 0.0
+      wire.current._0 = 0.0
+      wire.current._1 = 0.0
+      wire.current._2 = 0.0
+      wire.voltage._0 = 0.0
+      wire.voltage._1 = 0.0
       wire.resistance = drand48() * 10.0 + 1.0
 
       -- Keep inductance on the order of 1e-3 * dt to avoid resonance problems

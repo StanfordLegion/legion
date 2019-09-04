@@ -228,21 +228,33 @@ end
 
 local function has_all_valid_field_accesses(node)
   local valid = true
+  local print_warning = true
+  local message = "multi-field expansion is deprecated. please change it to single field expressions"
   data.zip(node.lhs, node.rhs):map(function(pair)
     if valid then
       local lh, rh = unpack(pair)
       local num_accessed_fields_lh = get_num_accessed_fields(lh)
       local num_accessed_fields_rh = get_num_accessed_fields(rh)
-      local num_accessed_fields =
-        join_num_accessed_fields(num_accessed_fields_lh,
-                                 num_accessed_fields_rh)
-      if num_accessed_fields == false then
-        valid = false
-      -- Special case when there is only one assignee for multiple
-      -- values on the RHS
-      elseif num_accessed_fields_lh == 1 and
-             num_accessed_fields_rh > 1 then
-        valid = false
+      if not std.config["allow-multi-field-expansion"] then
+        if num_accessed_fields_lh > 1 or num_accessed_fields_rh > 1 then
+          report.error(node, message)
+        end
+      else
+        if print_warning then
+          report.warn(node, message)
+          print_warning = false
+        end
+        local num_accessed_fields =
+          join_num_accessed_fields(num_accessed_fields_lh,
+                                   num_accessed_fields_rh)
+        if num_accessed_fields == false then
+          valid = false
+        -- Special case when there is only one assignee for multiple
+        -- values on the RHS
+        elseif num_accessed_fields_lh == 1 and
+               num_accessed_fields_rh > 1 then
+          valid = false
+        end
       end
     end
   end)

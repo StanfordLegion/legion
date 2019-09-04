@@ -35,8 +35,14 @@ where
   reads writes(r, s)
 do
   for p in is do
-    r[p].{c, d}.{a, b} = p.x * 3 + p.y * 11
-    s[p].{c, d}.{a, b} = p.x * 7 + p.y * 13
+    r[p].c.a = p.x * 3 + p.y * 11
+    r[p].c.b = p.x * 3 + p.y * 11
+    r[p].d.a = p.x * 3 + p.y * 11
+    r[p].d.b = p.x * 3 + p.y * 11
+    s[p].c.a = p.x * 7 + p.y * 13
+    s[p].c.b = p.x * 7 + p.y * 13
+    s[p].d.a = p.x * 7 + p.y * 13
+    s[p].d.b = p.x * 7 + p.y * 13
     for i = 0, 15 do
       r[p].c.z[i] = p.x * 5 + p.y * 15
       r[p].d.z[i] = p.x * 5 + p.y * 17
@@ -59,8 +65,14 @@ where
   reads writes(r, s)
 do
   for p in is do
-    r[p].{c, d}.{a, b} = p.x * 3 + p.y * 11
-    s[p].{c, d}.{a, b} = p.x * 7 + p.y * 13
+    r[p].c.a = p.x * 3 + p.y * 11
+    r[p].c.b = p.x * 3 + p.y * 11
+    r[p].d.a = p.x * 3 + p.y * 11
+    r[p].d.b = p.x * 3 + p.y * 11
+    s[p].c.a = p.x * 7 + p.y * 13
+    s[p].c.b = p.x * 7 + p.y * 13
+    s[p].d.a = p.x * 7 + p.y * 13
+    s[p].d.b = p.x * 7 + p.y * 13
     for i = 0, 15 do
       r[p].c.z[i] = p.x * 5 + p.y * 15
       r[p].d.z[i] = p.x * 5 + p.y * 17
