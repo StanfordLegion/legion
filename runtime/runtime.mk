@@ -293,7 +293,13 @@ endif
 ifeq ($(strip $(CUDA)),)
   USE_CUDA ?= 0
   ifeq ($(strip $(USE_CUDA)),1)
-    $(error CUDA variable is not defined, aborting build)
+    # try to auto-detect CUDA location
+    CUDA := $(patsubst %/bin/nvcc,%,$(shell which nvcc | head -1))
+    ifeq ($(strip $(CUDA)),)
+      $(error CUDA variable is not defined, aborting build)
+    else
+      $(info auto-detected CUDA at: $(CUDA))
+    endif
   endif
 else
   USE_CUDA ?= 1
