@@ -68,8 +68,14 @@ where
   reads writes(r, s)
 do
   for p in is do
-    r[p].{x, y, z, w} = p * 11
-    s[p].{x, y, z, w} = p * 13
+    r[p].x = p * 11
+    r[p].y = p * 11
+    r[p].z = p * 11
+    r[p].w = p * 11
+    s[p].x = p * 13
+    s[p].y = p * 13
+    s[p].z = p * 13
+    s[p].w = p * 13
   end
 end
 
@@ -80,8 +86,14 @@ where
   reads writes(r, s)
 do
   for p in is do
-    r[p].{x, y, z, w} = p * 11
-    s[p].{x, y, z, w} = p * 13
+    r[p].x = p * 11
+    r[p].y = p * 11
+    r[p].z = p * 11
+    r[p].w = p * 11
+    s[p].x = p * 13
+    s[p].y = p * 13
+    s[p].z = p * 13
+    s[p].w = p * 13
   end
 end
 

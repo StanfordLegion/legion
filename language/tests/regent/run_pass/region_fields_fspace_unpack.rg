@@ -41,7 +41,9 @@ task unpack_from_value(l : region(inner), m : region(middle(l)),
 where reads writes(l, m) do
   var o = n
   o.j.f.a = { _0 = 1, _1 = 2, _2 = 3 }
-  o.j.f.b.{_0, _1, _2} = 72
+  o.j.f.b._0 = 72
+  o.j.f.b._1 = 72
+  o.j.f.b._2 = 72
   o.j.f.c._0 = 53
   return o
 end
@@ -52,7 +54,9 @@ where reads writes(p, q, r) do
   var x = s.j.f.a._0
   s.j.f.a._0 = 101
   s.j.f.b._0 = x + 200
-  s.j.f.c.{_0, _1, _2} = 306
+  s.j.f.c._0 = 306
+  s.j.f.c._1 = 306
+  s.j.f.c._2 = 306
 end
 
 task main()
@@ -63,7 +67,15 @@ task main()
   var x = dynamic_cast(ptr(middle(t), u), 0)
   var y = dynamic_cast(ptr(outer(t, u), v), 0)
 
-  w.{a, b, c}.{_0, _1, _2} = 0
+  w.a._0 = 0
+  w.a._1 = 0
+  w.a._2 = 0
+  w.b._0 = 0
+  w.b._1 = 0
+  w.b._2 = 0
+  w.c._0 = 0
+  w.c._1 = 0
+  w.c._2 = 0
   @x = [middle(t)] { e = t, f = w }
   @y = [outer(t, u)] { i = u, j = x }
 

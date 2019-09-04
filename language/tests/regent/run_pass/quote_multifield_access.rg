@@ -12,6 +12,9 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
+-- runs-with:
+-- [[ "-fallow-multi-field-expansion", "1" ]]
+
 import "regent"
 
 local fields = terralib.newlist({"a", "b", "c"})
