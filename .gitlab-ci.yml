@@ -234,10 +234,16 @@ before_script:
 .n0003: &n0003
   tags:
     - n0003
+  only:
+    variables:
+      - $RUN_N0003_JOBS
 
 .p100: &p100
   tags:
     - p100
+  only:
+    variables:
+      - $RUN_P100_JOBS
 .cuda_p100: &cuda_p100
   CUDA: "/usr/local/cuda"
   USE_CUDA: "1"
