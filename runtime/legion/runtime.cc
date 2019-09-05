@@ -13779,11 +13779,12 @@ namespace Legion {
         MessageManager *manager = find_messenger(target);
         Serializer rez;
         bool deactivate_task;
+        const AddressSpaceID target_addr = find_address_space(target);
         {
           RezCheck z(rez);
           rez.serialize(target);
           rez.serialize(task->get_task_kind());
-          deactivate_task = task->pack_task(rez, target);
+          deactivate_task = task->pack_task(rez, target_addr);
         }
         // Send tasks on the physical state virtual channel in case
         // they moved any state when they were sent
@@ -13820,6 +13821,7 @@ namespace Legion {
         // Otherwise we need to send it remotely
         MessageManager *manager = find_messenger(target);
         unsigned idx = 1;
+        const AddressSpaceID target_addr = find_address_space(target);
         for (std::set<TaskOp*>::const_iterator it = tasks.begin();
               it != tasks.end(); it++,idx++)
         {
@@ -13829,7 +13831,7 @@ namespace Legion {
             RezCheck z(rez);
             rez.serialize(target);
             rez.serialize((*it)->get_task_kind());
-            deactivate_task = (*it)->pack_task(rez, target);
+            deactivate_task = (*it)->pack_task(rez, target_addr);
           }
           // Put it in the queue, flush the last task
           // Send tasks on the physical state virtual channel in case
