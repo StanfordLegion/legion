@@ -64,7 +64,8 @@ public:
   {
     // need 32 random bits (we probably lose a bunch when this gets converted to float)
     u32 bits = rand_raw(key, ctr_hi, ctr_lo);
-    const float scale = 0x1.p-32;  // 2^-32
+    // would prefer 0x1p-32 here, but pedantic c++ doesn't get it until c++17
+    const float scale = 1.0f / (1ULL << 32);  // 2^-32
     return (bits * scale);
   }
 };
