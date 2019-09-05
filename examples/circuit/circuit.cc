@@ -349,16 +349,16 @@ void allocate_wire_fields(Context ctx, Runtime *runtime, FieldSpace wire_space)
   runtime->attach_name(wire_space, FID_WIRE_CAP, "wire capacitance");
   for (int i = 0; i < WIRE_SEGMENTS; i++)
   {
-    char field_name[10];
+    char field_name[12];
     allocator.allocate_field(sizeof(float), FID_CURRENT+i);
-    sprintf(field_name, "current_%d", i);
+    snprintf(field_name, 12, "current_%d", i);
     runtime->attach_name(wire_space, FID_CURRENT+i, field_name);
   }
   for (int i = 0; i < (WIRE_SEGMENTS-1); i++)
   {
-    char field_name[15];
+    char field_name[17];
     allocator.allocate_field(sizeof(float), FID_WIRE_VOLTAGE+i);
-    sprintf(field_name, "wire_voltage_%d", i);
+    snprintf(field_name, 17, "wire_voltage_%d", i);
     runtime->attach_name(wire_space, FID_WIRE_VOLTAGE+i, field_name);
   }
 }
