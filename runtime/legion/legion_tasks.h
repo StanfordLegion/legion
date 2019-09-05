@@ -960,7 +960,7 @@ namespace Legion {
     public:
       virtual void perform_physical_traversal(unsigned idx,
                                 RegionTreeContext ctx, InstanceSet &valid);
-      virtual bool pack_task(Serializer &rez, Processor target);
+      virtual bool pack_task(Serializer &rez, AddressSpaceID target);
       virtual bool unpack_task(Deserializer &derez, Processor current,
                                std::set<RtEvent> &ready_events); 
       virtual void pack_as_shard_task(Serializer &rez, AddressSpaceID target);

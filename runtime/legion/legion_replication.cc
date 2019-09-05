@@ -6095,7 +6095,7 @@ namespace Legion {
         {
           rez.serialize((*it)->shard_id);
           rez.serialize((*it)->target_proc);
-          (*it)->pack_task(rez, (*it)->target_proc);
+          (*it)->pack_task(rez, target);
         }
       }
       runtime->send_replicate_launch(target, rez);

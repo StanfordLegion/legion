@@ -7034,12 +7034,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool ShardTask::pack_task(Serializer &rez, Processor target)
+    bool ShardTask::pack_task(Serializer &rez, AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
-      AddressSpaceID addr_target = runtime->find_address_space(target);
       RezCheck z(rez);
-      pack_single_task(rez, addr_target);
+      pack_single_task(rez, target);
       rez.serialize(remote_owner_uid);
       return false;
     }
