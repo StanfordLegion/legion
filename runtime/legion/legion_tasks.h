@@ -297,7 +297,7 @@ namespace Legion {
       virtual TaskKind get_task_kind(void) const = 0;
     public:
       // Returns true if the task should be deactivated
-      virtual bool pack_task(Serializer &rez, Processor target) = 0;
+      virtual bool pack_task(Serializer &rez, AddressSpaceID target) = 0;
       virtual bool unpack_task(Deserializer &derez, Processor current,
                                std::set<RtEvent> &ready_events) = 0;
       virtual void perform_inlining(void) = 0;
@@ -533,7 +533,7 @@ namespace Legion {
       virtual void trigger_task_complete(void) = 0;
       virtual void trigger_task_commit(void) = 0;
     public:
-      virtual bool pack_task(Serializer &rez, Processor target) = 0;
+      virtual bool pack_task(Serializer &rez, AddressSpaceID target) = 0;
       virtual bool unpack_task(Deserializer &derez, Processor current,
                                std::set<RtEvent> &ready_events) = 0; 
       virtual void perform_inlining(void) = 0;
@@ -630,7 +630,7 @@ namespace Legion {
       virtual void trigger_task_complete(void) = 0;
       virtual void trigger_task_commit(void) = 0;
     public:
-      virtual bool pack_task(Serializer &rez, Processor target) = 0;
+      virtual bool pack_task(Serializer &rez, AddressSpaceID target) = 0;
       virtual bool unpack_task(Deserializer &derez, Processor current,
                                std::set<RtEvent> &ready_events) = 0;
       virtual void perform_inlining(void) = 0;
@@ -733,7 +733,7 @@ namespace Legion {
     public:
       virtual void record_reference_mutation_effect(RtEvent event);
     public:
-      virtual bool pack_task(Serializer &rez, Processor target);
+      virtual bool pack_task(Serializer &rez, AddressSpaceID target);
       virtual bool unpack_task(Deserializer &derez, Processor current,
                                std::set<RtEvent> &ready_events);
       virtual void perform_inlining(void);
@@ -825,7 +825,7 @@ namespace Legion {
       virtual void trigger_task_complete(void);
       virtual void trigger_task_commit(void);
     public:
-      virtual bool pack_task(Serializer &rez, Processor target);
+      virtual bool pack_task(Serializer &rez, AddressSpaceID target);
       virtual bool unpack_task(Deserializer &derez, Processor current,
                                std::set<RtEvent> &ready_events);
       virtual void perform_inlining(void);
@@ -920,7 +920,7 @@ namespace Legion {
       virtual void trigger_task_complete(void);
       virtual void trigger_task_commit(void);
     public:
-      virtual bool pack_task(Serializer &rez, Processor target);
+      virtual bool pack_task(Serializer &rez, AddressSpaceID target);
       virtual bool unpack_task(Deserializer &derez, Processor current,
                                std::set<RtEvent> &ready_events);
       virtual void perform_inlining(void);
@@ -1030,7 +1030,7 @@ namespace Legion {
       virtual ApEvent get_task_completion(void) const;
       virtual TaskKind get_task_kind(void) const;
     public:
-      virtual bool pack_task(Serializer &rez, Processor target);
+      virtual bool pack_task(Serializer &rez, AddressSpaceID target);
       virtual bool unpack_task(Deserializer &derez, Processor current,
                                std::set<RtEvent> &ready_events);
       virtual void perform_inlining(void);

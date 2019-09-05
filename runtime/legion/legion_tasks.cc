@@ -5442,15 +5442,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool IndividualTask::pack_task(Serializer &rez, Processor target)
+    bool IndividualTask::pack_task(Serializer &rez, AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, INDIVIDUAL_PACK_TASK_CALL);
       // Check to see if we are stealable, if not and we have not
       // yet been sent remotely, then send the state now
-      AddressSpaceID addr_target = runtime->find_address_space(target);
       RezCheck z(rez);
-      pack_single_task(rez, addr_target);
+      pack_single_task(rez, target);
       rez.serialize(orig_task);
       rez.serialize(remote_completion_event);
       rez.serialize(remote_unique_id);
@@ -6191,12 +6190,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool PointTask::pack_task(Serializer &rez, Processor target)
+    bool PointTask::pack_task(Serializer &rez, AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, POINT_PACK_TASK_CALL);
       RezCheck z(rez);
-      pack_single_task(rez, runtime->find_address_space(target));
+      pack_single_task(rez, target);
       rez.serialize(point_termination); 
 #ifdef DEBUG_LEGION
       assert(is_origin_mapped()); // should be origin mapped if we're here
@@ -7147,7 +7146,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool IndexTask::pack_task(Serializer &rez, Processor target)
+    bool IndexTask::pack_task(Serializer &rez, AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -8043,18 +8042,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool SliceTask::pack_task(Serializer &rez, Processor target)
+    bool SliceTask::pack_task(Serializer &rez, AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, SLICE_PACK_TASK_CALL);
       // Check to see if we are stealable or not yet fully sliced,
       // if both are false and we're not remote, then we can send the state
       // now or check to see if we are remotely mapped
-      AddressSpaceID addr_target = runtime->find_address_space(target);
       RezCheck z(rez);
       // Preamble used in TaskOp::unpack
       rez.serialize(points.size());
-      pack_multi_task(rez, addr_target);
+      pack_multi_task(rez, target);
       rez.serialize(denominator);
       rez.serialize(index_owner);
       rez.serialize(index_complete);

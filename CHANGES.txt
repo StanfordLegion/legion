@@ -9,6 +9,11 @@ Version ??.??.? (TBD)
         now issues a warning; in a future release this warning will be
         upgraded to an error. For details, see:
         https://github.com/StanfordLegion/legion/issues/520
+    - Multi-field expasion is deprecated and now issues an error. The error
+        can be temporarily downgraded to a warning, but it is advised that
+        users migrate codes away from this syntax as it will become a hard
+        error in a future release. For details, see:
+        https://github.com/StanfordLegion/legion/issues/501
 
 Version 19.06.0 (June 27, 2019)
   * Legion
