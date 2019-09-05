@@ -1181,7 +1181,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (recording && init)
-        rec->record_get_term_event(memo);
+        record_get_term_event();
       if (rec != NULL)
         rec->add_recorder_reference();
     }
@@ -1189,6 +1189,15 @@ namespace Legion {
     //--------------------------------------------------------------------------
     TraceInfo::TraceInfo(const TraceInfo &rhs)
       : op(rhs.op), memo(rhs.memo), rec(rhs.rec), recording(rhs.recording)
+    //--------------------------------------------------------------------------
+    {
+      if (rec != NULL)
+        rec->add_recorder_reference();
+    }
+
+    //--------------------------------------------------------------------------
+    TraceInfo::TraceInfo(const TraceInfo &rhs, Operation *o)
+      : op(o), memo(rhs.memo), rec(rhs.rec), recording(rhs.recording)
     //--------------------------------------------------------------------------
     {
       if (rec != NULL)
@@ -1211,6 +1220,39 @@ namespace Legion {
     {
       if (rec != NULL)
         rec->add_recorder_reference();
+    }
+
+    //--------------------------------------------------------------------------
+    void TraceInfo::pack_remote_trace_info(Serializer &rez, 
+                        AddressSpaceID target, std::set<RtEvent> &applied) const
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize<bool>(recording);
+      if (recording)
+      {
+        // Only need to pack these if we're recording
+        memo->pack_remote_memoizable(rez, target);
+        rec->pack_recorder(rez, applied, target);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ TraceInfo* TraceInfo::unpack_remote_trace_info(
+        Deserializer &derez, Operation *op, Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      bool recording;
+      derez.deserialize<bool>(recording);
+      if (recording)
+      {
+        Memoizable *memo = 
+          RemoteMemoizable::unpack_remote_memoizable(derez, op, runtime); 
+        PhysicalTraceRecorder *rec = 
+          RemoteTraceRecorder::unpack_remote_recorder(derez, runtime, memo);
+        return new TraceInfo(op, memo, rec, true/*recording*/);
+      }
+      else
+        return new TraceInfo(op, NULL, NULL, false/*recording*/);
     }
 
     /////////////////////////////////////////////////////////////

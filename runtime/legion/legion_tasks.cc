@@ -1589,6 +1589,8 @@ namespace Legion {
       if (rhs->must_epoch != NULL)
         this->set_must_epoch(rhs->must_epoch, rhs->must_epoch_index,
                              false/*do registration*/);
+      // From Memoizable
+      this->trace_local_id = rhs->trace_local_id;
       // From Task
       this->task_id = rhs->task_id;
       this->indexes = rhs->indexes;
@@ -1740,6 +1742,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, EARLY_MAP_REGIONS_CALL);
+      // This always happens on the owner node so we can just do the 
+      // normal trace info creation here without needing 
       const TraceInfo trace_info(this);
       ApEvent init_precondition = compute_init_precondition(trace_info);;
       // A little bit of suckinesss here, it's unclear if we have
@@ -2304,6 +2308,7 @@ namespace Legion {
       task_priority = 0;
       perform_postmap = false;
       execution_context = NULL;
+      remote_trace_info = NULL;
       shard_manager = NULL;
       leaf_cached = false;
       inner_cached = false;
@@ -2326,6 +2331,8 @@ namespace Legion {
       untracked_valid_regions.clear();
       if ((execution_context != NULL) && execution_context->remove_reference())
         delete execution_context;
+      if (remote_trace_info != NULL)
+        delete remote_trace_info;
       if ((shard_manager != NULL) && shard_manager->remove_reference())
         delete shard_manager;
 #ifdef DEBUG_LEGION
@@ -2416,6 +2423,24 @@ namespace Legion {
       }
       else
       {
+        if (remote_trace_info == NULL)
+        {
+          const TraceInfo trace_info(this);
+          trace_info.pack_remote_trace_info(rez, target,map_applied_conditions);
+        }
+        else
+        {
+#ifdef DEBUG_LEGION
+          // Should be empty before
+          assert(map_applied_conditions.empty());
+#endif
+          remote_trace_info->pack_remote_trace_info(rez, target, 
+                                                    map_applied_conditions);
+#ifdef DEBUG_LEGION
+          // Should be empty after too
+          assert(map_applied_conditions.empty());
+#endif
+        }
         rez.serialize<size_t>(copy_profiling_requests.size());
         for (unsigned idx = 0; idx < copy_profiling_requests.size(); idx++)
           rez.serialize(copy_profiling_requests[idx]);
@@ -2481,6 +2506,11 @@ namespace Legion {
       }
       else
       {
+#ifdef DEBUG_LEGION
+        assert(remote_trace_info == NULL);
+#endif
+        remote_trace_info = 
+          TraceInfo::unpack_remote_trace_info(derez, this, runtime);
         size_t num_copy_requests;
         derez.deserialize(num_copy_requests);
         if (num_copy_requests > 0)
@@ -3782,7 +3812,14 @@ namespace Legion {
                                          defer_args, 1/*invocation count*/);
           }
         }
-        const TraceInfo trace_info(this, true/*initialize*/);
+        // See if we have a remote trace info to use, if we don't then make
+        // our trace info and do the initialization
+        const TraceInfo trace_info = (remote_trace_info == NULL) ? 
+          TraceInfo(this, true/*initialize*/) : *remote_trace_info;
+        // Record the get term event here if we're remote since we didn't
+        // do it automatically as part of the initialization
+        if ((remote_trace_info != NULL) && remote_trace_info->recording)
+          trace_info.record_get_term_event();
         ApEvent init_precondition = compute_init_precondition(trace_info);
 #ifdef LEGION_SPY
         {
@@ -6787,7 +6824,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    TraceLocalID PointTask::get_trace_local_id() const
+    TraceLocalID PointTask::get_trace_local_id(void) const
     //--------------------------------------------------------------------------
     {
       return TraceLocalID(trace_local_id, get_domain_point());
@@ -8221,7 +8258,6 @@ namespace Legion {
       result->denominator = scale_denominator;
       result->index_owner = this;
       result->remote_owner_uid = parent_ctx->get_unique_id();
-      result->trace_local_id = trace_local_id;
       result->tpl = tpl;
       result->memo_state = memo_state;
       if (runtime->legion_spy_enabled)
@@ -8308,6 +8344,7 @@ namespace Legion {
     void IndexTask::record_reference_mutation_effect(RtEvent event)
     //--------------------------------------------------------------------------
     {
+      AutoLock o_lock(op_lock);
       map_applied_conditions.insert(event);
     }
 
@@ -8759,6 +8796,7 @@ namespace Legion {
       denominator = 0;
       index_owner = NULL;
       remote_owner_uid = 0;
+      remote_trace_info = NULL;
       remote_unique_id = get_unique_id();
       origin_mapped = false;
     }
@@ -8782,6 +8820,8 @@ namespace Legion {
           (*it)->commit_operation(true/*deactivate*/);
       }
       points.clear(); 
+      if (remote_trace_info != NULL)
+        delete remote_trace_info;
       if (!acquired_instances.empty())
         release_acquired_instances(acquired_instances);
 #ifdef DEBUG_LEGION
@@ -9003,8 +9043,35 @@ namespace Legion {
         points[idx]->pack_task(rez, target);
       }
       // If we don't have any points, we have to pack up the argument map
+      // and any trace info that we need for doing remote tracing
       if (points.empty())
       {
+        if (remote_trace_info == NULL)
+        {
+          const TraceInfo trace_info(this); 
+          std::set<RtEvent> applied;
+          trace_info.pack_remote_trace_info(rez, target, applied);
+          // Pass any applied events back to the index owner
+          if (!applied.empty())
+          {
+            for (std::set<RtEvent>::const_iterator it =
+                  applied.begin(); it != applied.end(); it++)
+              index_owner->record_reference_mutation_effect(*it);
+          }
+        }
+        else
+        {
+#ifdef DEBUG_LEGION
+          // Should be empty before
+          assert(map_applied_conditions.empty());
+#endif
+          remote_trace_info->pack_remote_trace_info(rez, target, 
+                                                    map_applied_conditions);
+#ifdef DEBUG_LEGION
+          // Should be empty after too
+          assert(map_applied_conditions.empty());
+#endif
+        }
         if (point_arguments.impl != NULL)
           rez.serialize(point_arguments.impl->did);
         else
@@ -9095,6 +9162,11 @@ namespace Legion {
       }
       if (num_points == 0)
       {
+#ifdef DEBUG_LEGION
+        assert(remote_trace_info == NULL);
+#endif
+        remote_trace_info = 
+          TraceInfo::unpack_remote_trace_info(derez, this, runtime);
         DistributedID future_map_did;
         derez.deserialize(future_map_did);
         if (future_map_did > 0)
@@ -9133,7 +9205,6 @@ namespace Legion {
       result->denominator = this->denominator * scale_denominator;
       result->index_owner = this->index_owner;
       result->remote_owner_uid = this->remote_owner_uid;
-      result->trace_local_id = trace_local_id;
       result->tpl = tpl;
       result->memo_state = memo_state;
       if (runtime->legion_spy_enabled)
@@ -9221,11 +9292,18 @@ namespace Legion {
       result->is_index_space = true;
       result->must_epoch_task = this->must_epoch_task;
       result->index_domain = this->index_domain;
-      result->trace_local_id = trace_local_id;
       result->tpl = tpl;
       result->memo_state = memo_state;
       // Now figure out our local point information
       result->initialize_point(this, point, point_arguments);
+      // Grab any remote trace info that we need from the slice
+      if (remote_trace_info != NULL)
+      {
+#ifdef DEBUG_LEGION
+        assert(result->remote_trace_info == NULL);
+#endif
+        result->remote_trace_info = new TraceInfo(*remote_trace_info, result);
+      }
       if (runtime->legion_spy_enabled)
         LegionSpy::log_slice_point(get_unique_id(), 
                                    result->get_unique_id(),

@@ -6512,6 +6512,8 @@ namespace Legion {
       sharding_space = own->sharding_space;
       owner = own;
       execution_fence_event = own->get_execution_fence_event();
+      // From Memoizable
+      trace_local_id            = owner->get_trace_local_id().first;
       // From Copy
       src_requirements          = owner->src_requirements;
       dst_requirements          = owner->dst_requirements;
@@ -6715,6 +6717,13 @@ namespace Legion {
         dst_indirect_requirements[idx].region = result;
         dst_indirect_requirements[idx].handle_type = SINGULAR;
       }
+    }
+
+    //--------------------------------------------------------------------------
+    TraceLocalID PointCopyOp::get_trace_local_id(void) const
+    //--------------------------------------------------------------------------
+    {
+      return TraceLocalID(trace_local_id, index_point);
     }
 
     /////////////////////////////////////////////////////////////
@@ -14821,6 +14830,8 @@ namespace Legion {
       sharding_space = own->sharding_space;
       owner = own;
       execution_fence_event = own->get_execution_fence_event();
+      // From Memoizable
+      trace_local_id     = owner->get_trace_local_id().first;
       // From Fill
       requirement        = owner->get_requirement();
       grants             = owner->grants;
@@ -14927,6 +14938,13 @@ namespace Legion {
 #endif
       requirement.region = result;
       requirement.handle_type = SINGULAR;
+    }
+
+    //--------------------------------------------------------------------------
+    TraceLocalID PointFillOp::get_trace_local_id(void) const
+    //--------------------------------------------------------------------------
+    {
+      return TraceLocalID(trace_local_id, index_point);
     }
 
     ///////////////////////////////////////////////////////////// 

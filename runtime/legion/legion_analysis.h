@@ -316,11 +316,22 @@ namespace Legion {
     public:
       explicit TraceInfo(Operation *op, bool initialize = false);
       TraceInfo(const TraceInfo &info);
+      TraceInfo(const TraceInfo &info, Operation *op);
       ~TraceInfo(void);
     protected:
       TraceInfo(Operation *op, Memoizable *memo, 
                 PhysicalTraceRecorder *rec, bool recording);
     public:
+      void pack_remote_trace_info(Serializer &rez, AddressSpaceID target,
+                                  std::set<RtEvent> &applied) const;
+      static TraceInfo* unpack_remote_trace_info(Deserializer &derez,
+                                    Operation *op, Runtime *runtime);
+    public:
+      inline void record_get_term_event(void) const
+        {
+          base_sanity_check();
+          rec->record_get_term_event(memo);
+        }
       inline void record_create_ap_user_event(ApUserEvent result) const
         {
           base_sanity_check();
