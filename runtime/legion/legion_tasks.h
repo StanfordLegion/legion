@@ -571,6 +571,7 @@ namespace Legion {
       RtUserEvent                           deferred_complete_mapping;
     protected:
       TaskContext*                          execution_context;
+      TraceInfo*                            remote_trace_info;
     protected:
       mutable bool leaf_cached, is_leaf_result;
       mutable bool inner_cached, is_inner_result;
@@ -852,7 +853,7 @@ namespace Legion {
       virtual void complete_replay(ApEvent completion_event);
     public:
       // From Memoizable
-      virtual TraceLocalID get_trace_local_id() const;
+      virtual TraceLocalID get_trace_local_id(void) const;
     protected:
       friend class SliceTask;
       SliceTask                   *slice_owner;
@@ -1122,6 +1123,7 @@ namespace Legion {
       UniqueID remote_unique_id;
       bool origin_mapped;
       UniqueID remote_owner_uid;
+      TraceInfo *remote_trace_info;
     protected: 
       std::map<PhysicalManager*,std::pair<unsigned,bool> > acquired_instances;
       std::set<RtEvent> map_applied_conditions;

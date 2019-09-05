@@ -831,7 +831,7 @@ namespace Legion {
                                       Operation *op, Runtime *runtime);
     public:
       Operation *const op;
-      Memoizable *const original; // not a valid pointer
+      Memoizable *const original; // not a valid pointer on remote nodes
       const AddressSpaceID origin;
       const Operation::OpKind kind;
       const TraceLocalID trace_local_id;
@@ -872,7 +872,7 @@ namespace Legion {
       virtual void replay_analysis(void) = 0;
     public:
       // From Memoizable
-      virtual TraceLocalID get_trace_local_id() const;
+      virtual TraceLocalID get_trace_local_id(void) const;
       virtual PhysicalTemplate* get_template(void) const;
       virtual ApEvent compute_sync_precondition(const TraceInfo *info) const
         { assert(false); return ApEvent::NO_AP_EVENT; }
@@ -1285,6 +1285,9 @@ namespace Legion {
       // From ProjectionPoint
       virtual const DomainPoint& get_domain_point(void) const;
       virtual void set_projection_result(unsigned idx,LogicalRegion result);
+    public:
+      // From Memoizable
+      virtual TraceLocalID get_trace_local_id(void) const;
     protected:
       IndexCopyOp*              owner;
     };
@@ -2968,6 +2971,9 @@ namespace Legion {
       // From ProjectionPoint
       virtual const DomainPoint& get_domain_point(void) const;
       virtual void set_projection_result(unsigned idx,LogicalRegion result);
+    public:
+      // From Memoizable
+      virtual TraceLocalID get_trace_local_id(void) const;
     protected:
       IndexFillOp*              owner;
     };
