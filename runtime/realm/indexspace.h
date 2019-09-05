@@ -104,6 +104,7 @@ namespace Realm {
       Matrix<N,N2,T2> transform;
       Point<N2,T2> offset_lo, offset_hi;
       Point<N2,T2> divisor;
+      Rect<N2,T2> wrap;
       std::vector<IndexSpace<N2,T2> > spaces;
       std::vector<RegionInstance> insts;
     };
@@ -116,6 +117,8 @@ namespace Realm {
       FieldID field_id;
       RegionInstance inst;
       bool is_ranges;
+      bool oor_possible;  // can any pointers fall outside all the target spaces?
+      bool aliasing_possible;  // can multiple pointers go to the same element?
       size_t subfield_offset;
       std::vector<IndexSpace<N2,T2> > spaces;
       std::vector<RegionInstance> insts;
