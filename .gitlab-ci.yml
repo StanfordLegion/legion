@@ -27,6 +27,8 @@ variables:
   CXX: "clang++-3.5"
 .clang38: &clang38
   CXX: "clang++-3.8"
+.clang7: &clang7
+  CXX: "clang++-7"
 .clang8: &clang8
   CXX: "clang++-8"
 
@@ -36,6 +38,9 @@ variables:
 .terra38: &terra38
   LLVM_CONFIG: "llvm-config-3.8"
   TERRA_DIR: "/usr/local/terra38"
+.terra70: &terra70
+  LLVM_CONFIG: "llvm-config-7"
+  TERRA_DIR: "/usr/local/terra70"
 
 .debug: &debug
   DEBUG: "1"
@@ -684,9 +689,13 @@ n0003_gcc48_cxx98_release_legion_cuda:
 #   variables:
 #     <<: [*gcc48, *terra38, *release, *cxx98_normal, *cuda, *regent]
 p100_gcc7_cxx11_release_legion_cuda:
-  <<: [*p100, *image, *tests]
+  <<: [*p100, *tests]
   variables:
     <<: [*gcc7, *release, *cxx11_normal, *cuda_p100, *legion]
+p100_clang7_cxx11_release_regent_cuda:
+  <<: [*p100, *tests]
+  variables:
+    <<: [*clang7, *terra70, *release, *cxx11_normal, *cuda_p100, *regent]
 
 # Darwin Power9 tests:
 darwin_power9_gcc8_cxx17_release_legion:
