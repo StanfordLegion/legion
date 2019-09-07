@@ -52,11 +52,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void NullMapper::report_unimplemented(const char *func_name) const
+    void NullMapper::report_unimplemented(const char *func_name,
+                                          unsigned line) const
     //--------------------------------------------------------------------------
     {
-      log_null.error("Unimplemented mapper method \"%s\" in mapper %s", 
-                      func_name, get_mapper_name());
+      log_null.error("Unimplemented mapper method \"%s\" in mapper %s ", 
+         "on line %s of %s", func_name, get_mapper_name(), line, __FILE__);
       assert(false);
     }
 
@@ -74,7 +75,7 @@ namespace Legion {
     Mapper::MapperSyncModel NullMapper::get_mapper_sync_model(void) const
     //--------------------------------------------------------------------------
     {
-      report_unimplemented(__func__); 
+      report_unimplemented(__func__, __LINE__); 
       return SERIALIZED_REENTRANT_MAPPER_MODEL;
     }
 
@@ -84,7 +85,7 @@ namespace Legion {
                                                TaskOptions&     output)
     //--------------------------------------------------------------------------
     {
-      report_unimplemented(__func__);
+      report_unimplemented(__func__, __LINE__);
     }
 
     //--------------------------------------------------------------------------
@@ -94,7 +95,7 @@ namespace Legion {
                                        PremapTaskOutput&  output)
     //--------------------------------------------------------------------------
     {
-      report_unimplemented(__func__);
+      report_unimplemented(__func__, __LINE__);
     }
 
     //--------------------------------------------------------------------------
@@ -104,7 +105,7 @@ namespace Legion {
                                       SliceTaskOutput&   output)
     //--------------------------------------------------------------------------
     {
-      report_unimplemented(__func__);
+      report_unimplemented(__func__, __LINE__);
     }
 
     //--------------------------------------------------------------------------
@@ -114,7 +115,7 @@ namespace Legion {
                                     MapTaskOutput&     output)
     //--------------------------------------------------------------------------
     {
-      report_unimplemented(__func__);
+      report_unimplemented(__func__, __LINE__);
     }
 
     //--------------------------------------------------------------------------
@@ -125,7 +126,7 @@ namespace Legion {
                                         MapReplicateTaskOutput&  output)
     //--------------------------------------------------------------------------
     {
-      report_unimplemented(__func__);
+      report_unimplemented(__func__, __LINE__);
     }
 
     //--------------------------------------------------------------------------
@@ -135,7 +136,7 @@ namespace Legion {
                                                SelectVariantOutput&   output)
     //--------------------------------------------------------------------------
     {
-      report_unimplemented(__func__);
+      report_unimplemented(__func__, __LINE__);
     }
 
     //--------------------------------------------------------------------------
@@ -145,7 +146,7 @@ namespace Legion {
                                         PostMapOutput&     output)
     //--------------------------------------------------------------------------
     {
-      report_unimplemented(__func__); 
+      report_unimplemented(__func__, __LINE__); 
     }
 
     //--------------------------------------------------------------------------
@@ -155,7 +156,7 @@ namespace Legion {
                                                SelectTaskSrcOutput& output)
     //--------------------------------------------------------------------------
     {
-      report_unimplemented(__func__);
+      report_unimplemented(__func__, __LINE__);
     }
 
     //--------------------------------------------------------------------------
@@ -166,7 +167,7 @@ namespace Legion {
                                           CreateTaskTemporaryOutput& output)
     //--------------------------------------------------------------------------
     {
-      report_unimplemented(__func__); 
+      report_unimplemented(__func__, __LINE__); 
     }
 
     //--------------------------------------------------------------------------
@@ -175,7 +176,7 @@ namespace Legion {
                                      SpeculativeOutput& output)
     //--------------------------------------------------------------------------
     {
-      report_unimplemented(__func__);
+      report_unimplemented(__func__, __LINE__);
     }
 
     //--------------------------------------------------------------------------
@@ -184,7 +185,7 @@ namespace Legion {
                                       const TaskProfilingInfo&  input)
     //--------------------------------------------------------------------------
     {
-      report_unimplemented(__func__);
+      report_unimplemented(__func__, __LINE__);
     }
 
     //--------------------------------------------------------------------------
@@ -195,7 +196,7 @@ namespace Legion {
                                        SelectShardingFunctorOutput& output)
     //--------------------------------------------------------------------------
     {
-      report_unimplemented(__func__);
+      report_unimplemented(__func__, __LINE__);
     }
 
     //--------------------------------------------------------------------------
@@ -205,7 +206,7 @@ namespace Legion {
                                       MapInlineOutput&     output)
     //--------------------------------------------------------------------------
     {
-      report_unimplemented(__func__);
+      report_unimplemented(__func__, __LINE__);
     }
 
     //--------------------------------------------------------------------------
@@ -215,7 +216,7 @@ namespace Legion {
                                               SelectInlineSrcOutput& output)
     //--------------------------------------------------------------------------
     {
-      report_unimplemented(__func__);
+      report_unimplemented(__func__, __LINE__);
     }
 
     //--------------------------------------------------------------------------
@@ -226,7 +227,7 @@ namespace Legion {
                                         CreateInlineTemporaryOutput& output)
     //--------------------------------------------------------------------------
     {
-      report_unimplemented(__func__);  
+      report_unimplemented(__func__, __LINE__);  
     }
 
     //--------------------------------------------------------------------------
@@ -235,7 +236,7 @@ namespace Legion {
                                       const InlineProfilingInfo&  input)
     //--------------------------------------------------------------------------
     {
-      report_unimplemented(__func__);
+      report_unimplemented(__func__, __LINE__);
     }
 
     //--------------------------------------------------------------------------
@@ -245,7 +246,7 @@ namespace Legion {
                                     MapCopyOutput&     output)
     //--------------------------------------------------------------------------
     {
-      report_unimplemented(__func__);
+      report_unimplemented(__func__, __LINE__);
     }
 
     //--------------------------------------------------------------------------
@@ -255,7 +256,7 @@ namespace Legion {
                                                SelectCopySrcOutput&   output)
     //--------------------------------------------------------------------------
     {
-      report_unimplemented(__func__);
+      report_unimplemented(__func__, __LINE__);
     }
 
     //--------------------------------------------------------------------------
@@ -266,7 +267,7 @@ namespace Legion {
                                         CreateCopyTemporaryOutput& output)
     //--------------------------------------------------------------------------
     {
-      report_unimplemented(__func__); 
+      report_unimplemented(__func__, __LINE__); 
     }
 
     //--------------------------------------------------------------------------
@@ -275,7 +276,7 @@ namespace Legion {
                                      SpeculativeOutput& output)
     //--------------------------------------------------------------------------
     {
-      report_unimplemented(__func__);
+      report_unimplemented(__func__, __LINE__);
     }
 
     //--------------------------------------------------------------------------
@@ -284,7 +285,7 @@ namespace Legion {
                                       const CopyProfilingInfo& input)
     //--------------------------------------------------------------------------
     {
-      report_unimplemented(__func__);
+      report_unimplemented(__func__, __LINE__);
     }
     
     //--------------------------------------------------------------------------
@@ -295,7 +296,7 @@ namespace Legion {
                                        SelectShardingFunctorOutput& output)
     //--------------------------------------------------------------------------
     {
-      report_unimplemented(__func__);
+      report_unimplemented(__func__, __LINE__);
     }
     
     //--------------------------------------------------------------------------
@@ -305,7 +306,7 @@ namespace Legion {
                                      MapCloseOutput&     output)
     //--------------------------------------------------------------------------
     {
-      report_unimplemented(__func__); 
+      report_unimplemented(__func__, __LINE__); 
     }
 
     //--------------------------------------------------------------------------
@@ -315,7 +316,7 @@ namespace Legion {
                                                 SelectCloseSrcOutput& output)
     //--------------------------------------------------------------------------
     {
-      report_unimplemented(__func__);
+      report_unimplemented(__func__, __LINE__);
     }
 
     //--------------------------------------------------------------------------
@@ -326,7 +327,7 @@ namespace Legion {
                                         CreateCloseTemporaryOutput& output)
     //--------------------------------------------------------------------------
     {
-      report_unimplemented(__func__); 
+      report_unimplemented(__func__, __LINE__); 
     }
 
     //--------------------------------------------------------------------------
@@ -335,7 +336,7 @@ namespace Legion {
                                       const CloseProfilingInfo& input)
     //--------------------------------------------------------------------------
     {
-      report_unimplemented(__func__);
+      report_unimplemented(__func__, __LINE__);
     }
 
     //--------------------------------------------------------------------------
@@ -346,7 +347,7 @@ namespace Legion {
                                        SelectShardingFunctorOutput& output)
     //--------------------------------------------------------------------------
     {
-      report_unimplemented(__func__);
+      report_unimplemented(__func__, __LINE__);
     }
 
     //--------------------------------------------------------------------------
@@ -356,7 +357,7 @@ namespace Legion {
                                        MapAcquireOutput&     output)
     //--------------------------------------------------------------------------
     {
-      report_unimplemented(__func__);
+      report_unimplemented(__func__, __LINE__);
     }
 
     //--------------------------------------------------------------------------
@@ -365,7 +366,7 @@ namespace Legion {
                                      SpeculativeOutput&    output)
     //--------------------------------------------------------------------------
     {
-      report_unimplemented(__func__);
+      report_unimplemented(__func__, __LINE__);
     }
 
     //--------------------------------------------------------------------------
@@ -374,7 +375,7 @@ namespace Legion {
                                       const AcquireProfilingInfo& input)
     //--------------------------------------------------------------------------
     {
-      report_unimplemented(__func__);
+      report_unimplemented(__func__, __LINE__);
     }
 
     //--------------------------------------------------------------------------
@@ -385,7 +386,7 @@ namespace Legion {
                                        SelectShardingFunctorOutput& output)
     //--------------------------------------------------------------------------
     {
-      report_unimplemented(__func__);
+      report_unimplemented(__func__, __LINE__);
     }
 
     //--------------------------------------------------------------------------
@@ -395,7 +396,7 @@ namespace Legion {
                                        MapReleaseOutput&     output)
     //--------------------------------------------------------------------------
     {
-      report_unimplemented(__func__);
+      report_unimplemented(__func__, __LINE__);
     }
 
     //--------------------------------------------------------------------------
@@ -405,7 +406,7 @@ namespace Legion {
                                               SelectReleaseSrcOutput&  output)
     //--------------------------------------------------------------------------
     {
-      report_unimplemented(__func__);
+      report_unimplemented(__func__, __LINE__);
     }
 
     //--------------------------------------------------------------------------
@@ -414,7 +415,7 @@ namespace Legion {
                                      SpeculativeOutput&    output)
     //--------------------------------------------------------------------------
     {
-      report_unimplemented(__func__);
+      report_unimplemented(__func__, __LINE__);
     }
 
     //--------------------------------------------------------------------------
@@ -425,7 +426,7 @@ namespace Legion {
                                          CreateReleaseTemporaryOutput& output)
     //--------------------------------------------------------------------------
     {
-      report_unimplemented(__func__);
+      report_unimplemented(__func__, __LINE__);
     }
 
     //--------------------------------------------------------------------------
@@ -434,7 +435,7 @@ namespace Legion {
                                       const ReleaseProfilingInfo& input)
     //--------------------------------------------------------------------------
     {
-      report_unimplemented(__func__);
+      report_unimplemented(__func__, __LINE__);
     }
 
     //--------------------------------------------------------------------------
@@ -445,7 +446,7 @@ namespace Legion {
                                        SelectShardingFunctorOutput& output)
     //--------------------------------------------------------------------------
     {
-      report_unimplemented(__func__);
+      report_unimplemented(__func__, __LINE__);
     }
 
     //--------------------------------------------------------------------------
@@ -455,7 +456,7 @@ namespace Legion {
                               SelectPartitionProjectionOutput&    output)
     //--------------------------------------------------------------------------
     {
-      report_unimplemented(__func__);
+      report_unimplemented(__func__, __LINE__);
     }
 
     //--------------------------------------------------------------------------
@@ -465,7 +466,7 @@ namespace Legion {
                                      MapPartitionOutput&  output)
     //--------------------------------------------------------------------------
     {
-      report_unimplemented(__func__);
+      report_unimplemented(__func__, __LINE__);
     }
 
     //--------------------------------------------------------------------------
@@ -476,7 +477,7 @@ namespace Legion {
                                            SelectPartitionSrcOutput& output)
     //--------------------------------------------------------------------------
     {
-      report_unimplemented(__func__);
+      report_unimplemented(__func__, __LINE__);
     }
 
     //--------------------------------------------------------------------------
@@ -487,7 +488,7 @@ namespace Legion {
                                   CreatePartitionTemporaryOutput& output)
     //--------------------------------------------------------------------------
     {
-      report_unimplemented(__func__);
+      report_unimplemented(__func__, __LINE__);
     }
 
     //--------------------------------------------------------------------------
@@ -496,7 +497,7 @@ namespace Legion {
                                     const PartitionProfilingInfo&    input)
     //--------------------------------------------------------------------------
     {
-      report_unimplemented(__func__);
+      report_unimplemented(__func__, __LINE__);
     }
 
     //--------------------------------------------------------------------------
@@ -507,7 +508,7 @@ namespace Legion {
                                        SelectShardingFunctorOutput& output)
     //--------------------------------------------------------------------------
     {
-      report_unimplemented(__func__);
+      report_unimplemented(__func__, __LINE__);
     }
 
     //--------------------------------------------------------------------------
@@ -518,7 +519,7 @@ namespace Legion {
                                        SelectShardingFunctorOutput& output)
     //--------------------------------------------------------------------------
     {
-      report_unimplemented(__func__);
+      report_unimplemented(__func__, __LINE__);
     }
 
     //--------------------------------------------------------------------------
@@ -527,7 +528,7 @@ namespace Legion {
                                              ContextConfigOutput&  output)
     //--------------------------------------------------------------------------
     {
-      report_unimplemented(__func__);
+      report_unimplemented(__func__, __LINE__);
     }
 
     //--------------------------------------------------------------------------
@@ -537,7 +538,7 @@ namespace Legion {
                                                 SelectTunableOutput&  output)
     //--------------------------------------------------------------------------
     {
-      report_unimplemented(__func__);
+      report_unimplemented(__func__, __LINE__);
     }
 
     //--------------------------------------------------------------------------
@@ -548,7 +549,7 @@ namespace Legion {
                                        MustEpochShardingFunctorOutput& output)
     //--------------------------------------------------------------------------
     {
-      report_unimplemented(__func__);
+      report_unimplemented(__func__, __LINE__);
     }
 
     //--------------------------------------------------------------------------
@@ -557,7 +558,7 @@ namespace Legion {
                                           MapMustEpochOutput&     output)
     //--------------------------------------------------------------------------
     {
-      report_unimplemented(__func__); 
+      report_unimplemented(__func__, __LINE__); 
     }
 
     //--------------------------------------------------------------------------
@@ -566,7 +567,7 @@ namespace Legion {
                                               MapDataflowGraphOutput& output)
     //--------------------------------------------------------------------------
     {
-      report_unimplemented(__func__);
+      report_unimplemented(__func__, __LINE__);
     }
 
     //--------------------------------------------------------------------------
@@ -576,7 +577,7 @@ namespace Legion {
                                              MemoizeOutput& output)
     //--------------------------------------------------------------------------
     {
-      report_unimplemented(__func__);
+      report_unimplemented(__func__, __LINE__);
     }
 
     //--------------------------------------------------------------------------
@@ -585,7 +586,7 @@ namespace Legion {
                                                SelectMappingOutput&   output)
     //--------------------------------------------------------------------------
     {
-      report_unimplemented(__func__); 
+      report_unimplemented(__func__, __LINE__); 
     }
 
     //--------------------------------------------------------------------------
@@ -594,7 +595,7 @@ namespace Legion {
                                                 SelectStealingOutput& output)
     //--------------------------------------------------------------------------
     {
-      report_unimplemented(__func__);
+      report_unimplemented(__func__, __LINE__);
     }
 
     //--------------------------------------------------------------------------
@@ -603,7 +604,7 @@ namespace Legion {
                                                 StealRequestOutput&   output)
     //--------------------------------------------------------------------------
     {
-      report_unimplemented(__func__);
+      report_unimplemented(__func__, __LINE__);
     }
 
     //--------------------------------------------------------------------------
@@ -611,7 +612,7 @@ namespace Legion {
                                     const MapperMessage&          message)
     //--------------------------------------------------------------------------
     {
-      report_unimplemented(__func__); 
+      report_unimplemented(__func__, __LINE__); 
     }
 
     //--------------------------------------------------------------------------
@@ -619,7 +620,7 @@ namespace Legion {
                                         const MapperTaskResult&       result)
     //--------------------------------------------------------------------------
     {
-      report_unimplemented(__func__);
+      report_unimplemented(__func__, __LINE__);
     }
 
   }; // namespace Mapping 

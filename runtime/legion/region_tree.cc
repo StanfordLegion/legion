@@ -2042,7 +2042,8 @@ namespace Legion {
           const FieldMask &inst_mask = targets[idx].get_valid_fields();
           MaterializedView *mat_view = 
             analysis->target_views[idx]->as_materialized_view();
-          mat_view->find_atomic_reservations(inst_mask, analysis->op,exclusive);
+          mat_view->find_atomic_reservations(inst_mask, analysis->op,
+                                             analysis->index, exclusive);
         }
       }
       // Perform any output copies (e.g. for restriction) that need to be done

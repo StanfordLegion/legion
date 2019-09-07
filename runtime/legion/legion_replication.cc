@@ -4877,11 +4877,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplDetachOp::select_sources(const InstanceRef &target,
+    void ReplDetachOp::select_sources(const unsigned index,
+                                      const InstanceRef &target,
                                       const InstanceSet &sources,
                                       std::vector<unsigned> &ranking)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(index == 0);
+#endif
       // Pick any instances other than external ones
       std::vector<unsigned> remote_ranking;
       for (unsigned idx = 0; idx < sources.size(); idx++)

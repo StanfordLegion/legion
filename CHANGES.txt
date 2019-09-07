@@ -1,7 +1,7 @@
 This file lists the major changes as they appear in the stable branch.  No
 attempt is made to keep this list accurate for the master branch.
 
-Version ??.??.? (TBD)
+Version 19.09.0 (September ??, 2019)
   * Regent
     - __demand(__index_launch) has been added as an alternative to
         __demand(__parallel) on for loops that avoids confusion with the
@@ -14,6 +14,17 @@ Version ??.??.? (TBD)
         users migrate codes away from this syntax as it will become a hard
         error in a future release. For details, see:
         https://github.com/StanfordLegion/legion/issues/501
+  * Realm
+    - assorted bug, performance, and memory leak fixes
+    - fills to attached HDF5 instances are orders of magnitude faster
+    - support for reusing HDF5 file handles with `-hdf5:openfiles` option
+    - control which rank opens an HDF5 file with a `rank=nnn:` filename prefix
+  * Build System
+    - Makefile-based flow attempts to detect CUDA location and GASNet conduit
+        if they are not specified
+    - Makefile-based flow defaults to building CUDA fat binaries, but can still
+        be overridden with the `GPU_ARCH` setting, which now accepts SM arch
+	numbers (e.g. "70") as well as names (e.g. "volta")
 
 Version 19.06.0 (June 27, 2019)
   * Legion

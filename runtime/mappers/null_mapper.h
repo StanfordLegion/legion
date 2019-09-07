@@ -41,7 +41,7 @@ namespace Legion {
     public:
       NullMapper& operator=(const NullMapper &rhs);
     private:
-      void report_unimplemented(const char *func_name) const;
+      void report_unimplemented(const char *func_name, unsigned line) const;
     public:
       virtual const char* get_mapper_name(void) const;
       virtual MapperSyncModel get_mapper_sync_model(void) const;

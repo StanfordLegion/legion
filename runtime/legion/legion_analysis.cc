@@ -3735,7 +3735,8 @@ namespace Legion {
                     sources[src_idx++] = InstanceRef((*it)->get_manager(),
                                                      vit->set_mask);
                   std::vector<unsigned> ranking;
-                  op->select_sources(dst, sources, ranking);
+                  // Always use the source index for selecting sources
+                  op->select_sources(src_index, dst, sources, ranking);
                   // We know that which ever one was chosen first is
                   // the one that satisfies all our fields since all
                   // these instances are valid for all fields

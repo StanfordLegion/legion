@@ -3565,7 +3565,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void MaterializedView::find_atomic_reservations(const FieldMask &mask,
-                                                    Operation *op, bool excl)
+                                 Operation *op, const unsigned index, bool excl)
     //--------------------------------------------------------------------------
     {
       // Compute the field set
@@ -3578,7 +3578,7 @@ namespace Legion {
         std::vector<Reservation> reservations(atomic_fields.size());
         find_field_reservations(atomic_fields, reservations);
         for (unsigned idx = 0; idx < reservations.size(); idx++)
-          op->update_atomic_locks(reservations[idx], excl);
+          op->update_atomic_locks(index, reservations[idx], excl);
       }
       else
       {
@@ -3594,7 +3594,7 @@ namespace Legion {
             if (finder == atomic_reservations.end())
               needed_fields.push_back(*it);
             else
-              op->update_atomic_locks(finder->second, excl);
+              op->update_atomic_locks(index, finder->second, excl);
           }
         }
         if (!needed_fields.empty())
@@ -3621,7 +3621,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
             assert(finder != atomic_reservations.end());
 #endif
-            op->update_atomic_locks(finder->second, excl);
+            op->update_atomic_locks(index, finder->second, excl);
           }
         }
       }

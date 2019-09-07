@@ -922,6 +922,9 @@ namespace Legion {
         PhysicalInstance                              target;
         std::vector<PhysicalInstance>                 source_instances;
         bool                                          is_src;
+        bool                                          is_dst;
+        bool                                          is_src_indirect;
+        bool                                          is_dst_indirect;
         unsigned                                      region_req_index;
       };
       struct SelectCopySrcOutput {

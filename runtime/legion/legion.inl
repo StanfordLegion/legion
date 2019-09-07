@@ -6435,6 +6435,7 @@ namespace Legion {
     inline int IndexSpace::get_dim(void) const
     //--------------------------------------------------------------------------
     {
+      if (type_tag == 0) return 0;
       return Internal::NT_TemplateHelper::get_dim(type_tag);
     }
 
@@ -6558,6 +6559,7 @@ namespace Legion {
     inline int IndexPartition::get_dim(void) const
     //--------------------------------------------------------------------------
     {
+      if (type_tag == 0) return 0;
       return Internal::NT_TemplateHelper::get_dim(type_tag);
     }
 
