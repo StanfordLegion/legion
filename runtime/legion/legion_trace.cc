@@ -1884,31 +1884,6 @@ namespace Legion {
       current_template = templates[index]; 
     }
 
-#if 0
-    //--------------------------------------------------------------------------
-    int PhysicalTrace::check_template_preconditions(ReplTraceReplayOp *op)
-    //--------------------------------------------------------------------------
-    {
-      current_template = NULL;
-      for (int index = templates.size()-1; index >= 0; index--)
-      {
-        PhysicalTemplate *tpl = templates[index];
-        if (tpl->check_preconditions(op))
-        {
-#ifdef DEBUG_LEGION
-          assert(tpl->is_replayable());
-#endif
-          // Reset the nonreplayable count when a replayable template satisfies
-          // the precondition
-          nonreplayable_count = 0;
-          current_template = tpl;
-          return index;
-        }
-      }
-      return -1;
-    }
-#endif
-
     //--------------------------------------------------------------------------
     PhysicalTemplate* PhysicalTrace::start_new_template(void)
     //--------------------------------------------------------------------------
