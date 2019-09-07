@@ -56,8 +56,8 @@ namespace Legion {
                                           unsigned line) const
     //--------------------------------------------------------------------------
     {
-      log_null.error("Unimplemented mapper method \"%s\" in mapper %s ", 
-         "on line %s of %s", func_name, get_mapper_name(), line, __FILE__);
+      log_null.error("Unimplemented mapper method \"%s\" in mapper %s "
+         "on line %d of %s", func_name, get_mapper_name(), line, __FILE__);
       assert(false);
     }
 
