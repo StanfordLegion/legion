@@ -276,10 +276,12 @@ namespace Legion {
       virtual void resolve_true(bool speculated, bool launched);
       virtual void resolve_false(bool speculated, bool launched) = 0;
     public:
-      virtual void select_sources(const InstanceRef &target,
+      virtual void select_sources(const unsigned index,
+                                  const InstanceRef &target,
                                   const InstanceSet &sources,
                                   std::vector<unsigned> &ranking);
-      virtual void update_atomic_locks(Reservation lock, bool exclusive);
+      virtual void update_atomic_locks(const unsigned index,
+                                       Reservation lock, bool exclusive);
       virtual unsigned find_parent_index(unsigned idx);
       virtual VersionInfo& get_version_info(unsigned idx);
       virtual const VersionInfo& get_version_info(unsigned idx) const;
@@ -384,11 +386,6 @@ namespace Legion {
       bool children_commit; 
     protected:
       MapperManager *mapper;
-    private:
-      unsigned current_mapping_index;
-    public:
-      inline void set_current_mapping_index(unsigned index) 
-        { current_mapping_index = index; }
     public:
       // Index for this must epoch op
       unsigned must_epoch_index;
@@ -422,7 +419,8 @@ namespace Legion {
     public:
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
-      virtual void select_sources(const InstanceRef &target,
+      virtual void select_sources(const unsigned index,
+                                  const InstanceRef &target,
                                   const InstanceSet &sources,
                                   std::vector<unsigned> &ranking);
       virtual void pack_remote_operation(Serializer &rez,

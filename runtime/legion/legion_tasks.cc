@@ -1087,27 +1087,31 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TaskOp::select_sources(const InstanceRef &target,
+    void TaskOp::select_sources(const unsigned index,
+                                const InstanceRef &target,
                                 const InstanceSet &sources,
                                 std::vector<unsigned> &ranking)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(index < regions.size());
+#endif
       Mapper::SelectTaskSrcInput input;
       Mapper::SelectTaskSrcOutput output;
       prepare_for_mapping(target, input.target);
       prepare_for_mapping(sources, input.source_instances);
-      input.region_req_index = current_mapping_index;
+      input.region_req_index = index;
       if (mapper == NULL)
         mapper = runtime->find_mapper(current_proc, map_id);
       mapper->invoke_select_task_sources(this, &input, &output);
     }
 
     //--------------------------------------------------------------------------
-    void TaskOp::update_atomic_locks(Reservation lock, bool exclusive)
+    void TaskOp::update_atomic_locks(const unsigned index,
+                                     Reservation lock, bool exclusive)
     //--------------------------------------------------------------------------
     {
-      // Only one region should be in the process of being analyzed
-      // at a time so there is no need to hold the operation lock
+      AutoLock o_lock(op_lock);
       std::map<Reservation,bool>::iterator finder = atomic_locks.find(lock);
       if (finder != atomic_locks.end())
       {
@@ -1894,9 +1898,6 @@ namespace Legion {
                             parent_ctx->get_unique_id())
           }
         }
-        // Set the current mapping index before doing anything that
-        // could result in the generation of a copy
-        set_current_mapping_index(*it);
         // TODO: Implement physical tracing for premapped regions
         if (is_memoizing())
           assert(false);
@@ -2200,7 +2201,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RemoteTaskOp::select_sources(const InstanceRef &target,
+    void RemoteTaskOp::select_sources(const unsigned index,
+                                      const InstanceRef &target,
                                       const InstanceSet &sources,
                                       std::vector<unsigned> &ranking)
     //--------------------------------------------------------------------------
@@ -2208,13 +2210,14 @@ namespace Legion {
       if (source == runtime->address_space)
       {
         // If we're on the owner node we can just do this
-        remote_ptr->select_sources(target, sources, ranking);
+        remote_ptr->select_sources(index, target, sources, ranking);
         return;
       }
       Mapper::SelectTaskSrcInput input;
       Mapper::SelectTaskSrcOutput output;
       prepare_for_mapping(sources, input.source_instances); 
       prepare_for_mapping(target, input.target);
+      input.region_req_index = index;
       if (mapper == NULL)
         mapper = runtime->find_mapper(map_id);
       mapper->invoke_select_task_sources(this, &input, &output);
@@ -3511,9 +3514,6 @@ namespace Legion {
             if (early_mapped_regions.empty() && 
                 !no_access_regions[0] && !virtual_mapped[0])
             {
-              // Set the current mapping index before doing anything
-              // that sould result in a copy
-              set_current_mapping_index(0);
               const bool record_valid = (untracked_valid_regions.find(0) == 
                                          untracked_valid_regions.end());
               const ApEvent effects = 
@@ -3556,9 +3556,6 @@ namespace Legion {
               if (virtual_mapped[idx])
                 continue;
               performed_regions.push_back(idx);
-              // Set the current mapping index before doing anything
-              // that sould result in a copy
-              set_current_mapping_index(idx);
               const bool record_valid = (untracked_valid_regions.find(idx) ==
                                          untracked_valid_regions.end());
               // apply the results of the mapping to the tree

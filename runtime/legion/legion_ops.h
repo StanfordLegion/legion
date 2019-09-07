@@ -364,7 +364,8 @@ namespace Legion {
       virtual bool is_predicated_op(void) const { return false; }
     public: // virtual methods for mapping
       // Pick the sources for a copy operations
-      virtual void select_sources(const InstanceRef &target,
+      virtual void select_sources(const unsigned index,
+                                  const InstanceRef &target,
                                   const InstanceSet &sources,
                                   std::vector<unsigned> &ranking);
       virtual void report_uninitialized_usage(const unsigned index,
@@ -376,7 +377,8 @@ namespace Legion {
       virtual std::map<PhysicalManager*,std::pair<unsigned,bool> >*
                                        get_acquired_instances_ref(void);
       // Update the set of atomic locks for this operation
-      virtual void update_atomic_locks(Reservation lock, bool exclusive);
+      virtual void update_atomic_locks(const unsigned index, 
+                                       Reservation lock, bool exclusive);
       // Get the restrict precondition for this operation
       static ApEvent merge_sync_preconditions(const TraceInfo &info,
                                 const std::vector<Grant> &grants,
@@ -964,12 +966,14 @@ namespace Legion {
       virtual void deferred_execute(void);
       virtual void trigger_commit(void);
       virtual unsigned find_parent_index(unsigned idx);
-      virtual void select_sources(const InstanceRef &target,
+      virtual void select_sources(const unsigned index,
+                                  const InstanceRef &target,
                                   const InstanceSet &sources,
                                   std::vector<unsigned> &ranking);
       virtual std::map<PhysicalManager*,std::pair<unsigned,bool> >*
                    get_acquired_instances_ref(void);
-      virtual void update_atomic_locks(Reservation lock, bool exclusive);
+      virtual void update_atomic_locks(const unsigned index,
+                                       Reservation lock, bool exclusive);
       virtual void record_reference_mutation_effect(RtEvent event);
     public:
       virtual UniqueID get_unique_id(void) const;
@@ -1113,12 +1117,14 @@ namespace Legion {
       virtual void resolve_false(bool speculated, bool launched);
     public:
       virtual unsigned find_parent_index(unsigned idx);
-      virtual void select_sources(const InstanceRef &target,
+      virtual void select_sources(const unsigned index,
+                                  const InstanceRef &target,
                                   const InstanceSet &sources,
                                   std::vector<unsigned> &ranking);
       virtual std::map<PhysicalManager*,std::pair<unsigned,bool> >*
                    get_acquired_instances_ref(void);
-      virtual void update_atomic_locks(Reservation lock, bool exclusive);
+      virtual void update_atomic_locks(const unsigned index,
+                                       Reservation lock, bool exclusive);
       virtual void record_reference_mutation_effect(RtEvent event);
     public:
       virtual UniqueID get_unique_id(void) const;
@@ -1159,8 +1165,6 @@ namespace Legion {
       int perform_conversion(unsigned idx, const RegionRequirement &req,
                              std::vector<MappingInstance> &output,
                              InstanceSet &targets, bool is_reduce = false);
-      inline void set_mapping_state(unsigned idx) 
-        { current_index = idx; }
       virtual void add_copy_profiling_request(
                                       Realm::ProfilingRequestSet &reqeusts);
       virtual void handle_profiling_response(
@@ -1184,7 +1188,6 @@ namespace Legion {
       LegionVector<VersionInfo>::aligned    scatter_versions;
     protected: // for support with mapping
       MapperManager*              mapper;
-      unsigned                    current_index;
     protected:
       std::map<PhysicalManager*,std::pair<unsigned,bool> > acquired_instances;
       std::vector<std::map<Reservation,bool> > atomic_locks;
@@ -1609,7 +1612,8 @@ namespace Legion {
       virtual void trigger_mapping(void);
       virtual void trigger_commit(void);
       virtual unsigned find_parent_index(unsigned idx);
-      virtual void select_sources(const InstanceRef &target,
+      virtual void select_sources(const unsigned index,
+                                  const InstanceRef &target,
                                   const InstanceSet &sources,
                                   std::vector<unsigned> &ranking);
       virtual std::map<PhysicalManager*,std::pair<unsigned,bool> >*
@@ -1822,7 +1826,8 @@ namespace Legion {
     public:
       virtual void trigger_commit(void);
       virtual unsigned find_parent_index(unsigned idx);
-      virtual void select_sources(const InstanceRef &target,
+      virtual void select_sources(const unsigned index,
+                                  const InstanceRef &target,
                                   const InstanceSet &sources,
                                   std::vector<unsigned> &ranking);
       virtual std::map<PhysicalManager*,std::pair<unsigned,bool> >*
@@ -2724,7 +2729,8 @@ namespace Legion {
       virtual size_t get_region_count(void) const;
       virtual void trigger_commit(void);
     public:
-      virtual void select_sources(const InstanceRef &target,
+      virtual void select_sources(const unsigned index,
+                                  const InstanceRef &target,
                                   const InstanceSet &sources,
                                   std::vector<unsigned> &ranking);
       virtual std::map<PhysicalManager*,std::pair<unsigned,bool> >*
@@ -3072,7 +3078,8 @@ namespace Legion {
       virtual unsigned find_parent_index(unsigned idx);
       virtual void trigger_complete(void);
       virtual void trigger_commit(void);
-      virtual void select_sources(const InstanceRef &target,
+      virtual void select_sources(const unsigned index,
+                                  const InstanceRef &target,
                                   const InstanceSet &sources,
                                   std::vector<unsigned> &ranking);
       virtual void add_copy_profiling_request(
@@ -3163,7 +3170,8 @@ namespace Legion {
       virtual std::map<PhysicalManager*,std::pair<unsigned,bool> >*
                                        get_acquired_instances_ref(void);
       // This should be the only mapper call that we need to handle
-      virtual void select_sources(const InstanceRef &target,
+      virtual void select_sources(const unsigned index,
+                                  const InstanceRef &target,
                                   const InstanceSet &sources,
                                   std::vector<unsigned> &ranking) = 0;
 
@@ -3223,7 +3231,8 @@ namespace Legion {
     public:
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
-      virtual void select_sources(const InstanceRef &target,
+      virtual void select_sources(const unsigned index,
+                                  const InstanceRef &target,
                                   const InstanceSet &sources,
                                   std::vector<unsigned> &ranking); 
       virtual void pack_remote_operation(Serializer &rez,
@@ -3251,7 +3260,8 @@ namespace Legion {
     public:
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
-      virtual void select_sources(const InstanceRef &target,
+      virtual void select_sources(const unsigned index,
+                                  const InstanceRef &target,
                                   const InstanceSet &sources,
                                   std::vector<unsigned> &ranking);
       virtual void pack_remote_operation(Serializer &rez,
@@ -3279,7 +3289,8 @@ namespace Legion {
     public:
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
-      virtual void select_sources(const InstanceRef &target,
+      virtual void select_sources(const unsigned index,
+                                  const InstanceRef &target,
                                   const InstanceSet &sources,
                                   std::vector<unsigned> &ranking);
       virtual void pack_remote_operation(Serializer &rez,
@@ -3307,7 +3318,8 @@ namespace Legion {
     public:
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
-      virtual void select_sources(const InstanceRef &target,
+      virtual void select_sources(const unsigned index,
+                                  const InstanceRef &target,
                                   const InstanceSet &sources,
                                   std::vector<unsigned> &ranking);
       virtual void pack_remote_operation(Serializer &rez,
@@ -3335,7 +3347,8 @@ namespace Legion {
     public:
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
-      virtual void select_sources(const InstanceRef &target,
+      virtual void select_sources(const unsigned index,
+                                  const InstanceRef &target,
                                   const InstanceSet &sources,
                                   std::vector<unsigned> &ranking);
       virtual void pack_remote_operation(Serializer &rez,
@@ -3363,7 +3376,8 @@ namespace Legion {
     public:
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
-      virtual void select_sources(const InstanceRef &target,
+      virtual void select_sources(const unsigned index,
+                                  const InstanceRef &target,
                                   const InstanceSet &sources,
                                   std::vector<unsigned> &ranking);
       virtual void pack_remote_operation(Serializer &rez,
@@ -3392,7 +3406,8 @@ namespace Legion {
     public:
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
-      virtual void select_sources(const InstanceRef &target,
+      virtual void select_sources(const unsigned index,
+                                  const InstanceRef &target,
                                   const InstanceSet &sources,
                                   std::vector<unsigned> &ranking);
       virtual void pack_remote_operation(Serializer &rez,
@@ -3422,7 +3437,8 @@ namespace Legion {
     public:
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
-      virtual void select_sources(const InstanceRef &target,
+      virtual void select_sources(const unsigned index,
+                                  const InstanceRef &target,
                                   const InstanceSet &sources,
                                   std::vector<unsigned> &ranking);
       virtual void pack_remote_operation(Serializer &rez,
@@ -3450,7 +3466,8 @@ namespace Legion {
     public:
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
-      virtual void select_sources(const InstanceRef &target,
+      virtual void select_sources(const unsigned index,
+                                  const InstanceRef &target,
                                   const InstanceSet &sources,
                                   std::vector<unsigned> &ranking);
       virtual void pack_remote_operation(Serializer &rez,
@@ -3478,7 +3495,8 @@ namespace Legion {
     public:
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
-      virtual void select_sources(const InstanceRef &target,
+      virtual void select_sources(const unsigned index,
+                                  const InstanceRef &target,
                                   const InstanceSet &sources,
                                   std::vector<unsigned> &ranking);
       virtual void pack_remote_operation(Serializer &rez,

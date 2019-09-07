@@ -473,7 +473,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Operation::select_sources(const InstanceRef &target,
+    void Operation::select_sources(const unsigned index,
+                                   const InstanceRef &target,
                                    const InstanceSet &sources,
                                    std::vector<unsigned> &ranking)
     //--------------------------------------------------------------------------
@@ -539,7 +540,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Operation::update_atomic_locks(Reservation lock, bool exclusive)
+    void Operation::update_atomic_locks(const unsigned index,
+                                        Reservation lock, bool exclusive)
     //--------------------------------------------------------------------------
     {
       // Should only be called for inherited types
@@ -2887,11 +2889,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MapOp::select_sources(const InstanceRef &target,
+    void MapOp::select_sources(const unsigned index,
+                               const InstanceRef &target,
                                const InstanceSet &sources,
                                std::vector<unsigned> &ranking)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(index == 0);
+#endif
       Mapper::SelectInlineSrcInput input;
       Mapper::SelectInlineSrcOutput output;
       prepare_for_mapping(sources, input.source_instances); 
@@ -2914,9 +2920,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MapOp::update_atomic_locks(Reservation lock, bool exclusive)
+    void MapOp::update_atomic_locks(const unsigned index,
+                                    Reservation lock, bool exclusive)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(index == 0);
+#endif
+      AutoLock o_lock(op_lock);
       std::map<Reservation,bool>::iterator finder = atomic_locks.find(lock);
       if (finder != atomic_locks.end())
       {
@@ -4364,8 +4375,6 @@ namespace Legion {
         }
         else
         {
-          // Now do the registration
-          set_mapping_state(idx);
           // Don't track source views of copy across operations here,
           // as they will do later when the realm copies are recorded.
           PhysicalTraceInfo src_info(trace_info, idx, false/*update validity*/);
@@ -4397,7 +4406,6 @@ namespace Legion {
                                     output.dst_instances[idx], dst_targets);
         // Now do the registration
         const size_t dst_idx = src_requirements.size() + idx;
-        set_mapping_state(dst_idx);
         // Don't track target views of copy across operations here,
         // as they will do later when the realm copies are recorded.
         PhysicalTraceInfo dst_info(trace_info,dst_idx,false/*update_validity*/);
@@ -4436,7 +4444,6 @@ namespace Legion {
           // Now do the registration
           const size_t gather_idx = src_requirements.size() + 
             dst_requirements.size() + idx;
-          set_mapping_state(gather_idx);
           PhysicalTraceInfo gather_info(trace_info, gather_idx);
           const bool record_valid = (output.untracked_valid_ind_srcs.find(idx) 
                                     == output.untracked_valid_ind_srcs.end());
@@ -4475,7 +4482,6 @@ namespace Legion {
             dst_requirements.size() + src_indirect_requirements.size() + idx;
           const bool record_valid = (output.untracked_valid_ind_dsts.find(idx) 
                                     == output.untracked_valid_ind_dsts.end());
-          set_mapping_state(scatter_idx);
           PhysicalTraceInfo scatter_info(trace_info, scatter_idx);
           ApEvent effects_done = 
             runtime->forest->physical_perform_updates_and_registration(
@@ -4796,7 +4802,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void CopyOp::select_sources(const InstanceRef &target,
+    void CopyOp::select_sources(const unsigned index,
+                                const InstanceRef &target,
                                 const InstanceSet &sources,
                                 std::vector<unsigned> &ranking)
     //--------------------------------------------------------------------------
@@ -4805,11 +4812,42 @@ namespace Legion {
       Mapper::SelectCopySrcOutput output;
       prepare_for_mapping(sources, input.source_instances);
       prepare_for_mapping(target, input.target);
-      input.is_src = (current_index < src_requirements.size());
-      if (input.is_src)
-        input.region_req_index = current_index;
+      input.is_src = false;
+      input.is_dst = false;
+      input.is_src_indirect = false;
+      input.is_dst_indirect = false;
+      unsigned mod_index = index;
+      if (mod_index < src_requirements.size())
+      {
+        input.region_req_index = mod_index;
+        input.is_src = true;
+      }
       else
-        input.region_req_index = current_index - src_requirements.size();
+      {
+        mod_index -= src_requirements.size();
+        if (mod_index < dst_requirements.size())
+        {
+          input.region_req_index = mod_index;
+          input.is_dst = true;
+        }
+        else
+        {
+          mod_index -= dst_requirements.size();
+          if (mod_index < src_indirect_requirements.size())
+          {
+            input.region_req_index = mod_index;
+            input.is_src_indirect = true;
+          }
+          else
+          {
+            mod_index -= src_indirect_requirements.size();
+#ifdef DEBUG_LEGION
+            assert(mod_index < dst_indirect_requirements.size());
+#endif
+            input.is_dst_indirect = true;
+          }
+        }
+      }
       if (mapper == NULL)
       {
         Processor exec_proc = parent_ctx->get_executing_processor();
@@ -4829,15 +4867,22 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void CopyOp::update_atomic_locks(Reservation lock, bool exclusive)
+    void CopyOp::update_atomic_locks(const unsigned index,
+                                     Reservation lock, bool exclusive)
     //--------------------------------------------------------------------------
     {
-      // We should only be doing analysis on one region requirement
-      // at a time so we don't need to hold the operation lock when 
-      // updating this data structure
-      if (current_index >= atomic_locks.size())
-        atomic_locks.resize(current_index+1);
-      std::map<Reservation,bool> &local_locks = atomic_locks[current_index];
+      // Figure out which index this should actually be for
+      unsigned mod_index = index;
+      if (mod_index >= src_requirements.size())
+        mod_index -= src_requirements.size();
+      if (mod_index >= dst_requirements.size())
+        mod_index -= dst_requirements.size();
+      if (mod_index >= src_indirect_requirements.size())
+        mod_index -= src_indirect_requirements.size();
+      AutoLock o_lock(op_lock);
+      if (mod_index >= atomic_locks.size())
+        atomic_locks.resize(mod_index+1);
+      std::map<Reservation,bool> &local_locks = atomic_locks[mod_index];
       std::map<Reservation,bool>::iterator finder = local_locks.find(lock);
       if (finder != local_locks.end())
       {
@@ -8119,11 +8164,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PostCloseOp::select_sources(const InstanceRef &target,
+    void PostCloseOp::select_sources(const unsigned index,
+                                     const InstanceRef &target,
                                      const InstanceSet &sources,
                                      std::vector<unsigned> &ranking)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(index == 0);
+#endif
       Mapper::SelectCloseSrcInput input;
       Mapper::SelectCloseSrcOutput output;
       prepare_for_mapping(target, input.target);
@@ -9550,11 +9599,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReleaseOp::select_sources(const InstanceRef &target,
+    void ReleaseOp::select_sources(const unsigned index,
+                                   const InstanceRef &target,
                                    const InstanceSet &sources,
                                    std::vector<unsigned> &ranking)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(index == 0);
+#endif
       Mapper::SelectReleaseSrcInput input;
       Mapper::SelectReleaseSrcOutput output;
       prepare_for_mapping(target, input.target);
@@ -13195,11 +13248,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void DependentPartitionOp::select_sources(const InstanceRef &target,
+    void DependentPartitionOp::select_sources(const unsigned index,
+                                              const InstanceRef &target,
                                               const InstanceSet &sources,
                                               std::vector<unsigned> &ranking)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(index == 0);
+#endif
       Mapper::SelectPartitionSrcInput input;
       Mapper::SelectPartitionSrcOutput output;
       prepare_for_mapping(sources, input.source_instances);
@@ -15788,11 +15845,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void DetachOp::select_sources(const InstanceRef &target,
+    void DetachOp::select_sources(const unsigned index,
+                                  const InstanceRef &target,
                                   const InstanceSet &sources,
                                   std::vector<unsigned> &ranking)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(index == 0);
+#endif
       // TODO: invoke the mapper
     }
 
@@ -16420,7 +16481,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RemoteMapOp::select_sources(const InstanceRef &target,
+    void RemoteMapOp::select_sources(const unsigned index,
+                                     const InstanceRef &target,
                                      const InstanceSet &sources,
                                      std::vector<unsigned> &ranking)
     //--------------------------------------------------------------------------
@@ -16428,9 +16490,12 @@ namespace Legion {
       if (source == runtime->address_space)
       {
         // If we're on the owner node we can just do this
-        remote_ptr->select_sources(target, sources, ranking);
+        remote_ptr->select_sources(index, target, sources, ranking);
         return;
       }
+#ifdef DEBUG_LEGION
+      assert(index == 0);
+#endif
       Mapper::SelectInlineSrcInput input;
       Mapper::SelectInlineSrcOutput output;
       prepare_for_mapping(sources, input.source_instances); 
@@ -16537,7 +16602,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RemoteCopyOp::select_sources(const InstanceRef &target,
+    void RemoteCopyOp::select_sources(const unsigned index,
+                                      const InstanceRef &target,
                                       const InstanceSet &sources,
                                       std::vector<unsigned> &ranking)
     //--------------------------------------------------------------------------
@@ -16545,13 +16611,21 @@ namespace Legion {
       if (source == runtime->address_space)
       {
         // If we're on the owner node we can just do this
-        remote_ptr->select_sources(target, sources, ranking);
+        remote_ptr->select_sources(index, target, sources, ranking);
         return;
       }
       Mapper::SelectCopySrcInput input;
       Mapper::SelectCopySrcOutput output;
       prepare_for_mapping(sources, input.source_instances); 
       prepare_for_mapping(target, input.target);
+      input.is_src = (index < src_requirements.size());
+      if (input.is_src)
+        input.region_req_index = index;
+      else
+        input.region_req_index = index - src_requirements.size();
+#ifdef DEBUG_LEGION
+      assert(input.region_req_index < dst_requirements.size());
+#endif
       if (mapper == NULL)
         mapper = runtime->find_mapper(map_id);
       mapper->invoke_select_copy_sources(this, &input, &output);
@@ -16654,7 +16728,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RemoteCloseOp::select_sources(const InstanceRef &target,
+    void RemoteCloseOp::select_sources(const unsigned index,
+                                       const InstanceRef &target,
                                        const InstanceSet &sources,
                                        std::vector<unsigned> &ranking)
     //--------------------------------------------------------------------------
@@ -16662,9 +16737,12 @@ namespace Legion {
       if (source == runtime->address_space)
       {
         // If we're on the owner node we can just do this
-        remote_ptr->select_sources(target, sources, ranking);
+        remote_ptr->select_sources(index, target, sources, ranking);
         return;
       }
+#ifdef DEBUG_LEGION
+      assert(index == 0);
+#endif
       Mapper::SelectCloseSrcInput input;
       Mapper::SelectCloseSrcOutput output;
       prepare_for_mapping(sources, input.source_instances); 
@@ -16772,7 +16850,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RemoteAcquireOp::select_sources(const InstanceRef &target,
+    void RemoteAcquireOp::select_sources(const unsigned index,
+                                         const InstanceRef &target,
                                          const InstanceSet &sources,
                                          std::vector<unsigned> &ranking)
     //--------------------------------------------------------------------------
@@ -16878,7 +16957,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RemoteReleaseOp::select_sources(const InstanceRef &target,
+    void RemoteReleaseOp::select_sources(const unsigned index,
+                                         const InstanceRef &target,
                                          const InstanceSet &sources,
                                          std::vector<unsigned> &ranking)
     //--------------------------------------------------------------------------
@@ -16886,9 +16966,12 @@ namespace Legion {
       if (source == runtime->address_space)
       {
         // If we're on the owner node we can just do this
-        remote_ptr->select_sources(target, sources, ranking);
+        remote_ptr->select_sources(index, target, sources, ranking);
         return;
       }
+#ifdef DEBUG_LEGION
+      assert(index == 0);
+#endif
       Mapper::SelectReleaseSrcInput input;
       Mapper::SelectReleaseSrcOutput output;
       prepare_for_mapping(sources, input.source_instances); 
@@ -16995,7 +17078,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RemoteFillOp::select_sources(const InstanceRef &target,
+    void RemoteFillOp::select_sources(const unsigned index,
+                                      const InstanceRef &target,
                                       const InstanceSet &sources,
                                       std::vector<unsigned> &ranking)
     //--------------------------------------------------------------------------
@@ -17107,7 +17191,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RemotePartitionOp::select_sources(const InstanceRef &target,
+    void RemotePartitionOp::select_sources(const unsigned index,
+                                           const InstanceRef &target,
                                            const InstanceSet &sources,
                                            std::vector<unsigned> &ranking)
     //--------------------------------------------------------------------------
@@ -17115,9 +17200,12 @@ namespace Legion {
       if (source == runtime->address_space)
       {
         // If we're on the owner node we can just do this
-        remote_ptr->select_sources(target, sources, ranking);
+        remote_ptr->select_sources(index, target, sources, ranking);
         return;
       }
+#ifdef DEBUG_LEGION
+      assert(index == 0);
+#endif
       Mapper::SelectPartitionSrcInput input;
       Mapper::SelectPartitionSrcOutput output;
       prepare_for_mapping(sources, input.source_instances); 
@@ -17228,7 +17316,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RemoteAttachOp::select_sources(const InstanceRef &target,
+    void RemoteAttachOp::select_sources(const unsigned index,
+                                        const InstanceRef &target,
                                         const InstanceSet &sources,
                                         std::vector<unsigned> &ranking)
     //--------------------------------------------------------------------------
@@ -17331,7 +17420,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RemoteDetachOp::select_sources(const InstanceRef &target,
+    void RemoteDetachOp::select_sources(const unsigned index,
+                                        const InstanceRef &target,
                                         const InstanceSet &sources,
                                         std::vector<unsigned> &ranking)
     //--------------------------------------------------------------------------
@@ -17433,7 +17523,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RemoteDeletionOp::select_sources(const InstanceRef &target,
+    void RemoteDeletionOp::select_sources(const unsigned index, 
+                                          const InstanceRef &target,
                                           const InstanceSet &sources,
                                           std::vector<unsigned> &ranking)
     //--------------------------------------------------------------------------

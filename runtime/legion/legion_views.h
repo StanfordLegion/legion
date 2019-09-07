@@ -604,8 +604,8 @@ namespace Legion {
       // Must be called while holding the replication lock
       void update_remote_replication_state(std::set<RtEvent> &applied_events);
     public:
-      void find_atomic_reservations(const FieldMask &mask, 
-                                    Operation *op, bool exclusive);
+      void find_atomic_reservations(const FieldMask &mask, Operation *op, 
+                                    const unsigned index, bool exclusive);
     public:
       void find_field_reservations(const std::vector<FieldID> &needed_fields,
                                    std::vector<Reservation> &results);
