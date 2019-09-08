@@ -7933,8 +7933,11 @@ namespace Legion {
           const FieldMask overlap = it->second & clone_mask;
           if (!overlap)
             continue;
-          if (update_guards.insert(it->first, overlap))
-            it->first->record_guard_set(this);
+          // Only want to record this if it isn't in the process of
+          // being pruned out. The record_guard_set method will check
+          // for this return true if it is not being pruned out
+          if (it->first->record_guard_set(this))
+            update_guards.insert(it->first, overlap);
         }
       }
       // Return our space since we stored the data here
