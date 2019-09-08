@@ -1134,6 +1134,7 @@ namespace Legion {
     protected:
       RtBarrier mapping_barrier;
       RtBarrier execution_barrier;
+      RtBarrier completion_barrier;
       bool is_total_sharding;
       bool is_first_local_shard;
     };

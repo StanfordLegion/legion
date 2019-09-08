@@ -1819,6 +1819,7 @@ namespace Legion {
       activate_deletion();
       mapping_barrier = RtBarrier::NO_RT_BARRIER;
       execution_barrier = RtBarrier::NO_RT_BARRIER;
+      completion_barrier = RtBarrier::NO_RT_BARRIER;
       is_total_sharding = false;
       is_first_local_shard = false;
     }
@@ -2177,9 +2178,11 @@ namespace Legion {
           ApEvent::NO_AP_EVENT, ApEvent::NO_AP_EVENT);
 #endif
       if (!applied.empty())
-        complete_operation(Runtime::merge_events(applied));
+        Runtime::phase_barrier_arrive(completion_barrier, 1/*count*/,
+                                      Runtime::merge_events(applied));
       else
-        complete_operation();
+        Runtime::phase_barrier_arrive(completion_barrier, 1/*count*/);
+      complete_operation(completion_barrier);
     }
 
     //--------------------------------------------------------------------------
@@ -2194,6 +2197,8 @@ namespace Legion {
       mapping_barrier = deletion_barrier;
       ctx->advance_replicate_barrier(deletion_barrier, ctx->total_shards);
       execution_barrier = deletion_barrier;
+      ctx->advance_replicate_barrier(deletion_barrier, ctx->total_shards);
+      completion_barrier = deletion_barrier;
       ctx->advance_replicate_barrier(deletion_barrier, ctx->total_shards);
       is_total_sharding = is_total;
       is_first_local_shard = is_first;
