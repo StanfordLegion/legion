@@ -1449,6 +1449,7 @@ namespace Realm {
 
       // look at the dma channels available on the source node
       NodeID src_node = ID(src_mem).memory_owner_node();
+      NodeID dst_node = ID(dst_mem).memory_owner_node();
       const Node& n = get_runtime()->nodes[src_node];
       for(std::vector<DMAChannel *>::const_iterator it = n.dma_channels.begin();
 	  it != n.dma_channels.end();
@@ -1464,13 +1465,32 @@ namespace Realm {
 	}
       }
 
+      // if that didn't work, try the destination node (if different)
+      if((kind == XferDes::XFER_NONE) && (dst_node != src_node)) {
+	const Node& n = get_runtime()->nodes[dst_node];
+	for(std::vector<DMAChannel *>::const_iterator it = n.dma_channels.begin();
+	    it != n.dma_channels.end();
+	    ++it) {
+	  unsigned bw = 0;
+	  unsigned latency = 0;
+	  if((*it)->supports_path(src_mem, dst_mem,
+				  src_serdez_id, dst_serdez_id,
+				  redop_id,
+				  &bw, &latency)) {
+	    kind = (*it)->kind;
+	    break;
+	  }
+	}
+      }
+
       // check against old version
       // exceptions:
       //  1) old code didn't allow nodes other than 0 to
       //       directly access GLOBAL_MEM
       if((src_node == Network::my_node_id) &&
-	 !((Network::my_node_id != 0) && ((src_mem.kind() == Memory::GLOBAL_MEM) ||
-				 (dst_mem.kind() == Memory::GLOBAL_MEM)))) {
+	 !(((Network::my_node_id != 0) || (dst_node != 0)) &&
+	   ((src_mem.kind() == Memory::GLOBAL_MEM) ||
+	    (dst_mem.kind() == Memory::GLOBAL_MEM)))) {
 	XferDes::XferKind old_kind = old_get_xfer_des(src_mem, dst_mem,
 						      src_serdez_id, dst_serdez_id);
 	if(old_kind != kind) {
