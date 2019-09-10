@@ -2305,18 +2305,20 @@ function solver_context:synthesize_partitions(existing_disjoint_partitions,
       local all_region_ranges = hash_set.new()
       for field_path, summary in accesses_summary:items() do
         local all_field_ranges = hash_set.new()
-        local has_reduce = false
+        local has_uncentered_reduce = false
         for privilege, range_set in summary:items() do
           all_field_ranges:insert_all(range_set)
-          has_reduce = has_reduce or std.is_reduce(privilege)
+          if std.is_reduce(privilege) then
+            range_set:foreach(function(range)
+              local partition = self.constraints:get_partition(range)
+              has_uncentered_reduce = has_uncentered_reduce or not partition.disjoint
+            end)
+          end
         end
         local all_field_ranges_list = all_field_ranges:to_list()
         -- If the reduction is made with a single range constrained by some constraint,
         -- we still need a private-vs-shared partitioning.
-        if has_reduce and
-           (#all_field_ranges_list > 1 or
-            image_partitions[all_field_ranges_list[1]] ~= nil)
-        then
+        if has_uncentered_reduce then
           all_region_ranges:insert_all(all_field_ranges)
         end
       end

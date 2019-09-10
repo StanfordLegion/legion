@@ -66,6 +66,7 @@ function rewriter_context.new(accesses_to_region_params,
     loop_var                    = false,
     disjoint_loop_range         = true,
     colocation                  = options.colocation or false,
+    demoted_centers             = data.newmap(),
   }
   return setmetatable(cx, rewriter_context)
 end
@@ -127,6 +128,14 @@ function rewriter_context:get_incl_cache(index)
   --       Until we find a better way, we keep this scheme.
   return (self.incl_check_caches[index] and
           self.incl_check_caches[index][self.loop_range]) or false
+end
+
+function rewriter_context:add_demoted_center(symbol, region_symbol)
+  self.demoted_centers[symbol] = region_symbol
+end
+
+function rewriter_context:is_demoted_center(symbol)
+  return self.demoted_centers[symbol] or false
 end
 
 local rewrite_accesses = {}
@@ -491,18 +500,28 @@ local function split_region_access(cx, lhs, rhs, ref_type, reads, template)
   if std.is_rawref(index_type) then
     index_type = std.as_read(index_type)
   end
+  local centered = false
+  local region_param = false
   local centered =
-    std.is_bounded_type(index_type) and
-    #index_type.bounds_symbols == 1 and
-    index_type.bounds_symbols[1] == region_symbol
+    (std.is_bounded_type(index_type) and
+     #index_type.bounds_symbols == 1 and
+     index_type.bounds_symbols[1] == region_symbol) or
+     cx:is_demoted_center(index.value) == region_symbol
+  if centered then
+    region_param = cx.symbol_mapping[region_symbol]
+  end
+  if not centered then
+    centered =
+      cx:is_demoted_center(index.value) == region_symbol
+  end
   index = rewrite_accesses.expr(cx, index)
 
   if centered then
+    assert(region_symbol)
     local index_type = index.expr_type
     if std.is_rawref(index_type) then
       index_type = std.as_read(index_type)
     end
-    local region_param = index_type.bounds_symbols[1]
     local local_mapping = { [region_symbol] = region_param }
     if reads then
       rhs = rewrite_region_access(cx, local_mapping, rhs)
@@ -851,6 +870,14 @@ function rewrite_accesses.stat_var(cx, stat)
         end
       end
       return stats
+    elseif value:is(ast.typed.expr.Cast) and
+           std.is_bounded_type(std.as_read(value.arg.expr_type)) and
+           std.is_index_type(value.fn.value)
+    then
+      local bounded_type = std.as_read(value.arg.expr_type)
+      if #bounded_type.bounds_symbols == 1 then
+        cx:add_demoted_center(symbol, bounded_type.bounds_symbols[1])
+      end
     end
     value = rewrite_accesses.expr(cx, value)
   end
