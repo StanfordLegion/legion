@@ -1,7 +1,7 @@
 This file lists the major changes as they appear in the stable branch.  No
 attempt is made to keep this list accurate for the master branch.
 
-Version 19.09.0 (September ??, 2019)
+Version 19.09.0 (September 9, 2019)
   * Regent
     - __demand(__index_launch) has been added as an alternative to
         __demand(__parallel) on for loops that avoids confusion with the
@@ -16,7 +16,7 @@ Version 19.09.0 (September ??, 2019)
         https://github.com/StanfordLegion/legion/issues/501
   * Legion
     - Support for a built-in collection of reduction operators including
-      sum, product, max, and min over a variety of types for both CPUs and GPUs
+        sum, product, max, and min over a variety of types for CPUs and GPUs
   * Realm
     - assorted bug, performance, and memory leak fixes
     - fills to attached HDF5 instances are orders of magnitude faster

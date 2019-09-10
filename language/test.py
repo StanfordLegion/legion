@@ -363,7 +363,7 @@ def get_test_specs(legion_dir, use_run, use_spy, use_prof, use_hdf5, use_openmp,
         ]
 
     result = []
-    if not use_run and not use_spy and not use_prof and not use_hdf5:
+    if not use_run and not use_spy and not use_prof and not use_hdf5 and not use_cuda:
         result.extend(base)
         if not short:
             result.extend(pretty)

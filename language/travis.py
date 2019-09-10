@@ -48,7 +48,9 @@ def test(root_dir, install_only, debug, max_dim, short, spy, prof, gcov, hdf5, c
         if prof: extra_flags.append('--prof')
         if gcov: extra_flags.append('--run')
         if hdf5: extra_flags.append('--hdf5')
-        if cuda: extra_flags.extend(['--extra=-ll:gpu', '--extra=1'])
+        if cuda:
+            extra_flags.append('--cuda')
+            threads = ['-j', '1']  # do not oversubscribe GPU
         if openmp: extra_flags.append('--openmp')
         if python: extra_flags.append('--python')
         extra_flags.extend(['--extra=-fjobs', '--extra=%s' % jobs])

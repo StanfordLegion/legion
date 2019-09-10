@@ -6317,7 +6317,8 @@ namespace Legion {
           // We can only do this optimization safely if we're not 
           // recording a physical trace, otherwise the physical
           // trace needs to see this dependence
-          if ((current_trace == NULL) || !current_trace->is_recording())
+          Memoizable *memo = op->get_memoizable();
+          if ((memo == NULL) || !memo->is_recording())
             current_execution_fence_event = ApEvent::NO_AP_EVENT;
         }
         return current_execution_fence_event;
