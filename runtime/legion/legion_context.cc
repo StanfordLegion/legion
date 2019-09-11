@@ -1195,60 +1195,6 @@ namespace Legion {
                                                std::set<RtEvent> &preconditions)
     //--------------------------------------------------------------------------
     {
-      if (!created_regions.empty())
-      {
-        for (std::set<LogicalRegion>::const_iterator it = 
-              created_regions.begin(); it != created_regions.end(); it++)
-        {
-          REPORT_LEGION_WARNING(LEGION_WARNING_LEAKED_RESOURCE,
-              "Logical region (%x,%x,%x) was leaked out of task tree rooted "
-              "by task %s", it->index_space.id, it->field_space.id, it->tree_id,
-              get_task_name())
-          runtime->forest->destroy_logical_region(*it, runtime->address_space,
-                                                  preconditions);
-        }
-        created_regions.clear();
-      }
-      if (!created_fields.empty())
-      {
-        for (std::set<std::pair<FieldSpace,FieldID> >::const_iterator it =
-              created_fields.begin(); it != created_fields.end(); it++)
-        {
-          REPORT_LEGION_WARNING(LEGION_WARNING_LEAKED_RESOURCE,
-              "Field %d of field space %x was leaked out of task tree rooted "
-              "by task %s", it->second, it->first.id, get_task_name())
-          runtime->forest->free_field(it->first, it->second, preconditions);
-        }
-        created_fields.clear();
-      }
-      if (!created_field_spaces.empty())
-      {
-        for (std::set<FieldSpace>::const_iterator it = 
-              created_field_spaces.begin(); it != 
-              created_field_spaces.end(); it++)
-        {
-          REPORT_LEGION_WARNING(LEGION_WARNING_LEAKED_RESOURCE,
-              "Field space %x was leaked out of task tree rooted by task %s",
-              it->id, get_task_name())
-          runtime->forest->destroy_field_space(*it, runtime->address_space,
-                                               preconditions);
-        }
-        created_field_spaces.clear();
-      }
-      if (!created_index_spaces.empty())
-      {
-        for (std::set<IndexSpace>::const_iterator it = 
-              created_index_spaces.begin(); it !=
-              created_index_spaces.end(); it++)
-        {
-          REPORT_LEGION_WARNING(LEGION_WARNING_LEAKED_RESOURCE,
-              "Index space %x was leaked out of task tree rooted by task %s",
-              it->id, get_task_name());
-          runtime->forest->destroy_index_space(*it, runtime->address_space,
-                                               preconditions);
-        }
-        created_index_spaces.clear();
-      }
       if (!deleted_regions.empty())
       {
         for (std::vector<LogicalRegion>::const_iterator it = 
@@ -1306,6 +1252,63 @@ namespace Legion {
         deleted_index_partitions.clear();
       }
 #endif
+      // If we're not supposed to be reporting leaks then we're done
+      if (!runtime->report_leaks)
+        return;
+      if (!created_regions.empty())
+      {
+        for (std::set<LogicalRegion>::const_iterator it = 
+              created_regions.begin(); it != created_regions.end(); it++)
+        {
+          REPORT_LEGION_WARNING(LEGION_WARNING_LEAKED_RESOURCE,
+              "Logical region (%x,%x,%x) was leaked out of task tree rooted "
+              "by task %s", it->index_space.id, it->field_space.id, it->tree_id,
+              get_task_name())
+          runtime->forest->destroy_logical_region(*it, runtime->address_space,
+                                                  preconditions);
+        }
+        created_regions.clear();
+      }
+      if (!created_fields.empty())
+      {
+        for (std::set<std::pair<FieldSpace,FieldID> >::const_iterator it =
+              created_fields.begin(); it != created_fields.end(); it++)
+        {
+          REPORT_LEGION_WARNING(LEGION_WARNING_LEAKED_RESOURCE,
+              "Field %d of field space %x was leaked out of task tree rooted "
+              "by task %s", it->second, it->first.id, get_task_name())
+          runtime->forest->free_field(it->first, it->second, preconditions);
+        }
+        created_fields.clear();
+      }
+      if (!created_field_spaces.empty())
+      {
+        for (std::set<FieldSpace>::const_iterator it = 
+              created_field_spaces.begin(); it != 
+              created_field_spaces.end(); it++)
+        {
+          REPORT_LEGION_WARNING(LEGION_WARNING_LEAKED_RESOURCE,
+              "Field space %x was leaked out of task tree rooted by task %s",
+              it->id, get_task_name())
+          runtime->forest->destroy_field_space(*it, runtime->address_space,
+                                               preconditions);
+        }
+        created_field_spaces.clear();
+      }
+      if (!created_index_spaces.empty())
+      {
+        for (std::set<IndexSpace>::const_iterator it = 
+              created_index_spaces.begin(); it !=
+              created_index_spaces.end(); it++)
+        {
+          REPORT_LEGION_WARNING(LEGION_WARNING_LEAKED_RESOURCE,
+              "Index space %x was leaked out of task tree rooted by task %s",
+              it->id, get_task_name());
+          runtime->forest->destroy_index_space(*it, runtime->address_space,
+                                               preconditions);
+        }
+        created_index_spaces.clear();
+      } 
     }
 
     //--------------------------------------------------------------------------

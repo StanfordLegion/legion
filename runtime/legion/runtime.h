@@ -1698,6 +1698,7 @@ namespace Legion {
             verify_disjointness(false),
             runtime_warnings(false),
             warnings_backtrace(false),
+            report_leaks(false),
             separate_runtime_instances(false),
             record_registration(false),
             stealing_disabled(false),
@@ -1752,6 +1753,7 @@ namespace Legion {
         bool verify_disjointness;
         bool runtime_warnings;
         bool warnings_backtrace;
+        bool report_leaks;
         bool separate_runtime_instances;
         bool record_registration;
         bool stealing_disabled;
@@ -1895,6 +1897,7 @@ namespace Legion {
       const bool verify_disjointness;
       const bool runtime_warnings;
       const bool warnings_backtrace;
+      const bool report_leaks;
       const bool separate_runtime_instances;
       const bool record_registration;
       const bool stealing_disabled;

@@ -10450,6 +10450,7 @@ namespace Legion {
         verify_disjointness(config.verify_disjointness),
         runtime_warnings(config.runtime_warnings),
         warnings_backtrace(config.warnings_backtrace),
+        report_leaks(config.report_leaks),
         separate_runtime_instances(config.separate_runtime_instances),
         record_registration(config.record_registration),
         stealing_disabled(config.stealing_disabled),
@@ -10645,6 +10646,7 @@ namespace Legion {
         verify_disjointness(rhs.verify_disjointness),
         runtime_warnings(rhs.runtime_warnings),
         warnings_backtrace(rhs.warnings_backtrace),
+        report_leaks(rhs.report_leaks),
         separate_runtime_instances(rhs.separate_runtime_instances),
         record_registration(rhs.record_registration),
         stealing_disabled(rhs.stealing_disabled),
@@ -22283,6 +22285,7 @@ namespace Legion {
       {
         BOOL_ARG("-lg:warn_backtrace",config.warnings_backtrace);
         BOOL_ARG("-lg:warn",config.runtime_warnings);
+        BOOL_ARG("-lg:leaks",config.report_leaks);
         BOOL_ARG("-lg:separate",config.separate_runtime_instances);
         BOOL_ARG("-lg:registration",config.record_registration);
         BOOL_ARG("-lg:nosteal",config.stealing_disabled);
