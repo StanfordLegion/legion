@@ -78,9 +78,38 @@ task test2()
   regentlib.assert(x == 1, "test failed")
 end
 
+__demand(__inline)
+task tc(a : int[3])
+  for i = 0, 3 do a[i] += i end
+end
+
+struct fs
+{
+  z : int[3];
+}
+
+__demand(__inline)
+task td(a : fs)
+  for i = 0, 3 do a.z[i] += i end
+end
+
+task test3()
+  var x : int[3] = array(1, 2, 3)
+  var y : fs = [fs] { z = x }
+  tc(x)
+  td(y)
+  regentlib.assert(x[0] == 1, "test failed")
+  regentlib.assert(x[1] == 2, "test failed")
+  regentlib.assert(x[2] == 3, "test failed")
+  regentlib.assert(y.z[0] == 1, "test failed")
+  regentlib.assert(y.z[1] == 2, "test failed")
+  regentlib.assert(y.z[2] == 3, "test failed")
+end
+
 task main()
   test1()
   test2()
+  test3()
 end
 
 regentlib.start(main)
