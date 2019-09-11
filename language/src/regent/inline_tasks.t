@@ -318,6 +318,8 @@ local function find_lvalues_lhs(cx, expr)
     cx.lvalues[expr.value] = true
   elseif expr:is(ast.specialized.expr.FieldAccess) then
     find_lvalues_lhs(cx, expr.value)
+  elseif expr:is(ast.specialized.expr.IndexAccess) then
+    find_lvalues_lhs(cx, expr.value)
   end
 end
 
@@ -424,11 +426,14 @@ function inline_tasks.expr_call(stats, call)
   local expr_mapping = {}
   data.zip(params, param_types, args):map(function(tuple)
     local param, param_type, arg = unpack(tuple)
-    if not lvalues[param] and not param_type:ispointer() and
-       arg:is(ast.specialized.expr.ID)
+    if arg:is(ast.specialized.expr.ID) and
+       ((not lvalues[param] and not param_type:ispointer()) or
+        is_singleton_type(param_type))
     then
       symbol_mapping[param] = arg.value
-      if not is_singleton_type(param_type) then
+      if not (is_singleton_type(param_type) or
+              std.is_fspace_instance(param_type))
+      then
         arg = ast.specialized.expr.Cast {
           fn = ast.specialized.expr.Function {
             value = std.type_sub(param_type, symbol_mapping),
@@ -443,7 +448,9 @@ function inline_tasks.expr_call(stats, call)
       expr_mapping[param] = arg
     else
       local symbol_type = nil
-      if not is_singleton_type(param_type) then
+      if not (is_singleton_type(param_type) or
+              std.is_fspace_instance(param_type))
+      then
         symbol_type = param_type
       end
       local new_symbol = std.newsymbol(symbol_type, param:hasname())
