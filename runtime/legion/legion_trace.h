@@ -974,15 +974,16 @@ namespace Legion {
       virtual std::string to_string(void) = 0;
 
       virtual InstructionKind get_kind(void) = 0;
-      virtual GetTermEvent* as_get_term_event(void) = 0;
-      virtual CreateApUserEvent* as_create_ap_user_event(void) = 0;
-      virtual TriggerEvent* as_trigger_event(void) = 0;
-      virtual MergeEvent* as_merge_event(void) = 0;
-      virtual AssignFenceCompletion* as_assignment_fence_completion(void) = 0;
-      virtual IssueCopy* as_issue_copy(void) = 0;
-      virtual IssueFill* as_issue_fill(void) = 0;
-      virtual SetOpSyncEvent* as_set_op_sync_event(void) = 0;
-      virtual CompleteReplay* as_complete_replay(void) = 0;
+      virtual GetTermEvent* as_get_term_event(void) { return NULL; }
+      virtual CreateApUserEvent* as_create_ap_user_event(void) { return NULL; }
+      virtual TriggerEvent* as_trigger_event(void) { return NULL; }
+      virtual MergeEvent* as_merge_event(void) { return NULL; }
+      virtual AssignFenceCompletion* as_assignment_fence_completion(void) 
+        { return NULL; }
+      virtual IssueCopy* as_issue_copy(void) { return NULL; }
+      virtual IssueFill* as_issue_fill(void) { return NULL; }
+      virtual SetOpSyncEvent* as_set_op_sync_event(void) { return NULL; }
+      virtual CompleteReplay* as_complete_replay(void) { return NULL; }
 
       virtual Instruction* clone(PhysicalTemplate& tpl,
                                const std::map<unsigned, unsigned> &rewrite) = 0;
@@ -1011,22 +1012,6 @@ namespace Legion {
         { return GET_TERM_EVENT; }
       virtual GetTermEvent* as_get_term_event(void)
         { return this; }
-      virtual CreateApUserEvent* as_create_ap_user_event(void)
-        { return NULL; }
-      virtual TriggerEvent* as_trigger_event(void)
-        { return NULL; }
-      virtual MergeEvent* as_merge_event(void)
-        { return NULL; }
-      virtual AssignFenceCompletion* as_assignment_fence_completion(void)
-        { return NULL; }
-      virtual IssueCopy* as_issue_copy(void)
-        { return NULL; }
-      virtual IssueFill* as_issue_fill(void)
-        { return NULL; }
-      virtual SetOpSyncEvent* as_set_op_sync_event(void)
-        { return NULL; }
-      virtual CompleteReplay* as_complete_replay(void)
-        { return NULL; }
 
       virtual Instruction* clone(PhysicalTemplate& tpl,
                                  const std::map<unsigned, unsigned> &rewrite);
@@ -1050,24 +1035,8 @@ namespace Legion {
 
       virtual InstructionKind get_kind(void)
         { return CREATE_AP_USER_EVENT; }
-      virtual GetTermEvent* as_get_term_event(void)
-        { return NULL; }
       virtual CreateApUserEvent* as_create_ap_user_event(void)
         { return this; }
-      virtual TriggerEvent* as_trigger_event(void)
-        { return NULL; }
-      virtual MergeEvent* as_merge_event(void)
-        { return NULL; }
-      virtual AssignFenceCompletion* as_assignment_fence_completion(void)
-        { return NULL; }
-      virtual IssueCopy* as_issue_copy(void)
-        { return NULL; }
-      virtual IssueFill* as_issue_fill(void)
-        { return NULL; }
-      virtual SetOpSyncEvent* as_set_op_sync_event(void)
-        { return NULL; }
-      virtual CompleteReplay* as_complete_replay(void)
-        { return NULL; }
 
       virtual Instruction* clone(PhysicalTemplate& tpl,
                                  const std::map<unsigned, unsigned> &rewrite);
@@ -1091,24 +1060,8 @@ namespace Legion {
 
       virtual InstructionKind get_kind(void)
         { return TRIGGER_EVENT; }
-      virtual GetTermEvent* as_get_term_event(void)
-        { return NULL; }
-      virtual CreateApUserEvent* as_create_ap_user_event(void)
-        { return NULL; }
       virtual TriggerEvent* as_trigger_event(void)
         { return this; }
-      virtual MergeEvent* as_merge_event(void)
-        { return NULL; }
-      virtual AssignFenceCompletion* as_assignment_fence_completion(void)
-        { return NULL; }
-      virtual IssueCopy* as_issue_copy(void)
-        { return NULL; }
-      virtual IssueFill* as_issue_fill(void)
-        { return NULL; }
-      virtual SetOpSyncEvent* as_set_op_sync_event(void)
-        { return NULL; }
-      virtual CompleteReplay* as_complete_replay(void)
-        { return NULL; }
 
       virtual Instruction* clone(PhysicalTemplate& tpl,
                                  const std::map<unsigned, unsigned> &rewrite);
@@ -1134,24 +1087,8 @@ namespace Legion {
 
       virtual InstructionKind get_kind(void)
         { return MERGE_EVENT; }
-      virtual GetTermEvent* as_get_term_event(void)
-        { return NULL; }
-      virtual CreateApUserEvent* as_create_ap_user_event(void)
-        { return NULL; }
-      virtual TriggerEvent* as_trigger_event(void)
-        { return NULL; }
       virtual MergeEvent* as_merge_event(void)
         { return this; }
-      virtual AssignFenceCompletion* as_assignment_fence_completion(void)
-        { return NULL; }
-      virtual IssueCopy* as_issue_copy(void)
-        { return NULL; }
-      virtual IssueFill* as_issue_fill(void)
-        { return NULL; }
-      virtual SetOpSyncEvent* as_set_op_sync_event(void)
-        { return NULL; }
-      virtual CompleteReplay* as_complete_replay(void)
-        { return NULL; }
 
       virtual Instruction* clone(PhysicalTemplate& tpl,
                                  const std::map<unsigned, unsigned> &rewrite);
@@ -1175,24 +1112,8 @@ namespace Legion {
 
       virtual InstructionKind get_kind(void)
         { return ASSIGN_FENCE_COMPLETION; }
-      virtual GetTermEvent* as_get_term_event(void)
-        { return NULL; }
-      virtual CreateApUserEvent* as_create_ap_user_event(void)
-        { return NULL; }
-      virtual TriggerEvent* as_trigger_event(void)
-        { return NULL; }
-      virtual MergeEvent* as_merge_event(void)
-        { return NULL; }
       virtual AssignFenceCompletion* as_assignment_fence_completion(void)
         { return this; }
-      virtual IssueCopy* as_issue_copy(void)
-        { return NULL; }
-      virtual IssueFill* as_issue_fill(void)
-        { return NULL; }
-      virtual SetOpSyncEvent* as_set_op_sync_event(void)
-        { return NULL; }
-      virtual CompleteReplay* as_complete_replay(void)
-        { return NULL; }
 
       virtual Instruction* clone(PhysicalTemplate& tpl,
                                  const std::map<unsigned, unsigned> &rewrite);
@@ -1229,24 +1150,8 @@ namespace Legion {
 
       virtual InstructionKind get_kind(void)
         { return ISSUE_FILL; }
-      virtual GetTermEvent* as_get_term_event(void)
-        { return NULL; }
-      virtual CreateApUserEvent* as_create_ap_user_event(void)
-        { return NULL; }
-      virtual TriggerEvent* as_trigger_event(void)
-        { return NULL; }
-      virtual MergeEvent* as_merge_event(void)
-        { return NULL; }
-      virtual AssignFenceCompletion* as_assignment_fence_completion(void)
-        { return NULL; }
-      virtual IssueCopy* as_issue_copy(void)
-        { return NULL; }
       virtual IssueFill* as_issue_fill(void)
         { return this; }
-      virtual SetOpSyncEvent* as_set_op_sync_event(void)
-        { return NULL; }
-      virtual CompleteReplay* as_complete_replay(void)
-        { return NULL; }
 
       virtual Instruction* clone(PhysicalTemplate& tpl,
                                  const std::map<unsigned, unsigned> &rewrite);
@@ -1294,24 +1199,8 @@ namespace Legion {
 
       virtual InstructionKind get_kind(void)
         { return ISSUE_COPY; }
-      virtual GetTermEvent* as_get_term_event(void)
-        { return NULL; }
-      virtual CreateApUserEvent* as_create_ap_user_event(void)
-        { return NULL; }
-      virtual TriggerEvent* as_trigger_event(void)
-        { return NULL; }
-      virtual MergeEvent* as_merge_event(void)
-        { return NULL; }
-      virtual AssignFenceCompletion* as_assignment_fence_completion(void)
-        { return NULL; }
       virtual IssueCopy* as_issue_copy(void)
         { return this; }
-      virtual IssueFill* as_issue_fill(void)
-        { return NULL; }
-      virtual SetOpSyncEvent* as_set_op_sync_event(void)
-        { return NULL; }
-      virtual CompleteReplay* as_complete_replay(void)
-        { return NULL; }
 
       virtual Instruction* clone(PhysicalTemplate& tpl,
                                  const std::map<unsigned, unsigned> &rewrite);
@@ -1346,24 +1235,8 @@ namespace Legion {
 
       virtual InstructionKind get_kind(void)
         { return SET_OP_SYNC_EVENT; }
-      virtual GetTermEvent* as_get_term_event(void)
-        { return NULL; }
-      virtual CreateApUserEvent* as_create_ap_user_event(void)
-        { return NULL; }
-      virtual TriggerEvent* as_trigger_event(void)
-        { return NULL; }
-      virtual MergeEvent* as_merge_event(void)
-        { return NULL; }
-      virtual AssignFenceCompletion* as_assignment_fence_completion(void)
-        { return NULL; }
-      virtual IssueCopy* as_issue_copy(void)
-        { return NULL; }
-      virtual IssueFill* as_issue_fill(void)
-        { return NULL; }
       virtual SetOpSyncEvent* as_set_op_sync_event(void)
         { return this; }
-      virtual CompleteReplay* as_complete_replay(void)
-        { return NULL; }
 
       virtual Instruction* clone(PhysicalTemplate& tpl,
                                  const std::map<unsigned, unsigned> &rewrite);
@@ -1387,22 +1260,6 @@ namespace Legion {
 
       virtual InstructionKind get_kind(void)
         { return COMPLETE_REPLAY; }
-      virtual GetTermEvent* as_get_term_event(void)
-        { return NULL; }
-      virtual CreateApUserEvent* as_create_ap_user_event(void)
-        { return NULL; }
-      virtual TriggerEvent* as_trigger_event(void)
-        { return NULL; }
-      virtual MergeEvent* as_merge_event(void)
-        { return NULL; }
-      virtual AssignFenceCompletion* as_assignment_fence_completion(void)
-        { return NULL; }
-      virtual IssueCopy* as_issue_copy(void)
-        { return NULL; }
-      virtual IssueFill* as_issue_fill(void)
-        { return NULL; }
-      virtual SetOpSyncEvent* as_set_op_sync_event(void)
-        { return NULL; }
       virtual CompleteReplay* as_complete_replay(void)
         { return this; }
 
