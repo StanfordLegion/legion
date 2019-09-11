@@ -906,7 +906,7 @@ local SUBSET = setmetatable({}, { __tostring = function(self) return "SUBSET" en
 
 caller_context.__index = caller_context
 
-function caller_context.new(constraints)
+function caller_context.new(region_cx)
   local param = parallel_param.new({ dop = std.config["parallelize-dop"] })
   local cx = {
     __param_stack = terralib.newlist { param },
@@ -932,7 +932,7 @@ function caller_context.new(constraints)
     -- keep parent-child relationship in region tree
     __parent_region = {},
     -- the constraint graph to update for later stages
-    constraints = constraints,
+    region_cx = region_cx,
     -- symbols for caching region metadata
     __region_metadata_symbols = {},
     -- parallelization parameter -> max dimension
@@ -1234,8 +1234,8 @@ function caller_context:update_constraint(expr)
   local partition = value_type:partition()
   local parent = value_type:parent_region()
   local subregion = expr.expr_type
-  std.add_constraint(self, partition, parent, std.subregion, false)
-  std.add_constraint(self, subregion, partition, std.subregion, false)
+  self.region_cx:add_constraint(partition, parent, std.subregion)
+  self.region_cx:add_constraint(subregion, partition, std.subregion)
 end
 
 -- #####################################
@@ -2263,7 +2263,7 @@ function parallelize_task_calls.top_task(global_cx, node)
   end
 
   -- Add declartions for the variables that contain region metadata (e.g. bounds)
-  local caller_cx = caller_context.new(node.prototype:get_constraints())
+  local caller_cx = caller_context.new(node.prototype:get_region_context())
   local body =
     ast.flatmap_node_continuation(
       add_metadata_declarations(caller_cx), node.body)
@@ -3308,7 +3308,7 @@ function parallelize_tasks.top_task(global_cx, node)
   task:set_flags(node.flags)
   task:set_conditions(node.conditions)
   task:set_param_constraints(node.prototype:get_param_constraints())
-  task:set_constraints(node.prototype:get_constraints())
+  task:set_region_context(node.prototype:get_region_context())
   task:set_region_universe(region_universe)
 
   local parallelized = parallelize_tasks.top_task_body(task_cx, normalized)

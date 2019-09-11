@@ -315,6 +315,7 @@ data.vector.__index = data.vector
 
 function data.vector.__eq(a, b)
   assert(data.is_vector(a) and data.is_vector(b))
+  -- FIXME: Looks like a bug, as it ought to make sure they are the same length.
   for i, v in ipairs(a) do
     if v ~= b[i] then
       return false
@@ -428,6 +429,22 @@ function data.map:__newindex(k, v)
   self:put(k, v)
 end
 
+function data.map:__eq(x)
+  for k, v in x:items() do
+    if not self:has(k) then
+      return false
+    end
+  end
+
+  for k, v in self:items() do
+    if not (x:has(k) and x[k] == v) then
+      return false
+    end
+  end
+
+  return true
+end
+
 function data.map:has(k)
   return self.__values_by_hash[data.hash(k)]
 end
@@ -473,12 +490,21 @@ function data.map:copy()
   return self:map(function(k, v) return v end)
 end
 
+function data.map:copy_recursive(n)
+  if n == 0 then
+    return self:copy()
+  end
+
+  return self:map(function(k, v) return v:copy_recursive(n - 1) end)
+end
+
 function data.map:map(fn)
   local result = data.newmap()
   for k, v in self:items() do
     result:put(k, fn(k, v))
   end
-  return result
+  rawset(result, "__default", self.__default)
+  return setmetatable(result, getmetatable(self))
 end
 
 function data.map:map_list(fn)
@@ -505,6 +531,7 @@ data.default_map = setmetatable(
     -- So, apparently for this to work you must re-list any metamethods.
     __tostring = data.map.__tostring,
     __newindex = data.map.__newindex,
+    __eq = data.map.__eq,
   }, {
     __index = data.map,
 })

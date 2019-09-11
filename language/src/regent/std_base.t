@@ -1230,15 +1230,15 @@ function base.task:get_param_constraints()
   return self.param_constraints
 end
 
-function base.task:set_constraints(t)
-  assert(not self.constraints)
-  assert(t)
-  self.constraints = t
+function base.task:set_region_context(cx)
+  assert(not self.region_cx)
+  assert(cx)
+  self.region_cx = cx
 end
 
-function base.task:get_constraints()
-  assert(self.constraints)
-  return self.constraints
+function base.task:get_region_context()
+  assert(self.region_cx)
+  return self.region_cx
 end
 
 function base.task:set_region_universe(t)
@@ -1432,7 +1432,7 @@ do
       flags = false,
       conditions = false,
       param_constraints = false,
-      constraints = false,
+      region_cx = false,
       region_universe = false,
 
       -- Variants and alternative versions:

@@ -97,8 +97,6 @@ function context:new_local_scope(divergence, must_epoch, must_epoch_point, break
   return setmetatable({
     variant = self.variant,
     expected_return_type = self.expected_return_type,
-    privileges = self.privileges,
-    constraints = self.constraints,
     orderings = self.orderings,
     task = self.task,
     task_meta = self.task_meta,
@@ -116,13 +114,11 @@ function context:new_local_scope(divergence, must_epoch, must_epoch_point, break
   }, context)
 end
 
-function context:new_task_scope(expected_return_type, constraints, orderings, leaf, task_meta, task, ctx, runtime)
+function context:new_task_scope(expected_return_type, orderings, leaf, task_meta, task, ctx, runtime)
   assert(expected_return_type and task and ctx and runtime)
   return setmetatable({
     variant = self.variant,
     expected_return_type = expected_return_type,
-    privileges = data.newmap(),
-    constraints = constraints,
     orderings = orderings,
     task = task,
     task_meta = task_meta,
@@ -3509,7 +3505,7 @@ local lift_cast_to_futures = terralib.memoize(
     task:set_privileges(node.privileges)
     task:set_conditions({})
     task:set_param_constraints(node.constraints)
-    task:set_constraints({})
+    task:set_region_context(std.region_context())
     task:set_region_universe(data.newmap())
     return codegen.entry(node)
   end)
@@ -7071,7 +7067,7 @@ local lift_unary_op_to_futures = terralib.memoize(
     task:set_privileges(node.privileges)
     task:set_conditions({})
     task:set_param_constraints(node.constraints)
-    task:set_constraints({})
+    task:set_region_context(std.region_context())
     task:set_region_universe(data.newmap())
     return codegen.entry(node)
   end)
@@ -7170,7 +7166,7 @@ local lift_binary_op_to_futures = terralib.memoize(
     task:set_privileges(node.privileges)
     task:set_conditions({})
     task:set_param_constraints(node.constraints)
-    task:set_constraints({})
+    task:set_region_context(std.region_context())
     task:set_region_universe(data.newmap())
     return codegen.entry(node)
   end)
@@ -9533,7 +9529,7 @@ local make_dummy_task = terralib.memoize(
     task:set_privileges(node.privileges)
     task:set_conditions({})
     task:set_param_constraints(node.constraints)
-    task:set_constraints({})
+    task:set_region_context(std.region_context())
     task:set_region_universe(data.newmap())
     return codegen.entry(node)
   end)
@@ -10253,22 +10249,12 @@ function codegen.top_task(cx, node)
   end
 
   local cx = cx:new_task_scope(return_type,
-                               task:get_constraints(),
                                orderings,
                                variant:get_config_options().leaf,
                                task, c_task, c_context, c_runtime)
 
   -- FIXME: This code should be deduplicated with type_check, no
   -- reason to do it twice....
-  for _, privilege_list in ipairs(task.privileges) do
-    for _, privilege in ipairs(privilege_list) do
-      local privilege_type = privilege.privilege
-      local region = privilege.region
-      local field_path = privilege.field_path
-      assert(std.type_supports_privileges(region:gettype()))
-      std.add_privilege(cx, privilege_type, region:gettype(), field_path)
-    end
-  end
 
   -- Unpack the by-value parameters to the task.
   local task_setup = terralib.newlist()

@@ -13,7 +13,7 @@
 -- limitations under the License.
 
 -- fails-with:
--- type_mismatch_parallel_prefix13.rg:24: invalid privilege in argument 1: writes($r)
+-- type_mismatch_parallel_prefix13.rg:24: invalid privileges in argument 1: writes($r)
 --     __parallel_prefix(r, s, +, 1)
 --                       ^
 

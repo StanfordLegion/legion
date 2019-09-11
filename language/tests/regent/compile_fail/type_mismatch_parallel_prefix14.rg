@@ -13,7 +13,7 @@
 -- limitations under the License.
 
 -- fails-with:
--- type_mismatch_parallel_prefix14.rg:26: invalid privilege in argument 2: reads($s)
+-- type_mismatch_parallel_prefix14.rg:26: invalid privileges in argument 2: reads($s)
 --   __parallel_prefix(r, s, +, 1)
 --                        ^
 

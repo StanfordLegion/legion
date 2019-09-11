@@ -12,11 +12,6 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
--- fails-with:
--- type_mismatch_assignment2.rg:26: type mismatch in assignment: expected region(int32) but got region(int32)
---   s = t
---   ^
-
 import "regent"
 
 task f()

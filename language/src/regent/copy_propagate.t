@@ -344,6 +344,8 @@ function copy_propagate.stat_if(cx, stat)
 end
 
 function copy_propagate.stat_while(cx, stat)
+  -- FIXME: This looks like it won't realize that if the variable is changed
+  -- later in the loop then on the next iteration it is not a copy.
   return stat {
     cond = copy_propagate.expr(cx, stat.cond),
     block = copy_propagate.block(cx, stat.block),

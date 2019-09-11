@@ -34,10 +34,10 @@ function context:__newindex (field, value)
   error ("context has no field '" .. field .. "' (in assignment)", 2)
 end
 
-function context:new_task_scope(constraints, region_universe)
-  assert(constraints and region_universe)
+function context:new_task_scope(region_cx, region_universe)
+  assert(region_cx and region_universe)
   local cx = {
-    constraints = constraints,
+    region_cx = region_cx,
     region_universe = region_universe,
   }
   return setmetatable(cx, context)
@@ -71,7 +71,7 @@ local function uses(cx, region_type, polarity)
         other_region_type,
         std.disjointness)
       if std.type_maybe_eq(region_type:fspace(), other_region_type:fspace()) and
-        not std.check_constraint(cx, constraint)
+        not cx.region_cx:check_constraint(constraint)
       then
         usage[other_region_type] = polarity
       end
@@ -612,7 +612,7 @@ function optimize_mapping.top_task(cx, node)
   if not node.body then return node end
 
   local cx = cx:new_task_scope(
-    node.prototype:get_constraints(),
+    node.prototype:get_region_context(),
     node.prototype:get_region_universe())
   local initial_usage = task_initial_usage(cx, node.privileges)
   local annotated_body = optimize_mapping.block(cx, node.body)

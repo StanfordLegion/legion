@@ -58,7 +58,7 @@ local function desugar_image_by_task(cx, node)
     std.newsymbol(partition_type:colors().index_type(colors_symbol))
   local colors_expr = ast_util.mk_expr_colors_access(partition)
   local subregion_type = partition_type:subregion_dynamic()
-  std.add_constraint(cx, subregion_type, partition_type, std.subregion, false)
+  cx.constraints:add_constraint(subregion_type, partition_type, std.subregion)
 
   local subregion_expr =
     ast_util.mk_expr_index_access(partition,
@@ -85,7 +85,6 @@ local function desugar_image_by_task(cx, node)
                          ast_util.mk_expr_partition(image_partition_type,
                                                     ast_util.mk_expr_id(colors_symbol),
                                                     coloring_expr)))
-  std.add_constraint(cx, image_partition_type, parent_type, std.subregion, false)
 
   stats:insert(
     ast_util.mk_stat_expr(
@@ -175,7 +174,7 @@ function desugar.block(cx, block)
 end
 
 function desugar.top_task(node)
-  local cx = { constraints = node.prototype:get_constraints() }
+  local cx = { constraints = node.prototype:get_region_context() }
   local body = node.body and desugar.block(cx, node.body) or false
 
   return node { body = body }

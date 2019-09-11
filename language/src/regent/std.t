@@ -162,129 +162,88 @@ end
 -- ## Privilege and Constraint Helpers
 -- #################
 
-function std.add_privilege(cx, privilege, region, field_path)
-  assert(privilege:is(ast.privilege_kind))
-  assert(std.type_supports_privileges(region))
-  assert(data.is_tuple(field_path))
-  if not cx.privileges[privilege] then
-    cx.privileges[privilege] = data.newmap()
-  end
-  if not cx.privileges[privilege][region] then
-    cx.privileges[privilege][region] = data.newmap()
-  end
-  cx.privileges[privilege][region][field_path] = true
+function std.add_privilege(cx, node, privilege, region, field_path)
+  cx.dataflow_actions[node]:insert(function(region_cx)
+    region_cx:add_privilege(privilege, region, field_path)
+  end)
 end
 
-function std.copy_privileges(cx, from_region, to_region)
+function std.copy_privileges(cx, node, from_region, to_region)
   assert(std.type_supports_privileges(from_region))
   assert(std.type_supports_privileges(to_region))
-  local privileges_to_copy = terralib.newlist()
-  for privilege, privilege_regions in cx.privileges:items() do
-    local privilege_fields = privilege_regions[from_region]
-    if privilege_fields then
-      for _, field_path in privilege_fields:keys() do
-        privileges_to_copy:insert({privilege, to_region, field_path})
-      end
-    end
-  end
-  for _, privilege in ipairs(privileges_to_copy) do
-    std.add_privilege(cx, unpack(privilege))
-  end
-end
-
-function std.add_constraint(cx, lhs, rhs, op, symmetric)
-  if std.is_cross_product(lhs) then lhs = lhs:partition() end
-  if std.is_cross_product(rhs) then rhs = rhs:partition() end
-  assert(std.type_supports_constraints(lhs))
-  assert(std.type_supports_constraints(rhs))
-  cx.constraints[op][lhs][rhs] = true
-  if symmetric then
-    std.add_constraint(cx, rhs, lhs, op, false)
-  end
-end
-
-function std.add_constraints(cx, constraints)
-  for _, constraint in ipairs(constraints) do
-    local lhs, rhs, op = constraint.lhs, constraint.rhs, constraint.op
-    local symmetric = op == std.disjointness
-    std.add_constraint(cx, lhs:gettype(), rhs:gettype(), op, symmetric)
-  end
-end
-
-function std.search_constraint_predicate(cx, region, visited, predicate)
-  if predicate(cx, region) then
-    return region
-  end
-
-  if visited[region] then
-    return nil
-  end
-  visited[region] = true
-
-  if cx.constraints:has(std.subregion) and cx.constraints[std.subregion]:has(region) then
-    for subregion, _ in cx.constraints[std.subregion][region]:items() do
-      local result = std.search_constraint_predicate(
-        cx, subregion, visited, predicate)
-      if result then return result end
-    end
-  end
-  return nil
-end
-
-function std.search_privilege(cx, privilege, region, field_path, visited)
-  assert(privilege:is(ast.privilege_kind))
-  assert(std.type_supports_privileges(region))
-  assert(data.is_tuple(field_path))
-  return std.search_constraint_predicate(
-    cx, region, visited,
-    function(cx, region)
-      return cx.privileges[privilege] and
-        cx.privileges[privilege][region] and
-        cx.privileges[privilege][region][field_path]
-    end)
-end
-
-function std.check_privilege(cx, privilege, region, field_path)
-  assert(privilege:is(ast.privilege_kind))
-  assert(std.type_supports_privileges(region))
-  assert(data.is_tuple(field_path))
-  for i = #field_path, 0, -1 do
-    if std.search_privilege(cx, privilege, region, field_path:slice(1, i), {}) then
-      return true
-    end
-    if std.is_reduce(privilege) then
-      if std.search_privilege(cx, std.reads, region, field_path:slice(1, i), {}) and
-        std.search_privilege(cx, std.writes, region, field_path:slice(1, i), {})
-      then
-        return true
-      end
-    end
-  end
-  return false
-end
-
-function std.search_any_privilege(cx, region, field_path, visited)
-  assert(std.is_region(region) and data.is_tuple(field_path))
-  return std.search_constraint_predicate(
-    cx, region, visited,
-    function(cx, region)
-      for _, regions in cx.privileges:items() do
-        if regions[region] and regions[region][field_path] then
-          return region
+  cx.dataflow_actions[node]:insert(function(region_cx)
+    local privileges_to_copy = terralib.newlist()
+    for privilege, privileged_regions in region_cx.privileges:items() do
+      if privileged_regions:has(from_region) then
+        for _, field_path in privileged_regions[from_region]:keys() do
+          privileges_to_copy:insert({privilege, to_region, field_path})
         end
       end
-      return false
-    end)
+    end
+
+    for _, privilege in ipairs(privileges_to_copy) do
+      region_cx:add_privilege(unpack(privilege))
+    end
+  end)
 end
 
-function std.check_any_privilege(cx, region, field_path)
-  assert(std.is_region(region) and data.is_tuple(field_path))
-  for i = #field_path, 0, -1 do
-    if std.search_any_privilege(cx, region, field_path:slice(1, i), {}) then
-      return true
+function std.add_constraint(cx, node, lhs, rhs, op)
+  cx.dataflow_actions[node]:insert(function(region_cx)
+    region_cx:add_constraint(lhs, rhs, op)
+  end)
+end
+
+function std.add_constraints(cx, node, constraints)
+  cx.dataflow_actions[node]:insert(function(region_cx)
+    for _, constraint in ipairs(constraints) do
+      local lhs, rhs, op = constraint.lhs, constraint.rhs, constraint.op
+      region_cx:add_constraint(lhs, rhs, op)
     end
+  end)
+end
+
+function std.require_privilege(cx, node, msg, privilege, region, field_path, region_symbol)
+  cx.region_checks:insert(function(region_cx)
+    if not region_cx:check_privilege(privilege, region, field_path) then
+      if not region_symbol then
+        region_symbol = std.newsymbol(region)
+      end
+      report.error(
+        node, "invalid privileges in " .. msg .. ": " .. tostring(privilege) ..
+          "(" .. (data.newtuple(region_symbol) .. field_path):mkstring(".") .. ")")
+    end
+  end)
+end
+
+function std.require_constraint(cx, node, msg, constraint)
+  cx.region_checks:insert(function(region_cx)
+    if not region_cx:check_constraint(constraint) then
+      report.error(node, "invalid " .. msg .. " missing constraint " ..
+                   tostring(constraint.lhs) .. " " .. tostring(constraint.op) ..
+                   " " .. tostring(constraint.rhs))
+    end
+  end)
+end
+
+function std.require_constraints(cx, node, msg, constraints, mapping)
+  if not mapping then
+    mapping = {}
   end
-  return false
+
+  cx.region_checks:insert(function(region_cx)
+    for _, constraint in ipairs(constraints) do
+      local constraint = {
+        lhs = mapping[constraint.lhs] or constraint.lhs,
+        rhs = mapping[constraint.rhs] or constraint.rhs,
+        op = constraint.op,
+      }
+      if not region_cx:check_constraint(constraint) then
+        report.error(node, "invalid " .. msg .. " missing constraint " ..
+                     tostring(constraint.lhs) .. " " .. tostring(constraint.op) ..
+                     " " .. tostring(constraint.rhs))
+      end
+    end
+  end)
 end
 
 local function analyze_uses_variables_node(variables)
@@ -380,43 +339,324 @@ local function uses_variables(region, variables)
   return false
 end
 
-function std.search_constraint(cx, region, constraint, exclude_variables,
-                               visited, reflexive, symmetric)
-  return std.search_constraint_predicate(
-    cx, region, visited,
-    function(cx, region)
-      if reflexive and region == constraint.rhs then
-        return true
-      end
+-- This dataflow keeps track of constraints and privileges for all of the
+-- regions in scope at a point in the code. It enforces a set of rules on these
+-- relations:
+--
+-- 1. Subregion reflexivity: r <= r
+-- 2. Subregion transitivity: r <= s and s <= t implies r <= t
+-- 3. Disjointness symmetry: r * s iff s * r
+-- 4. Disjointness of subregions: r * s and x <= r and y <= s implies x * y
+-- 5. Privileges of subregions: priv(r.field) and s <= r implies priv(s.field)
+--      (note that field could be the empty string)
+-- 6. Reads and writes implies reduces.
+-- 7. Privileges of subfields: priv(r.field) implies priv(r.field.subfield)
+-- 8. If a privilege holds on all subfields, the field has it as well.
+--
+-- Rules 1-5 are applied immediately, while the others are applied on lookup.
+--
+-- Meet operations output all constraints and privileges that apply in both
+-- cases.
+--
+-- The constraints and privileges are stored in the following fields.
+-- privileges[priv][region][field]: priv(region.field)
+-- disjoint[lhs][rhs]: lhs * rhs
+-- superregions[child][parent]: child <= parent
+-- subregions[parent][child]: child <= parent
+--
+-- Rules
+-- (?) Distinct inputs to function with writes permission are disjoint
+-- Return value is always disjoint from everything disjoint from all its params.
+-- Temporary: return value must be either a subregion is disjoint.
+-- If a permission applies to a region then it applies to a field.
+-- (?) If a permission applies to all fields of a region then it applies to a
+--     region. Not currently true.
+-- Which partition a region is associated with is kept track of separately, as
+-- partitions cannot be in the constraints and it wouldn't make sense for them
+-- to be anyway.
 
-      if cx.constraints:has(constraint.op) and
-        cx.constraints[constraint.op]:has(region) and
-        cx.constraints[constraint.op][region][constraint.rhs] and
-        not (exclude_variables and
-               uses_variables(region, exclude_variables) and
-               uses_variables(constraint.rhs, exclude_variables))
-      then
-        return true
-      end
+local region_context_meta = {}
+local region_context = setmetatable({}, region_context_meta)
+region_context.__index = region_context
+std.region_context = region_context
 
-      if symmetric then
-        local constraint = {
-          lhs = constraint.rhs,
-          rhs = region,
-          op = constraint.op,
-        }
-        if std.search_constraint(cx, constraint.lhs, constraint,
-                                 exclude_variables, {}, reflexive, false)
-        then
-          return true
+function region_context_meta:__call()
+  local out = {
+    privileges = data.new_recursive_map(2),
+    disjoint = data.new_recursive_map(1),
+    superregions = data.new_recursive_map(1),
+    subregions = data.new_recursive_map(1),
+  }
+
+  return setmetatable(out, region_context)
+end
+
+function region_context:copy()
+  local out = {
+    privileges = self.privileges:copy_recursive(2),
+    disjoint = self.disjoint:copy_recursive(1),
+    superregions = self.superregions:copy_recursive(1),
+    subregions = self.subregions:copy_recursive(1),
+  }
+
+  return setmetatable(out, region_context)
+end
+
+function region_context:__eq(x)
+  return self.privileges == x.privileges and
+         self.disjoint == x.disjoint and
+         self.superregions == x.superregions and
+         self.subregions == x.subregions
+end
+
+function region_context:add_region(region)
+  assert(std.type_supports_constraints(region))
+
+  -- 1. Subregion reflexivity
+  self.subregions[region][region] = true
+  self.superregions[region][region] = true
+end
+
+function region_context:has_region(region)
+  return self.subregions:has(region)
+end
+
+function region_context:remove_region(region)
+  if not self:has_region(region) then return end
+
+  for privilege, privileged_regions in self.privileges:items() do
+    privileged_regions[region] = nil
+  end
+
+  if self.disjoint:has(region) then
+    for rhs in self.disjoint[region]:items() do
+      self.disjoint[rhs][region] = nil
+    end
+    self.disjoint[region] = nil
+  end
+
+  for parent in self.superregions[region]:items() do
+    self.subregions[parent][region] = nil
+  end
+  for child in self.subregions[region]:items() do
+    self.superregions[child][region] = nil
+  end
+  self.subregions[region] = nil
+  self.superregions[region] = nil
+end
+
+-- Same as
+-- self:add_region(new)
+-- self:add_subregion_constraint(new, old)
+-- self:add_subregion_constraint(old, new)
+-- but more efficient.
+function region_context:dup_region(old, new)
+  if old == new or not self:has_region(old) then
+    return
+  end
+
+  assert(not self:has_region(new))
+  assert(std.type_supports_constraints(new))
+
+  for privilege, privileged_regions in self.privileges:items() do
+    privileged_regions[new] = privileged_regions[old]:copy()
+  end
+
+  if self.disjoint:has(old) then
+    self.disjoint[new] = self.disjoint[old]:copy()
+    for rhs in self.disjoint[old]:items() do
+      self.disjoint[rhs][new] = self.disjoint[rhs][old]
+    end
+  end
+
+  self.subregions[new] = self.subregions[old]:copy()
+  self.superregions[new] = self.superregions[old]:copy()
+  for parent in self.superregions[old]:items() do
+    self.subregions[parent][new] = self.subregions[parent][old]
+  end
+  for child in self.subregions[old]:items() do
+    self.superregions[child][new] = self.superregions[child][old]
+  end
+
+  self.subregions[new][new] = true
+  self.superregions[new][new] = true
+end
+
+function region_context:add_privilege(privilege, region, field_path)
+  assert(privilege:is(ast.privilege_kind))
+  assert(data.is_tuple(field_path))
+
+  if not self:has_region(region) then self:add_region(region) end
+
+  for child in self.subregions[region]:items() do
+    self.privileges[privilege][region][field_path] = true
+  end
+end
+
+function region_context:add_subregion_constraint(child, parent)
+  if not self:has_region(child) then self:add_region(child) end
+  if not self:has_region(parent) then self:add_region(parent) end
+
+  if self.superregions[child][parent] then
+    return
+  end
+
+  -- 2. Subregion transitivity
+  for child in self.subregions[child]:items() do
+    for parent in self.superregions[parent]:items() do
+      self.subregions[parent][child] = true
+      self.superregions[child][parent] = true
+
+      -- 4. Disjointness of subregions
+      if self.disjoint:has(parent) then
+        for s in self.disjoint[parent]:items() do
+          self.disjoint[child][s] = true
+          self.disjoint[s][child] = true -- 3. Disjointness symmetry
         end
       end
 
-      return false
-    end)
+      -- 5. Privileges of subregions
+      for privilege, privileged_regions in self.privileges:items() do
+        if privileged_regions:has(parent) then
+          for field in privileged_regions[parent]:items() do
+            privileged_regions[child][field] = true
+          end
+        end
+      end
+    end
+  end
 end
 
-function std.check_constraint(cx, constraint, exclude_variables)
+function region_context:add_disjointness_constraint(lhs, rhs)
+  if not self:has_region(lhs) then self:add_region(lhs) end
+  if not self:has_region(rhs) then self:add_region(rhs) end
+
+  if self.disjoint[lhs][rhs] then
+    return
+  end
+
+  -- 4. Disjointness of subregions
+  for lhs in self.subregions[lhs]:items() do
+    for rhs in self.subregions[rhs]:items() do
+      self.disjoint[lhs][rhs] = true
+      self.disjoint[rhs][lhs] = true -- 3. Disjointness symmetry
+    end
+  end
+end
+
+function region_context:add_constraint(lhs, rhs, op)
+  if std.is_symbol(lhs) then lhs = lhs:gettype() end
+  if std.is_symbol(rhs) then rhs = rhs:gettype() end
+  if std.is_cross_product(lhs) then lhs = lhs:partition() end
+  if std.is_cross_product(rhs) then rhs = rhs:partition() end
+
+  if op == std.disjointness then
+    self:add_disjointness_constraint(lhs, rhs)
+  else
+    assert(op == std.subregion)
+    self:add_subregion_constraint(lhs, rhs)
+  end
+end
+
+function region_context:meet_privilege(x, privilege, region, path)
+  local reads_writes =
+    privilege == std.reads and self:check_privilege_above(std.writes, region, path) or
+    privilege == std.writes and self:check_privilege_above(std.reads, region, path)
+
+  return x:check_privilege_above(privilege, region, path, reads_writes)
+end
+
+function region_context:__add(x)
+  local out = region_context()
+
+  for privilege in self.privileges:items() do
+    if x.privileges:has(privilege) then
+      for region in self.privileges[privilege]:items() do
+        if x.privileges[privilege]:has(region) then
+          for path in self.privileges[privilege][region]:items() do
+            local matches, privilege = self:meet_privilege(x, privilege, region, path)
+            if matches then
+              out.privileges[privilege][region][path] = true
+            end
+          end
+
+          for path in x.privileges[privilege][region]:items() do
+            local matches, privilege = x:meet_privilege(self, privilege, region, path)
+            if matches then
+              out.privileges[privilege][region][path] = true
+            end
+          end
+        end
+      end
+    end
+  end
+
+  for lhs, i in self.superregions:items() do
+    if x.superregions:has(lhs) then
+      for rhs in i:items() do
+        if x.superregions[lhs][rhs] then
+          out.superregions[lhs][rhs] = true
+          out.subregions[rhs][lhs] = true
+        end
+      end
+    end
+  end
+
+  for lhs, i in self.disjoint:items() do
+    if x.disjoint:has(lhs) then
+      for rhs in i:items() do
+        if x.disjoint[lhs][rhs] then
+          out.disjoint[lhs][rhs] = true
+        end
+      end
+    end
+  end
+
+  -- Any regions only present in one branch should be considered uninitialized
+  -- in the other, so we can just copy the privileges and constraints from the
+  -- initialized branch.
+  out:merge_context(self)
+  out:merge_context(x)
+
+  return out
+end
+
+-- Add all regions from x that are not in self, along with their privileges and
+-- constraints.
+function region_context:merge_context(x)
+  local to_add = terralib.newlist()
+  for region in x.subregions:items() do
+    if not self:has_region(region) then
+      to_add:insert(region)
+    end
+  end
+
+  for _, region in ipairs(to_add) do
+    for privilege, privileged_regions in x.privileges:items() do
+      if privileged_regions:has(region) then
+        for path in privileged_regions[region]:items() do
+          self:add_privilege(privilege, region, path)
+        end
+      end
+    end
+
+    for parent in x.superregions[region]:items() do
+      self:add_subregion_constraint(region, parent)
+    end
+
+    for child in x.subregions[region]:items() do
+      self:add_subregion_constraint(child, region)
+    end
+
+    if x.disjoint:has(region) then
+      for rhs in x.disjoint[region]:items() do
+        self:add_disjointness_constraint(region, rhs)
+      end
+    end
+  end
+end
+
+function region_context:check_constraint(constraint)
   local lhs = constraint.lhs
   if lhs == std.wild then
     return true
@@ -435,33 +675,81 @@ function std.check_constraint(cx, constraint, exclude_variables)
   if std.is_cross_product(rhs) then rhs = rhs:partition() end
   assert(std.type_supports_constraints(rhs))
 
-  local constraint = {
-    lhs = lhs,
-    rhs = rhs,
-    op = constraint.op,
-  }
-  return std.search_constraint(
-    cx, constraint.lhs, constraint, exclude_variables, {},
-    constraint.op == std.subregion --[[ reflexive ]],
-    constraint.op == std.disjointness --[[ symmetric ]])
+  if not self:has_region(lhs) or not self:has_region(rhs) then
+    return constraint.op == std.subregion and lhs == rhs
+  end
+
+  if constraint.op == std.subregion then
+    return self.superregions[lhs][rhs]
+  else
+    return self.disjoint:has(lhs) and self.disjoint[lhs][rhs]
+  end
 end
 
-function std.check_constraints(cx, constraints, mapping)
-  if not mapping then
-    mapping = {}
-  end
+function region_context:check_privilege_above(privilege, region, field_path, reads_writes)
+  assert(privilege:is(ast.privilege_kind))
+  assert(std.type_supports_constraints(region))
+  assert(data.is_tuple(field_path))
 
-  for _, constraint in ipairs(constraints) do
-    local constraint = {
-      lhs = mapping[constraint.lhs] or constraint.lhs,
-      rhs = mapping[constraint.rhs] or constraint.rhs,
-      op = constraint.op,
-    }
-    if not std.check_constraint(cx, constraint) then
-      return false, constraint
+  if self.privileges:has(privilege) and self.privileges[privilege]:has(region) then
+    for i = #field_path, 0, -1 do
+      if self.privileges[privilege][region][field_path:slice(1, i)] then
+        return true, privilege
+      end
+    end
+
+    if reads_writes then
+      for i = #field_path, 0, -1 do
+        for reduction in self.privileges:items() do
+          if std.is_reduce(reduction) and
+             self.privileges[reduction]:has(region) and
+             self.privileges[reduction][region][field_path:slice(1, i)] then
+            return true, reduction
+          end
+        end
+      end
     end
   end
+
+  if std.is_reduce(privilege) then
+    if self:check_privilege_above(std.reads, region, field_path) and
+       self:check_privilege_above(std.writes, region, field_path) then
+      return true, privilege
+    end
+  end
+
+  return false
+end
+
+local function check_privilege_below(self, privilege, region, field_path)
+  if not (self.privileges:has(privilege) and self.privileges[privilege]:has(region)) then
+    return false
+  end
+
+  local field_type = std.get_field_path(region.fspace_type, field_path)
+  assert(field_type)
+
+  if not (field_type:isstruct() or std.is_fspace_instance(field_type)) or
+     std.is_bounded_type(field_type)then
+    return false
+  end
+
+  for _, entry in ipairs(field_type:getentries()) do
+    local subfield_name = entry[1] or entry.field
+    local subfield_path = field_path .. data.newtuple(subfield_name)
+
+    if not self.privileges[privilege][region][subfield_path] and
+       not check_privilege_below(self, privilege, region, subfield_path) then
+      return false
+    end
+  end
+
   return true
+end
+
+function region_context:check_privilege(privilege, region, field_path)
+  return self:check_privilege_above(privilege, region, field_path) or
+    check_privilege_below(self, privilege, region, field_path)
 end
 
 -- #####################################
@@ -1094,15 +1382,18 @@ function std.check_read(cx, node)
     local region_types, error_message = t:bounds()
     if region_types == nil then report.error(node, error_message) end
     local field_path = t.field_path
-    for i, region_type in ipairs(region_types) do
-      if not std.check_privilege(cx, std.reads, region_type, field_path) then
-        local regions = t.bounds_symbols
-        local ref_as_ptr = t.pointer_type.index_type(t.refers_to_type, unpack(regions))
-        report.error(node, "invalid privilege reads(" ..
-                  (data.newtuple(regions[i]) .. field_path):mkstring(".") ..
-                  ") for dereference of " .. tostring(ref_as_ptr))
+
+    cx.region_checks:insert(function(region_cx)
+      for i, region_type in ipairs(region_types) do
+        if not region_cx:check_privilege(std.reads, region_type, field_path) then
+          local regions = t.bounds_symbols
+          local ref_as_ptr = t.pointer_type.index_type(t.refers_to_type, unpack(regions))
+          report.error(node, "invalid privilege reads(" ..
+                    (data.newtuple(regions[i]) .. field_path):mkstring(".") ..
+                    ") for dereference of " .. tostring(ref_as_ptr))
+        end
       end
-    end
+    end)
   end
   return std.as_read(t)
 end
@@ -1114,15 +1405,18 @@ function std.check_write(cx, node)
     local region_types, error_message = t:bounds()
     if region_types == nil then report.error(node, error_message) end
     local field_path = t.field_path
-    for i, region_type in ipairs(region_types) do
-      if not std.check_privilege(cx, std.writes, region_type, field_path) then
-        local regions = t.bounds_symbols
-        local ref_as_ptr = t.pointer_type.index_type(t.refers_to_type, unpack(regions))
-        report.error(node, "invalid privilege writes(" ..
-                  (data.newtuple(regions[i]) .. field_path):mkstring(".") ..
-                  ") for dereference of " .. tostring(ref_as_ptr))
+
+    cx.region_checks:insert(function(region_cx)
+      for i, region_type in ipairs(region_types) do
+        if not region_cx:check_privilege(std.writes, region_type, field_path) then
+          local regions = t.bounds_symbols
+          local ref_as_ptr = t.pointer_type.index_type(t.refers_to_type, unpack(regions))
+          report.error(node, "invalid privilege writes(" ..
+                    (data.newtuple(regions[i]) .. field_path):mkstring(".") ..
+                    ") for dereference of " .. tostring(ref_as_ptr))
+        end
       end
-    end
+    end)
     return std.as_read(t)
   elseif std.is_rawref(t) then
     return std.as_read(t)
@@ -1138,15 +1432,18 @@ function std.check_reduce(cx, op, node)
     local region_types, error_message = t:bounds()
     if region_types == nil then report.error(node, error_message) end
     local field_path = t.field_path
-    for i, region_type in ipairs(region_types) do
-      if not std.check_privilege(cx, std.reduces(op), region_type, field_path) then
-        local regions = t.bounds_symbols
-        local ref_as_ptr = t.pointer_type.index_type(t.refers_to_type, unpack(regions))
-        report.error(node, "invalid privilege " .. tostring(std.reduces(op)) .. "(" ..
-                  (data.newtuple(regions[i]) .. field_path):mkstring(".") ..
-                  ") for dereference of " .. tostring(ref_as_ptr))
+
+    cx.region_checks:insert(function(region_cx)
+      for i, region_type in ipairs(region_types) do
+        if not region_cx:check_privilege(std.reduces(op), region_type, field_path) then
+          local regions = t.bounds_symbols
+          local ref_as_ptr = t.pointer_type.index_type(t.refers_to_type, unpack(regions))
+          report.error(node, "invalid privilege " .. tostring(std.reduces(op)) .. "(" ..
+                    (data.newtuple(regions[i]) .. field_path):mkstring(".") ..
+                    ") for dereference of " .. tostring(ref_as_ptr))
+        end
       end
-    end
+    end)
     return std.as_read(t)
   elseif std.is_rawref(t) then
     return std.as_read(t)

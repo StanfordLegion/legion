@@ -39,16 +39,16 @@ end
 
 function context:new_local_scope()
   local cx = {
-    constraints = self.constraints,
+    region_cx = self.region_cx,
     loop_index = false,
     loop_variables = {},
   }
   return setmetatable(cx, context)
 end
 
-function context:new_task_scope(constraints)
+function context:new_task_scope(region_cx)
   local cx = {
-    constraints = constraints,
+    region_cx = region_cx,
   }
   return setmetatable(cx, context)
 end
@@ -149,11 +149,12 @@ local function analyze_noninterference_previous(
       region_type,
       other_region_type,
       std.disjointness)
-    local exclude_variables = { [cx.loop_index] = true }
 
     if not (
         not std.type_maybe_eq(region_type.fspace_type, other_region_type.fspace_type) or
-        std.check_constraint(cx, constraint, exclude_variables) or
+        -- TODO Need to detect that the constraint holds in every iteration, not
+        -- just within one.
+        -- cx.region_cx:check_constraint(constraint) or
         check_privilege_noninterference(cx, task, arg, other_arg, mapping))
         -- Index non-interference is handled at the type checker level
         -- and is captured in the constraints.
@@ -911,7 +912,7 @@ end
 function optimize_index_launches.top_task(cx, node)
   if not node.body then return node end
 
-  local cx = cx:new_task_scope(node.prototype:get_constraints())
+  local cx = cx:new_task_scope(node.prototype:get_region_context())
   local body = optimize_index_launches.block(cx, node.body)
 
   return node { body = body }
