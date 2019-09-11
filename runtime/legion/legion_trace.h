@@ -930,18 +930,23 @@ namespace Legion {
                              const FieldMaskSet<FillView> &tracing_srcs,
                              const FieldMaskSet<InstanceView> &tracing_dsts);
       virtual void record_set_op_sync_event(ApEvent &lhs, Memoizable *memo);
+    public:
+      ApBarrier find_trace_shard_event(ApEvent event);
+      void record_trace_shard_event(ApEvent event, ApBarrier result);
     protected:
       virtual unsigned find_event(const ApEvent &event, AutoLock &tpl_lock);
       void request_remote_shard_event(ApEvent event, RtUserEvent done_event);
       static AddressSpaceID find_event_space(ApEvent event);
     public:
       ReplicateContext *const repl_ctx;
+      const size_t template_index;
       const ShardID local_shard;
       const size_t total_shards;
     private:
       static const unsigned NO_INDEX = UINT_MAX;
     protected:
       std::map<ApEvent,RtEvent> pending_event_requests;
+      std::map<ApEvent,ApBarrier> remote_barriers;
     };
 
     enum InstructionKind

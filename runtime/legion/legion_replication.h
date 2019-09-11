@@ -1803,6 +1803,14 @@ namespace Legion {
       RtEvent broadcast_resource_update(ShardTask *source, Serializer &rez);
       void handle_resource_update(Deserializer &derez);
     public:
+      void send_trace_event_request(ShardedPhysicalTemplate *physical_template,
+                          AddressSpaceID template_source, size_t template_index,
+                          ApEvent event, AddressSpaceID event_space, 
+                          RtUserEvent done_event);
+      void send_trace_event_response(ShardedPhysicalTemplate *physical_template,
+                          AddressSpaceID template_source, ApEvent event,
+                          ApBarrier result, RtUserEvent done_event);
+    public:
       static void handle_launch(const void *args);
       static void handle_delete(const void *args);
     public:
@@ -1820,6 +1828,9 @@ namespace Legion {
       static void handle_top_view_response(Deserializer &derez, Runtime *rt);
       static void handle_eq_request(Deserializer &derez, Runtime *rt);
       static void handle_resource_update(Deserializer &derez, Runtime *rt);
+      static void handle_trace_event_request(Deserializer &derez, Runtime *rt,
+                                             AddressSpaceID request_source);
+      static void handle_trace_event_response(Deserializer &derez);
     public:
       ShardingFunction* find_sharding_function(ShardingID sid);
     public:

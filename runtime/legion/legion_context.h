@@ -1660,6 +1660,7 @@ namespace Legion {
       static void handle_eq_response(Deserializer &derez, Runtime *rt);
       void handle_resource_update(Deserializer &derez,
                                   std::set<RtEvent> &applied);
+      ApBarrier handle_find_trace_shard_event(size_t temp_index, ApEvent event);
     public:
       // Collective methods
       CollectiveID get_next_collective_index(CollectiveIndexLocation loc);
@@ -1673,6 +1674,10 @@ namespace Legion {
       ReplFutureMapImpl* find_or_buffer_future_map_request(Deserializer &derez);
       void unregister_future_map(ReplFutureMapImpl *map);
       static void handle_future_map_reclaim(const void *args);
+    public:
+      // Physical template methods
+      size_t register_trace_template(ShardedPhysicalTemplate *phy_template);
+      void unregister_trace_template(size_t template_index);
     public:
       // Fence barrier methods
       RtBarrier get_next_mapping_fence_barrier(void);
@@ -1744,6 +1749,9 @@ namespace Legion {
       std::map<ApEvent,ReplFutureMapImpl*> future_maps;
       std::map<ApEvent,std::vector<
                 std::pair<void*,size_t> > > pending_future_map_requests;
+    protected:
+      std::map<size_t,ShardedPhysicalTemplate*> physical_templates;
+      size_t next_physical_template_index;
     protected:
       // Different from pending_top_views as this applies to our requests
       std::map<PhysicalManager*,RtUserEvent> pending_request_views;

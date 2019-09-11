@@ -758,6 +758,8 @@ namespace Legion {
       SEND_REPL_EQ_REQUEST,
       SEND_REPL_EQ_RESPONSE,
       SEND_REPL_RESOURCE_UPDATE,
+      SEND_REPL_TRACE_EVENT_REQUEST,
+      SEND_REPL_TRACE_EVENT_RESPONSE,
       SEND_MAPPER_MESSAGE,
       SEND_MAPPER_BROADCAST,
       SEND_TASK_IMPL_SEMANTIC_REQ,
@@ -930,6 +932,8 @@ namespace Legion {
         "Send Replicate Equivalence Set Request",                     \
         "Send Replicate Equivalence Set Response",                    \
         "Send Replicate Resource Update",                             \
+        "Send Replicate Trace Event Request",                         \
+        "Send Replicate Trace Event Response",                        \
         "Send Mapper Message",                                        \
         "Send Mapper Broadcast",                                      \
         "Send Task Impl Semantic Req",                                \
@@ -1604,6 +1608,7 @@ namespace Legion {
     class TraceViewSet;
     class TraceConditionSet;
     class PhysicalTemplate;
+    class ShardedPhysicalTemplate;
     class Instruction;
     class GetTermEvent;
     class CreateApUserEvent;

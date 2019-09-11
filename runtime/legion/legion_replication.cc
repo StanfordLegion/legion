@@ -6677,6 +6677,120 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void ShardManager::send_trace_event_request(
+        ShardedPhysicalTemplate *physical_template, 
+        AddressSpaceID template_source, size_t template_index, ApEvent event,
+        AddressSpaceID event_space, RtUserEvent done_event)
+    //--------------------------------------------------------------------------
+    {
+      // See whether we are on the right node to handle this request, if not
+      // then forward the request onto the proper node
+      if (event_space != runtime->address_space)
+      {
+#ifdef DEBUG_LEGION
+        assert(template_source == runtime->address_space);
+#endif
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(repl_id);
+          rez.serialize(physical_template);
+          rez.serialize(template_index);
+          rez.serialize(event);
+          rez.serialize(done_event);
+        }
+        runtime->send_control_replicate_trace_event_request(event_space, rez);
+      }
+      else
+      {
+        // Ask each of our local shards to check for the event in the template
+        for (std::vector<ShardTask*>::const_iterator it = 
+              local_shards.begin(); it != local_shards.end(); it++)
+        {
+          const ApBarrier result = 
+            (*it)->handle_find_trace_shard_event(template_index, event);
+          // If we found it then we are done
+          if (result.exists())
+          {
+            send_trace_event_response(physical_template, template_source,
+                event, result, done_event);
+            return;
+          }
+        }
+        // If we make it here then we didn't find it so return the result
+        send_trace_event_response(physical_template, template_source,
+            event, ApBarrier::NO_AP_BARRIER, done_event);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void ShardManager::handle_trace_event_request(
+                   Deserializer &derez, Runtime *runtime, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      ReplicationID repl_id;
+      derez.deserialize(repl_id);
+      ShardedPhysicalTemplate *physical_template;
+      derez.deserialize(physical_template);
+      size_t template_index;
+      derez.deserialize(template_index);
+      ApEvent event;
+      derez.deserialize(event);
+      RtUserEvent done_event;
+      derez.deserialize(done_event);
+
+      ShardManager *manager = runtime->find_shard_manager(repl_id);
+      manager->send_trace_event_request(physical_template, source, 
+          template_index, event, runtime->address_space, done_event);
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardManager::send_trace_event_response(
+        ShardedPhysicalTemplate *physical_template, AddressSpaceID temp_source,
+        ApEvent event, ApBarrier result, RtUserEvent done_event)
+    //--------------------------------------------------------------------------
+    {
+      if (temp_source != runtime->address_space)
+      {
+        // Not local so send the response message
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(physical_template);
+          rez.serialize(event);
+          rez.serialize(result);
+          rez.serialize(done_event);
+        }
+        runtime->send_control_replicate_trace_event_response(temp_source, rez);
+      }
+      else // This is local so handle it here
+      {
+        physical_template->record_trace_shard_event(event, result);
+        Runtime::trigger_event(done_event);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void ShardManager::handle_trace_event_response(
+                                                            Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      ShardedPhysicalTemplate *physical_template;
+      derez.deserialize(physical_template);
+      ApEvent event;
+      derez.deserialize(event);
+      ApBarrier result;
+      derez.deserialize(result);
+      RtUserEvent done_event;
+      derez.deserialize(done_event);
+
+      physical_template->record_trace_shard_event(event, result);
+      Runtime::trigger_event(done_event);
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ void ShardManager::handle_launch(const void *args)
     //--------------------------------------------------------------------------
     {

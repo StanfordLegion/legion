@@ -4145,6 +4145,7 @@ namespace Legion {
     ShardedPhysicalTemplate::ShardedPhysicalTemplate(PhysicalTrace *trace,
                                      ApEvent fence_event, ReplicateContext *ctx)
       : PhysicalTemplate(trace, fence_event), repl_ctx(ctx),
+        template_index(repl_ctx->register_trace_template(this)),
         local_shard(repl_ctx->owner_shard->shard_id), 
         total_shards(repl_ctx->shard_manager->total_shards)
     //--------------------------------------------------------------------------
@@ -4155,7 +4156,8 @@ namespace Legion {
     ShardedPhysicalTemplate::ShardedPhysicalTemplate(
                                              const ShardedPhysicalTemplate &rhs)
       : PhysicalTemplate(rhs), repl_ctx(rhs.repl_ctx), 
-        local_shard(rhs.local_shard), total_shards(rhs.total_shards)
+        template_index(rhs.template_index), local_shard(rhs.local_shard), 
+        total_shards(rhs.total_shards)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -4166,6 +4168,7 @@ namespace Legion {
     ShardedPhysicalTemplate::~ShardedPhysicalTemplate(void)
     //--------------------------------------------------------------------------
     {
+      repl_ctx->unregister_trace_template(template_index);
     }
 
     //--------------------------------------------------------------------------
@@ -4432,12 +4435,75 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    ApBarrier ShardedPhysicalTemplate::find_trace_shard_event(ApEvent event)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock tpl_lock(template_lock);
+      // Check to see if we made this event
+      std::map<ApEvent,unsigned>::const_iterator finder = 
+        event_map.find(event);
+      // If we didn't make this event then we don't do anything
+      if (finder == event_map.end())
+        return ApBarrier::NO_AP_BARRIER;
+      // If we did make it then see if we have a remote barrier for it yet
+      std::map<ApEvent,ApBarrier>::const_iterator barrier_finder = 
+        remote_barriers.find(event);
+      if (barrier_finder == remote_barriers.end())
+      {
+        // Make a new barrier and record it in the events
+        ApBarrier barrier(Realm::Barrier::create_barrier(1/*arrival count*/));
+        // TODO: Update this
+        // Record this in the instruction stream
+        //const unsigned index = convert_event(barrier);
+        // Then add a new instruction to arrive on the barrier with the
+        // event as a precondition
+        //insert_instruction(new BarrierArrival(barrier, index, finder->second));
+        // Save this in the remote barriers
+        remote_barriers[event] = barrier;
+        return barrier;
+      }
+      else
+        return barrier_finder->second;
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardedPhysicalTemplate::record_trace_shard_event(
+                                               ApEvent event, ApBarrier barrier)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock tpl_lock(template_lock);
+#ifdef DEBUG_LEGION
+      assert(event_map.find(event) == event_map.end());
+#endif
+      if (barrier.exists())
+      {
+        // TODO: Update this
+        convert_event(event);
+        //const unsigned index = convert_event(event);
+        //insert_instruction(new BarrierAdvance(barrier, index)); 
+      }
+      else // no barrier means it's not part of the trace
+        event_map[event] = NO_INDEX;
+      // Remove the pending event request
+#ifdef DEBUG_LEGION
+      std::map<ApEvent,RtEvent>::iterator finder = 
+        pending_event_requests.find(event);
+      assert(finder != pending_event_requests.end());
+      pending_event_requests.erase(finder);
+#else
+      pending_event_requests.erase(event);
+#endif
+    }
+
+    //--------------------------------------------------------------------------
     void ShardedPhysicalTemplate::request_remote_shard_event(ApEvent event,
                                                          RtUserEvent done_event)
     //--------------------------------------------------------------------------
     {
-      // TODO
-      assert(false);
+      const AddressSpaceID event_space = find_event_space(event);
+      repl_ctx->shard_manager->send_trace_event_request(this, 
+          repl_ctx->runtime->address_space, template_index, 
+          event, event_space, done_event);
     }
 
     //--------------------------------------------------------------------------

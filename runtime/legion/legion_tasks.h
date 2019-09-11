@@ -984,6 +984,7 @@ namespace Legion {
       void handle_equivalence_set_request(Deserializer &derez);
       void handle_resource_update(Deserializer &derez,
                                   std::set<RtEvent> &applied);
+      ApBarrier handle_find_trace_shard_event(size_t temp_index, ApEvent event);
     public:
       InstanceView* create_instance_top_view(PhysicalManager *manager,
                                              AddressSpaceID source);

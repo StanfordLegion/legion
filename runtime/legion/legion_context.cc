@@ -8450,7 +8450,7 @@ namespace Legion {
         index_space_allocator_shard(0), index_partition_allocator_shard(0),
         field_space_allocator_shard(0), field_allocator_shard(0),
         logical_region_allocator_shard(0), next_available_collective_index(0),
-        next_replicate_bar_index(0)
+        next_physical_template_index(0), next_replicate_bar_index(0)
     //--------------------------------------------------------------------------
     {
       // Get our allocation barriers
@@ -12560,6 +12560,29 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    ApBarrier ReplicateContext::handle_find_trace_shard_event(
+                                           size_t template_index, ApEvent event)
+    //--------------------------------------------------------------------------
+    {
+      ShardedPhysicalTemplate *physical_template = NULL;
+      {
+        AutoLock r_lock(replication_lock);
+        std::map<size_t,ShardedPhysicalTemplate*>::const_iterator finder = 
+          physical_templates.find(template_index);
+        // If we can't find the template index that means it hasn't been
+        // started here so it can't have produced the event we're looking for
+        // Note it also can't have been reclaimed yet as all the shard
+        // templates need to come to the same decision on whether they 
+        // are replayable before any of them can be deleted and so if one
+        // is still tracing then they all are
+        if (finder == physical_templates.end())
+          return ApBarrier::NO_AP_BARRIER;
+        physical_template = finder->second;
+      }
+      return physical_template->find_trace_shard_event(event);
+    }
+
+    //--------------------------------------------------------------------------
     void ReplicateContext::register_region_creations(
                                                   std::set<LogicalRegion> &regs)
     //--------------------------------------------------------------------------
@@ -13249,6 +13272,35 @@ namespace Legion {
       recl_args->ctx->unregister_future_map(recl_args->impl);
       if (recl_args->ctx->remove_reference())
         delete recl_args->ctx;
+    }
+
+    //--------------------------------------------------------------------------
+    size_t ReplicateContext::register_trace_template(
+                                     ShardedPhysicalTemplate *physical_template)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock r_lock(replication_lock);
+      const size_t index = next_physical_template_index++;
+#ifdef DEBUG_LEGION
+      assert(physical_templates.find(index) == physical_templates.end());
+#endif
+      physical_templates[index] = physical_template;
+      return index;
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplicateContext::unregister_trace_template(size_t index)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock r_lock(replication_lock);
+#ifdef DEBUG_LEGION
+      std::map<size_t,ShardedPhysicalTemplate*>::iterator finder = 
+        physical_templates.find(index);
+      assert(finder != physical_templates.end());
+      physical_templates.erase(finder);
+#else
+      physical_templates.erase(index);
+#endif
     }
 
     //--------------------------------------------------------------------------

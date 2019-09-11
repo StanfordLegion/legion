@@ -7328,6 +7328,23 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    ApBarrier ShardTask::handle_find_trace_shard_event(size_t template_index,
+                                                       ApEvent event)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(execution_context != NULL);
+      ReplicateContext *repl_ctx = 
+        dynamic_cast<ReplicateContext*>(execution_context);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = 
+        static_cast<ReplicateContext*>(execution_context);
+#endif
+      return repl_ctx->handle_find_trace_shard_event(template_index, event);
+    }
+
+    //--------------------------------------------------------------------------
     InstanceView* ShardTask::create_instance_top_view(PhysicalManager *manager,
                                                       AddressSpaceID source)
     //--------------------------------------------------------------------------
