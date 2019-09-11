@@ -20,6 +20,7 @@
 #include "legion.h"
 #include "legion/legion_ops.h"
 #include "legion/legion_analysis.h"
+#include "legion/legion_allocation.h"
 
 namespace Legion {
   namespace Internal {
@@ -488,6 +489,7 @@ namespace Legion {
     public:
       Runtime * const runtime;
       const LegionTrace *logical_trace;
+      ReplicateContext *const repl_ctx;
     private:
       mutable LocalLock trace_lock;
       PhysicalTemplate* current_template;
@@ -610,7 +612,7 @@ namespace Legion {
     public:
       PhysicalTemplate(PhysicalTrace *trace, ApEvent fence_event);
       PhysicalTemplate(const PhysicalTemplate &rhs);
-    private:
+    protected:
       virtual ~PhysicalTemplate(void);
     public:
       void initialize(Runtime *runtime, ApEvent fence_completion,
@@ -794,9 +796,9 @@ namespace Legion {
       TraceLocalID find_trace_local_id(Memoizable *memo);
       unsigned find_memo_entry(Memoizable *memo);
       TraceLocalID record_memo_entry(Memoizable *memo, unsigned entry);
-    private:
+    protected:
       unsigned convert_event(const ApEvent &event);
-      unsigned find_event(const ApEvent &event) const;
+      virtual unsigned find_event(const ApEvent &event, AutoLock &tpl_lock);
       void insert_instruction(Instruction *inst);
     private:
       void find_all_last_users(ViewExprs &view_exprs,
@@ -812,8 +814,10 @@ namespace Legion {
       PhysicalTrace * const trace;
       volatile bool recording;
       Replayable replayable;
+    protected:
       mutable LocalLock template_lock;
       const unsigned fence_completion_id;
+    private:
       const unsigned replay_parallelism;
     private:
       std::map<TraceLocalID,Memoizable*> operations;
@@ -824,6 +828,7 @@ namespace Legion {
       ApEvent                    fence_completion;
       std::vector<ApEvent>       events;
       std::vector<ApUserEvent>   user_events;
+    protected:
       std::map<ApEvent,unsigned> event_map;
     private:
       std::vector<Instruction*>               instructions;
@@ -860,6 +865,83 @@ namespace Legion {
     private:
       friend class PhysicalTrace;
       friend class Instruction;
+    };
+
+    /**
+     * \class ShardedPhysicalTemplate
+     * This is an extension of the PhysicalTemplate class for handling
+     * templates for control replicated contexts. It mostly behaves the
+     * same as a normal PhysicalTemplate but has some additional 
+     * extensions for handling the effects of control replication.
+     */
+    class ShardedPhysicalTemplate : public PhysicalTemplate {
+    public:
+      ShardedPhysicalTemplate(PhysicalTrace *trace, ApEvent fence_event,
+                              ReplicateContext *repl_ctx);
+      ShardedPhysicalTemplate(const ShardedPhysicalTemplate &rhs);
+    protected:
+      virtual ~ShardedPhysicalTemplate(void);
+    public:
+      // Have to provide explicit overrides of operator new and 
+      // delete here to make sure we get the right ones. C++ does
+      // not let us have these in a sub-class or it doesn't know
+      // which ones to pick from.
+      static inline void* operator new(size_t count)
+      { return legion_alloc_aligned<ShardedPhysicalTemplate,true>(count); }
+      static inline void operator delete(void *ptr)
+      { free(ptr); }
+    public:
+      virtual void record_merge_events(ApEvent &lhs, 
+                            const std::set<ApEvent>& rhs, Memoizable *memo);
+      virtual void record_issue_copy(Memoizable *memo,
+                             unsigned src_idx,
+                             unsigned dst_idx,
+                             ApEvent &lhs,
+                             IndexSpaceExpression *expr,
+                             const std::vector<CopySrcDstField>& src_fields,
+                             const std::vector<CopySrcDstField>& dst_fields,
+#ifdef LEGION_SPY
+                             FieldSpace handle,
+                             RegionTreeID src_tree_id,
+                             RegionTreeID dst_tree_id,
+#endif
+                             ApEvent precondition,
+                             ReductionOpID redop,
+                             bool reduction_fold,
+                             const FieldMaskSet<InstanceView> &tracing_srcs,
+                             const FieldMaskSet<InstanceView> &tracing_dsts);
+      virtual void record_issue_indirect(Memoizable *memo, ApEvent &lhs,
+                             IndexSpaceExpression *expr,
+                             const std::vector<CopySrcDstField>& src_fields,
+                             const std::vector<CopySrcDstField>& dst_fields,
+                             const std::vector<void*> &indirections,
+                             ApEvent precondition);
+      virtual void record_issue_fill(Memoizable *memo, unsigned idx,
+                             ApEvent &lhs,
+                             IndexSpaceExpression *expr,
+                             const std::vector<CopySrcDstField> &fields,
+                             const void *fill_value, size_t fill_size,
+#ifdef LEGION_SPY
+                             UniqueID fill_uid,
+                             FieldSpace handle,
+                             RegionTreeID tree_id,
+#endif
+                             ApEvent precondition,
+                             const FieldMaskSet<FillView> &tracing_srcs,
+                             const FieldMaskSet<InstanceView> &tracing_dsts);
+      virtual void record_set_op_sync_event(ApEvent &lhs, Memoizable *memo);
+    protected:
+      virtual unsigned find_event(const ApEvent &event, AutoLock &tpl_lock);
+      void request_remote_shard_event(ApEvent event, RtUserEvent done_event);
+      static AddressSpaceID find_event_space(ApEvent event);
+    public:
+      ReplicateContext *const repl_ctx;
+      const ShardID local_shard;
+      const size_t total_shards;
+    private:
+      static const unsigned NO_INDEX = UINT_MAX;
+    protected:
+      std::map<ApEvent,RtEvent> pending_event_requests;
     };
 
     enum InstructionKind

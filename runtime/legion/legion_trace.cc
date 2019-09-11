@@ -24,6 +24,8 @@
 #include "legion/legion_context.h"
 #include "legion/legion_replication.h"
 
+#include "realm/id.h" // TODO: remove this hackiness
+
 namespace Legion {
   namespace Internal {
 
@@ -1747,8 +1749,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     PhysicalTrace::PhysicalTrace(Runtime *rt, LegionTrace *lt)
-      : runtime(rt), logical_trace(lt), current_template(NULL),
-        nonreplayable_count(0),
+      : runtime(rt), logical_trace(lt), 
+        repl_ctx(dynamic_cast<ReplicateContext*>(lt->ctx)),
+        current_template(NULL), nonreplayable_count(0),
         previous_template_completion(ApEvent::NO_AP_EVENT),
         execution_fence_event(ApEvent::NO_AP_EVENT)
     //--------------------------------------------------------------------------
@@ -1768,8 +1771,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     PhysicalTrace::PhysicalTrace(const PhysicalTrace &rhs)
-      : runtime(NULL), logical_trace(NULL), current_template(NULL),
-        nonreplayable_count(0),
+      : runtime(NULL), logical_trace(NULL), repl_ctx(NULL), 
+        current_template(NULL), nonreplayable_count(0),
         previous_template_completion(ApEvent::NO_AP_EVENT),
         execution_fence_event(ApEvent::NO_AP_EVENT)
     //--------------------------------------------------------------------------
@@ -1794,6 +1797,7 @@ namespace Legion {
     {
       // should never be called
       assert(false);
+      return *this;
     }
 
     //--------------------------------------------------------------------------
@@ -1888,7 +1892,12 @@ namespace Legion {
     PhysicalTemplate* PhysicalTrace::start_new_template(void)
     //--------------------------------------------------------------------------
     {
-      current_template = new PhysicalTemplate(this, execution_fence_event);
+      // If we have a replicated context then we are making sharded templates
+      if (repl_ctx != NULL)
+        current_template = 
+          new ShardedPhysicalTemplate(this, execution_fence_event, repl_ctx);
+      else
+        current_template = new PhysicalTemplate(this, execution_fence_event);
       return current_template;
     }
 
@@ -3452,10 +3461,11 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(is_recording());
 #endif
-
+      // Do this first in case it gets pre-empted
+      const unsigned rhs_ = find_event(rhs, tpl_lock);
+      unsigned lhs_ = find_event(lhs, tpl_lock);
       events.push_back(ApEvent());
-      unsigned lhs_ = find_event(lhs);
-      insert_instruction(new TriggerEvent(*this, lhs_, find_event(rhs),
+      insert_instruction(new TriggerEvent(*this, lhs_, rhs_,
             instructions[lhs_]->owner));
     }
 
@@ -3521,12 +3531,9 @@ namespace Legion {
 #ifndef LEGION_DISABLE_EVENT_PRUNING
       if (!lhs.exists() || (rhs.find(lhs) != rhs.end()))
       {
-        Realm::UserEvent rename(Realm::UserEvent::create_user_event());
-        if (rhs.find(lhs) != rhs.end())
-          rename.trigger(lhs);
-        else
-          rename.trigger();
-        lhs = ApEvent(rename);
+        ApUserEvent rename = Runtime::create_ap_user_event();
+        Runtime::trigger_event(rename, lhs);
+        lhs = rename;
       }
 #endif
 
@@ -3559,16 +3566,17 @@ namespace Legion {
 #endif
       if (!lhs.exists())
       {
-        Realm::UserEvent rename(Realm::UserEvent::create_user_event());
-        rename.trigger();
-        lhs = ApEvent(rename);
+        ApUserEvent rename = Runtime::create_ap_user_event();
+        Runtime::trigger_event(rename);
+        lhs = rename;
       }
 
       AutoLock tpl_lock(template_lock);
 #ifdef DEBUG_LEGION
       assert(is_recording());
 #endif
-
+      // Do this first in case it gets preempted
+      const unsigned rhs_ = find_event(precondition, tpl_lock);
       unsigned lhs_ = convert_event(lhs);
       insert_instruction(new IssueCopy(
             *this, lhs_, expr, find_trace_local_id(memo),
@@ -3576,7 +3584,7 @@ namespace Legion {
 #ifdef LEGION_SPY
             handle, src_tree_id, dst_tree_id,
 #endif
-            find_event(precondition), redop, reduction_fold));
+            rhs_, redop, reduction_fold));
 
       record_views(memo, src_idx, lhs_, expr,
           RegionUsage(READ_ONLY, EXCLUSIVE, 0), tracing_srcs);
@@ -3622,15 +3630,16 @@ namespace Legion {
 #endif
       if (!lhs.exists())
       {
-        Realm::UserEvent rename(Realm::UserEvent::create_user_event());
-        rename.trigger();
-        lhs = ApEvent(rename);
+        ApUserEvent rename = Runtime::create_ap_user_event();
+        Runtime::trigger_event(rename);
+        lhs = rename;
       }
       AutoLock tpl_lock(template_lock);
 #ifdef DEBUG_LEGION
       assert(is_recording());
 #endif
-
+      // Do this first in case it gets preempted
+      const unsigned rhs_ = find_event(precondition, tpl_lock);
       unsigned lhs_ = convert_event(lhs);
       insert_instruction(new IssueFill(*this, lhs_, expr,
                                        find_trace_local_id(memo),
@@ -3638,7 +3647,7 @@ namespace Legion {
 #ifdef LEGION_SPY
                                        fill_uid, handle, tree_id,
 #endif
-                                       find_event(precondition)));
+                                       rhs_));
 
       record_fill_views(tracing_srcs);
       record_views(memo, idx, lhs_, expr,
@@ -3674,9 +3683,9 @@ namespace Legion {
 
       ApEvent lhs;
       {
-        Realm::UserEvent e(Realm::UserEvent::create_user_event());
-        e.trigger();
-        lhs = ApEvent(e);
+        ApUserEvent rename = Runtime::create_ap_user_event();
+        Runtime::trigger_event(rename);
+        lhs = rename;
       }
       unsigned lhs_ = convert_event(lhs);
       insert_instruction(new IssueFill(*this, lhs_, expr, op_key,
@@ -3941,9 +3950,9 @@ namespace Legion {
 #endif
       if (!lhs.exists())
       {
-        Realm::UserEvent rename(Realm::UserEvent::create_user_event());
-        rename.trigger();
-        lhs = ApEvent(rename);
+        ApUserEvent rename = Runtime::create_ap_user_event();
+        Runtime::trigger_event(rename);
+        lhs = rename;
       }
       AutoLock tpl_lock(template_lock);
 #ifdef DEBUG_LEGION
@@ -3965,14 +3974,15 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(is_recording());
 #endif
-
+      // Do this first in case it gets preempted
+      const unsigned rhs_ = find_event(rhs, tpl_lock);
       events.push_back(ApEvent());
       Memoizable *memo = op->get_memoizable();
 #ifdef DEBUG_LEGION
       assert(memo != NULL);
 #endif
       TraceLocalID lhs = find_trace_local_id(memo);
-      insert_instruction(new CompleteReplay(*this, lhs, find_event(rhs)));
+      insert_instruction(new CompleteReplay(*this, lhs, rhs_));
     }
 
     //--------------------------------------------------------------------------
@@ -4062,7 +4072,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    inline unsigned PhysicalTemplate::find_event(const ApEvent &event) const
+    inline unsigned PhysicalTemplate::find_event(const ApEvent &event, 
+                                                 AutoLock &tpl_lock)
     //--------------------------------------------------------------------------
     {
       std::map<ApEvent, unsigned>::const_iterator finder= event_map.find(event);
@@ -4124,6 +4135,318 @@ namespace Legion {
             users.insert(finder->second);
           }
         }
+    }
+
+    /////////////////////////////////////////////////////////////
+    // ShardedPhysicalTemplate
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    ShardedPhysicalTemplate::ShardedPhysicalTemplate(PhysicalTrace *trace,
+                                     ApEvent fence_event, ReplicateContext *ctx)
+      : PhysicalTemplate(trace, fence_event), repl_ctx(ctx),
+        local_shard(repl_ctx->owner_shard->shard_id), 
+        total_shards(repl_ctx->shard_manager->total_shards)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    ShardedPhysicalTemplate::ShardedPhysicalTemplate(
+                                             const ShardedPhysicalTemplate &rhs)
+      : PhysicalTemplate(rhs), repl_ctx(rhs.repl_ctx), 
+        local_shard(rhs.local_shard), total_shards(rhs.total_shards)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    ShardedPhysicalTemplate::~ShardedPhysicalTemplate(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardedPhysicalTemplate::record_merge_events(ApEvent &lhs,
+                                 const std::set<ApEvent> &rhs, Memoizable *memo)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(memo != NULL);
+#endif
+      AutoLock tpl_lock(template_lock);
+#ifdef DEBUG_LEGION
+      assert(is_recording());
+#endif
+      std::set<unsigned> rhs_;
+      std::set<RtEvent> wait_for;
+      std::vector<ApEvent> pending_events;
+      std::map<ApEvent,RtUserEvent> request_events;
+      for (std::set<ApEvent>::const_iterator it =
+            rhs.begin(); it != rhs.end(); it++)
+      {
+        std::map<ApEvent, unsigned>::iterator finder = event_map.find(*it);
+        if (finder == event_map.end())
+        {
+          // We're going to need to check this event later
+          pending_events.push_back(*it);
+          // See if anyone else has requested this event yet 
+          std::map<ApEvent,RtEvent>::const_iterator request_finder = 
+            pending_event_requests.find(*it);
+          if (request_finder == pending_event_requests.end())
+          {
+            const RtUserEvent request_event = Runtime::create_rt_user_event();
+            wait_for.insert(request_event);
+            request_events[*it] = request_event;
+          }
+          else
+            wait_for.insert(request_finder->second);
+        }
+        else if (finder->second != NO_INDEX)
+          rhs_.insert(finder->second);
+      }
+      // If we have anything to wait for we need to do that
+      if (!wait_for.empty())
+      {
+        tpl_lock.release();
+        // Send any request messages first
+        if (!request_events.empty())
+        {
+          for (std::map<ApEvent,RtUserEvent>::const_iterator it = 
+                request_events.begin(); it != request_events.end(); it++)
+            request_remote_shard_event(it->first, it->second);
+        }
+        // Do the wait
+        const RtEvent wait_on = Runtime::merge_events(wait_for);
+        if (wait_on.exists() && !wait_on.has_triggered())
+          wait_on.wait();
+        tpl_lock.reacquire();
+        // All our pending events should be here now
+        for (std::vector<ApEvent>::const_iterator it = 
+              pending_events.begin(); it != pending_events.end(); it++)
+        {
+          std::map<ApEvent,unsigned>::iterator finder = event_map.find(*it);
+#ifdef DEBUG_LEGION
+          assert(finder != event_map.end());
+#endif
+          if (finder->second != NO_INDEX)
+            rhs_.insert(finder->second);
+        }
+      }
+      if (rhs_.size() == 0)
+        rhs_.insert(fence_completion_id);
+      
+      // If the lhs event wasn't made on this node then we need to rename it
+      // because we need all events to go back to a node where we know that
+      // we have a shard that can answer queries about it
+      const AddressSpaceID event_space = find_event_space(lhs);
+      if (event_space != repl_ctx->runtime->address_space)
+      {
+        ApUserEvent rename = Runtime::create_ap_user_event();
+        Runtime::trigger_event(rename, lhs);
+        lhs = rename;
+      }
+#ifndef LEGION_DISABLE_EVENT_PRUNING
+      else if (!lhs.exists() || (rhs.find(lhs) != rhs.end()))
+      {
+        ApUserEvent rename = Runtime::create_ap_user_event();
+        Runtime::trigger_event(rename, lhs);
+        lhs = rename;
+      }
+#endif
+      insert_instruction(new MergeEvent(*this, convert_event(lhs), rhs_,
+            memo->get_trace_local_id()));
+    }
+
+    //--------------------------------------------------------------------------
+    unsigned ShardedPhysicalTemplate::find_event(const ApEvent &event,
+                                                 AutoLock &tpl_lock)
+    //--------------------------------------------------------------------------
+    {
+      std::map<ApEvent, unsigned>::const_iterator finder = 
+        event_map.find(event);
+      // If we've already got it then we're done
+      if (finder != event_map.end())
+      {
+#ifdef DEBUG_LEGION
+        assert(finder->second != NO_INDEX);
+#endif
+        return finder->second;
+      }
+      // If we don't have it then we need to request it
+      // See if someone else already sent the request
+      RtEvent wait_for;
+      RtUserEvent request_event;
+      std::map<ApEvent,RtEvent>::const_iterator request_finder = 
+        pending_event_requests.find(event);
+      if (request_finder == pending_event_requests.end())
+      {
+        // We're the first ones so send the request
+        request_event = Runtime::create_rt_user_event();
+        wait_for = request_event;
+        pending_event_requests[event] = wait_for;
+      }
+      else
+        wait_for = request_finder->second;
+      // Can't be holding the lock while we wait
+      tpl_lock.release();
+      // Send the request if necessary
+      if (request_event.exists())
+        request_remote_shard_event(event, request_event);
+      wait_for.wait();
+      tpl_lock.reacquire();
+      // Once we get here then there better be an answer
+      finder = event_map.find(event);
+#ifdef DEBUG_LEGION
+      assert(finder != event_map.end());
+      assert(finder->second != NO_INDEX);
+#endif
+      return finder->second;
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardedPhysicalTemplate::record_issue_copy(Memoizable *memo,
+                                             unsigned src_idx,
+                                             unsigned dst_idx,
+                                             ApEvent &lhs,
+                                             IndexSpaceExpression *expr,
+                                 const std::vector<CopySrcDstField>& src_fields,
+                                 const std::vector<CopySrcDstField>& dst_fields,
+#ifdef LEGION_SPY
+                                             FieldSpace handle,
+                                             RegionTreeID src_tree_id,
+                                             RegionTreeID dst_tree_id,
+#endif
+                                             ApEvent precondition,
+                                             ReductionOpID redop,
+                                             bool reduction_fold,
+                                 const FieldMaskSet<InstanceView> &tracing_srcs,
+                                 const FieldMaskSet<InstanceView> &tracing_dsts)
+    //--------------------------------------------------------------------------
+    {
+      // Make sure the lhs event is local to our shard
+      if (lhs.exists())
+      {
+        const AddressSpaceID event_space = find_event_space(lhs);
+        if (event_space != repl_ctx->runtime->address_space)
+        {
+          ApUserEvent rename = Runtime::create_ap_user_event();
+          Runtime::trigger_event(rename, lhs);
+          lhs = rename;
+        }
+      }
+      // Then do the base call
+      PhysicalTemplate::record_issue_copy(memo, src_idx, dst_idx, lhs, expr,
+                                          src_fields, dst_fields,
+#ifdef LEGION_SPY
+                                          handle, src_tree_id, dst_tree_id,
+#endif
+                                          precondition, redop, reduction_fold,
+                                          tracing_srcs, tracing_dsts);
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardedPhysicalTemplate::record_issue_indirect(Memoizable *memo, 
+                             ApEvent &lhs, IndexSpaceExpression *expr,
+                             const std::vector<CopySrcDstField>& src_fields,
+                             const std::vector<CopySrcDstField>& dst_fields,
+                             const std::vector<void*> &indirections,
+                             ApEvent precondition)
+    //--------------------------------------------------------------------------
+    {
+      // Make sure the lhs event is local to our shard
+      if (lhs.exists())
+      {
+        const AddressSpaceID event_space = find_event_space(lhs);
+        if (event_space != repl_ctx->runtime->address_space)
+        {
+          ApUserEvent rename = Runtime::create_ap_user_event();
+          Runtime::trigger_event(rename, lhs);
+          lhs = rename;
+        }
+      }
+      // Then do the base call
+      PhysicalTemplate::record_issue_indirect(memo, lhs, expr, src_fields,
+                                    dst_fields, indirections, precondition);
+    }
+    
+    //--------------------------------------------------------------------------
+    void ShardedPhysicalTemplate::record_issue_fill(Memoizable *memo,
+                                             unsigned idx,
+                                             ApEvent &lhs,
+                                             IndexSpaceExpression *expr,
+                                 const std::vector<CopySrcDstField> &fields,
+                                             const void *fill_value, 
+                                             size_t fill_size,
+#ifdef LEGION_SPY
+                                             UniqueID fill_uid,
+                                             FieldSpace handle,
+                                             RegionTreeID tree_id,
+#endif
+                                             ApEvent precondition,
+                                 const FieldMaskSet<FillView> &tracing_srcs,
+                                 const FieldMaskSet<InstanceView> &tracing_dsts)
+    //--------------------------------------------------------------------------
+    {
+      // Make sure the lhs event is local to our shard
+      if (lhs.exists())
+      {
+        const AddressSpaceID event_space = find_event_space(lhs);
+        if (event_space != repl_ctx->runtime->address_space)
+        {
+          ApUserEvent rename = Runtime::create_ap_user_event();
+          Runtime::trigger_event(rename, lhs);
+          lhs = rename;
+        }
+      }
+      // Then do the base call
+      PhysicalTemplate::record_issue_fill(memo, idx, lhs, expr, fields,
+                                          fill_value, fill_size,
+#ifdef LEGION_SPY
+                                          fill_uid, handle, tree_id,
+#endif
+                                          precondition, tracing_srcs, 
+                                          tracing_dsts);
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardedPhysicalTemplate::record_set_op_sync_event(ApEvent &lhs, 
+                                                           Memoizable *memo)
+    //--------------------------------------------------------------------------
+    {
+      // Make sure the lhs event is local to our shard
+      if (lhs.exists())
+      {
+        const AddressSpaceID event_space = find_event_space(lhs);
+        if (event_space != repl_ctx->runtime->address_space)
+        {
+          ApUserEvent rename = Runtime::create_ap_user_event();
+          Runtime::trigger_event(rename, lhs);
+          lhs = rename;
+        }
+      }
+      // Then do the base call
+      PhysicalTemplate::record_set_op_sync_event(lhs, memo);
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardedPhysicalTemplate::request_remote_shard_event(ApEvent event,
+                                                         RtUserEvent done_event)
+    //--------------------------------------------------------------------------
+    {
+      // TODO
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ AddressSpaceID ShardedPhysicalTemplate::find_event_space(
+                                                                  ApEvent event)
+    //--------------------------------------------------------------------------
+    {
+      // TODO: Remove hack include at top of file when we fix this 
+      return Realm::ID(event.id).event_creator_node();
     }
 
     /////////////////////////////////////////////////////////////
