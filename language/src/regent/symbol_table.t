@@ -69,6 +69,11 @@ function symbol_table:insert(node, index, value)
   return value
 end
 
+function symbol_table:force_insert(index, value)
+  rawset(self.local_env, index, value)
+  return value
+end
+
 function symbol_table:env()
   return self.combined_env
 end

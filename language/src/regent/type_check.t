@@ -21,6 +21,7 @@ local pretty = require("regent/pretty")
 local report = require("common/report")
 local std = require("regent/std")
 local symbol_table = require("regent/symbol_table")
+local dataflow = require("regent/dataflow")
 
 local type_check = {}
 
@@ -38,12 +39,16 @@ function context:__newindex(field, value)
   error("context has no field '" .. field .. "' (in assignment)", 2)
 end
 
-function context:new_local_scope(must_epoch, breakable_loop)
+function context:new_local_scope(must_epoch, breakable_loop, break_footer)
   assert(not (self.must_epoch and must_epoch))
+  assert(breakable_loop or not break_footer)
+
   must_epoch = self.must_epoch or must_epoch or false
   breakable_loop = self.breakable_loop or breakable_loop or false
   local cx = {
     type_env = self.type_env:new_local_scope(),
+    region_env = self.region_env:new_local_scope(),
+
     privileges = self.privileges,
     constraints = self.constraints,
     region_universe = self.region_universe,
@@ -52,7 +57,21 @@ function context:new_local_scope(must_epoch, breakable_loop)
     must_epoch = must_epoch,
     breakable_loop = breakable_loop,
     external = self.external,
+
+    break_footer = self.break_footer,
+    return_footer = self.return_footer,
   }
+
+  if breakable_loop then
+    cx.break_footer = break_footer or false
+  end
+  if break_footer then
+    function cx.return_footer(...)
+      break_footer(...)
+      self.return_footer(...)
+    end
+  end
+
   setmetatable(cx, context)
   return cx
 end
@@ -60,6 +79,8 @@ end
 function context:new_task_scope(expected_return_type)
   local cx = {
     type_env = self.type_env:new_local_scope(),
+    region_env = self.region_env:new_local_scope(),
+
     privileges = data.newmap(),
     constraints = data.new_recursive_map(2),
     region_universe = data.newmap(),
@@ -68,6 +89,9 @@ function context:new_task_scope(expected_return_type)
     must_epoch = false,
     breakable_loop = false,
     external = false,
+
+    break_footer = false,
+    return_footer = function() end,
   }
   setmetatable(cx, context)
   return cx
@@ -76,6 +100,7 @@ end
 function context.new_global_scope(type_env)
   local cx = {
     type_env = symbol_table.new_global_scope(type_env),
+    region_env = symbol_table.new_global_scope({}),
   }
   setmetatable(cx, context)
   return cx
@@ -420,10 +445,13 @@ function type_check.constraints(cx, node)
 end
 
 function type_check.expr_id(cx, node)
-  local expr_type = cx.type_env:lookup(node, node.value)
+  local value = node.value
+  value = cx.region_env:safe_lookup(value) or value
+
+  local expr_type = cx.type_env:lookup(node, value)
 
   return ast.typed.expr.ID {
-    value = node.value,
+    value = value,
     expr_type = expr_type,
     annotations = node.annotations,
     span = node.span,
@@ -3432,15 +3460,86 @@ function type_check.expr(cx, node)
   return type_check_expr(cx)(node)
 end
 
-function type_check.block(cx, node)
+function type_check.block(cx, node, footer)
+  local typed_stats = terralib.newlist()
+  for _, stat in ipairs(node.stats) do
+    local typed_stat = type_check.stat(cx, stat)
+
+    if terralib.islist(typed_stat) then
+      typed_stats:insertall(typed_stat)
+    else
+      typed_stats:insert(typed_stat)
+    end
+  end
+
+  if footer then
+    footer(cx, typed_stats)
+  end
+
   return ast.typed.Block {
-    stats = node.stats:map(
-      function(stat) return type_check.stat(cx, stat) end),
+    stats = typed_stats,
     span = node.span,
   }
 end
 
+function type_check.declare_phi_vars(cx, node, changed_regions, stats, region_mapping)
+  for region in pairs(changed_regions) do
+    local old_type = region:gettype()
+    --local type = std.region(std.newsymbol(old_type:ispace(), old_type.ispace_symbol.hasname()), old_type:fspace())
+    local type = std.region(old_type.ispace_symbol, old_type:fspace())
+    local renamed_region = std.newsymbol(type, region:getname())
+    cx.type_env:insert(node, renamed_region, std.rawref(&type))
+    region_mapping[region] = renamed_region
+
+    local decl = ast.typed.stat.Var {
+      symbol = renamed_region,
+      type = type,
+      value = false,
+      annotations = node.annotations,
+      span = node.span,
+    }
+    stats:insert(decl)
+  end
+end
+
+function type_check.use_phi_vars(cx, node, region_mapping)
+  for region, renamed_region in pairs(region_mapping) do
+    cx.region_env:force_insert(region, renamed_region)
+  end
+end
+
+function type_check.write_phi_vars(cx, node, region_mapping, stats)
+  for region, renamed_region in pairs(region_mapping) do
+    local assign = ast.typed.stat.Assignment {
+      lhs = ast.typed.expr.ID {
+        value = renamed_region,
+        expr_type = cx.type_env:lookup(node, renamed_region),
+        annotations = node.annotations,
+        span = node.span,
+      },
+
+      rhs = type_check.expr(cx, ast.specialized.expr.ID {
+        value = region,
+        annotations = node.annotations,
+        span = node.span,
+      }),
+
+      metadata = false,
+      annotations = node.annotations,
+      span = node.span,
+    }
+    stats:insert(assign)
+  end
+end
+
 function type_check.stat_if(cx, node)
+  local changed_regions = {}
+  type_check.changed_regions(cx, node, changed_regions)
+
+  local stats = terralib.newlist()
+  local region_mapping = {}
+  type_check.declare_phi_vars(cx, node, changed_regions, stats, region_mapping)
+
   local cond = type_check.expr(cx, node.cond)
   local cond_type = std.check_read(cx, cond)
   if not std.validate_implicit_cast(cond_type, bool) then
@@ -3448,20 +3547,28 @@ function type_check.stat_if(cx, node)
   end
   cond = insert_implicit_cast(cond, cond_type, bool)
 
+  local function footer(cx, stats)
+    type_check.write_phi_vars(cx, node, region_mapping, stats)
+  end
+
   local then_cx = cx:new_local_scope()
   local else_cx = cx:new_local_scope()
-  return ast.typed.stat.If {
+  local if_stat = ast.typed.stat.If {
     cond = cond,
-    then_block = type_check.block(then_cx, node.then_block),
+    then_block = type_check.block(then_cx, node.then_block, footer),
     elseif_blocks = node.elseif_blocks:map(
-      function(block) return type_check.stat_elseif(cx, block) end),
-    else_block = type_check.block(else_cx, node.else_block),
+      function(block) return type_check.stat_elseif(cx, block, footer) end),
+    else_block = type_check.block(else_cx, node.else_block, footer),
     annotations = node.annotations,
     span = node.span,
   }
+  stats:insert(if_stat)
+
+  type_check.use_phi_vars(cx, node, region_mapping)
+  return stats
 end
 
-function type_check.stat_elseif(cx, node)
+function type_check.stat_elseif(cx, node, footer)
   local cond = type_check.expr(cx, node.cond)
   local cond_type = std.check_read(cx, cond)
   if not std.validate_implicit_cast(cond_type, bool) then
@@ -3472,13 +3579,41 @@ function type_check.stat_elseif(cx, node)
   local body_cx = cx:new_local_scope()
   return ast.typed.stat.Elseif {
     cond = cond,
-    block = type_check.block(body_cx, node.block),
+    block = type_check.block(body_cx, node.block, footer),
     annotations = node.annotations,
     span = node.span,
   }
 end
 
+function type_check.make_loop_footers(cx, node, stats)
+  local out = {}
+
+  out.changed_regions = {}
+  type_check.changed_regions(cx, node, out.changed_regions)
+
+  out.region_mapping_inner = {}
+  out.region_mapping_after = {}
+  type_check.declare_phi_vars(cx, node, out.changed_regions, stats, out.region_mapping_inner)
+  type_check.declare_phi_vars(cx, node, out.changed_regions, stats, out.region_mapping_after)
+
+  function out.break_footer(cx, stats)
+    type_check.write_phi_vars(cx, node, out.region_mapping_after, stats)
+  end
+
+  function out.footer(cx, stats)
+    type_check.write_phi_vars(cx, node, out.region_mapping_inner, stats)
+    out.break_footer(cx, stats)
+  end
+
+  out.footer(cx, stats)
+  type_check.use_phi_vars(cx, node, out.region_mapping_inner)
+  return out
+end
+
 function type_check.stat_while(cx, node)
+  local stats = terralib.newlist()
+  local footers = type_check.make_loop_footers(cx, node, stats)
+
   local cond = type_check.expr(cx, node.cond)
   local cond_type = std.check_read(cx, cond)
   if not std.validate_implicit_cast(cond_type, bool) then
@@ -3486,13 +3621,17 @@ function type_check.stat_while(cx, node)
   end
   cond = insert_implicit_cast(cond, cond_type, bool)
 
-  local body_cx = cx:new_local_scope(nil, true)
-  return ast.typed.stat.While {
+  local body_cx = cx:new_local_scope(nil, true, footers.break_footer)
+  local while_stat = ast.typed.stat.While {
     cond = cond,
-    block = type_check.block(body_cx, node.block),
+    block = type_check.block(body_cx, node.block, footers.footer),
     annotations = node.annotations,
     span = node.span,
   }
+  stats:insert(while_stat)
+
+  type_check.use_phi_vars(cx, node, footers.region_mapping_after)
+  return stats
 end
 
 function type_check.stat_for_num(cx, node)
@@ -3507,11 +3646,14 @@ function type_check.stat_for_num(cx, node)
     end
   end
 
+  local stats = terralib.newlist()
+  local footers = type_check.make_loop_footers(cx, node, stats)
+
   -- Enter scope for header.
-  local cx = cx:new_local_scope()
+  local header_cx = cx:new_local_scope()
   local var_type = node.symbol:hastype() or value_types[1]
   if value_types[3] then
-    var_type = binary_op_type("+")(cx, node, var_type, value_types[3])
+    var_type = binary_op_type("+")(header_cx, node, var_type, value_types[3])
   end
   if not var_type:isintegral() then
     report.error(node, "numeric for loop expected integral type, got " .. tostring(var_type))
@@ -3520,18 +3662,22 @@ function type_check.stat_for_num(cx, node)
     node.symbol:settype(var_type)
   end
   assert(std.type_eq(var_type, node.symbol:gettype()))
-  cx.type_env:insert(node, node.symbol, var_type)
+  header_cx.type_env:insert(node, node.symbol, var_type)
 
   -- Enter scope for body.
-  local cx = cx:new_local_scope(nil, true)
-  return ast.typed.stat.ForNum {
+  local body_cx = header_cx:new_local_scope(nil, true, footers.break_footer)
+  local for_stat = ast.typed.stat.ForNum {
     symbol = node.symbol,
     values = values,
-    block = type_check.block(cx, node.block),
+    block = type_check.block(body_cx, node.block, footers.footer),
     metadata = false,
     annotations = node.annotations,
     span = node.span,
   }
+  stats:insert(for_stat)
+
+  type_check.use_phi_vars(cx, node, footers.region_mapping_after)
+  return stats
 end
 
 function type_check.stat_for_list(cx, node)
@@ -3545,8 +3691,11 @@ function type_check.stat_for_list(cx, node)
                 tostring(value_type))
   end
 
+  local stats = terralib.newlist()
+  local footers = type_check.make_loop_footers(cx, node, stats)
+
   -- Enter scope for header.
-  local cx = cx:new_local_scope()
+  local header_cx = cx:new_local_scope()
 
   -- Hack: Try to recover the original symbol for this bound if possible
   local bound
@@ -3585,23 +3734,33 @@ function type_check.stat_for_list(cx, node)
     node.symbol:settype(var_type)
   end
   assert(std.type_eq(var_type, node.symbol:gettype()))
-  cx.type_env:insert(node, node.symbol, var_type)
+  header_cx.type_env:insert(node, node.symbol, var_type)
+  if std.is_region(var_type) then
+    header_cx.region_env:insert(node, node.symbol, node.symbol)
+  end
 
   -- Enter scope for body.
-  local cx = cx:new_local_scope(nil, true)
-  return ast.typed.stat.ForList {
+  local body_cx = header_cx:new_local_scope(nil, true, footers.break_footer)
+  local for_stat = ast.typed.stat.ForList {
     symbol = node.symbol,
     value = value,
-    block = type_check.block(cx, node.block),
+    block = type_check.block(body_cx, node.block, footers.footer),
     metadata = false,
     annotations = node.annotations,
     span = node.span,
   }
+  stats:insert(for_stat)
+
+  type_check.use_phi_vars(cx, node, footers.region_mapping_after)
+  return stats
 end
 
 function type_check.stat_repeat(cx, node)
-  local block_cx = cx:new_local_scope(nil, true)
-  local block = type_check.block(cx, node.block)
+  local stats = terralib.newlist()
+  local footers = type_check.make_loop_footers(cx, node, stats)
+
+  local block_cx = cx:new_local_scope(nil, true, footers.break_footer)
+  local block = type_check.block(block_cx, node.block, footers.footer)
 
   local until_cond = type_check.expr(block_cx, node.until_cond)
   local until_cond_type = std.check_read(block_cx, until_cond)
@@ -3610,12 +3769,16 @@ function type_check.stat_repeat(cx, node)
   end
   until_cond = insert_implicit_cast(until_cond, until_cond_type, bool)
 
-  return ast.typed.stat.Repeat {
+  local repeat_stat = ast.typed.stat.Repeat {
     block = block,
     until_cond = until_cond,
     annotations = node.annotations,
     span = node.span,
   }
+  stats:insert(repeat_stat)
+
+  type_check.use_phi_vars(cx, node, footers.region_mapping_after)
+  return stats
 end
 
 function type_check.stat_must_epoch(cx, node)
@@ -3662,6 +3825,10 @@ function type_check.stat_var(cx, node)
     symbol:settype(var_type)
   end
   cx.type_env:insert(node, symbol, std.rawref(&var_type))
+
+  if std.is_region(var_type) then
+    cx.region_env:insert(node, symbol, symbol)
+  end
 
   value = value and insert_implicit_cast(value, value_type, symbol:gettype()) or false
 
@@ -3719,6 +3886,9 @@ function type_check.stat_var_unpack(cx, node)
     end
     assert(symbol:gettype() == field_type)
     cx.type_env:insert(node, symbol, std.rawref(&field_type))
+    if std.is_region(field_type) then
+      cx.region_env:insert(node, symbol, symbol)
+    end
     field_types:insert(field_type)
   end
 
@@ -3757,29 +3927,60 @@ function type_check.stat_return(cx, node)
     cx:set_return_type(result_type)
   end
 
-  return ast.typed.stat.Return {
+  local stats = terralib.newlist()
+  cx.return_footer(cx, stats)
+
+  local return_stat = ast.typed.stat.Return {
     value = value,
     annotations = node.annotations,
     span = node.span,
   }
+  stats:insert(return_stat)
+  return stats
 end
 
 function type_check.stat_break(cx, node)
   if not cx.breakable_loop then
     report.error(node, "break must be inside a loop")
   end
-  return ast.typed.stat.Break {
+
+  local stats = terralib.newlist()
+  if cx.break_footer then
+    cx.break_footer(cx, stats)
+  end
+
+  local break_stat = ast.typed.stat.Break {
     annotations = node.annotations,
     span = node.span,
   }
+  stats:insert(break_stat)
+  return stats
 end
 
 function type_check.stat_assignment(cx, node)
-  local lhs = type_check.expr(cx, node.lhs)
-  local lhs_type = std.check_write(cx, lhs)
-
   local rhs = type_check.expr(cx, node.rhs)
   local rhs_type = std.check_read(cx, rhs)
+
+  -- Rename region variables, like for SSA
+  if node.lhs:is(ast.specialized.expr.ID) then
+    local lhs = node.lhs.value
+    if cx.region_env:safe_lookup(lhs) then
+      local renamed_region = std.newsymbol(rhs_type, lhs:getname())
+      cx.type_env:insert(node, renamed_region, std.rawref(&rhs_type))
+      cx.region_env:force_insert(lhs, renamed_region)
+
+      return ast.typed.stat.Var {
+        symbol = renamed_region,
+        type = rhs_type,
+        value = rhs,
+        annotations = node.annotations,
+        span = node.span,
+      }
+    end
+  end
+
+  local lhs = type_check.expr(cx, node.lhs)
+  local lhs_type = std.check_write(cx, lhs)
 
   if not std.validate_implicit_cast(rhs_type, lhs_type) then
     report.error(node, "type mismatch in assignment: expected " .. tostring(lhs_type) .. " but got " .. tostring(rhs_type))
@@ -3991,6 +4192,68 @@ function type_check.stat(cx, node)
   return type_check_stat(cx)(node)
 end
 
+function type_check.changed_regions_block(cx, block, changed_regions)
+  for _, stat in ipairs(block.stats) do
+    type_check.changed_regions(cx, stat, changed_regions)
+  end
+end
+
+function type_check.changed_regions_if(cx, node, changed_regions)
+  type_check.changed_regions_block(cx, node.then_block, changed_regions)
+  for _, else_if in ipairs(node.elseif_blocks) do
+    type_check.changed_regions_block(cx, else_if.block, changed_regions)
+  end
+  type_check.changed_regions_block(cx, node.else_block, changed_regions)
+end
+
+function type_check.changed_regions_stat_block(cx, node, changed_regions)
+  type_check.changed_regions_block(cx, node.block, changed_regions)
+end
+
+function type_check.changed_regions_assignment(cx, node, changed_regions)
+  if node.lhs:is(ast.specialized.expr.ID) then
+    local lhs = node.lhs.value
+    if cx.region_env:safe_lookup(lhs) then
+      changed_regions[lhs] = true
+    end
+  end
+end
+
+function type_check.changed_regions_ignore(cx, node, changed_regions)
+end
+
+local type_check_changed_regions_node = {
+  [ast.specialized.stat.If]              = type_check.changed_regions_if,
+  [ast.specialized.stat.While]           = type_check.changed_regions_stat_block,
+  [ast.specialized.stat.ForNum]          = type_check.changed_regions_stat_block,
+  [ast.specialized.stat.ForList]         = type_check.changed_regions_stat_block,
+  [ast.specialized.stat.Repeat]          = type_check.changed_regions_stat_block,
+  [ast.specialized.stat.MustEpoch]       = type_check.changed_regions_stat_block,
+  [ast.specialized.stat.Block]           = type_check.changed_regions_stat_block,
+  [ast.specialized.stat.ParallelizeWith] = type_check.changed_regions_stat_block,
+  [ast.specialized.stat.Assignment]      = type_check.changed_regions_assignment,
+
+  [ast.specialized.stat.Var]             = type_check.changed_regions_ignore,
+  [ast.specialized.stat.VarUnpack]       = type_check.changed_regions_ignore,
+  [ast.specialized.stat.Reduce]          = type_check.changed_regions_ignore,
+  [ast.specialized.stat.Expr]            = type_check.changed_regions_ignore,
+  [ast.specialized.stat.Return]          = type_check.changed_regions_ignore,
+  [ast.specialized.stat.Break]           = type_check.changed_regions_ignore,
+  [ast.specialized.stat.RawDelete]       = type_check.changed_regions_ignore,
+  [ast.specialized.stat.Fence]           = type_check.changed_regions_ignore,
+  [ast.specialized.stat.ParallelPrefix]  = type_check.changed_regions_ignore,
+
+  [ast.specialized.stat.Elseif] = unreachable,
+}
+
+local type_check_changed_regions = ast.make_single_dispatch(
+  type_check_changed_regions_node,
+  {ast.specialized.stat})
+
+function type_check.changed_regions(cx, node, changed_regions)
+  return type_check_changed_regions(cx)(node, changed_regions)
+end
+
 local opaque_types = {
   [std.c.legion_domain_point_iterator_t]       = true,
   [std.c.legion_coloring_t]                    = true,
@@ -4053,6 +4316,9 @@ end
 function type_check.top_task_param(cx, node, task, mapping, is_defined)
   local param_type = node.symbol:gettype()
   cx.type_env:insert(node, node.symbol, std.rawref(&param_type))
+  if std.is_region(param_type) then
+    cx.region_env:insert(node, node.symbol, node.symbol)
+  end
 
   -- Check for parameters with duplicate types.
   if std.type_supports_constraints(param_type) then
