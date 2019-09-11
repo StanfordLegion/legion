@@ -6601,16 +6601,16 @@ class Operation(object):
                 self.compute_current_version_numbers()
                 assert self.mapping is None
                 # We have to do verification for all our replicatnts first
-                for shard in self.task.replicants.shards.itervalues():
+                for shard in itervalues(self.task.replicants.shards):
                     self.mapping = shard.op.mapping
-                    for index,req in self.reqs.iteritems():
+                    for index,req in iteritems(self.reqs):
                         if not self.verify_physical_requirement(index, req, perform_checks):
                             return False
                     self.mapping = None
                 # Then we do the registration for all our replicants
-                for shard in self.task.replicants.shards.itervalues():
+                for shard in itervalues(self.task.replicants.shards):
                     self.mapping = shard.op.mapping
-                    for index,req in self.reqs.iteritems():
+                    for index,req in iteritems(self.reqs):
                         if not self.perform_verification_registration(index, req, 
                                                                       perform_checks):
                             return False
@@ -6623,7 +6623,7 @@ class Operation(object):
                     return False
             else:
                 # Can verify each of these separately 
-                for shard in self.task.replicants.shards.itervalues():
+                for shard in itervalues(self.task.replicants.shards):
                     if not shard.perform_task_physical_verification(perform_checks):
                         return False
         else:
@@ -7337,8 +7337,8 @@ class Task(object):
                                                                    add_restrictions)
             if self.replicants:
                 # Control replicated path
-                for shard in self.replicants.shards.itervalues():
-                    for idx,req in shard.op.reqs.iteritems():
+                for shard in itervalues(self.replicants.shards):
+                    for idx,req in iteritems(shard.op.reqs):
                         initialize_requirement(shard, idx, req)
             else:
                 # Normal path for non-control replicated
@@ -7518,7 +7518,7 @@ class Task(object):
                 # If we're control replicated we need to alias all the single
                 # operations across shards so they have the same operation name
                 num_ops = -1
-                for shard in self.replicants.shards.itervalues():
+                for shard in itervalues(self.replicants.shards):
                     shard_ops = 0
                     for op in shard.operations:
                         if not op.fully_logged:
@@ -7538,7 +7538,7 @@ class Task(object):
                 for idx in range(num_ops):
                     owner_op = None
                     # See if we have an owner op
-                    for shard in self.replicants.shards.itervalues():
+                    for shard in itervalues(self.replicants.shards):
                         op = shard.operations[idx]
                         if op.owner_shard is not None and \
                                 op.owner_shard == op.context.shard:
@@ -7547,12 +7547,12 @@ class Task(object):
                     # We should only have owner ops for single operations
                     if owner_op is not None:
                         # Alias all the node names to the owner node name
-                        for shard in self.replicants.shards.itervalues():
+                        for shard in itervalues(self.replicants.shards):
                             op = shard.operations[idx]
                             if op is not owner_op:
                                 op.node_name = owner_op.node_name
                 # Now we can do the normal event graph print routine
-                for shard in self.replicants.shards.itervalues():
+                for shard in itervalues(self.replicants.shards):
                     shard.print_event_graph_context(printer, elevate, all_nodes, top)
             return
         if not top:
@@ -7823,7 +7823,7 @@ class Replicants(object):
     def update_shards(self):
         assert self.orig
         self.orig.replicants = self 
-        for sid,shard in self.shards.iteritems():
+        for sid,shard in iteritems(self.shards):
             shard.set_shard(sid, self.orig)
             shard.merge(self.orig)
 
@@ -10557,7 +10557,7 @@ class State(object):
         for task in itervalues(self.tasks):
             task.flatten_summary_operations()
         # Hook up any replicated tasks
-        for replicant in self.replicants.itervalues():
+        for replicant in itervalues(self.replicants):
             replicant.update_shards()
         # Create the unique set of operations
         self.unique_ops = set(itervalues(self.ops))
