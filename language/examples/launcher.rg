@@ -25,6 +25,8 @@ function launcher.compile_mapper(saveobj, name)
     cxx_flags = cxx_flags .. " -shared -fPIC"
   end
   local cxx = os.getenv('CXX') or 'c++'
+  local max_dim = os.getenv('MAX_DIM') or '3'
+  cxx_flags = cxx_flags .. " -DLEGION_MAX_DIM=" .. max_dim .. " -DREALM_MAX_DIM=" .. max_dim
 
   local cmd = (cxx .. " " .. cxx_flags ..
               " -I " .. runtime_dir ..
