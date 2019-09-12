@@ -2679,6 +2679,12 @@ namespace Legion {
               used[gen[trigger->rhs]] = true;
               break;
             }
+          case BARRIER_ARRIVAL:
+            {
+              BarrierArrival *arrival = inst->as_barrier_arrival();
+              used[gen[arrival->rhs]] = true;
+              break;
+            }
           case ISSUE_COPY:
             {
               IssueCopy *copy = inst->as_issue_copy();
@@ -2701,6 +2707,7 @@ namespace Legion {
           case CREATE_AP_USER_EVENT:
           case SET_OP_SYNC_EVENT:
           case ASSIGN_FENCE_COMPLETION:
+          case BARRIER_ADVANCE:
             {
               break;
             }
@@ -2873,6 +2880,11 @@ namespace Legion {
                 event_to_check = &inst->as_trigger_event()->rhs;
                 break;
               }
+            case BARRIER_ARRIVAL:
+              {
+                event_to_check = &inst->as_barrier_arrival()->rhs;
+                break;
+              }
             case ISSUE_COPY :
               {
                 event_to_check = &inst->as_issue_copy()->precondition_idx;
@@ -2972,6 +2984,13 @@ namespace Legion {
               outgoing[trigger->rhs].push_back(trigger->lhs);
               break;
             }
+          case BARRIER_ARRIVAL:
+            {
+              BarrierArrival *arrival = inst->as_barrier_arrival();
+              incoming[arrival->lhs].push_back(arrival->rhs);
+              outgoing[arrival->rhs].push_back(arrival->lhs);
+              break;
+            }
           case MERGE_EVENT :
             {
               MergeEvent *merge = inst->as_merge_event();
@@ -3002,6 +3021,13 @@ namespace Legion {
               SetOpSyncEvent *sync = inst->as_set_op_sync_event();
               inv_topo_order[sync->lhs] = topo_order.size();
               topo_order.push_back(sync->lhs);
+              break;
+            }
+          case BARRIER_ADVANCE:
+            {
+              BarrierAdvance *advance = inst->as_barrier_advance();
+              inv_topo_order[advance->lhs] = topo_order.size();
+              topo_order.push_back(advance->lhs);
               break;
             }
           case ASSIGN_FENCE_COMPLETION :
@@ -3213,6 +3239,13 @@ namespace Legion {
               if (subst >= 0) trigger->rhs = (unsigned)subst;
               break;
             }
+          case BARRIER_ARRIVAL:
+            {
+              BarrierArrival *arrival = inst->as_barrier_arrival();
+              int subst = substs[arrival->rhs];
+              if (subst >= 0) arrival->rhs = (unsigned)subst;
+              break;
+            }
           case MERGE_EVENT :
             {
               MergeEvent *merge = inst->as_merge_event();
@@ -3248,6 +3281,12 @@ namespace Legion {
             {
               SetOpSyncEvent *sync = inst->as_set_op_sync_event();
               lhs = sync->lhs;
+              break;
+            }
+          case BARRIER_ADVANCE:
+            {
+              BarrierAdvance *advance = inst->as_barrier_advance();
+              lhs = advance->lhs;
               break;
             }
           case ASSIGN_FENCE_COMPLETION :
@@ -4452,12 +4491,12 @@ namespace Legion {
       {
         // Make a new barrier and record it in the events
         ApBarrier barrier(Realm::Barrier::create_barrier(1/*arrival count*/));
-        // TODO: Update this
         // Record this in the instruction stream
-        //const unsigned index = convert_event(barrier);
+        const unsigned index = convert_event(barrier);
         // Then add a new instruction to arrive on the barrier with the
         // event as a precondition
-        //insert_instruction(new BarrierArrival(barrier, index, finder->second));
+        insert_instruction(
+            new BarrierArrival(*this, barrier, index, finder->second));
         // Save this in the remote barriers
         remote_barriers[event] = barrier;
         return barrier;
@@ -4477,10 +4516,8 @@ namespace Legion {
 #endif
       if (barrier.exists())
       {
-        // TODO: Update this
-        convert_event(event);
-        //const unsigned index = convert_event(event);
-        //insert_instruction(new BarrierAdvance(barrier, index)); 
+        const unsigned index = convert_event(event);
+        insert_instruction(new BarrierAdvance(*this, barrier, index)); 
       }
       else // no barrier means it's not part of the trace
         event_map[event] = NO_INDEX;
@@ -4983,6 +5020,82 @@ namespace Legion {
          << "].complete_replay(events[" << rhs << "])    (op kind: "
          << Operation::op_names[operations[owner]->get_memoizable_kind()] 
          << ")";
+      return ss.str();
+    }
+
+    /////////////////////////////////////////////////////////////
+    // BarrierArrival
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    BarrierArrival::BarrierArrival(PhysicalTemplate &tpl, 
+                                   ApBarrier bar, unsigned _lhs, unsigned _rhs)
+      : Instruction(tpl, TraceLocalID(0,DomainPoint())), barrier(bar), 
+        lhs(_lhs), rhs(_rhs)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(lhs < events.size());
+      assert(rhs < events.size());
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    void BarrierArrival::execute(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(rhs < events.size());
+      assert(lhs < events.size());
+#endif
+      Runtime::phase_barrier_arrive(barrier, 1/*count*/, events[rhs]);
+      events[lhs] = barrier;
+      Runtime::advance_barrier(barrier);
+    }
+
+    //--------------------------------------------------------------------------
+    std::string BarrierArrival::to_string(void)
+    //--------------------------------------------------------------------------
+    {
+      std::stringstream ss; 
+      ss << "events[" << lhs << "] = Runtime::phase_barrier_arrive("
+         << barrier.id << ", events[" << rhs << "])";
+      return ss.str();
+    }
+
+    /////////////////////////////////////////////////////////////
+    // BarrierAdvance
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    BarrierAdvance::BarrierAdvance(PhysicalTemplate &tpl,
+                                   ApBarrier bar, unsigned _lhs) 
+      : Instruction(tpl, TraceLocalID(0,DomainPoint())), barrier(bar), lhs(_lhs)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(lhs < events.size());
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    void BarrierAdvance::execute(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(lhs < events.size());
+#endif
+      events[lhs] = barrier;
+      Runtime::advance_barrier(barrier);
+    }
+
+    //--------------------------------------------------------------------------
+    std::string BarrierAdvance::to_string(void)
+    //--------------------------------------------------------------------------
+    {
+      std::stringstream ss;
+      ss << "events[" << lhs << "] = Runtime::barrier_advance("
+         << barrier.id << ")";
       return ss.str();
     }
 

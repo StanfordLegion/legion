@@ -960,6 +960,8 @@ namespace Legion {
       SET_OP_SYNC_EVENT,
       ASSIGN_FENCE_COMPLETION,
       COMPLETE_REPLAY,
+      BARRIER_ARRIVAL,
+      BARRIER_ADVANCE,
     };
 
     /**
@@ -984,6 +986,8 @@ namespace Legion {
       virtual IssueFill* as_issue_fill(void) { return NULL; }
       virtual SetOpSyncEvent* as_set_op_sync_event(void) { return NULL; }
       virtual CompleteReplay* as_complete_replay(void) { return NULL; }
+      virtual BarrierArrival* as_barrier_arrival(void) { return NULL; }
+      virtual BarrierAdvance* as_barrier_advance(void) { return NULL; }
     protected:
       std::map<TraceLocalID, Memoizable*> &operations;
       std::vector<ApEvent> &events;
@@ -1229,6 +1233,50 @@ namespace Legion {
     private:
       friend class PhysicalTemplate;
       unsigned rhs;
+    };
+
+    /**
+     * \class BarrierArrival
+     * This instruction has the following semantics:
+     * events[lhs] = barrier.arrive(events[rhs])
+     */
+    class BarrierArrival : public Instruction {
+    public:
+      BarrierArrival(PhysicalTemplate &tpl,
+                     ApBarrier bar, unsigned lhs, unsigned rhs);  
+      virtual void execute(void);
+      virtual std::string to_string(void);
+
+      virtual InstructionKind get_kind(void)
+        { return BARRIER_ARRIVAL; }
+      virtual BarrierArrival* as_barrier_arrival(void)
+        { return this; }
+    private:
+      friend class PhysicalTemplate;
+      ApBarrier barrier;
+      unsigned lhs, rhs;
+    };
+
+    /**
+     * \class BarrierAdvance
+     * This instruction has the following semantics
+     * events[lhs] = barrier
+     * barrier.advance();
+     */
+    class BarrierAdvance : public Instruction {
+    public:
+      BarrierAdvance(PhysicalTemplate &tpl, ApBarrier bar, unsigned lhs);
+      virtual void execute(void);
+      virtual std::string to_string(void);
+
+      virtual InstructionKind get_kind(void)
+        { return BARRIER_ADVANCE; }
+      virtual BarrierAdvance* as_barrier_advance(void)
+        { return this; }
+    private:
+      friend class PhysicalTemplate;
+      ApBarrier barrier;
+      unsigned lhs;
     };
 
   }; // namespace Internal

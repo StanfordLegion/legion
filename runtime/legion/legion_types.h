@@ -1620,6 +1620,8 @@ namespace Legion {
     class GetOpTermEvent;
     class SetOpSyncEvent;
     class CompleteReplay;
+    class BarrierArrival;
+    class BarrierAdvance;
 
     // region_tree.h
     class RegionTreeForest;
