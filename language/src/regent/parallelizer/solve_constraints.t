@@ -1906,9 +1906,9 @@ function solver_context:synthesize_partitions(existing_disjoint_partitions,
     for idx = 1, #path do
       local info, range = unpack(path[idx])
       local partition = self.constraints:get_partition(range)
-      assert(disjoint_partitions[range] == nil)
-      find_or_create(disjoint_partitions, range, hash_set.new):insert(range)
       if not created:has(range) then
+        assert(disjoint_partitions[range] == nil)
+        find_or_create(disjoint_partitions, range, hash_set.new):insert(range)
         if info == nil then
           assert(parent == nil)
           stats:insert(create_equal_partition(range, partition.region, color_space_symbol,
