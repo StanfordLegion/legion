@@ -24,34 +24,6 @@ namespace Realm {
 
   ////////////////////////////////////////////////////////////////////////
   //
-  // class WithDefault<T, _DEFAULT>
-
-  template <typename T, T _DEFAULT>
-  inline WithDefault<T, _DEFAULT>::WithDefault(void)
-    : val(_DEFAULT)
-  {}
-
-  template <typename T, T _DEFAULT>
-  inline WithDefault<T, _DEFAULT>::WithDefault(T _val)
-    : val(_val)
-  {}
-
-  template <typename T, T _DEFAULT>
-  inline WithDefault<T, _DEFAULT>::operator T(void) const
-  {
-    return val;
-  }
-
-  template <typename T, T _DEFAULT>
-  inline WithDefault<T,_DEFAULT>& WithDefault<T, _DEFAULT>::operator=(T newval)
-  {
-    val = newval;
-    return *this;
-  }
-
-
-  ////////////////////////////////////////////////////////////////////////
-  //
   // class ThreadLaunchParameters
 
   inline ThreadLaunchParameters::ThreadLaunchParameters(void)

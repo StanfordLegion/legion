@@ -21,6 +21,7 @@
 #include "realm/realm_config.h"
 #include "realm/activemsg.h"
 #include "realm/atomics.h"
+#include "realm/utils.h"
 
 #ifdef REALM_USE_USER_THREADS
 #ifdef __MACH__
@@ -253,20 +254,6 @@ namespace Realm {
     // delegates friendship of Thread with subclasses
     Thread::State update_thread_state(Thread *thread, Thread::State new_state);
     bool try_update_thread_state(Thread *thread, Thread::State old_state, Thread::State new_state);
-  };
-
-  template <typename T, T _DEFAULT>
-  struct WithDefault {
-  public:
-    static const T DEFAULT_VALUE = _DEFAULT;
-
-    WithDefault(void); // uses default
-    WithDefault(T _val);
-
-    operator T(void) const;
-    WithDefault<T,_DEFAULT>& operator=(T newval);
-
-    T val;
   };
 
   // any thread (user or kernel) will have its own stack and heap - the size of which can
