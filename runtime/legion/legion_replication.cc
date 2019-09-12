@@ -6690,16 +6690,32 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(template_source == runtime->address_space);
 #endif
-        Serializer rez;
+        // Check to see if we have a shard on that address space, if not
+        // then we know that this event can't have come from there
+        bool found = false;
+        for (unsigned idx = 0; idx < address_spaces->size(); idx++)
         {
-          RezCheck z(rez);
-          rez.serialize(repl_id);
-          rez.serialize(physical_template);
-          rez.serialize(template_index);
-          rez.serialize(event);
-          rez.serialize(done_event);
+          if ((*address_spaces)[idx] != event_space)
+            continue;
+          found = true;
+          break;
         }
-        runtime->send_control_replicate_trace_event_request(event_space, rez);
+        if (found)
+        {
+          Serializer rez;
+          {
+            RezCheck z(rez);
+            rez.serialize(repl_id);
+            rez.serialize(physical_template);
+            rez.serialize(template_index);
+            rez.serialize(event);
+            rez.serialize(done_event);
+          }
+          runtime->send_control_replicate_trace_event_request(event_space, rez);
+        }
+        else
+          send_trace_event_response(physical_template, template_source,
+              event, ApBarrier::NO_AP_BARRIER, done_event);
       }
       else
       {
