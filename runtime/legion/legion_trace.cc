@@ -4111,18 +4111,6 @@ namespace Legion {
       return ss.str();
     }
 
-    //--------------------------------------------------------------------------
-    Instruction* GetTermEvent::clone(PhysicalTemplate& tpl,
-                                  const std::map<unsigned, unsigned> &rewrite)
-    //--------------------------------------------------------------------------
-    {
-      std::map<unsigned, unsigned>::const_iterator finder = rewrite.find(lhs);
-#ifdef DEBUG_LEGION
-      assert(finder != rewrite.end());
-#endif
-      return new GetTermEvent(tpl, finder->second, owner);
-    }
-
     /////////////////////////////////////////////////////////////
     // CreateApUserEvent
     /////////////////////////////////////////////////////////////
@@ -4156,19 +4144,6 @@ namespace Legion {
       ss << "events[" << lhs << "] = Runtime::create_ap_user_event()    "
          << "(owner: " << owner << ")";
       return ss.str();
-    }
-
-    //--------------------------------------------------------------------------
-    Instruction* CreateApUserEvent::clone(PhysicalTemplate& tpl,
-                                    const std::map<unsigned, unsigned> &rewrite)
-    //--------------------------------------------------------------------------
-    {
-      std::map<unsigned, unsigned>::const_iterator lhs_finder =
-        rewrite.find(lhs);
-#ifdef DEBUG_LEGION
-      assert(lhs_finder != rewrite.end());
-#endif
-      return new CreateApUserEvent(tpl, lhs_finder->second, owner);
     }
 
     /////////////////////////////////////////////////////////////
@@ -4208,23 +4183,6 @@ namespace Legion {
       ss << "Runtime::trigger_event(events[" << lhs
          << "], events[" << rhs << "])    (owner: " << owner << ")";
       return ss.str();
-    }
-
-    //--------------------------------------------------------------------------
-    Instruction* TriggerEvent::clone(PhysicalTemplate& tpl,
-                                    const std::map<unsigned, unsigned> &rewrite)
-    //--------------------------------------------------------------------------
-    {
-      std::map<unsigned, unsigned>::const_iterator lhs_finder =
-        rewrite.find(lhs);
-      std::map<unsigned, unsigned>::const_iterator rhs_finder =
-        rewrite.find(rhs);
-#ifdef DEBUG_LEGION
-      assert(lhs_finder != rewrite.end());
-      assert(rhs_finder != rewrite.end());
-#endif
-      return new TriggerEvent(tpl, lhs_finder->second, rhs_finder->second,
-                              owner);
     }
 
     /////////////////////////////////////////////////////////////
@@ -4280,15 +4238,6 @@ namespace Legion {
       return ss.str();
     }
 
-    //--------------------------------------------------------------------------
-    Instruction* MergeEvent::clone(PhysicalTemplate& tpl,
-                                   const std::map<unsigned, unsigned> &rewrite)
-    //--------------------------------------------------------------------------
-    {
-      assert(false);
-      return NULL;
-    }
-
     /////////////////////////////////////////////////////////////
     // AssignFenceCompletion
     /////////////////////////////////////////////////////////////
@@ -4318,18 +4267,6 @@ namespace Legion {
       std::stringstream ss;
       ss << "events[" << lhs << "] = fence_completion";
       return ss.str();
-    }
-
-    //--------------------------------------------------------------------------
-    Instruction* AssignFenceCompletion::clone(PhysicalTemplate& tpl,
-                                  const std::map<unsigned, unsigned> &rewrite)
-    //--------------------------------------------------------------------------
-    {
-      std::map<unsigned, unsigned>::const_iterator finder = rewrite.find(lhs);
-#ifdef DEBUG_LEGION
-      assert(finder != rewrite.end());
-#endif
-      return new AssignFenceCompletion(tpl, finder->second, owner);
     }
 
     /////////////////////////////////////////////////////////////
@@ -4425,26 +4362,6 @@ namespace Legion {
       return ss.str();
     }
 
-    //--------------------------------------------------------------------------
-    Instruction* IssueCopy::clone(PhysicalTemplate& tpl,
-                                  const std::map<unsigned, unsigned> &rewrite)
-    //--------------------------------------------------------------------------
-    {
-      std::map<unsigned, unsigned>::const_iterator lfinder = rewrite.find(lhs);
-      std::map<unsigned, unsigned>::const_iterator pfinder =
-        rewrite.find(precondition_idx);
-#ifdef DEBUG_LEGION
-      assert(lfinder != rewrite.end());
-      assert(pfinder != rewrite.end());
-#endif
-      return new IssueCopy(tpl, lfinder->second, expr, owner, src_fields,
-                           dst_fields, 
-#ifdef LEGION_SPY
-                           handle, src_tree_id, dst_tree_id,
-#endif
-                           pfinder->second, redop, reduction_fold);
-    }
-
     /////////////////////////////////////////////////////////////
     // IssueFill
     /////////////////////////////////////////////////////////////
@@ -4527,26 +4444,6 @@ namespace Legion {
       return ss.str();
     }
 
-    //--------------------------------------------------------------------------
-    Instruction* IssueFill::clone(PhysicalTemplate& tpl,
-                                  const std::map<unsigned, unsigned> &rewrite)
-    //--------------------------------------------------------------------------
-    {
-      std::map<unsigned, unsigned>::const_iterator lfinder = rewrite.find(lhs);
-      std::map<unsigned, unsigned>::const_iterator pfinder =
-        rewrite.find(precondition_idx);
-#ifdef DEBUG_LEGION
-      assert(lfinder != rewrite.end());
-      assert(pfinder != rewrite.end());
-#endif
-      return new IssueFill(tpl, lfinder->second, expr, owner, fields, 
-                           fill_value, fill_size, 
-#ifdef LEGION_SPY
-                           fill_uid, handle, tree_id,
-#endif
-                           pfinder->second);
-    }
-
     /////////////////////////////////////////////////////////////
     // SetOpSyncEvent
     /////////////////////////////////////////////////////////////
@@ -4591,18 +4488,6 @@ namespace Legion {
       return ss.str();
     }
 
-    //--------------------------------------------------------------------------
-    Instruction* SetOpSyncEvent::clone(PhysicalTemplate& tpl,
-                                    const std::map<unsigned, unsigned> &rewrite)
-    //--------------------------------------------------------------------------
-    {
-      std::map<unsigned, unsigned>::const_iterator finder = rewrite.find(lhs);
-#ifdef DEBUG_LEGION
-      assert(finder != rewrite.end());
-#endif
-      return new SetOpSyncEvent(tpl, finder->second, owner);
-    }
-
     /////////////////////////////////////////////////////////////
     // CompleteReplay
     /////////////////////////////////////////////////////////////
@@ -4645,18 +4530,6 @@ namespace Legion {
          << ")";
       return ss.str();
     }
-
-    //--------------------------------------------------------------------------
-    Instruction* CompleteReplay::clone(PhysicalTemplate& tpl,
-                                    const std::map<unsigned, unsigned> &rewrite)
-    //--------------------------------------------------------------------------
-    {
-      std::map<unsigned, unsigned>::const_iterator finder = rewrite.find(rhs);
-#ifdef DEBUG_LEGION
-      assert(finder != rewrite.end());
-#endif
-      return new CompleteReplay(tpl, owner, finder->second);
-    } 
 
   }; // namespace Internal 
 }; // namespace Legion

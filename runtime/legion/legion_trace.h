@@ -889,10 +889,6 @@ namespace Legion {
       virtual IssueFill* as_issue_fill(void) { return NULL; }
       virtual SetOpSyncEvent* as_set_op_sync_event(void) { return NULL; }
       virtual CompleteReplay* as_complete_replay(void) { return NULL; }
-
-      virtual Instruction* clone(PhysicalTemplate& tpl,
-                               const std::map<unsigned, unsigned> &rewrite) = 0;
-
     protected:
       std::map<TraceLocalID, Memoizable*> &operations;
       std::vector<ApEvent> &events;
@@ -917,10 +913,6 @@ namespace Legion {
         { return GET_TERM_EVENT; }
       virtual GetTermEvent* as_get_term_event(void)
         { return this; }
-
-      virtual Instruction* clone(PhysicalTemplate& tpl,
-                                 const std::map<unsigned, unsigned> &rewrite);
-
     private:
       friend class PhysicalTemplate;
       unsigned lhs;
@@ -942,10 +934,6 @@ namespace Legion {
         { return CREATE_AP_USER_EVENT; }
       virtual CreateApUserEvent* as_create_ap_user_event(void)
         { return this; }
-
-      virtual Instruction* clone(PhysicalTemplate& tpl,
-                                 const std::map<unsigned, unsigned> &rewrite);
-
     private:
       friend class PhysicalTemplate;
       unsigned lhs;
@@ -967,10 +955,6 @@ namespace Legion {
         { return TRIGGER_EVENT; }
       virtual TriggerEvent* as_trigger_event(void)
         { return this; }
-
-      virtual Instruction* clone(PhysicalTemplate& tpl,
-                                 const std::map<unsigned, unsigned> &rewrite);
-
     private:
       friend class PhysicalTemplate;
       unsigned lhs;
@@ -994,10 +978,6 @@ namespace Legion {
         { return MERGE_EVENT; }
       virtual MergeEvent* as_merge_event(void)
         { return this; }
-
-      virtual Instruction* clone(PhysicalTemplate& tpl,
-                                 const std::map<unsigned, unsigned> &rewrite);
-
     private:
       friend class PhysicalTemplate;
       unsigned lhs;
@@ -1019,10 +999,6 @@ namespace Legion {
         { return ASSIGN_FENCE_COMPLETION; }
       virtual AssignFenceCompletion* as_assignment_fence_completion(void)
         { return this; }
-
-      virtual Instruction* clone(PhysicalTemplate& tpl,
-                                 const std::map<unsigned, unsigned> &rewrite);
-
     private:
       friend class PhysicalTemplate;
       PhysicalTemplate &tpl;
@@ -1057,10 +1033,6 @@ namespace Legion {
         { return ISSUE_FILL; }
       virtual IssueFill* as_issue_fill(void)
         { return this; }
-
-      virtual Instruction* clone(PhysicalTemplate& tpl,
-                                 const std::map<unsigned, unsigned> &rewrite);
-
     private:
       friend class PhysicalTemplate;
       unsigned lhs;
@@ -1106,10 +1078,6 @@ namespace Legion {
         { return ISSUE_COPY; }
       virtual IssueCopy* as_issue_copy(void)
         { return this; }
-
-      virtual Instruction* clone(PhysicalTemplate& tpl,
-                                 const std::map<unsigned, unsigned> &rewrite);
-
     private:
       friend class PhysicalTemplate;
       unsigned lhs;
@@ -1142,10 +1110,6 @@ namespace Legion {
         { return SET_OP_SYNC_EVENT; }
       virtual SetOpSyncEvent* as_set_op_sync_event(void)
         { return this; }
-
-      virtual Instruction* clone(PhysicalTemplate& tpl,
-                                 const std::map<unsigned, unsigned> &rewrite);
-
     private:
       friend class PhysicalTemplate;
       unsigned lhs;
@@ -1167,10 +1131,6 @@ namespace Legion {
         { return COMPLETE_REPLAY; }
       virtual CompleteReplay* as_complete_replay(void)
         { return this; }
-
-      virtual Instruction* clone(PhysicalTemplate& tpl,
-                                 const std::map<unsigned, unsigned> &rewrite);
-
     private:
       friend class PhysicalTemplate;
       unsigned rhs;
