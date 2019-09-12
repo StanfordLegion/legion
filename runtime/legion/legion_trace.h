@@ -921,7 +921,6 @@ namespace Legion {
                              const std::vector<CopySrcDstField> &fields,
                              const void *fill_value, size_t fill_size,
 #ifdef LEGION_SPY
-                             UniqueID fill_uid,
                              FieldSpace handle,
                              RegionTreeID tree_id,
 #endif

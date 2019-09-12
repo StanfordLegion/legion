@@ -4422,7 +4422,6 @@ namespace Legion {
                                              const void *fill_value, 
                                              size_t fill_size,
 #ifdef LEGION_SPY
-                                             UniqueID fill_uid,
                                              FieldSpace handle,
                                              RegionTreeID tree_id,
 #endif
@@ -4446,7 +4445,7 @@ namespace Legion {
       PhysicalTemplate::record_issue_fill(memo, idx, lhs, expr, fields,
                                           fill_value, fill_size,
 #ifdef LEGION_SPY
-                                          fill_uid, handle, tree_id,
+                                          handle, tree_id,
 #endif
                                           precondition, tracing_srcs, 
                                           tracing_dsts);
