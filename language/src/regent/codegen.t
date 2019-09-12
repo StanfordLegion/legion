@@ -10435,7 +10435,7 @@ function codegen.top_task(cx, node)
   -- Unpack field IDs passed by-value to the task.
   local param_field_id_labels = task:get_field_id_param_labels()
 
-  log_privileges:info('task ' .. tostring(task.name))
+  log_privileges:info('%s', 'task ' .. tostring(task.name))
 
   -- Unpack the region requirements.
   local physical_region_i = 0
