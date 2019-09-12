@@ -235,7 +235,7 @@ function partitioning_constraints:join(to_join, mapping)
     if my_partition == nil then
       self.ranges[new_range] = new_partition
     else
-      assert(my_partition.region == new_partition.region)
+      assert(std.type_eq(my_partition.region:gettype(), new_partition.region:gettype()))
       my_partition:meet_disjointness(new_partition.disjoint)
       my_partition:meet_completeness(new_partition.complete)
     end
