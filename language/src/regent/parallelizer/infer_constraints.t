@@ -42,6 +42,7 @@ function parallel_task_context.new(task)
     env                      = data.newmap(),
     sources                  = data.newmap(),
     sources_by_regions       = data.newmap(),
+    regions_to_symbols       = data.newmap(),
 
     field_accesses           = data.newmap(),
     node_ids_to_ranges       = data.newmap(),
@@ -75,6 +76,10 @@ function parallel_task_context:print_all_constraints()
   print("* sources by regions:")
   for region, source in self.sources_by_regions:items() do
     print("    " .. tostring(region) .. " => " .. tostring(source))
+  end
+  print("* region symbols by regions:")
+  for region, symbols in self.regions_to_symbols:items() do
+    print("    " .. tostring(region) .. " -> " .. tostring(symbols))
   end
   self.constraints:print_constraints()
   print("* accesses:")
@@ -209,9 +214,11 @@ function parallel_task_context:update_partition(range, partition)
   end
 end
 
-function parallel_task_context:find_or_create_source_range(region)
-  local range = find_or_create(self.sources_by_regions, region, ranges.new)
+function parallel_task_context:find_or_create_source_range(region_symbol)
+  local region_type = region_symbol:gettype()
+  local range = find_or_create(self.sources_by_regions, region_type, ranges.new)
   self.sources[range] = true
+  find_or_create(self.regions_to_symbols, region_type, hash_set.new):insert(region_symbol)
   return range
 end
 

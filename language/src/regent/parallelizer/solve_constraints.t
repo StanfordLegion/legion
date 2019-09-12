@@ -78,16 +78,16 @@ function collector_context.new()
   return setmetatable(cx, collector_context)
 end
 
-function collector_context:add_task(call, task, mapping)
+function collector_context:add_task(call, task, symbol_mapping, type_mapping)
   self.all_calls:insert(call)
   self.all_tasks[call] = task
-  self.task_mappings[call] = mapping
+  self.task_mappings[call] = { symbol_mapping, type_mapping }
 end
 
-function collector_context:get_mapping(call)
-  local mapping = self.task_mappings[call]
-  assert(mapping ~= nil)
-  return mapping
+function collector_context:get_mappings(call)
+  local mappings = self.task_mappings[call]
+  assert(mappings ~= nil)
+  return mappings
 end
 
 local collect_constraints = {}
@@ -128,12 +128,14 @@ local function add_task(cx, call)
     return arg.value
   end)
   assert(#mappable_params == #mappable_arg_symbols)
-  local mapping = data.newmap()
+  local symbol_mapping = data.newmap()
+  local type_mapping = data.newmap()
   data.zip(mappable_params, mappable_arg_symbols):map(function(pair)
     local param, arg = unpack(pair)
-    mapping[param] = arg
+    symbol_mapping[param] = arg
+    type_mapping[param:gettype()] = arg:gettype()
   end)
-  cx:add_task(call, task, mapping)
+  cx:add_task(call, task, symbol_mapping, type_mapping)
 end
 
 function collect_constraints.stat_var(cx, stat)
@@ -195,6 +197,7 @@ function solver_context.new(task_constraints)
   local cx                   = {
     sources                  = hash_set.new(),
     sources_by_regions       = data.newmap(),
+    regions_to_symbols       = data.newmap(),
     constraints              = partitioning_constraints.new(),
     field_accesses           = data.newmap(),
     mappings_by_access_paths = data.newmap(),
@@ -229,7 +232,7 @@ local function find_unifiable_ranges(constraints1, constraints2, source1, source
   return true, mapping
 end
 
-function solver_context:unify(name, new_constraints, region_mapping)
+function solver_context:unify(name, new_constraints, region_symbol_mapping, region_type_mapping)
   local range_mapping = data.newmap()
   if new_constraints.constraints:is_empty() then
     return range_mapping
@@ -237,13 +240,19 @@ function solver_context:unify(name, new_constraints, region_mapping)
     for source, _ in new_constraints.sources:items() do
       self.sources:insert(source)
     end
-    for region, source in new_constraints.sources_by_regions:items() do
-      local my_region = region_mapping[region]
-      self.sources_by_regions[my_region] = source
+    for region_type, source in new_constraints.sources_by_regions:items() do
+      local my_region_type = region_type_mapping[region_type]
+      self.sources_by_regions[my_region_type] = source
+      local my_region_symbols =
+        find_or_create(self.regions_to_symbols, my_region_type, hash_set.new)
+      my_region_symbols:insert_all(
+          new_constraints.regions_to_symbols[region_type]:map(function(region_symbol)
+            return region_symbol_mapping[region_symbol]
+          end))
     end
-    self.constraints = new_constraints.constraints:clone(region_mapping)
+    self.constraints = new_constraints.constraints:clone(region_symbol_mapping)
     for region, accesses_summary in new_constraints.field_accesses_summary:items() do
-      local my_region = region_mapping[region]
+      local my_region = region_symbol_mapping[region]
       local all_accesses = find_or_create(self.field_accesses, my_region)
       for field_path, summary in accesses_summary:items() do
         local accesses = find_or_create(all_accesses, field_path)
@@ -270,10 +279,10 @@ function solver_context:unify(name, new_constraints, region_mapping)
     return range_mapping
   end
 
-  local to_unify = new_constraints.constraints:clone(region_mapping)
-  for region, source in new_constraints.sources_by_regions:items() do
-    local my_region = region_mapping[region]
-    local my_source = self.sources_by_regions[my_region]
+  local to_unify = new_constraints.constraints:clone(region_symbol_mapping)
+  for region_type, source in new_constraints.sources_by_regions:items() do
+    local my_region_type = region_type_mapping[region_type]
+    local my_source = self.sources_by_regions[my_region_type]
     if my_source ~= nil then
       local unifiable, mapping =
         find_unifiable_ranges(to_unify, self.constraints, source, my_source)
@@ -297,8 +306,11 @@ function solver_context:unify(name, new_constraints, region_mapping)
       range_mapping[range] = range
       if new_constraints.sources[range] then
         self.sources:insert(range)
-        assert(self.sources_by_regions[partition.region] == nil)
-        self.sources_by_regions[partition.region] = range
+        local region_symbol = partition.region
+        local region_type = region_symbol:gettype()
+        assert(self.sources_by_regions[region_type] == nil)
+        self.sources_by_regions[region_type] = range
+        find_or_create(self.regions_to_symbols, region_type, hash_set.new):insert(region_symbol)
       end
     end
   end
@@ -306,7 +318,7 @@ function solver_context:unify(name, new_constraints, region_mapping)
   self.constraints:join(to_unify, range_mapping)
 
   for region, accesses_summary in new_constraints.field_accesses_summary:items() do
-    local my_region = region_mapping[region]
+    local my_region = region_symbol_mapping[region]
     local all_accesses = find_or_create(self.field_accesses, my_region)
     for field_path, summary in accesses_summary:items() do
       local accesses = find_or_create(all_accesses, field_path)
@@ -1896,14 +1908,12 @@ function solver_context:synthesize_partitions(existing_disjoint_partitions,
       local partition = self.constraints:get_partition(range)
       assert(disjoint_partitions[range] == nil)
       find_or_create(disjoint_partitions, range, hash_set.new):insert(range)
-      if info == nil then
-        if not created:has(range) then
+      if not created:has(range) then
+        if info == nil then
           assert(parent == nil)
           stats:insert(create_equal_partition(range, partition.region, color_space_symbol,
               existing_disjoint_partitions))
-        end
-      else
-        if info:is_image() then
+        elseif info:is_image() then
           if not created:has(range) then
             assert(parent ~= nil)
             stats:insertall(
@@ -1962,13 +1972,13 @@ function solver_context:synthesize_partitions(existing_disjoint_partitions,
          --       (e.g., R[S[T[U[e]]]] += ...)
          self.loop_ranges:has(src_range)
       then
-        local new_dst_range = self.sources_by_regions[dst_partition.region]
+        local new_dst_range = self.sources_by_regions[dst_partition.region:gettype()]
         if new_dst_range == nil then
           local new_dst_range = new_range()
           -- We are going to use an equal partition, hence disjoint and complete.
           self.constraints:set_partition(new_dst_range,
               partition_info.new(dst_partition.region, true, true))
-          self.sources_by_regions[dst_partition.region] = new_dst_range
+          self.sources_by_regions[dst_partition.region:gettype()] = new_dst_range
         else
           local new_dst_partition = self.constraints:get_partition(new_dst_range)
           new_dst_partition:meet_disjointness(true)
@@ -1998,8 +2008,8 @@ function solver_context:synthesize_partitions(existing_disjoint_partitions,
       self.constraints:add_subset_constraint(preimage_range, dst_partition.region,
         src_range)
       self.sources:remove(src_range)
-      if self.sources_by_regions[src_partition.region] == src_range then
-        self.sources_by_regions[src_partition.region] = nil
+      if self.sources_by_regions[src_partition.region:gettype()] == src_range then
+        self.sources_by_regions[src_partition.region:gettype()] = nil
       end
       assert(ghost_to_primary[dst_range] == nil or
              ghost_to_primary[dst_range] == new_dst_range)
@@ -2937,6 +2947,10 @@ function solver_context:print_all_constraints()
   for region, source in self.sources_by_regions:items() do
     print("    " .. tostring(region) .. " -> " .. tostring(source))
   end
+  print("* region symbols by regions:")
+  for region, symbols in self.regions_to_symbols:items() do
+    print("    " .. tostring(region) .. " -> " .. tostring(symbols))
+  end
   print("* loop ranges:")
   self.loop_ranges:foreach(function(range)
     print("    " .. tostring(range))
@@ -3049,6 +3063,30 @@ function solve_constraints.solve(cx, stat)
         find_or_create(containments, data.newtuple(region_symbol, field_path),
             hash_set.new):insert(hint.rhs.value)
 
+      elseif hint.op == "<=" and hint.lhs:is(ast.typed.expr.ID) and
+         hint.rhs:is(ast.typed.expr.ID)
+      then
+        local src_range = hint.lhs.value
+        local dst_range = hint.rhs.value
+        local region_symbol = dst_range:gettype().parent_region_symbol
+        user_constraints:add_subset_constraint(src_range, region_symbol, dst_range)
+
+        local function add_partition_info(range)
+          local partition = partition_info.new(
+              range:gettype().parent_region_symbol,
+              range:gettype():is_disjoint(),
+              range:gettype():is_disjoint())
+          if user_constraints:get_partition(range) == nil then
+            user_constraints:set_partition(range, partition)
+          end
+          if partition.disjoint then
+            find_or_create(existing_disjoint_partitions, partition.region,
+                hash_set.new):insert(range)
+          end
+        end
+        add_partition_info(src_range)
+        add_partition_info(dst_range)
+
       elseif hint.op == "disjoint" then
         local range_set = hash_set.new()
         collect_partition_symbols(hint.rhs, range_set)
@@ -3075,9 +3113,11 @@ function solve_constraints.solve(cx, stat)
   local mappings = all_calls:map(function(call)
     local task = all_tasks[call]
     local constraints = task:get_partitioning_constraints()
-    local region_mapping = collector_cx:get_mapping(call)
-    local range_mapping = solver_cx:unify(task.name, constraints, region_mapping)
-    return {range_mapping, region_mapping}
+    local region_symbol_mapping, region_type_mapping =
+      unpack(collector_cx:get_mappings(call))
+    local range_mapping =
+      solver_cx:unify(task.name, constraints, region_symbol_mapping, region_type_mapping)
+    return {range_mapping, region_symbol_mapping}
   end)
 
   local user_mapping = data.newmap()
@@ -3095,9 +3135,12 @@ function solve_constraints.solve(cx, stat)
     end
     user_sources:foreach(function(source)
       local my_source =
-        solver_cx.sources_by_regions[source:gettype().parent_region_symbol]
-      local unifiable, mapping =
-        find_unifiable_ranges(solver_cx.constraints, user_constraints, my_source, source)
+        solver_cx.sources_by_regions[source:gettype().parent_region_symbol:gettype()]
+      local unifiable, mapping = false, nil
+      if my_source ~= nil then
+        unifiable, mapping =
+          find_unifiable_ranges(solver_cx.constraints, user_constraints, my_source, source)
+      end
       if unifiable then
         local unified = user_constraints:join(solver_cx.constraints, mapping)
         for from, to in unified:items() do
@@ -3111,8 +3154,8 @@ function solve_constraints.solve(cx, stat)
         solver_cx.sources = new_sources
 
         local new_sources_by_regions = data.newmap()
-        for region, source in solver_cx.sources_by_regions:items() do
-          new_sources_by_regions[region] = mapping[source] or source
+        for region_type, source in solver_cx.sources_by_regions:items() do
+          new_sources_by_regions[region_type] = mapping[source] or source
         end
         solver_cx.sources_by_regions = new_sources_by_regions
 
