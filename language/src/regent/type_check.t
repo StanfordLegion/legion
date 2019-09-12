@@ -2930,6 +2930,7 @@ function type_check.expr_with_scratch_fields(cx, node)
   end
 
   std.copy_privileges(cx, region_type, expr_type)
+  cx:intern_region(expr_type)
 
   return ast.typed.expr.WithScratchFields {
     region = region,
