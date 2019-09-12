@@ -596,7 +596,6 @@ namespace Legion {
                                              const void *fill_value, 
                                              size_t fill_size,
 #ifdef LEGION_SPY
-                                             UniqueID fill_uid,
                                              FieldSpace handle,
                                              RegionTreeID tree_id,
 #endif
@@ -625,7 +624,6 @@ namespace Legion {
           rez.serialize(fill_size);
           rez.serialize(fill_value, fill_size);
 #ifdef LEGION_SPY
-          rez.serialize(fill_uid);
           rez.serialize(handle);
           rez.serialize(tree_id);
 #endif
@@ -653,7 +651,7 @@ namespace Legion {
         remote_tpl->record_issue_fill(memo, idx, lhs, expr, fields,
                                       fill_value, fill_size,
 #ifdef LEGION_SPY
-                                      fill_uid, handle, tree_id,
+                                      handle, tree_id,
 #endif
                                       precondition, tracing_srcs, tracing_dsts);
     }
@@ -969,8 +967,6 @@ namespace Legion {
             const void *fill_value = derez.get_current_pointer();
             derez.advance_pointer(fill_size);
 #ifdef LEGION_SPY
-            UniqueID fill_uid;
-            derez.deserialize(fill_uid);
             FieldSpace handle;
             derez.deserialize(handle);
             RegionTreeID tree_id;
@@ -1023,7 +1019,7 @@ namespace Legion {
             tpl->record_issue_fill(memo, index, lhs, expr, fields,
                                    fill_value, fill_size,
 #ifdef LEGION_SPY
-                                   fill_uid, handle, tree_id,
+                                   handle, tree_id,
 #endif
                                    precondition, tracing_srcs, tracing_dsts);
             if (lhs != lhs_copy)
