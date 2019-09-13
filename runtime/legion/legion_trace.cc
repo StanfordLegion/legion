@@ -3679,7 +3679,7 @@ namespace Legion {
             if (view->is_reduction_view() && IS_REDUCE(usage))
               record_issue_fill_for_reduction(memo, idx, view, mask, expr);
             ViewUser *user = new ViewUser(usage, entry, expr);
-            update_valid_views(memo, view, *eit, usage, mask, true);
+            update_valid_views(view, *eit, usage, mask, true);
             add_view_user(view, user, mask);
           }
         }
@@ -3708,6 +3708,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       const VersionInfo &info = memo->get_version_info(idx);
+      RegionTreeForest *forest = trace->runtime->forest;
       for (FieldMaskSet<InstanceView>::const_iterator vit = views.begin();
            vit != views.end(); ++vit)
       {
@@ -3720,9 +3721,17 @@ namespace Legion {
           for (std::set<EquivalenceSet*>::iterator eit = it->elements.begin();
                eit != it->elements.end(); ++eit)
           {
-            if ((*eit)->set_expr != expr) continue;
+            // Test for intersection here
+            IndexSpaceExpression *intersect =
+              forest->intersect_index_spaces((*eit)->set_expr, expr);
+            if (intersect->is_empty())
+              continue;
+#ifdef DEBUG_LEGION
+            // If they intersect, then the whole eq set should be contained
+            assert((*eit)->set_expr->get_volume() == intersect->get_volume());
+#endif
             ViewUser *user = new ViewUser(usage, entry, (*eit)->set_expr);
-            update_valid_views(memo, vit->first, *eit, usage, mask, false);
+            update_valid_views(vit->first, *eit, usage, mask, false);
             add_view_user(vit->first, user, mask);
           }
         }
@@ -3730,8 +3739,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::update_valid_views(Memoizable *memo,
-                                              InstanceView *view,
+    void PhysicalTemplate::update_valid_views(InstanceView *view,
                                               EquivalenceSet *eq,
                                               const RegionUsage &usage,
                                               const FieldMask &user_mask,

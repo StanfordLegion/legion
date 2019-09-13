@@ -754,8 +754,7 @@ namespace Legion {
                         IndexSpaceExpression *expr,
                         const RegionUsage &usage,
                         const FieldMaskSet<InstanceView> &views);
-      void update_valid_views(Memoizable *memo,
-                              InstanceView *view,
+      void update_valid_views(InstanceView *view,
                               EquivalenceSet *eq,
                               const RegionUsage &usage,
                               const FieldMask &user_mask,
