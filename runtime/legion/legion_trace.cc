@@ -3726,11 +3726,7 @@ namespace Legion {
               forest->intersect_index_spaces((*eit)->set_expr, expr);
             if (intersect->is_empty())
               continue;
-#ifdef DEBUG_LEGION
-            // If they intersect, then the whole eq set should be contained
-            assert((*eit)->set_expr->get_volume() == intersect->get_volume());
-#endif
-            ViewUser *user = new ViewUser(usage, entry, (*eit)->set_expr);
+            ViewUser *user = new ViewUser(usage, entry, intersect);
             update_valid_views(vit->first, *eit, usage, mask, false);
             add_view_user(vit->first, user, mask);
           }
