@@ -137,7 +137,6 @@ namespace Realm {
 	state(STATE_INIT), priority(_priority)
     {
       tgt_fetch_completion = Event::NO_EVENT;
-      pthread_mutex_init(&request_lock, NULL);
     }
 
     DmaRequest::DmaRequest(int _priority,
@@ -147,12 +146,10 @@ namespace Realm {
 	priority(_priority)
     {
       tgt_fetch_completion = Event::NO_EVENT;
-      pthread_mutex_init(&request_lock, NULL);
     }
 
     DmaRequest::~DmaRequest(void)
     {
-      pthread_mutex_destroy(&request_lock);
     }
 
     void DmaRequest::print(std::ostream& os) const

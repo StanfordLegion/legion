@@ -143,6 +143,7 @@ private:
 public:
   void lock(void);
   void unlock(void);
+  bool trylock(void);
 
 protected:
   friend class GASNetCondVar;

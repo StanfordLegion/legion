@@ -124,6 +124,17 @@ void GASNetHSL::unlock(void)
 #endif
 }
 
+bool GASNetHSL::trylock(void)
+{
+#ifdef USE_GASNET_HSL_T
+  int ret = gasnet_hsl_trylock(&mutex);
+  return (ret == 0);
+#else
+  int ret = pthread_mutex_trylock(&mutex);
+  return (ret == 0);
+#endif
+}
+
 GASNetCondVar::GASNetCondVar(GASNetHSL &_mutex) 
   : mutex(_mutex)
 {
@@ -271,7 +282,7 @@ void record_am_handler(int handler_id, const char *description, bool reply)
 #endif
 
 static const int DEFERRED_FREE_COUNT = 128;
-gasnet_hsl_t deferred_free_mutex;
+GASNetHSL deferred_free_mutex;
 int deferred_free_pos;
 void *deferred_frees[DEFERRED_FREE_COUNT];
 
@@ -307,15 +318,14 @@ protected:
   IncomingMessage ***tails;
   int *todo_list; // list of nodes with non-empty message lists
   int todo_oldest, todo_newest;
-  gasnet_hsl_t mutex;
-  gasnett_cond_t condvar;
+  GASNetHSL mutex;
+  GASNetCondVar condvar;
   Realm::CoreReservation *core_rsrv;
   std::vector<Realm::Thread *> handler_threads;
 };
 
 void init_deferred_frees(void)
 {
-  gasnet_hsl_init(&deferred_free_mutex);
   deferred_free_pos = 0;
   for(int i = 0; i < DEFERRED_FREE_COUNT; i++)
     deferred_frees[i] = 0;
@@ -326,11 +336,11 @@ void deferred_free(void *ptr)
 #ifdef DEBUG_MEM_REUSE
   printf("%d: deferring free of %p\n", gasnet_mynode(), ptr);
 #endif
-  gasnet_hsl_lock(&deferred_free_mutex);
+  deferred_free_mutex.lock();
   void *oldptr = deferred_frees[deferred_free_pos];
   deferred_frees[deferred_free_pos] = ptr;
   deferred_free_pos = (deferred_free_pos + 1) % DEFERRED_FREE_COUNT;
-  gasnet_hsl_unlock(&deferred_free_mutex);
+  deferred_free_mutex.unlock();
   if(oldptr) {
 #ifdef DEBUG_MEM_REUSE
     printf("%d: actual free of %p\n", gasnet_mynode(), oldptr);
@@ -382,8 +392,8 @@ public:
 
   class Lock {
   public:
-    Lock(SrcDataPool& _sdp) : sdp(_sdp) { gasnet_hsl_lock(&sdp.mutex); }
-    ~Lock(void) { gasnet_hsl_unlock(&sdp.mutex); }
+    Lock(SrcDataPool& _sdp) : sdp(_sdp) { sdp.mutex.lock(); }
+    ~Lock(void) { sdp.mutex.unlock(); }
   protected:
     SrcDataPool& sdp;
   };
@@ -412,8 +422,8 @@ protected:
   size_t round_up_size(size_t size);
 
   friend class SrcDataPool::Lock;
-  gasnet_hsl_t mutex;
-  gasnett_cond_t condvar;
+  GASNetHSL mutex;
+  GASNetCondVar condvar;
   size_t total_size;
   std::map<char *, size_t> free_list;
   std::queue<OutgoingMessage *> pending_allocations;
@@ -453,9 +463,8 @@ void release_srcptr(void *srcptr)
 }
 
 SrcDataPool::SrcDataPool(void *base, size_t size)
+  : condvar(mutex)
 {
-  gasnet_hsl_init(&mutex);
-  gasnett_cond_init(&condvar);
   free_list[(char *)base] = size;
   total_size = size;
 
@@ -717,7 +726,7 @@ bool SrcDataPool::alloc_spill_memory(size_t size_needed, int msgtype, Lock& held
   // sleep until the message would fit, although we won't try to allocate on this pass
   //  (this allows the caller to try the srcdatapool again first)
   while((current_spill_bytes + size_needed) > max_spill_bytes) {
-    gasnett_cond_wait(&condvar, &mutex.lock);
+    condvar.wait();
     log_spill.debug() << "awake - rechecking: "
 		      << current_spill_bytes << " + " << size_needed << " > " << max_spill_bytes << "?";
   }
@@ -744,7 +753,7 @@ void SrcDataPool::release_spill_memory(size_t size_released, int msgtype, Lock& 
   // if there are any threads blocked on spilling data, wake them
   if(current_suspended_spillers > 0) {
     log_spill.debug() << "waking " << current_suspended_spillers << " suspended spillers";
-    gasnett_cond_broadcast(&condvar);
+    condvar.broadcast();
   }
 }
 
@@ -1028,7 +1037,7 @@ static DetailedMessageTiming detailed_message_timing;
 #endif
 
 IncomingMessageManager::IncomingMessageManager(int _nodes, Realm::CoreReservationSet& crs)
-  : nodes(_nodes), shutdown_flag(0)
+  : nodes(_nodes), shutdown_flag(0), condvar(mutex)
 {
   heads = new IncomingMessage *[nodes];
   tails = new IncomingMessage **[nodes];
@@ -1038,8 +1047,6 @@ IncomingMessageManager::IncomingMessageManager(int _nodes, Realm::CoreReservatio
   }
   todo_list = new int[nodes + 1];  // an extra entry to distinguish full from empty
   todo_oldest = todo_newest = 0;
-  gasnet_hsl_init(&mutex);
-  gasnett_cond_init(&condvar);
 
   core_rsrv = new Realm::CoreReservation("AM handlers", crs,
 					 Realm::CoreReservationParameters());
@@ -1057,7 +1064,7 @@ void IncomingMessageManager::add_incoming_message(int sender, IncomingMessage *m
 #ifdef DEBUG_INCOMING
   printf("adding incoming message from %d\n", sender);
 #endif
-  gasnet_hsl_lock(&mutex);
+  mutex.lock();
   if(heads[sender]) {
     // tack this on to the existing list
     assert(tails[sender]);
@@ -1072,9 +1079,9 @@ void IncomingMessageManager::add_incoming_message(int sender, IncomingMessage *m
     if(todo_newest > nodes)
       todo_newest = 0;
     assert(todo_newest != todo_oldest);  // should never wrap around
-    gasnett_cond_broadcast(&condvar);  // wake up any sleepers
+    condvar.broadcast();  // wake up any sleepers
   }
-  gasnet_hsl_unlock(&mutex);
+  mutex.unlock();
 }
 
 void IncomingMessageManager::start_handler_threads(int count, size_t stack_size)
@@ -1093,12 +1100,12 @@ void IncomingMessageManager::start_handler_threads(int count, size_t stack_size)
 
 void IncomingMessageManager::shutdown(void)
 {
-  gasnet_hsl_lock(&mutex);
+  mutex.lock();
   if(!shutdown_flag) {
     shutdown_flag = true;
-    gasnett_cond_broadcast(&condvar);  // wake up any sleepers
+    condvar.broadcast();  // wake up any sleepers
   }
-  gasnet_hsl_unlock(&mutex);
+  mutex.unlock();
 
   for(std::vector<Realm::Thread *>::iterator it = handler_threads.begin();
       it != handler_threads.end();
@@ -1111,7 +1118,7 @@ void IncomingMessageManager::shutdown(void)
 
 IncomingMessage *IncomingMessageManager::get_messages(int &sender, bool wait)
 {
-  gasnet_hsl_lock(&mutex);
+  mutex.lock();
   while(todo_oldest == todo_newest) {
     // todo list is empty
     if(shutdown_flag || !wait)
@@ -1119,7 +1126,7 @@ IncomingMessage *IncomingMessageManager::get_messages(int &sender, bool wait)
 #ifdef DEBUG_INCOMING
     printf("incoming message list is empty - sleeping\n");
 #endif
-    gasnett_cond_wait(&condvar, &mutex.lock);
+    condvar.wait();
   }
   IncomingMessage *retval;
   if(todo_oldest == todo_newest) {
@@ -1142,7 +1149,7 @@ IncomingMessage *IncomingMessageManager::get_messages(int &sender, bool wait)
     printf("handling incoming messages from %d\n", sender);
 #endif
   }
-  gasnet_hsl_unlock(&mutex);
+  mutex.unlock();
   return retval;
 }    
 
@@ -1214,11 +1221,8 @@ public:
   };
 public:
   ActiveMessageEndpoint(gasnet_node_t _peer)
-    : peer(_peer)
+    : peer(_peer), cond(mutex)
   {
-    gasnet_hsl_init(&mutex);
-    gasnett_cond_init(&cond);
-
     cur_write_lmb = 0;
     cur_write_offset = 0;
     cur_write_count = 0;
@@ -1275,8 +1279,7 @@ public:
     while(still_more && ((max_to_send == 0) || (count < max_to_send))) {
       // attempt to get the mutex that covers the outbound queues - do not
       //  block
-      int ret = gasnet_hsl_trylock(&mutex);
-      if(ret == GASNET_ERR_NOT_READY) break;
+      if(!mutex.trylock()) break;
 
       // short messages are used primarily for flow control, so always try to send those first
       // (if a short message needs to be ordered with long messages, it goes in the long message
@@ -1292,7 +1295,7 @@ public:
 	message_log_state = MSGLOGSTATE_NORMAL;
 #endif
 	// now let go of lock and send message
-	gasnet_hsl_unlock(&mutex);
+	mutex.unlock();
 
 #ifdef DETAILED_MESSAGE_TIMING
 	CurrentTime start_time;
@@ -1321,7 +1324,7 @@ public:
 	  unsigned qdepth = out_long_hdrs.size();
 	  message_log_state = MSGLOGSTATE_NORMAL;
 #endif
-	  gasnet_hsl_unlock(&mutex);
+	  mutex.unlock();
 #ifdef DETAILED_MESSAGE_TIMING
 	  CurrentTime start_time;
 #endif
@@ -1345,7 +1348,7 @@ public:
 	    message_log_state = MSGLOGSTATE_SRCDATAWAIT;
 	  }
 #endif
-	  gasnet_hsl_unlock(&mutex);
+	  mutex.unlock();
 #ifdef DETAILED_MESSAGE_TIMING
 	  CurrentTime now;
 	  detailed_message_timing.record(timing_idx, peer, hdr->msgid, -2, hdr->num_args*4 + hdr->payload_size, qdepth, now, now);
@@ -1363,7 +1366,7 @@ public:
 	  unsigned qdepth = out_long_hdrs.size();
 	  message_log_state = MSGLOGSTATE_NORMAL;
 #endif
-	  gasnet_hsl_unlock(&mutex);
+	  mutex.unlock();
 #ifdef DETAILED_MESSAGE_TIMING
 	  CurrentTime start_time;
 #endif
@@ -1387,7 +1390,7 @@ public:
 	    message_log_state = MSGLOGSTATE_LMBWAIT;
 	  }
 #endif
-	  gasnet_hsl_unlock(&mutex);
+	  mutex.unlock();
 #ifdef DETAILED_MESSAGE_TIMING
 	  CurrentTime now;
 	  detailed_message_timing.record(timing_idx, peer, hdr->msgid, -3, hdr->num_args*4 + hdr->payload_size, qdepth, now, now);
@@ -1415,7 +1418,7 @@ public:
 	  unsigned qdepth = out_long_hdrs.size();
 	  message_log_state = MSGLOGSTATE_NORMAL;
 #endif
-	  gasnet_hsl_unlock(&mutex);
+	  mutex.unlock();
 #ifdef DEBUG_LMB
 	  printf("LMB: sending %zd bytes %d->%d, [%p,%p)\n",
 		 hdr->payload_size, gasnet_mynode(), peer,
@@ -1446,7 +1449,7 @@ public:
 	  message_log_state = MSGLOGSTATE_NORMAL;
 #endif
 	  // now let go of the lock and send the flip request
-	  gasnet_hsl_unlock(&mutex);
+	  mutex.unlock();
 
 #ifdef DEBUG_LMB
 	  printf("LMB: flipping buffer %d for %d->%d, [%p,%p), count=%d\n",
@@ -1476,11 +1479,11 @@ public:
       // Couldn't do anything so if we were told to wait, goto sleep
       if (wait)
       {
-        gasnett_cond_wait(&cond, &mutex.lock);
+	cond.wait();
       }
       // if we get here, we didn't find anything to do, so break out of loop
       //  after releasing the lock
-      gasnet_hsl_unlock(&mutex);
+      mutex.unlock();
       break;
     }
 
@@ -1506,7 +1509,7 @@ public:
     }
 
     // need to hold the mutex in order to push onto one of the queues
-    gasnet_hsl_lock(&mutex);
+    mutex.lock();
 
     // once we have the lock, we can safely move the message's payload to
     //  srcdatapool
@@ -1522,9 +1525,9 @@ public:
     else
       out_long_hdrs.push(hdr);
     // Signal in case there is a sleeping sender
-    gasnett_cond_signal(&cond);
+    cond.signal();
 
-    gasnet_hsl_unlock(&mutex);
+    mutex.unlock();
 
     return was_empty;
   }
@@ -1554,7 +1557,7 @@ public:
     // now take the lock to increment the r_count and decide if we need
     //  to ack (can't actually send it here, so queue it up)
     bool message_added_to_empty_queue = false;
-    gasnet_hsl_lock(&mutex);
+    mutex.lock();
     lmb_r_counts[r_buffer]++;
     if(lmb_r_counts[r_buffer] == 0) {
 #ifdef DEBUG_LMB
@@ -1567,9 +1570,9 @@ public:
       OutgoingMessage *hdr = new OutgoingMessage(MSGID_FLIP_ACK, 1, &r_buffer);
       out_short_hdrs.push(hdr);
       // wake up a sender
-      gasnett_cond_signal(&cond);
+      cond.signal();
     }
-    gasnet_hsl_unlock(&mutex);
+    mutex.unlock();
     return message_added_to_empty_queue;
   }
 
@@ -1585,7 +1588,7 @@ public:
 
     bool ready = false;;
     // now we need to hold the lock
-    gasnet_hsl_lock(&mutex);
+    mutex.lock();
     // See if we've seen this message id before
     std::map<int,ChunkInfo>::iterator finder = 
       observed_messages.find(message_id);
@@ -1614,7 +1617,7 @@ public:
       }
       // Otherwise we're not done yet
     }
-    gasnet_hsl_unlock(&mutex);
+    mutex.unlock();
     return ready;
   }
 
@@ -1632,7 +1635,7 @@ public:
     __sync_fetch_and_add(&received_messages, 1);
 #endif
     bool message_added_to_empty_queue = false;
-    gasnet_hsl_lock(&mutex);
+    mutex.lock();
     lmb_r_counts[buffer] -= count;
     if(lmb_r_counts[buffer] == 0) {
 #ifdef DEBUG_LMB
@@ -1645,9 +1648,9 @@ public:
       OutgoingMessage *hdr = new OutgoingMessage(MSGID_FLIP_ACK, 1, &buffer);
       out_short_hdrs.push(hdr);
       // Wake up a sender
-      gasnett_cond_signal(&cond);
+      cond.signal();
     }
-    gasnet_hsl_unlock(&mutex);
+    mutex.unlock();
     return message_added_to_empty_queue;
   }
 
@@ -1667,9 +1670,9 @@ public:
 
     lmb_w_avail[buffer] = true;
     // wake up a sender in case we had messages waiting for free space
-    gasnet_hsl_lock(&mutex);
-    gasnett_cond_signal(&cond);
-    gasnet_hsl_unlock(&mutex);
+    mutex.lock();
+    cond.signal();
+    mutex.unlock();
   }
 
 protected:
@@ -2062,8 +2065,8 @@ protected:
 
   gasnet_node_t peer;
   
-  gasnet_hsl_t mutex;
-  gasnett_cond_t cond;
+  GASNetHSL mutex;
+  GASNetCondVar cond;
 public:
   std::queue<OutgoingMessage *> out_short_hdrs;
   std::queue<OutgoingMessage *> out_long_hdrs;
@@ -2223,7 +2226,7 @@ void OutgoingMessage::assign_srcdata_pointer(void *ptr)
 class EndpointManager {
 public:
   EndpointManager(int num_endpoints, Realm::CoreReservationSet& crs)
-    : total_endpoints(num_endpoints)
+    : total_endpoints(num_endpoints), condvar(mutex)
   {
     endpoints = new ActiveMessageEndpoint*[num_endpoints];
     for (int i = 0; i < num_endpoints; i++)
@@ -2235,8 +2238,6 @@ public:
     }
 
     // keep a todo list of endpoints with non-empty queues
-    gasnet_hsl_init(&mutex);
-    gasnett_cond_init(&condvar);
     todo_list = new int[total_endpoints + 1];  // one extra to distinguish full/empty
     todo_oldest = todo_newest = 0;
 
@@ -2271,15 +2272,15 @@ public:
   void add_todo_entry(int target)
   {
     //printf("%d: adding target %d to list\n", gasnet_mynode(), target);
-    gasnet_hsl_lock(&mutex);
+    mutex.lock();
     todo_list[todo_newest] = target;
     todo_newest++;
     if(todo_newest > total_endpoints)
       todo_newest = 0;
     assert(todo_newest != todo_oldest); // should never wrap around
     // wake up any sleepers
-    gasnett_cond_broadcast(&condvar);
-    gasnet_hsl_unlock(&mutex);
+    condvar.broadcast();
+    mutex.unlock();
   }
 
   void handle_flip_request(gasnet_node_t src, int flip_buffer, int flip_count)
@@ -2299,16 +2300,17 @@ public:
     while(true) {
       // get the next entry from the todo list, waiting if requested
       if(wait) {
-	gasnet_hsl_lock(&mutex);
+	mutex.lock();
 	while(todo_oldest == todo_newest) {
 	  //printf("outgoing todo list is empty - sleeping\n");
-	  gasnett_cond_wait(&condvar, &mutex.lock);
+	  condvar.wait();
 	}
       } else {
 	// try to take our lock so we can pop an endpoint from the todo list
-	int ret = gasnet_hsl_trylock(&mutex);
-	// no lock, so we don't actually know if we have any messages - be conservative
-	if(ret == GASNET_ERR_NOT_READY) return true;
+	if(!mutex.trylock()) {
+	  // no lock, so we don't actually know if we have any messages - be conservative
+	  return true;
+	}
 
 	// give up if list is empty too
 	if(todo_oldest == todo_newest) {
@@ -2316,7 +2318,7 @@ public:
 	  //  empty queues, but there's a race condition here with endpoints
 	  //  that have added messages but not been able to put themselves on
 	  //  the todo list yet
-	  gasnet_hsl_unlock(&mutex);
+	  mutex.unlock();
 	  return false;
 	}
       }
@@ -2326,7 +2328,7 @@ public:
       todo_oldest++;
       if(todo_oldest > total_endpoints)
 	todo_oldest = 0;
-      gasnet_hsl_unlock(&mutex);
+      mutex.unlock();
 
       //printf("sending messages to %d\n", target);
       bool still_more = endpoints[target]->push_messages(max_to_send, wait);
@@ -2406,8 +2408,8 @@ protected:
 private:
   const int total_endpoints;
   ActiveMessageEndpoint **endpoints;
-  gasnet_hsl_t mutex;
-  gasnett_cond_t condvar;
+  GASNetHSL mutex;
+  GASNetCondVar condvar;
   int *todo_list;
   int todo_oldest, todo_newest;
   bool shutdown_flag;

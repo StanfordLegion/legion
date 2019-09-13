@@ -875,11 +875,11 @@ namespace Realm {
   struct FastRsrvState {
     FastReservation::State state;
     ReservationImpl *rsrv_impl;   // underlying reservation
-    pthread_mutex_t mutex;        // protects rest of internal state
+    GASNetHSL mutex;              // protects rest of internal state
     Event rsrv_ready;             // ready event for a pending rsrv request
     unsigned sleeper_count;
     Event sleeper_event;
-    pthread_cond_t condvar;    // for external waiters
+    GASNetCondVar condvar;        // for external waiters
 
     // must be called while holding mutex
     Event request_base_rsrv(void);
@@ -949,11 +949,12 @@ namespace Realm {
       frs.state = 0;
       frs.rsrv_impl = 0;
     }
-    pthread_mutex_init(&frs.mutex, 0);
+    // mutex, condvar must be manually constructed
+    new(&frs.mutex) GASNetHSL;
+    new(&frs.condvar) GASNetCondVar(frs.mutex);
     frs.rsrv_ready = Event::NO_EVENT;
     frs.sleeper_count = 0;
     frs.sleeper_event = Event::NO_EVENT;
-    pthread_cond_init(&frs.condvar, 0);
     if(Config::use_fast_reservation_fallback) {
       frs.state |= STATE_SLOW_FALLBACK;
       if(!frs.rsrv_impl)
@@ -977,9 +978,9 @@ namespace Realm {
 	  frs.rsrv_impl->release();
       }
     }
-    // clean up our pthread resources too
-    pthread_mutex_destroy(&frs.mutex);
-    pthread_cond_destroy(&frs.condvar);
+    // mutex, condvar must be manually destroyed
+    frs.condvar.~GASNetCondVar();
+    frs.mutex.~GASNetHSL();
   }
 
   // NOT copyable
@@ -1074,7 +1075,7 @@ namespace Realm {
 
       // any other transition requires holding the fast reservation's mutex
       {
-	pthread_mutex_lock(&frs.mutex);
+	frs.mutex.lock();
 
 	// resample the state - since we hold the lock, exceptional bits
 	//  cannot change out from under us
@@ -1111,7 +1112,7 @@ namespace Realm {
 	}
 
 	// now that we have our event, we're done messing with internal state
-	pthread_mutex_unlock(&frs.mutex);
+	frs.mutex.unlock();
 
 	if(wait_for.exists()) {
 	  switch(mode) {
@@ -1181,7 +1182,7 @@ namespace Realm {
 
       // any other transition requires holding the fast reservation's mutex
       {
-	pthread_mutex_lock(&frs.mutex);
+	frs.mutex.lock();
 
 	// resample the state - since we hold the lock, exceptional bits
 	//  cannot change out from under us
@@ -1217,7 +1218,7 @@ namespace Realm {
 	}
 
 	// now we're done messing with internal state
-	pthread_mutex_unlock(&frs.mutex);
+	frs.mutex.unlock();
 
 	// if an event trigger is required, fail the lock attempt
 	if(event_needed)
@@ -1302,7 +1303,7 @@ namespace Realm {
 	  
       // any other transition requires holding the fast reservation's mutex
       {
-	pthread_mutex_lock(&frs.mutex);
+	frs.mutex.lock();
 
 	// resample the state - since we hold the lock, exceptional bits
 	//  cannot change out from under us
@@ -1361,7 +1362,7 @@ namespace Realm {
 	}
 
 	// now that we have our event, we're done messing with internal state
-	pthread_mutex_unlock(&frs.mutex);
+	frs.mutex.unlock();
 
 	if(wait_for.exists()) {
 	  switch(mode) {
@@ -1441,7 +1442,7 @@ namespace Realm {
       // if the BASE_RSRV bit appears to be set, we probably need to request it,
       //  but take the lock first to be sure
       if((cur_state & STATE_BASE_RSRV) != 0) {
-	pthread_mutex_lock(&frs.mutex);
+	frs.mutex.lock();
 
 	// resample state
 	cur_state = __sync_fetch_and_add(&frs.state, 0);
@@ -1455,7 +1456,7 @@ namespace Realm {
 	  }
 	}
 
-	pthread_mutex_unlock(&frs.mutex);
+	frs.mutex.unlock();
 
 	if(retry)
 	  continue;
@@ -1480,7 +1481,7 @@ namespace Realm {
 
     // we already tried the fast path in unlock(), so just take the lock to
     //  hold exceptional conditions still and then modify state
-    pthread_mutex_lock(&frs.mutex);
+    frs.mutex.lock();
 
     // based on the current state, decide if we're undoing a write lock or
     //  a read lock
@@ -1519,7 +1520,7 @@ namespace Realm {
       __sync_fetch_and_sub(&frs.state, 1);
     }
 
-    pthread_mutex_unlock(&frs.mutex);
+    frs.mutex.unlock();
   }
 
   void FastReservation::advise_sleep_entry(UserEvent guard_event)
@@ -1530,7 +1531,7 @@ namespace Realm {
 
     // take the private lock, update the sleeper count/event and set the
     //  sleeper bit if we're the first
-    pthread_mutex_lock(&frs.mutex);
+    frs.mutex.lock();
     if(frs.sleeper_count == 0) {
       assert(!frs.sleeper_event.exists());
       frs.sleeper_event = guard_event;
@@ -1551,7 +1552,7 @@ namespace Realm {
 	frs.sleeper_event = Event::merge_events(frs.sleeper_event,
 						guard_event);
     }
-    pthread_mutex_unlock(&frs.mutex);
+    frs.mutex.unlock();
   }
 
   void FastReservation::advise_sleep_exit(void)
@@ -1562,7 +1563,7 @@ namespace Realm {
 
     // take the private lock, decrement the sleeper count, clearing the
     //  event and the sleeper bit if we were the last
-    pthread_mutex_lock(&frs.mutex);
+    frs.mutex.lock();
     assert(frs.sleeper_count > 0);
     if(frs.sleeper_count == 1) {
       // clear the sleeper flag - it must already be set
@@ -1578,7 +1579,7 @@ namespace Realm {
       assert((frs.state & STATE_SLEEPER) != 0);
       frs.sleeper_count--;
     }
-    pthread_mutex_unlock(&frs.mutex);
+    frs.mutex.unlock();
   }
 
   /* static */

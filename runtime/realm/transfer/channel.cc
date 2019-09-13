@@ -246,9 +246,6 @@ namespace Realm {
 	if(next_xd_guid != XFERDES_NO_GUID)
 	  seq_next_read.add_span(0, _next_max_rw_gap);
         offset_idx = 0;
-        pthread_mutex_init(&xd_lock, NULL);
-        pthread_mutex_init(&update_read_lock, NULL);
-        pthread_mutex_init(&update_write_lock, NULL);
       }
 
       XferDes::~XferDes() {
@@ -264,9 +261,6 @@ namespace Realm {
         //  get_runtime()->get_memory_impl(src_buf.memory)->free_bytes(
         //      src_buf.alloc_offset, src_buf.buf_size);
         //}
-        pthread_mutex_destroy(&xd_lock);
-        pthread_mutex_destroy(&update_read_lock);
-        pthread_mutex_destroy(&update_write_lock);
       };
 
       void XferDes::mark_completed() {
@@ -1473,7 +1467,7 @@ namespace Realm {
 
       long RemoteWriteXferDes::get_requests(Request** requests, long nr)
       {
-        pthread_mutex_lock(&xd_lock);
+	xd_lock.lock();
         RemoteWriteRequest** reqs = (RemoteWriteRequest**) requests;
 	// remote writes allow 2D on source, but not destination
 	unsigned flags = TransferIterator::SRC_LINES_OK;
@@ -1486,28 +1480,28 @@ namespace Realm {
 	  assert(reqs[i]->src_base != 0);
           reqs[i]->dst_base = dst_buf_base + reqs[i]->dst_off;
         }
-        pthread_mutex_unlock(&xd_lock);
+	xd_lock.unlock();
         return new_nr;
       }
 
       void RemoteWriteXferDes::notify_request_read_done(Request* req)
       {
-        pthread_mutex_lock(&xd_lock);
+        xd_lock.lock();
         default_notify_request_read_done(req);
-        pthread_mutex_unlock(&xd_lock);
+        xd_lock.unlock();
       }
 
       void RemoteWriteXferDes::notify_request_write_done(Request* req)
       {
-        pthread_mutex_lock(&xd_lock);
+        xd_lock.lock();
         default_notify_request_write_done(req);
-        pthread_mutex_unlock(&xd_lock);
+        xd_lock.unlock();
       }
 
       void RemoteWriteXferDes::flush()
       {
-        //pthread_mutex_lock(&xd_lock);
-        //pthread_mutex_unlock(&xd_lock);
+        //xd_lock.lock();
+        //xd_lock.unlock();
       }
 
       // doesn't do pre_bytes_write updates, since the remote write message
@@ -2154,13 +2148,11 @@ namespace Realm {
 
       MemcpyChannel::MemcpyChannel(long max_nr)
 	: Channel(XferDes::XFER_MEM_CPY)
+	, pending_cond(pending_lock)
       {
         capacity = max_nr;
         is_stopped = false;
         sleep_threads = false;
-        pthread_mutex_init(&pending_lock, NULL);
-        pthread_mutex_init(&finished_lock, NULL);
-        pthread_cond_init(&pending_cond, NULL);
         //cbs = (MemcpyRequest**) calloc(max_nr, sizeof(MemcpyRequest*));
 	unsigned bw = 0; // TODO
 	unsigned latency = 0;
@@ -2174,9 +2166,6 @@ namespace Realm {
 
       MemcpyChannel::~MemcpyChannel()
       {
-        pthread_mutex_destroy(&pending_lock);
-        pthread_mutex_destroy(&finished_lock);
-        pthread_cond_destroy(&pending_cond);
         //free(cbs);
       }
 
@@ -2201,19 +2190,19 @@ namespace Realm {
 
       void MemcpyChannel::stop()
       {
-        pthread_mutex_lock(&pending_lock);
+	pending_lock.lock();
         if (!is_stopped)
-          pthread_cond_broadcast(&pending_cond);
+	  pending_cond.broadcast();
         is_stopped = true;
-        pthread_mutex_unlock(&pending_lock);
+	pending_lock.unlock();
       }
 
       void MemcpyChannel::get_request(std::deque<MemcpyRequest*>& thread_queue)
       {
-        pthread_mutex_lock(&pending_lock);
+        pending_lock.lock();
         while (pending_queue.empty() && !is_stopped) {
           sleep_threads = true;
-          pthread_cond_wait(&pending_cond, &pending_lock);
+	  pending_cond.wait();
         }
         if (!is_stopped) {
           // TODO: enable the following optimization
@@ -2223,14 +2212,14 @@ namespace Realm {
           //fprintf(stderr, "[%d] thread_queue.size = %lu\n", gettid(), thread_queue.size());
           //pending_queue.clear();
         }
-        pthread_mutex_unlock(&pending_lock);
+        pending_lock.unlock();
       }
 
       void MemcpyChannel::return_request(std::deque<MemcpyRequest*>& thread_queue)
       {
-        pthread_mutex_lock(&finished_lock);
+        finished_lock.lock();
         finished_queue.insert(finished_queue.end(), thread_queue.begin(), thread_queue.end());
-        pthread_mutex_unlock(&finished_lock);
+        finished_lock.unlock();
       }
 
       long MemcpyChannel::submit(Request** requests, long nr)
@@ -2663,7 +2652,7 @@ namespace Realm {
         }
         return nr;
         /*
-        pthread_mutex_lock(&pending_lock);
+        pending_lock.lock();
         //if (nr > 0)
           //printf("MemcpyChannel::submit[nr = %ld]\n", nr);
         for (long i = 0; i < nr; i++) {
@@ -2673,7 +2662,7 @@ namespace Realm {
           pthread_cond_broadcast(&pending_cond);
           sleep_threads = false;
         }
-        pthread_mutex_unlock(&pending_lock);
+        pending_lock.unlock();
         return nr;
         */
         /*
@@ -2689,14 +2678,14 @@ namespace Realm {
 
       void MemcpyChannel::pull()
       {
-        pthread_mutex_lock(&finished_lock);
+        finished_lock.lock();
         while (!finished_queue.empty()) {
           MemcpyRequest* req = finished_queue.front();
           finished_queue.pop_front();
           req->xd->notify_request_read_done(req);
           req->xd->notify_request_write_done(req);
         }
-        pthread_mutex_unlock(&finished_lock);
+        finished_lock.unlock();
         /*
         while (true) {
           long np = worker->pull(cbs, capacity);

@@ -157,7 +157,7 @@ namespace Realm {
       State state;
       int priority;
       // <NEWDMA>
-      pthread_mutex_t request_lock;
+      GASNetHSL request_lock;
       std::vector<XferDesID> path;
       std::set<XferDesID> complete_xd;
 
@@ -166,10 +166,10 @@ namespace Realm {
       // This return val is a signal for delete this DmaRequest
       bool notify_xfer_des_completion(XferDesID guid)
       {
-        pthread_mutex_lock(&request_lock);
+	request_lock.lock();
         complete_xd.insert(guid);
         bool all_completed = (complete_xd.size() == path.size());
-        pthread_mutex_unlock(&request_lock);
+	request_lock.unlock();
         return all_completed;
       }
       Event tgt_fetch_completion;
