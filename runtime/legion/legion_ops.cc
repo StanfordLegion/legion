@@ -1521,21 +1521,36 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void RemoteMemoizable::find_equivalence_sets(unsigned idx,
+              const FieldMask &mask, FieldMaskSet<EquivalenceSet> &target) const
+    //--------------------------------------------------------------------------
+    {
+      Runtime *runtime = op->runtime;
+#ifdef DEBUG_LEGION
+      assert(origin != runtime->address_space);
+#endif
+      RtUserEvent done = Runtime::create_rt_user_event();
+      // Send the request back to the origin node
+      Serializer rez;
+      {
+        RezCheck z(rez);
+        rez.serialize(original);
+        rez.serialize(idx);
+        rez.serialize(mask);
+        rez.serialize(&target);
+        rez.serialize(done);
+      }
+      runtime->send_remote_trace_equivalence_sets_request(origin, rez);
+      done.wait();
+    }
+
+    //--------------------------------------------------------------------------
     const VersionInfo& RemoteMemoizable::get_version_info(unsigned idx) const
     //--------------------------------------------------------------------------
     {
       // should never be called
       assert(false);
       return *new VersionInfo();
-    }
-
-    //--------------------------------------------------------------------------
-    const RegionRequirement& RemoteMemoizable::get_requirement(unsigned x) const
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *new RegionRequirement();
     }
 
     //--------------------------------------------------------------------------
@@ -1578,6 +1593,79 @@ namespace Legion {
       derez.deserialize<bool>(is_memo);
       return new RemoteMemoizable(op, original, origin, kind, tid,
                                   completion_event, is_mem_task, is_memo);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void RemoteMemoizable::handle_eq_request(Deserializer &derez,
+                                        Runtime *runtime, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      Memoizable *memo;
+      derez.deserialize(memo);
+      unsigned index;
+      derez.deserialize(index);
+      FieldMask mask;
+      derez.deserialize(mask);
+      FieldMaskSet<EquivalenceSet> *target;
+      derez.deserialize(target);
+      RtUserEvent done_event;
+      derez.deserialize(done_event);
+      
+      FieldMaskSet<EquivalenceSet> result;
+      memo->find_equivalence_sets(index, mask, result);
+      if (!result.empty())
+      {
+        Serializer rez;
+        {
+          RezCheck z2(rez);
+          rez.serialize(target);
+          rez.serialize<size_t>(result.size());
+          for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
+                result.begin(); it != result.end(); it++)
+          {
+            rez.serialize(it->first->did);
+            rez.serialize(it->second);
+          }
+          rez.serialize(done_event);
+        }
+        runtime->send_remote_trace_equivalence_sets_response(source, rez);
+      }
+      else
+        Runtime::trigger_event(done_event);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void RemoteMemoizable::handle_eq_response(Deserializer &derez,
+                                                         Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      FieldMaskSet<EquivalenceSet> *target;
+      derez.deserialize(target);
+      size_t num_sets;
+      derez.deserialize(num_sets);
+      std::set<RtEvent> ready_events;
+      for (unsigned idx = 0; idx < num_sets; idx++)
+      {
+        DistributedID did;
+        derez.deserialize(did);
+        RtEvent ready;
+        EquivalenceSet *set = 
+          runtime->find_or_request_equivalence_set(did, ready);
+        FieldMask mask;
+        derez.deserialize(mask);
+        target->insert(set, mask);
+        if (ready.exists() && !ready.has_triggered())
+          ready_events.insert(ready);
+      }
+      RtUserEvent done_event;
+      derez.deserialize(done_event);
+
+      if (!ready_events.empty())
+        Runtime::trigger_event(done_event, Runtime::merge_events(ready_events));
+      else
+        Runtime::trigger_event(done_event);
     }
 
     ///////////////////////////////////////////////////////////// 

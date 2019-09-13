@@ -3497,6 +3497,21 @@ namespace Legion {
         lhs = ApEvent(rename);
       }
 
+      LegionList<FieldSet<EquivalenceSet*> >::aligned src_eqs, dst_eqs;
+      // Get these before we take the lock
+      {
+        FieldMaskSet<EquivalenceSet> eq_sets;
+        const FieldMask &src_mask = tracing_srcs.get_valid_mask();
+        memo->find_equivalence_sets(src_idx, src_mask, eq_sets);
+        eq_sets.compute_field_sets(src_mask, src_eqs);
+      }
+      {
+        FieldMaskSet<EquivalenceSet> eq_sets;
+        const FieldMask &dst_mask = tracing_dsts.get_valid_mask();
+        memo->find_equivalence_sets(dst_idx, dst_mask, eq_sets);
+        eq_sets.compute_field_sets(dst_mask, dst_eqs);
+      }
+
       AutoLock tpl_lock(template_lock);
 #ifdef DEBUG_LEGION
       assert(is_recording());
@@ -3511,11 +3526,11 @@ namespace Legion {
 #endif
             find_event(precondition), redop, reduction_fold));
 
-      record_views(memo, src_idx, lhs_, expr,
-          RegionUsage(READ_ONLY, EXCLUSIVE, 0), tracing_srcs);
+      record_views(lhs_, expr, RegionUsage(READ_ONLY, EXCLUSIVE, 0), 
+                   tracing_srcs, src_eqs);
       record_copy_views(lhs_, expr, tracing_srcs);
-      record_views(memo, dst_idx, lhs_, expr,
-          RegionUsage(WRITE_ONLY, EXCLUSIVE, 0), tracing_dsts);
+      record_views(lhs_, expr, RegionUsage(WRITE_ONLY, EXCLUSIVE, 0), 
+                   tracing_dsts, dst_eqs);
       record_copy_views(lhs_, expr, tracing_dsts);
     }
 
@@ -3558,6 +3573,16 @@ namespace Legion {
         rename.trigger();
         lhs = ApEvent(rename);
       }
+
+      // Do this before we take the lock
+      LegionList<FieldSet<EquivalenceSet*> >::aligned eqs;
+      {
+        FieldMaskSet<EquivalenceSet> eq_sets;
+        const FieldMask &dst_mask = tracing_dsts.get_valid_mask();
+        memo->find_equivalence_sets(idx, dst_mask, eq_sets);
+        eq_sets.compute_field_sets(dst_mask, eqs);
+      }
+
       AutoLock tpl_lock(template_lock);
 #ifdef DEBUG_LEGION
       assert(is_recording());
@@ -3573,8 +3598,8 @@ namespace Legion {
                                        find_event(precondition)));
 
       record_fill_views(tracing_srcs);
-      record_views(memo, idx, lhs_, expr,
-          RegionUsage(WRITE_ONLY, EXCLUSIVE, 0), tracing_dsts);
+      record_views(lhs_, expr, RegionUsage(WRITE_ONLY, EXCLUSIVE, 0), 
+                   tracing_dsts, eqs);
       record_copy_views(lhs_, expr, tracing_dsts);
     }
 
@@ -3653,16 +3678,18 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(memo != NULL);
 #endif
-      AutoLock tpl_lock(template_lock);
-      TraceLocalID op_key = find_trace_local_id(memo);
-      unsigned entry = find_memo_entry(memo);
-
+      // Do this part before we take the lock
       LegionList<FieldSet<EquivalenceSet*> >::aligned eqs;
       if (update_validity)
       {
-        memo->get_version_info(idx).get_equivalence_sets()
-          .compute_field_sets(user_mask, eqs);
+        FieldMaskSet<EquivalenceSet> eq_sets;
+        memo->find_equivalence_sets(idx, user_mask, eq_sets);
+        eq_sets.compute_field_sets(user_mask, eqs);
       }
+
+      AutoLock tpl_lock(template_lock);
+      TraceLocalID op_key = find_trace_local_id(memo);
+      unsigned entry = find_memo_entry(memo);
 
       FieldMaskSet<IndexSpaceExpression> &views = op_views[op_key][view];
       for (LegionList<FieldSet<EquivalenceSet*> >::aligned::iterator it =
@@ -3699,27 +3726,25 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::record_views(Memoizable *memo,
-                                        unsigned idx,
-                                        unsigned entry,
+    void PhysicalTemplate::record_views(unsigned entry,
                                         IndexSpaceExpression *expr,
                                         const RegionUsage &usage,
-                                        const FieldMaskSet<InstanceView> &views)
+                                        const FieldMaskSet<InstanceView> &views,
+                     const LegionList<FieldSet<EquivalenceSet*> >::aligned &eqs)
     //--------------------------------------------------------------------------
     {
-      const VersionInfo &info = memo->get_version_info(idx);
       RegionTreeForest *forest = trace->runtime->forest;
       for (FieldMaskSet<InstanceView>::const_iterator vit = views.begin();
-           vit != views.end(); ++vit)
+            vit != views.end(); ++vit)
       {
-        LegionList<FieldSet<EquivalenceSet*> >::aligned eqs;
-        info.get_equivalence_sets().compute_field_sets(vit->second, eqs);
-        for (LegionList<FieldSet<EquivalenceSet*> >::aligned::iterator it =
-             eqs.begin(); it != eqs.end(); ++it)
+        for (LegionList<FieldSet<EquivalenceSet*> >::aligned::const_iterator 
+              it = eqs.begin(); it != eqs.end(); ++it)
         {
-          FieldMask mask = it->set_mask & vit->second;
-          for (std::set<EquivalenceSet*>::iterator eit = it->elements.begin();
-               eit != it->elements.end(); ++eit)
+          const FieldMask mask = it->set_mask & vit->second;
+          if (!mask)
+            continue;
+          for (std::set<EquivalenceSet*>::const_iterator eit = 
+                it->elements.begin(); eit != it->elements.end(); ++eit)
           {
             // Test for intersection here
             IndexSpaceExpression *intersect =

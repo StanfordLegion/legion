@@ -748,12 +748,11 @@ namespace Legion {
                                   bool update_validity);
       virtual void record_fill_view(FillView *view, const FieldMask &user_mask);
     private:
-      void record_views(Memoizable *memo,
-                        unsigned idx,
-                        unsigned entry,
+      void record_views(unsigned entry,
                         IndexSpaceExpression *expr,
                         const RegionUsage &usage,
-                        const FieldMaskSet<InstanceView> &views);
+                        const FieldMaskSet<InstanceView> &views,
+                    const LegionList<FieldSet<EquivalenceSet*> >::aligned &eqs);
       void update_valid_views(InstanceView *view,
                               EquivalenceSet *eq,
                               const RegionUsage &usage,
