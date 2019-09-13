@@ -220,6 +220,13 @@ namespace Realm {
       static bool deserialize_vector(S& s, std::vector<T>& v);
     };
 
+    // support for static arrays
+    template <typename S, typename T, size_t N>
+      bool serialize(S& s, T (&a)[N]);
+
+    template <typename S, typename T, size_t N>
+      bool deserialize(S& s, T (&a)[N]);
+
     // support for some STL containers
     template <typename S, typename T1, typename T2>
       bool serialize(S& s, const std::pair<T1, T2>& p);
