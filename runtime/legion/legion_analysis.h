@@ -194,6 +194,9 @@ namespace Legion {
                           const FieldMask &user_mask,
                           bool update_validity) = 0;
       virtual void record_set_op_sync_event(ApEvent &lhs, Memoizable *memo) = 0;
+      virtual void record_mapper_output(Memoizable *memo,
+                         const Mapper::MapTaskOutput &output,
+                         const std::deque<InstanceSet> &physical_instances) = 0;
     };
 
     /**
@@ -213,6 +216,7 @@ namespace Legion {
         REMOTE_TRACE_ISSUE_FILL,
         REMOTE_TRACE_RECORD_OP_VIEW,
         REMOTE_TRACE_SET_OP_SYNC,
+        REMOTE_TRACE_RECORD_MAPPER_OUTPUT,
       };
     public:
       RemoteTraceRecorder(Runtime *rt, AddressSpaceID origin,AddressSpace local,
@@ -287,6 +291,9 @@ namespace Legion {
                           const FieldMask &user_mask,
                           bool update_validity);
       virtual void record_set_op_sync_event(ApEvent &lhs, Memoizable *memo);
+      virtual void record_mapper_output(Memoizable *memo,
+                          const Mapper::MapTaskOutput &output,
+                          const std::deque<InstanceSet> &physical_instances);
     public:
       static RemoteTraceRecorder* unpack_remote_recorder(Deserializer &derez,
                                           Runtime *runtime, Memoizable *memo);
@@ -357,6 +364,13 @@ namespace Legion {
         {
           base_sanity_check();
           rec->record_set_op_sync_event(result, memo);
+        }
+      inline void record_mapper_output(Memoizable *local, 
+                          const Mapper::MapTaskOutput &output,
+                          const std::deque<InstanceSet> &physical_instances)
+        {
+          base_sanity_check();
+          rec->record_mapper_output(local, output, physical_instances);
         }
     protected:
       inline void base_sanity_check(void) const

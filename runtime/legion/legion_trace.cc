@@ -3281,21 +3281,20 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::record_mapper_output(SingleTask *task,
+    void PhysicalTemplate::record_mapper_output(Memoizable *memo,
                                             const Mapper::MapTaskOutput &output,
                               const std::deque<InstanceSet> &physical_instances)
     //--------------------------------------------------------------------------
     {
+      const TraceLocalID op_key = memo->get_trace_local_id();
       AutoLock t_lock(template_lock);
 #ifdef DEBUG_LEGION
       assert(is_recording());
-#endif
-
-      TraceLocalID op_key = task->get_trace_local_id();
-#ifdef DEBUG_LEGION
       assert(cached_mappings.find(op_key) == cached_mappings.end());
 #endif
       CachedMapping &mapping = cached_mappings[op_key];
+      // If you change the things recorded from output here then
+      // you also need to change RemoteTraceRecorder::record_mapper_output
       mapping.target_procs = output.target_procs;
       mapping.chosen_variant = output.chosen_variant;
       mapping.task_priority = output.task_priority;
@@ -3342,7 +3341,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(memo != NULL);
 #endif
-      const ApEvent lhs = memo->get_memo_completion(false/*replay*/);
+      const ApEvent lhs = memo->get_memo_completion();
       AutoLock tpl_lock(template_lock);
 #ifdef DEBUG_LEGION
       assert(is_recording());
@@ -4095,7 +4094,8 @@ namespace Legion {
       assert(operations.find(owner) != operations.end());
       assert(operations.find(owner)->second != NULL);
 #endif
-      events[lhs] = operations[owner]->get_memo_completion(true/*replay*/);
+      operations[owner]->replay_mapping_output();
+      events[lhs] = operations[owner]->get_memo_completion();
     }
 
     //--------------------------------------------------------------------------

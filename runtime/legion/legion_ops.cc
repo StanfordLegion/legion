@@ -1406,6 +1406,7 @@ namespace Legion {
       TraceLocalID tid = get_trace_local_id();
       rez.serialize(tid.first);
       rez.serialize(tid.second);
+      rez.serialize(get_memo_completion());
       rez.serialize<bool>(is_memoizable_task());
       rez.serialize<bool>(is_memoizing());
     }
@@ -1413,9 +1414,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     RemoteMemoizable::RemoteMemoizable(Operation *o, Memoizable *orig,
                                        AddressSpaceID orgn, Operation::OpKind k,
-                                       TraceLocalID tid, bool is_mem, bool is_m)
+                                       TraceLocalID tid, ApEvent completion,
+                                       bool is_mem, bool is_m)
       : op(o), original(orig), origin(orgn), kind(k), trace_local_id(tid),
-        is_mem_task(is_mem), is_memo(is_m)
+        completion_event(completion), is_mem_task(is_mem), is_memo(is_m)
     //--------------------------------------------------------------------------
     {
     }
@@ -1465,12 +1467,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ApEvent RemoteMemoizable::get_memo_completion(bool replay)
+    ApEvent RemoteMemoizable::get_memo_completion(void) const
+    //--------------------------------------------------------------------------
+    {
+      return completion_event;
+    }
+
+    //--------------------------------------------------------------------------
+    void RemoteMemoizable::replay_mapping_output(void)
     //--------------------------------------------------------------------------
     {
       // should never be called
       assert(false);
-      return ApEvent::NO_AP_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -1542,6 +1550,7 @@ namespace Legion {
       rez.serialize(kind);
       rez.serialize(trace_local_id.first);
       rez.serialize(trace_local_id.second);
+      rez.serialize(completion_event);
       rez.serialize<bool>(is_mem_task);
       rez.serialize<bool>(is_memo);
     }
@@ -1562,11 +1571,13 @@ namespace Legion {
       TraceLocalID tid;
       derez.deserialize(tid.first);
       derez.deserialize(tid.second);
+      ApEvent completion_event;
+      derez.deserialize(completion_event);
       bool is_mem_task, is_memo;
       derez.deserialize<bool>(is_mem_task);
       derez.deserialize<bool>(is_memo);
       return new RemoteMemoizable(op, original, origin, kind, tid,
-                                  is_mem_task, is_memo);
+                                  completion_event, is_mem_task, is_memo);
     }
 
     ///////////////////////////////////////////////////////////// 

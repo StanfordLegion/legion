@@ -672,8 +672,8 @@ namespace Legion {
       virtual void pack_recorder(Serializer &rez, 
           std::set<RtEvent> &applied, const AddressSpaceID target);
     public:
-      void record_mapper_output(SingleTask *task,
-                                const Mapper::MapTaskOutput &output,
+      virtual void record_mapper_output(Memoizable *memo,
+                             const Mapper::MapTaskOutput &output,
                              const std::deque<InstanceSet> &physical_instances);
       void get_mapper_output(SingleTask *task,
                              VariantID &chosen_variant,

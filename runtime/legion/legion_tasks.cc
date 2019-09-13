@@ -960,6 +960,7 @@ namespace Legion {
                                 parent_ctx->get_unique_id(), 
                                 get_task_name(), get_unique_id())
       }
+#ifndef ENABLE_REMOTE_TRACING
       if (is_recording() && !runtime->is_local(target_proc))
         REPORT_LEGION_ERROR(ERROR_PHYSICAL_TRACING_REMOTE_MAPPING,
                             "Mapper %s remotely mapped task %s (UID %lld) "
@@ -968,6 +969,7 @@ namespace Legion {
                             "yet. Please change your mapper to map this task "
                             "locally.", mapper->get_mapper_name(),
                             get_task_name(), get_unique_id())
+#endif
       return options.inline_task;
     }
 
@@ -3438,9 +3440,14 @@ namespace Legion {
       if (is_recording())
       {
 #ifdef DEBUG_LEGION
-        assert(tpl != NULL && tpl->is_recording());
+        assert(((tpl != NULL) && tpl->is_recording()) ||
+               ((remote_trace_info != NULL) && remote_trace_info->recording));
 #endif
-        tpl->record_mapper_output(this, output, physical_instances);
+        if (tpl != NULL)
+          tpl->record_mapper_output(this, output, physical_instances);
+        else
+          remote_trace_info->record_mapper_output(this, output, 
+                                                  physical_instances);
       }
     }
 
@@ -4341,6 +4348,7 @@ namespace Legion {
                         "original index space to be sliced.",
                         mapper->get_mapper_name(), slice.domain_is.get_id(),
                         get_task_name(), get_unique_id());
+#ifndef ENABLE_REMOTE_TRACING
         if (is_recording() && !runtime->is_local(slice.proc))
           REPORT_LEGION_ERROR(ERROR_PHYSICAL_TRACING_REMOTE_MAPPING,
                               "Mapper %s remotely mapped a slice of task %s "
@@ -4350,6 +4358,7 @@ namespace Legion {
                               "map this slice locally.",
                               mapper->get_mapper_name(),
                               get_task_name(), get_unique_id())
+#endif
 #ifdef DEBUG_LEGION
         // Check to make sure the domain is not empty
         Domain &d = slice.domain;
