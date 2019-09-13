@@ -752,6 +752,46 @@ function region_context:check_privilege(privilege, region, field_path)
     check_privilege_below(self, privilege, region, field_path)
 end
 
+function region_context:find_codegen_privileges(region_type)
+  assert(std.type_supports_privileges(region_type))
+
+  -- Cannot group privileges as they might be grouped in different ways from
+  -- different branches of the code.
+  local ungrouped_privileges = terralib.newlist()
+  local ungrouped_field_paths = terralib.newlist()
+  local ungrouped_field_types = terralib.newlist()
+
+  local field_paths, field_types = std.flatten_struct_fields(region_type:fspace())
+
+  local privilege_index = data.newmap()
+  for i, field_path in ipairs(field_paths) do
+    local field_type = field_types[i]
+
+    local field_privilege = "none"
+    for privilege in self.privileges:items() do
+      if self:check_privilege(privilege, region_type, field_path) then
+        field_privilege = base.meet_privilege(field_privilege, tostring(privilege))
+      end
+    end
+
+    -- FIXME: For now, render write privileges as
+    -- read-write. Otherwise, write would get rendered as
+    -- write-discard, which would not be correct without explicit
+    -- user annotation.
+    if field_privilege == "writes" then
+      field_privilege = "reads_writes"
+    end
+
+    if field_privilege ~= "none" then
+      ungrouped_privileges:insert(field_privilege)
+      ungrouped_field_paths:insert(terralib.newlist({field_path}))
+      ungrouped_field_types:insert(terralib.newlist({field_type}))
+    end
+  end
+
+  return ungrouped_privileges, ungrouped_field_paths, ungrouped_field_types
+end
+
 -- #####################################
 -- ## Physical Privilege Helpers
 -- #################

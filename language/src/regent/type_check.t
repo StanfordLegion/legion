@@ -3561,8 +3561,8 @@ end
 function type_check.declare_phi_vars(cx, node, changed_regions, stats, region_mapping)
   for region in pairs(changed_regions) do
     local old_type = region:gettype()
-    --local type = std.region(std.newsymbol(old_type:ispace(), old_type.ispace_symbol.hasname()), old_type:fspace())
-    local type = std.region(old_type.ispace_symbol, old_type:fspace())
+    local type = std.region(std.newsymbol(old_type:ispace(), old_type.ispace_symbol:hasname()), old_type:fspace())
+    --local type = std.region(old_type.ispace_symbol, old_type:fspace())
     local renamed_region = std.newsymbol(type, region:getname())
     cx.type_env:insert(node, renamed_region, std.rawref(&type))
     region_mapping[region] = renamed_region

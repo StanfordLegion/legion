@@ -14,27 +14,22 @@
 
 import "regent"
 
-task foo(x : region(int), y : region(int))
-where
-  x <= y,
-  y <= x,
-  reads writes(x)
-do
-  y[0] = x[0]
-  x[0] = y[0]
-end
-
 task main()
   var s = region(ispace(ptr, 5), int)
   var t = region(ispace(ptr, 5), int)
+
   s[0] = 1
   t[0] = 2
 
-  s = t
-  foo(s, t)
+  var x : region(int)
+  if true then
+    x = s
+  else
+    x = t
+  end
 
-  regentlib.assert(s[0] == 2, "test failed")
-  s[0] = 0
+  regentlib.assert(x[0] == 1, "test failed")
+  x[0] = 0
   regentlib.assert(s[0] == 0, "test failed")
 end
 regentlib.start(main)
