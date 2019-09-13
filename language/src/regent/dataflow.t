@@ -55,6 +55,10 @@ function forward:exit_state()
   return self.exit_stack[1]
 end
 
+function forward:set_exit_state(value)
+  self.exit_stack[1] = value
+end
+
 local function push(stack, state)
   stack.len = stack.len + 1
   stack[stack.len] = state

@@ -143,6 +143,12 @@ end
 -- #################
 
 function base.type_meet(a, b)
+  if base.types.is_region(a) and base.types.is_region(b) and
+     a:ispace().index_type == b:ispace().index_type and
+     a.fspace_type == b.fspace_type then
+     return b
+  end
+
   local function test()
     local terra query(x : a, y : b)
       if true then return x end

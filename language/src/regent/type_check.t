@@ -60,6 +60,8 @@ function context:new_local_scope(must_epoch, breakable_loop, break_footer)
     breakable_loop = breakable_loop,
     external = self.external,
 
+    recursive = self.recursive,
+
     break_footer = self.break_footer,
     return_footer = self.return_footer,
   }
@@ -93,6 +95,8 @@ function context:new_task_scope(expected_return_type)
     must_epoch = false,
     breakable_loop = false,
     external = false,
+
+    recursive = { value = false },
 
     break_footer = false,
     return_footer = function() end,
@@ -142,6 +146,7 @@ function region_dataflow_meta:__call(type_check_cx, region_cx)
   local out = {
     context = region_cx,
     type_check_cx = type_check_cx,
+    unreachable = false,
   }
 
   return setmetatable(out, region_dataflow)
@@ -151,6 +156,7 @@ function region_dataflow:copy()
   local out = {
     context = self.context:copy(),
     type_check_cx = self.type_check_cx,
+    unreachable = self.unreachable,
   }
 
   return setmetatable(out, region_dataflow)
@@ -163,9 +169,16 @@ end
 function region_dataflow:__add(x)
   assert(self.type_check_cx == x.type_check_cx)
 
+  if self.unreachable then
+    return x:copy()
+  elseif x.unreachable then
+    return self:copy()
+  end
+
   local out = {
     context = self.context + x.context,
     type_check_cx = self.type_check_cx,
+    unreachable = false,
   }
 
   return setmetatable(out, region_dataflow)
@@ -210,6 +223,13 @@ end
 function region_dataflow:stat_return(node)
   if node.value then
     self:expr(node.value)
+
+    local expected_type = self.type_check_cx:get_return_type()
+    local value_type = std.as_read(node.value.expr_type)
+    if std.is_region(expected_type) and std.is_region(value_type) then
+      assert(expected_type ~= value_type)
+      self.context:dup_region(value_type, expected_type)
+    end
   end
 end
 
@@ -259,6 +279,22 @@ function region_dataflow:expr_id(node)
   end
 end
 
+function region_dataflow:expr_call(node)
+  local expr_type = node.expr_type
+  if not std.is_region(expr_type) then
+    return
+  end
+
+  if not node.fn.value.region_cx and
+     not self.type_check_cx.recursive.value then
+    self.type_check_cx.recursive.value = true
+
+    -- Use other execution paths to determine the privileges of the return
+    -- value.
+    self.unreachable = true
+  end
+end
+
 function region_dataflow:expr(node)
   for k, v in pairs(node) do
     if terralib.islist(v) then
@@ -270,6 +306,10 @@ function region_dataflow:expr(node)
     elseif ast.is_node(v) and v:is(ast.typed.expr) then
       self:expr(v)
     end
+  end
+
+  if node:is(ast.typed.expr.Call) then
+    self:expr_call(node)
   end
 
   self:run_dataflow_actions(node)
@@ -1064,6 +1104,16 @@ function type_check.expr_method_call(cx, node)
   }
 end
 
+local function disjoint_from_all(region_cx, region, disjoint_regions)
+  for i, disjoint_region in ipairs(disjoint_regions) do
+    if std.is_region(disjoint_region) and
+       not region_cx:check_constraint({lhs = region, rhs = disjoint_region, op = std.disjointness}) then
+      return false
+    end
+  end
+  return true
+end
+
 function type_check.expr_call(cx, node)
   local fn = type_check.expr(cx, node.fn)
   local args = node.args:map(
@@ -1146,14 +1196,14 @@ function type_check.expr_call(cx, node)
   local expr_type, need_cast = std.validate_args(
     node, param_symbols, arg_symbols, def_type.isvararg, def_type.returntype, {}, false)
 
+  local mapping = {}
+  local arg_nums = {}
   if std.is_task(fn.value) then
     if cx.must_epoch then
       -- Inside a must epoch tasks are not allowed to return.
       expr_type = terralib.types.unit
     end
 
-    local mapping = {}
-    local arg_nums = {}
     for i, arg_symbol in ipairs(arg_symbols) do
       local param_symbol = param_symbols[i]
       local param_type = fn_type.parameters[i]
@@ -1161,22 +1211,6 @@ function type_check.expr_call(cx, node)
       mapping[param_type] = arg_symbol
       arg_nums[arg_symbol] = i
     end
-
-    local privileges = fn.value:get_privileges()
-    for _, privilege_list in ipairs(privileges) do
-      for _, privilege in ipairs(privilege_list) do
-        local privilege_type = privilege.privilege
-        local region = privilege.region
-        local field_path = privilege.field_path
-        assert(std.type_supports_privileges(region:gettype()))
-        local arg_region = mapping[region:gettype()]
-        std.require_privilege(cx, node, "argument " .. arg_nums[arg_region], privilege_type,
-                              arg_region:gettype(), field_path, arg_region)
-      end
-    end
-
-    local constraints = fn.value:get_param_constraints()
-    std.require_constraints(cx, node, "call", constraints, mapping)
   end
 
   local param_types = terralib.newlist()
@@ -1209,11 +1243,84 @@ function type_check.expr_call(cx, node)
     annotations = node.annotations,
     span = node.span,
   }
+
   if expr_type == untyped then
     cx.fixup_nodes:insert(result)
   elseif std.is_partition(expr_type) then
     std.add_constraint(cx, result, expr_type, expr_type:parent_region(), std.subregion)
   end
+
+  if std.is_task(fn.value) then
+    local privileges = fn.value:get_privileges()
+    for _, privilege_list in ipairs(privileges) do
+      for _, privilege in ipairs(privilege_list) do
+        local privilege_type = privilege.privilege
+        local region = privilege.region
+        local field_path = privilege.field_path
+        assert(std.type_supports_privileges(region:gettype()))
+        local arg_region = mapping[region:gettype()]
+        std.require_privilege(cx, node, "argument " .. arg_nums[arg_region], privilege_type,
+                              arg_region:gettype(), field_path, arg_region,
+                              cx.dataflow_actions[result])
+      end
+    end
+
+    local constraints = fn.value:get_param_constraints()
+    std.require_constraints(cx, node, "call", constraints, mapping, cx.dataflow_actions[result])
+  end
+
+  if std.is_region(expr_type) then
+    local saved_universe = cx.region_universe:copy()
+    cx:intern_region(expr_type)
+
+    arg_types = arg_symbols:map(function(x) return x:gettype() end)
+
+    -- Determine return value's privileges and constraints
+    cx.dataflow_actions[result]:insert(function(region_cx)
+      local region = def_type.returntype
+      local fn_cx = fn.value.region_cx
+      if not fn_cx then return end
+
+      for privilege, privileged_regions in fn_cx.privileges:items() do
+        if privileged_regions:has(region) then
+          for path in privileged_regions[region]:items() do
+            region_cx:add_privilege(privilege, expr_type, path)
+          end
+        end
+      end
+
+      for parent in fn_cx.superregions[region]:items() do
+        if mapping[parent] then
+          region_cx:add_subregion_constraint(expr_type, mapping[parent]:gettype())
+        end
+      end
+
+      for child in fn_cx.subregions[region]:items() do
+        if mapping[child] then
+          region_cx:add_subregion_constraint(mapping[child]:gettype(), expr_type)
+        end
+      end
+
+      if fn_cx.disjoint:has(region) then
+        for rhs in fn_cx.disjoint[region]:items() do
+          if mapping[rhs] then
+            region_cx:add_disjointness_constraint(expr_type, mapping[rhs]:gettype())
+          end
+        end
+      end
+
+      -- Returned regions must be disjoint from all other regions that are
+      -- disjoint from all of the parameters.
+      for other_region, _ in saved_universe:items() do
+        assert(not std.type_eq(expr_type, other_region))
+        if std.type_maybe_eq(expr_type:fspace(), other_region:fspace()) and
+           disjoint_from_all(region_cx, other_region, arg_types) then
+          region_cx:add_disjointness_constraint(expr_type, other_region)
+        end
+      end
+    end)
+  end
+
   return result
 end
 
@@ -3898,7 +4005,7 @@ function type_check.stat_var(cx, node)
     if value and std.is_region(var_type) then
       local value_type_read = std.as_read(value_type)
       if std.is_region(value_type_read) and
-         std.type_eq(var_type:ispace(), value_type_read:ispace()) and
+         std.type_eq(var_type:ispace().index_type, value_type_read:ispace().index_type) and
          std.type_eq(var_type.fspace_type, value_type_read.fspace_type) then
 
         -- Use value's region type instead, as otherwise they won't be
@@ -4017,6 +4124,10 @@ function type_check.stat_return(cx, node)
   local expected_type = cx:get_return_type()
   assert(expected_type)
   if std.type_eq(expected_type, std.untyped) then
+    if std.is_region(value_type) then
+      local ispace = std.newsymbol(value_type:ispace(), value_type.ispace_symbol:hasname())
+      value_type = std.region(ispace, value_type:fspace())
+    end
     cx:set_return_type(value_type)
   else
     local result_type = std.type_meet(value_type, expected_type)
@@ -4537,21 +4648,28 @@ function type_check.top_task(cx, node)
 
   if body then
     local entry = region_dataflow(cx, region_cx)
-    local df = dataflow.forward()
-    local exit = df:block(body, entry)
 
-    if exit and return_type ~= terralib.types.unit then
-      report.warn(node, "WARNING: function ends without return statement.")
-    end
-    exit = dataflow.meet(exit, df:exit_state())
+    local exit
+    local count = 0
+    repeat
+      local df = dataflow.forward(exit)
+      exit = df:block(body, entry:copy())
 
-    region_cx = exit.context
+      if exit and not exit.unreachable and return_type ~= terralib.types.unit then
+        report.warn(node, "WARNING: function ends without return statement.")
+      end
+      exit = dataflow.meet(exit, df:exit_state())
+
+      local prev_region_cx = region_cx
+      region_cx = exit.context
+      prototype.region_cx = region_cx
+      count = count + 1
+      assert(count < 30)
+    until not cx.recursive.value or prev_region_cx == region_cx
+
     for _, check in ipairs(cx.region_checks) do
       check(region_cx)
     end
-
-    -- TODO: Get permissions and conditions of return value
-    -- TODO: Recursion: default to nil, then iterate to fixed point.
 
     for _, fixup_node in ipairs(cx.fixup_nodes) do
       if fixup_node:is(ast.typed.expr.Call) then
@@ -4562,9 +4680,10 @@ function type_check.top_task(cx, node)
         assert(false)
       end
     end
+  else
+    prototype:set_region_context(region_cx)
   end
 
-  prototype:set_region_context(region_cx)
   prototype:set_region_universe(cx.region_universe)
 
   return ast.typed.top.Task {

@@ -202,8 +202,12 @@ function std.add_constraints(cx, node, constraints)
   end)
 end
 
-function std.require_privilege(cx, node, msg, privilege, region, field_path, region_symbol)
-  cx.region_checks:insert(function(region_cx)
+function std.require_privilege(cx, node, msg, privilege, region, field_path, region_symbol, action_list)
+  if not action_list then
+    action_list = cx.region_checks
+  end
+
+  action_list:insert(function(region_cx)
     if not region_cx:check_privilege(privilege, region, field_path) then
       if not region_symbol then
         region_symbol = std.newsymbol(region)
@@ -215,7 +219,11 @@ function std.require_privilege(cx, node, msg, privilege, region, field_path, reg
   end)
 end
 
-function std.require_constraint(cx, node, msg, constraint)
+function std.require_constraint(cx, node, msg, constraint, action_list)
+  if not action_list then
+    action_list = cx.region_checks
+  end
+
   cx.region_checks:insert(function(region_cx)
     if not region_cx:check_constraint(constraint) then
       report.error(node, "invalid " .. msg .. " missing constraint " ..
@@ -1124,7 +1132,13 @@ local function reconstruct_return_as_arg_type(return_type, mapping)
   local result = reconstruct_param_as_arg_type(return_type, mapping, true)
   if result then return result end
 
-  return std.type_sub(return_type, mapping)
+  local output_type = std.type_sub(return_type, mapping)
+  if std.is_region(output_type) then
+    output_type = std.region(
+      std.newsymbol(output_type:ispace(), output_type.ispace_symbol:hasname()),
+      output_type:fspace())
+  end
+  return output_type
 end
 
 function std.validate_args(node, params, args, isvararg, return_type, mapping, strict)
