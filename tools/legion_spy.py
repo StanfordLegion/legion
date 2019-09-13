@@ -1,4 +1,4 @@
-usr/bin/env python
+#!/usr/bin/env python
 
 # Copyright 2019 Stanford University, NVIDIA Corporation
 #
