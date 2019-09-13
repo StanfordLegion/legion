@@ -224,14 +224,14 @@ namespace Realm {
   IntrusivePriorityList<T, PT, LINK, PRI, LT>::IntrusivePriorityList(const IntrusivePriorityList<T, PT, LINK, PRI, LT>& copy_from)
     : head(0)
   {
-    assert(copy_from.empty());
+    assert(copy_from.head == 0);
   }
 
   template <typename T, typename PT, IntrusivePriorityListLink<T> T::*LINK, PT T::*PRI, typename LT>
   IntrusivePriorityList<T, PT, LINK, PRI, LT>& IntrusivePriorityList<T, PT, LINK, PRI, LT>::operator=(const IntrusivePriorityList<T, PT, LINK, PRI, LT>& copy_from)
   {
-    assert(empty());
-    assert(copy_from.empty());
+    assert(head == 0);
+    assert(copy_from.head == 0);
     return *this;
   } 
 
