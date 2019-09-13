@@ -1,6 +1,11 @@
 This file lists the major changes as they appear in the stable branch.  No
 attempt is made to keep this list accurate for the master branch.
 
+Version 19.09.1 (September 13, 2019)
+  * Regent
+    - Fix for correctness bug in task inlining.  See:
+        https://github.com/StanfordLegion/legion/issues/582
+
 Version 19.09.0 (September 9, 2019)
   * Regent
     - __demand(__index_launch) has been added as an alternative to
