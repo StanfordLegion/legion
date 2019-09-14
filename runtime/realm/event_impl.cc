@@ -1817,9 +1817,13 @@ namespace Realm {
 	      local_triggers[gen_triggered] = poisoned;
 	      has_local_triggers = true;
 
-	      subscribe_needed = true;
-	      previous_subscribe_gen = gen_subscribed;
-	      gen_subscribed = gen_triggered;
+	      // TODO: this might still cause shutdown races - do we really
+	      //  need to do this at all?
+	      if(gen_triggered > (gen_subscribed + 1)) {
+		subscribe_needed = true;
+		previous_subscribe_gen = gen_subscribed;
+		gen_subscribed = gen_triggered - 1;
+	      }
 	    }
 	}
 
