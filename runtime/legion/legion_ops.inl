@@ -60,7 +60,6 @@ namespace Legion {
       DerezCheck z(derez);
       derez.deserialize(memo_state);
       derez.deserialize(need_prepipeline_stage);
-      // TODO: remote mapping is not yet supported in dynamic tracing
       tpl = NULL;
     }
 

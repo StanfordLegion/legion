@@ -6471,7 +6471,15 @@ namespace Legion {
     TraceLocalID PointTask::get_trace_local_id(void) const
     //--------------------------------------------------------------------------
     {
-      return TraceLocalID(trace_local_id, get_domain_point());
+      if (remote_trace_info != NULL)
+      {
+        TraceLocalID result = 
+          slice_owner->remote_trace_info->memo->get_trace_local_id();
+        result.second = get_domain_point();
+        return result;
+      }
+      else
+        return TraceLocalID(trace_local_id, get_domain_point());
     }
 
     /////////////////////////////////////////////////////////////

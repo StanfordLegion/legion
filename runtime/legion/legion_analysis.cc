@@ -1250,6 +1250,7 @@ namespace Legion {
             ApEvent ready_event;
             derez.deserialize(ready_event);
             tpl->record_complete_replay(memo, ready_event);
+            Runtime::trigger_event(applied);
             break;
           }
         default:

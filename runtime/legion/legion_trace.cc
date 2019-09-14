@@ -181,6 +181,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       blocking_call_observed = true;
+      if (physical_trace == NULL)
+        return;
       PhysicalTemplate *tpl = physical_trace->get_current_template();
       if (tpl != NULL)
         tpl->trigger_recording_done();
