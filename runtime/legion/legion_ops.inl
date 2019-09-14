@@ -173,7 +173,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<typename OP>
-    void MemoizableOp<OP>::find_equivalence_sets(unsigned idx, 
+    void MemoizableOp<OP>::find_equivalence_sets(Runtime *runtime, unsigned idx, 
                  const FieldMask &mask, FieldMaskSet<EquivalenceSet> &eqs) const
     //--------------------------------------------------------------------------
     {

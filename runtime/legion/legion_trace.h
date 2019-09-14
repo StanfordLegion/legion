@@ -737,8 +737,8 @@ namespace Legion {
                                            const FieldMask &user_mask,
                                            IndexSpaceExpression *expr);
     public:
-      void get_reduction_ready_events(Memoizable *memo,
-                                      std::set<ApEvent> &ready_events);
+      virtual void get_reduction_ready_events(Memoizable *memo,
+                                              std::set<ApEvent> &ready_events);
     public:
       virtual void record_op_view(Memoizable *memo,
                                   unsigned idx,
@@ -767,7 +767,7 @@ namespace Legion {
       void record_fill_views(const FieldMaskSet<FillView> &views);
     public:
       virtual void record_set_op_sync_event(ApEvent &lhs, Memoizable *memo);
-      void record_complete_replay(Operation *op, ApEvent rhs);
+      virtual void record_complete_replay(Memoizable *memo, ApEvent rhs);
     public:
       RtEvent defer_template_deletion(void);
     public:

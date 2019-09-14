@@ -797,7 +797,7 @@ namespace Legion {
       virtual TraceLocalID get_trace_local_id(void) const = 0;
       virtual ApEvent compute_sync_precondition(const TraceInfo *in) const = 0;
       virtual void complete_replay(ApEvent complete_event) = 0;
-      virtual void find_equivalence_sets(unsigned idx,
+      virtual void find_equivalence_sets(Runtime *runtime, unsigned idx,
         const FieldMask &mask, FieldMaskSet<EquivalenceSet> &target) const = 0;
     protected:
       virtual const VersionInfo& get_version_info(unsigned idx) const = 0;
@@ -828,7 +828,7 @@ namespace Legion {
       virtual TraceLocalID get_trace_local_id(void) const;
       virtual ApEvent compute_sync_precondition(const TraceInfo *info) const;
       virtual void complete_replay(ApEvent complete_event);
-      virtual void find_equivalence_sets(unsigned idx,
+      virtual void find_equivalence_sets(Runtime *runtime, unsigned idx,
           const FieldMask &mask, FieldMaskSet<EquivalenceSet> &target) const;
     protected:
       virtual const VersionInfo& get_version_info(unsigned idx) const;
@@ -898,8 +898,8 @@ namespace Legion {
       virtual ApEvent compute_init_precondition(const TraceInfo &info);
       virtual RtEvent complete_memoizable(
                                  RtEvent complete_event = RtEvent::NO_RT_EVENT);
-      virtual void find_equivalence_sets(unsigned idx, const FieldMask &mask,
-                                       FieldMaskSet<EquivalenceSet> &eqs) const;
+      virtual void find_equivalence_sets(Runtime *runtime, unsigned idx, 
+          const FieldMask &mask, FieldMaskSet<EquivalenceSet> &eqs) const;
     protected:
       void invoke_memoize_operation(MapperID mapper_id);
     public:

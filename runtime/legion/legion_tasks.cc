@@ -1720,7 +1720,8 @@ namespace Legion {
     {
       DETAILED_PROFILER(runtime, EARLY_MAP_REGIONS_CALL);
       // This always happens on the owner node so we can just do the 
-      // normal trace info creation here without needing 
+      // normal trace info creation here without needing to check
+      // whether we have a remote trace info
       const TraceInfo trace_info(this);
       ApEvent init_precondition = compute_init_precondition(trace_info);;
       // A little bit of suckinesss here, it's unclear if we have
@@ -3495,7 +3496,8 @@ namespace Legion {
         // See if we have a remote trace info to use, if we don't then make
         // our trace info and do the initialization
         const TraceInfo trace_info = (remote_trace_info == NULL) ? 
-          TraceInfo(this, true/*initialize*/) : *remote_trace_info;
+          TraceInfo(this, true/*initialize*/) : 
+          TraceInfo(*remote_trace_info, this);
         // Record the get term event here if we're remote since we didn't
         // do it automatically as part of the initialization
         if ((remote_trace_info != NULL) && remote_trace_info->recording)
@@ -3659,15 +3661,18 @@ namespace Legion {
         delete defer_args->effects;
         if (perform_postmap)
         {
-          const TraceInfo trace_info(this);
+          const TraceInfo trace_info = (remote_trace_info == NULL) ?
+            TraceInfo(this) : TraceInfo(*remote_trace_info, this);
           perform_post_mapping(trace_info);
         }
       }
       if (is_recording())
       {
-        const TraceInfo trace_info(this);
+        const TraceInfo trace_info = (remote_trace_info == NULL) ?
+          TraceInfo(this) : TraceInfo(*remote_trace_info, this);
 #ifdef DEBUG_LEGION
-        assert(tpl != NULL && tpl->is_recording());
+        assert(((tpl != NULL) && tpl->is_recording()) ||
+               ((remote_trace_info != NULL) && remote_trace_info->recording));
 #endif
         std::set<ApEvent> ready_events;
         for (unsigned idx = 0; idx < regions.size(); idx++)
@@ -3675,9 +3680,15 @@ namespace Legion {
           if (!virtual_mapped[idx] && !no_access_regions[idx])
             physical_instances[idx].update_wait_on_events(ready_events);
         }
-        tpl->get_reduction_ready_events(this, ready_events);
+        if (tpl != NULL)
+          tpl->get_reduction_ready_events(this, ready_events);
+        else
+          remote_trace_info->get_reduction_ready_events(this, ready_events);
         ApEvent ready_event = Runtime::merge_events(&trace_info, ready_events);
-        tpl->record_complete_replay(this, ready_event);
+        if (tpl != NULL)
+          tpl->record_complete_replay(this, ready_event);
+        else
+          remote_trace_info->record_complete_replay(this, ready_event);
       }
       return RtEvent::NO_RT_EVENT;
     }
@@ -5135,7 +5146,8 @@ namespace Legion {
         ApEvent done_event = get_task_completion();
         if (!effects_postconditions.empty())
         {
-          const TraceInfo trace_info(this);
+          const TraceInfo trace_info = (remote_trace_info == NULL) ?
+            TraceInfo(this) : TraceInfo(*remote_trace_info, this);
           effects_postconditions.insert(done_event);
           done_event = 
             Runtime::merge_events(&trace_info, effects_postconditions);
@@ -6050,7 +6062,8 @@ namespace Legion {
         }
         if (!effects_postconditions.empty())
         {
-          const TraceInfo trace_info(this);
+          const TraceInfo trace_info = (remote_trace_info == NULL) ? 
+            TraceInfo(this) : TraceInfo(*remote_trace_info, this);
           effects_condition = 
             Runtime::merge_events(&trace_info, effects_postconditions);
           effects_postconditions.clear();
@@ -6296,7 +6309,8 @@ namespace Legion {
       {
         if (!effects_postconditions.empty())
         {
-          const TraceInfo trace_info(this);
+          const TraceInfo trace_info = (remote_trace_info == NULL) ?
+            TraceInfo(this) : TraceInfo(*remote_trace_info, this);
           Runtime::trigger_event(deferred_effects,
             Runtime::merge_events(&trace_info, effects_postconditions));
         }
@@ -8123,7 +8137,8 @@ namespace Legion {
       {
         if (remote_trace_info == NULL)
         {
-          const TraceInfo trace_info(this); 
+          const TraceInfo trace_info = (remote_trace_info == NULL) ?
+            TraceInfo(this) : *remote_trace_info; 
           std::set<RtEvent> applied;
           trace_info.pack_remote_trace_info(rez, target, applied);
           // Pass any applied events back to the index owner
@@ -8583,7 +8598,8 @@ namespace Legion {
 #endif
         if (!effects_postconditions.empty())
         {
-          const TraceInfo trace_info(this);
+          const TraceInfo trace_info = (remote_trace_info == NULL) ?
+            TraceInfo(this) : *remote_trace_info;
           ApEvent effects_done = 
             Runtime::merge_events(&trace_info, effects_postconditions);
           index_owner->return_slice_mapped(points.size(), denominator,
@@ -8681,7 +8697,8 @@ namespace Legion {
       rez.serialize(applied_condition);
       if (!effects_postconditions.empty())
       {
-        const TraceInfo trace_info(this);
+        const TraceInfo trace_info = (remote_trace_info == NULL) ?
+          TraceInfo(this) : *remote_trace_info;
         ApEvent effects_done =
           Runtime::merge_events(&trace_info, effects_postconditions);
         rez.serialize(effects_done);

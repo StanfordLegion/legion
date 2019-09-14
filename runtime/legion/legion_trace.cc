@@ -3502,13 +3502,13 @@ namespace Legion {
       {
         FieldMaskSet<EquivalenceSet> eq_sets;
         const FieldMask &src_mask = tracing_srcs.get_valid_mask();
-        memo->find_equivalence_sets(src_idx, src_mask, eq_sets);
+        memo->find_equivalence_sets(trace->runtime, src_idx, src_mask, eq_sets);
         eq_sets.compute_field_sets(src_mask, src_eqs);
       }
       {
         FieldMaskSet<EquivalenceSet> eq_sets;
         const FieldMask &dst_mask = tracing_dsts.get_valid_mask();
-        memo->find_equivalence_sets(dst_idx, dst_mask, eq_sets);
+        memo->find_equivalence_sets(trace->runtime, dst_idx, dst_mask, eq_sets);
         eq_sets.compute_field_sets(dst_mask, dst_eqs);
       }
 
@@ -3579,7 +3579,7 @@ namespace Legion {
       {
         FieldMaskSet<EquivalenceSet> eq_sets;
         const FieldMask &dst_mask = tracing_dsts.get_valid_mask();
-        memo->find_equivalence_sets(idx, dst_mask, eq_sets);
+        memo->find_equivalence_sets(trace->runtime, idx, dst_mask, eq_sets);
         eq_sets.compute_field_sets(dst_mask, eqs);
       }
 
@@ -3683,7 +3683,7 @@ namespace Legion {
       if (update_validity)
       {
         FieldMaskSet<EquivalenceSet> eq_sets;
-        memo->find_equivalence_sets(idx, user_mask, eq_sets);
+        memo->find_equivalence_sets(trace->runtime, idx, user_mask, eq_sets);
         eq_sets.compute_field_sets(user_mask, eqs);
       }
 
@@ -3916,23 +3916,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::record_complete_replay(Operation* op, ApEvent rhs)
+    void PhysicalTemplate::record_complete_replay(Memoizable* memo, ApEvent rhs)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(op->is_memoizing());
-#endif
+      const TraceLocalID lhs = find_trace_local_id(memo);
       AutoLock tpl_lock(template_lock);
 #ifdef DEBUG_LEGION
       assert(is_recording());
 #endif
 
       events.push_back(ApEvent());
-      Memoizable *memo = op->get_memoizable();
-#ifdef DEBUG_LEGION
-      assert(memo != NULL);
-#endif
-      TraceLocalID lhs = find_trace_local_id(memo);
       insert_instruction(new CompleteReplay(*this, lhs, find_event(rhs)));
     }
 

@@ -1521,11 +1521,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RemoteMemoizable::find_equivalence_sets(unsigned idx,
+    void RemoteMemoizable::find_equivalence_sets(Runtime *runtime, unsigned idx,
               const FieldMask &mask, FieldMaskSet<EquivalenceSet> &target) const
     //--------------------------------------------------------------------------
     {
-      Runtime *runtime = op->runtime;
 #ifdef DEBUG_LEGION
       assert(origin != runtime->address_space);
 #endif
@@ -1613,7 +1612,7 @@ namespace Legion {
       derez.deserialize(done_event);
       
       FieldMaskSet<EquivalenceSet> result;
-      memo->find_equivalence_sets(index, mask, result);
+      memo->find_equivalence_sets(runtime, index, mask, result);
       if (!result.empty())
       {
         Serializer rez;
