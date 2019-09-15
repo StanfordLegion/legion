@@ -662,6 +662,62 @@ namespace Realm {
 #endif
   }
 
+  void OperationTable::shutdown_check(void)
+  {
+#ifdef REALM_USE_OPERATION_TABLE
+    std::vector<Event> remote_completions;
+    int errors = 0;
+
+    for(int subtable = 0; subtable < NUM_TABLES; subtable++) {
+      GASNetHSL& mutex = mutexes[subtable];
+      Table& table = tables[subtable];
+
+      // taking the lock on the subtable also guarantees that none of the
+      //  operations in the subtable will be deleted during our iteration
+      AutoHSLLock al(mutex);
+
+      if(!table.empty())
+	for(Table::const_iterator it = table.begin();
+	    it != table.end();
+	    ++it) {
+	  // tolerate races between shutdown and table cleaners - this is
+	  //  safe because we won't destroy the operation table until all the
+	  //  threads running cleaners are stopped
+	  if(it->second.finish_event.has_triggered()) continue;
+
+	  if(it->second.local_op) {
+	    log_optable.error() << "operation pending during shutdown: " << it->second.local_op;
+	    errors++;
+	  } else {
+	    log_optable.info() << "awaiting remote op completion during shutdown: node=" << it->second.remote_node << " event=" << it->second.finish_event;
+	    remote_completions.push_back(it->second.finish_event);
+	  }
+	}
+    }
+
+    if(errors > 0) {
+      log_optable.fatal() << "shutdown with " << errors << " operations pending - aborting";
+      abort();
+    }
+
+    if(!remote_completions.empty()) {
+      long long deadline = (Clock::current_time_in_nanoseconds() +
+			    5000000000LL); // 5 seconds before we assume a hang
+      for(std::vector<Event>::const_iterator it = remote_completions.begin();
+	  it != remote_completions.end();
+	  ++it) {
+	bool poison_dontcare = false;
+	long long max_ns = (deadline - Clock::current_time_in_nanoseconds());
+	bool ok = (*it).external_timedwait_faultaware(poison_dontcare, max_ns);
+	if(!ok) {
+	  log_optable.fatal() << "remote completion timeout: event=" << *it;
+	  abort();
+	}
+      }
+    }
+#endif
+  }
+
 
   ////////////////////////////////////////////////////////////////////////
   //

@@ -14,6 +14,7 @@
  */
 
 #include "realm/realm_config.h"
+#include "realm/atomics.h"
 
 // include gasnet header files before activemsg.h to make sure we have
 //  definitions for gasnet_hsl_t and gasnett_cond_t
@@ -78,7 +79,8 @@ static const void *ignore_gasnet_warning2 __attribute__((unused)) = (void *)_gas
 
 #define NO_DEBUG_AMREQUESTS
 
-enum { MSGID_LONG_EXTENSION = 253,
+enum { MSGID_CHANNEL_CLOSE = 250,
+       MSGID_LONG_EXTENSION = 253,
        MSGID_FLIP_REQ = 254,
        MSGID_FLIP_ACK = 255 };
 
@@ -893,6 +895,7 @@ static int num_lmbs = 2;
 static size_t lmb_size = 1 << 20; // 1 MB
 static bool force_long_messages = true;
 static int max_msgs_to_send = 8;
+static bool strict_shutdown = true;
 
 // returns the largest payload that can be sent to a node (to a non-pinned
 //   address)
@@ -1168,45 +1171,6 @@ extern void enqueue_incoming(NodeID sender, IncomingMessage *msg)
   incoming_message_manager->add_incoming_message(sender, msg);
 }
 
-void IncomingMessageManager::handler_thread_loop(void)
-{
-  // messages enqueued in response to incoming messages can never be stalled
-  ThreadLocal::always_allow_spilling = true;
-
-  while (true) {
-    int sender = -1;
-    IncomingMessage *current_msg = get_messages(sender);
-    if(!current_msg) {
-#ifdef DEBUG_INCOMING
-      printf("received empty list - assuming shutdown!\n");
-#endif
-      break;
-    }
-#ifdef DETAILED_MESSAGE_TIMING
-    int count = 0;
-#endif
-    while(current_msg) {
-      IncomingMessage *next_msg = current_msg->next_msg;
-#ifdef DETAILED_MESSAGE_TIMING
-      int timing_idx = detailed_message_timing.get_next_index(); // grab this while we still hold the lock
-      CurrentTime start_time;
-#endif
-      current_msg->run_handler();
-#ifdef DETAILED_MESSAGE_TIMING
-      detailed_message_timing.record(timing_idx, 
-				     current_msg->get_peer(),
-				     current_msg->get_msgid(),
-				     -18, // 0xee - flagged as an incoming message,
-				     current_msg->get_msgsize(),
-				     count++, // how many messages we handle in a batch
-				     start_time, CurrentTime());
-#endif
-      delete current_msg;
-      current_msg = next_msg;
-    }
-  }
-}
-
 class ActiveMessageEndpoint {
 public:
   struct ChunkInfo {
@@ -1222,6 +1186,8 @@ public:
 public:
   ActiveMessageEndpoint(gasnet_node_t _peer)
     : peer(_peer), cond(mutex)
+    , out_channel_closed(false), messages_sent(0)
+    , in_channel_closed(false), messages_handled(0), messages_expected(size_t(-1))
   {
     cur_write_lmb = 0;
     cur_write_offset = 0;
@@ -1511,6 +1477,29 @@ public:
     // need to hold the mutex in order to push onto one of the queues
     mutex.lock();
 
+    // keep track of total messages sent, and don't allow any after we've
+    //  "closed" the channel
+    if(out_channel_closed) {
+      if(hdr->msgid == MSGID_NEW_ACTIVEMSG) {
+	// fish real message ID out of payload
+	unsigned short id;
+	memcpy(&id, reinterpret_cast<const char *>(hdr->args)+sizeof(BaseMedium),
+	       sizeof(unsigned short));
+	if(strict_shutdown) {
+	  log_amsg.fatal() << "post-shutdown message: dst=" << peer << " type=" << activemsg_handler_table.lookup_message_name(id);
+	  abort();
+	} else
+	  log_amsg.warning() << "dropping post-shutdown message - hang possible: dst=" << peer << " type=" << activemsg_handler_table.lookup_message_name(id);
+      } else {
+	// TODO: these are probably fine - ignore silently?
+	log_amsg.fatal() << "post-shutdown message: dst=" << peer << " msgid=" << hdr->msgid;
+	abort();
+      }
+      mutex.unlock();
+      return true; // we don't want to add a todo entry
+    }
+    messages_sent++;
+
     // once we have the lock, we can safely move the message's payload to
     //  srcdatapool
     hdr->reserve_srcdata();
@@ -1673,6 +1662,42 @@ public:
     mutex.lock();
     cond.signal();
     mutex.unlock();
+  }
+
+  void flush_outbound_messages(void)
+  {
+    mutex.lock();
+    assert(!out_channel_closed);
+    out_channel_closed = true;
+    mutex.unlock();
+    // messages_sent can no longer change
+    log_amsg.info() << "sending close: " << gasnet_mynode() << "->" << peer << ": count=" << messages_sent;
+    handlerarg_t count_hi = messages_sent >> 32;
+    handlerarg_t count_lo = messages_sent & 0xFFFFFFFFULL;
+    CHECK_GASNET( gasnet_AMRequestShort2(peer, MSGID_CHANNEL_CLOSE,
+					 count_lo, count_hi) );
+  }
+
+  bool inbound_messages_flushed(bool verbose)
+  {
+    if(!in_channel_closed.load_acquire()) {
+      if(verbose)
+	log_amsg.print() << "flush check: " << peer << "->" << gasnet_mynode() << ": exp=?? cur=" << messages_handled.load();
+      return false;
+    }
+    size_t exp = messages_expected.load();
+    size_t cur = messages_handled.load();
+    if(verbose)
+      log_amsg.print() << "flush check: " << peer << "->" << gasnet_mynode() << ": exp=" << exp << " cur=" << cur;
+    return(exp == cur);
+  }
+
+  void handle_channel_close(handlerarg_t count_lo, handlerarg_t count_hi)
+  {
+    size_t count = (size_t(count_hi) << 32) + size_t(count_lo);
+    log_amsg.info() << "received close: " << peer << "->" << gasnet_mynode() << ": count=" << count << " cur=" << messages_handled.load();
+    messages_expected.store(count);
+    in_channel_closed.store_release(true);
   }
 
 protected:
@@ -2082,6 +2107,11 @@ public:
   //size_t cur_long_size;
   std::map<int/*message id*/,ChunkInfo> observed_messages;
   int next_outgoing_message_id;
+  bool out_channel_closed;
+  size_t messages_sent;
+  // these are updated asynchronously
+  Realm::atomic<bool> in_channel_closed;
+  Realm::atomic<size_t> messages_handled, messages_expected;
 #ifdef TRACE_MESSAGES
   int sent_messages;
   int received_messages;
@@ -2294,6 +2324,13 @@ public:
     endpoints[src]->handle_flip_ack(ack_buffer);
   }
 
+  void handle_channel_close(gasnet_node_t src,
+			    gasnet_handlerarg_t count_lo,
+			    gasnet_handlerarg_t count_hi)
+  {
+    endpoints[src]->handle_channel_close(count_lo, count_hi);
+  }
+
   // returns whether any more messages remain
   bool push_messages(int max_to_send = 0, bool wait = false)
   {
@@ -2397,6 +2434,48 @@ public:
     endpoints[source]->record_message(sent_reply);
   }
 
+  void count_handled_message(gasnet_node_t source)
+  {
+    endpoints[source]->messages_handled.fetch_add(1);
+  }
+
+  void flush_message_channels(void)
+  {
+    // step 1: send close messages
+    for(int i = 0; i < total_endpoints; i++)
+      if(endpoints[i])
+	endpoints[i]->flush_outbound_messages();
+
+    // step 2: wait until outbound queues are actually empty
+    while(push_messages(0))
+      CHECK_GASNET( gasnet_AMPoll() );
+
+    // step 3: wait until we've handled every incoming message we expect
+    long long next_print = Realm::Clock::current_time_in_nanoseconds() + 1000000000;
+    long long timeout = Realm::Clock::current_time_in_nanoseconds() + 15000000000LL;
+    int cur = 0;
+    while(cur < total_endpoints) {
+      if(endpoints[cur]) {
+	long long now = Realm::Clock::current_time_in_nanoseconds();
+	bool verbose = false;
+	if(now > next_print) {
+	  verbose = true;
+	  next_print = now + 1000000000;
+	}
+	if(now > timeout) {
+	  log_amsg.fatal() << "timeout waiting for messages to flush";
+	  abort();
+	}
+	if(!(endpoints[cur]->inbound_messages_flushed(verbose))) {
+	  CHECK_GASNET( gasnet_AMPoll() );
+	  continue;
+	}
+      }
+      // on to the next node
+      cur++;
+    }
+  }
+  
   void start_polling_threads(int count);
 
   void stop_threads(void);
@@ -2437,6 +2516,55 @@ static void handle_flip_ack(gasnet_token_t token,
   gasnet_node_t src;
   CHECK_GASNET( gasnet_AMGetMsgSource(token, &src) );
   endpoint_manager->handle_flip_ack(src, ack_buffer);
+}
+
+static void handle_channel_close(gasnet_token_t token,
+				 handlerarg_t count_lo,
+				 handlerarg_t count_hi)
+{
+  gasnet_node_t src;
+  CHECK_GASNET( gasnet_AMGetMsgSource(token, &src) );
+  endpoint_manager->handle_channel_close(src, count_lo, count_hi);
+}
+
+void IncomingMessageManager::handler_thread_loop(void)
+{
+  // messages enqueued in response to incoming messages can never be stalled
+  ThreadLocal::always_allow_spilling = true;
+
+  while (true) {
+    int sender = -1;
+    IncomingMessage *current_msg = get_messages(sender);
+    if(!current_msg) {
+#ifdef DEBUG_INCOMING
+      printf("received empty list - assuming shutdown!\n");
+#endif
+      break;
+    }
+#ifdef DETAILED_MESSAGE_TIMING
+    int count = 0;
+#endif
+    while(current_msg) {
+      IncomingMessage *next_msg = current_msg->next_msg;
+#ifdef DETAILED_MESSAGE_TIMING
+      int timing_idx = detailed_message_timing.get_next_index(); // grab this while we still hold the lock
+      CurrentTime start_time;
+#endif
+      current_msg->run_handler();
+      endpoint_manager->count_handled_message(current_msg->get_peer());
+#ifdef DETAILED_MESSAGE_TIMING
+      detailed_message_timing.record(timing_idx, 
+				     current_msg->get_peer(),
+				     current_msg->get_msgid(),
+				     -18, // 0xee - flagged as an incoming message,
+				     current_msg->get_msgsize(),
+				     count++, // how many messages we handle in a batch
+				     start_time, CurrentTime());
+#endif
+      delete current_msg;
+      current_msg = next_msg;
+    }
+  }
 }
 
 class IncomingMessageNew : public IncomingMessage {
@@ -2566,6 +2694,7 @@ void init_endpoints(int gasnet_mem_size,
     .add_option_int("-ll:forcelong", force_long_messages)
     .add_option_int_units("-ll:sdpsize", srcdatapool_size, 'm')
     .add_option_int("-ll:maxsend", max_msgs_to_send)
+    .add_option_int("-ll:strict_shutdown", strict_shutdown)
     .add_option_int_units("-ll:spillwarn", SrcDataPool::print_spill_threshold, 'm')
     .add_option_int_units("-ll:spillstep", SrcDataPool::print_spill_step, 'm')
     .add_option_int_units("-ll:spillstall", SrcDataPool::max_spill_bytes, 'm');
@@ -2611,7 +2740,7 @@ void init_endpoints(int gasnet_mem_size,
   }
 #endif
 
-  const int MAX_HANDLERS = 4;
+  const int MAX_HANDLERS = 5;
   gasnet_handlerentry_t handlers[MAX_HANDLERS];
   int hcount = 0;
 
@@ -2626,6 +2755,9 @@ void init_endpoints(int gasnet_mem_size,
   hcount++;
   handlers[hcount].index = MSGID_RELEASE_SRCPTR;
   handlers[hcount].fnptr = (void (*)())SrcDataPool::release_srcptr_handler;
+  hcount++;
+  handlers[hcount].index = MSGID_CHANNEL_CLOSE;
+  handlers[hcount].fnptr = (void (*)())handle_channel_close;
   hcount++;
   assert(hcount <= MAX_HANDLERS);
 #ifdef ACTIVE_MESSAGE_TRACE
@@ -2767,6 +2899,20 @@ void start_handler_threads(int count, Realm::CoreReservationSet& crs, size_t sta
   incoming_message_manager = new IncomingMessageManager(gasnet_nodes(), crs);
 
   incoming_message_manager->start_handler_threads(count, stack_size);
+}
+
+void flush_activemsg_channels(void)
+{
+  // start with a barrier to make sure everybody has sent any
+  //  requests that we might need to respond to first
+  gasnet_barrier_notify(0, GASNET_BARRIERFLAG_ANONYMOUS);
+  gasnet_barrier_wait(0, GASNET_BARRIERFLAG_ANONYMOUS);
+
+  endpoint_manager->flush_message_channels();
+  
+  // finally another barrier to hopefully clear out any implicit replies
+  gasnet_barrier_notify(0, GASNET_BARRIERFLAG_ANONYMOUS);
+  gasnet_barrier_wait(0, GASNET_BARRIERFLAG_ANONYMOUS);
 }
 
 void stop_activemsg_threads(void)
@@ -3012,6 +3158,10 @@ void start_handler_threads(int, Realm::CoreReservationSet&, size_t)
 {
 }
 
+void flush_activemsg_channels(void)
+{
+}
+
 void stop_activemsg_threads(void)
 {
 }
@@ -3084,6 +3234,12 @@ ActiveMessageHandlerTable::MessageHandler ActiveMessageHandlerTable::lookup_mess
   return handlers[id].handler;
 }
 
+const char *ActiveMessageHandlerTable::lookup_message_name(ActiveMessageHandlerTable::MessageID id)
+{
+  assert(id < handlers.size());
+  return handlers[id].name;
+}
+
 /*static*/ void ActiveMessageHandlerTable::append_handler_reg(ActiveMessageHandlerRegBase *new_reg)
 {
   new_reg->next_handler = pending_handlers;
@@ -3103,6 +3259,7 @@ void ActiveMessageHandlerTable::construct_handler_table(void)
       nextreg = nextreg->next_handler) {
     HandlerEntry e;
     e.hash = nextreg->hash;
+    e.name = nextreg->name;
     e.handler = nextreg->get_handler();
     handlers.push_back(e);
   }
