@@ -4813,7 +4813,14 @@ namespace Legion {
       task_id = launcher.task_id;
       indexes = launcher.index_requirements;
       regions = launcher.region_requirements;
-      futures = launcher.futures;
+      if (!launcher.futures.empty())
+      {
+        // Only allow non-empty futures on the way in
+        for (std::vector<Future>::const_iterator it =
+              launcher.futures.begin(); it != launcher.futures.end(); it++)
+          if (it->impl != NULL)
+            futures.push_back(*it);
+      }
       // Can't update these here in case we get restricted postconditions
       grants = launcher.grants;
       wait_barriers = launcher.wait_barriers;
@@ -4980,12 +4987,7 @@ namespace Legion {
       // register mapping dependences on futures
       for (std::vector<Future>::const_iterator it = futures.begin();
             it != futures.end(); it++)
-      {
-#ifdef DEBUG_LEGION
-        assert(it->impl != NULL);
-#endif
         it->impl->register_dependence(this);
-      }
       if (predicate_false_future.impl != NULL)
         predicate_false_future.impl->register_dependence(this);
       // Also have to register any dependences on our predicate
@@ -6576,7 +6578,14 @@ namespace Legion {
       task_id = launcher.task_id;
       indexes = launcher.index_requirements;
       regions = launcher.region_requirements;
-      futures = launcher.futures;
+      if (!launcher.futures.empty())
+      {
+        // Only allow non-empty futures on the way in
+        for (std::vector<Future>::const_iterator it =
+              launcher.futures.begin(); it != launcher.futures.end(); it++)
+          if (it->impl != NULL)
+            futures.push_back(*it);
+      }
       update_grants(launcher.grants);
       wait_barriers = launcher.wait_barriers;
       update_arrival_barriers(launcher.arrive_barriers);
@@ -6651,7 +6660,14 @@ namespace Legion {
       task_id = launcher.task_id;
       indexes = launcher.index_requirements;
       regions = launcher.region_requirements;
-      futures = launcher.futures;
+      if (!launcher.futures.empty())
+      {
+        // Only allow non-empty futures on the way in
+        for (std::vector<Future>::const_iterator it =
+              launcher.futures.begin(); it != launcher.futures.end(); it++)
+          if (it->impl != NULL)
+            futures.push_back(*it);
+      }
       update_grants(launcher.grants);
       wait_barriers = launcher.wait_barriers;
       update_arrival_barriers(launcher.arrive_barriers);
@@ -6851,12 +6867,7 @@ namespace Legion {
       // register mapping dependences on futures
       for (std::vector<Future>::const_iterator it = futures.begin();
             it != futures.end(); it++)
-      {
-#ifdef DEBUG_LEGION
-        assert(it->impl != NULL);
-#endif
         it->impl->register_dependence(this);
-      }
       if (predicate_false_future.impl != NULL)
         predicate_false_future.impl->register_dependence(this);
       // Also have to register any dependences on our predicate

@@ -16033,7 +16033,15 @@ namespace Legion {
     {
       initialize_operation(ctx, true/*track*/);
       measurement = launcher.measurement;
-      preconditions = launcher.preconditions;
+      // Only allow non-empty futures 
+      if (!launcher.preconditions.empty())
+      {
+        for (std::set<Future>::const_iterator it =
+              launcher.preconditions.begin(); it != 
+              launcher.preconditions.end(); it++)
+          if (it->impl != NULL)
+            preconditions.insert(*it);
+      }
       result = Future(new FutureImpl(runtime, true/*register*/,
                   runtime->get_available_distributed_id(),
                   runtime->address_space, this));
@@ -16090,10 +16098,7 @@ namespace Legion {
     {
       for (std::set<Future>::const_iterator it = preconditions.begin();
             it != preconditions.end(); it++)
-      {
-        if (it->impl != NULL)
-          it->impl->register_dependence(this);
-      }
+        it->impl->register_dependence(this);
     }
 
     //--------------------------------------------------------------------------
@@ -16104,10 +16109,8 @@ namespace Legion {
       std::set<ApEvent> pre_events;
       for (std::set<Future>::const_iterator it = preconditions.begin();
             it != preconditions.end(); it++)
-      {
-        if ((it->impl != NULL) && !it->impl->ready_event.has_triggered())
+        if (!it->impl->ready_event.has_triggered())
           pre_events.insert(it->impl->get_ready_event());
-      }
       // Also make sure we wait for any execution fences that we have
       if (execution_fence_event.exists())
         pre_events.insert(execution_fence_event);
