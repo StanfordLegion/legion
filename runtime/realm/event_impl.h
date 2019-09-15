@@ -78,6 +78,8 @@ namespace Realm {
       //void wait(Event::gen_t needed_gen);
 
       virtual void external_wait(gen_t needed_gen, bool& poisoned) = 0;
+      virtual bool external_timedwait(gen_t needed_gen, bool& poisoned,
+				      long long max_ns) = 0;
 
       // helper to create the Event for an arbitrary generation
       Event make_event(gen_t gen) const;
@@ -152,6 +154,8 @@ namespace Realm {
       virtual bool has_triggered(gen_t needed_gen, bool& poisoned);
 
       virtual void external_wait(gen_t needed_gen, bool& poisoned);
+      virtual bool external_timedwait(gen_t needed_gen, bool& poisoned,
+				      long long max_ns);
 
       virtual bool add_waiter(gen_t needed_gen, EventWaiter *waiter);
 
@@ -201,6 +205,10 @@ namespace Realm {
       //  not the owner)
       EventWaiter::EventWaiterList current_local_waiters;
       std::map<gen_t, EventWaiter::EventWaiterList> future_local_waiters;
+
+      // external waiters on this node are notifies via a condition variable
+      bool has_external_waiters;
+      GASNetCondVar external_waiter_condvar;
 
       // remote waiters are kept in a bitmask for the current generation - this is
       //  only maintained on the owner, who never has to worry about more than one
@@ -255,6 +263,8 @@ namespace Realm {
       // test whether an event has triggered without waiting
       virtual bool has_triggered(gen_t needed_gen, bool& poisoned);
       virtual void external_wait(gen_t needed_gen, bool& poisoned);
+      virtual bool external_timedwait(gen_t needed_gen, bool& poisoned,
+				      long long max_ns);
 
       virtual bool add_waiter(gen_t needed_gen, EventWaiter *waiter/*, bool pre_subscribed = false*/);
 
@@ -295,6 +305,10 @@ namespace Realm {
       };
 
       std::map<gen_t, Generation *> generations;
+
+      // external waiters on this node are notifies via a condition variable
+      bool has_external_waiters;
+      GASNetCondVar external_waiter_condvar;
 
       // a list of remote waiters and the latest generation they're interested in
       // also the latest generation that each node (that has ever subscribed) has been told about
