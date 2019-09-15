@@ -1661,6 +1661,7 @@ namespace Legion {
   typedef Realm::Processor Processor;
   typedef Realm::CodeDescriptor CodeDescriptor;
   typedef Realm::Reservation Reservation;
+  typedef Realm::CompletionQueue CompletionQueue;
   typedef ::legion_reduction_op_id_t ReductionOpID;
   typedef Realm::ReductionOpUntyped ReductionOp;
   typedef ::legion_custom_serdez_id_t CustomSerdezID;

@@ -1140,7 +1140,7 @@ namespace Legion {
     protected:
       mutable LocalLock                               post_task_lock;
       std::list<PostTaskArgs>                         post_task_queue;
-      size_t                                          post_task_index;
+      CompletionQueue                                 post_task_comp_queue;
     protected:
       // Traces for this task's execution
       LegionMap<TraceID,DynamicTrace*,TASK_TRACES_ALLOC>::tracked traces;

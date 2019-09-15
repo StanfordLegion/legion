@@ -2884,7 +2884,8 @@ namespace Legion {
         parent_req_indexes(parent_indexes), virtual_mapped(virt_mapped), 
         total_children_count(0), total_close_count(0), total_summary_count(0),
         outstanding_children_count(0), outstanding_prepipeline(0),
-        outstanding_dependence(false), post_task_index(ULONG_MAX), 
+        outstanding_dependence(false),
+        post_task_comp_queue(CompletionQueue::NO_QUEUE), 
         current_trace(NULL), previous_trace(NULL), valid_wait_event(false), 
         outstanding_subtasks(0), pending_subtasks(0), pending_frames(0), 
         currently_active_context(false), current_mapping_fence(NULL), 
@@ -2942,6 +2943,8 @@ namespace Legion {
     {
       if (!remote_instances.empty())
         free_remote_contexts();
+      if (post_task_comp_queue.exists())
+        post_task_comp_queue.destroy();
       for (std::map<TraceID,DynamicTrace*>::const_iterator it = traces.begin();
             it != traces.end(); it++)
       {
@@ -5827,24 +5830,24 @@ namespace Legion {
       const size_t task_index = ctx->get_owner_task()->get_context_index();
       {
         AutoLock p_lock(post_task_lock);
-        // If this is a lower index than the current outstanding index
-        // then we need to launch a task for when it is ready
-        if (task_index < post_task_index)
+        // Issue a task if there isn't one running right now
+        if (!post_task_queue.empty())
         {
           issue_task = true;
-          // Update the post_task_index
-          post_task_index = task_index;
           // Add a reference to the context the first time we defer this
           add_reference();
         }
         post_task_queue.push_back(
             PostTaskArgs(ctx, task_index, result, size, inst, wait_on));
+        post_task_comp_queue.add_event(wait_on);
       }
       if (issue_task)
       {
-        PostEndArgs args(ctx->owner_task, this);
+        // Other things could be added to the queue by the time we're here
+        const RtEvent precondition(post_task_comp_queue.get_nonempty_event());
+        PostEndArgs args(owner_task, this);
         runtime->issue_runtime_meta_task(args, 
-            LG_THROUGHPUT_WORK_PRIORITY, wait_on);
+            LG_THROUGHPUT_WORK_PRIORITY, precondition);
       }
     }
 
@@ -5852,64 +5855,54 @@ namespace Legion {
     bool InnerContext::process_post_end_tasks(void)
     //--------------------------------------------------------------------------
     {
+      bool launch_next = false;
       std::vector<PostTaskArgs> to_perform;
       to_perform.reserve(context_configuration.meta_task_vector_width);
-      TaskOp *next_op = NULL;
-      RtEvent next_precondition;
       {
-        size_t next_index = ULONG_MAX;
+        std::vector<RtEvent> ready_events(
+                          context_configuration.meta_task_vector_width);
         AutoLock p_lock(post_task_lock);
-        // Go through and find any ones that are ready, also keep track of
-        // the earliest task that is not ready since that is the one we'll
-        // choose to wait on before doing the next batch
+        // Ask the completion queue for the ready events
+        const size_t num_ready = post_task_comp_queue.pop_events(
+            &ready_events.front(), ready_events.size());
+#ifdef DEBUG_LEGION
+        assert(num_ready > 0);
+#endif
+        // Find all the entries for all the ready events
         for (std::list<PostTaskArgs>::iterator it = post_task_queue.begin();
               it != post_task_queue.end(); /*nothing*/)
         {
-          if (!it->wait_on.exists() || it->wait_on.has_triggered())
+          bool found = false;
+          for (unsigned idx = 0; idx < num_ready; idx++)
           {
-            if (to_perform.size() >= context_configuration.meta_task_vector_width)
+            if (it->wait_on == ready_events[idx])  
             {
-              // If we've already exceeded the maximum vector width then we'll
-              // still handle them now if they are less than or equal to the
-              // current post task index
-              if (it->index > post_task_index)
-              {
-                if (it->index < next_index)
-                {
-                  next_index = it->index;
-                  next_precondition = it->wait_on;
-                  next_op = it->context->owner_task;
-                }
-                it++;
-                continue;
-              }
-              else
-                to_perform.push_back(*it);
+              found = true;
+              break;
             }
-            else
-              to_perform.push_back(*it);
+          }
+          if (found)
+          {
+            to_perform.push_back(*it);
             it = post_task_queue.erase(it);
+            // Check to see if we're done early
+            if (to_perform.size() == num_ready)
+              break;
           }
           else
-          {
-            if (it->index < next_index)
-            {
-              next_index = it->index;
-              next_precondition = it->wait_on;
-              next_op = it->context->owner_task;
-            }
             it++;
-          }
         }
-        // Update the new next index
-        post_task_index = next_index;
+        if (!post_task_queue.empty())
+          launch_next = true;
       }
       // Launch this first to get it in flight so it can run when ready
-      if (next_op != NULL)
+      if (launch_next)
       {
-        PostEndArgs args(next_op, this);
+        // Other things could be added to the queue by the time we're here
+        const RtEvent precondition(post_task_comp_queue.get_nonempty_event());
+        PostEndArgs args(owner_task, this);
         runtime->issue_runtime_meta_task(args, 
-            LG_THROUGHPUT_WORK_PRIORITY, next_precondition);
+            LG_THROUGHPUT_WORK_PRIORITY, precondition);
       }
       // Now perform our operations
       if (!to_perform.empty())
@@ -5931,7 +5924,7 @@ namespace Legion {
         }
       }
       // If we didn't launch a next op, then we can remove the reference
-      return (next_op == NULL);
+      return !launch_next;
     }
 
     //--------------------------------------------------------------------------
@@ -6984,6 +6977,12 @@ namespace Legion {
       // See if we permit priority mutations from child operation mapppers
       mutable_priority = context_configuration.mutable_priority; 
       current_priority = p;
+#ifdef DEBUG_LEGION
+      assert(!post_task_comp_queue.exists());
+#endif
+      // Create the completion queue that we'll use for post task completion
+      post_task_comp_queue = CompletionQueue::create_completion_queue(
+          context_configuration.max_window_size);
     }
 
     //--------------------------------------------------------------------------
