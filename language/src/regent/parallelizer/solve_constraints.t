@@ -2772,6 +2772,7 @@ function solver_context:synthesize_partitions(existing_disjoint_partitions,
   end)
 
   if std.config["parallelize-cache-incl-check"] then
+    local previous_caches = terralib.newlist()
     for ghost_range, primary_range in ghost_to_primary:items() do
       local primary_partitions = disjoint_partitions[primary_range]:to_list() or
                                  terralib.newlist({primary_range})
@@ -2799,10 +2800,15 @@ function solver_context:synthesize_partitions(existing_disjoint_partitions,
       local orig_region = loop_range_type.parent_region_symbol
       local cache_region, cache_stats =
         create_isomorphic_region("cache_" .. tostring(ghost_range), orig_region, cache_value_type)
+      local cache_type = cache_region:gettype()
       stats:insertall(cache_stats)
-      self.task_constraints.region_universe[cache_region:gettype()] = true
-      std.add_privilege(self.task_constraints, std.reads, cache_region:gettype(), data.newtuple())
-      std.add_privilege(self.task_constraints, std.writes, cache_region:gettype(), data.newtuple())
+      self.task_constraints.region_universe[cache_type] = true
+      std.add_privilege(self.task_constraints, std.reads, cache_type, data.newtuple())
+      std.add_privilege(self.task_constraints, std.writes, cache_type, data.newtuple())
+      previous_caches:map(function(previous_cache)
+        std.add_constraint(self.task_constraints, cache_type, previous_cache, std.disjointness, true)
+      end)
+      previous_caches:insert(cache_type)
 
       -- We mark all the entries as potentially pointing to ghost elements
       local cache_partition, partition_stat =
