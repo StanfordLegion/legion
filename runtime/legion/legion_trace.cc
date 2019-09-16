@@ -85,7 +85,7 @@ namespace Legion {
     void LegionTrace::register_physical_only(Operation *op, GenerationID gen)
     //--------------------------------------------------------------------------
     {
-      if (has_blocking_call());
+      if (has_blocking_call())
         REPORT_LEGION_ERROR(ERROR_INVALID_PHYSICAL_TRACING,
             "Physical tracing violation! The trace has a blocking API call "
             "that was unseen when it was recorded. Please make sure that "
