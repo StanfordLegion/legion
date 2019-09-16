@@ -15653,8 +15653,12 @@ namespace Legion {
                                            Serializer &rez)
     //--------------------------------------------------------------------------
     {
+      // All these messages must be on the same ordered virtual channel
+      // so that they are ordered in their program order and handled on
+      // the target node in this order as they would have been if they
+      // were being handled directly on the owner node
       find_messenger(target)->send_message(rez, SEND_REMOTE_TRACE_UPDATE,
-                                  DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+                                  TRACING_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -15662,6 +15666,8 @@ namespace Legion {
                                              Serializer &rez)
     //--------------------------------------------------------------------------
     {
+      // No need for responses to be ordered so they can be handled on
+      // the default virtual channel in whatever order
       find_messenger(target)->send_message(rez, SEND_REMOTE_TRACE_RESPONSE,
                   DEFAULT_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
     }
@@ -15671,6 +15677,7 @@ namespace Legion {
                                          AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
+      // We're paging in these eq sets so there is no need for order
       find_messenger(target)->send_message(rez, SEND_REMOTE_TRACE_EQ_REQUEST,
                                       DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
     }
@@ -15680,6 +15687,7 @@ namespace Legion {
                                          AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
+      // Same as above for why we don't need order
       find_messenger(target)->send_message(rez, SEND_REMOTE_TRACE_EQ_RESPONSE,
                     DEFAULT_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
     }

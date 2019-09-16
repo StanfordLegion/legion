@@ -644,7 +644,8 @@ namespace Legion {
       LAYOUT_CONSTRAINT_VIRTUAL_CHANNEL = 10,
       EXPRESSION_VIRTUAL_CHANNEL = 11,
       MIGRATION_VIRTUAL_CHANNEL = 12,
-      MAX_NUM_VIRTUAL_CHANNELS = 13, // this one must be last
+      TRACING_VIRTUAL_CHANNEL = 13,
+      MAX_NUM_VIRTUAL_CHANNELS = 14, // this one must be last
     };
 
     enum MessageKind {
