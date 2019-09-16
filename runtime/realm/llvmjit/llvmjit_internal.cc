@@ -244,7 +244,7 @@ namespace Realm {
 	delete[] nullterm;
       } else {
 	mb = LLVMCreateMemoryBufferWithMemoryRange((const char *)(ir.base()),
-						   ir.size(),
+						   ir.size() - 1, // do not count null byte at end
 						   "membuf",
 						   true /*RequiresTerminator*/);
       }

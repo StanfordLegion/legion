@@ -103,12 +103,10 @@ namespace Realm {
       : MemoryImpl(_me, 0 /*no memory space*/, MKIND_FILE, ALIGNMENT, Memory::FILE_MEM)
       , next_offset(0x12340000LL)  // something not zero for debugging
     {
-      pthread_mutex_init(&vector_lock, NULL);
     }
 
     FileMemory::~FileMemory(void)
     {
-      pthread_mutex_destroy(&vector_lock);
     }
 
     off_t FileMemory::alloc_bytes(size_t size)
@@ -129,7 +127,7 @@ namespace Realm {
     {
       // map from the offset back to the instance index
       assert(offset < next_offset);
-      pthread_mutex_lock(&vector_lock);
+      vector_lock.lock();
       // this finds the first entry _AFTER_ the one we want
       std::map<off_t, int>::const_iterator it = offset_map.upper_bound(offset);
       assert(it != offset_map.begin());
@@ -137,15 +135,15 @@ namespace Realm {
       --it;
       ID::IDType index = it->second;
       off_t rel_offset = offset - it->first;
-      pthread_mutex_unlock(&vector_lock);
+      vector_lock.unlock();
       get_bytes(index, rel_offset, dst, size);
     }
 
     void FileMemory::get_bytes(ID::IDType inst_id, off_t offset, void *dst, size_t size)
     {
-      pthread_mutex_lock(&vector_lock);
+      vector_lock.lock();
       int fd = file_vec[inst_id];
-      pthread_mutex_unlock(&vector_lock);
+      vector_lock.unlock();
       size_t ret = pread(fd, dst, size, offset);
 #ifdef NDEBUG
       (void)ret;
@@ -158,7 +156,7 @@ namespace Realm {
     {
       // map from the offset back to the instance index
       assert(offset < next_offset);
-      pthread_mutex_lock(&vector_lock);
+      vector_lock.lock();
       // this finds the first entry _AFTER_ the one we want
       std::map<off_t, int>::const_iterator it = offset_map.upper_bound(offset);
       assert(it != offset_map.begin());
@@ -166,15 +164,15 @@ namespace Realm {
       --it;
       ID::IDType index = it->second;
       off_t rel_offset = offset - it->first;
-      pthread_mutex_unlock(&vector_lock);
+      vector_lock.unlock();
       put_bytes(index, rel_offset, src, size);
     }
 
     void FileMemory::put_bytes(ID::IDType inst_id, off_t offset, const void *src, size_t size)
     {
-      pthread_mutex_lock(&vector_lock);
+      vector_lock.lock();
       int fd = file_vec[inst_id];
-      pthread_mutex_unlock(&vector_lock);
+      vector_lock.unlock();
       size_t ret = pwrite(fd, src, size, offset);
 #ifdef NDEBUG
       (void)ret;
@@ -198,9 +196,9 @@ namespace Realm {
 
     int FileMemory::get_file_des(ID::IDType inst_id)
     {
-      pthread_mutex_lock(&vector_lock);
+      vector_lock.lock();
       int fd = file_vec[inst_id];
-      pthread_mutex_unlock(&vector_lock);
+      vector_lock.unlock();
       return fd;
     }
 

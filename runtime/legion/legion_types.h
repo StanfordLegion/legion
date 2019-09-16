@@ -671,7 +671,8 @@ namespace Legion {
       LAYOUT_CONSTRAINT_VIRTUAL_CHANNEL = 10,
       EXPRESSION_VIRTUAL_CHANNEL = 11,
       MIGRATION_VIRTUAL_CHANNEL = 12,
-      MAX_NUM_VIRTUAL_CHANNELS = 13, // this one must be last
+      TRACING_VIRTUAL_CHANNEL = 13,
+      MAX_NUM_VIRTUAL_CHANNELS = 14, // this one must be last
     };
 
     enum MessageKind {
@@ -842,6 +843,8 @@ namespace Legion {
       SEND_REMOTE_OP_PROFILING_COUNT_UPDATE,
       SEND_REMOTE_TRACE_UPDATE,
       SEND_REMOTE_TRACE_RESPONSE,
+      SEND_REMOTE_TRACE_EQ_REQUEST,
+      SEND_REMOTE_TRACE_EQ_RESPONSE,
       SEND_SHUTDOWN_NOTIFICATION,
       SEND_SHUTDOWN_RESPONSE,
       LAST_SEND_KIND, // This one must be last
@@ -1016,6 +1019,8 @@ namespace Legion {
         "Remote Op Profiling Count Update",                           \
         "Send Remote Trace Update",                                   \
         "Send Remote Trace Response",                                 \
+        "Send Remote Trace Equivalence Sets Request",                 \
+        "Send Remote Trace Equivalence Sets Response",                \
         "Send Shutdown Notification",                                 \
         "Send Shutdown Response",                                     \
       };

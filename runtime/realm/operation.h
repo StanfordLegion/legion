@@ -143,6 +143,9 @@ namespace Realm {
     
     static void register_handlers(void);
 
+    // checks that all operations have finished before shutdown
+    void shutdown_check(void);
+
   protected:
     void event_triggered(Event e);
 

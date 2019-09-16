@@ -194,6 +194,12 @@ namespace Legion {
                           const FieldMask &user_mask,
                           bool update_validity) = 0;
       virtual void record_set_op_sync_event(ApEvent &lhs, Memoizable *memo) = 0;
+      virtual void record_mapper_output(Memoizable *memo,
+                         const Mapper::MapTaskOutput &output,
+                         const std::deque<InstanceSet> &physical_instances) = 0;
+      virtual void get_reduction_ready_events(Memoizable *memo,
+                                           std::set<ApEvent> &ready_events) = 0;
+      virtual void record_complete_replay(Memoizable *memo, ApEvent rhs) = 0;
     };
 
     /**
@@ -213,6 +219,9 @@ namespace Legion {
         REMOTE_TRACE_ISSUE_FILL,
         REMOTE_TRACE_RECORD_OP_VIEW,
         REMOTE_TRACE_SET_OP_SYNC,
+        REMOTE_TRACE_RECORD_MAPPER_OUTPUT,
+        REMOTE_TRACE_GET_REDUCTION_EVENTS,
+        REMOTE_TRACE_COMPLETE_REPLAY,
       };
     public:
       RemoteTraceRecorder(Runtime *rt, AddressSpaceID origin,AddressSpace local,
@@ -287,6 +296,12 @@ namespace Legion {
                           const FieldMask &user_mask,
                           bool update_validity);
       virtual void record_set_op_sync_event(ApEvent &lhs, Memoizable *memo);
+      virtual void record_mapper_output(Memoizable *memo,
+                          const Mapper::MapTaskOutput &output,
+                          const std::deque<InstanceSet> &physical_instances);
+      virtual void get_reduction_ready_events(Memoizable *memo,
+                                              std::set<ApEvent> &ready_events);
+      virtual void record_complete_replay(Memoizable *memo, ApEvent rhs);
     public:
       static RemoteTraceRecorder* unpack_remote_recorder(Deserializer &derez,
                                           Runtime *runtime, Memoizable *memo);
@@ -357,6 +372,24 @@ namespace Legion {
         {
           base_sanity_check();
           rec->record_set_op_sync_event(result, memo);
+        }
+      inline void record_mapper_output(Memoizable *local, 
+                          const Mapper::MapTaskOutput &output,
+                          const std::deque<InstanceSet> &physical_instances)
+        {
+          base_sanity_check();
+          rec->record_mapper_output(local, output, physical_instances);
+        }
+      inline void get_reduction_ready_events(Memoizable *local,
+                                             std::set<ApEvent> &ready_events)
+        {
+          base_sanity_check();
+          rec->get_reduction_ready_events(local, ready_events);
+        }
+      inline void record_complete_replay(Memoizable *local, ApEvent ready_event)
+        {
+          base_sanity_check();
+          rec->record_complete_replay(local, ready_event);
         }
     protected:
       inline void base_sanity_check(void) const

@@ -25,6 +25,7 @@
 #include <vector>
 #include <map>
 #include <cassert>
+#include <sstream>
 
 #define WARN_UNUSED __attribute__((warn_unused_result))
 
@@ -92,6 +93,22 @@ namespace Realm {
     std::ostream os;
   };
 
+  // little helper class that defines a default value for a member variable
+  //  in the header rather than in the containing object's constructor
+  //  implementation
+  template <typename T, T _DEFAULT>
+  struct WithDefault {
+  public:
+    static const T DEFAULT_VALUE = _DEFAULT;
+
+    WithDefault(void) : val(_DEFAULT) {}
+    WithDefault(T _val) : val(_val) {}
+
+    operator T(void) const { return val; }
+    WithDefault<T,_DEFAULT>& operator=(T newval) { val = newval; return *this; }
+
+    T val;
+  };
 
   // behaves like static_cast, but uses dynamic_cast+assert when DEBUG_REALM
   //  is defined

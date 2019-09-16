@@ -682,8 +682,8 @@ namespace Legion {
       virtual void pack_recorder(Serializer &rez, 
           std::set<RtEvent> &applied, const AddressSpaceID target);
     public:
-      void record_mapper_output(SingleTask *task,
-                                const Mapper::MapTaskOutput &output,
+      virtual void record_mapper_output(Memoizable *memo,
+                             const Mapper::MapTaskOutput &output,
                              const std::deque<InstanceSet> &physical_instances);
       void get_mapper_output(SingleTask *task,
                              VariantID &chosen_variant,
@@ -747,8 +747,8 @@ namespace Legion {
                                            const FieldMask &user_mask,
                                            IndexSpaceExpression *expr);
     public:
-      void get_reduction_ready_events(Memoizable *memo,
-                                      std::set<ApEvent> &ready_events);
+      virtual void get_reduction_ready_events(Memoizable *memo,
+                                              std::set<ApEvent> &ready_events);
     public:
       virtual void record_op_view(Memoizable *memo,
                                   unsigned idx,
@@ -758,14 +758,12 @@ namespace Legion {
                                   bool update_validity);
       virtual void record_fill_view(FillView *view, const FieldMask &user_mask);
     private:
-      void record_views(Memoizable *memo,
-                        unsigned idx,
-                        unsigned entry,
+      void record_views(unsigned entry,
                         IndexSpaceExpression *expr,
                         const RegionUsage &usage,
-                        const FieldMaskSet<InstanceView> &views);
-      void update_valid_views(Memoizable *memo,
-                              InstanceView *view,
+                        const FieldMaskSet<InstanceView> &views,
+                    const LegionList<FieldSet<EquivalenceSet*> >::aligned &eqs);
+      void update_valid_views(InstanceView *view,
                               EquivalenceSet *eq,
                               const RegionUsage &usage,
                               const FieldMask &user_mask,
@@ -779,7 +777,7 @@ namespace Legion {
       void record_fill_views(const FieldMaskSet<FillView> &views);
     public:
       virtual void record_set_op_sync_event(ApEvent &lhs, Memoizable *memo);
-      void record_complete_replay(Operation *op, ApEvent rhs);
+      virtual void record_complete_replay(Memoizable *memo, ApEvent rhs);
     public:
       RtEvent defer_template_deletion(void);
     public:

@@ -332,6 +332,50 @@ namespace Realm {
     log_event.info() << "external thread resumed: event=" << *this;
   }
 
+  bool Event::external_timedwait(long long max_ns) const
+  {
+    bool poisoned = false;
+    bool triggered = external_timedwait_faultaware(poisoned, max_ns);
+    if(!triggered)
+      return false;
+
+    // a poisoned event causes an exception because the caller isn't prepared for it
+    if(poisoned) {
+#ifdef REALM_USE_EXCEPTIONS
+      if(Thread::self()->exceptions_permitted()) {
+	throw PoisonedEventException(*this);
+      } else
+#endif
+      {
+	log_poison.fatal() << "FATAL: no handler for test of poisoned event " << *this;
+	assert(0);
+      }
+    }
+
+    return true;
+  }
+
+  bool Event::external_timedwait_faultaware(bool& poisoned,
+					    long long max_ns) const
+  {
+    DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
+    if(!id) return true;  // special case: never wait for NO_EVENT
+    EventImpl *e = get_runtime()->get_event_impl(*this);
+    EventImpl::gen_t gen = ID(id).event_generation();
+
+    // early out case too
+    if(e->has_triggered(gen, poisoned)) return true;
+
+    // waiting on an event does not count against the low level's time
+    DetailedTimer::ScopedPush sp2(TIME_NONE);
+
+    log_event.info() << "external thread blocked: event=" << *this;
+    bool triggered = e->external_timedwait(gen, poisoned, max_ns);
+    log_event.info() << "external thread resumed: event=" << *this
+		     << (triggered ? "" : " (timeout)");
+    return triggered;
+  }
+
   void Event::cancel_operation(const void *reason_data, size_t reason_len) const
   {
     get_runtime()->optable.request_cancellation(*this, reason_data, reason_len);
@@ -762,12 +806,9 @@ namespace Realm {
 
     EventMerger::~EventMerger(void)
     {
-      // TODO: put this assert back once we've got a better handle on
-      //  shutdown race conditions
-      //assert(!is_active());
-      if(!is_active())
-	if(max_preconditions > MAX_INLINE_PRECONDITIONS)
-	  delete[] preconditions;
+      assert(!is_active());
+      if(max_preconditions > MAX_INLINE_PRECONDITIONS)
+	delete[] preconditions;
     }
 
     bool EventMerger::is_active(void) const
@@ -884,6 +925,8 @@ namespace Realm {
     , gen_subscribed(0)
     , num_poisoned_generations(0)
     , merger(this)
+    , has_external_waiters(false)
+    , external_waiter_condvar(mutex)
   {
     next_free = 0;
     poisoned_generations = 0;
@@ -897,10 +940,12 @@ namespace Realm {
     AutoHSLLock a(mutex);
     if(!current_local_waiters.empty() ||
        !future_local_waiters.empty() ||
+       has_external_waiters ||
        !remote_waiters.empty()) {
       log_event.fatal() << "Event " << me << " destroyed with"
 			<< (current_local_waiters.empty() ? "" : " current local waiters")
 			<< (future_local_waiters.empty() ? "" : " current future waiters")
+			<< (has_external_waiters ? " external waiters" : "")
 			<< (remote_waiters.empty() ? "" : " remote waiters");
       while(!current_local_waiters.empty()) {
 	EventWaiter *ew = current_local_waiters.pop_front();
@@ -1532,6 +1577,12 @@ namespace Realm {
 
       // finally, update the generation count, representing that we have complete information to that point
       generation.store_release(current_gen);
+
+      // external waiters need to be signalled inside the lock
+      if(has_external_waiters) {
+	has_external_waiters = false;
+	external_waiter_condvar.broadcast();
+      }
     }
 
     // now trigger anybody that needs to be triggered
@@ -1622,60 +1673,42 @@ namespace Realm {
       return locally_triggered;
     }
 
-    class PthreadCondWaiter : public EventWaiter {
-    public:
-      PthreadCondWaiter(GASNetCondVar &_cv)
-        : cv(_cv)
-	, signalled(false)
-	, poisoned(false)
-      {
-      }
-      virtual ~PthreadCondWaiter(void) 
-      {
-      }
-
-      virtual void event_triggered(bool _poisoned)
-      {
-	// record whether event was poisoned - owner will inspect once awake
-	poisoned = _poisoned;
-
-        // Need to hold the lock to avoid the race
-        AutoHSLLock(cv.mutex);
-	signalled = true;
-	cv.signal();
-      }
-
-      virtual void print(std::ostream& os) const
-      {
-	os << "external waiter";
-      }
-
-      virtual Event get_finish_event(void) const
-      {
-	return Event::NO_EVENT;
-      }
-
-    public:
-      GASNetCondVar &cv;
-      bool signalled;
-      bool poisoned;
-    };
-
     void GenEventImpl::external_wait(gen_t gen_needed, bool& poisoned)
     {
-      GASNetCondVar cv(mutex);
-      PthreadCondWaiter w(cv);
-      add_waiter(gen_needed, &w);
       {
 	AutoHSLLock a(mutex);
 
-	// re-check condition before going to sleep
-	while(!w.signalled) {
-	  // now just sleep on the condition variable - hope we wake up
-	  cv.wait();
+	// wait until the generation has advanced far enough
+	while(gen_needed > generation.load_acquire()) {
+	  has_external_waiters = true;
+	  external_waiter_condvar.wait();
 	}
+
+	poisoned = is_generation_poisoned(gen_needed);
       }
-      poisoned = w.poisoned;
+    }
+
+    bool GenEventImpl::external_timedwait(gen_t gen_needed, bool& poisoned,
+					  long long max_ns)
+    {
+      long long deadline = Clock::current_time_in_nanoseconds() + max_ns;
+      {
+	AutoHSLLock a(mutex);
+
+	// wait until the generation has advanced far enough
+	while(gen_needed > generation.load_acquire()) {
+	  long long now = Clock::current_time_in_nanoseconds();
+	  if(now >= deadline)
+	    return false;  // trigger has not occurred
+	  has_external_waiters = true;
+	  // we don't actually care what timedwait returns - we'll recheck
+	  //  the generation ourselves
+	  external_waiter_condvar.timedwait(deadline - now);
+	}
+
+	poisoned = is_generation_poisoned(gen_needed);
+      }
+      return true;
     }
 
     void GenEventImpl::trigger(gen_t gen_triggered, int trigger_node, bool poisoned)
@@ -1740,6 +1773,12 @@ namespace Realm {
 	  if(free_event && merger.is_active()) {
 	    free_list_insertion_delayed = true;
 	    free_event = false;
+	  }
+
+	  // external waiters need to be signalled inside the lock
+	  if(has_external_waiters) {
+	    has_external_waiters = false;
+	    external_waiter_condvar.broadcast();
 	  }
 	}
 
@@ -1817,10 +1856,20 @@ namespace Realm {
 	      local_triggers[gen_triggered] = poisoned;
 	      has_local_triggers = true;
 
-	      subscribe_needed = true;
-	      previous_subscribe_gen = gen_subscribed;
-	      gen_subscribed = gen_triggered;
+	      // TODO: this might still cause shutdown races - do we really
+	      //  need to do this at all?
+	      if(gen_triggered > (gen_subscribed + 1)) {
+		subscribe_needed = true;
+		previous_subscribe_gen = gen_subscribed;
+		gen_subscribed = gen_triggered - 1;
+	      }
 	    }
+
+	  // external waiters need to be signalled inside the lock
+	  if(has_external_waiters) {
+	    has_external_waiters = false;
+	    external_waiter_condvar.broadcast();
+	  }
 	}
 
 	if(subscribe_needed) {
@@ -1924,6 +1973,8 @@ namespace Realm {
     }
 
     BarrierImpl::BarrierImpl(void)
+      : has_external_waiters(false)
+      , external_waiter_condvar(mutex)
     {
       generation = 0;
       gen_subscribed = 0;
@@ -2205,6 +2256,8 @@ static void *bytedup(const void *data, size_t datalen)
       do { // so we can use 'break' from the middle
 	AutoHSLLock a(mutex);
 
+	bool generation_updated = false;
+
 	// ownership can change, so check it inside the lock
 	if(owner != my_node_id) {
 	  forward_to_node = owner;
@@ -2246,6 +2299,7 @@ static void *bytedup(const void *data, size_t datalen)
 	    // keep the list of local waiters to wake up once we release the lock
 	    local_notifications.absorb_append(it->second->local_waiters);
 	    trigger_gen = generation = it->first;
+	    generation_updated = true;
 	    delete it->second;
 	    generations.erase(it);
 	    it = generations.begin();
@@ -2337,6 +2391,12 @@ static void *bytedup(const void *data, size_t datalen)
 	  int count = trigger_gen - oldest_previous;
 	  final_values_copy = bytedup(final_values + ((rel_gen - 1) * redop->sizeof_lhs),
 				      count * redop->sizeof_lhs);
+	}
+
+	// external waiters need to be signalled inside the lock
+	if(generation_updated && has_external_waiters) {
+	  has_external_waiters = false;
+	  external_waiter_condvar.broadcast();
 	}
       } while(0);
 
@@ -2441,21 +2501,44 @@ static void *bytedup(const void *data, size_t datalen)
       return false;
     }
 
-    void BarrierImpl::external_wait(gen_t needed_gen, bool& poisoned)
+    // TODO: this is identical to GenEventImpl versions - lift back up into
+    //   EventImpl?
+    void BarrierImpl::external_wait(gen_t gen_needed, bool& poisoned)
     {
-      GASNetCondVar cv(mutex);
-      PthreadCondWaiter w(cv);
-      add_waiter(needed_gen, &w);
       {
 	AutoHSLLock a(mutex);
 
-	// re-check condition before going to sleep
-	while(needed_gen > generation) {
-	  // now just sleep on the condition variable - hope we wake up
-	  cv.wait();
+	// wait until the generation has advanced far enough
+	while(gen_needed > generation) {
+	  has_external_waiters = true;
+	  external_waiter_condvar.wait();
 	}
+
+	poisoned = POISON_FIXME;
       }
-      poisoned = w.poisoned;
+    }
+
+    bool BarrierImpl::external_timedwait(gen_t gen_needed, bool& poisoned,
+					 long long max_ns)
+    {
+      long long deadline = Clock::current_time_in_nanoseconds() + max_ns;
+      {
+	AutoHSLLock a(mutex);
+
+	// wait until the generation has advanced far enough
+	while(gen_needed > generation) {
+	  long long now = Clock::current_time_in_nanoseconds();
+	  if(now >= deadline)
+	    return false;  // trigger has not occurred
+	  has_external_waiters = true;
+	  // we don't actually care what timedwait returns - we'll recheck
+	  //  the generation ourselves
+	  external_waiter_condvar.timedwait(deadline - now);
+	}
+
+	poisoned = POISON_FIXME;
+      }
+      return true;
     }
 
     bool BarrierImpl::add_waiter(gen_t needed_gen, EventWaiter *waiter/*, bool pre_subscribed = false*/)
@@ -2614,6 +2697,8 @@ static void *bytedup(const void *data, size_t datalen)
       {
 	AutoHSLLock a(impl->mutex);
 
+	bool generation_updated = false;
+
 	// handle migration of the barrier ownership (possibly to us)
 	if(args.migration_target != (NodeID) -1) {
 	  log_barrier.info() << "barrier " << b << " has migrated to " << args.migration_target;
@@ -2639,8 +2724,10 @@ static void *bytedup(const void *data, size_t datalen)
 	    impl->held_triggers.erase(it);
 	  }
 
-	  if(trigger_gen > impl->generation)
+	  if(trigger_gen > impl->generation) {
 	    impl->generation = trigger_gen;
+	    generation_updated = true;
+	  }
 
 	  // now iterate through any generations up to and including the latest triggered
 	  //  generation, and accumulate local waiters to notify
@@ -2683,6 +2770,12 @@ static void *bytedup(const void *data, size_t datalen)
 	  }
 	  assert(datalen == (impl->redop->sizeof_lhs * (trigger_gen - args.previous_gen)));
 	  memcpy(impl->final_values + ((rel_gen - 1) * impl->redop->sizeof_lhs), data, datalen);
+	}
+
+	// external waiters need to be signalled inside the lock
+	if(generation_updated && impl->has_external_waiters) {
+	  impl->has_external_waiters = false;
+	  impl->external_waiter_condvar.broadcast();
 	}
       }
 

@@ -494,11 +494,9 @@ namespace Realm {
     }
   
     void RuntimeImpl::DeferredShutdown::defer(RuntimeImpl *_runtime,
-					      int _result_code,
 					      Event wait_on)
     {
       runtime = _runtime;
-      result_code = _result_code;
       EventImpl::add_waiter(wait_on, this);
     }
 
@@ -510,7 +508,7 @@ namespace Realm {
 	assert(false);
       }
       log_runtime.info() << "triggering deferred shutdown";
-      runtime->shutdown(true, result_code);
+      runtime->initiate_shutdown();
     }
 
     void RuntimeImpl::DeferredShutdown::print(std::ostream& os) const
@@ -526,13 +524,37 @@ namespace Realm {
     void Runtime::shutdown(Event wait_on /*= Event::NO_EVENT*/,
 			   int result_code /*= 0*/)
     {
-      log_runtime.info() << "shutdown requested - wait_on=" << wait_on;
-      if(wait_on.has_triggered())
-	((RuntimeImpl *)impl)->shutdown(true, result_code); // local request
-      else
-	((RuntimeImpl *)impl)->deferred_shutdown.defer((RuntimeImpl *)impl,
-						       result_code,
-						       wait_on);
+      // if we're called from inside a task, automatically include the
+      //  task's finish event as well
+      if(Thread::self()) {
+	Operation *op = Thread::self()->get_operation();
+	if(op != 0) {
+	  log_runtime.debug() << "shutdown merging finish event=" << op->get_finish_event();
+	  wait_on = Event::merge_events(wait_on, op->get_finish_event());
+	}
+      }
+
+      log_runtime.info() << "shutdown requested - wait_on=" << wait_on
+			 << " code=" << result_code;
+
+      // send a message to the shutdown master if it's not us
+      NodeID shutdown_master_node = 0;
+      if(my_node_id != shutdown_master_node) {
+	ActiveMessage<RuntimeShutdownRequest> amsg(shutdown_master_node);
+	amsg->wait_on = wait_on;
+	amsg->result_code = result_code;
+	amsg.commit();
+	return;
+      }
+
+      RuntimeImpl *r_impl = static_cast<RuntimeImpl *>(impl);
+      bool duplicate = r_impl->request_shutdown(wait_on, result_code);
+      if(!duplicate) {
+	if(wait_on.has_triggered())
+	  r_impl->initiate_shutdown();
+	else
+	  r_impl->deferred_shutdown.defer(r_impl, wait_on);
+      }
     }
 
     int Runtime::wait_for_shutdown(void)
@@ -834,9 +856,11 @@ namespace Realm {
 	local_proc_group_free_list(0),
 	//local_sparsity_map_free_list(0),
 	run_method_called(false),
-	shutdown_requested(false),
-	shutdown_result_code(0),
 	shutdown_condvar(shutdown_mutex),
+	shutdown_request_received(false),
+	shutdown_result_code(0),
+	shutdown_initiated(false),
+	shutdown_in_progress(false),
 	core_map(0), core_reservations(0),
 	sampling_profiler(true /*system default*/),
 	num_local_memories(0), num_local_ib_memories(0),
@@ -1797,16 +1821,19 @@ namespace Realm {
     }
 
   template <typename T>
-  void spawn_on_all(const T& container_of_procs,
-		    Processor::TaskFuncID func_id,
-		    const void *args, size_t arglen,
-		    Event start_event = Event::NO_EVENT,
-		    int priority = 0)
+  Event spawn_on_all(const T& container_of_procs,
+		     Processor::TaskFuncID func_id,
+		     const void *args, size_t arglen,
+		     Event start_event, int priority)
   {
+    std::set<Event> events;
     for(typename T::const_iterator it = container_of_procs.begin();
 	it != container_of_procs.end();
-	it++)
-      (*it)->me.spawn(func_id, args, arglen, ProfilingRequestSet(), start_event, priority);
+	it++) {
+      Event e = (*it)->me.spawn(func_id, args, arglen, ProfilingRequestSet(), start_event, priority);
+      events.insert(e);
+    }
+    return Event::merge_events(events);
   }
 
   struct CollectiveSpawnInfo {
@@ -2112,22 +2139,98 @@ namespace Realm {
 	return;
 
       // otherwise, sleep until shutdown has been requested by somebody
-      {
-	AutoHSLLock al(shutdown_mutex);
-	while(!shutdown_requested)
-	  shutdown_condvar.wait();
-	log_runtime.info("shutdown request received - terminating\n");
-      }
-
       int result = wait_for_shutdown();
       exit(result);
     }
 
-    // this is not member data of RuntimeImpl because we don't want use-after-free problems
-    static int shutdown_count = 0;
-
-    void RuntimeImpl::shutdown(bool local_request, int result_code)
+    bool RuntimeImpl::request_shutdown(Event wait_on, int result_code)
     {
+      AutoHSLLock al(shutdown_mutex);
+      // if this is a duplicate request, it has to match exactly
+      if(shutdown_request_received) {
+	if((wait_on != shutdown_precondition) ||
+	   (result_code != shutdown_result_code)) {
+	  log_runtime.fatal() << "inconsistent shutdown requests:"
+			      << " old=" << shutdown_precondition << "/" << shutdown_result_code
+			      << " new=" << wait_on << "/" << result_code;
+	  abort();
+	}
+	
+	return true;
+      } else {
+	shutdown_precondition = wait_on;
+	shutdown_result_code = result_code;
+	shutdown_request_received = true;
+	
+	return false;
+      }
+    }
+
+    void RuntimeImpl::initiate_shutdown(void)
+    {
+      // if we're the master, we need to notify everyone else first
+      NodeID shutdown_master_node = 0;
+      if(my_node_id == shutdown_master_node) {
+      	NodeSet targets;
+	for(NodeID i = 0; i <= max_node_id; i++)
+	  if(i != my_node_id)
+	    targets.add(i);
+
+	ActiveMessage<RuntimeShutdownMessage> amsg(targets);
+	amsg->result_code = shutdown_result_code;
+	amsg.commit();
+      }
+
+      {
+	AutoHSLLock al(shutdown_mutex);
+	assert(shutdown_request_received);
+	shutdown_initiated = true;
+	shutdown_condvar.broadcast();
+      }
+    }
+
+    int RuntimeImpl::wait_for_shutdown(void)
+    {
+      // sleep until shutdown has been requested by somebody
+      {
+	AutoHSLLock al(shutdown_mutex);
+	while(!shutdown_initiated)
+	  shutdown_condvar.wait();
+      }
+      log_runtime.info("shutdown request received - terminating");
+
+      // we need a task to run on each processor to ensure anything that was
+      //  running when the shutdown was initiated (e.g. the task that initiated
+      //  the shutdown) has finished - in legacy mode this is the "shutdown"
+      //  task, otherwise it's just a NOP (task 0)
+      {
+	Processor::TaskFuncID flush_task_id = (run_method_called ?
+					         Processor::TASK_ID_PROCESSOR_SHUTDOWN :
+					         Processor::TASK_ID_PROCESSOR_NOP);
+
+	// legacy shutdown - call shutdown task on processors
+	log_runtime.info() << "local processor shutdown tasks initiated";
+
+	const std::vector<ProcessorImpl *>& local_procs = nodes[my_node_id].processors;
+	Event e = spawn_on_all(local_procs, flush_task_id, 0, 0,
+			       Event::NO_EVENT,
+			       INT_MIN); // runs with lowest priority
+	e.external_wait();
+	log_runtime.info() << "local processor shutdown tasks complete";
+      }
+
+      // the operation table should be clear of work
+      optable.shutdown_check();
+      
+      // flush out all inter-node communication channels to make sure
+      //  we handle any incoming work before we start tearing stuff down
+      flush_activemsg_channels();
+
+      // mark that a shutdown is in progress so that we can hopefully catch
+      //  things that try to run during teardown
+      shutdown_in_progress.store(true);
+      
+#if 0
       // filter out duplicate requests
       bool already_started = (__sync_fetch_and_add(&shutdown_count, 1) > 0);
       if(already_started)
@@ -2146,54 +2249,6 @@ namespace Realm {
       }
 
       log_runtime.info("shutdown request - cleaning up local processors");
-
-      if(run_method_called) {
-	// legacy shutdown - call shutdown task on processors
-	log_task.info("spawning processor shutdown task on local cpus");
-
-	const std::vector<ProcessorImpl *>& local_procs = nodes[my_node_id].processors;
-
-	spawn_on_all(local_procs, Processor::TASK_ID_PROCESSOR_SHUTDOWN, 0, 0,
-		     Event::NO_EVENT,
-		     INT_MIN); // runs with lowest priority
-      }
-
-      {
-	AutoHSLLock al(shutdown_mutex);
-	shutdown_result_code = result_code;
-	shutdown_requested = true;
-	shutdown_condvar.broadcast();
-      }
-    }
-
-    int RuntimeImpl::wait_for_shutdown(void)
-    {
-#if 0
-      bool exit_process = true;
-      if (background_pthread != 0)
-      {
-        pthread_t *background_thread = (pthread_t*)background_pthread;
-        void *result;
-        pthread_join(*background_thread, &result);
-        free(background_thread);
-        // Set this to null so we don't wait anymore
-        background_pthread = 0;
-        exit_process = false;
-      }
-#endif
-
-      // sleep until shutdown has been requested by somebody
-      {
-	AutoHSLLock al(shutdown_mutex);
-	while(!shutdown_requested)
-	  shutdown_condvar.wait();
-	log_runtime.info("shutdown request received - terminating");
-      }
-
-#ifdef USE_GASNET
-      // don't start tearing things down until all processes agree
-      gasnet_barrier_notify(0, GASNET_BARRIERFLAG_ANONYMOUS);
-      gasnet_barrier_wait(0, GASNET_BARRIERFLAG_ANONYMOUS);
 #endif
 
       // Shutdown all the threads
@@ -2300,6 +2355,10 @@ namespace Realm {
 
     EventImpl *RuntimeImpl::get_event_impl(Event e)
     {
+      if(shutdown_in_progress.load()) {
+	log_runtime.fatal() << "looking up event after shutdown: " << e;
+	abort();
+      }
       ID id(e);
       if(id.is_event())
 	return get_genevent_impl(e);
@@ -2614,16 +2673,40 @@ namespace Realm {
   // class RuntimeShutdownMessage
   //
 
-  /*static*/ void RuntimeShutdownMessage::handle_message(NodeID sender,const RuntimeShutdownMessage &args,
+  /*static*/ void RuntimeShutdownRequest::handle_message(NodeID sender,
+							 const RuntimeShutdownRequest &args,
 							 const void *data, size_t datalen)
   {
-    log_runtime.info() << "shutdown request received: sender=" << sender << " code=" << args.result_code;
+    log_runtime.info() << "shutdown request received: sender=" << sender
+		       << " wait_on=" << args.wait_on
+		       << " code=" << args.result_code;
 
-    get_runtime()->shutdown(false, args.result_code);
+    RuntimeImpl *r_impl = runtime_singleton;
+    bool duplicate = r_impl->request_shutdown(args.wait_on, args.result_code);
+    if(!duplicate) {
+      if(args.wait_on.has_triggered())
+	r_impl->initiate_shutdown();
+      else
+	r_impl->deferred_shutdown.defer(r_impl, args.wait_on);
+    }
+  }
+
+  /*static*/ void RuntimeShutdownMessage::handle_message(NodeID sender,
+							 const RuntimeShutdownMessage &args,
+							 const void *data, size_t datalen)
+  {
+    log_runtime.info() << "shutdown initiation received: sender=" << sender
+		       << " code=" << args.result_code;
+
+    RuntimeImpl *r_impl = runtime_singleton;
+    bool duplicate = r_impl->request_shutdown(Event::NO_EVENT, args.result_code);
+    assert(!duplicate);
+    r_impl->initiate_shutdown();
   }
 
   ActiveMessageHandlerReg<RemoteIDRequestMessage> remote_id_request_message_handler;
   ActiveMessageHandlerReg<RemoteIDResponseMessage> remote_id_response_message_handler;
+  ActiveMessageHandlerReg<RuntimeShutdownRequest> runtime_shutdown_request_handler;
   ActiveMessageHandlerReg<RuntimeShutdownMessage> runtime_shutdown_message_handler;
 
 }; // namespace Realm

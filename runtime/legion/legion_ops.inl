@@ -60,7 +60,6 @@ namespace Legion {
       DerezCheck z(derez);
       derez.deserialize(memo_state);
       derez.deserialize(need_prepipeline_stage);
-      // TODO: remote mapping is not yet supported in dynamic tracing
       tpl = NULL;
     }
 
@@ -169,6 +168,29 @@ namespace Legion {
         complete_event =
           Runtime::merge_events(complete_event, tpl->get_recording_done());
       return complete_event;
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    void MemoizableOp<OP>::find_equivalence_sets(Runtime *runtime, unsigned idx, 
+                 const FieldMask &mask, FieldMaskSet<EquivalenceSet> &eqs) const
+    //--------------------------------------------------------------------------
+    {
+      const VersionInfo &info = get_version_info(idx);
+      const FieldMaskSet<EquivalenceSet> &sets = info.get_equivalence_sets();
+      if (mask != sets.get_valid_mask())
+      {
+        for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
+              sets.begin(); it != sets.end(); it++)
+        {
+          const FieldMask overlap = it->second & mask;
+          if (!overlap)
+            continue;
+          eqs.insert(it->first, overlap);
+        }
+      }
+      else
+        eqs = sets;
     }
 
     //--------------------------------------------------------------------------

@@ -1404,6 +1404,7 @@ namespace Legion {
       TraceLocalID tid = get_trace_local_id();
       rez.serialize(tid.first);
       rez.serialize(tid.second);
+      rez.serialize(get_memo_completion());
       rez.serialize<bool>(is_memoizable_task());
       rez.serialize<bool>(is_memoizing());
     }
@@ -1411,9 +1412,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     RemoteMemoizable::RemoteMemoizable(Operation *o, Memoizable *orig,
                                        AddressSpaceID orgn, Operation::OpKind k,
-                                       TraceLocalID tid, bool is_mem, bool is_m)
+                                       TraceLocalID tid, ApEvent completion,
+                                       bool is_mem, bool is_m)
       : op(o), original(orig), origin(orgn), kind(k), trace_local_id(tid),
-        is_mem_task(is_mem), is_memo(is_m)
+        completion_event(completion), is_mem_task(is_mem), is_memo(is_m)
     //--------------------------------------------------------------------------
     {
     }
@@ -1463,12 +1465,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ApEvent RemoteMemoizable::get_memo_completion(bool replay)
+    ApEvent RemoteMemoizable::get_memo_completion(void) const
+    //--------------------------------------------------------------------------
+    {
+      return completion_event;
+    }
+
+    //--------------------------------------------------------------------------
+    void RemoteMemoizable::replay_mapping_output(void)
     //--------------------------------------------------------------------------
     {
       // should never be called
       assert(false);
-      return ApEvent::NO_AP_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -1511,21 +1519,35 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void RemoteMemoizable::find_equivalence_sets(Runtime *runtime, unsigned idx,
+              const FieldMask &mask, FieldMaskSet<EquivalenceSet> &target) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(origin != runtime->address_space);
+#endif
+      RtUserEvent done = Runtime::create_rt_user_event();
+      // Send the request back to the origin node
+      Serializer rez;
+      {
+        RezCheck z(rez);
+        rez.serialize(original);
+        rez.serialize(idx);
+        rez.serialize(mask);
+        rez.serialize(&target);
+        rez.serialize(done);
+      }
+      runtime->send_remote_trace_equivalence_sets_request(origin, rez);
+      done.wait();
+    }
+
+    //--------------------------------------------------------------------------
     const VersionInfo& RemoteMemoizable::get_version_info(unsigned idx) const
     //--------------------------------------------------------------------------
     {
       // should never be called
       assert(false);
       return *new VersionInfo();
-    }
-
-    //--------------------------------------------------------------------------
-    const RegionRequirement& RemoteMemoizable::get_requirement(unsigned x) const
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *new RegionRequirement();
     }
 
     //--------------------------------------------------------------------------
@@ -1540,6 +1562,7 @@ namespace Legion {
       rez.serialize(kind);
       rez.serialize(trace_local_id.first);
       rez.serialize(trace_local_id.second);
+      rez.serialize(completion_event);
       rez.serialize<bool>(is_mem_task);
       rez.serialize<bool>(is_memo);
     }
@@ -1560,11 +1583,86 @@ namespace Legion {
       TraceLocalID tid;
       derez.deserialize(tid.first);
       derez.deserialize(tid.second);
+      ApEvent completion_event;
+      derez.deserialize(completion_event);
       bool is_mem_task, is_memo;
       derez.deserialize<bool>(is_mem_task);
       derez.deserialize<bool>(is_memo);
       return new RemoteMemoizable(op, original, origin, kind, tid,
-                                  is_mem_task, is_memo);
+                                  completion_event, is_mem_task, is_memo);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void RemoteMemoizable::handle_eq_request(Deserializer &derez,
+                                        Runtime *runtime, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      Memoizable *memo;
+      derez.deserialize(memo);
+      unsigned index;
+      derez.deserialize(index);
+      FieldMask mask;
+      derez.deserialize(mask);
+      FieldMaskSet<EquivalenceSet> *target;
+      derez.deserialize(target);
+      RtUserEvent done_event;
+      derez.deserialize(done_event);
+      
+      FieldMaskSet<EquivalenceSet> result;
+      memo->find_equivalence_sets(runtime, index, mask, result);
+      if (!result.empty())
+      {
+        Serializer rez;
+        {
+          RezCheck z2(rez);
+          rez.serialize(target);
+          rez.serialize<size_t>(result.size());
+          for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
+                result.begin(); it != result.end(); it++)
+          {
+            rez.serialize(it->first->did);
+            rez.serialize(it->second);
+          }
+          rez.serialize(done_event);
+        }
+        runtime->send_remote_trace_equivalence_sets_response(source, rez);
+      }
+      else
+        Runtime::trigger_event(done_event);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void RemoteMemoizable::handle_eq_response(Deserializer &derez,
+                                                         Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      FieldMaskSet<EquivalenceSet> *target;
+      derez.deserialize(target);
+      size_t num_sets;
+      derez.deserialize(num_sets);
+      std::set<RtEvent> ready_events;
+      for (unsigned idx = 0; idx < num_sets; idx++)
+      {
+        DistributedID did;
+        derez.deserialize(did);
+        RtEvent ready;
+        EquivalenceSet *set = 
+          runtime->find_or_request_equivalence_set(did, ready);
+        FieldMask mask;
+        derez.deserialize(mask);
+        target->insert(set, mask);
+        if (ready.exists() && !ready.has_triggered())
+          ready_events.insert(ready);
+      }
+      RtUserEvent done_event;
+      derez.deserialize(done_event);
+
+      if (!ready_events.empty())
+        Runtime::trigger_event(done_event, Runtime::merge_events(ready_events));
+      else
+        Runtime::trigger_event(done_event);
     }
 
     ///////////////////////////////////////////////////////////// 
@@ -16025,7 +16123,15 @@ namespace Legion {
     {
       initialize_operation(ctx, true/*track*/);
       measurement = launcher.measurement;
-      preconditions = launcher.preconditions;
+      // Only allow non-empty futures 
+      if (!launcher.preconditions.empty())
+      {
+        for (std::set<Future>::const_iterator it =
+              launcher.preconditions.begin(); it != 
+              launcher.preconditions.end(); it++)
+          if (it->impl != NULL)
+            preconditions.insert(*it);
+      }
       result = Future(new FutureImpl(runtime, true/*register*/,
                   runtime->get_available_distributed_id(),
                   runtime->address_space, this));
@@ -16096,10 +16202,7 @@ namespace Legion {
     {
       for (std::set<Future>::const_iterator it = preconditions.begin();
             it != preconditions.end(); it++)
-      {
-        if (it->impl != NULL)
-          it->impl->register_dependence(this);
-      }
+        it->impl->register_dependence(this);
     }
 
     //--------------------------------------------------------------------------
@@ -16110,10 +16213,8 @@ namespace Legion {
       std::set<ApEvent> pre_events;
       for (std::set<Future>::const_iterator it = preconditions.begin();
             it != preconditions.end(); it++)
-      {
-        if ((it->impl != NULL) && !it->impl->ready_event.has_triggered())
+        if (!it->impl->ready_event.has_triggered())
           pre_events.insert(it->impl->get_ready_event());
-      }
       // Also make sure we wait for any execution fences that we have
       if (execution_fence_event.exists())
         pre_events.insert(execution_fence_event);

@@ -88,6 +88,11 @@ namespace Legion {
     void LegionTrace::register_physical_only(Operation *op, GenerationID gen)
     //--------------------------------------------------------------------------
     {
+      if (has_blocking_call())
+        REPORT_LEGION_ERROR(ERROR_INVALID_PHYSICAL_TRACING,
+            "Physical tracing violation! The trace has a blocking API call "
+            "that was unseen when it was recorded. Please make sure that "
+            "the trace does not change its behavior.");
       std::pair<Operation*,GenerationID> key(op,gen);
       const unsigned index = operations.size();
       op->set_trace_local_id(index);
@@ -184,9 +189,16 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       blocking_call_observed = true;
+      if (physical_trace == NULL)
+        return;
       PhysicalTemplate *tpl = physical_trace->get_current_template();
       if (tpl != NULL)
         tpl->trigger_recording_done();
+      if (is_replaying())
+        REPORT_LEGION_ERROR(ERROR_INVALID_PHYSICAL_TRACING,
+            "Physical tracing violation! The trace has a blocking API call "
+            "that was unseen when it was recorded. Please make sure that "
+            "the trace does not change its behavior.");
     }
 
     //--------------------------------------------------------------------------
@@ -3395,21 +3407,20 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::record_mapper_output(SingleTask *task,
+    void PhysicalTemplate::record_mapper_output(Memoizable *memo,
                                             const Mapper::MapTaskOutput &output,
                               const std::deque<InstanceSet> &physical_instances)
     //--------------------------------------------------------------------------
     {
+      const TraceLocalID op_key = memo->get_trace_local_id();
       AutoLock t_lock(template_lock);
 #ifdef DEBUG_LEGION
       assert(is_recording());
-#endif
-
-      TraceLocalID op_key = task->get_trace_local_id();
-#ifdef DEBUG_LEGION
       assert(cached_mappings.find(op_key) == cached_mappings.end());
 #endif
       CachedMapping &mapping = cached_mappings[op_key];
+      // If you change the things recorded from output here then
+      // you also need to change RemoteTraceRecorder::record_mapper_output
       mapping.target_procs = output.target_procs;
       mapping.chosen_variant = output.chosen_variant;
       mapping.task_priority = output.task_priority;
@@ -3456,7 +3467,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(memo != NULL);
 #endif
-      const ApEvent lhs = memo->get_memo_completion(false/*replay*/);
+      const ApEvent lhs = memo->get_memo_completion();
       AutoLock tpl_lock(template_lock);
 #ifdef DEBUG_LEGION
       assert(is_recording());
@@ -3610,6 +3621,21 @@ namespace Legion {
         lhs = rename;
       }
 
+      LegionList<FieldSet<EquivalenceSet*> >::aligned src_eqs, dst_eqs;
+      // Get these before we take the lock
+      {
+        FieldMaskSet<EquivalenceSet> eq_sets;
+        const FieldMask &src_mask = tracing_srcs.get_valid_mask();
+        memo->find_equivalence_sets(trace->runtime, src_idx, src_mask, eq_sets);
+        eq_sets.compute_field_sets(src_mask, src_eqs);
+      }
+      {
+        FieldMaskSet<EquivalenceSet> eq_sets;
+        const FieldMask &dst_mask = tracing_dsts.get_valid_mask();
+        memo->find_equivalence_sets(trace->runtime, dst_idx, dst_mask, eq_sets);
+        eq_sets.compute_field_sets(dst_mask, dst_eqs);
+      }
+
       AutoLock tpl_lock(template_lock);
 #ifdef DEBUG_LEGION
       assert(is_recording());
@@ -3625,11 +3651,11 @@ namespace Legion {
 #endif
             rhs_, redop, reduction_fold));
 
-      record_views(memo, src_idx, lhs_, expr,
-          RegionUsage(READ_ONLY, EXCLUSIVE, 0), tracing_srcs);
+      record_views(lhs_, expr, RegionUsage(READ_ONLY, EXCLUSIVE, 0), 
+                   tracing_srcs, src_eqs);
       record_copy_views(lhs_, expr, tracing_srcs);
-      record_views(memo, dst_idx, lhs_, expr,
-          RegionUsage(WRITE_ONLY, EXCLUSIVE, 0), tracing_dsts);
+      record_views(lhs_, expr, RegionUsage(WRITE_ONLY, EXCLUSIVE, 0), 
+                   tracing_dsts, dst_eqs);
       record_copy_views(lhs_, expr, tracing_dsts);
     }
 
@@ -3672,6 +3698,16 @@ namespace Legion {
         Runtime::trigger_event(rename);
         lhs = rename;
       }
+
+      // Do this before we take the lock
+      LegionList<FieldSet<EquivalenceSet*> >::aligned eqs;
+      {
+        FieldMaskSet<EquivalenceSet> eq_sets;
+        const FieldMask &dst_mask = tracing_dsts.get_valid_mask();
+        memo->find_equivalence_sets(trace->runtime, idx, dst_mask, eq_sets);
+        eq_sets.compute_field_sets(dst_mask, eqs);
+      }
+
       AutoLock tpl_lock(template_lock);
 #ifdef DEBUG_LEGION
       assert(is_recording());
@@ -3688,8 +3724,8 @@ namespace Legion {
                                        rhs_));
 
       record_fill_views(tracing_srcs);
-      record_views(memo, idx, lhs_, expr,
-          RegionUsage(WRITE_ONLY, EXCLUSIVE, 0), tracing_dsts);
+      record_views(lhs_, expr, RegionUsage(WRITE_ONLY, EXCLUSIVE, 0), 
+                   tracing_dsts, eqs);
       record_copy_views(lhs_, expr, tracing_dsts);
     }
 
@@ -3768,16 +3804,18 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(memo != NULL);
 #endif
-      AutoLock tpl_lock(template_lock);
-      TraceLocalID op_key = find_trace_local_id(memo);
-      unsigned entry = find_memo_entry(memo);
-
+      // Do this part before we take the lock
       LegionList<FieldSet<EquivalenceSet*> >::aligned eqs;
       if (update_validity)
       {
-        memo->get_version_info(idx).get_equivalence_sets()
-          .compute_field_sets(user_mask, eqs);
+        FieldMaskSet<EquivalenceSet> eq_sets;
+        memo->find_equivalence_sets(trace->runtime, idx, user_mask, eq_sets);
+        eq_sets.compute_field_sets(user_mask, eqs);
       }
+
+      AutoLock tpl_lock(template_lock);
+      TraceLocalID op_key = find_trace_local_id(memo);
+      unsigned entry = find_memo_entry(memo);
 
       FieldMaskSet<IndexSpaceExpression> &views = op_views[op_key][view];
       for (LegionList<FieldSet<EquivalenceSet*> >::aligned::iterator it =
@@ -3794,7 +3832,7 @@ namespace Legion {
             if (view->is_reduction_view() && IS_REDUCE(usage))
               record_issue_fill_for_reduction(memo, idx, view, mask, expr);
             ViewUser *user = new ViewUser(usage, entry, expr);
-            update_valid_views(memo, view, *eit, usage, mask, true);
+            update_valid_views(view, *eit, usage, mask, true);
             add_view_user(view, user, mask);
           }
         }
@@ -3814,30 +3852,33 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::record_views(Memoizable *memo,
-                                        unsigned idx,
-                                        unsigned entry,
+    void PhysicalTemplate::record_views(unsigned entry,
                                         IndexSpaceExpression *expr,
                                         const RegionUsage &usage,
-                                        const FieldMaskSet<InstanceView> &views)
+                                        const FieldMaskSet<InstanceView> &views,
+                     const LegionList<FieldSet<EquivalenceSet*> >::aligned &eqs)
     //--------------------------------------------------------------------------
     {
-      const VersionInfo &info = memo->get_version_info(idx);
+      RegionTreeForest *forest = trace->runtime->forest;
       for (FieldMaskSet<InstanceView>::const_iterator vit = views.begin();
-           vit != views.end(); ++vit)
+            vit != views.end(); ++vit)
       {
-        LegionList<FieldSet<EquivalenceSet*> >::aligned eqs;
-        info.get_equivalence_sets().compute_field_sets(vit->second, eqs);
-        for (LegionList<FieldSet<EquivalenceSet*> >::aligned::iterator it =
-             eqs.begin(); it != eqs.end(); ++it)
+        for (LegionList<FieldSet<EquivalenceSet*> >::aligned::const_iterator 
+              it = eqs.begin(); it != eqs.end(); ++it)
         {
-          FieldMask mask = it->set_mask & vit->second;
-          for (std::set<EquivalenceSet*>::iterator eit = it->elements.begin();
-               eit != it->elements.end(); ++eit)
+          const FieldMask mask = it->set_mask & vit->second;
+          if (!mask)
+            continue;
+          for (std::set<EquivalenceSet*>::const_iterator eit = 
+                it->elements.begin(); eit != it->elements.end(); ++eit)
           {
-            if ((*eit)->set_expr != expr) continue;
-            ViewUser *user = new ViewUser(usage, entry, (*eit)->set_expr);
-            update_valid_views(memo, vit->first, *eit, usage, mask, false);
+            // Test for intersection here
+            IndexSpaceExpression *intersect =
+              forest->intersect_index_spaces((*eit)->set_expr, expr);
+            if (intersect->is_empty())
+              continue;
+            ViewUser *user = new ViewUser(usage, entry, intersect);
+            update_valid_views(vit->first, *eit, usage, mask, false);
             add_view_user(vit->first, user, mask);
           }
         }
@@ -3845,8 +3886,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::update_valid_views(Memoizable *memo,
-                                              InstanceView *view,
+    void PhysicalTemplate::update_valid_views(InstanceView *view,
                                               EquivalenceSet *eq,
                                               const RegionUsage &usage,
                                               const FieldMask &user_mask,
@@ -4002,12 +4042,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::record_complete_replay(Operation* op, ApEvent rhs)
+    void PhysicalTemplate::record_complete_replay(Memoizable* memo, ApEvent rhs)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(op->is_memoizing());
-#endif
+      const TraceLocalID lhs = find_trace_local_id(memo);
       AutoLock tpl_lock(template_lock);
 #ifdef DEBUG_LEGION
       assert(is_recording());
@@ -4015,11 +4053,6 @@ namespace Legion {
       // Do this first in case it gets preempted
       const unsigned rhs_ = find_event(rhs, tpl_lock);
       events.push_back(ApEvent());
-      Memoizable *memo = op->get_memoizable();
-#ifdef DEBUG_LEGION
-      assert(memo != NULL);
-#endif
-      TraceLocalID lhs = find_trace_local_id(memo);
       insert_instruction(new CompleteReplay(*this, lhs, rhs_));
     }
 
@@ -4586,7 +4619,8 @@ namespace Legion {
       assert(operations.find(owner) != operations.end());
       assert(operations.find(owner)->second != NULL);
 #endif
-      events[lhs] = operations[owner]->get_memo_completion(true/*replay*/);
+      operations[owner]->replay_mapping_output();
+      events[lhs] = operations[owner]->get_memo_completion();
     }
 
     //--------------------------------------------------------------------------

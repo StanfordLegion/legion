@@ -351,10 +351,10 @@ gcc49_cxx98_debug_spy_legion:
   <<: [*linux, *image, *tests]
   variables:
     <<: [*gcc49, *terra38, *debug, *cxx98_spy, *legion]
-gcc49_cxx98_debug_spy_regent:
+gcc49_cxx98_debug_spy_python3_regent:
   <<: [*linux_compute, *image, *tests]
   variables:
-    <<: [*gcc49, *terra38, *debug, *cxx98_spy, *regent, *parallel]
+    <<: [*gcc49, *terra38, *debug, *cxx98_spy, *python3, *regent, *parallel]
 #   * Prof
 gcc49_cxx98_release_prof_regent:
   <<: [*linux_compute, *image, *tests]
@@ -483,10 +483,10 @@ clang38_cxx98_debug_spy_legion:
   <<: [*linux, *image_clang, *tests]
   variables:
     <<: [*clang38, *terra38, *debug, *cxx98_spy, *legion]
-clang38_cxx98_debug_spy_regent:
+clang38_cxx98_debug_spy_python3_regent:
   <<: [*linux_compute, *image_clang, *tests]
   variables:
-    <<: [*clang38, *terra38, *debug, *cxx98_spy, *regent, *parallel]
+    <<: [*clang38, *terra38, *debug, *cxx98_spy, *python3, *regent, *parallel]
 #   * Prof
 clang38_cxx98_release_prof_regent:
   <<: [*linux_compute, *image_clang, *tests]

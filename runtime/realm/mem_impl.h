@@ -283,7 +283,7 @@ namespace Realm {
       int get_file_des(ID::IDType inst_id);
     public:
       std::vector<int> file_vec;
-      pthread_mutex_t vector_lock;
+      GASNetHSL vector_lock;
       off_t next_offset;
       std::map<off_t, int> offset_map;
     };

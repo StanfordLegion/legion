@@ -1435,19 +1435,20 @@ namespace Legion {
           {
             case 0:
               break;
-              // C++11 is stupid, apparently the `using` statement is not 
-              // smart enough to rename explicit destructor invocations, FML
-#if 0 // __cplusplus == 201103L
+              // Clang is exceedingly stupid about this when we have a 
+              // using statement and try to do an inplace deletion, FML
+#if defined(__clang__) && __cplusplus >= 201103L
 #define DIMFUNC(DIM) \
             case DIM: \
               { \
-                reinterpret_cast<DomainT<DIM,T>*>(bounds)->~IndexSpace(); \
+                reinterpret_cast<DomainT<DIM,T>*>(bounds)-> \
+                  ~IndexSpace<DIM,T>(); \
                 if (has_transform) \
                   reinterpret_cast<AffineTransform<DIM,N,T>*>(transform)-> \
                     ~AffineTransform(); \
                 break; \
               }
-#else
+#else // This is the version that all non-clang compilers like
 #define DIMFUNC(DIM) \
             case DIM: \
               { \

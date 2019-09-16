@@ -252,8 +252,11 @@ namespace Realm {
 	       Runtime::RunStyle style = Runtime::ONE_TASK_ONLY,
 	       const void *args = 0, size_t arglen = 0, bool background = false);
 
-      // requests a shutdown of the runtime
-      void shutdown(bool local_request, int result_code);
+      // requests a shutdown of the runtime - returns true if request is a duplicate
+      bool request_shutdown(Event wait_on, int result_code);
+
+      // indicates shutdown has been initiated, wakes up a waiter if already present
+      void initiate_shutdown(void);
 
       // returns value of result_code passed to shutdown()
       int wait_for_shutdown(void);
@@ -308,10 +311,13 @@ namespace Realm {
       pthread_t all_threads[MAX_NUM_THREADS];
       unsigned thread_counts[MAX_NUM_THREADS];
 #endif
-      volatile bool shutdown_requested;
-      int shutdown_result_code;
       GASNetHSL shutdown_mutex;
       GASNetCondVar shutdown_condvar;
+      bool shutdown_request_received;  // has a request for shutdown arrived
+      Event shutdown_precondition;
+      int shutdown_result_code;
+      bool shutdown_initiated;  // is it time to start shutting down
+      atomic<bool> shutdown_in_progress; // are we actively shutting down?
 
       CoreMap *core_map;
       CoreReservationSet *core_reservations;
@@ -322,8 +328,7 @@ namespace Realm {
 
       class DeferredShutdown : public EventWaiter {
       public:
-	void defer(RuntimeImpl *_runtime, int _result_code,
-		   Event wait_on);
+	void defer(RuntimeImpl *_runtime, Event wait_on);
 
 	virtual void event_triggered(bool poisoned);
 	virtual void print(std::ostream& os) const;
@@ -331,7 +336,6 @@ namespace Realm {
 
       protected:
 	RuntimeImpl *runtime;
-	int result_code;
       };
       DeferredShutdown deferred_shutdown;
       
@@ -394,6 +398,14 @@ namespace Realm {
 				 const void *data, size_t datalen);
     };
 
+    struct RuntimeShutdownRequest {
+      Event wait_on;
+      int result_code;
+
+      static void handle_message(NodeID sender,const RuntimeShutdownRequest &msg,
+				 const void *data, size_t datalen);
+    };
+      
     struct RuntimeShutdownMessage {
       int result_code;
 

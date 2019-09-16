@@ -790,7 +790,8 @@ namespace Legion {
       virtual bool is_memoizing(void) const = 0;
       virtual AddressSpaceID get_origin_space(void) const = 0;
       virtual PhysicalTemplate* get_template(void) const = 0;
-      virtual ApEvent get_memo_completion(bool replay) = 0;
+      virtual ApEvent get_memo_completion(void) const = 0;
+      virtual void replay_mapping_output(void) = 0;
       virtual Operation* get_operation(void) const = 0;
       virtual Operation::OpKind get_memoizable_kind(void) const = 0;
       // Return a trace local unique ID for this operation
@@ -798,8 +799,10 @@ namespace Legion {
       virtual TraceLocalID get_trace_local_id(void) const = 0;
       virtual ApEvent compute_sync_precondition(const TraceInfo *in) const = 0;
       virtual void complete_replay(ApEvent complete_event) = 0;
+      virtual void find_equivalence_sets(Runtime *runtime, unsigned idx,
+        const FieldMask &mask, FieldMaskSet<EquivalenceSet> &target) const = 0;
+    protected:
       virtual const VersionInfo& get_version_info(unsigned idx) const = 0;
-      virtual const RegionRequirement& get_requirement(unsigned idx) const = 0;
     public:
       virtual void pack_remote_memoizable(Serializer &rez, 
                                           AddressSpaceID target) const;
@@ -809,8 +812,8 @@ namespace Legion {
     public:
       RemoteMemoizable(Operation *op, Memoizable *original, 
                        AddressSpaceID origin, Operation::OpKind kind,
-                       TraceLocalID tid, bool is_memoizable_task,
-                        bool is_memoizing);
+                       TraceLocalID tid, ApEvent completion_event,
+                       bool is_memoizable_task, bool is_memoizing);
       virtual ~RemoteMemoizable(void);
     public:
       virtual bool is_memoizable_task(void) const;
@@ -818,7 +821,8 @@ namespace Legion {
       virtual bool is_memoizing(void) const;
       virtual AddressSpaceID get_origin_space(void) const;
       virtual PhysicalTemplate* get_template(void) const;
-      virtual ApEvent get_memo_completion(bool replay);
+      virtual ApEvent get_memo_completion(void) const;
+      virtual void replay_mapping_output(void);
       virtual Operation* get_operation(void) const;
       virtual Operation::OpKind get_memoizable_kind(void) const;
       // Return a trace local unique ID for this operation
@@ -826,19 +830,25 @@ namespace Legion {
       virtual TraceLocalID get_trace_local_id(void) const;
       virtual ApEvent compute_sync_precondition(const TraceInfo *info) const;
       virtual void complete_replay(ApEvent complete_event);
+      virtual void find_equivalence_sets(Runtime *runtime, unsigned idx,
+          const FieldMask &mask, FieldMaskSet<EquivalenceSet> &target) const;
+    protected:
       virtual const VersionInfo& get_version_info(unsigned idx) const;
-      virtual const RegionRequirement& get_requirement(unsigned idx) const;
     public:
       virtual void pack_remote_memoizable(Serializer &rez, 
                                           AddressSpaceID target) const;
       static Memoizable* unpack_remote_memoizable(Deserializer &derez,
                                       Operation *op, Runtime *runtime);
+      static void handle_eq_request(Deserializer &derez, Runtime *runtime,
+                                    AddressSpaceID source);
+      static void handle_eq_response(Deserializer &derez, Runtime *runtime);
     public:
       Operation *const op;
       Memoizable *const original; // not a valid pointer on remote nodes
       const AddressSpaceID origin;
       const Operation::OpKind kind;
       const TraceLocalID trace_local_id;
+      const ApEvent completion_event;
       const bool is_mem_task;
       const bool is_memo;
     };
@@ -882,13 +892,16 @@ namespace Legion {
         { assert(false); return ApEvent::NO_AP_EVENT; }
       virtual void complete_replay(ApEvent complete_event)
         { assert(false); }
-      virtual ApEvent get_memo_completion(bool replay)
+      virtual ApEvent get_memo_completion(void) const
         { return this->get_completion_event(); }
+      virtual void replay_mapping_output(void) { /*do nothing*/ }
       virtual Operation::OpKind get_memoizable_kind(void) const
         { return this->get_operation_kind(); }
       virtual ApEvent compute_init_precondition(const TraceInfo &info);
       virtual RtEvent complete_memoizable(
                                  RtEvent complete_event = RtEvent::NO_RT_EVENT);
+      virtual void find_equivalence_sets(Runtime *runtime, unsigned idx, 
+          const FieldMask &mask, FieldMaskSet<EquivalenceSet> &eqs) const;
     protected:
       void invoke_memoize_operation(MapperID mapper_id);
     public:

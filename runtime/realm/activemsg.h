@@ -143,6 +143,7 @@ private:
 public:
   void lock(void);
   void unlock(void);
+  bool trylock(void);
 
 protected:
   friend class GASNetCondVar;
@@ -197,6 +198,7 @@ extern void init_endpoints(int gasnet_mem_size,
 			   std::vector<std::string>& cmdline);
 extern void start_polling_threads(int count);
 extern void start_handler_threads(int count, Realm::CoreReservationSet& crs, size_t stacksize);
+extern void flush_activemsg_channels(void);
 extern void stop_activemsg_threads(void);
 extern void report_activemsg_status(FILE *f);
 
@@ -660,6 +662,7 @@ public:
   MessageID lookup_message_id(void) const;
 
   MessageHandler lookup_message_handler(MessageID id);
+  const char *lookup_message_name(MessageID id);
 
   static void append_handler_reg(ActiveMessageHandlerRegBase *new_reg);
 
@@ -669,6 +672,7 @@ public:
 
   struct HandlerEntry {
     TypeHash hash;
+    const char *name;
     MessageHandler handler;
   };
 
@@ -686,6 +690,7 @@ public:
   virtual ActiveMessageHandlerTable::MessageHandler get_handler(void) const = 0;
 
   ActiveMessageHandlerTable::TypeHash hash;
+  const char *name;
   ActiveMessageHandlerRegBase *next_handler;
 };
 

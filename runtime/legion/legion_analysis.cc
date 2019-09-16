@@ -691,6 +691,8 @@ namespace Legion {
           rez.serialize<bool>(update_validity);
         }
         runtime->send_remote_trace_update(origin_space, rez);
+        AutoLock a_lock(applied_lock);
+        applied_events.insert(applied);
       }
       else
         remote_tpl->record_op_view(memo, idx, view, usage, 
@@ -721,6 +723,92 @@ namespace Legion {
       }
       else
         remote_tpl->record_set_op_sync_event(lhs, memo);
+    }
+
+    //--------------------------------------------------------------------------
+    void RemoteTraceRecorder::record_mapper_output(Memoizable *memo,
+                              const Mapper::MapTaskOutput &output,
+                              const std::deque<InstanceSet> &physical_instances)
+    //--------------------------------------------------------------------------
+    {
+      if (local_space != origin_space)
+      {
+        RtUserEvent applied = Runtime::create_rt_user_event(); 
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(remote_tpl);
+          rez.serialize(REMOTE_TRACE_RECORD_MAPPER_OUTPUT);
+          rez.serialize(applied);
+          memo->pack_remote_memoizable(rez, origin_space);
+          // We actually only need a few things here  
+          rez.serialize<size_t>(output.target_procs.size());
+          for (unsigned idx = 0; idx < output.target_procs.size(); idx++)
+            rez.serialize(output.target_procs[idx]);
+          rez.serialize(output.chosen_variant);
+          rez.serialize(output.task_priority);
+          rez.serialize<bool>(output.postmap_task);
+          rez.serialize<size_t>(physical_instances.size());
+          for (std::deque<InstanceSet>::const_iterator it = 
+               physical_instances.begin(); it != physical_instances.end(); it++)
+            it->pack_references(rez);
+        }
+        runtime->send_remote_trace_update(origin_space, rez);
+        AutoLock a_lock(applied_lock);
+        applied_events.insert(applied);
+      }
+      else
+        remote_tpl->record_mapper_output(memo, output, physical_instances);
+    }
+
+    //--------------------------------------------------------------------------
+    void RemoteTraceRecorder::get_reduction_ready_events(Memoizable *memo,
+                                                std::set<ApEvent> &ready_events)
+    //--------------------------------------------------------------------------
+    {
+      if (local_space != origin_space)
+      {
+        RtUserEvent done_event = Runtime::create_rt_user_event();
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(remote_tpl);
+          rez.serialize(REMOTE_TRACE_GET_REDUCTION_EVENTS);
+          rez.serialize(done_event);
+          memo->pack_remote_memoizable(rez, origin_space);
+          rez.serialize(&ready_events);
+        }
+        runtime->send_remote_trace_update(origin_space, rez);
+        // Wait for the result to be ready
+        done_event.wait();
+      }
+      else
+        remote_tpl->get_reduction_ready_events(memo, ready_events);
+    }
+
+    //--------------------------------------------------------------------------
+    void RemoteTraceRecorder::record_complete_replay(Memoizable *memo, 
+                                                     ApEvent rhs)
+    //--------------------------------------------------------------------------
+    {
+      if (local_space != origin_space)
+      {
+        RtUserEvent applied = Runtime::create_rt_user_event();
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(remote_tpl);
+          rez.serialize(REMOTE_TRACE_COMPLETE_REPLAY);
+          rez.serialize(applied);
+          memo->pack_remote_memoizable(rez, origin_space);
+          rez.serialize(rhs);
+        }
+        runtime->send_remote_trace_update(origin_space, rez);
+        AutoLock a_lock(applied_lock);
+        applied_events.insert(applied);
+      }
+      else
+        remote_tpl->record_complete_replay(memo, rhs);
     }
 
     //--------------------------------------------------------------------------
@@ -1092,6 +1180,80 @@ namespace Legion {
               Runtime::trigger_event(done);
             break;
           }
+        case REMOTE_TRACE_RECORD_MAPPER_OUTPUT:
+          {
+            RtUserEvent applied;
+            derez.deserialize(applied);
+            Memoizable *memo = RemoteMemoizable::unpack_remote_memoizable(derez,
+                                                           NULL/*op*/, runtime);
+            size_t num_target_processors;
+            derez.deserialize(num_target_processors);
+            Mapper::MapTaskOutput output;
+            output.target_procs.resize(num_target_processors);
+            for (unsigned idx = 0; idx < num_target_processors; idx++)
+              derez.deserialize(output.target_procs[idx]);
+            derez.deserialize(output.chosen_variant);
+            derez.deserialize(output.task_priority);
+            derez.deserialize<bool>(output.postmap_task);
+            size_t num_phy_instances;
+            derez.deserialize(num_phy_instances);
+            std::deque<InstanceSet> physical_instances(num_phy_instances);
+            std::set<RtEvent> ready_events;
+            for (unsigned idx = 0; idx < num_phy_instances; idx++)
+              physical_instances[idx].unpack_references(runtime, derez,
+                                                        ready_events);
+            if (!ready_events.empty())
+            {
+              const RtEvent wait_on = Runtime::merge_events(ready_events);
+              if (wait_on.exists() && !wait_on.has_triggered())
+                wait_on.wait();
+            }
+            tpl->record_mapper_output(memo, output, physical_instances);
+            Runtime::trigger_event(applied);
+            break;
+          }
+        case REMOTE_TRACE_GET_REDUCTION_EVENTS:
+          {
+            RtUserEvent done;
+            derez.deserialize(done);
+            Memoizable *memo = RemoteMemoizable::unpack_remote_memoizable(derez,
+                                                           NULL/*op*/, runtime);
+            std::set<ApEvent> *target;
+            derez.deserialize(target);
+
+            std::set<ApEvent> result;
+            tpl->get_reduction_ready_events(memo, result);
+            if (!result.empty())
+            {
+              Serializer rez;
+              {
+                RezCheck z2(rez);
+                rez.serialize(REMOTE_TRACE_GET_REDUCTION_EVENTS);
+                rez.serialize(target);
+                rez.serialize<size_t>(result.size());
+                for (std::set<ApEvent>::const_iterator it = 
+                      result.begin(); it != result.end(); it++)
+                  rez.serialize(*it);
+                rez.serialize(done);
+              }
+              runtime->send_remote_trace_response(source, rez);
+            }
+            else
+              Runtime::trigger_event(done);
+            break;
+          }
+        case REMOTE_TRACE_COMPLETE_REPLAY:
+          {
+            RtUserEvent applied;
+            derez.deserialize(applied);
+            Memoizable *memo = RemoteMemoizable::unpack_remote_memoizable(derez,
+                                                           NULL/*op*/, runtime);
+            ApEvent ready_event;
+            derez.deserialize(ready_event);
+            tpl->record_complete_replay(memo, ready_event);
+            Runtime::trigger_event(applied);
+            break;
+          }
         default:
           assert(false);
       }
@@ -1115,6 +1277,23 @@ namespace Legion {
             ApUserEvent *event_ptr;
             derez.deserialize(event_ptr);
             derez.deserialize(*event_ptr);
+            RtUserEvent done;
+            derez.deserialize(done);
+            Runtime::trigger_event(done);
+            break;
+          }
+        case REMOTE_TRACE_GET_REDUCTION_EVENTS:
+          {
+            std::set<ApEvent> *target;
+            derez.deserialize(target);
+            size_t num_events;
+            derez.deserialize(num_events);
+            for (unsigned idx = 0; idx < num_events; idx++)
+            {
+              ApEvent event;
+              derez.deserialize(event);
+              target->insert(event);
+            }
             RtUserEvent done;
             derez.deserialize(done);
             Runtime::trigger_event(done);
@@ -1193,9 +1372,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     TraceInfo::TraceInfo(const TraceInfo &rhs, Operation *o)
-      : op(o), memo(rhs.memo), rec(rhs.rec), recording(rhs.recording)
+      : op(o), memo(o->get_memoizable()), rec(rhs.rec), recording(rhs.recording)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(memo != NULL);
+#endif
       if (rec != NULL)
         rec->add_recorder_reference();
     }

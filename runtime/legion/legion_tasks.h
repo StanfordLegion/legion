@@ -584,10 +584,9 @@ namespace Legion {
     public:
       // From Memoizable
       virtual bool is_memoizable_task(void) const { return true; }
-      virtual ApEvent get_memo_completion(bool replay)
-        { const ApEvent result = get_task_completion();
-          if (replay) replay_map_task_output();
-          return result; }
+      virtual ApEvent get_memo_completion(void) const
+        { return get_task_completion(); }
+      virtual void replay_mapping_output(void) { replay_map_task_output(); }
     protected:
       virtual InnerContext* initialize_inner_execution_context(VariantImpl *v);
     protected:

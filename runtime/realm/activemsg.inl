@@ -222,9 +222,10 @@ template <typename T, typename T2>
 ActiveMessageHandlerReg<T, T2>::ActiveMessageHandlerReg(void)
 {
   hash = 0;
-  const char *name = typeid(T).name();
-  while(*name)
-    hash = hash * 73 + *name++;
+  name = typeid(T).name();
+  const char *c = name;
+  while(*c)
+    hash = hash * 73 + *c++;
 
   ActiveMessageHandlerTable::append_handler_reg(this);
 }

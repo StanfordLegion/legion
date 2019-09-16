@@ -50,11 +50,16 @@ namespace Realm {
       // used by non-legion threads to wait on an event - always blocking
       void external_wait(void) const;
 
+      // external wait with a timeout - returns true if event triggers, false
+      //  if the maximum delay occurs first
+      bool external_timedwait(long long max_ns) const;
+
       // fault-aware versions of the above (the above versions will cause the
       //  caller to fault as well if a poisoned event is queried)
       bool has_triggered_faultaware(bool& poisoned) const;
       void wait_faultaware(bool& poisoned) const;
       void external_wait_faultaware(bool& poisoned) const;
+      bool external_timedwait_faultaware(bool& poisoned, long long max_ns) const;
 
       // attempts to cancel the operation associated with this event
       // "reason_data" will be provided to any profilers of the operation

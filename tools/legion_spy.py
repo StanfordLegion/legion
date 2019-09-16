@@ -10535,10 +10535,10 @@ class State(object):
                 # Check for the dominance property
                 space.check_partition_properties()
         # Fill in the parents for all the regions and partitions
-        # No iterators in case things change size
-        for region in self.regions.values():
+        # Make a copy in case things change size
+        for region in itervalues(self.regions.copy()):
             region.update_parent()
-        for partition in self.partitions.values():
+        for partition in itervalues(self.partitions.copy()):
             partition.update_parent()
         # Find the top-level regions
         for region in itervalues(self.regions):
