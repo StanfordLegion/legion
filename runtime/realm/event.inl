@@ -55,4 +55,34 @@ namespace Realm {
   }
 
 
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class CompletionQueue
+
+  inline bool CompletionQueue::operator<(const CompletionQueue& rhs) const
+  {
+    return id < rhs.id;
+  }
+
+  inline bool CompletionQueue::operator==(const CompletionQueue& rhs) const
+  {
+    return id == rhs.id;
+  }
+
+  inline bool CompletionQueue::operator!=(const CompletionQueue& rhs) const
+  {
+    return id != rhs.id;
+  }
+
+  inline bool CompletionQueue::exists(void) const
+  {
+    return id != 0;
+  }
+
+  inline std::ostream& operator<<(std::ostream& os, CompletionQueue e)
+  {
+    return os << std::hex << e.id << std::dec;
+  }
+
+
 }; // namespace Realm  
