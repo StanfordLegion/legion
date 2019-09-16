@@ -221,6 +221,34 @@ namespace Realm {
     T value;
   };
 
+
+  // helpers to pretty-print containers
+
+  template <typename T>
+  class PrettyVector {
+  public:
+    explicit PrettyVector(const T *_data, size_t _size,
+			  const char *_delim = ", ",
+			  const char *_pfx = "[",
+			  const char *_sfx = "]");
+    explicit PrettyVector(const std::vector<T>& _v,
+			  const char *_delim = ", ",
+			  const char *_pfx = "[",
+			  const char *_sfx = "]");
+
+    void print(std::ostream& os) const;
+
+  protected:
+    const T *data;
+    size_t size;
+    const char *delim;
+    const char *pfx;
+    const char *sfx;
+  };
+
+  template <typename T>
+  std::ostream& operator<<(std::ostream& os, const PrettyVector<T>& pv);
+  
 }; // namespace Realm
 
 #include "utils.inl"
