@@ -85,6 +85,11 @@ namespace Legion {
     void LegionTrace::register_physical_only(Operation *op, GenerationID gen)
     //--------------------------------------------------------------------------
     {
+      if (has_blocking_call());
+        REPORT_LEGION_ERROR(ERROR_INVALID_PHYSICAL_TRACING,
+            "Physical tracing violation! The trace has a blocking API call "
+            "that was unseen when it was recorded. Please make sure that "
+            "the trace does not change its behavior.");
       std::pair<Operation*,GenerationID> key(op,gen);
       const unsigned index = operations.size();
       op->set_trace_local_id(index);
@@ -186,6 +191,11 @@ namespace Legion {
       PhysicalTemplate *tpl = physical_trace->get_current_template();
       if (tpl != NULL)
         tpl->trigger_recording_done();
+      if (is_replaying())
+        REPORT_LEGION_ERROR(ERROR_INVALID_PHYSICAL_TRACING,
+            "Physical tracing violation! The trace has a blocking API call "
+            "that was unseen when it was recorded. Please make sure that "
+            "the trace does not change its behavior.");
     }
 
     //--------------------------------------------------------------------------
