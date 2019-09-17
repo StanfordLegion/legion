@@ -8181,6 +8181,9 @@ namespace Legion {
                      dummy_indexes, dummy_mapped, ctx_id)
     //--------------------------------------------------------------------------
     {
+      // We never call configure context on the top-level context but we
+      // still need a completion queue here to handle things correctly
+      post_task_comp_queue = CompletionQueue::create_completion_queue(1); 
     }
 
     //--------------------------------------------------------------------------
