@@ -5856,7 +5856,7 @@ namespace Legion {
     bool InnerContext::process_post_end_tasks(void)
     //--------------------------------------------------------------------------
     {
-      bool launch_next = false;
+      TaskContext *next_ctx = NULL;
       std::vector<PostTaskArgs> to_perform;
       to_perform.reserve(context_configuration.meta_task_vector_width);
       {
@@ -5894,14 +5894,14 @@ namespace Legion {
             it++;
         }
         if (!post_task_queue.empty())
-          launch_next = true;
+          next_ctx = post_task_queue.front().context;
       }
       // Launch this first to get it in flight so it can run when ready
-      if (launch_next)
+      if (next_ctx != NULL)
       {
         // Other things could be added to the queue by the time we're here
         const RtEvent precondition(post_task_comp_queue.get_nonempty_event());
-        PostEndArgs args(owner_task, this);
+        PostEndArgs args(next_ctx->owner_task, this);
         runtime->issue_runtime_meta_task(args, 
             LG_THROUGHPUT_WORK_PRIORITY, precondition);
       }
@@ -5925,7 +5925,7 @@ namespace Legion {
         }
       }
       // If we didn't launch a next op, then we can remove the reference
-      return !launch_next;
+      return (next_ctx == NULL);
     }
 
     //--------------------------------------------------------------------------
