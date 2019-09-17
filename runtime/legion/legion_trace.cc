@@ -1548,6 +1548,14 @@ namespace Legion {
       parent_ctx->update_current_fence(this, true, true);
     }
 
+    //--------------------------------------------------------------------------
+    void TraceReplayOp::pack_remote_operation(Serializer &rez, 
+                                              AddressSpaceID target) const
+    //--------------------------------------------------------------------------
+    {
+      pack_local_remote_operation(rez);
+    }
+
     /////////////////////////////////////////////////////////////
     // TraceBeginOp
     /////////////////////////////////////////////////////////////

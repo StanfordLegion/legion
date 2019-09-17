@@ -16454,6 +16454,11 @@ namespace Legion {
             result = new RemoteDeletionOp(runtime, remote_ptr, source);
             break;
           }
+        case TRACE_REPLAY_OP_KIND:
+          {
+            result = new RemoteReplayOp(runtime, remote_ptr, source);
+            break;
+          }
         default:
           assert(false);
       }
@@ -17644,6 +17649,110 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RemoteDeletionOp::unpack(Deserializer &derez,ReferenceMutator &mutator)
+    //--------------------------------------------------------------------------
+    {
+      // Nothing for the moment
+    }
+
+    ///////////////////////////////////////////////////////////// 
+    // Remote Replay Op 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    RemoteReplayOp::RemoteReplayOp(Runtime *rt,
+                                   Operation *ptr, AddressSpaceID src)
+      : RemoteOp(rt, ptr, src)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    RemoteReplayOp::RemoteReplayOp(const RemoteReplayOp &rhs)
+      : RemoteOp(rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    RemoteReplayOp::~RemoteReplayOp(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    RemoteReplayOp& RemoteReplayOp::operator=(const RemoteReplayOp &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    UniqueID RemoteReplayOp::get_unique_id(void) const
+    //--------------------------------------------------------------------------
+    {
+      return unique_op_id;
+    }
+
+    //--------------------------------------------------------------------------
+    size_t RemoteReplayOp::get_context_index(void) const
+    //--------------------------------------------------------------------------
+    {
+      return context_index;
+    }
+
+    //--------------------------------------------------------------------------
+    void RemoteReplayOp::set_context_index(size_t index)
+    //--------------------------------------------------------------------------
+    {
+      context_index = index;
+    }
+
+    //--------------------------------------------------------------------------
+    int RemoteReplayOp::get_depth(void) const
+    //--------------------------------------------------------------------------
+    {
+      return (parent_ctx->get_depth() + 1);
+    }
+
+    //--------------------------------------------------------------------------
+    const char* RemoteReplayOp::get_logging_name(void) const
+    //--------------------------------------------------------------------------
+    {
+      return op_names[TRACE_REPLAY_OP_KIND];
+    }
+
+    //--------------------------------------------------------------------------
+    Operation::OpKind RemoteReplayOp::get_operation_kind(void) const
+    //--------------------------------------------------------------------------
+    {
+      return TRACE_REPLAY_OP_KIND;
+    }
+
+    //--------------------------------------------------------------------------
+    void RemoteReplayOp::select_sources(const unsigned index, 
+                                        const InstanceRef &target,
+                                        const InstanceSet &sources,
+                                        std::vector<unsigned> &ranking)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void RemoteReplayOp::pack_remote_operation(Serializer &rez,
+                                               AddressSpaceID target) const
+    //--------------------------------------------------------------------------
+    {
+      pack_remote_base(rez);
+    }
+
+    //--------------------------------------------------------------------------
+    void RemoteReplayOp::unpack(Deserializer &derez, ReferenceMutator &mutator)
     //--------------------------------------------------------------------------
     {
       // Nothing for the moment
