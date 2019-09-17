@@ -3257,6 +3257,7 @@ namespace Legion {
         rez.serialize(virtual_indexes[idx]);
       rez.serialize(owner_task->get_task_completion());
       rez.serialize(find_parent_context()->get_context_uid());
+      rez.serialize(context_configuration.max_window_size);
       // Finally pack the local field infos
       AutoLock local_lock(local_field_lock,1,false/*exclusive*/);
       rez.serialize<size_t>(local_field_infos.size());
@@ -8657,6 +8658,14 @@ namespace Legion {
       }
       derez.deserialize(remote_completion_event);
       derez.deserialize(parent_context_uid);
+      unsigned max_window_size;
+      derez.deserialize(max_window_size);
+      // Make a completion queue for this context
+#ifdef DEBUG_LEGION
+      assert(!post_task_comp_queue.exists());
+#endif
+      post_task_comp_queue = 
+        CompletionQueue::create_completion_queue(max_window_size);
       // Unpack any local fields that we have
       unpack_local_field_update(derez);
       
