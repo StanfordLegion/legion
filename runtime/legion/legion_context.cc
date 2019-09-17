@@ -8641,7 +8641,10 @@ namespace Legion {
       top_level_context = (depth < 0);
       // If we're the top-level context then we're already done
       if (top_level_context)
+      {
+        post_task_comp_queue = CompletionQueue::create_completion_queue(1);
         return;
+      }
       WrapperReferenceMutator mutator(preconditions);
       remote_task.unpack_external_task(derez, runtime, &mutator);
       local_parent_req_indexes.resize(remote_task.regions.size()); 
