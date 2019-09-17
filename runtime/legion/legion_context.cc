@@ -5832,7 +5832,7 @@ namespace Legion {
       {
         AutoLock p_lock(post_task_lock);
         // Issue a task if there isn't one running right now
-        if (!post_task_queue.empty())
+        if (post_task_queue.empty())
         {
           issue_task = true;
           // Add a reference to the context the first time we defer this
@@ -5846,7 +5846,7 @@ namespace Legion {
       {
         // Other things could be added to the queue by the time we're here
         const RtEvent precondition(post_task_comp_queue.get_nonempty_event());
-        PostEndArgs args(owner_task, this);
+        PostEndArgs args(ctx->owner_task, this);
         runtime->issue_runtime_meta_task(args, 
             LG_THROUGHPUT_WORK_PRIORITY, precondition);
       }
