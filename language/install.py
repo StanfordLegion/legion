@@ -119,9 +119,11 @@ def build_terra(terra_dir, terra_branch, use_cmake, cmake_exe, thread_count, llv
     build_dir = os.path.join(terra_dir, 'build')
     release_dir = os.path.join(terra_dir, 'release')
     if use_cmake is None:
-        use_cmake = os.path.exists(os.path.join(build_dir, 'CMakeCache.txt'))
-        if use_cmake:
-            print('Detected previous CMake build in Terra, enabling Terra CMake build...')
+        build_detected = os.path.exists(os.path.join(build_dir, 'main.o'))
+        cmake_detected = os.path.exists(os.path.join(build_dir, 'CMakeCache.txt'))
+        use_cmake = cmake_detected or not build_detected
+        if not use_cmake:
+            print('Detected previous Makefile build in Terra, disabling Terra CMake build...')
 
     flags = []
     if llvm:
