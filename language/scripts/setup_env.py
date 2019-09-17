@@ -332,7 +332,7 @@ def check_dirty_build(name, build_result, component_dir):
 
 def driver(prefix_dir=None, scratch_dir=None, cache=False,
            legion_use_cmake=False, llvm_version=None,
-           terra_url=None, terra_branch=None, terra_use_cmake=False,
+           terra_url=None, terra_branch=None, terra_use_cmake=None,
            insecure=False):
     if not cache:
         if 'CC' not in os.environ:
@@ -367,6 +367,9 @@ def driver(prefix_dir=None, scratch_dir=None, cache=False,
         llvm_use_cmake = True
     else:
         raise Exception('Unrecognized LLVM version %s' % llvm_version)
+
+    if llvm_use_cmake and terra_use_cmake is None:
+        terra_use_cmake = True
 
     if terra_use_cmake and not llvm_use_cmake:
         raise Exception('Terra with CMake requires LLVM to be built with CMake')
@@ -520,7 +523,10 @@ if __name__ == '__main__':
         default='luajit2.1',
         help='Branch of Terra repository to checkout.')
     parser.add_argument(
-        '--terra-cmake', dest='terra_use_cmake', action='store_true',
+        '--terra-cmake', dest='terra_use_cmake', action='store_true', default=None,
+        help='Use CMake to build Terra.')
+    parser.add_argument(
+        '--no-terra-cmake', dest='terra_use_cmake', action='store_false', default=None,
         help='Use CMake to build Terra.')
     args = parser.parse_args()
     driver(**vars(args))
