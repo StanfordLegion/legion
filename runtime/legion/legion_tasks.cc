@@ -9108,6 +9108,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(!points.empty());
 #endif
+      const long long denom = points.size();
       // For each point give it its own slice owner in case we need to
       // to move it remotely as part of the replay
       while (points.size() > 1)
@@ -9121,6 +9122,7 @@ namespace Legion {
         new_owner->num_unmapped_points = 1;
         new_owner->num_uncomplete_points = 1;
         new_owner->num_uncommitted_points = 1;
+        new_owner->denominator = denom;
         slices.push_back(new_owner);
       }
       // Always add ourselves as the last point
@@ -9128,6 +9130,7 @@ namespace Legion {
       num_unmapped_points = points.size();
       num_uncomplete_points = points.size();
       num_uncommitted_points = points.size();
+      denominator = denom;
     }
 
     //--------------------------------------------------------------------------
