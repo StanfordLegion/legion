@@ -14,7 +14,7 @@
  */
 
 #include <float.h>
-#include "legion/legion_defines.h"
+#include "legion/legion_config.h"
 #include "legion/runtime.h"
 
 namespace Legion {
