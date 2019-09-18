@@ -3812,7 +3812,7 @@ function std.setup(main_task, extra_setup_thunk, task_wrappers, registration_nam
 
   local layout_reduction = data.new_recursive_map(2)
   for dim = 1, max_dim do
-    for _, pair in ipairs(base.registered_reduction_ops) do
+    for _, pair in ipairs(base.all_reduction_ops) do
       local op, op_type = unpack(pair)
       local op_id = std.reduction_op_ids[op][op_type]
       local layout_id, layout_actions = make_reduction_layout(dim, op_id)

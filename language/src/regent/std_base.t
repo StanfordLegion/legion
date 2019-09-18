@@ -22,7 +22,6 @@ local base = {}
 base.config, base.args = config.args()
 
 local max_dim = base.config["legion-dim"]
-local use_complex_redop = base.config["complex-redop"]
 
 -- Hack: Terra symbols don't support the hash() method so monkey patch
 -- it in here. This allows deterministic hashing of Terra symbols,
@@ -62,7 +61,7 @@ local c = terralib.includecstring([[
 #include <unistd.h>
 ]], {"-DREALM_MAX_DIM=" .. tostring(max_dim),
      "-DLEGION_MAX_DIM=" .. tostring(max_dim),
-     use_complex_redop and "-DLEGION_REDOP_COMPLEX" or ""})
+     "-DLEGION_REDOP_COMPLEX"})
 base.c = c
 
 -- #####################################
@@ -320,6 +319,7 @@ base.reduction_ops = data.map_from_table({
 })
 base.reduction_op_ids = {}
 base.reduction_op_init = {}
+base.all_reduction_ops = terralib.newlist()
 base.registered_reduction_ops = terralib.newlist()
 do
   local base_op_id = 101
@@ -331,7 +331,7 @@ do
     end
     local builtin = op_id ~= nil
     local op_id = op_id or base_op_id
-    base_op_id = base_op_id + 1
+    if not builtin then base_op_id = base_op_id + 1 end
     if not base.reduction_op_ids[op] then
       base.reduction_op_ids[op] = {}
     end
@@ -340,6 +340,7 @@ do
     end
     base.reduction_op_ids[op][op_type] = op_id
     base.reduction_op_init[op][op_type] = init or base.reduction_ops[op].init(op_type)
+    base.all_reduction_ops:insert({op, op_type})
     if not builtin then
       base.registered_reduction_ops:insert({op, op_type})
     end
@@ -349,8 +350,8 @@ do
   local reduction_ops =
     terralib.newlist({ "+", "-", "*", "/", "max", "min" })
   local legion_op_names = data.map_from_table({
-    ["+"] = "SUM", ["-"] = "DIFF",  ["*"] = "PROD",
-    ["/"] = "DIV", ["max"] = "MAX", ["min"] = "MIN" })
+    ["+"] = "SUM", ["-"] = "SUM",  ["*"] = "PROD",
+    ["/"] = "PROD", ["max"] = "MAX", ["min"] = "MIN" })
   local primitive_reduction_types =
     terralib.newlist({ float, double, int16, int32, int64, uint16, uint32, uint64 })
   for _, op in ipairs(reduction_ops) do
@@ -363,7 +364,7 @@ do
       base.update_reduction_op(op, op_type, legion_op_id)
     end
   end
-  if use_complex_redop then
+  do
     local complex_reduction_types = terralib.newlist({ base.complex32 })
     local complex_reduction_inits = data.map_from_table({
       ["+"] = lift(zero),

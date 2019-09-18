@@ -1371,7 +1371,7 @@ local reduction_fold = {
   ["+"] = "+",
   ["-"] = "-",
   ["*"] = "*",
-  ["/"] = "*", -- FIXME: Need to fold with "/" for RW instances.
+  ["/"] = "/", -- FIXME: Need to fold with "/" for RW instances.
   ["max"] = "max",
   ["min"] = "min",
 }

@@ -100,7 +100,6 @@ local default_options = {
   ["jobs"] = "1",
   ["incr-comp"] = os.getenv('REGENT_INCREMENTAL') == '1' or false, -- incremental compilation
   ["opt-compile-time"] = true, -- compile time optimization
-  ["complex-redop"] = false,
 
   -- Need this here to make the logger happy.
   ["log"] = "",
