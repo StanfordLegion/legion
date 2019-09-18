@@ -46,8 +46,8 @@ namespace Legion {
 #ifdef LEGION_REDOP_HALF
   /*static*/ const complex<__half> SumReduction<complex<__half> >::identity = complex<__half>(__half(0, false/*raw*/), __half(0, false/*raw*/));
   /*static*/ const complex<__half> DiffReduction<complex<__half> >::identity = complex<__half>(__half(0, false/*raw*/), __half(0, false/*raw*/));
-  /*static*/ const complex<__half> ProdReduction<complex<__half> >::identity = complex<__half>(__half(1, false/*raw*/), __half(1, false/*raw*/));
-  /*static*/ const complex<__half> DivReduction<complex<__half> >::identity = complex<__half>(__half(1, false/*raw*/), __half(1, false/*raw*/));
+  /*static*/ const complex<__half> ProdReduction<complex<__half> >::identity = complex<__half>(__half(1, false/*raw*/), __half(0, false/*raw*/));
+  /*static*/ const complex<__half> DivReduction<complex<__half> >::identity = complex<__half>(__half(1, false/*raw*/), __half(0, false/*raw*/));
 #endif
   /*static*/ const complex<float> SumReduction<complex<float> >::identity = complex<float>(0.f, 0.f);
   /*static*/ const complex<float> DiffReduction<complex<float> >::identity = complex<float>(0.f, 0.f);
