@@ -51,8 +51,8 @@ namespace Legion {
 #endif
   /*static*/ const complex<float> SumReduction<complex<float> >::identity = complex<float>(0.f, 0.f);
   /*static*/ const complex<float> DiffReduction<complex<float> >::identity = complex<float>(0.f, 0.f);
-  /*static*/ const complex<float> ProdReduction<complex<float> >::identity = complex<float>(1.f, 1.f);
-  /*static*/ const complex<float> DivReduction<complex<float> >::identity = complex<float>(1.f, 1.f);
+  /*static*/ const complex<float> ProdReduction<complex<float> >::identity = complex<float>(1.f, 0.f);
+  /*static*/ const complex<float> DivReduction<complex<float> >::identity = complex<float>(1.f, 0.f);
 #endif
 
 #define REGISTER_BUILTIN_REDOP(id, type)  \
