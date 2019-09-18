@@ -65,6 +65,9 @@ ifeq ($(strip $(USE_SPY)),1)
 	CC_FLAGS += -DLEGION_SPY
 endif
 
+# Use reduction operators for complex types by default
+CC_FLAGS += -DLEGION_REDOP_COMPLEX
+
 # terra already includes LLVM libs, so we don't want them in our .so
 CC_FLAGS += -DREALM_ALLOW_MISSING_LLVM_LIBS
 $(OUTFILE) : LLVM_LIBS=

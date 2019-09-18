@@ -319,6 +319,13 @@ mark_as_advanced(Legion_ENABLE_TLS)
 # define variable for legion_defines.h
 set(ENABLE_LEGION_TLS ${Legion_ENABLE_TLS})
 
+option(Legion_REDOP_COMPLEX "Use reduction operators for complex types" OFF)
+if(Legion_REDOP_COMPLEX)
+  # define variable for legion_defines.h
+  set(LEGION_REDOP_COMPLEX ON)
+endif()
+mark_as_advanced(Legion_REDOP_COMPLEX)
+
 #------------------------------------------------------------------------------#
 # Runtime library targets
 #------------------------------------------------------------------------------#

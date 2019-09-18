@@ -45,3 +45,7 @@
 #ifndef USE_ZLIB
 #cmakedefine USE_ZLIB
 #endif
+
+#ifndef LEGION_REDOP_COMPLEX
+#cmakedefine LEGION_REDOP_COMPLEX
+#endif
