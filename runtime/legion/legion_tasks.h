@@ -391,8 +391,8 @@ namespace Legion {
       unsigned must_epoch_index;
     public:
       // Static methods
-      static void process_unpack_task(Runtime *rt,
-                                      Deserializer &derez); 
+      static void process_unpack_task(Runtime *rt, Deserializer &derez); 
+      static void process_remote_replay(Runtime *rt, Deserializer &derez);
     public:
       static void log_requirement(UniqueID uid, unsigned idx,
                                  const RegionRequirement &req);
@@ -1048,6 +1048,7 @@ namespace Legion {
                                      get_acquired_instances_ref(void);
       void check_target_processors(void) const;
       void update_target_processor(void);
+      void expand_replay_slices(std::list<SliceTask*> &slices);
     protected:
       virtual void trigger_task_complete(void);
       virtual void trigger_task_commit(void);
@@ -1103,6 +1104,7 @@ namespace Legion {
     public:
       // From MemoizableOp
       virtual void replay_analysis(void);
+      virtual void complete_replay(ApEvent instance_ready_event);
     protected:
       friend class IndexTask;
       friend class PointTask;

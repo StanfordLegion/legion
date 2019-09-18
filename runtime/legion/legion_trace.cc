@@ -3642,7 +3642,7 @@ namespace Legion {
       std::vector<CopySrcDstField> fields;
       std::vector<FieldID> fill_fields;
       manager->field_space_node->get_field_set(user_mask,
-          memo->get_operation()->get_context(), fill_fields);
+          trace->logical_trace->ctx, fill_fields);
       layout->compute_copy_offsets(fill_fields, manager, fields);
 
       size_t fill_size = reduction_op->sizeof_rhs;
