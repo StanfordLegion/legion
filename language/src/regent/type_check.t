@@ -4170,7 +4170,8 @@ function type_check.top_task(cx, node)
           std.flatten_struct_fields(std.get_field_path(region_type:fspace(), field_path))
         field_types:map(function(field_type)
           if field_type:isprimitive() or
-             (field_type:isarray() and field_type.type:isprimitive())
+             (field_type:isarray() and field_type.type:isprimitive()) or
+             (std.config["complex-redop"] and std.is_complex_type(field_type))
           then
             std.update_reduction_op(privilege_type.op, field_type)
           else
