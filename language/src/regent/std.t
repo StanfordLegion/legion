@@ -477,6 +477,12 @@ do
   local st = std.complex32
 
   st.__no_field_slicing = true
+  st.__supported_reduction_ops =
+    { ["+"] = true, ["-"] = true, ["*"] = true, ["/"] = true }
+
+  function st:support_reduction(op)
+    return self.__supported_reduction_ops[op] or false
+  end
 
   terra st.metamethods.__add(a : st, b : st)
     return st { real = a.real + b.real, imag = a.imag + b.imag }
@@ -507,6 +513,11 @@ do
   local st = std.complex64
 
   st.__no_field_slicing = true
+  st.__supported_reduction_ops = { ["+"] = true, ["-"] = true }
+
+  function st:support_reduction(op)
+    return self.__supported_reduction_ops[op] or false
+  end
 
   terra st.metamethods.__add(a : st, b : st)
     return st { real = a.real + b.real, imag = a.imag + b.imag }

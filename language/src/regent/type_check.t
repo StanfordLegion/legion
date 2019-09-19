@@ -4169,7 +4169,9 @@ function type_check.top_task(cx, node)
         local _, field_types =
           std.flatten_struct_fields(std.get_field_path(region_type:fspace(), field_path))
         field_types:map(function(field_type)
-          if field_type:isprimitive() or std.is_complex_type(field_type) or
+          if field_type:isprimitive() or
+             (std.is_complex_type(field_type) and
+              field_type:support_reduction(privilege_type.op)) or
              (field_type:isarray() and field_type.type:isprimitive())
           then
             std.update_reduction_op(privilege_type.op, field_type)
