@@ -16459,6 +16459,11 @@ namespace Legion {
             result = new RemoteReplayOp(runtime, remote_ptr, source);
             break;
           }
+        case TRACE_SUMMARY_OP_KIND:
+          {
+            result = new RemoteSummaryOp(runtime, remote_ptr, source);
+            break;
+          }
         default:
           assert(false);
       }
@@ -17753,6 +17758,110 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RemoteReplayOp::unpack(Deserializer &derez, ReferenceMutator &mutator)
+    //--------------------------------------------------------------------------
+    {
+      // Nothing for the moment
+    }
+
+    ///////////////////////////////////////////////////////////// 
+    // Remote Summary Op 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    RemoteSummaryOp::RemoteSummaryOp(Runtime *rt,
+                                     Operation *ptr, AddressSpaceID src)
+      : RemoteOp(rt, ptr, src)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    RemoteSummaryOp::RemoteSummaryOp(const RemoteSummaryOp &rhs)
+      : RemoteOp(rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    RemoteSummaryOp::~RemoteSummaryOp(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    RemoteSummaryOp& RemoteSummaryOp::operator=(const RemoteSummaryOp &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    UniqueID RemoteSummaryOp::get_unique_id(void) const
+    //--------------------------------------------------------------------------
+    {
+      return unique_op_id;
+    }
+
+    //--------------------------------------------------------------------------
+    size_t RemoteSummaryOp::get_context_index(void) const
+    //--------------------------------------------------------------------------
+    {
+      return context_index;
+    }
+
+    //--------------------------------------------------------------------------
+    void RemoteSummaryOp::set_context_index(size_t index)
+    //--------------------------------------------------------------------------
+    {
+      context_index = index;
+    }
+
+    //--------------------------------------------------------------------------
+    int RemoteSummaryOp::get_depth(void) const
+    //--------------------------------------------------------------------------
+    {
+      return (parent_ctx->get_depth() + 1);
+    }
+
+    //--------------------------------------------------------------------------
+    const char* RemoteSummaryOp::get_logging_name(void) const
+    //--------------------------------------------------------------------------
+    {
+      return op_names[TRACE_SUMMARY_OP_KIND];
+    }
+
+    //--------------------------------------------------------------------------
+    Operation::OpKind RemoteSummaryOp::get_operation_kind(void) const
+    //--------------------------------------------------------------------------
+    {
+      return TRACE_SUMMARY_OP_KIND;
+    }
+
+    //--------------------------------------------------------------------------
+    void RemoteSummaryOp::select_sources(const unsigned index, 
+                                         const InstanceRef &target,
+                                         const InstanceSet &sources,
+                                         std::vector<unsigned> &ranking)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void RemoteSummaryOp::pack_remote_operation(Serializer &rez,
+                                                AddressSpaceID target) const
+    //--------------------------------------------------------------------------
+    {
+      pack_remote_base(rez);
+    }
+
+    //--------------------------------------------------------------------------
+    void RemoteSummaryOp::unpack(Deserializer &derez, ReferenceMutator &mutator)
     //--------------------------------------------------------------------------
     {
       // Nothing for the moment

@@ -1741,6 +1741,14 @@ namespace Legion {
       FenceOp::trigger_mapping();
     }
 
+    //--------------------------------------------------------------------------
+    void TraceSummaryOp::pack_remote_operation(Serializer &rez,
+                                               AddressSpaceID target) const
+    //--------------------------------------------------------------------------
+    {
+      pack_local_remote_operation(rez);
+    }
+
     /////////////////////////////////////////////////////////////
     // PhysicalTrace
     /////////////////////////////////////////////////////////////

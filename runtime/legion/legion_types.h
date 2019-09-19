@@ -1362,6 +1362,8 @@ namespace Legion {
     class RemoteReleaseOp;
     class RemoteFillOp;
     class RemotePartitionOp;
+    class RemoteReplayOp;
+    class RemoteSummaryOp;
 
     // legion_tasks.h
     class ExternalTask;
