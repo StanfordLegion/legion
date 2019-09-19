@@ -798,6 +798,7 @@ namespace Legion {
                            IndexSpaceExpression *expr,
                            const FieldMask &mask,
                            std::set<unsigned> &users);
+      bool has_virtual_mapping(void) const;
     public:
       ApEvent get_fence_completion(void)
         { return fence_completion; }

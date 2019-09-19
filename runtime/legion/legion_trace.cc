@@ -2306,6 +2306,9 @@ namespace Legion {
       if (has_blocking_call)
         return Replayable(false, "blocking call");
 
+      if (has_virtual_mapping())
+        return Replayable(false, "virtual mapping");
+
       if (!pre_fill_views.empty())
         return Replayable(false, "external fill views");
 
@@ -4106,6 +4109,28 @@ namespace Legion {
             users.insert(finder->second);
           }
         }
+    }
+
+    //--------------------------------------------------------------------------
+    bool PhysicalTemplate::has_virtual_mapping(void) const
+    //--------------------------------------------------------------------------
+    {
+      for (CachedMappings::const_iterator cit = 
+            cached_mappings.begin(); cit != cached_mappings.end(); cit++)
+      {
+        for (std::deque<InstanceSet>::const_iterator it = 
+              cit->second.physical_instances.begin(); it != 
+              cit->second.physical_instances.end(); it++)
+        {
+          for (unsigned idx = 0; idx < it->size(); idx++)
+          {
+            const InstanceRef &ref = (*it)[idx];
+            if (ref.is_virtual_ref())
+              return true;
+          }
+        }
+      }
+      return false;
     }
 
     /////////////////////////////////////////////////////////////
