@@ -5053,6 +5053,7 @@ legion_task_t
 legion_mappable_as_task(legion_mappable_t task_)
 {
   Task* task = const_cast<Task*>(CObjectWrapper::unwrap(task_)->as_task());
+  assert(task != NULL);
 
   return CObjectWrapper::wrap(task);
 }
