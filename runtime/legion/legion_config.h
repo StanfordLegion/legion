@@ -1341,7 +1341,8 @@ typedef enum legion_type_id_t {
   LEGION_TYPE_FLOAT64 = 9,
   LEGION_TYPE_COMPLEX32 = 10,
   LEGION_TYPE_COMPLEX64 = 11,
-  LEGION_TYPE_TOTAL = 12, // must be last
+  LEGION_TYPE_COMPLEX128 = 12,
+  LEGION_TYPE_TOTAL = 13, // must be last
 } legion_type_id_t;
 
 // Do it like this because the Python CFFI parser is stupid
@@ -1408,7 +1409,7 @@ typedef enum legion_builtin_redop_t {
   LEGION_REDOP_SUM_COMPLEX32  = LEGION_REDOP_VALUE(SUM,COMPLEX32),
 #endif
   LEGION_REDOP_SUM_COMPLEX64  = LEGION_REDOP_VALUE(SUM,COMPLEX64),
-  // TODO: LEGION_REDOP_SUM_COMPLEX128,
+  LEGION_REDOP_SUM_COMPLEX128 = LEGION_REDOP_VALUE(SUM,COMPLEX128),
 #endif
   ////////////////////////////////////////
   // Difference reductions

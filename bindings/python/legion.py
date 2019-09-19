@@ -559,7 +559,7 @@ def is_rect_type(t):
 _redop_ids = {}
 def _fill_redop_ids():
     operators = ['+', '-', '*', '/', 'max', 'min']
-    types = [bool, int16, int32, int64, uint16, uint32, uint64, None, float32, float64, None, complex64]
+    types = [bool, int16, int32, int64, uint16, uint32, uint64, None, float32, float64, None, complex64, complex128]
     next_id = 1048576
     for operator in operators:
         _redop_ids[operator] = {}
@@ -1047,6 +1047,14 @@ class Region(object):
 
     def keys(self):
         return self.fspace.keys()
+
+    def values(self):
+        for key in self.keys():
+            yield getattr(self, key)
+
+    def items(self):
+        for key in self.keys():
+            yield key, getattr(self, key)
 
     def _set_privilege(self, field_name, privilege):
         assert self.parent is None # not supported on subregions

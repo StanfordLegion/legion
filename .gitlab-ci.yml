@@ -8,6 +8,7 @@ variables:
   # MAKEFLAGS: "-s"
   REALM_BACKTRACE: "1"
   REALM_SYNTHETIC_CORE_MAP: "" # Disable Realm thread pinning.
+  TIMELIMIT: "600"  # each test should take less than 10 minutes
 
 # Local variables (included on a case-by-case basis in each job):
 .gcc48: &gcc48
