@@ -230,7 +230,6 @@ def install_bindings(regent_dir, legion_dir, bindings_dir, runtime_dir,
              '-DLegion_USE_LLVM=%s' % ('ON' if llvm else 'OFF'),
              '-DLegion_USE_GASNet=%s' % ('ON' if gasnet else 'OFF'),
              '-DLegion_USE_HDF5=%s' % ('ON' if hdf else 'OFF'),
-             '-DLegion_REDOP_COMPLEX=ON', # Use reduction operators for complex types by default
              '-DLegion_BUILD_BINDINGS=ON',
              '-DBUILD_SHARED_LIBS=ON',
             ] +
