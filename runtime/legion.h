@@ -2676,18 +2676,6 @@ namespace Legion {
       // Return the depth of this operation in the task tree
       virtual int get_depth(void) const = 0;
     public:
-      enum MappableType {
-        TASK_MAPPABLE,
-        COPY_MAPPABLE,
-        INLINE_MAPPABLE,
-        ACQUIRE_MAPPABLE,
-        RELEASE_MAPPABLE,
-        CLOSE_MAPPABLE,
-        FILL_MAPPABLE,
-        PARTITION_MAPPABLE,
-        DYNAMIC_COLLECTIVE_MAPPABLE,
-        MUST_EPOCH_MAPPABLE,
-      };
       virtual MappableType get_mappable_type(void) const = 0;
       virtual const Task* as_task(void) const = 0;
       virtual const Copy* as_copy(void) const = 0;
@@ -2706,6 +2694,21 @@ namespace Legion {
       // Mapper annotated data 
       void*                                     mapper_data;
       size_t                                    mapper_data_size;
+    public:
+      // These are here for backwards compatibility from a time when
+      // the MappableType enum was inside of this class
+      typedef Legion::MappableType MappableType;
+      static const MappableType TASK_MAPPABLE = ::TASK_MAPPABLE;
+      static const MappableType COPY_MAPPABLE = ::COPY_MAPPABLE;
+      static const MappableType INLINE_MAPPABLE = ::INLINE_MAPPABLE;
+      static const MappableType ACQUIRE_MAPPABLE = ::ACQUIRE_MAPPABLE;
+      static const MappableType RELEASE_MAPPABLE = ::RELEASE_MAPPABLE;
+      static const MappableType CLOSE_MAPPABLE = ::CLOSE_MAPPABLE;
+      static const MappableType FILL_MAPPABLE = ::FILL_MAPPABLE;
+      static const MappableType PARTITION_MAPPABLE = ::PARTITION_MAPPABLE;
+      static const MappableType DYNAMIC_COLLECTIVE_MAPPABLE = 
+                                            ::DYNAMIC_COLLECTIVE_MAPPABLE;
+      static const MappableType MUST_EPOCH_MAPPABLE = ::MUST_EPOCH_MAPPABLE;
     };
 
     /**
