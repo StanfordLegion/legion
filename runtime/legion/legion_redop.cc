@@ -54,6 +54,8 @@ namespace Legion {
   /*static*/ const complex<float> DiffReduction<complex<float> >::identity = complex<float>(0.f, 0.f);
   /*static*/ const complex<float> ProdReduction<complex<float> >::identity = complex<float>(1.f, 0.f);
   /*static*/ const complex<float> DivReduction<complex<float> >::identity = complex<float>(1.f, 0.f);
+
+  /*static*/ const complex<double> SumReduction<complex<double> >::identity = complex<double>(0.f, 0.f);
 #endif
 
 #define REGISTER_BUILTIN_REDOP(id, type)  \
@@ -81,6 +83,7 @@ namespace Legion {
       REGISTER_BUILTIN_REDOP(LEGION_REDOP_SUM_COMPLEX32, SumReduction<complex<__half> >);
 #endif
       REGISTER_BUILTIN_REDOP(LEGION_REDOP_SUM_COMPLEX64, SumReduction<complex<float> >);
+      REGISTER_BUILTIN_REDOP(LEGION_REDOP_SUM_COMPLEX128, SumReduction<complex<double> >);
 #endif
       // Difference Reductions
       REGISTER_BUILTIN_REDOP(LEGION_REDOP_DIFF_INT16, DiffReduction<int16_t>);

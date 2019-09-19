@@ -229,6 +229,25 @@ namespace Legion {
     template<bool EXCLUSIVE> __CUDA_HD__
     static void fold(RHS &rhs1, RHS rhs2);
   };
+
+  // WARNING: This operator performs element-wise reductions on real and
+  //          imaginary components, and thus has non-linearizable semantics.
+  //          Users should be aware of this non-linearizability, which can
+  //          lead to inconsistent results.
+  template<>
+  class SumReduction<complex<double> > {
+  public:
+    typedef complex<double> LHS;
+    typedef complex<double> RHS;
+
+    static const complex<double> identity;
+    static const int REDOP_ID = LEGION_REDOP_SUM_COMPLEX128;
+
+    template<bool EXCLUSIVE> __CUDA_HD__
+    static void apply(LHS &lhs, RHS rhs);
+    template<bool EXCLUSIVE> __CUDA_HD__
+    static void fold(RHS &rhs1, RHS rhs2);
+  };
 #endif // LEGION_REDOP_COMPLEX
 
   template<typename T>
