@@ -1530,7 +1530,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       bool recording;
-      derez.deserialize(recording);
+      derez.deserialize<bool>(recording);
       if (recording)
       {
         RemoteOp *op = 
@@ -1557,7 +1557,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       bool recording;
-      derez.deserialize(recording);
+      derez.deserialize<bool>(recording);
       if (recording)
       {
 #ifdef DEBUG_LEGION

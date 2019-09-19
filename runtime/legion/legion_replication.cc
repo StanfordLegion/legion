@@ -637,7 +637,16 @@ namespace Legion {
         trigger_children_committed();
       }
       else // We have valid points, so it goes on the ready queue
+      {
+        // Update the total number of points we're actually repsonsible
+        // for now with this shard
+        IndexSpaceNode *node = runtime->forest->get_node(internal_space);
+        total_points = node->get_volume();
+#ifdef DEBUG_LEGION
+        assert(total_points > 0);
+#endif
         enqueue_ready_operation();
+      }
     }
 
     //--------------------------------------------------------------------------

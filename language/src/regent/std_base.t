@@ -59,7 +59,9 @@ local c = terralib.includecstring([[
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
-]], {"-DREALM_MAX_DIM=" .. tostring(max_dim), "-DLEGION_MAX_DIM=" .. tostring(max_dim)})
+]], {"-DREALM_MAX_DIM=" .. tostring(max_dim),
+     "-DLEGION_MAX_DIM=" .. tostring(max_dim),
+     "-DLEGION_REDOP_COMPLEX"})
 base.c = c
 
 -- #####################################
@@ -236,6 +238,34 @@ function base.quote_binary_op(op, lhs, rhs)
 end
 
 -- #####################################
+-- ## Complex types
+-- #################
+
+do
+  local st = terralib.types.newstruct("complex32")
+  st.entries = terralib.newlist({
+      { "real", float },
+      { "imag", float },
+  })
+  st.base_type = float
+  st.is_complex_type = true
+  base.complex = st
+  base.complex32 = st
+end
+
+do
+  local st = terralib.types.newstruct("complex64")
+  st.entries = terralib.newlist({
+      { "real", double },
+      { "imag", double },
+  })
+  st.base_type = double
+  st.is_complex_type = true
+  base.complex = st
+  base.complex64 = st
+end
+
+-- #####################################
 -- ## Physical Privilege Helpers
 -- #################
 
@@ -271,6 +301,8 @@ local function lift(fn)
       return `(array([data.range(value_type.N):map(function(_)
         return lift(fn)(value_type.type)
       end)]))
+    elseif value_type == base.complex32 or value_type == base.complex64 then
+      return `([value_type] { [fn(value_type.base_type)], 0.0 })
     else
       return fn(value_type)
     end
@@ -287,17 +319,19 @@ base.reduction_ops = data.map_from_table({
 })
 base.reduction_op_ids = {}
 base.reduction_op_init = {}
+base.all_reduction_ops = terralib.newlist()
 base.registered_reduction_ops = terralib.newlist()
 do
   local base_op_id = 101
-  function base.update_reduction_op(op, op_type, init)
+  function base.update_reduction_op(op, op_type, op_id, init)
     if base.reduction_op_ids[op] ~= nil and
        base.reduction_op_ids[op][op_type] ~= nil
     then
       return
     end
-    local op_id = base_op_id
-    base_op_id = base_op_id + 1
+    local builtin = op_id ~= nil
+    local op_id = op_id or base_op_id
+    if not builtin then base_op_id = base_op_id + 1 end
     if not base.reduction_op_ids[op] then
       base.reduction_op_ids[op] = {}
     end
@@ -306,17 +340,45 @@ do
     end
     base.reduction_op_ids[op][op_type] = op_id
     base.reduction_op_init[op][op_type] = init or base.reduction_ops[op].init(op_type)
-    base.registered_reduction_ops:insert({op, op_type})
+    base.all_reduction_ops:insert({op, op_type})
+    if not builtin then
+      base.registered_reduction_ops:insert({op, op_type})
+    end
   end
 
   -- Prefill the table of reduction op IDs for primitive types.
   local reduction_ops =
     terralib.newlist({ "+", "-", "*", "/", "max", "min" })
+  local legion_op_names = data.map_from_table({
+    ["+"] = "SUM", ["-"] = "SUM",  ["*"] = "PROD",
+    ["/"] = "PROD", ["max"] = "MAX", ["min"] = "MIN" })
   local primitive_reduction_types =
-    terralib.newlist({ float, double, int32, int64, uint32, uint64 })
+    terralib.newlist({ float, double, int16, int32, int64, uint16, uint32, uint64 })
   for _, op in ipairs(reduction_ops) do
     for _, op_type in ipairs(primitive_reduction_types) do
-      base.update_reduction_op(op, op_type)
+      local type_name =
+        (op_type:isfloat() and ("FLOAT" .. tostring(sizeof(op_type) * 8))) or
+        string.upper(tostring(op_type))
+      local legion_op_id =
+        c["LEGION_REDOP_" .. legion_op_names[op] .. "_" .. type_name]
+      base.update_reduction_op(op, op_type, legion_op_id)
+    end
+  end
+  do
+    local complex_reduction_types = terralib.newlist({ base.complex32 })
+    local complex_reduction_inits = data.map_from_table({
+      ["+"] = lift(zero),
+      ["-"] = lift(zero),
+      ["*"] = lift(one),
+      ["/"] = lift(one)})
+    for _, op in ipairs(reduction_ops) do
+      if op == "max" then break end
+      for _, op_type in ipairs(complex_reduction_types) do
+        local type_name = "COMPLEX" .. tostring(sizeof(op_type) * 8)
+        local legion_op_id =
+          c["LEGION_REDOP_" .. legion_op_names[op] .. "_" .. type_name]
+        base.update_reduction_op(op, op_type, legion_op_id)
+      end
     end
   end
 end
@@ -720,6 +782,10 @@ end
 
 function base.types.is_fspace_instance(t)
   return terralib.types.istype(t) and rawget(t, "is_fspace_instance") or false
+end
+
+function base.types.is_complex_type(t)
+  return terralib.types.istype(t) and rawget(t, "is_complex_type") or false
 end
 
 function base.types.flatten_struct_fields(struct_type)

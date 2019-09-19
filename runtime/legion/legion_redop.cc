@@ -14,6 +14,7 @@
  */
 
 #include <float.h>
+#include "legion/legion_config.h"
 #include "legion/runtime.h"
 
 namespace Legion {
@@ -46,13 +47,13 @@ namespace Legion {
 #ifdef LEGION_REDOP_HALF
   /*static*/ const complex<__half> SumReduction<complex<__half> >::identity = complex<__half>(__half(0, false/*raw*/), __half(0, false/*raw*/));
   /*static*/ const complex<__half> DiffReduction<complex<__half> >::identity = complex<__half>(__half(0, false/*raw*/), __half(0, false/*raw*/));
-  /*static*/ const complex<__half> ProdReduction<complex<__half> >::identity = complex<__half>(__half(1, false/*raw*/), __half(1, false/*raw*/));
-  /*static*/ const complex<__half> DivReduction<complex<__half> >::identity = complex<__half>(__half(1, false/*raw*/), __half(1, false/*raw*/));
+  /*static*/ const complex<__half> ProdReduction<complex<__half> >::identity = complex<__half>(__half(1, false/*raw*/), __half(0, false/*raw*/));
+  /*static*/ const complex<__half> DivReduction<complex<__half> >::identity = complex<__half>(__half(1, false/*raw*/), __half(0, false/*raw*/));
 #endif
   /*static*/ const complex<float> SumReduction<complex<float> >::identity = complex<float>(0.f, 0.f);
   /*static*/ const complex<float> DiffReduction<complex<float> >::identity = complex<float>(0.f, 0.f);
-  /*static*/ const complex<float> ProdReduction<complex<float> >::identity = complex<float>(1.f, 1.f);
-  /*static*/ const complex<float> DivReduction<complex<float> >::identity = complex<float>(1.f, 1.f);
+  /*static*/ const complex<float> ProdReduction<complex<float> >::identity = complex<float>(1.f, 0.f);
+  /*static*/ const complex<float> DivReduction<complex<float> >::identity = complex<float>(1.f, 0.f);
 #endif
 
 #define REGISTER_BUILTIN_REDOP(id, type)  \

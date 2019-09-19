@@ -679,6 +679,7 @@ namespace Legion {
       TASK_MESSAGE,
       STEAL_MESSAGE,
       ADVERTISEMENT_MESSAGE,
+      SEND_REMOTE_TASK_REPLAY,
       SEND_INDEX_SPACE_NODE,
       SEND_INDEX_SPACE_REQUEST,
       SEND_INDEX_SPACE_RETURN,
@@ -855,6 +856,7 @@ namespace Legion {
         "Task Message",                                               \
         "Steal Message",                                              \
         "Advertisement Message",                                      \
+        "Send Remote Task Replay",                                    \
         "Send Index Space Node",                                      \
         "Send Index Space Request",                                   \
         "Send Index Space Return",                                    \
@@ -1521,6 +1523,8 @@ namespace Legion {
     class RemoteReleaseOp;
     class RemoteFillOp;
     class RemotePartitionOp;
+    class RemoteReplayOp;
+    class RemoteSummaryOp;
 
     // legion_tasks.h
     class ExternalTask;

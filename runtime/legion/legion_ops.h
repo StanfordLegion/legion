@@ -3584,6 +3584,68 @@ namespace Legion {
       virtual void unpack(Deserializer &derez, ReferenceMutator &mutator);
     };
 
+    /**
+     * \class RemoteReplayOp
+     * This is a remote copy of a trace replay op, it really doesn't
+     * have to do very much at all other than implement the interface
+     * for remote ops as it will only be used for checking equivalence
+     * sets for valid physical template replay conditions
+     */
+    class RemoteReplayOp : public RemoteOp {
+    public:
+      RemoteReplayOp(Runtime *rt, Operation *ptr, AddressSpaceID src);
+      RemoteReplayOp(const RemoteReplayOp &rhs);
+      virtual ~RemoteReplayOp(void);
+    public:
+      RemoteReplayOp& operator=(const RemoteReplayOp &rhs);
+    public:
+      virtual UniqueID get_unique_id(void) const;
+      virtual size_t get_context_index(void) const;
+      virtual void set_context_index(size_t index);
+      virtual int get_depth(void) const;
+    public:
+      virtual const char* get_logging_name(void) const;
+      virtual OpKind get_operation_kind(void) const;
+      virtual void select_sources(const unsigned index,
+                                  const InstanceRef &target,
+                                  const InstanceSet &sources,
+                                  std::vector<unsigned> &ranking);
+      virtual void pack_remote_operation(Serializer &rez,
+                                         AddressSpaceID target) const;
+      virtual void unpack(Deserializer &derez, ReferenceMutator &mutator);
+    };
+
+    /**
+     * \class RemoteSummaryOp
+     * This is a remote copy of a trace summary op, it really doesn't
+     * have to do very much at all other than implement the interface
+     * for remote ops as it will only be used for updating state for
+     * physical template replays
+     */
+    class RemoteSummaryOp : public RemoteOp {
+    public:
+      RemoteSummaryOp(Runtime *rt, Operation *ptr, AddressSpaceID src);
+      RemoteSummaryOp(const RemoteSummaryOp &rhs);
+      virtual ~RemoteSummaryOp(void);
+    public:
+      RemoteSummaryOp& operator=(const RemoteSummaryOp &rhs);
+    public:
+      virtual UniqueID get_unique_id(void) const;
+      virtual size_t get_context_index(void) const;
+      virtual void set_context_index(size_t index);
+      virtual int get_depth(void) const;
+    public:
+      virtual const char* get_logging_name(void) const;
+      virtual OpKind get_operation_kind(void) const;
+      virtual void select_sources(const unsigned index,
+                                  const InstanceRef &target,
+                                  const InstanceSet &sources,
+                                  std::vector<unsigned> &ranking);
+      virtual void pack_remote_operation(Serializer &rez,
+                                         AddressSpaceID target) const;
+      virtual void unpack(Deserializer &derez, ReferenceMutator &mutator);
+    };
+
   }; //namespace Internal 
 }; // namespace Legion 
 

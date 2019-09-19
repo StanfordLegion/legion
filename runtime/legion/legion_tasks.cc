@@ -720,10 +720,8 @@ namespace Legion {
       pack_external_task(rez, target); 
       pack_memoizable(rez);
       RezCheck z(rez);
-#ifdef DEBUG_LEGION
-      assert(regions.size() == parent_req_indexes.size());
-#endif
-      for (unsigned idx = 0; idx < regions.size(); idx++)
+      rez.serialize(parent_req_indexes.size());
+      for (unsigned idx = 0; idx < parent_req_indexes.size(); idx++)
         rez.serialize(parent_req_indexes[idx]);
       rez.serialize(map_origin);
       if (map_origin)
@@ -761,9 +759,14 @@ namespace Legion {
       unpack_external_task(derez, runtime, this); 
       unpack_memoizable(derez);
       DerezCheck z(derez);
-      parent_req_indexes.resize(regions.size());
-      for (unsigned idx = 0; idx < parent_req_indexes.size(); idx++)
-        derez.deserialize(parent_req_indexes[idx]);
+      size_t num_indexes;
+      derez.deserialize(num_indexes);
+      if (num_indexes > 0)
+      {
+        parent_req_indexes.resize(num_indexes);
+        for (unsigned idx = 0; idx < num_indexes; idx++)
+          derez.deserialize(parent_req_indexes[idx]);
+      }
       derez.deserialize(map_origin);
       if (map_origin)
       {
@@ -793,8 +796,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void TaskOp::process_unpack_task(Runtime *rt, 
-                                                Deserializer &derez)
+    /*static*/ void TaskOp::process_unpack_task(Runtime *rt,Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       // Figure out what kind of task this is and where it came from
@@ -847,6 +849,55 @@ namespace Legion {
               else
                 rt->add_to_ready_queue(current, task, ready);
             }
+            break;
+          }
+        case POINT_TASK_KIND:
+        case INDEX_TASK_KIND:
+        default:
+          assert(false); // no other tasks should be sent anywhere
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void TaskOp::process_remote_replay(Runtime *rt, Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      // Figure out what kind of task this is and where it came from
+      DerezCheck z(derez);
+      ApEvent instance_ready;
+      derez.deserialize(instance_ready);
+      Processor target_proc;
+      derez.deserialize(target_proc);
+      TaskKind kind;
+      derez.deserialize(kind);
+      switch (kind)
+      {
+        case INDIVIDUAL_TASK_KIND:
+          {
+            IndividualTask *task = rt->get_available_individual_task();
+            std::set<RtEvent> ready_events;
+            task->unpack_task(derez, target_proc, ready_events);
+            if (!ready_events.empty())
+            {
+              const RtEvent wait_on = Runtime::merge_events(ready_events);
+              if (wait_on.exists() && !wait_on.has_triggered())
+                wait_on.wait();
+            }
+            task->complete_replay(instance_ready);
+            break;
+          }
+        case SLICE_TASK_KIND:
+          {
+            SliceTask *task = rt->get_available_slice_task();
+            std::set<RtEvent> ready_events;
+            task->unpack_task(derez, target_proc, ready_events);
+            if (!ready_events.empty())
+            {
+              const RtEvent wait_on = Runtime::merge_events(ready_events);
+              if (wait_on.exists() && !wait_on.has_triggered())
+                wait_on.wait();
+            }
+            task->complete_replay(instance_ready);
             break;
           }
         case POINT_TASK_KIND:
@@ -4737,8 +4788,7 @@ namespace Legion {
         SliceTask *new_slice = this->clone_as_slice_task(slice.domain_is,
                                                          slice.proc,
                                                          slice.recurse,
-                                                         slice.stealable,
-                                                         output.slices.size());
+                                                         slice.stealable);
         slices.push_back(new_slice);
       }
 #ifdef DEBUG_LEGION
@@ -6119,23 +6169,49 @@ namespace Legion {
     void IndividualTask::complete_replay(ApEvent instance_ready_event)
     //--------------------------------------------------------------------------
     {
-      if (!arrive_barriers.empty())
-      {
-        ApEvent done_event = get_task_completion();
-        for (std::vector<PhaseBarrier>::const_iterator it =
-             arrive_barriers.begin(); it !=
-             arrive_barriers.end(); it++)
-          Runtime::phase_barrier_arrive(*it, 1/*count*/, done_event);
-      }
 #ifdef DEBUG_LEGION
-      assert(is_leaf());
+      assert(!target_processors.empty());
 #endif
-      for (std::deque<InstanceSet>::iterator it = physical_instances.begin();
-           it != physical_instances.end(); ++it)
-        for (unsigned idx = 0; idx < it->size(); ++idx)
-          (*it)[idx].set_ready_event(instance_ready_event);
-      update_no_access_regions();
-      launch_task();
+      const AddressSpaceID target_space = 
+        runtime->find_address_space(target_processors.front());
+      // Check to see if we're replaying this locally or remotely
+      if (target_space != runtime->address_space)
+      {
+        // This is the remote case, pack it up and ship it over
+        // Mark that we are effecitvely mapping this at the origin
+        map_origin = true;
+        // Pack this task up and send it to the remote node
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(instance_ready_event);
+          rez.serialize(target_processors.front());
+          rez.serialize(INDIVIDUAL_TASK_KIND);
+          pack_task(rez, target_space);
+        }
+        runtime->send_remote_task_replay(target_space, rez);
+      }
+      else
+      { 
+        // This is the local case
+        if (!arrive_barriers.empty())
+        {
+          ApEvent done_event = get_task_completion();
+          for (std::vector<PhaseBarrier>::const_iterator it =
+               arrive_barriers.begin(); it !=
+               arrive_barriers.end(); it++)
+            Runtime::phase_barrier_arrive(*it, 1/*count*/, done_event);
+        }
+#ifdef DEBUG_LEGION
+        assert(is_leaf());
+#endif
+        for (std::deque<InstanceSet>::iterator it = physical_instances.begin();
+             it != physical_instances.end(); ++it)
+          for (unsigned idx = 0; idx < it->size(); ++idx)
+            (*it)[idx].set_ready_event(instance_ready_event);
+        update_no_access_regions();
+        launch_task();
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -6836,13 +6912,36 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(is_leaf());
+      assert(is_origin_mapped());
+      assert(!target_processors.empty());
 #endif
-      for (std::deque<InstanceSet>::iterator it = physical_instances.begin();
-           it != physical_instances.end(); ++it)
-        for (unsigned idx = 0; idx < it->size(); ++idx)
-          (*it)[idx].set_ready_event(instance_ready_event);
-      update_no_access_regions();
-      launch_task();
+      const AddressSpaceID target_space = 
+        runtime->find_address_space(target_processors.front());
+      if (target_space != runtime->address_space)
+      {
+        // This is the remote case, pack it up and ship it over
+        // Update our target_proc so that the sending code is correct 
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(instance_ready_event);
+          rez.serialize(target_processors.front());
+          rez.serialize(SLICE_TASK_KIND);
+          slice_owner->pack_task(rez, target_space);
+        }
+        runtime->send_remote_task_replay(target_space, rez);
+      }
+      else
+      {
+        // This is the local case
+        // Check to see if we're replaying this locally or remotely
+        for (std::deque<InstanceSet>::iterator it = physical_instances.begin();
+             it != physical_instances.end(); ++it)
+          for (unsigned idx = 0; idx < it->size(); ++idx)
+            (*it)[idx].set_ready_event(instance_ready_event);
+        update_no_access_regions();
+        launch_task();
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -7443,7 +7542,6 @@ namespace Legion {
     {
       activate_multi();
       serdez_redop_fns = NULL;
-      slice_fraction = Fraction<long long>(0,1); // empty fraction
       total_points = 0;
       mapped_points = 0;
       complete_points = 0;
@@ -7719,7 +7817,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // First compute the parent indexes
-      compute_parent_indexes();
+      compute_parent_indexes(); 
+      // Count how many total points we need for this index space task
+      total_points = index_domain.get_volume();
       // Annotate any regions which are going to need to be early mapped
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
@@ -8000,7 +8100,7 @@ namespace Legion {
           // Make a slice copy and send it away
           SliceTask *clone = clone_as_slice_task(internal_space, target_proc,
                                                  true/*needs slice*/,
-                                                 stealable, 1LL);
+                                                 stealable);
           runtime->send_task(clone);
           return false; // We have now been sent away
         }
@@ -8301,8 +8401,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     SliceTask* IndexTask::clone_as_slice_task(IndexSpace is, Processor p,
-                                              bool recurse, bool stealable,
-                                              long long scale_denominator)
+                                              bool recurse, bool stealable)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, INDEX_CLONE_AS_SLICE_CALL);
@@ -8311,7 +8410,6 @@ namespace Legion {
                                    Predicate::TRUE_PRED, this->task_id);
       result->clone_multi_from(this, is, p, recurse, stealable);
       result->index_complete = this->completion_event;
-      result->denominator = scale_denominator;
       result->index_owner = this;
       result->remote_owner_uid = parent_ctx->get_unique_id();
       result->tpl = tpl;
@@ -8413,7 +8511,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndexTask::return_slice_mapped(unsigned points, long long denom,
+    void IndexTask::return_slice_mapped(unsigned points,
                                 RtEvent applied_condition, ApEvent effects_done)
     //--------------------------------------------------------------------------
     {
@@ -8423,15 +8521,13 @@ namespace Legion {
       bool trigger_children_commit = false;
       {
         AutoLock o_lock(op_lock);
-        total_points += points;
         mapped_points += points;
-        slice_fraction.add(Fraction<long long>(1,denom));
         if (applied_condition.exists())
           map_applied_conditions.insert(applied_condition);
         if (effects_done.exists())
           effects_postconditions.insert(effects_done);
         // Already know that mapped points is the same as total points
-        if (slice_fraction.is_whole())
+        if (mapped_points == total_points)
         {
           need_trigger = true;
           if ((complete_points == total_points) &&
@@ -8490,8 +8586,7 @@ namespace Legion {
         assert(!complete_received);
         assert(complete_points <= total_points);
 #endif
-        if (slice_fraction.is_whole() && 
-            (complete_points == total_points))
+        if (complete_points == total_points)
         {
           trigger_execution = true;
           if (!children_complete_invoked)
@@ -8522,9 +8617,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(committed_points <= total_points);
 #endif
-        if (slice_fraction.is_whole() &&
-            (committed_points == total_points) && 
-            !children_commit_invoked)
+        if ((committed_points == total_points) && !children_commit_invoked)
         {
           need_trigger = true;
           children_commit_invoked = true;
@@ -8542,8 +8635,6 @@ namespace Legion {
       DerezCheck z(derez);
       size_t points;
       derez.deserialize(points);
-      long long denom;
-      derez.deserialize(denom);
       RtEvent applied_condition;
       derez.deserialize(applied_condition);
       ApEvent restrict_postcondition;
@@ -8564,8 +8655,7 @@ namespace Legion {
         check_point_requirements(local_requirements);
       }
 #endif
-      return_slice_mapped(points, denom, applied_condition, 
-                          restrict_postcondition);
+      return_slice_mapped(points, applied_condition, restrict_postcondition);
     }
 
     //--------------------------------------------------------------------------
@@ -8670,13 +8760,24 @@ namespace Legion {
         for (unsigned idx = 0; idx < regions.size(); idx++)
           TaskOp::log_requirement(unique_op_id, idx, regions[idx]);
       }
+      // Count how many total points we need for this index space task
+      total_points = index_domain.get_volume();
+      // Mark that this is origin mapped effectively in case we
+      // have any remote tasks, do this before we clone it
+      map_origin = true;
       SliceTask *new_slice = this->clone_as_slice_task(internal_space,
                                                        current_proc,
-                                                       false,
-                                                       false, 1LL);
-      slices.push_back(new_slice);
+                                                       false, false);
       new_slice->enumerate_points();
-      new_slice->replay_analysis();
+      // We need to make one slice per point here in case we need to move
+      // points to remote nodes. The way we do slicing right now prevents
+      // us from knowing which point tasks are going remote until later in
+      // the replay so we have to be pessimistic here
+      new_slice->expand_replay_slices(slices);
+      // Then do the replay on all the slices
+      for (std::list<SliceTask*>::const_iterator it = 
+            slices.begin(); it != slices.end(); it++)
+        (*it)->replay_analysis();
     }
 
     //--------------------------------------------------------------------------
@@ -8849,7 +8950,6 @@ namespace Legion {
       num_unmapped_points = 0;
       num_uncomplete_points = 0;
       num_uncommitted_points = 0;
-      denominator = 0;
       index_owner = NULL;
       remote_owner_uid = 0;
       remote_trace_info = NULL;
@@ -9080,7 +9180,6 @@ namespace Legion {
       // Preamble used in TaskOp::unpack
       rez.serialize(points.size());
       pack_multi_task(rez, target);
-      rez.serialize(denominator);
       rez.serialize(index_owner);
       rez.serialize(index_complete);
       rez.serialize(remote_unique_id);
@@ -9159,7 +9258,6 @@ namespace Legion {
       derez.deserialize(num_points);
       unpack_multi_task(derez, ready_events);
       set_current_proc(current);
-      derez.deserialize(denominator);
       derez.deserialize(index_owner);
       derez.deserialize(index_complete);
       derez.deserialize(remote_unique_id); 
@@ -9249,8 +9347,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     SliceTask* SliceTask::clone_as_slice_task(IndexSpace is, Processor p,
-                                              bool recurse, bool stealable,
-                                              long long scale_denominator)
+                                              bool recurse, bool stealable)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, SLICE_CLONE_AS_SLICE_CALL);
@@ -9259,7 +9356,6 @@ namespace Legion {
                                    Predicate::TRUE_PRED, this->task_id);
       result->clone_multi_from(this, is, p, recurse, stealable);
       result->index_complete = this->index_complete;
-      result->denominator = this->denominator * scale_denominator;
       result->index_owner = this->index_owner;
       result->remote_owner_uid = this->remote_owner_uid;
       result->tpl = tpl;
@@ -9570,11 +9666,11 @@ namespace Legion {
             TraceInfo(this) : *remote_trace_info;
           ApEvent effects_done = 
             Runtime::merge_events(&trace_info, effects_postconditions);
-          index_owner->return_slice_mapped(points.size(), denominator,
+          index_owner->return_slice_mapped(points.size(),
                                            applied_condition, effects_done);
         }
         else
-          index_owner->return_slice_mapped(points.size(), denominator, 
+          index_owner->return_slice_mapped(points.size(),
                              applied_condition, ApEvent::NO_AP_EVENT);
       }
       complete_mapping(applied_condition); 
@@ -9661,7 +9757,6 @@ namespace Legion {
       rez.serialize(index_owner);
       RezCheck z(rez);
       rez.serialize(points.size());
-      rez.serialize(denominator);
       rez.serialize(applied_condition);
       if (!effects_postconditions.empty())
       {
@@ -9955,6 +10050,36 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void SliceTask::expand_replay_slices(std::list<SliceTask*> &slices)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!points.empty());
+      assert(is_origin_mapped());
+#endif
+      // For each point give it its own slice owner in case we need to
+      // to move it remotely as part of the replay
+      while (points.size() > 1)
+      {
+        PointTask *point = points.back();
+        points.pop_back();
+        SliceTask *new_owner = clone_as_slice_task(internal_space,
+                current_proc, false/*recurse*/, false/*stealable*/);
+        point->slice_owner = new_owner;
+        new_owner->points.push_back(point);
+        new_owner->num_unmapped_points = 1;
+        new_owner->num_uncomplete_points = 1;
+        new_owner->num_uncommitted_points = 1;
+        slices.push_back(new_owner);
+      }
+      // Always add ourselves as the last point
+      slices.push_back(this);
+      num_unmapped_points = points.size();
+      num_uncomplete_points = points.size();
+      num_uncommitted_points = points.size();
+    }
+
+    //--------------------------------------------------------------------------
     void SliceTask::replay_analysis(void)
     //--------------------------------------------------------------------------
     {
@@ -9964,6 +10089,14 @@ namespace Legion {
         point->replay_analysis();
         record_child_mapped(RtEvent::NO_RT_EVENT, ApEvent::NO_AP_EVENT);
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void SliceTask::complete_replay(ApEvent instance_ready_event)
+    //--------------------------------------------------------------------------
+    {
+      for (unsigned idx = 0; idx < points.size(); idx++)
+        points[idx]->complete_replay(instance_ready_event);
     }
 
   }; // namespace Internal 

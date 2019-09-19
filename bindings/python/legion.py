@@ -559,12 +559,13 @@ def is_rect_type(t):
 _redop_ids = {}
 def _fill_redop_ids():
     operators = ['+', '-', '*', '/', 'max', 'min']
-    types = [float32, float64, int32, int64, uint32, uint64]
-    next_id = 101
+    types = [bool, int16, int32, int64, uint16, uint32, uint64, None, float32, float64, None, complex64]
+    next_id = 1048576
     for operator in operators:
         _redop_ids[operator] = {}
         for type in types:
-            _redop_ids[operator][type] = next_id
+            if type is not None:
+                _redop_ids[operator][type] = next_id
             next_id += 1
 _fill_redop_ids()
 

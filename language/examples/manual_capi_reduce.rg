@@ -15,7 +15,7 @@
 local tasklib = require("manual_capi_tasklib")
 local c = tasklib.c
 
-RED_PLUS_INT = 1
+RED_PLUS_INT = c.LEGION_REDOP_SUM_INT32
 
 FID_1 = 1
 FID_2 = 2
@@ -129,7 +129,6 @@ local args = require("manual_capi_args")
 
 terra main()
   c.printf("in main...\n")
-  c.register_reduction_plus_int32(RED_PLUS_INT, false)
 
   var execution_constraints = c.legion_execution_constraint_set_create()
   c.legion_execution_constraint_set_add_processor_constraint(execution_constraints, c.LOC_PROC)

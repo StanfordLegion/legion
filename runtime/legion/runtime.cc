@@ -6756,6 +6756,11 @@ namespace Legion {
               runtime->handle_advertisement(derez);
               break;
             }
+          case SEND_REMOTE_TASK_REPLAY:
+            {
+              runtime->handle_remote_task_replay(derez);
+              break;
+            }
           case SEND_INDEX_SPACE_NODE:
             {
               runtime->handle_index_space_node(derez, remote_address_space);
@@ -8862,13 +8867,13 @@ namespace Legion {
 #endif
       // Add any profiling requests
       if (runtime->profiler != NULL)
-	{
-	  if (target.kind() == Processor::TOC_PROC)
-	    runtime->profiler->add_gpu_task_request(requests, owner->task_id, vid,task);
-	  else
-	    runtime->profiler->add_task_request(requests, owner->task_id, vid,task);
-	}
-
+      {
+        if (target.kind() == Processor::TOC_PROC)
+          runtime->profiler->add_gpu_task_request(requests, owner->task_id, 
+                                                  vid, task);
+        else
+          runtime->profiler->add_task_request(requests,owner->task_id,vid,task);
+      }
       // Increment the number of outstanding tasks
 #ifdef DEBUG_LEGION
       runtime->increment_total_outstanding_tasks(task->task_id, false/*meta*/);
@@ -15548,6 +15553,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_remote_task_replay(AddressSpaceID target,Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_REMOTE_TASK_REPLAY,
+                                DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_index_space_node(AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
@@ -17162,6 +17175,13 @@ namespace Legion {
       {
         it->second->process_advertisement(source, map_id);
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_remote_task_replay(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      TaskOp::process_remote_replay(this, derez);
     }
 
     //--------------------------------------------------------------------------

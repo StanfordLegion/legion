@@ -422,8 +422,8 @@ namespace Legion {
       unsigned must_epoch_index;
     public:
       // Static methods
-      static void process_unpack_task(Runtime *rt,
-                                      Deserializer &derez); 
+      static void process_unpack_task(Runtime *rt, Deserializer &derez); 
+      static void process_remote_replay(Runtime *rt, Deserializer &derez);
     public:
       static void log_requirement(UniqueID uid, unsigned idx,
                                  const RegionRequirement &req);
@@ -681,8 +681,7 @@ namespace Legion {
       virtual void perform_inlining(void) = 0;
     public:
       virtual SliceTask* clone_as_slice_task(IndexSpace is,
-          Processor p, bool recurse, bool stealable,
-          long long scale_denominator) = 0;
+                      Processor p, bool recurse, bool stealable) = 0;
       virtual void handle_future(const DomainPoint &point, const void *result,
                                  size_t result_size, bool owner) = 0;
       virtual void register_must_epoch(void) = 0;
@@ -1066,8 +1065,7 @@ namespace Legion {
                                        get_acquired_instances_ref(void);
     public:
       virtual SliceTask* clone_as_slice_task(IndexSpace is,
-          Processor p, bool recurse, bool stealable,
-          long long scale_denominator);
+                  Processor p, bool recurse, bool stealable);
     public:
       virtual void handle_future(const DomainPoint &point, const void *result,
                                  size_t result_size, bool owner);
@@ -1083,7 +1081,7 @@ namespace Legion {
     public:
       void record_origin_mapped_slice(SliceTask *local_slice);
     public:
-      void return_slice_mapped(unsigned points, long long denom,
+      void return_slice_mapped(unsigned points,
                                RtEvent applied_condition, 
                                ApEvent restrict_postcondition);
       void return_slice_complete(unsigned points,
@@ -1106,9 +1104,6 @@ namespace Legion {
       friend class SliceTask;
       FutureMap future_map;
       Future reduction_future;
-      // The fraction used to keep track of what part of
-      // the sliced index spaces we have seen
-      Fraction<long long> slice_fraction;
       unsigned total_points;
       unsigned mapped_points;
       unsigned complete_points;
@@ -1179,8 +1174,7 @@ namespace Legion {
       virtual void perform_inlining(void);
     public:
       virtual SliceTask* clone_as_slice_task(IndexSpace is,
-          Processor p, bool recurse, bool stealable,
-          long long scale_denominator);
+                  Processor p, bool recurse, bool stealable);
       virtual void handle_future(const DomainPoint &point, const void *result,
                                  size_t result_size, bool owner);
     public:
@@ -1193,6 +1187,7 @@ namespace Legion {
                                      get_acquired_instances_ref(void);
       void check_target_processors(void) const;
       void update_target_processor(void);
+      void expand_replay_slices(std::list<SliceTask*> &slices);
     protected:
       virtual void trigger_task_complete(bool deferred = false);
       virtual void trigger_task_commit(void);
@@ -1248,6 +1243,7 @@ namespace Legion {
     public:
       // From MemoizableOp
       virtual void replay_analysis(void);
+      virtual void complete_replay(ApEvent instance_ready_event);
     protected:
       friend class IndexTask;
       friend class PointTask;
@@ -1258,9 +1254,6 @@ namespace Legion {
       unsigned num_uncomplete_points;
       unsigned num_uncommitted_points;
     protected:
-      // For knowing which fraction of the
-      // domain we have (1/denominator)
-      long long denominator;
       IndexTask *index_owner;
       ApEvent index_complete;
       UniqueID remote_unique_id;

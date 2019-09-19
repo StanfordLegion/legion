@@ -1570,6 +1570,14 @@ namespace Legion {
       parent_ctx->update_current_fence(this, true, true);
     }
 
+    //--------------------------------------------------------------------------
+    void TraceReplayOp::pack_remote_operation(Serializer &rez, 
+                                              AddressSpaceID target) const
+    //--------------------------------------------------------------------------
+    {
+      pack_local_remote_operation(rez);
+    }
+
     /////////////////////////////////////////////////////////////
     // TraceBeginOp
     /////////////////////////////////////////////////////////////
@@ -1753,6 +1761,14 @@ namespace Legion {
 #endif
       current_template->apply_postcondition(this);
       FenceOp::trigger_mapping();
+    }
+
+    //--------------------------------------------------------------------------
+    void TraceSummaryOp::pack_remote_operation(Serializer &rez,
+                                               AddressSpaceID target) const
+    //--------------------------------------------------------------------------
+    {
+      pack_local_remote_operation(rez);
     }
 
     /////////////////////////////////////////////////////////////
@@ -3748,7 +3764,7 @@ namespace Legion {
       std::vector<CopySrcDstField> fields;
       std::vector<FieldID> fill_fields;
       manager->field_space_node->get_field_set(user_mask,
-          memo->get_operation()->get_context(), fill_fields);
+          trace->logical_trace->ctx, fill_fields);
       layout->compute_copy_offsets(fill_fields, manager, fields);
 
       size_t fill_size = reduction_op->sizeof_rhs;

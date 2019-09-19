@@ -126,8 +126,11 @@ namespace Legion {
       DerezCheck z(derez);
       DistributedID did;
       derez.deserialize(did);
-      RtEvent ready = RtEvent::NO_RT_EVENT;
+      std::set<RtEvent> ready_events;
+      RtEvent ready;
       LogicalView *view = runtime->find_or_request_logical_view(did, ready);
+      if (ready.exists())
+        ready_events.insert(ready);
 
       RegionUsage usage;
       derez.deserialize(usage);
@@ -146,15 +149,20 @@ namespace Legion {
       derez.deserialize(ready_event);
       RtUserEvent applied_event;
       derez.deserialize(applied_event);
+      const PhysicalTraceInfo trace_info = 
+        PhysicalTraceInfo::unpack_trace_info(derez, runtime, ready_events);
 
-      if (ready.exists() && !ready.has_triggered())
-        ready.wait();
+      if (!ready_events.empty())
+      {
+        const RtEvent wait_on = Runtime::merge_events(ready_events);
+        if (wait_on.exists() && !wait_on.has_triggered())
+          wait_on.wait();
+      }
 #ifdef DEBUG_LEGION
       assert(view->is_instance_view());
 #endif
       InstanceView *inst_view = view->as_instance_view();
       std::set<RtEvent> applied_events;
-      const PhysicalTraceInfo trace_info(NULL, -1U, false);
       ApEvent pre = inst_view->register_user(usage, user_mask, user_expr,
                                              op_id, index, term_event,
                                              applied_events, trace_info,source);
@@ -2448,10 +2456,6 @@ namespace Legion {
         return manager->get_use_event();
       if (!is_logical_owner())
       {
-#ifdef DEBUG_LEGION
-        // Don't support tracing for this case yet
-        assert(!trace_info.recording);
-#endif
         ApUserEvent ready_event;
         // Check to see if this user came from somewhere that wasn't
         // the logical owner, if so we need to send the update back 
@@ -2475,6 +2479,8 @@ namespace Legion {
             rez.serialize(term_event);
             rez.serialize(ready_event);
             rez.serialize(applied_event);
+            trace_info.pack_trace_info<true/*pack operation*/>(rez, 
+                                    applied_events, logical_owner);
           }
           // Add a remote valid reference that will be removed by 
           // the receiver once the changes have been applied
@@ -2589,6 +2595,8 @@ namespace Legion {
                 rez.serialize(term_event);
                 rez.serialize(ApUserEvent::NO_AP_USER_EVENT);
                 rez.serialize(applied_event);
+                trace_info.pack_trace_info<true/*pack operation*/>(rez, 
+                                            applied_events, it->first);
               }
               runtime->send_view_register_user(it->first, rez);
               applied_events.insert(applied_event);
@@ -2639,10 +2647,6 @@ namespace Legion {
     {
       if (!is_logical_owner())
       {
-#ifdef DEBUG_LEGION
-        // Don't support tracing for this case yet
-        assert(!trace_recording);
-#endif
         // Check to see if there are any replicated fields here which we
         // can handle locally so we don't have to send a message to the owner
         RtUserEvent ready_event;
@@ -2829,10 +2833,6 @@ namespace Legion {
     {
       if (!is_logical_owner())
       {
-#ifdef DEBUG_LEGION
-        // Don't support tracing for this case yet
-        assert(!trace_recording);
-#endif
         // Check to see if this update came from some place other than the
         // source in which case we need to send it back to the source
         if (source != logical_owner)
@@ -4671,10 +4671,6 @@ namespace Legion {
         return manager->get_use_event();
       if (!is_logical_owner())
       {
-#ifdef DEBUG_LEGION
-        // Don't support tracing for this case yet
-        assert(!trace_info.recording);
-#endif
         // If we're not the logical owner send a message there 
         // to do the analysis and provide a user event to trigger
         // with the precondition
@@ -4692,6 +4688,8 @@ namespace Legion {
           rez.serialize(term_event);
           rez.serialize(ready_event);
           rez.serialize(applied_event);
+          trace_info.pack_trace_info<true/*pack operation*/>(rez,
+                                  applied_events, logical_owner);
         }
         // Add a remote valid reference that will be removed by 
         // the receiver once the changes have been applied
@@ -4747,10 +4745,6 @@ namespace Legion {
     {
       if (!is_logical_owner())
       {
-#ifdef DEBUG_LEGION
-        // Don't support tracing for this case yet
-        assert(!trace_recording);
-#endif
         RtUserEvent ready_event = Runtime::create_rt_user_event();
         Serializer rez;
         {
@@ -4833,10 +4827,6 @@ namespace Legion {
     {
       if (!is_logical_owner())
       {
-#ifdef DEBUG_LEGION
-        // Don't support tracing for this case yet
-        assert(!trace_recording);
-#endif
         RtUserEvent applied_event = Runtime::create_rt_user_event();
         Serializer rez;
         {
