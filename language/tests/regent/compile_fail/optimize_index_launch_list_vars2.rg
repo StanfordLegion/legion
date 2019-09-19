@@ -13,7 +13,7 @@
 -- limitations under the License.
 
 -- fails-with:
--- optimize_index_launch_list_vars2.rg:34: loop optimization failed: argument 1 is not provably projectable or invariant
+-- optimize_index_launch_list_vars2.rg:34: loop optimization failed: argument 1 interferes with itself
 --     f(p[j])
 --      ^
 

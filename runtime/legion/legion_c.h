@@ -2425,6 +2425,23 @@ extern "C" {
                                  bool inst /* = true */);
 
   /**
+   * @see Legion::RegionRequirement::get_projection_args()
+   */
+  const void*
+  legion_index_launcher_get_projection_args(legion_region_requirement_t requirement,
+					    size_t *size);
+
+  /**
+   * @see Legion::RegionRequirement::set_projection_args()
+   */
+  void
+  legion_index_launcher_set_projection_args(legion_index_launcher_t launcher_,
+					    unsigned idx,
+					    const void *args,
+					    size_t size,
+					    bool own);
+
+  /**
    * @see Legion::RegionRequirement::add_flags()
    */
   void
@@ -3761,6 +3778,12 @@ extern "C" {
    */
   legion_unique_id_t
   legion_context_get_unique_id(legion_context_t ctx);
+
+  /**
+   * @see Legion::Mappable::as_task()
+   */
+  legion_task_t
+  legion_mappable_as_task(legion_mappable_t task);
 
   /**
    * @see Legion::Mappable::get_unique_id()

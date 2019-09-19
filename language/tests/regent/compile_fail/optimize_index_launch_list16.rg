@@ -13,7 +13,7 @@
 -- limitations under the License.
 
 -- fails-with:
--- optimize_index_launch_list16.rg:33: loop optimization failed: fill target is not provably projectable
+-- optimize_index_launch_list16.rg:33: loop optimization failed: fill target interferes with itself
 --     fill((p[i * n]), 1)
 --        ^
 

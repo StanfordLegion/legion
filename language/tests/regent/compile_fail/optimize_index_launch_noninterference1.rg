@@ -13,9 +13,9 @@
 -- limitations under the License.
 
 -- fails-with:
--- optimize_index_launch_num6.rg:69: loop optimization failed: argument 1 interferes with itself
---     g(p_disjoint[(i + 1) % n])
---     ^
+-- optimize_index_launch_noninterference1.rg:71: loop optimization failed: argument 1 interferes with itself
+--       g(p_disjoint[(j + 1) % n])
+--       ^
 
 import "regent"
 
@@ -63,10 +63,13 @@ task main()
   var p1_disjoint = partition(disjoint, r1, rc)
   c.legion_coloring_destroy(rc)
 
-  -- not optimized: can't analyze loop-variant argument
-  __demand(__index_launch)
-  for i = 0, n do
-    g(p_disjoint[(i + 1) % n])
+  -- not optimized: loop-invariant argument is interfering
+  do
+    var j = 3
+    __demand(__parallel)
+    for i = 0, n do
+      g(p_disjoint[(j + 1) % n])
+    end
   end
 end
 regentlib.start(main)
