@@ -657,13 +657,15 @@ namespace Legion {
       bool projections_match(const FieldState &rhs) const;
       void merge(const FieldState &rhs, RegionTreeNode *node);
     public:
-      bool can_elide_close_operation(const ProjectionInfo &info,
-                     RegionTreeNode *node, bool reduction) const;
+      bool can_elide_close_operation(Operation *op, unsigned index,
+                                     const ProjectionInfo &info,
+                                     RegionTreeNode *node,bool reduction) const;
       void record_projection_summary(const ProjectionInfo &info,
                                      RegionTreeNode *node);
     protected:
-      bool expensive_elide_test(const ProjectionInfo &info,
-                RegionTreeNode *node, bool reduction) const;
+      bool expensive_elide_test(Operation *op, unsigned index,
+                                const ProjectionInfo &info,
+                                RegionTreeNode *node, bool reduction) const;
     public:
       void print_state(TreeStateLogger *logger, 
                        const FieldMask &capture_mask,

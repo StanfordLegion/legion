@@ -12834,8 +12834,8 @@ namespace Legion {
               // Can only avoid a close operation if we have the 
               // same projection function with the same or smaller
               // size domain as the original index space launch
-              if (it->can_elide_close_operation(proj_info, this,
-                                  IS_REDUCE(closer.user.usage)))
+              if (it->can_elide_close_operation(closer.user.op, closer.user.idx,
+                                proj_info, this, IS_REDUCE(closer.user.usage)))
               {
                 // If we're a reduction we have to go into a dirty 
                 // reduction mode since we know we're already open below

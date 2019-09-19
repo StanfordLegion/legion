@@ -2533,8 +2533,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool FieldState::can_elide_close_operation(const ProjectionInfo &info,
-                                     RegionTreeNode *node, bool reduction) const
+    bool FieldState::can_elide_close_operation(Operation *op, unsigned index,
+         const ProjectionInfo &info, RegionTreeNode *node, bool reduction) const
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -2586,7 +2586,7 @@ namespace Legion {
             if (!info.projection->find_elide_close_result(info, projections,
                                                           node, elide))
             {
-              elide = expensive_elide_test(info, node, reduction); 
+              elide = expensive_elide_test(op, index, info, node, reduction);
               // Now memoize the results for later
               info.projection->record_elide_close_result(info, projections,
                                                          node, elide);
@@ -2635,7 +2635,7 @@ namespace Legion {
           if (!info.projection->find_elide_close_result(info, projections,
                                                         node, elide))
           {
-            elide = expensive_elide_test(info, node, reduction); 
+            elide = expensive_elide_test(op, index, info, node, reduction);
             // Now memoize the results for later
             info.projection->record_elide_close_result(info, projections,
                                                        node, elide);
@@ -2663,8 +2663,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool FieldState::expensive_elide_test(const ProjectionInfo &info,
-                                     RegionTreeNode *node, bool reduction) const
+    bool FieldState::expensive_elide_test(Operation *op, unsigned index,
+         const ProjectionInfo &info, RegionTreeNode *node, bool reduction) const
     //--------------------------------------------------------------------------
     {
       // We can't do this test if the projection function is not functional
@@ -2694,13 +2694,13 @@ namespace Legion {
         node_map[root_source] = prev;
         for (std::set<ProjectionSummary>::const_iterator it = 
               projections.begin(); it != projections.end(); it++)
-          it->projection->construct_projection_tree(node, it->domain, 
+          it->projection->construct_projection_tree(op, index, node, it->domain,
                         it->sharding, it->sharding_domain, node_map);
       }
       // Then construct the new projection tree
       ProjectionTree *next = 
-        info.projection->construct_projection_tree(node, info.projection_space,
-                                   info.sharding_function, info.sharding_space);
+        info.projection->construct_projection_tree(op, index, node, 
+            info.projection_space, info.sharding_function, info.sharding_space);
       // First check to see if the previous dominates
       bool has_mapping = false;
       if (prev->dominates(next))

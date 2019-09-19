@@ -10114,15 +10114,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ProjectionTree* ProjectionFunction::construct_projection_tree(
-                            RegionTreeNode *root, IndexSpaceNode *launch_space,
+    ProjectionTree* ProjectionFunction::construct_projection_tree(Operation *op,
+                            unsigned index, RegionTreeNode *root, 
+                            IndexSpaceNode *launch_space,
                             ShardingFunction *sharding_function, 
-                            IndexSpaceNode *sharding_space)
+                            IndexSpaceNode *sharding_space) const
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(is_functional);
-#endif
+      Mappable *mappable = is_functional ? NULL : op->get_mappable();
       IndexTreeNode *row_source = root->get_row_source();
       RegionTreeForest *context = root->context;
       ProjectionTree *result = new ProjectionTree(row_source);
@@ -10144,10 +10143,18 @@ namespace Legion {
           if (!is_exclusive)
           {
             AutoLock p_lock(projection_reservation);
-            result = functor->project(region->handle, itr.p, launch_domain);
+            if (is_functional)
+              result = functor->project(region->handle, itr.p, launch_domain);
+            else
+              result = functor->project(mappable, index, region->handle, itr.p);
           }
           else
-            result = functor->project(region->handle, itr.p, launch_domain);
+          {
+            if (is_functional)
+              result = functor->project(region->handle, itr.p, launch_domain);
+            else
+              result = functor->project(mappable, index, region->handle, itr.p);
+          }
           if (!result.exists())
             continue;
           if (sharding_function != NULL)
@@ -10168,10 +10175,18 @@ namespace Legion {
           if (!is_exclusive)
           {
             AutoLock p_lock(projection_reservation);
-            result = functor->project(partition->handle, itr.p, launch_domain);
+            if (is_functional)
+              result = functor->project(partition->handle, itr.p,launch_domain);
+            else
+              result = functor->project(mappable,index,partition->handle,itr.p);
           }
           else
-            result = functor->project(partition->handle, itr.p, launch_domain);
+          {
+            if (is_functional)
+              result = functor->project(partition->handle, itr.p,launch_domain);
+            else
+              result = functor->project(mappable,index,partition->handle,itr.p);
+          }
           if (!result.exists())
             continue;
           if (sharding_function != NULL)
@@ -10187,15 +10202,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ProjectionFunction::construct_projection_tree(RegionTreeNode *root,
-          IndexSpaceNode *launch_space, ShardingFunction *sharding_function,
-          IndexSpaceNode *sharding_space, 
-          std::map<IndexTreeNode*,ProjectionTree*> &node_map)
+    void ProjectionFunction::construct_projection_tree(Operation *op,
+          unsigned index, RegionTreeNode *root, IndexSpaceNode *launch_space, 
+          ShardingFunction *sharding_function, IndexSpaceNode *sharding_space, 
+          std::map<IndexTreeNode*,ProjectionTree*> &node_map) const
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(is_functional);
-#endif
+      Mappable *mappable = is_functional ? NULL : op->get_mappable();
       IndexTreeNode *row_source = root->get_row_source();
       RegionTreeForest *context = root->context;
       // Iterate over the points, compute the projections, and build the tree   
@@ -10214,10 +10227,18 @@ namespace Legion {
           if (!is_exclusive)
           {
             AutoLock p_lock(projection_reservation);
-            result = functor->project(region->handle, itr.p, launch_domain);
+            if (is_functional)
+              result = functor->project(region->handle, itr.p, launch_domain);
+            else
+              result = functor->project(mappable, index, region->handle, itr.p);
           }
           else
-            result = functor->project(region->handle, itr.p, launch_domain);
+          {
+            if (is_functional)
+              result = functor->project(region->handle, itr.p, launch_domain);
+            else
+              result = functor->project(mappable, index, region->handle, itr.p);
+          }
           if (!result.exists())
             continue;
           if (sharding_function != NULL)
@@ -10238,10 +10259,18 @@ namespace Legion {
           if (!is_exclusive)
           {
             AutoLock p_lock(projection_reservation);
-            result = functor->project(partition->handle, itr.p, launch_domain);
+            if (is_functional)
+              result = functor->project(partition->handle, itr.p,launch_domain);
+            else
+              result = functor->project(mappable,index,partition->handle,itr.p);
           }
           else
-            result = functor->project(partition->handle, itr.p, launch_domain);
+          {
+            if (is_functional)
+              result = functor->project(partition->handle, itr.p,launch_domain);
+            else
+              result = functor->project(mappable,index,partition->handle,itr.p);
+          }
           if (!result.exists())
             continue;
           if (sharding_function != NULL)
