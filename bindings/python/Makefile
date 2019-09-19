@@ -33,7 +33,7 @@ USE_PYTHON := 1
 # Put the binary file name here
 OUTFILE		?= legion_python
 # List all the application source files here
-GEN_SRC		?= main.cc redop.cc		# .cc files
+GEN_SRC		?= main.cc		# .cc files
 GEN_GPU_SRC	?=		# .cu files
 
 # You can modify these variables, some will be appended to by the runtime makefile
@@ -48,6 +48,9 @@ ifeq ($(shell uname), Darwin)
 else
 	LD_FLAGS += -Wl,--whole-archive -llegion -Wl,--no-whole-archive
 endif
+
+# Use reduction operators for complex types by default
+CC_FLAGS += -DLEGION_REDOP_COMPLEX
 
 NO_BUILD_ALL=1
 .PHONY: all
