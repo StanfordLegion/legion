@@ -449,12 +449,12 @@ endif()
 # Complex support
 #------------------------------------------------------------------------------#
 
-if(Legion_BUILD_BINDINGS)
+if(Legion_BUILD_ALL OR Legion_BUILD_BINDINGS)
   option(Legion_REDOP_COMPLEX "Use reduction operators for complex types" ON)
 else()
   option(Legion_REDOP_COMPLEX "Use reduction operators for complex types" OFF)
 endif()
-if(Legion_BUILD_BINDINGS AND NOT Legion_REDOP_COMPLEX)
+if((Legion_BUILD_ALL OR Legion_BUILD_BINDINGS) AND NOT Legion_REDOP_COMPLEX)
   error("Bindings require Legion_REDOP_COMPLEX to be set")
 endif()
 if(Legion_REDOP_COMPLEX)
