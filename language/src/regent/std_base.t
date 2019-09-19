@@ -364,22 +364,15 @@ do
       base.update_reduction_op(op, op_type, legion_op_id)
     end
   end
+  -- Prefill the table of reduction op IDs for complex types.
   do
-    local complex_reduction_types = terralib.newlist({ base.complex32 })
-    local complex_reduction_inits = data.map_from_table({
-      ["+"] = lift(zero),
-      ["-"] = lift(zero),
-      ["*"] = lift(one),
-      ["/"] = lift(one)})
-    for _, op in ipairs(reduction_ops) do
-      if op == "max" then break end
-      for _, op_type in ipairs(complex_reduction_types) do
-        local type_name = "COMPLEX" .. tostring(sizeof(op_type) * 8)
-        local legion_op_id =
-          c["LEGION_REDOP_" .. legion_op_names[op] .. "_" .. type_name]
-        base.update_reduction_op(op, op_type, legion_op_id)
-      end
-    end
+    base.update_reduction_op("+", base.complex32, c.LEGION_REDOP_SUM_COMPLEX64)
+    base.update_reduction_op("-", base.complex32, c.LEGION_REDOP_SUM_COMPLEX64)
+    base.update_reduction_op("*", base.complex32, c.LEGION_REDOP_PROD_COMPLEX64)
+    base.update_reduction_op("/", base.complex32, c.LEGION_REDOP_PROD_COMPLEX64)
+
+    base.update_reduction_op("+", base.complex64, c.LEGION_REDOP_SUM_COMPLEX128)
+    base.update_reduction_op("-", base.complex64, c.LEGION_REDOP_SUM_COMPLEX128)
   end
 end
 

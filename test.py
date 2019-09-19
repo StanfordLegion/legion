@@ -17,6 +17,7 @@
 
 from __future__ import print_function
 import argparse, datetime, glob, json, multiprocessing, os, platform, shutil, subprocess, sys, traceback, tempfile
+import signal
 
 make_exe = os.environ.get('MAKE', 'make')
 
@@ -174,14 +175,33 @@ def get_regent_perf_tests(nodes, cores_per_node):
           '-fvectorize-unsafe', '1']],
     ]
 
-def cmd(command, env=None, cwd=None):
+class TestTimeoutException(Exception):
+    pass
+
+def sigalrm_handler(signum, frame):
+    raise TestTimeoutException
+
+def cmd(command, env=None, cwd=None, timelimit=None):
     print(' '.join(command))
-    return subprocess.check_call(command, env=env, cwd=cwd)
+    if timelimit:
+        child = subprocess.Popen(command, env=env, cwd=cwd)
+        signal.signal(signal.SIGALRM, sigalrm_handler)
+        signal.alarm(timelimit)
+        try:
+            ret = child.wait()
+            signal.alarm(0)  # disable alarm
+            signal.signal(signal.SIGALRM, signal.SIG_DFL)
+            return ret
+        except TestTimeoutException:
+            child.kill()
+            raise  # re-raise
+    else:
+        return subprocess.check_call(command, env=env, cwd=cwd)
 
 def run_test_regent(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
     cmd([sys.executable, os.path.join(root_dir, 'language/travis.py')], env=env)
 
-def run_cxx(tests, flags, launcher, root_dir, bin_dir, env, thread_count):
+def run_cxx(tests, flags, launcher, root_dir, bin_dir, env, thread_count, timelimit):
     for test_file, test_flags in tests:
         test_dir = os.path.dirname(os.path.join(root_dir, test_file))
         if bin_dir:
@@ -189,17 +209,17 @@ def run_cxx(tests, flags, launcher, root_dir, bin_dir, env, thread_count):
         else:
             test_path = os.path.join(root_dir, test_file)
             cmd([make_exe, '-C', test_dir, '-j', str(thread_count)], env=env)
-        cmd(launcher + [test_path] + flags + test_flags, env=env, cwd=test_dir)
+        cmd(launcher + [test_path] + flags + test_flags, env=env, cwd=test_dir, timelimit=timelimit)
         # after a successful run, clean up libraries/executables to keep disk
         #  usage down
         if not bin_dir:
             cmd(['find', test_dir , '-type', 'f', '(', '-name', '*.a', '-o', '-name', os.path.basename(test_file), ')', '-exec', 'rm', '-v', '{}', ';'])
 
-def run_regent(tests, flags, launcher, root_dir, env, thread_count):
+def run_regent(tests, flags, launcher, root_dir, env, thread_count, timelimit):
     for test_file, test_flags in tests:
         test_dir = os.path.dirname(os.path.join(root_dir, test_file))
         test_path = os.path.join(root_dir, test_file)
-        cmd(launcher + [test_path] + flags + test_flags, env=env, cwd=test_dir)
+        cmd(launcher + [test_path] + flags + test_flags, env=env, cwd=test_dir, timelimit=timelimit)
 
 def precompile_regent(tests, flags, launcher, root_dir, env, thread_count):
     exe_tests = []
@@ -215,38 +235,38 @@ def precompile_regent(tests, flags, launcher, root_dir, env, thread_count):
         exe_tests.append([exe, test_flags])
     return exe_tests
 
-def run_test_legion_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
+def run_test_legion_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit):
     flags = ['-logfile', 'out_%.log']
     if env['USE_CUDA'] == '1':
         flags.extend(['-ll:gpu', '1'])
-    run_cxx(legion_cxx_tests, flags, launcher, root_dir, bin_dir, env, thread_count)
+    run_cxx(legion_cxx_tests, flags, launcher, root_dir, bin_dir, env, thread_count, timelimit)
 
-def run_test_legion_gasnet_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
+def run_test_legion_gasnet_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit):
     flags = ['-logfile', 'out_%.log']
     if env['USE_CUDA'] == '1':
         flags.extend(['-ll:gpu', '1'])
-    run_cxx(legion_gasnet_cxx_tests, flags, launcher, root_dir, bin_dir, env, thread_count)
+    run_cxx(legion_gasnet_cxx_tests, flags, launcher, root_dir, bin_dir, env, thread_count, timelimit)
 
-def run_test_legion_openmp_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
+def run_test_legion_openmp_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit):
     flags = ['-logfile', 'out_%.log']
     if env['USE_CUDA'] == '1':
         flags.extend(['-ll:gpu', '1'])
-    run_cxx(legion_openmp_cxx_tests, flags, launcher, root_dir, bin_dir, env, thread_count)
+    run_cxx(legion_openmp_cxx_tests, flags, launcher, root_dir, bin_dir, env, thread_count, timelimit)
 
-def run_test_legion_python_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
+def run_test_legion_python_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit):
     # Hack: legion_python currently requires the module name to come first
     flags = [] # ['-logfile', 'out_%.log']
     # Hack: Fix up the environment so that Python can find all the examples.
     env = dict(list(env.items()) + [
         ('PYTHONPATH', ':'.join([os.path.join(root_dir, 'bindings', 'python')])),
     ])
-    run_cxx(legion_python_cxx_tests, flags, launcher, root_dir, bin_dir, env, thread_count)
+    run_cxx(legion_python_cxx_tests, flags, launcher, root_dir, bin_dir, env, thread_count, timelimit)
 
-def run_test_legion_hdf_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
+def run_test_legion_hdf_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit):
     flags = ['-logfile', 'out_%.log']
     if env['USE_CUDA'] == '1':
         flags.extend(['-ll:gpu', '1'])
-    run_cxx(legion_hdf_cxx_tests, flags, launcher, root_dir, bin_dir, env, thread_count)
+    run_cxx(legion_hdf_cxx_tests, flags, launcher, root_dir, bin_dir, env, thread_count, timelimit)
 
 def run_test_fuzzer(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
     env = dict(list(env.items()) + [('WARN_AS_ERROR', '0')])
@@ -256,18 +276,19 @@ def run_test_fuzzer(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
     cmd(['git', 'checkout', 'deppart'], cwd=fuzz_dir)
     cmd(['python', 'main.py'], env=env, cwd=fuzz_dir)
 
-def run_test_realm(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
+def run_test_realm(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit):
     test_dir = os.path.join(root_dir, 'test/realm')
     cmd([make_exe, '-C', test_dir, 'DEBUG=0', 'clean'], env=env)
-    cmd([make_exe, '-C', test_dir, 'DEBUG=0', 'run_all'], env=env)
+    cmd([make_exe, '-C', test_dir, 'DEBUG=0', 'run_all'], env=env, timelimit=timelimit)
 
-def run_test_external(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
+def run_test_external(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit):
     flags = ['-logfile', 'out_%.log']
 
     # Realm perf test (move back to perf test when integrated with perf.py)
     perf_dir = os.path.join(root_dir, 'test/performance/realm')
     cmd([make_exe, '-C', perf_dir, 'DEBUG=0', 'clean_all'], env=env)
-    cmd([make_exe, '-C', perf_dir, 'DEBUG=0', 'RUNMODE=short', 'run_all'], env=env)
+    cmd([make_exe, '-C', perf_dir, 'DEBUG=0', 'build_all'], env=env)
+    cmd([make_exe, '-C', perf_dir, 'DEBUG=0', 'RUNMODE=short', 'run_all'], env=env, timelimit=timelimit)
 
     # Fast Direct Solver
     # Contact: Chao Chen <cchen10@stanford.edu>
@@ -276,7 +297,7 @@ def run_test_external(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
     # cmd(['git', 'checkout', '4c7a59de63dd46a0abcc7f296fa3b0f511e5e6d2', ], cwd=solver_dir)
     solver = [[os.path.join(solver_dir, 'spmd_driver/solver'),
         ['-machine', '1', '-core', '8', '-mtxlvl', '6', '-ll:cpu', '8', '-ll:csize', '1024']]]
-    run_cxx(solver, flags, launcher, root_dir, None, env, thread_count)
+    run_cxx(solver, flags, launcher, root_dir, None, env, thread_count, timelimit)
 
     # Parallel Research Kernels: Stencil
     # Contact: Wonchan Lee <wonchan@cs.stanford.edu>
@@ -295,7 +316,7 @@ def run_test_external(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
     makefile = os.path.join(root_dir, 'apps/Makefile.template')
     cmd([make_exe, '-f', makefile, '-C', stencil_dir, '-j', str(thread_count)], env=stencil_env)
     stencil = os.path.join(stencil_dir, 'stencil')
-    cmd([stencil, '4', '10', '1000'])
+    cmd([stencil, '4', '10', '1000'], timelimit=timelimit)
 
     # SNAP
     # Contact: Mike Bauer <mbauer@nvidia.com>
@@ -305,7 +326,7 @@ def run_test_external(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
     # them after.
     snap = [[os.path.join(snap_dir, 'src/snap'),
              [os.path.join(snap_dir, 'input/mms.in')] + flags]]
-    run_cxx(snap, [], launcher, root_dir, None, env, thread_count)
+    run_cxx(snap, [], launcher, root_dir, None, env, thread_count, timelimit)
 
     # Soleil-X
     # Contact: Manolis Papadakis <mpapadak@stanford.edu>
@@ -338,14 +359,16 @@ def run_test_external(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
          '-o', 'bodies-16384-blitz.h5',
          '-n', '16384'],
         cwd=barnes_hut_dir,
-        env=env)
+        env=env,
+        timelimit=timelimit)
     cmd([sys.executable, regent_path, 'barnes_hut.rg',
          '-i', 'bodies-16384-blitz.h5',
          '-n', '16384'],
         cwd=barnes_hut_dir,
-        env=env)
+        env=env,
+        timelimit=timelimit)
 
-def run_test_private(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
+def run_test_private(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit):
     flags = ['-logfile', 'out_%.log']
 
     # MiniAero
@@ -360,7 +383,7 @@ def run_test_private(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
                  # , 'FlatPlate', 'Ramp'
                 ]:
         test_dir = os.path.join(miniaero_dir, 'tests', test)
-        cmd([os.path.join(test_dir, 'test.sh')], env=env, cwd=test_dir)
+        cmd([os.path.join(test_dir, 'test.sh')], env=env, cwd=test_dir, timelimit=timelimit)
 
     # PENNANT
     # Contact: Galen Shipman <gshipman@lanl.gov>
@@ -384,11 +407,15 @@ def run_test_private(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
     cmd([make_exe, '-f', makefile, '-C', pennant_dir, '-j', str(thread_count)], env=pennant_env)
     pennant = os.path.join(pennant_dir, 'pennant')
     cmd([pennant, str(app_cores), 'test/sedovsmall/sedovsmall.pnt', '-ll:cpu', str(app_cores)],
-        cwd=pennant_dir)
+        cwd=pennant_dir,
+        timelimit=timelimit)
 
-def run_test_ctest(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
+def run_test_ctest(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit):
     build_dir = os.path.join(tmp_dir, 'build')
-    cmd(['ctest', '-j', str(thread_count), '--output-on-failure'],
+    args = ['ctest', '-j', str(thread_count), '--output-on-failure']
+    if timelimit:
+        args.extend(['--timeout', str(timelimit)])
+    cmd(args,
         env=env,
         cwd=build_dir)
 
@@ -408,7 +435,7 @@ def git_branch_name(repo_dir):
         return output.strip()
     return None
 
-def run_test_perf_one_configuration(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, nodes):
+def run_test_perf_one_configuration(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, nodes, timelimit):
     flags = ['-logfile', 'out_%.log']
 
     # for backward-compatibility, use app_cores if PERF_CORES_PER_NODE is not specified
@@ -493,7 +520,7 @@ def run_test_perf_one_configuration(launcher, root_dir, tmp_dir, bin_dir, env, t
 
     # Run Legion C++ performance tests.
     runner = os.path.join(root_dir, 'perf.py')
-    run_cxx(legion_cxx_perf_tests, flags, [runner], root_dir, bin_dir, cxx_env, thread_count)
+    run_cxx(legion_cxx_perf_tests, flags, [runner], root_dir, bin_dir, cxx_env, thread_count, timelimit)
 
     # Run Regent performance tests.
     regent_path = os.path.join(root_dir, 'language/regent.py')
@@ -520,11 +547,11 @@ def run_test_perf_one_configuration(launcher, root_dir, tmp_dir, bin_dir, env, t
          'git@github.com:StanfordLegion/perf-data.git'],
         env=env)
 
-def run_test_perf(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, min_nodes, max_nodes):
+def run_test_perf(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, min_nodes, max_nodes, timelimit):
     nodes = min_nodes
     while nodes <= max_nodes:
         launcher = [w.format(**{'NODES': nodes}) for w in launcher]
-        run_test_perf_one_configuration(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, nodes)
+        run_test_perf_one_configuration(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, nodes, timelimit)
         nodes *= 2
 
 def check_test_legion_cxx(root_dir):
@@ -700,12 +727,17 @@ def run_tests(test_modules=None,
               root_dir=None,
               check_ownership=False,
               keep_tmp_dir=False,
+              timelimit=None,
               verbose=False):
     if thread_count is None:
         thread_count = multiprocessing.cpu_count()
 
     if root_dir is None:
         root_dir = os.path.dirname(os.path.realpath(__file__))
+
+    if timelimit is None:
+        if 'TIMELIMIT' in os.environ:
+            timelimit = int(os.environ['TIMELIMIT'])
 
     # Determine which test modules to run.
     def module_enabled(module, default=True):
@@ -826,35 +858,35 @@ def run_tests(test_modules=None,
                 run_test_regent(launcher, root_dir, tmp_dir, bin_dir, env, thread_count)
         if test_legion_cxx:
             with Stage('legion_cxx'):
-                run_test_legion_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count)
+                run_test_legion_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit)
                 if use_gasnet:
-                    run_test_legion_gasnet_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count)
+                    run_test_legion_gasnet_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit)
                 if use_openmp:
-                    run_test_legion_openmp_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count)
+                    run_test_legion_openmp_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit)
                 if use_python:
-                    run_test_legion_python_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count)
+                    run_test_legion_python_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit)
                 if use_hdf:
-                    run_test_legion_hdf_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count)
+                    run_test_legion_hdf_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit)
         if test_fuzzer:
             with Stage('fuzzer'):
                 run_test_fuzzer(launcher, root_dir, tmp_dir, bin_dir, env, thread_count)
         if test_realm:
             with Stage('realm'):
-                run_test_realm(launcher, root_dir, tmp_dir, bin_dir, env, thread_count)
+                run_test_realm(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit)
         if test_external:
             with Stage('external'):
                 if not test_regent:
                     build_regent(root_dir, env)
-                run_test_external(launcher, root_dir, tmp_dir, bin_dir, env, thread_count)
+                run_test_external(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit)
         if test_private:
             with Stage('private'):
-                run_test_private(launcher, root_dir, tmp_dir, bin_dir, env, thread_count)
+                run_test_private(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit)
         if test_perf:
             with Stage('perf'):
-                run_test_perf(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, min_nodes, max_nodes)
+                run_test_perf(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, min_nodes, max_nodes, timelimit)
         if test_ctest:
             with Stage('ctest'):
-                run_test_ctest(launcher, root_dir, tmp_dir, bin_dir, env, thread_count)
+                run_test_ctest(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit)
     finally:
         if keep_tmp_dir:
             print('Leaving build directory:')
@@ -951,6 +983,10 @@ def driver():
     parser.add_argument(
         '--keep', dest='keep_tmp_dir', action='store_true',
         help='Keep temporary directory.')
+
+    parser.add_argument(
+        '--timelimit', dest='timelimit', type=int,
+        help='Maximum time (in seconds) allowed for individual test execution')
 
     parser.add_argument(
         '-v', '--verbose', dest='verbose', action='store_true',

@@ -707,6 +707,74 @@ namespace Legion {
     } while (!__sync_bool_compare_and_swap(target, oldval, newval));
 #endif
   }
+
+  template<> __CUDA_HD__ inline
+  void SumReduction<complex<double> >::apply<true>(LHS &lhs, RHS rhs)
+  {
+    lhs += rhs;
+  }
+
+  template<> __CUDA_HD__ inline
+  void SumReduction<complex<double> >::apply<false>(LHS &lhs, RHS rhs)
+  {
+    double *l = reinterpret_cast<double*>(&lhs);
+    double *r = reinterpret_cast<double*>(&rhs);
+#ifdef __CUDA_ARCH__
+    for (unsigned i = 0; i < 2; ++i) {
+      unsigned long long *target = (unsigned long long*)&l[i];
+      union { unsigned long long as_int; double as_double; } oldval, newval;
+      newval.as_int = *target;
+      do {
+        oldval = newval;
+        newval.as_double = newval.as_double + r[i];
+        newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
+      } while (oldval.as_int != newval.as_int);
+    }
+#else
+    for (unsigned i = 0; i < 2; ++i) {
+      volatile unsigned long long *target = (unsigned long long*)&l[i];
+      unsigned long long oldval, newval;
+      do {
+        oldval = *target;
+        newval = (unsigned long long)((double)oldval + r[i]);
+      } while (!__sync_bool_compare_and_swap(target, oldval, newval));
+    }
+#endif
+  }
+
+  template<> __CUDA_HD__ inline
+  void SumReduction<complex<double> >::fold<true>(RHS &rhs1, RHS rhs2)
+  {
+    rhs1 += rhs2;
+  }
+
+  template<> __CUDA_HD__ inline
+  void SumReduction<complex<double> >::fold<false>(RHS &rhs1, RHS rhs2)
+  {
+    double *r1 = reinterpret_cast<double*>(&rhs1);
+    double *r2 = reinterpret_cast<double*>(&rhs2);
+#ifdef __CUDA_ARCH__
+    for (unsigned i = 0; i < 2; ++i) {
+      unsigned long long *target = (unsigned long long*)&r1[i];
+      union { unsigned long long as_int; double as_double; } oldval, newval;
+      newval.as_int = *target;
+      do {
+        oldval = newval;
+        newval.as_double = newval.as_double + r2[i];
+        newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
+      } while (oldval.as_int != newval.as_int);
+    }
+#else
+    for (unsigned i = 0; i < 2; ++i) {
+      volatile unsigned long long *target = (unsigned long long*)&r1[i];
+      unsigned long long oldval, newval;
+      do {
+        oldval = *target;
+        newval = (unsigned long long)((double)oldval + r2[i]);
+      } while (!__sync_bool_compare_and_swap(target, oldval, newval));
+    }
+#endif
+  }
 #endif // LEGION_REDOP_COMPLEX
 
   template<> __CUDA_HD__ inline

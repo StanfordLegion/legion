@@ -247,6 +247,104 @@ protected:
   float _imag;
 };
 
+template<>
+class complex<double> {
+public:
+  __CUDA_HD__
+  complex(void) : _real(0.f), _imag(0.f) { }
+  __CUDA_HD__
+  complex(const double val[2]) : _real(val[0]), _imag(val[1]) { }
+  __CUDA_HD__
+  complex(double re, double im) : _real(re), _imag(im) { }
+  __CUDA_HD__
+  complex(const complex<double> &rhs) : _real(rhs.real()), _imag(rhs.imag()) { }
+#ifdef __CUDACC__
+  __device__ // Device only constructor
+  complex(double2 val) : _real(val.x), _imag(val.y) { }
+#endif
+public:
+  // explicit reinterpret case from integer
+  __CUDA_HD__ 
+  explicit complex(unsigned long long val)
+    {
+      union { unsigned long long as_long; double array[2]; } convert;
+      convert.as_long = val;
+      _real = convert.array[0];
+      _imag = convert.array[1];
+    }
+  // cast back to integer
+  __CUDA_HD__
+  inline unsigned long long as_int(void) const
+    {
+      union { unsigned long long as_long; double array[2]; } convert;
+      convert.array[0] = _real;
+      convert.array[1] = _imag;
+      return convert.as_long;
+    }
+#ifdef __CUDACC__
+  __device__
+  operator double2(void) const
+  {
+    double2 result;
+    result.x = _real;
+    result.y = _imag;
+    return result;
+  }
+#endif
+public:
+  __CUDA_HD__
+  inline complex<double>& operator=(const complex<double> &rhs)
+    {
+      _real = rhs.real();
+      _imag = rhs.imag();
+      return *this;
+    }
+public:
+  __CUDA_HD__
+  inline double real(void) const { return _real; }
+  __CUDA_HD__
+  inline double imag(void) const { return _imag; }
+public:
+  __CUDA_HD__
+  inline complex<double>& operator+=(const complex<double> &rhs)
+    {
+      _real += rhs.real();
+      _imag += rhs.imag();
+      return *this;
+    }
+  __CUDA_HD__
+  inline complex<double>& operator-=(const complex<double> &rhs)
+    {
+      _real -= rhs.real();
+      _imag -= rhs.imag();
+      return *this;
+    }
+  __CUDA_HD__
+  inline complex<double>& operator*=(const complex<double> &rhs)
+    {
+      const double new_real = _real * rhs.real() - _imag * rhs.imag();
+      const double new_imag = _imag * rhs.real() + _real * rhs.imag();
+      _real = new_real;
+      _imag = new_imag;
+      return *this;
+    }
+  __CUDA_HD__
+  inline complex<double>& operator/=(const complex<double> &rhs)
+    {
+      // Note the plus because of conjugation
+      const double num_real = _real * rhs.real() + _imag * rhs.imag();
+      // Note the minus because of conjugation
+      const double num_imag = _imag * rhs.real() - _real * rhs.imag();
+      const double denom = rhs.real() * rhs.real() + rhs.imag() * rhs.imag();
+      _real = num_real / denom;
+      _imag = num_imag / denom;
+      return *this;
+    }
+protected:
+  double _real;
+  double _imag;
+};
+
 // These methods work on all types regardless of instatiations
 template<typename T> __CUDA_HD__
 inline complex<T> operator+(const complex<T> &rhs)
