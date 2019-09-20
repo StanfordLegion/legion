@@ -2697,7 +2697,11 @@ namespace Legion {
     public:
       // These are here for backwards compatibility from a time when
       // the MappableType enum was inside of this class
+#ifndef __GNUC__
+      // GCC doesn't like this line even though it's just creating a
+      // type alias, who knows what their problem is
       typedef Legion::MappableType MappableType;
+#endif
       static const MappableType TASK_MAPPABLE = ::TASK_MAPPABLE;
       static const MappableType COPY_MAPPABLE = ::COPY_MAPPABLE;
       static const MappableType INLINE_MAPPABLE = ::INLINE_MAPPABLE;
