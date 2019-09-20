@@ -129,6 +129,8 @@ namespace Legion {
 #pragma clang diagnostic pop
 #endif
       NEW_OPAQUE_WRAPPER(legion_task_t, Task *);
+      NEW_OPAQUE_WRAPPER(legion_copy_t, Copy *);
+      NEW_OPAQUE_WRAPPER(legion_fill_t, Fill *);
       NEW_OPAQUE_WRAPPER(legion_inline_t, InlineMapping *);
       NEW_OPAQUE_WRAPPER(legion_mappable_t, Mappable *);
       NEW_OPAQUE_WRAPPER(legion_region_requirement_t , RegionRequirement *);

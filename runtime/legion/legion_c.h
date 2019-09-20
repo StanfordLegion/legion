@@ -85,6 +85,8 @@ extern "C" {
 #undef NEW_ACCESSOR_ARRAY_TYPE
   NEW_OPAQUE_TYPE(legion_index_iterator_t);
   NEW_OPAQUE_TYPE(legion_task_t);
+  NEW_OPAQUE_TYPE(legion_copy_t);
+  NEW_OPAQUE_TYPE(legion_fill_t);
   NEW_OPAQUE_TYPE(legion_inline_t);
   NEW_OPAQUE_TYPE(legion_mappable_t);
   NEW_OPAQUE_TYPE(legion_region_requirement_t);
@@ -2945,6 +2947,14 @@ extern "C" {
     legion_mapper_id_t id /* = 0 */,
     legion_mapping_tag_id_t launcher_tag /* = 0 */);
 
+  /**
+   * @return Caller does **NOT** take ownership of return value.
+   *
+   * @see Legion::Fill::requirement
+   */
+  legion_region_requirement_t
+  legion_fill_get_requirement(legion_fill_t fill);
+
   // -----------------------------------------------------------------------
   // File Operations
   // -----------------------------------------------------------------------
@@ -3093,6 +3103,17 @@ extern "C" {
   void
   legion_copy_launcher_add_arrival_barrier(legion_copy_launcher_t launcher,
                                            legion_phase_barrier_t bar);
+
+  /**
+   * @return Caller does **NOT** take ownership of return value.
+   *
+   * @see Legion::Copy::src_requirements
+   * @see Legion::Copy::dst_requirements
+   * @see Legion::Copy::src_indirect_requirements
+   * @see Legion::Copy::dst_indirect_requirements
+   */
+  legion_region_requirement_t
+  legion_copy_get_requirement(legion_copy_t copy, unsigned idx);
 
   // -----------------------------------------------------------------------
   // Index Copy Operations
@@ -3770,6 +3791,41 @@ extern "C" {
                                   size_t req_count /* = -1 */);
 
   // -----------------------------------------------------------------------
+  // Mappable Operations
+  // -----------------------------------------------------------------------
+
+  /**
+   * @see Legion::Mappable::get_mappable_type
+   */
+  enum legion_mappable_type_id_t
+  legion_mappable_get_type(legion_mappable_t mappable);
+
+  /**
+   * @see Legion::Mappable::as_task()
+   */
+  legion_task_t
+  legion_mappable_as_task(legion_mappable_t mappable);
+
+  /**
+   * @see Legion::Mappable::as_copy()
+   */
+  legion_copy_t
+  legion_mappable_as_copy(legion_mappable_t mappable);
+
+  /**
+   * @see Legion::Mappable::as_fill()
+   */
+  legion_fill_t
+  legion_mappable_as_fill(legion_mappable_t mappable);
+
+  /**
+   * @see Legion::Mappable::as_inline_mapping()
+   */
+  legion_inline_t
+  legion_mappable_as_inline_mapping(legion_mappable_t mappable);
+
+
+  // -----------------------------------------------------------------------
   // Task Operations
   // -----------------------------------------------------------------------
 
@@ -3777,13 +3833,7 @@ extern "C" {
    * @see Legion::Mappable::get_unique_id()
    */
   legion_unique_id_t
-  legion_context_get_unique_id(legion_context_t ctx);
-
-  /**
-   * @see Legion::Mappable::as_task()
-   */
-  legion_task_t
-  legion_mappable_as_task(legion_mappable_t task);
+  legion_context_get_unique_id(legion_context_t ctx); 
 
   /**
    * @see Legion::Mappable::get_unique_id()
@@ -3898,7 +3948,7 @@ extern "C" {
    * @see Legion::Task::regions
    */
   legion_region_requirement_t
-  legion_task_get_region(legion_task_t task, unsigned idx);
+  legion_task_get_requirement(legion_task_t task, unsigned idx);
 
   /**
    * @see Legion::Task::futures

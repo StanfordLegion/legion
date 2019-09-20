@@ -810,7 +810,7 @@ function codegen.map_task(rules, automata, state_id, signature, mapper_state_typ
           do
             [target.actions]
             var [inst_var]
-            var [req_var] = c.legion_task_get_region([task_var], [idx - 1])
+            var [req_var] = c.legion_task_get_requirement([task_var], [idx - 1])
             var [region_var] = c.legion_region_requirement_get_region([req_var])
             [layout_init]
             [inst_creation]
@@ -872,7 +872,7 @@ function codegen.map_task(rules, automata, state_id, signature, mapper_state_typ
           [body]
           do
             [target.actions]
-            var [req_var] = c.legion_task_get_region([task_var], [idx - 1])
+            var [req_var] = c.legion_task_get_requirement([task_var], [idx - 1])
             var [region_var] = c.legion_region_requirement_get_region([req_var])
 
             var [cache_success_var] = true
