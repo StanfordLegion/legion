@@ -2886,8 +2886,25 @@ local function make_partition_projection_functor(cx, expr, loop_index, color_spa
                                   idx : uint,
                                   parent : c.legion_logical_partition_t,
                                   [point])
-      var task = c.legion_mappable_as_task(mappable)
-      var [requirement] = c.legion_task_get_region(task, idx)
+      var [requirement];
+      var mappable_type = c.legion_mappable_get_type(mappable)
+      if mappable_type == c.TASK_MAPPABLE then
+        var task = c.legion_mappable_as_task(mappable)
+        [requirement] = c.legion_task_get_requirement(task, idx)
+      elseif mappable_type == c.COPY_MAPPABLE then
+        var copy = c.legion_mappable_as_copy(mappable)
+        [requirement] = c.legion_copy_get_requirement(copy, idx)
+      elseif mappable_type == c.FILL_MAPPABLE then
+        var fill = c.legion_mappable_as_fill(mappable)
+        std.assert(idx == 0, "projection index for fill is not zero")
+        [requirement] = c.legion_fill_get_requirement(fill) 
+      elseif mappable_type == c.INLINE_MAPPABLE then
+        var mapping = c.legion_mappable_as_inline_mapping(mappable)
+        std.assert(idx == 0, "projection index for inline mapping is not zero")
+        [requirement] = c.legion_inline_get_requirement(mapping)
+      else
+        std.assert(false, "unhandled mappable type")
+      end
       [symbol_setup];
       [free_vars_setup];
       var index : index_type = [value.value];

@@ -3624,6 +3624,14 @@ legion_runtime_index_fill_field_future_with_domain(
   runtime->fill_fields(ctx, launcher);
 }
 
+legion_region_requirement_t
+legion_fill_get_requirement(legion_fill_t fill_)
+{
+  Fill *fill = CObjectWrapper::unwrap(fill_);
+
+  return CObjectWrapper::wrap(&fill->requirement);
+}
+
 // -----------------------------------------------------------------------
 // File Operations
 // -----------------------------------------------------------------------
@@ -3829,6 +3837,27 @@ legion_copy_launcher_add_arrival_barrier(legion_copy_launcher_t launcher_,
   PhaseBarrier bar = CObjectWrapper::unwrap(bar_);
 
   launcher->add_arrival_barrier(bar);
+}
+
+legion_region_requirement_t
+legion_copy_get_requirement(legion_copy_t copy_, unsigned idx)
+{
+  Copy *copy = CObjectWrapper::unwrap(copy_);
+
+  if (idx < copy->src_requirements.size())
+    return CObjectWrapper::wrap(&copy->src_requirements[idx]);
+  else
+    idx -= copy->src_requirements.size();
+  if (idx < copy->dst_requirements.size())
+    return CObjectWrapper::wrap(&copy->dst_requirements[idx]);
+  else
+    idx -= copy->dst_requirements.size();
+  if (idx < copy->src_indirect_requirements.size())
+    return CObjectWrapper::wrap(&copy->src_indirect_requirements[idx]);
+  else
+    idx -= copy->src_indirect_requirements.size();
+  assert(idx < copy->dst_indirect_requirements.size());
+  return CObjectWrapper::wrap(&copy->dst_indirect_requirements[idx]);
 }
 
 // -----------------------------------------------------------------------
@@ -5038,6 +5067,58 @@ legion_index_iterator_next_span(legion_index_iterator_t handle_,
 }
 
 //------------------------------------------------------------------------
+// Mappable Operations
+//------------------------------------------------------------------------
+
+enum legion_mappable_type_id_t
+legion_mappable_get_type(legion_mappable_t mappable_)
+{
+  Mappable *mappable = CObjectWrapper::unwrap(mappable_);
+
+  return mappable->get_mappable_type();
+}
+
+legion_task_t
+legion_mappable_as_task(legion_mappable_t mappable_)
+{
+  Mappable *mappable = CObjectWrapper::unwrap(mappable_);
+  Task* task = const_cast<Task*>(mappable->as_task());
+  assert(task != NULL);
+
+  return CObjectWrapper::wrap(task);
+}
+
+legion_copy_t
+legion_mappable_as_copy(legion_mappable_t mappable_)
+{
+  Mappable *mappable = CObjectWrapper::unwrap(mappable_);
+  Copy* copy = const_cast<Copy*>(mappable->as_copy());
+  assert(copy != NULL);
+
+  return CObjectWrapper::wrap(copy);
+}
+
+legion_fill_t
+legion_mappable_as_fill(legion_mappable_t mappable_)
+{
+  Mappable *mappable = CObjectWrapper::unwrap(mappable_);
+  Fill* fill = const_cast<Fill*>(mappable->as_fill());
+  assert(fill != NULL);
+
+  return CObjectWrapper::wrap(fill);
+}
+
+legion_inline_t
+legion_mappable_as_inline_mapping(legion_mappable_t mappable_)
+{
+  Mappable *mappable = CObjectWrapper::unwrap(mappable_);
+  InlineMapping* mapping = const_cast<InlineMapping*>(mappable->as_inline());
+  assert(mapping != NULL);
+
+  return CObjectWrapper::wrap(mapping);
+}
+
+//------------------------------------------------------------------------
 // Task Operations
 //------------------------------------------------------------------------
 
@@ -5047,15 +5128,6 @@ legion_context_get_unique_id(legion_context_t ctx_)
   Task* task =
     reinterpret_cast<Task*>(CObjectWrapper::unwrap(ctx_)->context());
   return task->get_unique_id();
-}
-
-legion_task_t
-legion_mappable_as_task(legion_mappable_t task_)
-{
-  Task* task = const_cast<Task*>(CObjectWrapper::unwrap(task_)->as_task());
-  assert(task != NULL);
-
-  return CObjectWrapper::wrap(task);
 }
 
 legion_unique_id_t
@@ -5191,9 +5263,10 @@ legion_task_get_regions_size(legion_task_t task_)
 }
 
 legion_region_requirement_t
-legion_task_get_region(legion_task_t task_, unsigned idx)
+legion_task_get_requirement(legion_task_t task_, unsigned idx)
 {
   Task *task = CObjectWrapper::unwrap(task_);
+  assert(idx < task->regions.size());
 
   return CObjectWrapper::wrap(&task->regions[idx]);
 }
