@@ -1246,6 +1246,10 @@ namespace Legion {
           const InstanceSet &instances, const IndexSpace space,
           LegionVector<IndirectRecord>::aligned &records, const bool sources);
     public:
+      // From MemoizableOp
+      virtual void replay_analysis(void);
+    public:
+      void enumerate_points(void);
       void handle_point_commit(RtEvent point_committed);
       void check_point_requirements(void);
     public:
@@ -2952,6 +2956,10 @@ namespace Legion {
       virtual void trigger_mapping(void);
       virtual void trigger_commit(void);
     public:
+      // From MemoizableOp
+      virtual void replay_analysis(void);
+    public:
+      void enumerate_points(void);
       void handle_point_commit(void);
       void check_point_requirements(void);
     public:

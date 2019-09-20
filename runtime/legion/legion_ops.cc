@@ -6189,6 +6189,88 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Enumerate the points
+      enumerate_points(); 
+      if (runtime->check_privileges)
+      {
+        // Check for interfering point requirements in debug mode
+        check_point_requirements();
+        // Also check to make sure source requirements dominate
+        // the destination requirements for each point
+        for (std::vector<PointCopyOp*>::const_iterator it = points.begin();
+              it != points.end(); it++)
+          (*it)->check_compatibility_properties();
+      } 
+      // Launch the points
+      std::set<RtEvent> mapped_preconditions;
+      std::set<ApEvent> executed_preconditions;
+      for (std::vector<PointCopyOp*>::const_iterator it = points.begin();
+            it != points.end(); it++)
+      {
+        mapped_preconditions.insert((*it)->get_mapped_event());
+        executed_preconditions.insert((*it)->get_completion_event());
+        (*it)->launch();
+      }
+#ifdef LEGION_SPY
+      LegionSpy::log_operation_events(unique_op_id, ApEvent::NO_AP_EVENT,
+                                      completion_event);
+#endif
+      // Record that we are mapped when all our points are mapped
+      // and we are executed when all our points are executed
+      complete_mapping(Runtime::merge_events(mapped_preconditions));
+      ApEvent done = Runtime::merge_events(NULL, executed_preconditions);
+      request_early_complete(done);
+      complete_execution(Runtime::protect_event(done));
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexCopyOp::trigger_mapping(void)
+    //--------------------------------------------------------------------------
+    {
+      // This should never be called as this operation doesn't
+      // go through the rest of the queue normally
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexCopyOp::trigger_commit(void)
+    //--------------------------------------------------------------------------
+    {
+      bool commit_now = false;
+      {
+        AutoLock o_lock(op_lock);
+#ifdef DEBUG_LEGION
+        assert(!commit_request);
+#endif
+        commit_request = true;
+        commit_now = (points.size() == points_committed);
+      }
+      if (commit_now)
+        commit_operation(true/*deactivate*/, 
+                          Runtime::merge_events(commit_preconditions));
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexCopyOp::replay_analysis(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(is_replaying());
+#endif
+#ifdef LEGION_SPY
+      LegionSpy::log_replay_operation(unique_op_id);
+#endif
+      // Enumerate the points
+      enumerate_points();
+      // Then call replay analysis on all of them
+      for (std::vector<PointCopyOp*>::const_iterator it = 
+            points.begin(); it != points.end(); it++)
+        (*it)->replay_analysis();
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexCopyOp::enumerate_points(void)
+    //--------------------------------------------------------------------------
+    {
       size_t num_points = index_domain.get_volume();
 #ifdef DEBUG_LEGION
       assert(num_points > 0);
@@ -6255,69 +6337,12 @@ namespace Legion {
                                    projection_points);
         }
       }
-      if (runtime->check_privileges)
-      {
-        // Check for interfering point requirements in debug mode
-        check_point_requirements();
-        // Also check to make sure source requirements dominate
-        // the destination requirements for each point
-        for (std::vector<PointCopyOp*>::const_iterator it = points.begin();
-              it != points.end(); it++)
-          (*it)->check_compatibility_properties();
-      }
       if (runtime->legion_spy_enabled)
       {
         for (std::vector<PointCopyOp*>::const_iterator it = points.begin();
               it != points.end(); it++) 
           (*it)->log_copy_requirements();
       }
-      // Launch the points
-      std::set<RtEvent> mapped_preconditions;
-      std::set<ApEvent> executed_preconditions;
-      for (std::vector<PointCopyOp*>::const_iterator it = points.begin();
-            it != points.end(); it++)
-      {
-        mapped_preconditions.insert((*it)->get_mapped_event());
-        executed_preconditions.insert((*it)->get_completion_event());
-        (*it)->launch();
-      }
-#ifdef LEGION_SPY
-      LegionSpy::log_operation_events(unique_op_id, ApEvent::NO_AP_EVENT,
-                                      completion_event);
-#endif
-      // Record that we are mapped when all our points are mapped
-      // and we are executed when all our points are executed
-      complete_mapping(Runtime::merge_events(mapped_preconditions));
-      ApEvent done = Runtime::merge_events(NULL, executed_preconditions);
-      request_early_complete(done);
-      complete_execution(Runtime::protect_event(done));
-    }
-
-    //--------------------------------------------------------------------------
-    void IndexCopyOp::trigger_mapping(void)
-    //--------------------------------------------------------------------------
-    {
-      // This should never be called as this operation doesn't
-      // go through the rest of the queue normally
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    void IndexCopyOp::trigger_commit(void)
-    //--------------------------------------------------------------------------
-    {
-      bool commit_now = false;
-      {
-        AutoLock o_lock(op_lock);
-#ifdef DEBUG_LEGION
-        assert(!commit_request);
-#endif
-        commit_request = true;
-        commit_now = (points.size() == points_committed);
-      }
-      if (commit_now)
-        commit_operation(true/*deactivate*/, 
-                          Runtime::merge_events(commit_preconditions));
     }
 
     //--------------------------------------------------------------------------
@@ -14733,35 +14758,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Enumerate the points
-      size_t num_points = index_domain.get_volume();
-#ifdef DEBUG_LEGION
-      assert(num_points > 0);
-#endif
-      unsigned point_idx = 0;
-      points.resize(num_points);
-      for (Domain::DomainPointIterator itr(index_domain); 
-            itr; itr++, point_idx++)
-      {
-        PointFillOp *point = runtime->get_available_point_fill_op();
-        point->initialize(this, itr.p);
-        points[point_idx] = point;
-      }
-      // Now we have to do the projection
-      ProjectionFunction *function = 
-        runtime->find_projection_function(requirement.projection);
-      std::vector<ProjectionPoint*> projection_points(points.begin(),
-                                                      points.end());
-      function->project_points(this, 0/*idx*/, requirement,
-                               runtime, projection_points);
+      enumerate_points(); 
       // Check for interfering point requirements in debug mode
       if (runtime->check_privileges)
-        check_point_requirements();
-      if (runtime->legion_spy_enabled)
-      {
-        for (std::vector<PointFillOp*>::const_iterator it = points.begin();
-              it != points.end(); it++)
-          (*it)->log_fill_requirement();
-      }
+        check_point_requirements(); 
       // Launch the points
       std::set<RtEvent> mapped_preconditions;
       std::set<ApEvent> executed_preconditions;
@@ -14808,6 +14808,57 @@ namespace Legion {
       }
       if (commit_now)
         commit_operation(true/*deactivate*/); 
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexFillOp::replay_analysis(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(is_replaying());
+#endif
+#ifdef LEGION_SPY
+      LegionSpy::log_replay_operation(unique_op_id);
+#endif
+      // Enumerate the points
+      enumerate_points();
+      // Then call replay analysis on all of them
+      for (std::vector<PointFillOp*>::const_iterator it = 
+            points.begin(); it != points.end(); it++)
+        (*it)->replay_analysis();
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexFillOp::enumerate_points(void)
+    //--------------------------------------------------------------------------
+    {
+      // Enumerate the points
+      size_t num_points = index_domain.get_volume();
+#ifdef DEBUG_LEGION
+      assert(num_points > 0);
+#endif
+      unsigned point_idx = 0;
+      points.resize(num_points);
+      for (Domain::DomainPointIterator itr(index_domain); 
+            itr; itr++, point_idx++)
+      {
+        PointFillOp *point = runtime->get_available_point_fill_op();
+        point->initialize(this, itr.p);
+        points[point_idx] = point;
+      }
+      // Now we have to do the projection
+      ProjectionFunction *function = 
+        runtime->find_projection_function(requirement.projection);
+      std::vector<ProjectionPoint*> projection_points(points.begin(),
+                                                      points.end());
+      function->project_points(this, 0/*idx*/, requirement,
+                               runtime, projection_points);
+      if (runtime->legion_spy_enabled)
+      {
+        for (std::vector<PointFillOp*>::const_iterator it = points.begin();
+              it != points.end(); it++)
+          (*it)->log_fill_requirement();
+      }
     }
 
     //--------------------------------------------------------------------------
