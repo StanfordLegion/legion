@@ -1325,7 +1325,8 @@ namespace Legion {
       RegionTreeContext ctx = context->get_context(); 
 #ifdef DEBUG_LEGION
       assert(ctx.exists());
-      assert(req.handle_type == SINGULAR);
+      assert((req.handle_type == SINGULAR) || 
+          ((req.handle_type == REG_PROJECTION) && (req.projection == 0)));
 #endif
       RegionNode *region_node = get_node(req.region);
       FieldMask user_mask = 
