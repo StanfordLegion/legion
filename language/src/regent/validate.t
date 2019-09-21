@@ -202,6 +202,7 @@ local node_vars_are_valid = {
   [ast.typed.expr.Future]                     = continue,
   [ast.typed.expr.FutureGetResult]            = continue,
   [ast.typed.expr.ParallelizerConstraint]     = continue,
+  [ast.typed.expr.Projection]                 = continue,
 
   [ast.typed.expr.Internal]                   = unreachable,
 

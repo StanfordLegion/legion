@@ -545,27 +545,45 @@ function specialize.expr_field_access(cx, node, allow_lists)
       }
     end
   else
-    local fields = specialize.region_fields(cx, node.field_names)
-    if value:is(ast.specialized.expr.LuaTable) then
-      local function convert(fields, value)
-        if fields then
-          if #fields > 1 then
-            report.error(node, "unable to specialize multi-field access")
-          end
-          return convert(fields[1].fields,
-              convert_lua_value(cx, node, value.value[fields[1].field_name]))
-        else
-          return value
-        end
+    local is_field_access = nil
+    local is_projection = nil
+    local fields = data.flatmap(function(field_name)
+      if field_name:is(ast.unspecialized.FieldNames) then
+        is_field_access = true
+        return specialize.field_names(cx, field_name)
+      elseif field_name:is(ast.unspecialized.region.Field) then
+        is_projection = true
+        return specialize.region_field(cx, field_name)
+      else
+        assert(false)
       end
-      return convert(fields, value)
+    end, node.field_names)
+    assert(not (is_field_access and is_projection))
+
+    if value:is(ast.specialized.expr.LuaTable) then
+      if not is_field_access then
+        report.error(node, "unable to specialize projection")
+      end
+      if #fields > 1 then
+        report.error(node, "unable to specialize multi-field access")
+      end
+      return convert_lua_value(cx, node, value.value[fields[1]])
     else
-      return ast.specialized.expr.FieldAccess {
-        value = value,
-        field_name = fields,
-        annotations = node.annotations,
-        span = node.span,
-      }
+      if is_field_access then
+        return ast.specialized.expr.FieldAccess {
+          value = value,
+          field_name = fields,
+          annotations = node.annotations,
+          span = node.span,
+        }
+      else
+        return ast.specialized.expr.Projection {
+          region = value,
+          fields = fields,
+          annotations = node.annotations,
+          span = node.span,
+        }
+      end
     end
   end
 end

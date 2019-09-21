@@ -3007,8 +3007,15 @@ local function expr_call_setup_region_arg(
     add_flags = c.legion_index_launcher_add_flags
   end
 
+  local param_field_paths = std.flatten_struct_fields(param_type:fspace())
+  local arg_field_paths = std.flatten_struct_fields(arg_type:fspace())
+  local mapping = data.dict(data.zip(param_field_paths:map(data.hash),
+                                     arg_field_paths))
+
   for i, privilege in ipairs(privileges) do
-    local field_paths = privilege_field_paths[i]
+    local field_paths = privilege_field_paths[i]:map(function(field_path)
+        return mapping[field_path:hash()]
+      end)
     local field_types = privilege_field_types[i]
     local privilege_mode = privilege_modes[i]
     local coherence_mode = coherence_modes[i]
@@ -7906,6 +7913,85 @@ function codegen.expr_import_partition(cx, node)
     partition_type)
 end
 
+function codegen.expr_projection(cx, node)
+  local orig_region_value = codegen.expr(cx, node.region):read(cx)
+  local orig_region_type = std.as_read(node.region.expr_type)
+
+  local region_type = std.as_read(node.expr_type)
+
+  local orig_field_paths = std.get_absolute_field_paths(orig_region_type:fspace(),
+      node.field_mapping:map(function(entry) return entry[1] end))
+  local field_paths = std.get_absolute_field_paths(region_type:fspace(),
+      node.field_mapping:map(function(entry) return entry[2] end))
+
+  local orig_region = cx:region(orig_region_type)
+  local result = terralib.newsymbol(region_type, "r")
+  local field_id_array_buffer =
+    terralib.newsymbol(&c.legion_field_id_t[#orig_field_paths], "field_ids")
+  local field_id_array = `(@[field_id_array_buffer])
+  local index_mapping = data.dict(data.zip(orig_region.field_paths:map(data.hash),
+                                           data.range(0, #orig_region.field_paths)))
+  local actions = quote
+    [orig_region_value.actions]
+    var [result] = [region_type] { impl = [orig_region_value.value].impl }
+    var [field_id_array_buffer] =
+      [&c.legion_field_id_t[#orig_field_paths]](c.malloc([#orig_field_paths] *
+                                                         [terralib.sizeof(c.legion_field_id_t)]))
+    [data.zip(data.range(0, #orig_field_paths), orig_field_paths):map(function(pair)
+      local idx, orig_field_path = unpack(pair)
+      local orig_idx = index_mapping[orig_field_path:hash()]
+      assert(orig_idx ~= nil)
+      return quote
+        [field_id_array][ [idx] ] = [orig_region.field_id_array][ [orig_idx] ]
+      end
+    end)]
+  end
+
+  local field_mapping = data.map_from_table(data.dict(data.zip(field_paths, orig_field_paths)))
+  local function map_dict(dict)
+    return data.dict(data.zip(field_paths:map(data.hash),
+                              field_paths:map(function(field_path)
+                                return dict[field_mapping[field_path]:hash()]
+                              end)))
+  end
+
+  if std.type_eq(orig_region.root_region_type, orig_region_type) then
+    cx:add_region_root(region_type, result,
+                       field_paths,
+                       terralib.newlist({field_paths}),
+                       map_dict(orig_region.field_privileges),
+                       map_dict(orig_region.field_types),
+                       map_dict(orig_region.field_ids),
+                       field_id_array,
+                       map_dict(orig_region.fields_are_scratch),
+                       map_dict(orig_region.physical_regions),
+                       map_dict(orig_region.base_pointers),
+                       map_dict(orig_region.strides))
+  else
+    local root_region_type = orig_region.root_region_type
+    local parent_region_type =
+      std.region(root_region_type.ispace_symbol, region_type:fspace())
+    cx:add_region_root(parent_region_type,
+                       cx:region(root_region_type).logical_region,
+                       field_paths,
+                       terralib.newlist({field_paths}),
+                       map_dict(orig_region.field_privileges),
+                       map_dict(orig_region.field_types),
+                       map_dict(orig_region.field_ids),
+                       field_id_array,
+                       map_dict(orig_region.fields_are_scratch),
+                       map_dict(orig_region.physical_regions),
+                       map_dict(orig_region.base_pointers),
+                       map_dict(orig_region.strides))
+    cx:add_region_subregion(region_type, result, parent_region_type)
+  end
+
+  return values.value(
+    node,
+    expr.once_only(actions, result, region_type),
+    region_type)
+end
+
 function codegen.expr(cx, node)
   if node:is(ast.typed.expr.Internal) then
     return codegen.expr_internal(cx, node)
@@ -8104,6 +8190,9 @@ function codegen.expr(cx, node)
 
   elseif node:is(ast.typed.expr.ImportPartition) then
     return codegen.expr_import_partition(cx, node)
+
+  elseif node:is(ast.typed.expr.Projection) then
+    return codegen.expr_projection(cx, node)
 
   else
     assert(false, "unexpected node type " .. tostring(node.node_type))

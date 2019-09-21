@@ -745,6 +745,16 @@ function pretty.expr_import_partition(cx, node)
       ")"})
 end
 
+function pretty.expr_projection(cx, node)
+  return join({
+    pretty.expr(cx, node.region),
+    ".{",
+    node.field_mapping:map(function(entry)
+      return entry[1]:mkstring(".")
+    end):concat(","),
+    "}"})
+end
+
 function pretty.expr(cx, node)
   if node:is(ast.typed.expr.ID) then
     return pretty.expr_id(cx, node)
@@ -943,6 +953,9 @@ function pretty.expr(cx, node)
 
   elseif node:is(ast.typed.expr.ImportPartition) then
     return pretty.expr_import_partition(cx, node)
+
+  elseif node:is(ast.typed.expr.Projection) then
+    return pretty.expr_projection(cx, node)
 
   else
     assert(false, "unexpected node type " .. tostring(node.node_type))

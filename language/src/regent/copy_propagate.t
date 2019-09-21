@@ -286,6 +286,7 @@ local copy_propagate_expr_table = {
   [ast.typed.expr.Constant]                   = copy_propagate.pass_through_expr,
   [ast.typed.expr.Global]                     = copy_propagate.pass_through_expr,
   [ast.typed.expr.Null]                       = copy_propagate.pass_through_expr,
+  [ast.typed.expr.Projection]                 = copy_propagate.pass_through_expr,
 
   [ast.typed.expr.CtorListField]              = unreachable,
   [ast.typed.expr.CtorRecField]               = unreachable,

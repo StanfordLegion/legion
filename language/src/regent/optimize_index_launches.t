@@ -529,7 +529,8 @@ local function analyze_is_side_effect_free_node(cx)
       node:is(ast.typed.expr.WithScratchFields) or
       node:is(ast.typed.expr.RegionRoot) or
       node:is(ast.typed.expr.Unary) or
-      node:is(ast.typed.expr.Binary)
+      node:is(ast.typed.expr.Binary) or
+      node:is(ast.typed.expr.Projection)
     then
       return true
 
@@ -591,7 +592,8 @@ local function analyze_is_loop_invariant_node(cx)
       node:is(ast.typed.expr.Release) or
       node:is(ast.typed.expr.AllocateScratchFields) or
       node:is(ast.typed.expr.Condition) or
-      node:is(ast.typed.expr.Deref)
+      node:is(ast.typed.expr.Deref) or
+      node:is(ast.typed.expr.Projection)
     then
       return false
 

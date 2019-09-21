@@ -386,6 +386,20 @@ local normalize_expr_factory = terralib.memoize(function(field, is_list, read)
   end
 end)
 
+local normalize_expr_factory_full = function(field_list, read_list)
+  assert(field_list ~= nil)
+  assert(read_list ~= nil)
+  assert(#field_list == #read_list)
+  return function(stats, expr)
+    local normalized_fields = data.zip(field_list, read_list):map(function(pair)
+      local field, read = unpack(pair)
+      return expr[field] and normalize.expr(stats, expr[field], read)
+    end)
+    local subst = data.dict(data.zip(field_list, normalized_fields))
+    return expr(subst)
+  end
+end
+
 local predicates = {
   [ast.specialized.expr.ID]       = function(node) return true end,
   [ast.specialized.expr.Constant] = function(node) return true end,
@@ -427,6 +441,10 @@ local predicates = {
         return normalize.normalized(field.value)
       end))
     end,
+  [ast.specialized.expr.Projection] =
+    function(node)
+      return normalize.normalized(node.region)
+    end
 }
 
 normalize.normalized = terralib.memoize(function(expr)
@@ -434,31 +452,33 @@ normalize.normalized = terralib.memoize(function(expr)
   return predicate and predicate(expr) or false
 end)
 
-local expr_regent_cast = normalize_expr_factory("value", false, true)
-
-local function expr_ispace(stats, expr)
-  local extent = normalize.expr(stats, expr.extent, true)
-  local start = expr.start and normalize.expr(stats, expr.start, true) or false
+local function expr_field_access(stats, expr)
+  local value = normalize.expr(stats, expr.value, true)
+  local field_name = expr.field_name
+  if not std.config["allow-multi-field-expansion"] then
+    if type(field_name[1]) == "string" then
+      if #field_name > 1 then
+        report.error(expr, "multi-field access is not allowed")
+      end
+      field_name = field_name[1]
+    end
+  end
   return expr {
-    extent = extent,
-    start = start,
+    value = value,
+    field_name = field_name,
   }
 end
 
-local expr_region = normalize_expr_factory("ispace", false, true)
+local expr_index_access = normalize_expr_factory_full({"value", "index"}, {true, true})
 
-local expr_field_access = normalize_expr_factory("value", false, true)
-
-local expr_deref = normalize_expr_factory("value", false, true)
-
-local expr_address_of = normalize_expr_factory("value", false, true)
-
-local function expr_index_access(stats, expr)
+local function expr_method_call(stats, expr)
   local value = normalize.expr(stats, expr.value, true)
-  local index = normalize.expr(stats, expr.index, true)
+  local args = expr.args:map(function(arg)
+    return normalize.expr(stats, arg, true)
+  end)
   return expr {
-    index = index,
     value = value,
+    args = args,
   }
 end
 
@@ -482,125 +502,207 @@ local function expr_call(stats, expr)
   return expr { args = args }
 end
 
-local expr_method_call = normalize_expr_factory("args", true, true)
+local expr_cast = normalize_expr_factory("args", true, true)
 
 local expr_ctor = normalize_expr_factory("fields", true, false)
 
 local expr_ctor_field = normalize_expr_factory("value", false, true)
 
+local expr_raw_fields = normalize_expr_factory("region", false, false)
+
+local expr_raw_physical = normalize_expr_factory("region", false, false)
+
+local expr_raw_value = normalize_expr_factory("value", false, true)
+
 local expr_is_null = normalize_expr_factory("pointer", false, true)
+
+local expr_regent_cast = normalize_expr_factory("value", false, true)
+
+local expr_ispace = normalize_expr_factory_full({"extent", "start"}, {true, true})
+
+local expr_region = normalize_expr_factory("ispace", false, true)
+
+local expr_partition = normalize_expr_factory_full(
+    {"region", "coloring", "colors"},
+    {false, false, false})
+
+local expr_partition_equal =
+  normalize_expr_factory_full({"region", "colors"}, {false, false})
+
+local expr_partition_by_field =
+  normalize_expr_factory_full({"region", "colors"}, {false, false})
+
+local expr_partition_by_restriction = normalize_expr_factory_full(
+    {"region", "transform", "extent", "colors"},
+    {false, false, false, false})
+
+local expr_image = normalize_expr_factory_full(
+    {"parent", "partition", "region"},
+    {false, false, false})
+
+local expr_preimage = normalize_expr_factory_full(
+    {"parent", "partition", "region"},
+    {false, false, false})
+
+local expr_cross_product = normalize_expr_factory("args", true, false)
+
+local expr_cross_product_array =
+  normalize_expr_factory_full({"lhs", "colorings"}, {false, false})
+
+local expr_list_slice_partition =
+  normalize_expr_factory_full({"partition", "indices"}, {false, false})
+
+local expr_list_duplicate_partition =
+  normalize_expr_factory_full({"partition", "indices"}, {false, false})
+
+local expr_list_cross_product =
+  normalize_expr_factory_full({"lhs", "rhs"}, {false, false})
+
+local expr_list_cross_product_complete =
+  normalize_expr_factory_full({"lhs", "product"}, {false, false})
+
+local expr_list_phase_barriers = normalize_expr_factory("product", false, false)
+
+local expr_list_invert =
+  normalize_expr_factory_full({"rhs", "product", "barriers"}, {false, false, false})
+
+local expr_list_range =
+  normalize_expr_factory_full({"start", "stop"}, {false, false})
+
+local expr_list_ispace = normalize_expr_factory("ispace", false, false)
+
+local expr_list_from_element =
+  normalize_expr_factory_full({"list", "value"}, {false, false})
+
+local expr_phase_barrier = normalize_expr_factory("value", false, false)
+
+local expr_dynamic_collective = normalize_expr_factory("arrivals", false, false)
+
+local expr_dynamic_collective_get_result = normalize_expr_factory("value", false, false)
+
+local expr_advance = normalize_expr_factory("value", false, false)
+
+local expr_adjust =
+  normalize_expr_factory_full({"barrier", "value"}, {false, false})
+
+local expr_arrive =
+  normalize_expr_factory_full({"barrier", "value"}, {false, false})
+
+local expr_await = normalize_expr_factory("barrier", false, false)
+
+local expr_copy =
+  normalize_expr_factory_full({"src", "dst"}, {false, false})
+
+local expr_fill =
+  normalize_expr_factory_full({"dst", "value"}, {false, false})
+
+local expr_acquire = normalize_expr_factory("region", false, false)
+
+local expr_release = normalize_expr_factory("region", false, false)
+
+local expr_attach_hdf5 =
+  normalize_expr_factory_full(
+    {"region", "filename", "mode", "field_map"},
+    {false, true, true, true})
+
+local expr_detach_hdf5 = normalize_expr_factory("region", false, false)
+
+local expr_allocate_scratch_fields = normalize_expr_factory("region", false, false)
+
+local expr_with_scratch_fields = normalize_expr_factory("region", false, false)
+
+local expr_region_root = normalize_expr_factory("region", false, false)
 
 local expr_unary = normalize_expr_factory("rhs", false, true)
 
-local function expr_binary(stats, expr)
-  local lhs = normalize.expr(stats, expr.lhs, true)
-  local rhs = normalize.expr(stats, expr.rhs, true)
-  return expr {
-    lhs = lhs,
-    rhs = rhs,
-  }
-end
+local expr_binary =
+  normalize_expr_factory_full({"lhs", "rhs"}, {true, true})
 
-local expr_cast = normalize_expr_factory("args", true, true)
+local expr_deref = normalize_expr_factory("value", false, true)
+
+local expr_address_of = normalize_expr_factory("value", false, true)
 
 local expr_import_ispace = normalize_expr_factory("value", false, true)
 
-local function expr_import_region(stats, expr)
-  local ispace    = normalize.expr(stats, expr.ispace   , true)
-  local value     = normalize.expr(stats, expr.value    , true)
-  local field_ids = normalize.expr(stats, expr.field_ids, true)
-  return expr {
-    ispace = ispace,
-    value = value,
-    field_ids = field_ids,
-  }
-end
+local expr_import_region =
+  normalize_expr_factory_full({"ispace", "value", "field_ids"}, {false, true, true})
 
-local function expr_import_partition(stats, expr)
-  local region = normalize.expr(stats, expr.region, true)
-  local colors = normalize.expr(stats, expr.colors, true)
-  local value  = normalize.expr(stats, expr.value,  true)
-  return expr {
-    region = region,
-    colors = colors,
-    value = value,
-  }
-end
+local expr_import_partition =
+  normalize_expr_factory_full({"region", "colors", "value"}, {false, true, true})
+
+local expr_projection = normalize_expr_factory("region", false, false)
 
 local normalize_expr_table = {
+  [ast.specialized.expr.ID]                         = pass_through_expr,
+  [ast.specialized.expr.FieldAccess]                = expr_field_access,
+  [ast.specialized.expr.IndexAccess]                = expr_index_access,
+  [ast.specialized.expr.MethodCall]                 = expr_method_call,
+  [ast.specialized.expr.Call]                       = expr_call,
+  [ast.specialized.expr.Cast]                       = expr_cast,
+  [ast.specialized.expr.Ctor]                       = expr_ctor,
+  [ast.specialized.expr.CtorListField]              = expr_ctor_field,
+  [ast.specialized.expr.CtorRecField]               = expr_ctor_field,
+  [ast.specialized.expr.Constant]                   = pass_through_expr,
+  [ast.specialized.expr.Global]                     = pass_through_expr,
+
+  [ast.specialized.expr.RawContext]                 = pass_through_expr,
+  [ast.specialized.expr.RawFields]                  = expr_raw_fields,
+  [ast.specialized.expr.RawPhysical]                = expr_raw_physical,
+  [ast.specialized.expr.RawRuntime]                 = pass_through_expr,
+  [ast.specialized.expr.RawTask]                    = pass_through_expr,
+  [ast.specialized.expr.RawValue]                   = expr_raw_value,
+  [ast.specialized.expr.Isnull]                     = expr_is_null,
+  [ast.specialized.expr.New]                        = pass_through_expr,
+  [ast.specialized.expr.Null]                       = pass_through_expr,
   [ast.specialized.expr.DynamicCast]                = expr_regent_cast,
   [ast.specialized.expr.StaticCast]                 = expr_regent_cast,
   [ast.specialized.expr.UnsafeCast]                 = expr_regent_cast,
   [ast.specialized.expr.Ispace]                     = expr_ispace,
   [ast.specialized.expr.Region]                     = expr_region,
-  [ast.specialized.expr.FieldAccess]                = expr_field_access,
-  [ast.specialized.expr.Deref]                      = expr_deref,
-  [ast.specialized.expr.AddressOf]                  = expr_address_of,
-  [ast.specialized.expr.IndexAccess]                = expr_index_access,
-  [ast.specialized.expr.MethodCall]                 = expr_method_call,
-  [ast.specialized.expr.Call]                       = expr_call,
-  [ast.specialized.expr.Ctor]                       = expr_ctor,
-  [ast.specialized.expr.CtorListField]              = expr_ctor_field,
-  [ast.specialized.expr.CtorRecField]               = expr_ctor_field,
-  [ast.specialized.expr.Isnull]                     = expr_is_null,
+  [ast.specialized.expr.Partition]                  = expr_partition,
+  [ast.specialized.expr.PartitionEqual]             = expr_partition_equal,
+  [ast.specialized.expr.PartitionByField]           = expr_partition_by_field,
+  [ast.specialized.expr.PartitionByRestriction]     = expr_partition_by_restriction,
+  [ast.specialized.expr.Image]                      = expr_image,
+  [ast.specialized.expr.Preimage]                   = expr_preimage,
+  [ast.specialized.expr.CrossProduct]               = expr_cross_product,
+  [ast.specialized.expr.CrossProductArray]          = expr_cross_product_array,
+  [ast.specialized.expr.ListSlicePartition]         = expr_list_slice_partition,
+  [ast.specialized.expr.ListDuplicatePartition]     = expr_list_duplicate_partition,
+  [ast.specialized.expr.ListCrossProduct]           = expr_list_cross_product,
+  [ast.specialized.expr.ListCrossProductComplete]   = expr_list_cross_product_complete,
+  [ast.specialized.expr.ListPhaseBarriers]          = expr_list_phase_barriers,
+  [ast.specialized.expr.ListInvert]                 = expr_list_invert,
+  [ast.specialized.expr.ListRange]                  = expr_list_range,
+  [ast.specialized.expr.ListIspace]                 = expr_list_ispace,
+  [ast.specialized.expr.ListFromElement]            = expr_list_from_element,
+  [ast.specialized.expr.PhaseBarrier]               = expr_phase_barrier,
+  [ast.specialized.expr.DynamicCollective]          = expr_dynamic_collective,
+  [ast.specialized.expr.DynamicCollectiveGetResult] = expr_dynamic_collective_get_result,
+  [ast.specialized.expr.Advance]                    = expr_advance,
+  [ast.specialized.expr.Adjust]                     = expr_adjust,
+  [ast.specialized.expr.Arrive]                     = expr_arrive,
+  [ast.specialized.expr.Await]                      = expr_await,
+  [ast.specialized.expr.Copy]                       = expr_copy,
+  [ast.specialized.expr.Fill]                       = expr_fill,
+  [ast.specialized.expr.Acquire]                    = expr_acquire,
+  [ast.specialized.expr.Release]                    = expr_release,
+  [ast.specialized.expr.AttachHDF5]                 = expr_attach_hdf5,
+  [ast.specialized.expr.DetachHDF5]                 = expr_detach_hdf5,
+  [ast.specialized.expr.AllocateScratchFields]      = expr_allocate_scratch_fields,
+  [ast.specialized.expr.WithScratchFields]          = expr_with_scratch_fields,
+  [ast.specialized.expr.RegionRoot]                 = expr_region_root,
+  [ast.specialized.expr.Condition]                  = pass_through_expr,
+  [ast.specialized.expr.Function]                   = pass_through_expr,
   [ast.specialized.expr.Unary]                      = expr_unary,
   [ast.specialized.expr.Binary]                     = expr_binary,
-  [ast.specialized.expr.Cast]                       = expr_cast,
-
-  -- Normal expressions
-  [ast.specialized.expr.ID]                         = pass_through_expr,
-  [ast.specialized.expr.Function]                   = pass_through_expr,
-  [ast.specialized.expr.Constant]                   = pass_through_expr,
-  [ast.specialized.expr.Global]                     = pass_through_expr,
-
-  -- Expressions that do not need to be normalized
-  [ast.specialized.expr.New]                        = pass_through_expr,
-  [ast.specialized.expr.Null]                       = pass_through_expr,
-  [ast.specialized.expr.RawContext]                 = pass_through_expr,
-  [ast.specialized.expr.RawFields]                  = pass_through_expr,
-  [ast.specialized.expr.RawPhysical]                = pass_through_expr,
-  [ast.specialized.expr.RawRuntime]                 = pass_through_expr,
-  [ast.specialized.expr.RawTask]                    = pass_through_expr,
-  [ast.specialized.expr.RawValue]                   = pass_through_expr,
-  [ast.specialized.expr.Partition]                  = pass_through_expr,
-  [ast.specialized.expr.PartitionEqual]             = pass_through_expr,
-  [ast.specialized.expr.PartitionByField]           = pass_through_expr,
-  [ast.specialized.expr.PartitionByRestriction]     = pass_through_expr,
-  [ast.specialized.expr.Image]                      = pass_through_expr,
-  [ast.specialized.expr.Preimage]                   = pass_through_expr,
-  [ast.specialized.expr.CrossProduct]               = pass_through_expr,
-  [ast.specialized.expr.CrossProductArray]          = pass_through_expr,
-  [ast.specialized.expr.ListSlicePartition]         = pass_through_expr,
-  [ast.specialized.expr.ListDuplicatePartition]     = pass_through_expr,
-  [ast.specialized.expr.ListCrossProduct]           = pass_through_expr,
-  [ast.specialized.expr.ListCrossProductComplete]   = pass_through_expr,
-  [ast.specialized.expr.ListPhaseBarriers]          = pass_through_expr,
-  [ast.specialized.expr.ListInvert]                 = pass_through_expr,
-  [ast.specialized.expr.ListRange]                  = pass_through_expr,
-  [ast.specialized.expr.ListIspace]                 = pass_through_expr,
-  [ast.specialized.expr.ListFromElement]            = pass_through_expr,
-  [ast.specialized.expr.PhaseBarrier]               = pass_through_expr,
-  [ast.specialized.expr.DynamicCollective]          = pass_through_expr,
-  [ast.specialized.expr.DynamicCollectiveGetResult] = pass_through_expr,
-  [ast.specialized.expr.Advance]                    = pass_through_expr,
-  [ast.specialized.expr.Adjust]                     = pass_through_expr,
-  [ast.specialized.expr.Arrive]                     = pass_through_expr,
-  [ast.specialized.expr.Await]                      = pass_through_expr,
-  [ast.specialized.expr.Copy]                       = pass_through_expr,
-  [ast.specialized.expr.Fill]                       = pass_through_expr,
-  [ast.specialized.expr.Acquire]                    = pass_through_expr,
-  [ast.specialized.expr.Release]                    = pass_through_expr,
-  [ast.specialized.expr.AttachHDF5]                 = pass_through_expr,
-  [ast.specialized.expr.DetachHDF5]                 = pass_through_expr,
-  [ast.specialized.expr.AllocateScratchFields]      = pass_through_expr,
-  [ast.specialized.expr.WithScratchFields]          = pass_through_expr,
-  [ast.specialized.expr.RegionRoot]                 = pass_through_expr,
-  [ast.specialized.expr.Condition]                  = pass_through_expr,
+  [ast.specialized.expr.Deref]                      = expr_deref,
+  [ast.specialized.expr.AddressOf]                  = expr_address_of,
+  [ast.specialized.expr.LuaTable]                   = pass_through_expr,
   [ast.specialized.expr.ImportIspace]               = expr_import_ispace,
   [ast.specialized.expr.ImportRegion]               = expr_import_region,
   [ast.specialized.expr.ImportPartition]            = expr_import_partition,
-
-  [ast.specialized.expr.LuaTable]                   = pass_through_expr,
+  [ast.specialized.expr.Projection]                 = expr_projection,
 }
 
 local normalize_expr = ast.make_single_dispatch(

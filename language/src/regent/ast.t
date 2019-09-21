@@ -416,6 +416,7 @@ ast.specialized.expr:leaf("LuaTable", {"value"})
 ast.specialized.expr:leaf("ImportIspace", {"index_type", "value"})
 ast.specialized.expr:leaf("ImportRegion", {"ispace", "fspace_type", "value", "field_ids"})
 ast.specialized.expr:leaf("ImportPartition", {"disjointness", "region", "colors", "value"})
+ast.specialized.expr:leaf("Projection", {"region", "fields"})
 
 ast.specialized:leaf("Block", {"stats"})
 
@@ -531,6 +532,7 @@ ast.typed.expr:leaf("ParallelizerConstraint", {"lhs", "op", "rhs"})
 ast.typed.expr:leaf("ImportIspace", {"value"})
 ast.typed.expr:leaf("ImportRegion", {"ispace", "value", "field_ids"})
 ast.typed.expr:leaf("ImportPartition", {"region", "colors", "value"})
+ast.typed.expr:leaf("Projection", {"region", "field_mapping"})
 
 ast.typed:leaf("Block", {"stats"})
 

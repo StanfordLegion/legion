@@ -1360,7 +1360,11 @@ function parser.expr_primary_continuation(p, expr)
           field_names:insert(p:field_names())
         end
       else
-        field_names = p:region_fields()
+        if p:matches("{") then
+          field_names = p:region_fields()
+        else
+          field_names = terralib.newlist({p:field_names()})
+        end
       end
       expr = ast.unspecialized.expr.FieldAccess {
         value = expr,

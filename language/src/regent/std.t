@@ -181,15 +181,27 @@ function std.add_privilege(cx, privilege, region, field_path)
   cx.privileges[privilege][region][field_path] = true
 end
 
-function std.copy_privileges(cx, from_region, to_region)
+function std.copy_privileges(cx, from_region, to_region, field_mapping)
   assert(std.type_supports_privileges(from_region))
   assert(std.type_supports_privileges(to_region))
   local privileges_to_copy = terralib.newlist()
   for privilege, privilege_regions in cx.privileges:items() do
     local privilege_fields = privilege_regions[from_region]
     if privilege_fields then
-      for _, field_path in privilege_fields:keys() do
-        privileges_to_copy:insert({privilege, to_region, field_path})
+      if field_mapping == nil then
+        for _, field_path in privilege_fields:keys() do
+          privileges_to_copy:insert({privilege, to_region, field_path})
+        end
+      else
+        field_mapping:map(function(pair)
+          local from_path, to_path = unpack(pair)
+          for _, field_path in privilege_fields:keys() do
+            if from_path:starts_with(field_path) then
+              privileges_to_copy:insert({privilege, to_region, to_path})
+              break
+            end
+          end
+        end)
       end
     end
   end
@@ -784,12 +796,31 @@ local function type_compatible(a, b)
     (std.is_list_of_regions(a) and std.is_list_of_regions(b))
 end
 
-local function type_isomorphic(param_type, arg_type, check, mapping)
+local function type_isomorphic(node, param_type, arg_type, check, mapping, polymorphic)
   if std.is_ispace(param_type) and std.is_ispace(arg_type) then
     return std.type_eq(param_type.index_type, arg_type.index_type, mapping)
   elseif std.is_region(param_type) and std.is_region(arg_type) then
-    return std.type_eq(param_type:ispace(), arg_type:ispace(), mapping) and
-      std.type_eq(param_type.fspace_type, arg_type.fspace_type, mapping)
+    if polymorphic then
+      if not std.type_eq(param_type:ispace(), arg_type:ispace(), mapping) then
+        return false
+      end
+
+      local param_fspace = param_type.fspace_type
+      local arg_fspace = arg_type.fspace_type
+      if std.is_fspace_instance(param_fspace) then
+        return std.type_eq(param_fspace, arg_fspace, mapping)
+      -- Special case of field polymorphism
+      elseif param_fspace:isprimitive() then
+        return std.type_eq(param_fspace, arg_fspace)
+      elseif param_fspace:isstruct() then
+        return type_isomorphic(node, param_fspace, arg_fspace, check, mapping, polymorphic)
+      else
+        return false
+      end
+    else
+      return std.type_eq(param_type:ispace(), arg_type:ispace(), mapping) and
+             std.type_eq(param_type.fspace_type, arg_type.fspace_type, mapping)
+    end
   elseif std.is_partition(param_type) and std.is_partition(arg_type) then
     return param_type:is_disjoint() == arg_type:is_disjoint() and
       check(param_type:parent_region(), arg_type:parent_region(), mapping) and
@@ -808,22 +839,46 @@ local function type_isomorphic(param_type, arg_type, check, mapping)
   then
     return std.type_eq(
       param_type.element_type:fspace(), arg_type.element_type:fspace())
+  elseif param_type:isstruct() and arg_type:isstruct() then
+    local param_entries = param_type:getentries()
+    local arg_entries = arg_type:getentries()
+
+    if #param_entries ~= #arg_entries then
+      report.error(
+        node, "incompatible types: " ..
+        tostring(arg_type) .. " has " .. tostring(#arg_entries) .. " fields but " ..
+        tostring(param_type) .. " expects " .. tostring(#param_entries) .. " fields")
+    end
+
+    for idx, param_entry in ipairs(param_entries) do
+      local arg_entry = arg_entries[idx]
+      local param_field = param_entry[1] or param_entry.field
+      local param_type = param_entry[2] or param_entry.type
+      local arg_type = arg_entry[2] or arg_entry.type
+      if not type_isomorphic(node, param_type, arg_type, check, mapping, polymorphic) then
+        report.error(node, "type mismatch: expected " .. tostring(param_type) .. " for field " ..
+                     param_field .. " but got " .. tostring(arg_type))
+      end
+    end
+    return true
+  elseif param_type:isprimitive() and arg_type:isprimitive() then
+    return std.type_eq(param_type, arg_type)
   else
     return false
   end
 end
 
-local function unify_param_type_args(param, param_type, arg_type, mapping)
+local function unify_param_type_args(node, param, param_type, arg_type, mapping)
   if std.is_region(param_type) and
     type_compatible(param_type:ispace(), arg_type:ispace()) and
     not (mapping[param] or mapping[param_type] or mapping[param_type:ispace()]) and
-    type_isomorphic(param_type:ispace(), arg_type:ispace(), mapping)
+    type_isomorphic(node, param_type:ispace(), arg_type:ispace(), mapping)
   then
     mapping[param_type:ispace()] = arg_type:ispace()
   elseif std.is_partition(param_type) and
     type_compatible(param_type:colors(), arg_type:colors()) and
     not (mapping[param] or mapping[param_type] or mapping[param_type:colors()]) and
-    type_isomorphic(param_type:colors(), arg_type:colors(), mapping)
+    type_isomorphic(node, param_type:colors(), arg_type:colors(), mapping)
   then
     mapping[param_type:colors()] = arg_type:colors()
   end
@@ -884,7 +939,7 @@ local function reconstruct_return_as_arg_type(return_type, mapping)
   return std.type_sub(return_type, mapping)
 end
 
-function std.validate_args(node, params, args, isvararg, return_type, mapping, strict)
+function std.validate_args(node, params, args, isvararg, return_type, mapping, strict, polymorphic)
   if (#args < #params) or (#args > #params and not isvararg) then
     report.error(node, "expected " .. tostring(#params) .. " arguments but got " .. tostring(#args))
   end
@@ -940,11 +995,11 @@ function std.validate_args(node, params, args, isvararg, return_type, mapping, s
       end
 
       -- Allow type arguments to unify (if any).
-      unify_param_type_args(param, param_type, arg_type, mapping)
+      unify_param_type_args(node, param, param_type, arg_type, mapping)
 
       mapping[param] = arg
       mapping[param_type] = arg_type
-      if not type_isomorphic(param_type, arg_type, check, mapping) then
+      if not type_isomorphic(node, param_type, arg_type, check, mapping, polymorphic) then
         local param_as_arg_type = reconstruct_param_as_arg_type(param_type, mapping)
         report.error(node, "type mismatch in argument " .. tostring(i) ..
                     ": expected " .. tostring(param_as_arg_type) ..
@@ -1294,6 +1349,9 @@ function std.get_field_path(value_type, field_path)
 end
 
 function std.get_absolute_field_paths(fspace_type, prefixes)
+  if not terralib.islist(prefixes) then
+    prefixes = terralib.newlist({prefixes})
+  end
   return data.flatmap(function(prefix)
     local field_type = std.get_field_path(fspace_type, prefix)
     return std.flatten_struct_fields(field_type):map(function(suffix)
