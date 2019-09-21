@@ -721,23 +721,27 @@ namespace Legion {
     double *r = reinterpret_cast<double*>(&rhs);
 #ifdef __CUDA_ARCH__
     for (unsigned i = 0; i < 2; ++i) {
-      unsigned long long *target = (unsigned long long*)&l[i];
-      union { unsigned long long as_int; double as_double; } oldval, newval;
+#if __CUDA_ARCH__ >= 600
+      atomicAdd(&l[i], r[i]);
+#else
+      unsigned long long *target = (unsigned long long *)&l[i];
+      union { unsigned long long as_int; double as_float; } oldval, newval;
       newval.as_int = *target;
       do {
-        oldval = newval;
-        newval.as_double = newval.as_double + r[i];
+        oldval.as_int = newval.as_int;
+        newval.as_float += r[i];
         newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
       } while (oldval.as_int != newval.as_int);
+#endif
     }
 #else
     for (unsigned i = 0; i < 2; ++i) {
-      volatile unsigned long long *target = (unsigned long long*)&l[i];
-      unsigned long long oldval, newval;
+      volatile long long *target = (volatile long long*)&l[i];
+      union { long long as_int; double as_float; } oldval, newval;
       do {
-        oldval = *target;
-        newval = (unsigned long long)((double)oldval + r[i]);
-      } while (!__sync_bool_compare_and_swap(target, oldval, newval));
+        oldval.as_int = *target;
+        newval.as_float = oldval.as_float + r[i];
+      } while (!__sync_bool_compare_and_swap(target, oldval.as_int, newval.as_int));
     }
 #endif
   }
@@ -755,23 +759,27 @@ namespace Legion {
     double *r2 = reinterpret_cast<double*>(&rhs2);
 #ifdef __CUDA_ARCH__
     for (unsigned i = 0; i < 2; ++i) {
-      unsigned long long *target = (unsigned long long*)&r1[i];
-      union { unsigned long long as_int; double as_double; } oldval, newval;
+#if __CUDA_ARCH__ >= 600
+      atomicAdd(&r1[i], r2[i]);
+#else
+      unsigned long long *target = (unsigned long long *)&r1[i];
+      union { unsigned long long as_int; double as_float; } oldval, newval;
       newval.as_int = *target;
       do {
-        oldval = newval;
-        newval.as_double = newval.as_double + r2[i];
+        oldval.as_int = newval.as_int;
+        newval.as_float += r2[i];
         newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
       } while (oldval.as_int != newval.as_int);
+#endif
     }
 #else
     for (unsigned i = 0; i < 2; ++i) {
-      volatile unsigned long long *target = (unsigned long long*)&r1[i];
-      unsigned long long oldval, newval;
+      volatile long long *target = (volatile long long*)&r1[i];
+      union { long long as_int; double as_float; } oldval, newval;
       do {
-        oldval = *target;
-        newval = (unsigned long long)((double)oldval + r2[i]);
-      } while (!__sync_bool_compare_and_swap(target, oldval, newval));
+        oldval.as_int = *target;
+        newval.as_float = oldval.as_float + r2[i];
+      } while (!__sync_bool_compare_and_swap(target, oldval.as_int, newval.as_int));
     }
 #endif
   }
