@@ -2856,14 +2856,8 @@ namespace Legion {
         }
         if (!runtime->unsafe_mapper)
           validate_target_processors(output.target_procs);
-        // Special case for when we run in hl:separate mode
-        if (runtime->separate_runtime_instances)
-        {
-          target_processors.resize(1);
-          target_processors[0] = this->target_proc;
-        }
-        else // the common case
-          target_processors = output.target_procs;
+        // Save the target processors from the output
+        target_processors = output.target_procs;
       }
       else
       {
@@ -3385,9 +3379,13 @@ namespace Legion {
                                  const std::vector<Processor> &processors) const
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(!processors.empty());
+#endif
       // Make sure that they are all on the same node and of the same kind
-      Processor::Kind kind = this->target_proc.kind();
-      AddressSpace space = this->target_proc.address_space();
+      const Processor &first = processors.front();
+      const Processor::Kind kind = first.kind();
+      const AddressSpace space = first.address_space();
       for (unsigned idx = 0; idx < processors.size(); idx++)
       {
         const Processor &proc = processors[idx];
