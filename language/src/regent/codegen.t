@@ -2850,6 +2850,9 @@ end
 
 local function make_partition_projection_functor(cx, expr, loop_index, color_space,
                                                  free_vars_setup, requirement)
+  if expr:is(ast.typed.expr.Projection) then
+    expr = expr.region
+  end
   assert(expr:is(ast.typed.expr.IndexAccess))
 
   -- Strip the index for the purpose of checking if this is the
@@ -3298,8 +3301,15 @@ local function expr_call_setup_partition_arg(
   local parent_region =
     cx:region(cx:region(arg_type).root_region_type).logical_region
 
+  local param_field_paths = std.flatten_struct_fields(param_type:fspace())
+  local arg_field_paths = std.flatten_struct_fields(arg_type:fspace())
+  local mapping = data.dict(data.zip(param_field_paths:map(data.hash),
+                                     arg_field_paths))
+
   for i, privilege in ipairs(privileges) do
-    local field_paths = privilege_field_paths[i]
+    local field_paths = privilege_field_paths[i]:map(function(field_path)
+        return mapping[field_path:hash()]
+      end)
     local field_types = privilege_field_types[i]
     local privilege_mode = privilege_modes[i]
     local coherence_mode = coherence_modes[i]
@@ -9045,13 +9055,39 @@ local function stat_index_launch_setup(cx, node, domain, actions)
     else
       -- Run codegen halfway to get the partition. Note: Remember to
       -- splice the actions back in later.
-      partition = codegen.expr(cx, arg.value):read(cx)
+      local partition_expr = nil
+      local partition_type = nil
+      if arg:is(ast.typed.expr.Projection) then
+        partition_expr = arg.region.value
+        partition_type = std.as_read(arg.region.value.expr_type)
+      else
+        partition_expr = arg.value
+        partition_type = std.as_read(arg.value.expr_type)
+      end
+      partition = codegen.expr(cx, partition_expr):read(cx)
 
       -- Now run codegen the rest of the way to get the region.
-      local partition_type = std.as_read(arg.value.expr_type)
-      local region = codegen.expr(
-        cx,
-        ast.typed.expr.IndexAccess {
+      local region_expr = nil
+      if arg:is(ast.typed.expr.Projection) then
+        region_expr = arg {
+          region = ast.typed.expr.IndexAccess {
+            value = ast.typed.expr.Internal {
+              value = values.value(
+                node,
+                expr.just(quote end, partition.value),
+                partition_type),
+              expr_type = partition_type,
+              annotations = node.annotations,
+              span = node.span,
+            },
+            index = arg.region.index,
+            expr_type = arg.region.expr_type,
+            annotations = node.annotations,
+            span = node.span,
+          }
+        }
+      else
+        region_expr = ast.typed.expr.IndexAccess {
           value = ast.typed.expr.Internal {
             value = values.value(
               node,
@@ -9065,7 +9101,9 @@ local function stat_index_launch_setup(cx, node, domain, actions)
           expr_type = arg.expr_type,
           annotations = node.annotations,
           span = node.span,
-        }):read(cx)
+        }
+      end
+      local region = codegen.expr(cx, region_expr):read(cx)
       args:insert(region)
     end
     args_partitions:insert(partition)

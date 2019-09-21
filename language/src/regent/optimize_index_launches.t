@@ -757,6 +757,10 @@ local function analyze_is_simple_index_expression(cx, node)
 end
 
 local function analyze_is_projectable(cx, arg)
+  if arg:is(ast.typed.expr.Projection) then
+    arg = arg.region
+  end
+
   -- 1. We can project any index access `p[...]`
   if not arg:is(ast.typed.expr.IndexAccess) then
     return false
@@ -988,6 +992,10 @@ local function optimize_loop_body(cx, node, report_pass, report_fail)
     local free_vars_base = terralib.newlist()
     free_vars_base:insertall(loop_cx.free_variables)
     for i, arg in ipairs(args) do
+      if arg:is(ast.typed.expr.Projection) then
+        arg = arg.region
+      end
+
       if not analyze_is_side_effect_free(loop_cx, arg) then
         report_fail(call, "loop optimization failed: argument " .. tostring(i) .. " is not side-effect free")
         return
