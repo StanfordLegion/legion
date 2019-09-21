@@ -488,6 +488,26 @@ function type_check.expr_function(cx, node)
 end
 
 function type_check.expr_field_access(cx, node)
+  if type(node.field_name) ~= "string" then
+    local function convert_field_names(value, fields)
+      if not fields then
+        return value
+      else
+        if #fields > 1 then
+          report.error(node, "multi-field expression is not allowed")
+        end
+        return convert_field_names(
+          ast.specialized.expr.FieldAccess {
+            value = value,
+            field_name = fields[1].field_name,
+            annotations = node.annotations,
+            span = fields[1].span,
+          }, fields[1].fields)
+      end
+    end
+    return type_check.expr(cx, convert_field_names(node.value, node.field_name))
+  end
+
   local value = type_check.expr(cx, node.value)
   local value_type = value.expr_type -- Keep references, do NOT std.check_read
 

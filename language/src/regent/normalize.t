@@ -51,10 +51,23 @@ local function get_num_accessed_fields(node)
     return 1
 
   elseif node:is(ast.specialized.expr.FieldAccess) then
-    if terralib.islist(node.field_name) then
-      return get_num_accessed_fields(node.value) * #node.field_name
+    if std.config["allow-multi-field-expansion"] then
+      if terralib.islist(node.field_name) then
+        return get_num_accessed_fields(node.value) * #node.field_name
+      else
+        return get_num_accessed_fields(node.value)
+      end
     else
-      return get_num_accessed_fields(node.value)
+      -- We only need to know if there is any multi-field access
+      -- as we are going to use this only to reject it.
+      local fields = node.field_name
+      while fields do
+        if #fields > 1 then
+          return #fields
+        end
+        fields = fields[1].fields
+      end
+      return 1
     end
 
   elseif node:is(ast.specialized.expr.IndexAccess) then
@@ -238,8 +251,11 @@ local function has_all_valid_field_accesses(node)
       local lh, rh = unpack(pair)
       local num_accessed_fields_lh = get_num_accessed_fields(lh)
       local num_accessed_fields_rh = get_num_accessed_fields(rh)
+      local num_accessed_fields =
+        join_num_accessed_fields(num_accessed_fields_lh,
+                                 num_accessed_fields_rh)
       if not std.config["allow-multi-field-expansion"] then
-        if num_accessed_fields_lh > 1 or num_accessed_fields_rh > 1 then
+        if not num_accessed_fields or num_accessed_fields > 1 then
           report.error(node, message)
         end
       else
@@ -247,10 +263,7 @@ local function has_all_valid_field_accesses(node)
           report.warn(node, message)
           print_warning = false
         end
-        local num_accessed_fields =
-          join_num_accessed_fields(num_accessed_fields_lh,
-                                   num_accessed_fields_rh)
-        if num_accessed_fields == false then
+        if not num_accessed_fields then
           valid = false
         -- Special case when there is only one assignee for multiple
         -- values on the RHS
@@ -318,6 +331,10 @@ end
 local function flatten_multifield_accesses(node)
   if not has_all_valid_field_accesses(node) then
     report.error(node, "invalid use of multi-field access")
+  end
+
+  if not std.config["allow-multi-field-expansion"] then
+    return node
   end
 
   local flattened_lhs = terralib.newlist()
