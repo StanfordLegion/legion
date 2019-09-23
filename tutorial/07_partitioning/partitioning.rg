@@ -75,18 +75,18 @@ task main()
   -- declared above. (Note as before the __demand annotation is
   -- optional and causes the compiler to issue an error if the loop
   -- iterations cannot be guarranteed to execute in parallel.)
-  __demand(__parallel)
+  __demand(__index_launch)
   for i = 0, num_subregions do
     init(input_lp[i])
   end
 
   var alpha = c.drand48()
-  __demand(__parallel)
+  __demand(__index_launch)
   for i = 0, num_subregions do
     daxpy(input_lp[i], output_lp[i], alpha)
   end
 
-  __demand(__parallel)
+  __demand(__index_launch)
   for i = 0, num_subregions do
     check(input_lp[i], output_lp[i], alpha)
   end

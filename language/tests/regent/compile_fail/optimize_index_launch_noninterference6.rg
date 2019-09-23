@@ -78,7 +78,7 @@ task main()
 
 
   -- cancelling coefficients
-  __demand(__parallel)
+  __demand(__index_launch)
   for i = 0,4 do
     var temp = 2 * i
     func1(pt[ temp - 2 * i + 1])

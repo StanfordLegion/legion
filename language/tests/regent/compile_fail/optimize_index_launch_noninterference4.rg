@@ -78,7 +78,7 @@ task main()
 
 
    -- cancelling index field (mult by 0)
-   __demand(__parallel)
+   __demand(__index_launch)
    for c in cs do
       var temp = 0
       func2(ps[int2d{c.x, temp * c.y}])

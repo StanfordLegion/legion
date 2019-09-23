@@ -79,7 +79,7 @@ task main()
 
   -- cancelling coefficients
   var zero = 0
-  __demand(__parallel)
+  __demand(__index_launch)
   for c in ct do
     func1(pt[zero * c])
   end

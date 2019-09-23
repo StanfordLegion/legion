@@ -237,13 +237,6 @@ task main()
     check(p1_disjoint[i], 12345)
   end
 
-  -- __demand(__parallel) is deprecated and should issue a warning, but is still currently supported
-  -- https://github.com/StanfordLegion/legion/issues/520
-  __demand(__parallel)
-  for i in cs do
-    check(p1_disjoint[i], 12345)
-  end
-
   -- with_partitions(r0, p0_disjoint, r1, p1_disjoint, n)
 end
 regentlib.start(main)

@@ -30,7 +30,7 @@ task main()
   -- ensures that the compiler will throw an error if the optimization
   -- fails.
   var total = 0
-  __demand(__parallel)
+  __demand(__index_launch)
   for i = 0, num_points do
     total += double_of(i, i + 10)
   end
