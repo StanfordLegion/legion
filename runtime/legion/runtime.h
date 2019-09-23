@@ -244,7 +244,7 @@ namespace Legion {
       FutureImpl(Runtime *rt, bool register_future, DistributedID did, 
                  AddressSpaceID owner_space, Operation *op, GenerationID gen,
 #ifdef LEGION_SPY
-                 UniqueID op_uid
+                 UniqueID op_uid,
 #endif
                  int op_depth);
       FutureImpl(const FutureImpl &rhs);
@@ -442,7 +442,7 @@ namespace Legion {
       // in case they have to make futures from remote shards
       const int op_depth; 
 #ifdef LEGION_SPY
-      const int UniqueID op_uid;
+      const UniqueID op_uid;
 #endif
     protected:
       std::vector<PendingRequest> pending_future_map_requests;
