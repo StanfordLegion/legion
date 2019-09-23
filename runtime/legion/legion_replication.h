@@ -661,7 +661,8 @@ namespace Legion {
      */
     class FutureNameExchange : public AllGatherCollective {
     public:
-      FutureNameExchange(ReplicateContext *ctx, CollectiveID id);
+      FutureNameExchange(ReplicateContext *ctx, CollectiveID id, 
+                         ReplFutureMapImpl *future_map);
       FutureNameExchange(const FutureNameExchange &rhs);
       virtual ~FutureNameExchange(void);
     public:
@@ -671,6 +672,8 @@ namespace Legion {
       virtual void unpack_collective_stage(Deserializer &derez, int stage);
     public:
       void exchange_future_names(std::map<DomainPoint,Future> &futures);
+    public:
+      ReplFutureMapImpl *const future_map;
     protected:
       std::map<DomainPoint,Future> results;
       LocalReferenceMutator mutator;

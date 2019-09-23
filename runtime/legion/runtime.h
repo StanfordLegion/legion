@@ -241,6 +241,12 @@ namespace Legion {
     public:
       FutureImpl(Runtime *rt, bool register_future, DistributedID did, 
                  AddressSpaceID owner_space, Operation *op = NULL);
+      FutureImpl(Runtime *rt, bool register_future, DistributedID did, 
+                 AddressSpaceID owner_space, Operation *op, GenerationID gen,
+#ifdef LEGION_SPY
+                 UniqueID op_uid
+#endif
+                 int op_depth);
       FutureImpl(const FutureImpl &rhs);
       virtual ~FutureImpl(void);
     public:
@@ -431,6 +437,13 @@ namespace Legion {
       const Domain shard_domain;
       const ApBarrier future_map_barrier;
       const CollectiveID collective_index; // in case we have to do all-to-all
+      // Unlike normal future maps, we know these only ever exist on the
+      // node where they are made so we store their producer op information
+      // in case they have to make futures from remote shards
+      const int op_depth; 
+#ifdef LEGION_SPY
+      const int UniqueID op_uid;
+#endif
     protected:
       std::vector<PendingRequest> pending_future_map_requests;
       RtUserEvent sharding_function_ready;
@@ -3029,7 +3042,13 @@ namespace Legion {
                                             DistributedID did, RtEvent &ready);
     public:
       FutureImpl* find_or_create_future(DistributedID did,
-                                        ReferenceMutator *mutator);
+                                        ReferenceMutator *mutator,
+                                        Operation *op = NULL,
+                                        GenerationID op_gen = 0, 
+#ifdef LEGION_SPY
+                                        UniqueID op_uid = 0,
+#endif
+                                        int op_depth = 0);
       FutureMapImpl* find_or_create_future_map(DistributedID did, 
                       TaskContext *ctx, ReferenceMutator *mutator);
       IndexSpace find_or_create_index_slice_space(const Domain &launch_domain);

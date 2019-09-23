@@ -9099,15 +9099,15 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FutureNameExchange::FutureNameExchange(ReplicateContext *ctx,
-                                           CollectiveID id)
-      : AllGatherCollective(ctx, id)
+                                           CollectiveID id,ReplFutureMapImpl *m)
+      : AllGatherCollective(ctx, id), future_map(m)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     FutureNameExchange::FutureNameExchange(const FutureNameExchange &rhs)
-      : AllGatherCollective(rhs)
+      : AllGatherCollective(rhs), future_map(rhs.future_map)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -9161,7 +9161,12 @@ namespace Legion {
         derez.deserialize(did);
         if (did > 0)
           results[point] = 
-            Future(context->runtime->find_or_create_future(did, &mutator));
+            Future(context->runtime->find_or_create_future(did, &mutator,
+                  future_map->op, future_map->op_gen,
+#ifdef LEGION_SPY
+                  future_map->op_uid,
+#endif
+                  future_map->op_depth));
         else
           results[point] = Future();
       }

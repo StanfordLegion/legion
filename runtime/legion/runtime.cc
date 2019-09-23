@@ -355,6 +355,32 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    FutureImpl::FutureImpl(Runtime *rt, bool register_now, DistributedID did,
+                       AddressSpaceID own_space, Operation *o, GenerationID gen,
+#ifdef LEGION_SPY
+                       UniqueID uid,
+#endif
+                       int depth)
+      : DistributedCollectable(rt, 
+          LEGION_DISTRIBUTED_HELP_ENCODE(did, FUTURE_DC), 
+          own_space, register_now),
+        producer_op(o), op_gen(gen), producer_depth(depth),
+#ifdef LEGION_SPY
+        producer_uid(uid),
+#endif
+        ready_event(Runtime::create_ap_user_event()), 
+        result(NULL), result_size(0), empty(true), sampled(false)
+    //--------------------------------------------------------------------------
+    {
+      if (producer_op != NULL)
+        producer_op->add_mapping_reference(op_gen);
+#ifdef LEGION_GC
+      log_garbage.info("GC Future %lld %d", 
+          LEGION_DISTRIBUTED_ID_FILTER(did), local_space);
+#endif
+    }
+
+    //--------------------------------------------------------------------------
     FutureImpl::FutureImpl(const FutureImpl &rhs)
       : DistributedCollectable(NULL, 0, 0), producer_op(NULL), op_gen(0),
         producer_depth(0)
@@ -1282,6 +1308,10 @@ namespace Legion {
         repl_ctx(ctx), shard_domain(shard_dom),
         future_map_barrier(ctx->get_next_future_map_barrier()),
         collective_index(ctx->get_next_collective_index(COLLECTIVE_LOC_32)),
+        op_depth(repl_ctx->get_depth()),
+#ifdef LEGION_SPY
+        op_uid(op->get_unique_op_id()),
+#endif
         sharding_function_ready(Runtime::create_rt_user_event()), 
         sharding_function(NULL), collective_performed(false)
     //--------------------------------------------------------------------------
@@ -1293,7 +1323,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     ReplFutureMapImpl::ReplFutureMapImpl(const ReplFutureMapImpl &rhs)
       : FutureMapImpl(rhs), repl_ctx(NULL), shard_domain(Domain::NO_DOMAIN), 
-        collective_index(0)
+        collective_index(0), op_depth(0)
+#ifdef LEGION_SPY
+        , op_uid(0)
+#endif
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -1402,7 +1435,7 @@ namespace Legion {
       AutoLock f_lock(future_map_lock);
       if (!collective_performed)
       {
-        FutureNameExchange collective(repl_ctx, collective_index);
+        FutureNameExchange collective(repl_ctx, collective_index, this);
         collective.exchange_future_names(futures);
         // When the collective is done we can mark that we've done it
         // and then copy the results
@@ -1566,13 +1599,25 @@ namespace Legion {
       derez.deserialize(done_event);
 
       // It should already exist so we're just finding it
-      FutureMapImpl *target = 
+      FutureMapImpl *temp = 
         runtime->find_or_create_future_map(map_did, NULL, NULL);
+      // This better be a ReplFutureMap
+#ifdef DEBUG_LEGION
+      ReplFutureMapImpl *target = dynamic_cast<ReplFutureMapImpl*>(temp);
+      assert(target != NULL);
+#else
+      ReplFutureMapImpl *target = static_cast<ReplFutureMapImpl*>(temp);
+#endif
       std::set<RtEvent> done_events;
       WrapperReferenceMutator mutator(done_events);
       if (future_did > 0)
       {
-        FutureImpl *impl = runtime->find_or_create_future(future_did, &mutator);
+        FutureImpl *impl = runtime->find_or_create_future(future_did, &mutator,
+                                                  target->op, target->op_gen,
+#ifdef LEGION_SPY
+                                                  target->op_uid,
+#endif
+                                                  target->op_depth);
         target->set_future(point, impl, &mutator);
       }
       else
@@ -19503,7 +19548,12 @@ namespace Legion {
     
     //--------------------------------------------------------------------------
     FutureImpl* Runtime::find_or_create_future(DistributedID did,
-                                               ReferenceMutator *mutator)
+                                               ReferenceMutator *mutator,
+                                               Operation *op, GenerationID gen,
+#ifdef LEGION_SPY
+                                               UniqueID op_uid,
+#endif
+                                               int op_depth)
     //--------------------------------------------------------------------------
     {
       did &= LEGION_DISTRIBUTED_ID_MASK; 
@@ -19523,8 +19573,13 @@ namespace Legion {
         }
       }
       AddressSpaceID owner_space = determine_owner(did);
-      FutureImpl *result = new FutureImpl(this, false/*register*/, 
-                                          did, owner_space);
+      FutureImpl *result = (op == NULL) ? 
+        new FutureImpl(this, false/*register*/, did, owner_space) : 
+        new FutureImpl(this, false/*register*/, did, owner_space, op, gen,
+#ifdef LEGION_SPY
+                       op_uid,
+#endif
+                       op_depth);
       // Retake the lock and see if we lost the race
       {
         AutoLock d_lock(distributed_collectable_lock);
