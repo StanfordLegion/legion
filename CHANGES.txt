@@ -1,6 +1,19 @@
 This file lists the major changes as they appear in the stable branch.  No
 attempt is made to keep this list accurate for the master branch.
 
+Version ??.??.? (?? ??, ????)
+  * Regent
+    - __demand(__index_launch) has been added as an alternative to
+        __demand(__parallel) on for loops that avoids confusion with the
+        auto-parallelizer. __demand(__parallel) on for loops is deprecated and
+        now issues an error; this error can be temporarily downgraded to a
+        warning via the flag -fallow-loop-demand-parallel 1. In a future
+        release the error will become permanent. For details, see:
+        https://github.com/StanfordLegion/legion/issues/520
+    - Substantially improved the generality of the index launch
+      optimization. Task arguments of the form p[i+k] may now be used,
+      where k is a variable defined outside of the loop.
+
 Version 19.09.0 (September 9, 2019)
   * Regent
     - __demand(__index_launch) has been added as an alternative to
