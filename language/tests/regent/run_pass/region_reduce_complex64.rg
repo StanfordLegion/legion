@@ -24,7 +24,7 @@ end
 task g_minus(r : region(complex64), p : ptr(complex64, r))
 where reduces-(r) do
   @p -= complex64 { 3, 0 }
-  @p -= complex64 { 10, 0 }
+  @p -= complex64 { 20, 0 }
   @p -= complex64 { 7, 0 }
 end
 
@@ -60,7 +60,7 @@ task main()
   v += complex64 { 13, 0 }
   v += complex64 { 5, 0 }
   v -= complex64 { 3, 0 }
-  v -= complex64 { 10, 0 }
+  v -= complex64 { 20, 0 }
   v -= complex64 { 7, 0 }
   v += complex64 { 100, 0 }
   v += complex64 { 100, 0 }

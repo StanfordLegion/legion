@@ -1050,11 +1050,13 @@ class Region(object):
 
     def values(self):
         for key in self.keys():
-            yield getattr(self, key)
+            if key in self.privileges and self.privileges[key] is not None:
+                yield getattr(self, key)
 
     def items(self):
         for key in self.keys():
-            yield key, getattr(self, key)
+            if key in self.privileges and self.privileges[key] is not None:
+                yield key, getattr(self, key)
 
     def _set_privilege(self, field_name, privilege):
         assert self.parent is None # not supported on subregions
