@@ -3073,6 +3073,32 @@ extern "C" {
     bool verified /* = false*/);
 
   /**
+   * @see Legion::CopyLauncher::add_src_indirect_field()
+   */
+  unsigned
+  legion_copy_launcher_add_src_indirect_region_requirement_logical_region(
+    legion_copy_launcher_t launcher,
+    legion_logical_region_t handle,
+    legion_field_id_t fid,
+    legion_coherence_property_t prop,
+    legion_logical_region_t parent,
+    legion_mapping_tag_id_t tag /* = 0 */,
+    bool verified /* = false*/);
+
+  /**
+   * @see Legion::CopyLauncher::add_dst_indirect_field()
+   */
+  unsigned
+  legion_copy_launcher_add_dst_indirect_region_requirement_logical_region(
+    legion_copy_launcher_t launcher,
+    legion_logical_region_t handle,
+    legion_field_id_t fid,
+    legion_coherence_property_t prop,
+    legion_logical_region_t parent,
+    legion_mapping_tag_id_t tag /* = 0 */,
+    bool verified /* = false*/);
+
+  /**
    * @see Legion::CopyLauncher::add_src_field()
    */
   void
@@ -3228,6 +3254,62 @@ extern "C" {
     legion_logical_partition_t handle,
     legion_projection_id_t proj /* = 0 */,
     legion_reduction_op_id_t redop,
+    legion_coherence_property_t prop,
+    legion_logical_region_t parent,
+    legion_mapping_tag_id_t tag /* = 0 */,
+    bool verified /* = false*/);
+
+  /**
+   * @see Legion::IndexCopyLauncher::add_src_indirect_field()
+   */
+  unsigned
+  legion_index_copy_launcher_add_src_indirect_region_requirement_logical_region(
+    legion_index_copy_launcher_t launcher,
+    legion_logical_region_t handle,
+    legion_projection_id_t proj /* = 0 */,
+    legion_field_id_t fid,
+    legion_coherence_property_t prop,
+    legion_logical_region_t parent,
+    legion_mapping_tag_id_t tag /* = 0 */,
+    bool verified /* = false*/);
+
+  /**
+   * @see Legion::IndexCopyLauncher::add_dst_indirect_field()
+   */
+  unsigned
+  legion_index_copy_launcher_add_dst_indirect_region_requirement_logical_region(
+    legion_index_copy_launcher_t launcher,
+    legion_logical_region_t handle,
+    legion_projection_id_t proj /* = 0 */,
+    legion_field_id_t fid,
+    legion_coherence_property_t prop,
+    legion_logical_region_t parent,
+    legion_mapping_tag_id_t tag /* = 0 */,
+    bool verified /* = false*/);
+
+  /**
+   * @see Legion::IndexCopyLauncher::add_src_indirect_field()
+   */
+  unsigned
+  legion_index_copy_launcher_add_src_indirect_region_requirement_logical_partition(
+    legion_index_copy_launcher_t launcher,
+    legion_logical_partition_t handle,
+    legion_projection_id_t proj /* = 0 */,
+    legion_field_id_t fid,
+    legion_coherence_property_t prop,
+    legion_logical_region_t parent,
+    legion_mapping_tag_id_t tag /* = 0 */,
+    bool verified /* = false*/);
+
+  /**
+   * @see Legion::IndexCopyLauncher::add_dst_indirect_field()
+   */
+  unsigned
+  legion_index_copy_launcher_add_dst_indirect_region_requirement_logical_partition(
+    legion_index_copy_launcher_t launcher,
+    legion_logical_partition_t handle,
+    legion_projection_id_t proj /* = 0 */,
+    legion_field_id_t fid,
     legion_coherence_property_t prop,
     legion_logical_region_t parent,
     legion_mapping_tag_id_t tag /* = 0 */,
