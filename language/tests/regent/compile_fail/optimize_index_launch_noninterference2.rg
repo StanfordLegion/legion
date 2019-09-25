@@ -78,7 +78,7 @@ task main()
 
 
    -- projecting down dimensions
-   __demand(__parallel)
+   __demand(__index_launch)
    for c in cr do
       func3(pr[int3d{c.x + c.y, 0, c.z}])
    end
