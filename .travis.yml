@@ -42,8 +42,8 @@ before_install:
       sudo add-apt-repository ppa:pypy/ppa -y
       sudo apt-get update -qq
       # OpenMPI packages: openmpi-bin libopenmpi-dev
-      # MPICH packages: mpich2 libmpich-dev
-      sudo apt-get install -qq clang-6.0 libclang-6.0-dev llvm-6.0-dev libedit-dev mpich2 libmpich-dev libblas-dev liblapack-dev libhdf5-dev pypy
+      # MPICH packages: mpich libmpich-dev
+      sudo apt-get install -qq clang-6.0 libclang-6.0-dev llvm-6.0-dev libedit-dev mpich libmpich-dev libblas-dev liblapack-dev libhdf5-dev pypy
       export CMAKE_PREFIX_PATH=/usr/lib/llvm-6.0:/usr/share/llvm-6.0
     fi
   - |
