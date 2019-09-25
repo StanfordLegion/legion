@@ -4346,6 +4346,8 @@ namespace Legion {
       input.dst_instances.resize(dst_requirements.size());
       output.src_instances.resize(src_requirements.size());
       output.dst_instances.resize(dst_requirements.size());
+      output.src_indirect_instances.resize(src_indirect_requirements.size());
+      output.dst_indirect_instances.resize(dst_indirect_requirements.size());
       output.profiling_priority = LG_THROUGHPUT_WORK_PRIORITY;
       if (mapper == NULL)
       {
