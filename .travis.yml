@@ -1,7 +1,6 @@
 language: cpp
 sudo: required
-dist: trusty
-group: edge # Try new Travis image
+dist: xenial
 os:
   - linux
   - osx
@@ -43,20 +42,19 @@ before_install:
       sudo add-apt-repository ppa:pypy/ppa -y
       sudo apt-get update -qq
       # OpenMPI packages: openmpi-bin libopenmpi-dev
-      # MPICH packages: mpich2 libmpich-dev
-      sudo apt-get install -qq g++-4.9 clang-3.5 libclang-3.5-dev llvm-3.5-dev mpich2 libmpich-dev libblas-dev liblapack-dev libhdf5-dev pypy
+      # MPICH packages: mpich libmpich-dev
+      sudo apt-get install -qq clang-6.0 libclang-6.0-dev llvm-6.0-dev libedit-dev mpich libmpich-dev libblas-dev liblapack-dev libhdf5-dev pypy
+      export CMAKE_PREFIX_PATH=/usr/lib/llvm-6.0:/usr/share/llvm-6.0
+      export HDF_LIBNAME=hdf5_serial
     fi
   - |
     if [[ "$(uname)" = "Darwin" ]]; then
       brew update
-      brew install pypy llvm@3.9 hdf5
-      export CLANG="$(brew --prefix)/opt/llvm@3.9/bin/clang"
-      export LLVM_CONFIG="$(brew --prefix)/opt/llvm@3.9/bin/llvm-config"
-      export CXX="$(brew --prefix)/opt/llvm@3.9/bin/clang++"
+      brew install pypy llvm@6 hdf5
+      export CXX="$(brew --prefix)/opt/llvm@6/bin/clang++"
+      export CMAKE_PREFIX_PATH="$(brew --prefix)/opt/llvm@6"
     fi
-  - if [[ "$(uname)" = "Linux" && "$CXX" = "g++" ]]; then export CXX="g++-4.9" CC="gcc-4.9"; fi
-  - if [[ "$(uname)" = "Linux" && "$CXX" = "clang++" ]]; then export CXX="clang++-3.5" CC="clang-3.5"; fi
-  - if [[ "$(uname)" = "Linux" ]]; then export LLVM_CONFIG="llvm-config-3.5"; fi
+  - if [[ "$(uname)" = "Linux" && "$CXX" = "clang++" ]]; then export CXX="clang++-6.0" CC="clang-6.0"; fi
   - |
     if [[ "$USE_GASNET" -eq 1 ]]; then
       export CONDUIT=mpi
