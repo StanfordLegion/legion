@@ -43,7 +43,7 @@ before_install:
       sudo apt-get update -qq
       # OpenMPI packages: openmpi-bin libopenmpi-dev
       # MPICH packages: mpich2 libmpich-dev
-      sudo apt-get install -qq g++-4.9 clang-6.0 libclang-6.0-dev llvm-6.0-dev libedit-dev mpich2 libmpich-dev libblas-dev liblapack-dev libhdf5-dev pypy
+      sudo apt-get install -qq clang-6.0 libclang-6.0-dev llvm-6.0-dev libedit-dev mpich2 libmpich-dev libblas-dev liblapack-dev libhdf5-dev pypy
       export CMAKE_PREFIX_PATH=/usr/lib/llvm-6.0:/usr/share/llvm-6.0
     fi
   - |
@@ -55,7 +55,6 @@ before_install:
       export CXX="$(brew --prefix)/opt/llvm@6/bin/clang++"
       export CMAKE_PREFIX_PATH="$(brew --prefix)/opt/llvm@6"
     fi
-  - if [[ "$(uname)" = "Linux" && "$CXX" = "g++" ]]; then export CXX="g++-4.9" CC="gcc-4.9"; fi
   - if [[ "$(uname)" = "Linux" && "$CXX" = "clang++" ]]; then export CXX="clang++-6.0" CC="clang-6.0"; fi
   - if [[ "$(uname)" = "Linux" ]]; then export LLVM_CONFIG="llvm-config-6.0"; fi
   - |
