@@ -128,6 +128,7 @@ local node_is_leaf = {
 
   [ast.typed.expr.ID]              = always_true,
   [ast.typed.expr.Constant]        = always_true,
+  [ast.typed.expr.Global]          = always_true,
   [ast.typed.expr.Function]        = always_true,
   [ast.typed.expr.FieldAccess]     = always_true,
   [ast.typed.expr.IndexAccess]     = always_true,
@@ -228,6 +229,7 @@ local node_is_inner = {
 
   [ast.typed.expr.ID]                         = always_true,
   [ast.typed.expr.Constant]                   = always_true,
+  [ast.typed.expr.Global]                     = always_true,
   [ast.typed.expr.Function]                   = always_true,
   [ast.typed.expr.FieldAccess]                = always_true,
   [ast.typed.expr.MethodCall]                 = always_true,
@@ -371,6 +373,7 @@ local node_is_idempotent = {
 
   [ast.typed.expr.ID]                         = always_true,
   [ast.typed.expr.Constant]                   = always_true,
+  [ast.typed.expr.Global]                     = always_true,
   [ast.typed.expr.Deref]                      = always_true,
   [ast.typed.expr.IndexAccess]                = always_true,
   [ast.typed.expr.Function]                   = always_true,
@@ -515,6 +518,7 @@ local node_is_replicable = {
 
   [ast.typed.expr.ID]                         = always_true,
   [ast.typed.expr.Constant]                   = always_true,
+  [ast.typed.expr.Global]                     = always_true,
   [ast.typed.expr.Deref]                      = always_true,
   [ast.typed.expr.IndexAccess]                = always_true,
   [ast.typed.expr.Function]                   = always_true,

@@ -134,6 +134,7 @@ local node_vars_are_valid = {
   end,
 
   [ast.typed.expr.Constant]                   = continue,
+  [ast.typed.expr.Global]                     = continue,
   [ast.typed.expr.Function]                   = continue,
   [ast.typed.expr.IndexAccess]                = continue,
   [ast.typed.expr.MethodCall]                 = continue,

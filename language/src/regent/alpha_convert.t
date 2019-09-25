@@ -222,6 +222,7 @@ local node_alpha_conversion = {
   [ast.specialized.expr.Region]      = update_fspace_type,
 
   [ast.specialized.expr.Constant]                   = pass_through,
+  [ast.specialized.expr.Global]                     = pass_through,
   [ast.specialized.expr.FieldAccess]                = pass_through,
   [ast.specialized.expr.IndexAccess]                = pass_through,
   [ast.specialized.expr.MethodCall]                 = pass_through,
@@ -280,6 +281,7 @@ local node_alpha_conversion = {
   [ast.specialized.expr.ImportPartition]            = pass_through,
 
   [ast.specialized.expr.LuaTable] = function(cx, node, continuation)
+    for k, v in pairs(node.value) do print(k, v) end
     report.error(node, "unable to specialize value of type table")
   end,
 

@@ -47,6 +47,9 @@ local function get_num_accessed_fields(node)
   elseif node:is(ast.specialized.expr.Constant) then
     return 1
 
+  elseif node:is(ast.specialized.expr.Global) then
+    return 1
+
   elseif node:is(ast.specialized.expr.FieldAccess) then
     if terralib.islist(node.field_name) then
       return get_num_accessed_fields(node.value) * #node.field_name
@@ -369,6 +372,7 @@ end)
 local predicates = {
   [ast.specialized.expr.ID]       = function(node) return true end,
   [ast.specialized.expr.Constant] = function(node) return true end,
+  [ast.specialized.expr.Global] = function(node) return true end,
   [ast.specialized.expr.Function] = function(node) return true end,
   [ast.specialized.expr.FieldAccess] =
     function(node)
@@ -530,6 +534,7 @@ local normalize_expr_table = {
   [ast.specialized.expr.ID]                         = pass_through_expr,
   [ast.specialized.expr.Function]                   = pass_through_expr,
   [ast.specialized.expr.Constant]                   = pass_through_expr,
+  [ast.specialized.expr.Global]                     = pass_through_expr,
 
   -- Expressions that do not need to be normalized
   [ast.specialized.expr.New]                        = pass_through_expr,
