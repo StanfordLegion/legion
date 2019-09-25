@@ -50,13 +50,10 @@ before_install:
     if [[ "$(uname)" = "Darwin" ]]; then
       brew update
       brew install pypy llvm@6 hdf5
-      export CLANG="$(brew --prefix)/opt/llvm@6/bin/clang"
-      export LLVM_CONFIG="$(brew --prefix)/opt/llvm@6/bin/llvm-config"
       export CXX="$(brew --prefix)/opt/llvm@6/bin/clang++"
       export CMAKE_PREFIX_PATH="$(brew --prefix)/opt/llvm@6"
     fi
   - if [[ "$(uname)" = "Linux" && "$CXX" = "clang++" ]]; then export CXX="clang++-6.0" CC="clang-6.0"; fi
-  - if [[ "$(uname)" = "Linux" ]]; then export LLVM_CONFIG="llvm-config-6.0"; fi
   - |
     if [[ "$USE_GASNET" -eq 1 ]]; then
       export CONDUIT=mpi
