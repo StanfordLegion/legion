@@ -4349,14 +4349,14 @@ class DataflowTraverser(object):
         self.reductions_to_perform = dict()
         self.failed_analysis = False
 
-    def visit_node(self, node): 
+    def visit_node(self, node, eq_key): 
         if isinstance(node, Operation):
             pass 
         elif isinstance(node, RealmCopy):
-            if not self.visit_copy(node):
+            if not self.visit_copy(node, eq_key):
                 return False
         elif isinstance(node, RealmFill):
-            if not self.visit_fill(node):
+            if not self.visit_fill(node, eq_key):
                 return False
         elif isinstance(node, RealmDeppart):
             pass
@@ -4364,9 +4364,9 @@ class DataflowTraverser(object):
             assert False # should never get here
         return True
 
-    def post_visit_node(self, node):
+    def post_visit_node(self, node, eq_key):
         if isinstance(node, RealmCopy):
-            self.post_visit_copy(node)
+            self.post_visit_copy(node, eq_key)
 
     def traverse_node(self, node, eq_key, first = True):
         if node.version_numbers and eq_key in node.version_numbers and \
@@ -4375,7 +4375,7 @@ class DataflowTraverser(object):
             # because that is not the same value of the equivalence class
             # Skip this check on the first node though for things like copy across
             return False
-        if not self.visit_node(node):
+        if not self.visit_node(node, eq_key):
             return False
         eq_privileges = node.get_equivalence_privileges()
         privilege = eq_privileges[eq_key]
@@ -4392,13 +4392,13 @@ class DataflowTraverser(object):
                         # Short-circuit if we're done for better or worse
                         if self.traverse_node(next_node, eq_key, first=False):
                             # Still need to do the post visit call
-                            self.post_visit_node(node)
+                            self.post_visit_node(node, eq_key)
                             return True
-        self.post_visit_node(node)
+        self.post_visit_node(node, eq_key)
         # See if we are done
-        return self.failed_analysis or self.verified()
+        return self.failed_analysis or self.verified(eq_key)
 
-    def visit_copy(self, copy):
+    def visit_copy(self, copy, eq_key):
         # Check to see if this is a reduction copy or not
         if 0 in copy.redops:
             # Normal copy
@@ -4425,14 +4425,14 @@ class DataflowTraverser(object):
                 elif src in self.state.valid_instances:
                     self.found_dataflow_path = True
                 # Continue the traversal if we're not done
-                if not self.verified(last=False):
+                if not self.verified(eq_key, last=False):
                     # Push it on the stack and continue traversal
                     self.dataflow_stack.append(src)
                     self.dataflow_copy.append(True)
                     return True
                 elif self.found_dataflow_path:
                     # If we just finished finding it do the analysis now
-                    self.perform_copy_analysis(copy, src, self.dataflow_stack[-1])
+                    self.perform_copy_analysis(copy, src, self.dataflow_stack[-1], eq_key)
             else:
                 # Always traverse through non-dataflow copies
                 self.dataflow_copy.append(False)
@@ -4453,6 +4453,8 @@ class DataflowTraverser(object):
                                 str(copy)+" and "+str(self.observed_reductions[src])+
                                 " from reduction instance "+str(src)+ " for op "+
                                 self.error_str)
+                        if self.op.state.eq_graph_on_error:
+                            self.op.state.dump_eq_graph(eq_key)
                         if self.op.state.assert_on_error:
                             assert False
                         return False
@@ -4463,10 +4465,10 @@ class DataflowTraverser(object):
                         self.reductions_to_perform[red_target].append(src)
                         # Keep going as long as we haven't found the dataflow path
                         # or there are more reductions to find
-                        return not self.verified(last=False)
+                        return not self.verified(eq_key, last=False)
         return False
 
-    def post_visit_copy(self, copy):
+    def post_visit_copy(self, copy, eq_key):
         if self.failed_analysis:
             if self.dataflow_copy[-1]:
                 self.dataflow_stack.pop()
@@ -4483,19 +4485,19 @@ class DataflowTraverser(object):
                     # Do these in the reverse order of how they were added
                     for red_src in reversed(self.reductions_to_perform[src]):
                         reduction = self.observed_reductions[red_src]
-                        self.perform_copy_analysis(reduction, red_src, src)
+                        self.perform_copy_analysis(reduction, red_src, src, eq_key)
                         if self.failed_analysis and self.op.state.assert_on_error:
                             assert False
                     del self.reductions_to_perform[src]
                 # Perform the copy analysis
-                self.perform_copy_analysis(copy, src, dst)
+                self.perform_copy_analysis(copy, src, dst, eq_key)
             # Only pop off our instance if this wasn't a reduction copy
             if self.dataflow_copy:
                 if self.dataflow_copy[-1]:
                     self.dataflow_stack.pop()
                 self.dataflow_copy.pop()
 
-    def perform_copy_analysis(self, copy, src, dst):
+    def perform_copy_analysis(self, copy, src, dst, eq_key):
         # If we've already traversed this then we can skip the verification
         if copy.record_version_number(self.state):
             return
@@ -4510,6 +4512,8 @@ class DataflowTraverser(object):
             print("ERROR: Missing source precondition for "+str(copy)+
                 " on field "+str(self.src_field)+" for op "+self.error_str+
                 " on "+str(bad))
+            if self.op.state.eq_graph_on_error:
+                self.op.state.dump_eq_graph(eq_key)
             self.failed_analysis = True
             if self.op.state.assert_on_error:
                 assert False
@@ -4522,6 +4526,8 @@ class DataflowTraverser(object):
             print("ERROR: Missing destination precondition for "+str(copy)+
                 " on field "+str(self.dst_field)+" for op "+self.error_str+
                 " on "+str(bad))
+            if self.op.state.eq_graph_on_error:
+                self.op.state.dump_eq_graph(eq_key)
             self.failed_analysis = True
             if self.op.state.assert_on_error:
                 assert False
@@ -4531,7 +4537,7 @@ class DataflowTraverser(object):
         dst.add_verification_copy_user(self.dst_depth, self.dst_field, self.point,
                        copy, self.dst_req.index, False, src.redop, self.dst_version)
 
-    def visit_fill(self, fill):
+    def visit_fill(self, fill, eq_key):
         # See if this fill is for the current target
         if not self.found_dataflow_path and self.dataflow_stack and \
               self.dst_field in fill.fields and \
@@ -4557,6 +4563,8 @@ class DataflowTraverser(object):
                     str(fill)+" on field "+str(self.dst_field)+" for op "+
                     self.error_str+" on "+str(bad))
                 self.failed_analysis = True
+                if self.op.state.eq_graph_on_error:
+                    self.op.state.dump_eq_graph(eq_key)
                 if self.op.state.assert_on_error:
                     assert False
                 return False
@@ -4565,7 +4573,7 @@ class DataflowTraverser(object):
         # We should never traverse backwards through a fill
         return False
 
-    def verified(self, last = False):
+    def verified(self, eq_key, last = False):
         if self.failed_analysis:
             if last and self.op.state.assert_on_error:
                 assert False
@@ -4577,6 +4585,8 @@ class DataflowTraverser(object):
                         str(self.dst_field)+" of instance "+str(self.target)+
                         " of region requirement "+str(self.dst_req.index)+
                         " of "+str(self.op))
+                if self.op.state.eq_graph_on_error:
+                    self.op.state.dump_eq_graph(eq_key)
                 if self.op.state.assert_on_error:
                     assert False
             return False
@@ -4588,6 +4598,8 @@ class DataflowTraverser(object):
                             str(self.dst_field)+" of instance "+str(self.target)+
                             " of region requirement "+str(self.dst_req.index)+
                             " of "+str(self.op))
+                    if self.op.state.eq_graph_on_error:
+                        self.op.state.dump_eq_graph(eq_key)
                     if self.op.state.assert_on_error:
                         assert False
                 return False
@@ -4597,7 +4609,7 @@ class DataflowTraverser(object):
                     # Do these in the reverse order of how they were added
                     for src in reversed(self.reductions_to_perform[self.target]):
                         reduction = self.observed_reductions[src]
-                        self.perform_copy_analysis(reduction, src, self.target)
+                        self.perform_copy_analysis(reduction, src, self.target, eq_key)
                         if self.failed_analysis:
                             if self.op.state.assert_on_error:
                                 assert False
@@ -4607,6 +4619,8 @@ class DataflowTraverser(object):
     def verify(self, op, restricted = False):
         src_key = (self.point, self.src_field, self.src_tree)
         dst_key = (self.point, self.dst_field, self.dst_tree)
+        # The verification key is the src_key unless otherwise specified
+        ver_key = src_key
         # Copies are a little weird in that they don't actually
         # depend on their region requirements so we just need
         # to traverse from their finish event
@@ -4617,6 +4631,7 @@ class DataflowTraverser(object):
                 # copies because they are the across ones, otherwise
                 # we just traverse them
                 if self.across:
+                    ver_key = dst_key
                     for copy in op.realm_copies:
                         # Skip non-across copies
                         if not copy.is_across():
@@ -4646,6 +4661,7 @@ class DataflowTraverser(object):
             # non-accross ones will be traverse by the normal copy traversasl
             if op.realm_fills:
                 if self.across:
+                    ver_key = dst_key
                     for fill in op.realm_fills:
                         # Skip non-across fills
                         if not fill.is_across():
@@ -4694,7 +4710,7 @@ class DataflowTraverser(object):
         else:
             # Traverse the node and then see if we satisfied everything
             self.traverse_node(op, src_key)
-        return self.verified(True)
+        return self.verified(ver_key, True)
 
 class EquivalenceSet(object):
     __slots__ = ['tree', 'depth', 'field', 'point', 'valid_instances', 
@@ -6891,6 +6907,33 @@ class Operation(object):
                     printer.println(src.node_name+' -> '+self.node_name+
                             ' [style=solid,color=black,penwidth=2];')
 
+    def print_eq_node(self, printer, eq_key):
+        pass
+
+    def print_incoming_eq_edges(self, printer, eq_key):
+        if self.eq_incoming is None or eq_key not in self.eq_incoming:
+            return
+        if self.cluster_name is not None:
+            for src in self.eq_incoming[eq_key]:
+                if src.cluster_name is not None:
+                    printer.println(src.node_name+' -> '+self.node_name+
+                            ' [ltail='+src.cluster_name+',lhead='+
+                            self.cluster_name+',style=solid,color=black,'+
+                            'penwidth=2];')
+                else:
+                    printer.println(src.node_name+' -> '+self.node_name+
+                            ' [lhead='+self.cluster_name+',style=solid,'+
+                            'color=black,penwidth=2];')
+        else:
+            for src in self.eq_incoming[eq_key]:
+                if src.cluster_name is not None:
+                    printer.println(src.node_name+' -> '+self.node_name+
+                            ' [ltail='+src.cluster_name+',style=solid,'+
+                            'color=black,penwidth=2];')
+                else:
+                    printer.println(src.node_name+' -> '+self.node_name+
+                            ' [style=solid,color=black,penwidth=2];')
+
     def pack_requirement_replay_info(self, replay_file, req, mapping):
         if mapping:
             # Get the unique set of instances
@@ -8620,6 +8663,20 @@ class RealmBase(object):
                 printer.println(src.node_name+' -> '+self.node_name+
                         ' [style=solid,color=black,penwidth=2];')
 
+    def print_eq_node(self, printer, eq_key):
+        pass
+
+    def print_incoming_eq_edges(self, printer, eq_key):
+        if self.eq_incoming is None or eq_key not in self.eq_incoming:
+            return
+        for src in self.eq_incoming[eq_key]:
+            if src.cluster_name is not None:
+                printer.println(src.node_name+' -> '+self.node_name+
+                            ' [ltail='+src.cluster_name+',style=solid,'+
+                            'color=black,penwidth=2];')
+            else:
+                printer.println(src.node_name+' -> '+self.node_name+
+                        ' [style=solid,color=black,penwidth=2];')
 
 class RealmCopy(RealmBase):
     __slots__ = ['start_event', 'finish_event', 'src_fields', 'dst_fields', 
@@ -10407,8 +10464,8 @@ def parse_legion_spy_line(line, state):
     return False
 
 class State(object):
-    __slots__ = ['verbose', 'top_level_uid', 'top_level_ctx_uid', 'traverser_gen', 
-                 'processors', 'memories',
+    __slots__ = ['temp_dir', 'verbose', 'top_level_uid', 'top_level_ctx_uid', 
+                 'traverser_gen', 'processors', 'memories',
                  'processor_kinds', 'memory_kinds', 'index_exprs', 'index_spaces', 
                  'index_partitions', 'field_spaces', 'regions', 'partitions', 'top_spaces', 
                  'trees', 'ops', 'unique_ops', 'tasks', 'task_names', 'variants', 
@@ -10416,14 +10473,17 @@ class State(object):
                  'copies', 'fills', 'depparts', 'no_event', 'slice_index', 'slice_slice', 
                  'point_slice', 'point_point', 'futures', 'next_generation', 
                  'next_realm_num', 'detailed_graphs',  'assert_on_error', 'assert_on_warning', 
-                 'config', 'detailed_logging', 'replicants']
-    def __init__(self, verbose, details, assert_on_error, assert_on_warning):
+                 'eq_graph_on_error', 'config', 'detailed_logging', 'replicants']
+    def __init__(self, temp_dir, verbose, details, assert_on_error, 
+                 assert_on_warning, eq_graph_on_error):
+        self.temp_dir = temp_dir
         self.config = False
         self.detailed_logging = True
         self.verbose = verbose
         self.detailed_graphs = details
         self.assert_on_error = assert_on_error
         self.assert_on_warning = assert_on_warning
+        self.eq_graph_on_error = eq_graph_on_error
         self.top_level_uid = None
         self.top_level_ctx_uid = None
         self.traverser_gen = 1
@@ -11136,6 +11196,38 @@ class State(object):
             node.print_incoming_event_edges(printer) 
         printer.print_pdf_after_close(False, zoom_graphs)
 
+    def dump_eq_graph(self, eq_key):
+        print('Dumping equivalence set graph for eq set (point='+str(eq_key[0])+
+                ', field='+str(eq_key[1])+', tree='+str(eq_key[2])+')')
+        nodes = set()
+        # Find all the nodes with this eq_key
+        def has_eq_key(node):
+            if node.eq_incoming and eq_key in node.eq_incoming:
+                return True
+            if node.eq_outgoing and eq_key in node.eq_outgoing:
+                return True
+            return False
+        for op in self.ops:
+            if has_eq_key(op):
+                nodes.add(op)
+        for copy in self.copies:
+            if has_eq_key(copy):
+                nodes.add(copy)
+        for fill in self.fills:
+            if has_eq_key(fill):
+                nodes.add(fill)
+        for deppart in self.depparts:
+            if has_eq_key(deppart):
+                nodes.add(deppart)
+        # Now that we've got all the nodes we can print them with a graph printer
+        file_name = 'bad_eq_graph'
+        printer = GraphPrinter(self.temp_dir, file_name)
+        for node in nodes:
+            node.print_event_node(printer)
+        for node in nodes:
+            node.print_incoming_eq_edges(printer, eq_key)
+        printer.print_pdf_after_close(False)
+
     def print_realm_statistics(self):
         print('Total events: '+str(len(self.events)))
         print('Total copies: '+str(len(self.copies)))
@@ -11590,7 +11682,7 @@ def main(temp_dir):
         '-i', '--instance', dest='instance_descriptions', action='store_true',
         help='print instance descriptions')
     parser.add_argument(
-        '-q', '--mapping', dest='mapping_decisions', action='store_true',
+        '-x', '--mapping', dest='mapping_decisions', action='store_true',
         help='print mapping decisions')
     parser.add_argument(
         '-t', '--trees', dest='print_trees', action='store_true',
@@ -11616,6 +11708,9 @@ def main(temp_dir):
     parser.add_argument(
         '--zoom', dest='zoom_graphs', action='store_true',
         help='enable generation of "zoom" graphs for all emitted graphs')
+    parser.add_argument(
+        '-q', '--eq_graph', dest='eq_graph_on_error', action='store_true',
+        help='dump equivalence set graph on failure')
     parser.add_argument(
         dest='filenames', nargs='+',
         help='input legion spy log filenames')
@@ -11645,11 +11740,13 @@ def main(temp_dir):
     assert_on_warning = args.assert_on_warning
     test_geometry = args.test_geometry
     zoom_graphs = args.zoom_graphs
+    eq_graph_on_error = args.eq_graph_on_error
 
     if test_geometry:
         run_geometry_tests()
 
-    state = State(verbose, detailed_graphs, assert_on_error, assert_on_warning)
+    state = State(temp_dir, verbose, detailed_graphs, assert_on_error, 
+                  assert_on_warning, eq_graph_on_error)
     total_matches = 0 
     for file_name in file_names:
         total_matches += state.parse_log_file(file_name)
