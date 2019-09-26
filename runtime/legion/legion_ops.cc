@@ -4465,15 +4465,7 @@ namespace Legion {
             Runtime::release_reservation(it->first, completion_event);
           }
         }
-        // If we have a compsite reference, we need to map it
-        // as a virtual region
-        if (src_composite >= 0)
-        {
-          // Clear out the target views, the copy_across call will
-          // find the proper valid views
-          src_targets.clear();
-        }
-        else
+        if (src_composite < 0)
         {
           // Don't track source views of copy across operations here,
           // as they will do later when the realm copies are recorded.
@@ -4496,6 +4488,13 @@ namespace Legion {
                                               false/*track effects*/,
                                               record_valid);
         }
+#ifdef DEBUG_LEGION
+        else
+        {
+          assert(src_targets.size() == 1);
+          assert(src_targets[0].is_virtual_ref());
+        }
+#endif
         // Little bit of a hack here, if we are going to do a reduction
         // explicit copy, switch the privileges to read-write when doing
         // the registration since we know we are using normal instances

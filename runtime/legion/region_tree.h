@@ -563,7 +563,8 @@ namespace Legion {
                                std::map<PhysicalManager*,
                                     std::pair<unsigned,bool> > *acquired,
                                std::vector<PhysicalManager*> &unacquired,
-                               const bool do_acquire_checks);
+                               const bool do_acquire_checks,
+                               const bool allow_partial_virtual = false);
       bool physical_convert_postmapping(Operation *op,
                                const RegionRequirement &req,
                                const std::vector<MappingInstance> &chosen,
