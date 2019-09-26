@@ -99,6 +99,7 @@ local node_allow_annotations = {
 
   [ast.typed.expr.ID]                         = deny_all,
   [ast.typed.expr.Constant]                   = deny_all,
+  [ast.typed.expr.Global]                     = deny_all,
   [ast.typed.expr.Function]                   = deny_all,
   [ast.typed.expr.FieldAccess]                = deny_all,
   [ast.typed.expr.IndexAccess]                = deny_all,

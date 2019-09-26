@@ -125,6 +125,14 @@ local function convert_lua_value(cx, node, value, allow_lists)
       annotations = node.annotations,
       span = node.span,
     }
+  elseif terralib.isglobalvar(value) then
+    local expr_type = value:gettype()
+    return ast.specialized.expr.Global {
+      value = value,
+      expr_type = expr_type,
+      annotations = node.annotations,
+      span = node.span,
+    }
   elseif std.is_symbol(value) then
     value = cx.env:safe_lookup(value) or value
     return ast.specialized.expr.ID {

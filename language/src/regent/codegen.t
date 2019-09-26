@@ -2176,6 +2176,19 @@ function codegen.expr_constant(cx, node)
     value_type)
 end
 
+function codegen.expr_global(cx, node)
+  local value = node.value
+  local value_type = std.as_read(node.expr_type)
+
+  assert(terralib.isglobalvar(value))
+  assert(std.type_eq(value.type, value_type))
+
+  return values.value(
+    node,
+    expr.just(emit_debuginfo(node), value),
+    value_type)
+end
+
 function codegen.expr_function(cx, node)
   local value_type = std.as_read(node.expr_type)
   local value = node.value
@@ -7885,6 +7898,9 @@ function codegen.expr(cx, node)
 
   elseif node:is(ast.typed.expr.Constant) then
     return codegen.expr_constant(cx, node)
+
+  elseif node:is(ast.typed.expr.Global) then
+    return codegen.expr_global(cx, node)
 
   elseif node:is(ast.typed.expr.Function) then
     return codegen.expr_function(cx, node)

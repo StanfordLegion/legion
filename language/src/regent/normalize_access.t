@@ -42,6 +42,7 @@ end)
 local normalized_predicates = {
   [ast.typed.expr.ID]       = function(node) return true end,
   [ast.typed.expr.Constant] = function(node) return true end,
+  [ast.typed.expr.Global]   = function(node) return true end,
   [ast.typed.expr.Function] = function(node) return true end,
   [ast.typed.expr.FieldAccess] =
     function(node)
@@ -163,6 +164,7 @@ local normalize_access_expr_table = {
   [ast.typed.expr.ID]                         = normalize_access.pass_through_expr,
   [ast.typed.expr.Function]                   = normalize_access.pass_through_expr,
   [ast.typed.expr.Constant]                   = normalize_access.pass_through_expr,
+  [ast.typed.expr.Global]                     = normalize_access.pass_through_expr,
   [ast.typed.expr.Null]                       = normalize_access.pass_through_expr,
   [ast.typed.expr.Isnull]                     = normalize_access.pass_through_expr,
 

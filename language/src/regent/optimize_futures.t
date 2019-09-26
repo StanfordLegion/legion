@@ -144,6 +144,7 @@ function analyze_var_flow.expr(cx, node)
     return analyze_var_flow.expr_id(cx, node)
 
   elseif node:is(ast.typed.expr.Constant) or
+    node:is(ast.typed.expr.Global) or
     node:is(ast.typed.expr.Function) or
     node:is(ast.typed.expr.FieldAccess) or
     node:is(ast.typed.expr.IndexAccess) or
@@ -989,6 +990,9 @@ function optimize_futures.expr(cx, node)
     return optimize_futures.expr_id(cx, node)
 
   elseif node:is(ast.typed.expr.Constant) then
+    return node
+
+  elseif node:is(ast.typed.expr.Global) then
     return node
 
   elseif node:is(ast.typed.expr.Function) then

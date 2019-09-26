@@ -439,6 +439,15 @@ function type_check.expr_constant(cx, node)
   }
 end
 
+function type_check.expr_global(cx, node)
+  return ast.typed.expr.Global {
+    value = node.value,
+    expr_type = node.expr_type,
+    annotations = node.annotations,
+    span = node.span,
+  }
+end
+
 local untyped = std.untyped
 local untyped_fn = terralib.types.functype(terralib.newlist({untyped}), terralib.types.unit, true)
 local function cast_fn(to_type)
@@ -3384,6 +3393,7 @@ end
 local type_check_expr_node = {
   [ast.specialized.expr.ID]                         = type_check.expr_id,
   [ast.specialized.expr.Constant]                   = type_check.expr_constant,
+  [ast.specialized.expr.Global]                     = type_check.expr_global,
   [ast.specialized.expr.Function]                   = type_check.expr_function,
   [ast.specialized.expr.FieldAccess]                = type_check.expr_field_access,
   [ast.specialized.expr.IndexAccess]                = type_check.expr_index_access,

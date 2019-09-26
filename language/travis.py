@@ -21,8 +21,6 @@ import argparse, os, platform, subprocess, sys
 def test(root_dir, install_only, debug, max_dim, short, spy, prof, gcov, hdf5, cuda, openmp, python, jobs, env):
     threads = ['-j', '2'] if 'TRAVIS' in env else []
     terra = ['--with-terra', env['TERRA_DIR']] if 'TERRA_DIR' in env else []
-    # FIXME: https://github.com/StanfordLegion/legion/issues/601
-    terra.extend(['--no-terra-cmake'] if 'TRAVIS' in env else [])
     build = (['--with-cmake-build', env['CMAKE_BUILD_DIR']]
              if env.get('USE_CMAKE') == '1' and 'CMAKE_BUILD_DIR' in env
              else [])

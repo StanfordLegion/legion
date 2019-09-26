@@ -3232,7 +3232,8 @@ namespace Legion {
                                   std::map<PhysicalManager*,
                                        std::pair<unsigned,bool> > *acquired,
                                   std::vector<PhysicalManager*> &unacquired,
-                                  const bool do_acquire_checks)
+                                  const bool do_acquire_checks,
+                                  const bool allow_partial_virtual)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, REGION_TREE_PHYSICAL_CONVERT_MAPPING_CALL);
@@ -3283,6 +3284,13 @@ namespace Legion {
       {
         if (has_composite)
         {
+          if (!allow_partial_virtual)
+          {
+            // If we don't allow partial virtual results then clear
+            // the results and make all the needed fields the result
+            result.clear();
+            needed_fields = node->get_field_mask(req.privilege_fields);
+          }
           int composite_idx = result.size();
           result.add_instance(
               InstanceRef(runtime->virtual_manager, needed_fields));

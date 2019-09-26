@@ -294,6 +294,10 @@ function pretty.expr_constant(cx, node)
   return text.Line { value = tostring(value) }
 end
 
+function pretty.expr_global(cx, node)
+  return text.Line { value = tostring(node.value) }
+end
+
 function pretty.expr_function(cx, node)
   local name
   if std.is_task(node.value) then
@@ -747,6 +751,9 @@ function pretty.expr(cx, node)
 
   elseif node:is(ast.typed.expr.Constant) then
     return pretty.expr_constant(cx, node)
+
+  elseif node:is(ast.typed.expr.Global) then
+    return pretty.expr_global(cx, node)
 
   elseif node:is(ast.typed.expr.Function) then
     return pretty.expr_function(cx, node)
