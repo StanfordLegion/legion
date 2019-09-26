@@ -4503,13 +4503,14 @@ namespace Legion {
                                               false/*track effects*/,
                                               record_valid);
         }
-#ifdef DEBUG_LEGION
         else
         {
+#ifdef DEBUG_LEGION
           assert(src_targets.size() == 1);
           assert(src_targets[0].is_virtual_ref());
-        }
 #endif
+          src_targets.clear();
+        }
         // Little bit of a hack here, if we are going to do a reduction
         // explicit copy, switch the privileges to read-write when doing
         // the registration since we know we are using normal instances
