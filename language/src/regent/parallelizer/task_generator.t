@@ -251,6 +251,7 @@ local rewrite_accesses_expr_table = {
   [ast.typed.expr.CtorListField]              = unreachable,
   [ast.typed.expr.CtorRecField]               = unreachable,
   [ast.typed.expr.Internal]                   = unreachable,
+  [ast.typed.expr.Global]                     = unreachable,
   [ast.typed.expr.RawContext]                 = unreachable,
   [ast.typed.expr.Ispace]                     = unreachable,
   [ast.typed.expr.Region]                     = unreachable,
