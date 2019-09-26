@@ -4101,10 +4101,7 @@ class LogicalState(object):
             # Check for replays
             if prev_op is op:
                 # If it is a previous registration of ourself, skip it
-                # This will only happen during replays
-                if prev_req.index == req.index:
-                    continue
-                assert False
+                continue
             if perform_checks:
                 if not close.has_mapping_dependence(close_req, prev_op, prev_req,
                                       ANTI_DEPENDENCE if prev_req.is_read_only()
@@ -5285,6 +5282,9 @@ class Operation(object):
             for point in itervalues(self.points):
                 point.set_name(name)
 
+    def is_index_op(self):
+        return self.launch_rect is not None
+
     def __str__(self):
         if self.name is None:
             return OpNames[self.kind] + " " + str(self.uid)
@@ -6083,7 +6083,8 @@ class Operation(object):
                 for point in sorted(itervalues(self.points), key=lambda x: x.uid):
                     if not point.perform_op_logical_verification(logical_op, previous_deps):
                         return False
-        else: 
+        elif self.launch_rect is None: 
+            # This is a single operation if it doesn't have a launch rectangle
             assert len(self.reqs) >= len(logical_op.reqs)
             for idx in xrange(0,len(logical_op.reqs)):
                 if not self.verify_logical_requirement(idx, logical_op, previous_deps):
@@ -6558,10 +6559,11 @@ class Operation(object):
         # Handle special cases
         if self.kind == COPY_OP_KIND:
             # Check to see if this is an index copy
-            if self.points:
-                for point in sorted(itervalues(self.points), key=lambda x: x.uid):
-                    if not point.perform_op_physical_verification(perform_checks): 
-                        return False
+            if self.is_index_op():
+                if self.points is not None:
+                    for point in sorted(itervalues(self.points), key=lambda x: x.uid):
+                        if not point.perform_op_physical_verification(perform_checks): 
+                            return False
                 return True
             # Compute our version numbers first
             if perform_checks:
@@ -6575,10 +6577,11 @@ class Operation(object):
                     return False
         elif self.kind == FILL_OP_KIND:
             # Check to see if this is an index fill
-            if self.points:
-                for point in sorted(itervalues(self.points), key=lambda x: x.uid):
-                    if not point.perform_op_physical_verification(perform_checks):
-                        return False
+            if self.is_index_op():
+                if self.points is not None:
+                    for point in sorted(itervalues(self.points), key=lambda x: x.uid):
+                        if not point.perform_op_physical_verification(perform_checks):
+                            return False
                 return True
             # Compute our version numbers first
             if perform_checks:
@@ -7180,19 +7183,20 @@ class Task(object):
                         if idx >= len(shard.operations):
                             continue
                         op = shard.operations[idx]
-                        if op.points is not None:
-                            if op.kind == INDEX_TASK_KIND:
-                                for point in itervalues(op.points):
-                                    if not point.op.fully_logged:
-                                        assert not op.fully_logged
-                                        break
-                                    point.op.owner_shard = shard.shard
-                            else:
-                                for point in itervalues(op.points):
-                                    if not point.fully_logged:
-                                        assert not op.fully_logged
-                                        break
-                                    point.owner_shard = shard.shard
+                        if op.is_index_op():
+                            if op.points is not None:
+                                if op.kind == INDEX_TASK_KIND:
+                                    for point in itervalues(op.points):
+                                        if not point.op.fully_logged:
+                                            assert not op.fully_logged
+                                            break
+                                        point.op.owner_shard = shard.shard
+                                else:
+                                    for point in itervalues(op.points):
+                                        if not point.fully_logged:
+                                            assert not op.fully_logged
+                                            break
+                                        point.owner_shard = shard.shard
                         elif shard is not logical_shard:
                             # Skip individual operations not from our shard
                             # as we only need to verify individual operations
