@@ -4901,6 +4901,8 @@ class EquivalenceSet(object):
                 print("ERROR: Missing use precondition for field "+str(self.field)+
                       " of region requirement "+str(req.index)+" of "+str(op)+
                       " (UID "+str(op.uid)+") on previous "+str(bad))
+                if self.tree.state.eq_graph_on_error:
+                    self.tree.state.dump_eq_graph((self.point, self.field, self.tree))
                 if self.tree.state.assert_on_error:
                     assert False
                 return False
@@ -4959,6 +4961,8 @@ class EquivalenceSet(object):
                         str(src_field)+" to field "+str(dst_field)+" between "+
                         "region requirements "+str(src_req.index)+" and "+
                         str(dst_req.index)+" of "+str(op))
+                    if op.state.eq_graph_on_error:
+                        op.state.dump_eq_graph((self.point, self.field, self.tree))
                     if op.state.assert_on_error:
                         assert False
                     return False
@@ -4975,6 +4979,8 @@ class EquivalenceSet(object):
                     print("ERROR: Missing source precondition for "+str(copy)+
                           " on field "+str(src_field)+" for "+str(op)+
                           " on "+str(bad))
+                    if op.state.eq_graph_on_error:
+                        op.state.dump_eq_graph((self.point, self.field, self.tree))
                     if op.state.assert_on_error:
                         assert False
                     return False
@@ -4986,6 +4992,8 @@ class EquivalenceSet(object):
                     print("ERROR: Missing destination precondition for "+str(copy)+
                           " on field "+str(dst_field)+" for "+str(op)+
                           " on "+str(bad))
+                    if op.state.eq_graph_on_error:
+                        op.state.dump_eq_graph((self.point, self.field, self.tree))
                     if op.state.assert_on_error:
                         assert False
                     return False
@@ -11207,16 +11215,16 @@ class State(object):
             if node.eq_outgoing and eq_key in node.eq_outgoing:
                 return True
             return False
-        for op in self.ops:
+        for op in self.unique_ops:
             if has_eq_key(op):
                 nodes.add(op)
-        for copy in self.copies:
+        for copy in itervalues(self.copies):
             if has_eq_key(copy):
                 nodes.add(copy)
-        for fill in self.fills:
+        for fill in itervalues(self.fills):
             if has_eq_key(fill):
                 nodes.add(fill)
-        for deppart in self.depparts:
+        for deppart in itervalues(self.depparts):
             if has_eq_key(deppart):
                 nodes.add(deppart)
         # Now that we've got all the nodes we can print them with a graph printer
