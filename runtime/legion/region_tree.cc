@@ -2478,11 +2478,10 @@ namespace Legion {
           intersect_index_spaces(it->first->set_expr, dst_expr);
         if (overlap->is_empty())
           continue;
-        FieldMask remove_mask;
-        if (it->first->issue_across_copies(*analysis, it->second, overlap,
-              deferral_events, map_applied_events, &remove_mask))
-          analysis->record_delete_set(it->first, remove_mask, 
-                                      map_applied_events);
+        // No alt-set tracking here because some equivalence sets
+        // may need to be traversed multiple times
+        it->first->issue_across_copies(*analysis, it->second, overlap,
+                                       deferral_events, map_applied_events);
       }
       const RtEvent traversal_done = deferral_events.empty() ?
         RtEvent::NO_RT_EVENT : Runtime::merge_events(deferral_events);

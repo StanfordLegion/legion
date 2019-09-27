@@ -1665,17 +1665,6 @@ namespace Legion {
     class VersionManager;
     class VersionInfo;
     class RayTracer;
-    class PhysicalAnalysis;
-    class ValidInstAnalysis;
-    class InvalidInstAnalysis;
-    class UpdateAnalysis;
-    class AcquireAnalysis;
-    class ReleaseAnalysis;
-    class CopyAcrossAnalysis;
-    class OverwriteAnalysis;
-    class FilterAnalysis;
-    class CopyFillGuard;
-    class CopyFillAggregator;
 
     class Collectable;
     class Notifiable;
