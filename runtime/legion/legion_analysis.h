@@ -1177,10 +1177,10 @@ namespace Legion {
       typedef LegionMap<ApEvent,
                FieldMaskSet<Update> >::aligned EventFieldUpdates;
     public:
-      CopyFillAggregator(RegionTreeForest *forest, PhysicalAnalysis &analysis, 
-                         RtEvent guard_event, bool track_events,
+      CopyFillAggregator(RegionTreeForest *forest, Operation *op, 
+                         unsigned idx, RtEvent guard_event, bool track_events,
                          PredEvent pred_guard = PredEvent::NO_PRED_EVENT);
-      CopyFillAggregator(RegionTreeForest *forest, PhysicalAnalysis &analysis,
+      CopyFillAggregator(RegionTreeForest *forest, Operation *op, 
                          unsigned src_idx, unsigned dst_idx, 
                          RtEvent guard_event, bool track_events,
                          PredEvent pred_guard = PredEvent::NO_PRED_EVENT);
@@ -1255,7 +1255,6 @@ namespace Legion {
     public:
       RegionTreeForest *const forest;
       const AddressSpaceID local_space;
-      PhysicalAnalysis *const analysis;
       Operation *const op;
       const unsigned src_index;
       const unsigned dst_index;
@@ -2191,9 +2190,9 @@ namespace Legion {
                       const bool original_set = true,
                       const bool already_deferred = false);
     protected:
-      void update_set_internal(PhysicalAnalysis &analysis,
-                               CopyFillAggregator *&input_aggregator,
+      void update_set_internal(CopyFillAggregator *&input_aggregator,
                                const RtEvent guard_event,
+                               Operation *op, const unsigned index,
                                const RegionUsage &usage,
                                const FieldMask &user_mask,
                                const InstanceSet &target_instances,
@@ -2244,9 +2243,9 @@ namespace Legion {
                             const InstanceSet &target_instances,
                             const std::vector<InstanceView*> &target_views,
                                   ReferenceMutator &mutator);
-      void issue_update_copies_and_fills(PhysicalAnalysis &analysis,
-                                         CopyFillAggregator *&aggregator,
+      void issue_update_copies_and_fills(CopyFillAggregator *&aggregator,
                                          const RtEvent guard_event,
+                                         Operation *op, const unsigned index,
                                          const bool track_events,
                                          FieldMask update_mask,
                                          const InstanceSet &target_instances,
@@ -2256,18 +2255,18 @@ namespace Legion {
                                          const int dst_index = -1) const;
       void filter_valid_instances(const FieldMask &filter_mask);
       void filter_reduction_instances(const FieldMask &filter_mask);
-      void apply_reductions(PhysicalAnalysis &analysis, 
-                            const FieldMask &reduce_mask, 
+      void apply_reductions(const FieldMask &reduce_mask, 
                             CopyFillAggregator *&aggregator,
-                            RtEvent guard_event, const bool track_events);
-      void copy_out(PhysicalAnalysis &analysis,
-                    const FieldMask &restricted_mask,
+                            RtEvent guard_event, Operation *op,
+                            const unsigned index, const bool track_events);
+      void copy_out(const FieldMask &restricted_mask,
                     const InstanceSet &src_instances,
                     const std::vector<InstanceView*> &src_views,
+                    Operation *op, const unsigned index,
                           CopyFillAggregator *&aggregator) const;
       // For the case with a single instance and a logical view
-      void copy_out(PhysicalAnalysis &analysis, 
-                    const FieldMask &restricted_mask, LogicalView *src_view,
+      void copy_out(const FieldMask &restricted_mask, LogicalView *src_view,
+                    Operation *op, const unsigned index,
                           CopyFillAggregator *&aggregator) const;
       void advance_version_numbers(FieldMask advance_mask);
     protected:

@@ -8449,9 +8449,8 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       // Either it is local or it is a group that we made
-      if (!runtime->separate_runtime_instances)
-        assert(runtime->is_local(target) || 
-                (target.kind() == Processor::PROC_GROUP));
+      assert(runtime->is_local(target) || 
+              (target.kind() == Processor::PROC_GROUP));
 #endif
       // Add any profiling requests
       if (runtime->profiler != NULL)
