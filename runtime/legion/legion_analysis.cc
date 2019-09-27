@@ -6689,8 +6689,12 @@ namespace Legion {
         src_node->report_uninitialized_usage(op, src_index, src_usage, 
                                 uninitialized, uninitialized_reported);
       }
-      if (!alt_sets.empty() || !delete_sets.empty())
-        apply_update_equivalence_sets();
+#ifdef DEBUG_LEGION
+      // CopyAcrossAnalysis should have no alt-set tracking because 
+      // individual equivalence sets may need to be traversed multiple times
+      assert(alt_sets.empty());
+      assert(delete_sets.empty());
+#endif
       if (across_aggregator != NULL)
       {
 #ifdef DEBUG_LEGION
@@ -10686,8 +10690,7 @@ namespace Legion {
         // No alt-set tracking here, see comment above
         // Update the release mask and the remove_mask if there is one
         src_mask -= to_traverse.get_valid_mask();
-        if (remove_mask != NULL)
-          *remove_mask |= to_traverse.get_valid_mask();
+        // No alt-set tracking here, see comment above
         for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
               to_traverse.begin(); it != to_traverse.end(); it++) 
         {
