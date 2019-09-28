@@ -8761,6 +8761,14 @@ namespace Legion {
       }
       else
         user_data = NULL;
+      // If we have a variant name, then record it
+      if (registrar.task_variant_name == NULL)
+      {
+        variant_name = (char*)malloc(64*sizeof(char));
+        snprintf(variant_name,64,"unnamed_variant_%d", vid);
+      }
+      else
+        variant_name = strdup(registrar.task_variant_name);
       // Perform the registration, the normal case is not to have separate
       // runtime instances, but if we do have them, we only register on
       // the local processor
@@ -8818,14 +8826,6 @@ namespace Legion {
         if (!ready_events.empty())
           ready_event = Runtime::merge_events(NULL, ready_events);
       }
-      // If we have a variant name, then record it
-      if (registrar.task_variant_name == NULL)
-      {
-        variant_name = (char*)malloc(64*sizeof(char));
-        snprintf(variant_name,64,"unnamed_variant_%d", vid);
-      }
-      else
-        variant_name = strdup(registrar.task_variant_name);
       // register this with the runtime profiler if we have to
       if (runtime->profiler != NULL)
         runtime->profiler->register_task_variant(own->task_id, vid,
@@ -23520,7 +23520,7 @@ namespace Legion {
     {
       log_run.warning(id, "LEGION WARNING: %s (from file %s:%d)",
                       message, file_name, line);
-      if (Runtime::the_runtime->warnings_backtrace)
+      if (Runtime::the_runtime && Runtime::the_runtime->warnings_backtrace)
       {
         Realm::Backtrace bt;
         bt.capture_backtrace();

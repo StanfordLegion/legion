@@ -3298,7 +3298,13 @@ namespace Legion {
       }
       // Now that we have our physical instances we can validate the variant
       if (!runtime->unsafe_mapper)
-        validate_variant_selection(mapper, variant_impl, "map_task");
+      {
+#ifdef DEBUG_LEGION
+        assert(!target_processors.empty());
+#endif
+        validate_variant_selection(mapper, variant_impl, 
+            target_processors.front().kind(), "map_task");
+      }
       // Record anything else that needs to be recorded 
       selected_variant = output.chosen_variant;
       task_priority = output.task_priority;
@@ -3420,7 +3426,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void SingleTask::validate_variant_selection(MapperManager *local_mapper,
-                          VariantImpl *impl, const char *mapper_call_name) const
+    VariantImpl *impl, Processor::Kind kind, const char *mapper_call_name) const
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, VALIDATE_VARIANT_SELECTION_CALL);
@@ -3490,19 +3496,17 @@ namespace Legion {
       if (execution_constraints.processor_constraint.is_valid())
       {
         // If the constraint is a no processor constraint we can ignore it
-        if (!execution_constraints.processor_constraint.can_use(
-                                      this->target_proc.kind()))
+        if (!execution_constraints.processor_constraint.can_use(kind))
         {
           if (local_mapper == NULL)
             local_mapper = runtime->find_mapper(current_proc, map_id);
           REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                       "Invalid mapper output. Mapper %s selected variant %d "
                       "for task %s (ID %lld). However, this variant does not "
-                      "permit running on processor " IDFMT " of kind %s.",
+                      "permit running on processors of kind %s.",
                       local_mapper->get_mapper_name(),
-                      impl->vid,get_task_name(), get_unique_id(),
-                      this->target_proc.id, Processor::get_kind_name(
-                        this->target_proc.kind()))
+                      impl->vid, get_task_name(), get_unique_id(),
+                      Processor::get_kind_name(kind))
         }
       }
       // Then check the colocation constraints
@@ -6037,7 +6041,8 @@ namespace Legion {
       if (!runtime->unsafe_mapper)
       {
         MapperManager *mapper = runtime->find_mapper(current, map_id);
-        validate_variant_selection(mapper, variant, "select_task_variant");
+        validate_variant_selection(mapper, variant, current.kind(), 
+                                    "select_task_variant");
       }
       // Now make an inline context to use for the execution
       InlineContext *inline_ctx = new InlineContext(runtime, parent_ctx, this);

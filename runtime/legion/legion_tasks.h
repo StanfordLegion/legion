@@ -522,7 +522,7 @@ namespace Legion {
     protected: // mapper helper calls
       void validate_target_processors(const std::vector<Processor> &prcs) const;
       void validate_variant_selection(MapperManager *local_mapper,
-                    VariantImpl *impl, const char *call_name) const;
+          VariantImpl *impl, Processor::Kind kind, const char *call_name) const;
     protected:
       void invoke_mapper(MustEpochOp *must_epoch_owner);
       void invoke_mapper_replicated(MustEpochOp *must_epoch_owner);

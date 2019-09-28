@@ -125,6 +125,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    Domain PhysicalInstance::get_instance_domain(void) const
+    //--------------------------------------------------------------------------
+    {
+      if (impl == NULL)
+        return Domain::NO_DOMAIN;
+      Internal::ApEvent ready;
+      Domain domain = impl->instance_domain->get_domain(ready, true);
+      ready.wait();
+      return domain;
+    }
+
+    //--------------------------------------------------------------------------
     FieldSpace PhysicalInstance::get_field_space(void) const
     //--------------------------------------------------------------------------
     {

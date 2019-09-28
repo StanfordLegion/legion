@@ -55,6 +55,7 @@ namespace Legion {
       Memory get_location(void) const;
       unsigned long get_instance_id(void) const;
       size_t get_instance_size(void) const;
+      Domain get_instance_domain(void) const;
       // Adds all fields that exist in instance to 'fields', unless
       //  instance is virtual
       void get_fields(std::set<FieldID> &fields) const;
