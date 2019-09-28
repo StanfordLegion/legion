@@ -21422,7 +21422,7 @@ namespace Legion {
     {
       log_run.warning(id, "LEGION WARNING: %s (from file %s:%d)",
                       message, file_name, line);
-      if (Runtime::the_runtime->warnings_backtrace)
+      if (Runtime::the_runtime && Runtime::the_runtime->warnings_backtrace)
       {
         Realm::Backtrace bt;
         bt.capture_backtrace();
