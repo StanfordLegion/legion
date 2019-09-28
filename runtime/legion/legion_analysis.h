@@ -1228,7 +1228,7 @@ namespace Legion {
       RtEvent perform_updates(const LegionMap<InstanceView*,
                             FieldMaskSet<Update> >::aligned &updates,
                            const PhysicalTraceInfo &trace_info,
-                           ApEvent precondition,
+                           const ApEvent all_precondition,
                            const bool has_src_preconditions,
                            const bool has_dst_preconditions,
                            const bool needs_preconditions);

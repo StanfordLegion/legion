@@ -3841,7 +3841,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     RtEvent CopyFillAggregator::perform_updates(
          const LegionMap<InstanceView*,FieldMaskSet<Update> >::aligned &updates,
-         const PhysicalTraceInfo &trace_info, ApEvent precondition,
+         const PhysicalTraceInfo &trace_info, const ApEvent all_precondition,
          const bool has_src_preconditions, const bool has_dst_preconditions,
          const bool needs_preconditions)
     //--------------------------------------------------------------------------
@@ -3968,6 +3968,7 @@ namespace Legion {
             return wait_on;
         }
       }
+#ifndef UNSAFE_AGGREGATION
       // Iterate over the destinations and compute updates that have the
       // same preconditions on different fields
       std::map<std::set<ApEvent>,ApEvent> merge_cache;
@@ -4100,8 +4101,8 @@ namespace Legion {
               update_groups.begin(); eit != update_groups.end(); eit++)
         {
           // Merge in the over-arching precondition if necessary
-          const ApEvent group_precondition = precondition.exists() ? 
-            Runtime::merge_events(&trace_info, precondition, eit->first) :
+          const ApEvent group_precondition = all_precondition.exists() ? 
+            Runtime::merge_events(&trace_info, all_precondition, eit->first) :
             eit->first;
           const FieldMaskSet<Update> &group = eit->second;
 #ifdef DEBUG_LEGION
@@ -4146,6 +4147,154 @@ namespace Legion {
           }
         }
       } // iterate over dst instances
+#else
+      // This is the unsafe aggregation routine that just looks at fields
+      // and expressions and doesn't consider event preconditions
+      for (LegionMap<InstanceView*,FieldMaskSet<Update> >::aligned::
+            const_iterator uit = updates.begin(); uit != updates.end(); uit++)
+      {
+        const EventFieldExprs &dst_preconditions = dst_pre[uit->first];
+        // Group by fields first
+        LegionList<FieldSet<Update*> >::aligned field_groups;
+        uit->second.compute_field_sets(FieldMask(), field_groups);
+        for (LegionList<FieldSet<Update*> >::aligned::const_iterator fit = 
+              field_groups.begin(); fit != field_groups.end(); fit++)
+        {
+          const FieldMask &dst_mask = fit->set_mask;
+          // Now that we have the src mask for these operations group 
+          // them into fills and copies and then do their event analysis
+          std::vector<FillUpdate*> fills;
+          std::map<InstanceView* /*src*/,std::vector<CopyUpdate*> > copies;
+          for (std::set<Update*>::const_iterator it = fit->elements.begin();
+                it != fit->elements.end(); it++)
+            (*it)->sort_updates(copies, fills);
+          // Issue the copies and fills
+          if (!fills.empty())
+          {
+            std::set<ApEvent> preconditions;
+            if (all_precondition.exists())
+              preconditions.insert(all_precondition);
+            std::set<IndexSpaceExpression*> fill_exprs;
+            for (std::vector<FillUpdate*>::const_iterator it = 
+                  fills.begin(); it != fills.end(); it++)
+              fill_exprs.insert((*it)->expr);
+            IndexSpaceExpression *fill_expr = (fill_exprs.size() == 1) ?
+              *(fill_exprs.begin()) : forest->union_index_spaces(fill_exprs);
+            for (EventFieldExprs::const_iterator eit = 
+                  dst_preconditions.begin(); eit != 
+                  dst_preconditions.end(); eit++)
+            {
+              // If there are no overlapping fields we can skip it
+              if (dst_mask * eit->second.get_valid_mask())
+                continue;
+              for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
+                    eit->second.begin(); it != eit->second.end(); it++)
+              {
+                if (it->second * dst_mask)
+                  continue;
+                IndexSpaceExpression *expr_overlap = 
+                  forest->intersect_index_spaces(it->first, fill_expr);
+                if (!expr_overlap->is_empty())
+                {
+                  preconditions.insert(eit->first);
+                  break;
+                }
+              }
+            }
+            CopyAcrossHelper *across_helper = fills[0]->across_helper; 
+            const FieldMask src_mask = (across_helper == NULL) ? dst_mask :
+              across_helper->convert_dst_to_src(dst_mask);
+            if (!preconditions.empty())
+            {
+              const ApEvent fill_precondition = 
+                Runtime::merge_events(&trace_info, preconditions);
+              issue_fills(uit->first, fills, fill_precondition, 
+                          src_mask, trace_info, has_dst_preconditions);
+            }
+            else
+              issue_fills(uit->first, fills, ApEvent::NO_AP_EVENT, 
+                          src_mask, trace_info, has_dst_preconditions);
+          }
+          if (!copies.empty())
+          {
+            std::set<ApEvent> preconditions;
+            if (all_precondition.exists())
+              preconditions.insert(all_precondition);
+            std::set<IndexSpaceExpression*> copy_exprs;
+            for (std::map<InstanceView*,std::vector<CopyUpdate*> >::
+                  const_iterator cit = copies.begin(); 
+                  cit != copies.end(); cit++)
+              for (std::vector<CopyUpdate*>::const_iterator it = 
+                    cit->second.begin(); it != cit->second.end(); it++)
+                copy_exprs.insert((*it)->expr);
+            IndexSpaceExpression *copy_expr = (copy_exprs.size() == 1) ?
+              *(copy_exprs.begin()) : forest->union_index_spaces(copy_exprs); 
+            // Destination preconditions first
+            for (EventFieldExprs::const_iterator eit = 
+                  dst_preconditions.begin(); eit != 
+                  dst_preconditions.end(); eit++)
+            {
+              // If there are no overlapping fields we can skip it
+              if (dst_mask * eit->second.get_valid_mask())
+                continue;
+              for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
+                    eit->second.begin(); it != eit->second.end(); it++)
+              {
+                if (it->second * dst_mask)
+                  continue;
+                IndexSpaceExpression *expr_overlap = 
+                  forest->intersect_index_spaces(it->first, copy_expr);
+                if (!expr_overlap->is_empty())
+                {
+                  preconditions.insert(eit->first);
+                  break;
+                }
+              }
+            }
+            // Then do the source preconditions
+            // Be careful that we get the destination fields right in the
+            // case that this is an across copy
+            CopyAcrossHelper *across_helper = 
+              copies.begin()->second[0]->across_helper;
+            const FieldMask src_mask = (across_helper == NULL) ? dst_mask :
+              across_helper->convert_dst_to_src(dst_mask);
+            LegionMap<ApEvent,FieldMask>::aligned src_preconds;
+            for (std::map<InstanceView*,std::vector<CopyUpdate*> >::
+                  const_iterator cit = copies.begin(); cit != 
+                  copies.end(); cit++)
+            {
+              for (std::vector<CopyUpdate*>::const_iterator it =
+                    cit->second.begin(); it != cit->second.end(); it++)
+              {
+                (*it)->compute_source_preconditions(forest,
+#ifdef DEBUG_LEGION
+                                                    (src_index != dst_index),
+#endif
+                                                    src_pre, src_preconds);
+              }
+            }
+            for (LegionMap<ApEvent,FieldMask>::aligned::const_iterator it =
+                  src_preconds.begin(); it != src_preconds.end(); it++)
+            {
+              //if (it->second * dst_mask)
+              //  continue;
+              preconditions.insert(it->first);
+            }
+            if (!preconditions.empty())
+            {
+              const ApEvent copy_precondition = 
+                Runtime::merge_events(&trace_info, preconditions);
+              issue_copies(uit->first, copies, copy_precondition, 
+                           src_mask, trace_info, has_dst_preconditions);
+            }
+            else
+              issue_copies(uit->first, copies, ApEvent::NO_AP_EVENT, 
+                           src_mask, trace_info, has_dst_preconditions);
+
+          }
+        }
+      }
+#endif
       return RtEvent::NO_RT_EVENT;
     }
 
