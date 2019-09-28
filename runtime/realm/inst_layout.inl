@@ -572,6 +572,15 @@ namespace Realm {
     return *this;
   }
 
+  template <typename FT>
+  inline std::ostream& operator<<(std::ostream& os, const AccessorRefHelper<FT>& arh)
+  {
+    FT val;
+    arh.inst.read_untyped(arh.offset, &val, sizeof(FT));
+    os << val;
+    return os;
+  }
+
 
   ////////////////////////////////////////////////////////////////////////
   //

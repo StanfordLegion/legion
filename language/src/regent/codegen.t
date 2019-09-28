@@ -2947,6 +2947,15 @@ local function make_partition_projection_functor(cx, expr, loop_index, color_spa
   end
 end
 
+local function is_identity_projection(expr, loop_index)
+  assert(expr:is(ast.typed.expr.IndexAccess))
+
+  -- Strip the index for the purpose of checking if this is the
+  -- identity projection functor.
+  local stripped_index = strip_casts(expr.index)
+  return stripped_index:is(ast.typed.expr.ID) and stripped_index.value == loop_index
+end
+
 local function add_region_fields(cx, arg_type, field_paths, field_types, launcher, index)
   local add_field = c.legion_task_launcher_add_field
   if index then
@@ -3263,16 +3272,20 @@ local function expr_call_setup_partition_arg(
 
   free_vars_setup:insertall(loop_vars_setup)
 
-  local proj_args_set = terralib.newsymbol(free_vars_struct, "proj_args")
-  args_setup:insert(
-    quote
-      var [proj_args_set]
-    end)
-  for i, symbol in ipairs(free_vars) do
+  local needs_non_identity_functor = not is_identity_projection(arg_value, loop_index)
+  local proj_args_set = nil
+  if needs_non_identity_functor and #free_vars > 0 then
+    proj_args_set = terralib.newsymbol(free_vars_struct, "proj_args")
     args_setup:insert(
       quote
-        [proj_args_set].[tostring(symbol)] = [symbol:getsymbol()]
+        var [proj_args_set]
       end)
+    for i, symbol in ipairs(free_vars) do
+      args_setup:insert(
+        quote
+          [proj_args_set].[tostring(symbol)] = [symbol:getsymbol()]
+        end)
+    end
   end
 
   local parent_region =
@@ -3326,8 +3339,13 @@ local function expr_call_setup_partition_arg(
         var [requirement] = [add_requirement]([requirement_args])
         [add_fields]([launcher], [requirement], &[cx:region(arg_type).field_id_array])
         c.legion_index_launcher_add_flags([launcher], [requirement], [flag])
-        [set_args]([launcher], [requirement], [&opaque](&[proj_args_set]), terralib.sizeof(free_vars_struct), false)
       end)
+    if proj_args_set ~= nil then
+      args_setup:insert(
+        quote
+          [set_args]([launcher], [requirement], [&opaque](&[proj_args_set]), terralib.sizeof(free_vars_struct), false)
+        end)
+    end
   end
 end
 

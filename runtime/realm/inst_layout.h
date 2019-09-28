@@ -215,6 +215,9 @@ namespace Realm {
     AccessorRefHelper<FT>& operator=(const AccessorRefHelper<FT>& rhs);
 
   protected:
+    template <typename T>
+    friend std::ostream& operator<<(std::ostream& os, const AccessorRefHelper<T>& arh);
+
     RegionInstance inst;
     size_t offset;
   };
