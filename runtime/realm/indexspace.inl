@@ -334,6 +334,13 @@ namespace Realm {
     log_dpops.info() << "construct: " << *this;
   }
 
+  template <int N, typename T>
+  inline IndexSpace<N,T>::operator Rect<N,T>(void) const
+  {
+    assert(dense());
+    return bounds;
+  }
+
   // constructs a guaranteed-empty index space
   template <int N, typename T>
   inline /*static*/ IndexSpace<N,T> IndexSpace<N,T>::make_empty(void)

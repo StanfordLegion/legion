@@ -151,6 +151,9 @@ namespace Realm {
     IndexSpace(const std::vector<Point<N,T> >& points);
     IndexSpace(const std::vector<Rect<N,T> >& rects);
 
+    // support conversion back to rect only when dense, will assert if not dense
+    operator Rect<N,T>(void) const;
+
     // constructs a guaranteed-empty index space
     static IndexSpace<N,T> make_empty(void);
 
