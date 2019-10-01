@@ -21534,6 +21534,8 @@ namespace Legion {
     void Runtime::trace_allocation(AllocationType type, size_t size, int elems)
     //--------------------------------------------------------------------------
     {
+      if (prepared_for_shutdown)
+        return;
       AutoLock a_lock(allocation_lock);
       std::map<AllocationType,AllocationTracker>::iterator finder = 
         allocation_manager.find(type);
@@ -21548,6 +21550,8 @@ namespace Legion {
     void Runtime::trace_free(AllocationType type, size_t size, int elems)
     //--------------------------------------------------------------------------
     {
+      if (prepared_for_shutdown)
+        return;
       AutoLock a_lock(allocation_lock);
       std::map<AllocationType,AllocationTracker>::iterator finder = 
         allocation_manager.find(type);
@@ -21573,7 +21577,7 @@ namespace Legion {
         if (it->second.diff_allocations == 0)
           continue;
         log_allocation.info("%s on %d: "
-            "total=%d total_bytes=%ld diff=%d diff_bytes=%ld",
+            "total=%d total_bytes=%ld diff=%d diff_bytes=%lld",
             get_allocation_name(it->first), address_space,
             it->second.total_allocations, it->second.total_bytes,
             it->second.diff_allocations, it->second.diff_bytes);
@@ -21781,6 +21785,8 @@ namespace Legion {
           return "Variant Implementation";
         case LAYOUT_CONSTRAINTS_ALLOC:
           return "Layout Constraints";
+        case COPY_FILL_AGGREGATOR_ALLOC:
+          return "Copy Fill Aggregator";
         default:
           assert(false); // should never get here
       }
