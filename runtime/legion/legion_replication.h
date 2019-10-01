@@ -1529,6 +1529,7 @@ namespace Legion {
       ReplTraceOp& operator=(const ReplTraceOp &rhs);
     public:
       virtual void execute_dependence_analysis(void);
+      virtual bool exchange_replayable(ReplicateContext *ctx, bool replayable);
     protected:
       LegionTrace *local_trace;
     };
@@ -1548,7 +1549,6 @@ namespace Legion {
       ReplTraceCaptureOp& operator=(const ReplTraceCaptureOp &rhs);
     public:
       void initialize_capture(ReplicateContext *ctx, bool has_blocking_call);
-      bool exchange_replayable(ReplicateContext *ctx, const bool replayable);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -1556,6 +1556,7 @@ namespace Legion {
       virtual OpKind get_operation_kind(void) const;
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_mapping(void);
+      virtual bool exchange_replayable(ReplicateContext *ctx, bool replayable);
     protected:
       DynamicTrace *dynamic_trace;
       PhysicalTemplate *current_template;
@@ -1585,6 +1586,7 @@ namespace Legion {
       virtual OpKind get_operation_kind(void) const;
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_mapping(void);
+      virtual bool exchange_replayable(ReplicateContext *ctx, bool replayable);
     protected:
       PhysicalTemplate *current_template;
       ApEvent template_completion;

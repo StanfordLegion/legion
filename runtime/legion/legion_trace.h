@@ -624,7 +624,7 @@ namespace Legion {
       ApEvent get_completion(void) const;
       virtual ApEvent get_completion_for_deletion(void) const;
     public:
-      void finalize(Operation *op, bool has_blocking_call);
+      void finalize(bool has_blocking_call, ReplTraceOp *op = NULL);
       void generate_conditions(void);
     public:
       struct Replayable {
@@ -642,7 +642,7 @@ namespace Legion {
         std::string message;
       };
     protected:
-      virtual Replayable check_replayable(Operation *op,
+      virtual Replayable check_replayable(ReplTraceOp *op,
                             bool has_blocking_call) const;
     public:
       void optimize(void);
@@ -939,7 +939,7 @@ namespace Legion {
       virtual unsigned find_event(const ApEvent &event, AutoLock &tpl_lock);
       void request_remote_shard_event(ApEvent event, RtUserEvent done_event);
       static AddressSpaceID find_event_space(ApEvent event);
-      virtual Replayable check_replayable(Operation *op,
+      virtual Replayable check_replayable(ReplTraceOp *op,
                             bool has_blocking_call) const;
       virtual ApEvent get_completion_for_deletion(void) const;
     public:

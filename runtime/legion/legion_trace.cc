@@ -1227,7 +1227,7 @@ namespace Legion {
         assert(current_template != NULL);
         assert(current_template->is_recording());
 #endif
-        current_template->finalize(this, has_blocking_call);
+        current_template->finalize(has_blocking_call);
         if (!current_template->is_replayable())
         {
           const RtEvent pending_deletion = 
@@ -1370,7 +1370,6 @@ namespace Legion {
             get_completion_event());
         current_template = physical_trace->get_current_template();
         physical_trace->clear_cached_template();
-
       }
 
       // If this is a static trace, then we remove our reference when we're done
@@ -1395,7 +1394,7 @@ namespace Legion {
         assert(local_trace->get_physical_trace() != NULL);
         assert(current_template->is_recording());
 #endif
-        current_template->finalize(this, has_blocking_call);
+        current_template->finalize(has_blocking_call);
         PhysicalTrace *physical_trace = local_trace->get_physical_trace();
         if (!current_template->is_replayable())
         {
@@ -2375,7 +2374,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     PhysicalTemplate::Replayable PhysicalTemplate::check_replayable(
-                                    Operation *op, bool has_blocking_call) const
+                                  ReplTraceOp *op, bool has_blocking_call) const
     //--------------------------------------------------------------------------
     {
       if (has_blocking_call)
@@ -2461,7 +2460,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::finalize(Operation *op, bool has_blocking_call)
+    void PhysicalTemplate::finalize(bool has_blocking_call, ReplTraceOp *op)
     //--------------------------------------------------------------------------
     {
       if (!recording_done.has_triggered())
@@ -4649,21 +4648,18 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     PhysicalTemplate::Replayable ShardedPhysicalTemplate::check_replayable(
-                                    Operation *op, bool has_blocking_call) const
+                                  ReplTraceOp *op, bool has_blocking_call) const
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(op != NULL);
+#endif
       // Do the base call first to determine if our local shard is replayable
       const Replayable result = 
         PhysicalTemplate::check_replayable(op, has_blocking_call);
-#ifdef DEBUG_LEGION
-      ReplTraceCaptureOp *capture_op = dynamic_cast<ReplTraceCaptureOp*>(op); 
-      assert(capture_op != NULL);
-#else
-      ReplTraceCaptureOp *capture_op = static_cast<ReplTraceCaptureOp*>(op);
-#endif
       if (result)
       {
-        if (capture_op->exchange_replayable(repl_ctx, true/*replayable*/))
+        if (op->exchange_replayable(repl_ctx, true/*replayable*/))
           return result;
         else
           return Replayable(false, "Remote shard not replyable");
@@ -4671,7 +4667,7 @@ namespace Legion {
       else
       {
         // Still need to do the exchange
-        capture_op->exchange_replayable(repl_ctx, false/*replayable*/);
+        op->exchange_replayable(repl_ctx, false/*replayable*/);
         return result;
       }
     }
@@ -4682,12 +4678,17 @@ namespace Legion {
     {
       // Skip the any events that are from remote shards since we  
       std::set<ApEvent> all_events;
+      std::set<ApEvent> local_barriers;
+      for (std::map<ApEvent,ApBarrier>::const_iterator it = 
+            remote_barriers.begin(); it != remote_barriers.end(); it++)
+        local_barriers.insert(it->second);
       for (std::map<ApEvent, unsigned>::const_iterator it = event_map.begin();
            it != event_map.end(); ++it)
       {
-        // If this is a remote event then don't include it
-        if (pending_event_requests.find(it->first) == 
-              pending_event_requests.end())
+        // If this is a remote event or one of our barriers then don't use it
+        if ((local_barriers.find(it->first) == local_barriers.end()) &&
+            (pending_event_requests.find(it->first) == 
+              pending_event_requests.end()))
           all_events.insert(it->first);
       }
       return Runtime::merge_events(NULL, all_events);

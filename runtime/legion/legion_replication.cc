@@ -4970,6 +4970,15 @@ namespace Legion {
       end_dependence_analysis();
     }
 
+    //--------------------------------------------------------------------------
+    bool ReplTraceOp::exchange_replayable(ReplicateContext *ctx,bool replayable)
+    //--------------------------------------------------------------------------
+    {
+      // Should only be called by derived classes
+      assert(false);
+      return false;
+    }
+
     /////////////////////////////////////////////////////////////
     // ReplTraceCaptureOp 
     /////////////////////////////////////////////////////////////
@@ -5098,7 +5107,7 @@ namespace Legion {
         assert(local_trace->get_physical_trace() != NULL);
         assert(current_template->is_recording());
 #endif
-        current_template->finalize(this, has_blocking_call);
+        current_template->finalize(has_blocking_call, this);
         if (!current_template->is_replayable())
         {
           const RtEvent pending_deletion = 
@@ -5118,7 +5127,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool ReplTraceCaptureOp::exchange_replayable(ReplicateContext *repl_ctx,
-                                                 const bool shard_replayable)
+                                                 bool shard_replayable)
     //--------------------------------------------------------------------------
     {
       // Check to see if this template is replayable across all the shards
@@ -5223,11 +5232,12 @@ namespace Legion {
 #endif
       if (local_trace->is_replaying())
       {
+        PhysicalTrace *physical_trace = local_trace->get_physical_trace();
 #ifdef DEBUG_LEGION
-        assert(local_trace->get_physical_trace() != NULL);
+        assert(physical_trace != NULL);
 #endif
         PhysicalTemplate *current_template =
-          local_trace->get_physical_trace()->get_current_template();
+          physical_trace->get_current_template();
 #ifdef DEBUG_LEGION
         assert(current_template != NULL);
 #endif
@@ -5245,7 +5255,7 @@ namespace Legion {
         local_trace->end_trace_execution(this);
         parent_ctx->update_current_fence(this, true, true);
         parent_ctx->record_previous_trace(local_trace);
-        local_trace->get_physical_trace()->record_previous_template_completion(
+        physical_trace->record_previous_template_completion(
             template_completion);
         local_trace->initialize_tracing_state();
         replayed = true;
@@ -5253,13 +5263,14 @@ namespace Legion {
       }
       else if (local_trace->is_recording())
       {
+        PhysicalTrace *physical_trace = local_trace->get_physical_trace();
 #ifdef DEBUG_LEGION
-        assert(local_trace->get_physical_trace() != NULL);
+        assert(physical_trace != NULL);
 #endif
-        current_template =
-          local_trace->get_physical_trace()->get_current_template();
-        local_trace->get_physical_trace()->record_previous_template_completion(
+        current_template = physical_trace->get_current_template();
+        physical_trace->record_previous_template_completion(
             get_completion_event());
+        physical_trace->clear_cached_template();
       }
 
       // Indicate that this trace is done being captured
@@ -5294,24 +5305,15 @@ namespace Legion {
       // Now finish capturing the physical trace
       if (local_trace->is_recording())
       {
+        PhysicalTrace *physical_trace = local_trace->get_physical_trace();
 #ifdef DEBUG_LEGION
+        assert(physical_trace != NULL);
         assert(current_template != NULL);
         assert(local_trace->get_physical_trace() != NULL);
         assert(current_template->is_recording());
-        ReplicateContext *repl_ctx =dynamic_cast<ReplicateContext*>(parent_ctx);
-        assert(repl_ctx != NULL);
-#else
-        ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
-        current_template->finalize(this, has_blocking_call);
-        PhysicalTrace *physical_trace = local_trace->get_physical_trace();
-        // Check to see if this template is replayable across all the shards
-        AllReduceCollective<ProdReduction<bool> > 
-          all_replayable_collective(repl_ctx, replayable_collective_id);
-        const bool all_replayable = 
-          all_replayable_collective.sync_all_reduce(
-              current_template->is_replayable());
-        if (!all_replayable)
+        current_template->finalize(has_blocking_call, this);
+        if (!current_template->is_replayable())
         {
           const RtEvent pending_deletion = 
             current_template->defer_template_deletion();
@@ -5339,6 +5341,17 @@ namespace Legion {
         return;
       }
       ReplFenceOp::trigger_mapping();
+    }
+
+    //--------------------------------------------------------------------------
+    bool ReplTraceCompleteOp::exchange_replayable(ReplicateContext *repl_ctx,
+                                                  bool shard_replayable)
+    //--------------------------------------------------------------------------
+    {
+      // Check to see if this template is replayable across all the shards
+      AllReduceCollective<ProdReduction<bool> > 
+        all_replayable_collective(repl_ctx, replayable_collective_id);
+      return all_replayable_collective.sync_all_reduce(shard_replayable);
     }
 
     /////////////////////////////////////////////////////////////
