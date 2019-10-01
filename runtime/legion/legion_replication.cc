@@ -5090,24 +5090,15 @@ namespace Legion {
       // Now finish capturing the physical trace
       if (local_trace->is_recording())
       {
+        PhysicalTrace *physical_trace = local_trace->get_physical_trace();
 #ifdef DEBUG_LEGION
+        assert(physical_trace != NULL);
         assert(current_template != NULL);
         assert(local_trace->get_physical_trace() != NULL);
         assert(current_template->is_recording());
-        ReplicateContext *repl_ctx =dynamic_cast<ReplicateContext*>(parent_ctx);
-        assert(repl_ctx != NULL);
-#else
-        ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
         current_template->finalize(this, has_blocking_call);
-        PhysicalTrace *physical_trace = local_trace->get_physical_trace();
-        // Check to see if this template is replayable across all the shards
-        AllReduceCollective<ProdReduction<bool> > 
-          all_replayable_collective(repl_ctx, replayable_collective_id);
-        const bool all_replayable = 
-          all_replayable_collective.sync_all_reduce(
-              current_template->is_replayable());
-        if (!all_replayable)
+        if (!current_template->is_replayable())
         {
           const RtEvent pending_deletion = 
             current_template->defer_template_deletion();
@@ -5122,6 +5113,17 @@ namespace Legion {
         local_trace->initialize_tracing_state();
       }
       ReplFenceOp::trigger_mapping();
+    }
+
+    //--------------------------------------------------------------------------
+    bool ReplTraceCaptureOp::exchange_replayable(ReplicateContext *repl_ctx,
+                                                 const bool shard_replayable)
+    //--------------------------------------------------------------------------
+    {
+      // Check to see if this template is replayable across all the shards
+      AllReduceCollective<ProdReduction<bool> > 
+        all_replayable_collective(repl_ctx, replayable_collective_id);
+      return all_replayable_collective.sync_all_reduce(shard_replayable);
     }
 
     /////////////////////////////////////////////////////////////

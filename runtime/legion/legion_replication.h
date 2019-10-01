@@ -1548,6 +1548,7 @@ namespace Legion {
       ReplTraceCaptureOp& operator=(const ReplTraceCaptureOp &rhs);
     public:
       void initialize_capture(ReplicateContext *ctx, bool has_blocking_call);
+      bool exchange_replayable(ReplicateContext *ctx, const bool replayable);
     public:
       virtual void activate(void);
       virtual void deactivate(void);

@@ -641,8 +641,9 @@ namespace Legion {
         bool replayable;
         std::string message;
       };
-    private:
-      Replayable check_replayable(bool has_blocking_call) const;
+    protected:
+      virtual Replayable check_replayable(Operation *op,
+                            bool has_blocking_call) const;
     public:
       void optimize(void);
     private:
@@ -938,6 +939,8 @@ namespace Legion {
       virtual unsigned find_event(const ApEvent &event, AutoLock &tpl_lock);
       void request_remote_shard_event(ApEvent event, RtUserEvent done_event);
       static AddressSpaceID find_event_space(ApEvent event);
+      virtual Replayable check_replayable(Operation *op,
+                            bool has_blocking_call) const;
     public:
       ReplicateContext *const repl_ctx;
       const size_t template_index;

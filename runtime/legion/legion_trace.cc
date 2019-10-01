@@ -2375,7 +2375,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     PhysicalTemplate::Replayable PhysicalTemplate::check_replayable(
-                                                   bool has_blocking_call) const
+                                    Operation *op, bool has_blocking_call) const
     //--------------------------------------------------------------------------
     {
       if (has_blocking_call)
@@ -2467,7 +2467,7 @@ namespace Legion {
       if (!recording_done.has_triggered())
         Runtime::trigger_event(recording_done);
       recording = false;
-      replayable = check_replayable(has_blocking_call);
+      replayable = check_replayable(op, has_blocking_call);
 
       if (!replayable)
       {
@@ -4166,7 +4166,7 @@ namespace Legion {
                                                  AutoLock &tpl_lock)
     //--------------------------------------------------------------------------
     {
-      std::map<ApEvent, unsigned>::const_iterator finder= event_map.find(event);
+      std::map<ApEvent,unsigned>::const_iterator finder = event_map.find(event);
 #ifdef DEBUG_LEGION
       assert(finder != event_map.end());
 #endif
@@ -4302,6 +4302,8 @@ namespace Legion {
       for (std::set<ApEvent>::const_iterator it =
             rhs.begin(); it != rhs.end(); it++)
       {
+        if (!it->exists())
+          continue;
         std::map<ApEvent, unsigned>::iterator finder = event_map.find(*it);
         if (finder == event_map.end())
         {
@@ -4313,6 +4315,7 @@ namespace Legion {
           if (request_finder == pending_event_requests.end())
           {
             const RtUserEvent request_event = Runtime::create_rt_user_event();
+            pending_event_requests[*it] = request_event;
             wait_for.insert(request_event);
             request_events[*it] = request_event;
           }
@@ -4554,7 +4557,7 @@ namespace Legion {
       std::map<ApEvent,unsigned>::const_iterator finder = 
         event_map.find(event);
       // If we didn't make this event then we don't do anything
-      if (finder == event_map.end())
+      if (finder == event_map.end() || (finder->second == NO_INDEX))
         return ApBarrier::NO_AP_BARRIER;
       // If we did make it then see if we have a remote barrier for it yet
       std::map<ApEvent,ApBarrier>::const_iterator barrier_finder = 
@@ -4584,6 +4587,7 @@ namespace Legion {
     {
       AutoLock tpl_lock(template_lock);
 #ifdef DEBUG_LEGION
+      assert(event.exists());
       assert(event_map.find(event) == event_map.end());
 #endif
       if (barrier.exists())
@@ -4609,6 +4613,9 @@ namespace Legion {
                                                          RtUserEvent done_event)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(event.exists());
+#endif
       const AddressSpaceID event_space = find_event_space(event);
       repl_ctx->shard_manager->send_trace_event_request(this, 
           repl_ctx->runtime->address_space, template_index, 
@@ -4622,6 +4629,35 @@ namespace Legion {
     {
       // TODO: Remove hack include at top of file when we fix this 
       return Realm::ID(event.id).event_creator_node();
+    }
+
+    //--------------------------------------------------------------------------
+    PhysicalTemplate::Replayable ShardedPhysicalTemplate::check_replayable(
+                                    Operation *op, bool has_blocking_call) const
+    //--------------------------------------------------------------------------
+    {
+      // Do the base call first to determine if our local shard is replayable
+      const Replayable result = 
+        PhysicalTemplate::check_replayable(op, has_blocking_call);
+#ifdef DEBUG_LEGION
+      ReplTraceCaptureOp *capture_op = dynamic_cast<ReplTraceCaptureOp*>(op); 
+      assert(capture_op != NULL);
+#else
+      ReplTraceCaptureOp *capture_op = static_cast<ReplTraceCaptureOp*>(op);
+#endif
+      if (result)
+      {
+        if (capture_op->exchange_replayable(repl_ctx, true/*replayable*/))
+          return result;
+        else
+          return Replayable(false, "Remote shard not replyable");
+      }
+      else
+      {
+        // Still need to do the exchange
+        capture_op->exchange_replayable(repl_ctx, false/*replayable*/);
+        return result;
+      }
     }
 
     /////////////////////////////////////////////////////////////
