@@ -10691,7 +10691,7 @@ function codegen.top_task(cx, node)
   if #(task:get_params_struct():getentries()) > 0 then
     task_setup:insert(quote
       var [args], [arglen], [data_ptr]
-      if c.legion_task_get_is_index_space(c_task) then
+      if c.legion_task_get_is_index_space(c_task) and c.legion_task_get_local_arglen(c_task) > 0 then
         [arglen] = c.legion_task_get_local_arglen(c_task)
         std.assert([arglen] >= terralib.sizeof(params_struct_type),
                    ["arglen mismatch in " .. tostring(task.name) .. " (index task)"])
@@ -10833,6 +10833,36 @@ function codegen.top_task(cx, node)
     end
 
     local actions = quote end
+
+    -- Hack: This enables Regent tasks to execute with Python constant
+    -- time launches. The value of the region in the task arguments
+    -- will be bogus, but we can recover it from the physical region
+    -- so we should be good.
+    if #privilege_field_paths > 0 then
+      local physical_region_index = physical_regions_index[1]
+      actions = quote
+        [actions]
+        std.assert([physical_region_index] < c_num_regions, "too few physical regions in task setup")
+        var req = c.legion_task_get_requirement(c_task, [physical_region_index])
+        -- FIXME: This seems to be just completely messed up in the
+        -- runtime right now, so it's impossible to figure out what
+        -- you can actually rely on. For now we're going to assume a
+        -- non-zero partition means it's a projection requirement.
+        if c.legion_region_requirement_get_partition(req).tree_id ~= 0 then
+        -- if c.legion_region_requirement_get_handle_type(req) == c.PART_PROJECTION and c.legion_region_requirement_get_projection(req) == 0 then
+          [r].impl = c.legion_logical_partition_get_logical_subregion_by_color_domain_point(
+            [cx.runtime],
+            c.legion_region_requirement_get_partition(req),
+            c.legion_task_get_index_point(c_task))
+        elseif c.legion_region_requirement_get_handle_type(req) == c.SINGULAR then
+          var new_r = c.legion_region_requirement_get_region(req)
+          -- FIXME: For some reason I'm still getting bad values here some of the time....
+          if new_r.tree_id ~= 0 then
+            [r].impl = new_r
+          end
+        end
+      end
+    end
 
     if not cx.leaf then
       actions = quote
