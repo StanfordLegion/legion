@@ -622,7 +622,7 @@ namespace Legion {
       void initialize(Runtime *runtime, ApEvent fence_completion,
                       bool recurrent);
       ApEvent get_completion(void) const;
-      ApEvent get_completion_for_deletion(void) const;
+      virtual ApEvent get_completion_for_deletion(void) const;
     public:
       void finalize(Operation *op, bool has_blocking_call);
       void generate_conditions(void);
@@ -941,6 +941,7 @@ namespace Legion {
       static AddressSpaceID find_event_space(ApEvent event);
       virtual Replayable check_replayable(Operation *op,
                             bool has_blocking_call) const;
+      virtual ApEvent get_completion_for_deletion(void) const;
     public:
       ReplicateContext *const repl_ctx;
       const size_t template_index;

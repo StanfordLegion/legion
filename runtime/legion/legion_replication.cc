@@ -5073,13 +5073,14 @@ namespace Legion {
       parent_ctx->record_previous_trace(local_trace);
       if (local_trace->is_recording())
       {
+        PhysicalTrace *physical_trace = local_trace->get_physical_trace();
 #ifdef DEBUG_LEGION
-        assert(local_trace->get_physical_trace() != NULL);
+        assert(physical_trace != NULL);
 #endif
-        current_template =
-          local_trace->get_physical_trace()->get_current_template();
-        local_trace->get_physical_trace()->record_previous_template_completion(
+        current_template = physical_trace->get_current_template();
+        physical_trace->record_previous_template_completion(
             get_completion_event());
+        physical_trace->clear_cached_template();
       }
     }
 
@@ -5435,7 +5436,7 @@ namespace Legion {
       bool recurrent = true;
       bool fence_registered = false;
       bool is_recording = local_trace->is_recording();
-      if (physical_trace->get_current_template() == NULL || is_recording)
+      if ((physical_trace->get_current_template() == NULL) || is_recording)
       {
         recurrent = false;
         {

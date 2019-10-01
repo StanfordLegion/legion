@@ -4281,6 +4281,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       repl_ctx->unregister_trace_template(template_index);
+      // Clean up our phase barriers too since we're done with them
+      for (std::map<ApEvent,ApBarrier>::iterator it = 
+            remote_barriers.begin(); it != remote_barriers.end(); it++)
+        it->second.destroy_barrier();
     }
 
     //--------------------------------------------------------------------------
@@ -4413,7 +4417,8 @@ namespace Legion {
       // Send the request if necessary
       if (request_event.exists())
         request_remote_shard_event(event, request_event);
-      wait_for.wait();
+      if (wait_for.exists())
+        wait_for.wait();
       tpl_lock.reacquire();
       // Once we get here then there better be an answer
       finder = event_map.find(event);
@@ -4594,18 +4599,29 @@ namespace Legion {
       {
         const unsigned index = convert_event(event);
         insert_instruction(new BarrierAdvance(*this, barrier, index)); 
+        // Don't remove it, just set it to NO_EVENT so we can tell the names
+        // of the remote events that we got from other shards
+        // See get_completion_for_deletion for where we use this
+        std::map<ApEvent,RtEvent>::iterator finder = 
+          pending_event_requests.find(event);
+#ifdef DEBUG_LEGION
+        assert(finder != pending_event_requests.end());
+#endif
+        finder->second = RtEvent::NO_RT_EVENT;
       }
       else // no barrier means it's not part of the trace
+      {
         event_map[event] = NO_INDEX;
-      // Remove the pending event request
+        // In this case we can remove it since we're not tracing it      
 #ifdef DEBUG_LEGION
-      std::map<ApEvent,RtEvent>::iterator finder = 
-        pending_event_requests.find(event);
-      assert(finder != pending_event_requests.end());
-      pending_event_requests.erase(finder);
+        std::map<ApEvent,RtEvent>::iterator finder = 
+          pending_event_requests.find(event);
+        assert(finder != pending_event_requests.end());
+        pending_event_requests.erase(finder);
 #else
-      pending_event_requests.erase(event);
+        pending_event_requests.erase(event);
 #endif
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -4658,6 +4674,23 @@ namespace Legion {
         capture_op->exchange_replayable(repl_ctx, false/*replayable*/);
         return result;
       }
+    }
+
+    //--------------------------------------------------------------------------
+    ApEvent ShardedPhysicalTemplate::get_completion_for_deletion(void) const
+    //--------------------------------------------------------------------------
+    {
+      // Skip the any events that are from remote shards since we  
+      std::set<ApEvent> all_events;
+      for (std::map<ApEvent, unsigned>::const_iterator it = event_map.begin();
+           it != event_map.end(); ++it)
+      {
+        // If this is a remote event then don't include it
+        if (pending_event_requests.find(it->first) == 
+              pending_event_requests.end())
+          all_events.insert(it->first);
+      }
+      return Runtime::merge_events(NULL, all_events);
     }
 
     /////////////////////////////////////////////////////////////
