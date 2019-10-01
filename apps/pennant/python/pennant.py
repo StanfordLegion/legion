@@ -491,7 +491,7 @@ def main():
     sides_part = create_partition(True, sides, partitions.rs_all_p, pieces)
 
     if conf.par_init:
-        if _constant_time_launches:
+        if False: # _constant_time_launches:
             c = Future(conf, value_type=config)
             index_launch(
                 pieces,
