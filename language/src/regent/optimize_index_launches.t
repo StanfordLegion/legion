@@ -860,7 +860,13 @@ local optimize_index_launches = {}
 local function ignore(...) end
 
 local function optimize_loop_body(cx, node, report_pass, report_fail)
-  local is_demand = node.annotations.index_launch:is(ast.annotation.Demand)
+  local is_demand_ctl = node.annotations.constant_time_launch:is(ast.annotation.Demand)
+  local is_demand = is_demand_ctl or node.annotations.index_launch:is(ast.annotation.Demand)
+
+  local report_fail_ctl = ignore
+  if is_demand_ctl then
+    report_fail_ctl = report_fail
+  end
 
   if #node.block.stats == 0 then
     report_fail(node, "loop optimization failed: body is empty")
@@ -1001,6 +1007,13 @@ local function optimize_loop_body(cx, node, report_pass, report_fail)
     invariant = terralib.newlist(),
     projectable = terralib.newlist(),
   }
+
+  local is_constant_time = not node.annotations.constant_time_launch:is(ast.annotation.Forbid)
+
+  if #loop_vars > 0 then
+    is_constant_time = false
+    report_fail_ctl(call, "constant time launch failed: local variable refers to loop index")
+  end
 
   local free_vars = terralib.newlist()
 
@@ -1144,6 +1157,12 @@ local function optimize_loop_body(cx, node, report_pass, report_fail)
         end
       end
 
+      if not (arg_projectable or arg_invariant) then
+        is_constant_time = false
+        report_fail_ctl(call, "constant time launch failed: argument " .. tostring(i) ..
+                      " is not provably projectable or invariant")
+      end
+
       args_provably.invariant[i] = arg_invariant
       args_provably.projectable[i] = arg_projectable
 
@@ -1161,6 +1180,7 @@ local function optimize_loop_body(cx, node, report_pass, report_fail)
     reduce_lhs = reduce_lhs,
     reduce_op = reduce_op,
     args_provably = args_provably,
+    is_constant_time = is_constant_time,
     free_variables = free_vars,
     loop_variables = loop_vars
   }
@@ -1169,12 +1189,17 @@ end
 function optimize_index_launch.stat_for_num(cx, node)
   local report_pass = ignore
   local report_fail = report.info
-  if node.annotations.index_launch:is(ast.annotation.Demand) then
+  if node.annotations.index_launch:is(ast.annotation.Demand) or
+    node.annotations.constant_time_launch:is(ast.annotation.Demand)
+  then
     report_pass = ignore
     report_fail = report.error
   end
 
   if node.annotations.index_launch:is(ast.annotation.Forbid) then
+    if node.annotations.constant_time_launch:is(ast.annotation.Demand) then
+      report_fail(node, "conflicting annotations: __constant_time_launch requires __index_launch")
+    end
     return node
   end
 
@@ -1202,6 +1227,7 @@ function optimize_index_launch.stat_for_num(cx, node)
     reduce_op = body.reduce_op,
     reduce_task = false,
     args_provably = body.args_provably,
+    is_constant_time = body.is_constant_time,
     free_vars = body.free_variables,
     loop_vars = body.loop_variables,
     annotations = node.annotations,
@@ -1212,12 +1238,17 @@ end
 function optimize_index_launch.stat_for_list(cx, node)
   local report_pass = ignore
   local report_fail = report.info
-  if node.annotations.index_launch:is(ast.annotation.Demand) then
+  if node.annotations.index_launch:is(ast.annotation.Demand) or
+    node.annotations.constant_time_launch:is(ast.annotation.Demand)
+  then
     report_pass = ignore
     report_fail = report.error
   end
 
   if node.annotations.index_launch:is(ast.annotation.Forbid) then
+    if node.annotations.constant_time_launch:is(ast.annotation.Demand) then
+      report_fail(node, "conflicting annotations: __constant_time_launch requires __index_launch")
+    end
     return node
   end
 
@@ -1246,6 +1277,7 @@ function optimize_index_launch.stat_for_list(cx, node)
     reduce_op = body.reduce_op,
     reduce_task = false,
     args_provably = body.args_provably,
+    is_constant_time = body.is_constant_time,
     free_vars = body.free_variables,
     loop_vars = body.loop_variables,
     annotations = node.annotations,

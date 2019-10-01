@@ -55,6 +55,7 @@ local language = {
   },
   keywords = {
     "__block",
+    "__constant_time_launch",
     "__context",
     "__cuda",
     "__delete",
