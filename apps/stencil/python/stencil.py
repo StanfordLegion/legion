@@ -100,7 +100,8 @@ def make_ghost_y_partition(points, tiles, n, nt, direction):
 
 _constant_time_launches = True
 if _constant_time_launches:
-    extern_task = pygion.extern_task_wrapper
+    extern_task = pygion.extern_task
+    # extern_task = pygion.extern_task_wrapper
 else:
     extern_task = pygion.extern_task
 

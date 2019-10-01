@@ -1591,7 +1591,7 @@ def define_regent_argument_struct(task_id, argument_types, privileges, return_ty
         arg_name = '__arg_%s' % i
         fields.append('%s %s;' % (arg_type.cffi_type, arg_name))
     for i, arg in enumerate(arguments):
-        if isinstance(arg, Region):
+        if isinstance(arg, Region) or (isinstance(arg, SymbolicExpr) and arg.is_region()):
             fields.append('legion_field_id_t __arg_%s_fields[%s];' % (i, len(arg.fspace.field_types)))
 
     struct = 'typedef struct %s { %s } %s;' % (struct_name, ' '.join(fields), struct_name)
@@ -1928,14 +1928,14 @@ class _TaskLauncher(object):
                 if isinstance(arg, Future):
                     getattr(task_args_buffer, '__map')[i // 64] |= 1 << (i % 64)
             for i, arg in enumerate(args):
-                if not isinstance(arg, Future):
+                if not isinstance(arg, Future) and not (isinstance(arg, SymbolicExpr) and arg.is_region()):
                     arg_name = '__arg_%s' % i
                     arg_value = arg
                     if hasattr(arg, 'handle') and not isinstance(arg, DomainPoint):
                         arg_value = arg.handle[0]
                     setattr(task_args_buffer, arg_name, arg_value)
             for i, arg in enumerate(args):
-                if isinstance(arg, Region):
+                if isinstance(arg, Region) or (isinstance(arg, SymbolicExpr) and arg.is_region()):
                     arg_name = '__arg_%s_fields' % i
                     arg_slot = getattr(task_args_buffer, arg_name)
                     for j, field_id in enumerate(arg.fspace.field_ids.values()):

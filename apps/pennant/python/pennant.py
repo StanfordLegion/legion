@@ -52,7 +52,8 @@ def create_partition(is_disjoint, region, c_partition, color_space):
 
 _constant_time_launches = False
 if _constant_time_launches:
-    extern_task = pygion.extern_task_wrapper
+    extern_task = pygion.extern_task
+    # extern_task = pygion.extern_task_wrapper
 else:
     extern_task = pygion.extern_task
 

@@ -37,15 +37,17 @@ ast.annotation:leaf("Forbid", {"value"}, true)
 ast.annotation:leaf("Unroll", {"value"}, true)
 
 -- Annotation: Sets
-ast.annotation:leaf("Set", {"cuda", "external", "idempotent", "index_launch",
-                            "inline", "inner", "leaf", "openmp", "optimize",
-                            "parallel", "predicate", "replicable", "spmd", "trace",
+ast.annotation:leaf("Set", {"constant_time_launch", "cuda", "external",
+                            "idempotent", "index_launch", "inline", "inner",
+                            "leaf", "openmp", "optimize", "parallel",
+                            "predicate", "replicable", "spmd", "trace",
                             "vectorize"},
                     false, true)
 
 function ast.default_annotations()
   local allow = ast.annotation.Allow { value = false }
   return ast.annotation.Set {
+    constant_time_launch = allow,
     cuda = allow,
     external = allow,
     idempotent = allow,
@@ -504,10 +506,13 @@ ast.typed.stat:leaf("MustEpoch", {"block"})
 ast.typed.stat:leaf("Block", {"block"})
 ast.typed.stat:leaf("IndexLaunchNum", {"symbol", "values", "preamble", "call",
                                        "reduce_lhs", "reduce_op", "reduce_task",
-                                       "args_provably", "free_vars", "loop_vars"})
+                                       "args_provably", "is_constant_time",
+                                       "free_vars", "loop_vars"})
 ast.typed.stat:leaf("IndexLaunchList", {"symbol", "value", "preamble", "call",
-                                        "reduce_lhs", "reduce_op", "reduce_task",
-                                        "args_provably", "free_vars", "loop_vars"})
+                                        "reduce_lhs", "reduce_op",
+                                        "reduce_task", "args_provably",
+                                        "is_constant_time", "free_vars",
+                                        "loop_vars"})
 ast:leaf("IndexLaunchArgsProvably", {"invariant", "projectable"})
 ast.typed.stat:leaf("Var", {"symbol", "type", "value"})
 ast.typed.stat:leaf("VarUnpack", {"symbols", "fields", "field_types", "value"})
