@@ -1059,6 +1059,8 @@ namespace Legion {
                                public CopyFillGuard,
                                public LegionHeapify<CopyFillAggregator> {
     public:
+      static const AllocationType alloc_type = COPY_FILL_AGGREGATOR_ALLOC;
+    public:
       struct CopyFillAggregation : public LgTaskArgs<CopyFillAggregation>,
                                    public PhysicalTraceInfo {
       public:

@@ -136,6 +136,7 @@ namespace Legion {
       TASK_IMPL_ALLOC,
       VARIANT_IMPL_ALLOC,
       LAYOUT_CONSTRAINTS_ALLOC,
+      COPY_FILL_AGGREGATOR_ALLOC,
       LAST_ALLOC, // must be last
     };
 
