@@ -70,9 +70,8 @@ read_partitions = legion.extern_task(
 
 initialize_topology = extern_task(
     task_id=10008,
-    argument_types=[config, legion.int64, Region, Region, Region, Region, Region],
+    argument_types=[config, Region, Region, Region, Region, Region],
     privileges=[
-        None,
         None,
         RW('znump'),
         RW('px_x', 'px_y', 'has_bcx', 'has_bcy'),
@@ -491,12 +490,11 @@ def main():
     sides_part = create_partition(True, sides, partitions.rs_all_p, pieces)
 
     if conf.par_init:
-        if False: # _constant_time_launches:
-            c = Future(conf, value_type=config)
+        if _constant_time_launches:
             index_launch(
                 pieces,
                 initialize_topology,
-                c, ID,
+                conf, # ID,
                 zones_part[ID],
                 private_part[ID],
                 shared_part[ID],
@@ -505,7 +503,7 @@ def main():
         else:
             for i in IndexLaunch(pieces):
                 initialize_topology(
-                    conf, i,
+                    conf, # i,
                     zones_part[i],
                     private_part[i],
                     shared_part[i],

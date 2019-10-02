@@ -1614,7 +1614,7 @@ do
 end
 
 task initialize_topology(conf : config,
-                         piece : int64,
+                         -- piece : int64,
                          rz : region(zone),
                          rpp : region(point),
                          rps : region(point),
@@ -1629,6 +1629,8 @@ do
     conf.meshtype == MESH_RECT,
     "distributed initialization only works on rectangular meshes")
   var znump = 4
+
+  var piece = regentlib.c.legion_logical_region_get_color(__runtime(), __raw(rz))
 
   var pcx, pcy = piece % conf.numpcx, piece / conf.numpcx
 

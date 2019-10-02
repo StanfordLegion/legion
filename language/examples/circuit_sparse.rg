@@ -358,7 +358,7 @@ do
   c.free(alread_picked)
 end
 
-task init_piece(spiece_id   : int,
+task init_piece(-- spiece_id   : int,
                 conf        : Config,
                 rgr         : region(ghost_range),
                 rpn         : region(node),
@@ -368,6 +368,7 @@ task init_piece(spiece_id   : int,
 where
   reads writes(rgr, rpn, rsn, rw)
 do
+  var spiece_id = regentlib.c.legion_logical_region_get_color(__runtime(), __raw(rpn))
   init_nodes(rpn)
   init_nodes(rsn)
   init_wires(spiece_id, conf, rgr, rpn, rsn, all_shared, rw)
