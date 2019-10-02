@@ -1468,7 +1468,7 @@ task toplevel()
   if conf.par_init then
     __demand(__index_launch)
     for i = 0, conf.npieces do
-      initialize_topology(conf, i, rz_all_p[i],
+      initialize_topology(conf, rz_all_p[i],
                           rp_all_private_p[i],
                           rp_all_shared_p[i],
                           rp_all_ghost_p[i],
