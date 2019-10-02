@@ -23,6 +23,7 @@ def parse_content(path):
 def main():
     paths = glob.glob('*/*.log')
     content = [(os.path.dirname(path),) + parse_basename(os.path.basename(path)) + parse_content(path) for path in paths]
+    content.sort(key=lambda row: (row[0], int(row[1])))
 
     import sys
     # with open(out_filename, 'w') as f:
