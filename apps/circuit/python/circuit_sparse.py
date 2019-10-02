@@ -73,8 +73,8 @@ else:
 
 init_piece = extern_task(
     task_id=10002,
-    argument_types=[legion.int32, Config, Region, Region, Region, Region, Region],
-    privileges=[None, None, WD, WD, WD, N, WD],
+    argument_types=[Config, Region, Region, Region, Region, Region],
+    privileges=[None, WD, WD, WD, N, WD],
     return_type=legion.void,
     calling_convention='regent')
 
@@ -197,12 +197,11 @@ def main():
     ghost_ranges = Region([num_superpieces], OrderedDict([('rect', legion.rect1d)]))
     ghost_ranges_part = Partition.equal(ghost_ranges, launch_domain)
 
-    if False: # _constant_time_launches:
-        c = Future(conf[0], value_type=Config)
-        index_launch(launch_domain, init_piece, ID, c, ghost_ranges_part[ID], private_part[ID], shared_part[ID], all_shared, wires_part[ID])
+    if _constant_time_launches:
+        index_launch(launch_domain, init_piece, conf[0], ghost_ranges_part[ID], private_part[ID], shared_part[ID], all_shared, wires_part[ID])
     else:
         for i in IndexLaunch(launch_domain):
-            init_piece(i, conf[0], ghost_ranges_part[i], private_part[i], shared_part[i], all_shared, wires_part[i])
+            init_piece(conf[0], ghost_ranges_part[i], private_part[i], shared_part[i], all_shared, wires_part[i])
 
     ghost_part = Partition.image(all_shared, ghost_ranges_part, 'rect', launch_domain)
 
