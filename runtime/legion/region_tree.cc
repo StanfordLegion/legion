@@ -2003,8 +2003,8 @@ namespace Legion {
             // Record the event as the precondition for the task
             targets[idx].set_ready_event(ready);
             if (trace_info.recording)
-              trace_info.record_op_view(
-                  analysis->usage, inst_mask, analysis->target_views[idx]);
+              trace_info.record_op_view(analysis->usage, inst_mask, 
+                  analysis->target_views[idx], map_applied_events);
           }
           if (!user_applied.empty())
           {
@@ -2027,8 +2027,8 @@ namespace Legion {
             // Record the event as the precondition for the task
             targets[idx].set_ready_event(ready);
             if (trace_info.recording)
-              trace_info.record_op_view(
-                analysis->usage, inst_mask, analysis->target_views[idx]);
+              trace_info.record_op_view(analysis->usage, inst_mask, 
+                  analysis->target_views[idx], map_applied_events);
           }
         }
       }
@@ -2401,6 +2401,7 @@ namespace Legion {
 #endif
                                          full_precondition, guard,
                                          dst_req.redop, false/*fold*/, 
+                                         &map_applied_events,
                                          &tracing_srcs, &tracing_dsts);
           }
           else
@@ -2412,7 +2413,7 @@ namespace Legion {
 #endif
                                          full_precondition, guard,
                                          dst_req.redop, false/*fold*/, 
-                                         NULL, NULL);
+                                         NULL, NULL, NULL);
         }
         else
         {
@@ -2433,6 +2434,7 @@ namespace Legion {
 #endif
                                         full_precondition, guard,
                                         dst_req.redop, false/*fold*/,
+                                        &map_applied_events,
                                         &tracing_srcs, &tracing_dsts);
           }
           else
@@ -2444,7 +2446,7 @@ namespace Legion {
 #endif
                                         full_precondition, guard,
                                         dst_req.redop, false/*fold*/,
-                                        NULL, NULL);
+                                        NULL, NULL, NULL);
         }
       }
       FieldMask src_mask, dst_mask; 
@@ -2887,7 +2889,7 @@ namespace Legion {
         RegionNode *region_node = get_node(req.region);
         FieldSpaceNode *fs_node = region_node->column_source;
         trace_info.record_fill_view(fill_view,
-            fs_node->get_field_mask(req.privilege_fields));
+            fs_node->get_field_mask(req.privilege_fields), map_applied_events);
       }
       const FieldMaskSet<EquivalenceSet> &eq_sets = 
         version_info.get_equivalence_sets();     

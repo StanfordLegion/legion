@@ -12561,6 +12561,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void ReplicateContext::handle_trace_update(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      ShardedPhysicalTemplate *tpl = find_or_buffer_trace_update(derez);
+      // If the template is NULL then the request was buffered
+      if (tpl == NULL)
+        return;
+      tpl->handle_trace_update(derez);
+    }
+
+    //--------------------------------------------------------------------------
     ApBarrier ReplicateContext::handle_find_trace_shard_event(
                                            size_t template_index, ApEvent event)
     //--------------------------------------------------------------------------
@@ -13287,6 +13298,24 @@ namespace Legion {
 #endif
       physical_templates[index] = physical_template;
       return index;
+    }
+
+    //--------------------------------------------------------------------------
+    ShardedPhysicalTemplate* ReplicateContext::find_or_buffer_trace_update(
+                                                            Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      size_t trace_index;
+      derez.deserialize(trace_index);
+      AutoLock r_lock(replication_lock); 
+      std::map<size_t,ShardedPhysicalTemplate*>::const_iterator finder = 
+        physical_templates.find(trace_index);
+      if (finder != physical_templates.end())
+        return finder->second;
+      // I think we don't actually need to buffer right now because traces
+      // should all start together, but we'll find out for sure if we hit this
+      assert(false);
+      return NULL;
     }
 
     //--------------------------------------------------------------------------

@@ -1660,6 +1660,7 @@ namespace Legion {
       static void handle_eq_response(Deserializer &derez, Runtime *rt);
       void handle_resource_update(Deserializer &derez,
                                   std::set<RtEvent> &applied);
+      void handle_trace_update(Deserializer &derez);
       ApBarrier handle_find_trace_shard_event(size_t temp_index, ApEvent event);
     public:
       // Collective methods
@@ -1677,6 +1678,7 @@ namespace Legion {
     public:
       // Physical template methods
       size_t register_trace_template(ShardedPhysicalTemplate *phy_template);
+      ShardedPhysicalTemplate* find_or_buffer_trace_update(Deserializer &derez);
       void unregister_trace_template(size_t template_index);
     public:
       // Fence barrier methods

@@ -3626,7 +3626,8 @@ namespace Legion {
                                              ReductionOpID redop,
                                              bool reduction_fold,
                                  const FieldMaskSet<InstanceView> &tracing_srcs,
-                                 const FieldMaskSet<InstanceView> &tracing_dsts)
+                                 const FieldMaskSet<InstanceView> &tracing_dsts,
+                                             std::set<RtEvent> &applied)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -3670,10 +3671,10 @@ namespace Legion {
             rhs_, redop, reduction_fold));
 
       record_views(lhs_, expr, RegionUsage(READ_ONLY, EXCLUSIVE, 0), 
-                   tracing_srcs, src_eqs);
+                   tracing_srcs, src_eqs, applied);
       record_copy_views(lhs_, expr, tracing_srcs);
       record_views(lhs_, expr, RegionUsage(WRITE_ONLY, EXCLUSIVE, 0), 
-                   tracing_dsts, dst_eqs);
+                   tracing_dsts, dst_eqs, applied);
       record_copy_views(lhs_, expr, tracing_dsts);
     }
 
@@ -3704,7 +3705,8 @@ namespace Legion {
 #endif
                                              ApEvent precondition,
                                  const FieldMaskSet<FillView> &tracing_srcs,
-                                 const FieldMaskSet<InstanceView> &tracing_dsts)
+                                 const FieldMaskSet<InstanceView> &tracing_dsts,
+                                             std::set<RtEvent> &applied)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -3741,9 +3743,9 @@ namespace Legion {
 #endif
                                        rhs_));
 
-      record_fill_views(tracing_srcs);
+      record_fill_views(tracing_srcs, applied);
       record_views(lhs_, expr, RegionUsage(WRITE_ONLY, EXCLUSIVE, 0), 
-                   tracing_dsts, eqs);
+                   tracing_dsts, eqs, applied);
       record_copy_views(lhs_, expr, tracing_dsts);
     }
 
@@ -3816,7 +3818,8 @@ namespace Legion {
                                           InstanceView *view,
                                           const RegionUsage &usage,
                                           const FieldMask &user_mask,
-                                          bool update_validity)
+                                          bool update_validity,
+                                          std::set<RtEvent> &applied)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -3850,7 +3853,7 @@ namespace Legion {
             if (view->is_reduction_view() && IS_REDUCE(usage))
               record_issue_fill_for_reduction(memo, idx, view, mask, expr);
             ViewUser *user = new ViewUser(usage, entry, expr);
-            update_valid_views(view, *eit, usage, mask, true);
+            update_valid_views(view, *eit, usage, mask, true, applied);
             add_view_user(view, user, mask);
           }
         }
@@ -3858,8 +3861,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::record_fill_view(
-                                     FillView *view, const FieldMask &user_mask)
+    void PhysicalTemplate::record_fill_view(FillView *view, 
+                         const FieldMask &user_mask, std::set<RtEvent> &applied)
     //--------------------------------------------------------------------------
     {
       AutoLock tpl_lock(template_lock);
@@ -3874,7 +3877,8 @@ namespace Legion {
                                         IndexSpaceExpression *expr,
                                         const RegionUsage &usage,
                                         const FieldMaskSet<InstanceView> &views,
-                     const LegionList<FieldSet<EquivalenceSet*> >::aligned &eqs)
+                     const LegionList<FieldSet<EquivalenceSet*> >::aligned &eqs,
+                                        std::set<RtEvent> &applied)
     //--------------------------------------------------------------------------
     {
       RegionTreeForest *forest = trace->runtime->forest;
@@ -3896,7 +3900,7 @@ namespace Legion {
             if (intersect->is_empty())
               continue;
             ViewUser *user = new ViewUser(usage, entry, intersect);
-            update_valid_views(vit->first, *eit, usage, mask, false);
+            update_valid_views(vit->first, *eit, usage, mask, false, applied);
             add_view_user(vit->first, user, mask);
           }
         }
@@ -3908,7 +3912,8 @@ namespace Legion {
                                               EquivalenceSet *eq,
                                               const RegionUsage &usage,
                                               const FieldMask &user_mask,
-                                              bool invalidates)
+                                              bool invalidates,
+                                              std::set<RtEvent> &applied)
     //--------------------------------------------------------------------------
     {
       std::set<InstanceView*> &views= view_groups[view->get_manager()->tree_id];
@@ -4016,7 +4021,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::record_fill_views(const FieldMaskSet<FillView>&views)
+    void PhysicalTemplate::record_fill_views(const FieldMaskSet<FillView>&views,
+                                             std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
       for (FieldMaskSet<FillView>::const_iterator it = views.begin();
@@ -4256,9 +4262,9 @@ namespace Legion {
     ShardedPhysicalTemplate::ShardedPhysicalTemplate(PhysicalTrace *trace,
                                      ApEvent fence_event, ReplicateContext *ctx)
       : PhysicalTemplate(trace, fence_event), repl_ctx(ctx),
-        template_index(repl_ctx->register_trace_template(this)),
         local_shard(repl_ctx->owner_shard->shard_id), 
-        total_shards(repl_ctx->shard_manager->total_shards)
+        total_shards(repl_ctx->shard_manager->total_shards),
+        template_index(repl_ctx->register_trace_template(this))
     //--------------------------------------------------------------------------
     {
     }
@@ -4267,8 +4273,8 @@ namespace Legion {
     ShardedPhysicalTemplate::ShardedPhysicalTemplate(
                                              const ShardedPhysicalTemplate &rhs)
       : PhysicalTemplate(rhs), repl_ctx(rhs.repl_ctx), 
-        template_index(rhs.template_index), local_shard(rhs.local_shard), 
-        total_shards(rhs.total_shards)
+        local_shard(rhs.local_shard), total_shards(rhs.total_shards), 
+        template_index(rhs.template_index)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -4445,7 +4451,8 @@ namespace Legion {
                                              ReductionOpID redop,
                                              bool reduction_fold,
                                  const FieldMaskSet<InstanceView> &tracing_srcs,
-                                 const FieldMaskSet<InstanceView> &tracing_dsts)
+                                 const FieldMaskSet<InstanceView> &tracing_dsts,
+                                             std::set<RtEvent> &applied)
     //--------------------------------------------------------------------------
     {
       // Make sure the lhs event is local to our shard
@@ -4466,7 +4473,7 @@ namespace Legion {
                                           handle, src_tree_id, dst_tree_id,
 #endif
                                           precondition, redop, reduction_fold,
-                                          tracing_srcs, tracing_dsts);
+                                          tracing_srcs, tracing_dsts, applied);
     }
 
     //--------------------------------------------------------------------------
@@ -4508,7 +4515,8 @@ namespace Legion {
 #endif
                                              ApEvent precondition,
                                  const FieldMaskSet<FillView> &tracing_srcs,
-                                 const FieldMaskSet<InstanceView> &tracing_dsts)
+                                 const FieldMaskSet<InstanceView> &tracing_dsts,
+                                             std::set<RtEvent> &applied)
     //--------------------------------------------------------------------------
     {
       // Make sure the lhs event is local to our shard
@@ -4529,7 +4537,7 @@ namespace Legion {
                                           handle, tree_id,
 #endif
                                           precondition, tracing_srcs, 
-                                          tracing_dsts);
+                                          tracing_dsts, applied);
     }
 
     //--------------------------------------------------------------------------
@@ -4624,6 +4632,90 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void ShardedPhysicalTemplate::handle_trace_update(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      Runtime *runtime = repl_ctx->runtime;
+      UpdateKind kind;
+      derez.deserialize(kind);
+      RtUserEvent done;
+      std::set<RtEvent> applied;
+      switch (kind)
+      {
+        case UPDATE_VALID_VIEWS:
+          {
+            DistributedID view_did, eq_did;
+            derez.deserialize(view_did);
+            RtEvent view_ready;
+            InstanceView *view = static_cast<InstanceView*>(
+                runtime->find_or_request_logical_view(view_did, view_ready));
+            derez.deserialize(eq_did);
+            RtEvent eq_ready;
+            EquivalenceSet *eq = 
+              runtime->find_or_request_equivalence_set(eq_did, eq_ready);
+            RegionUsage usage;
+            derez.deserialize(usage);
+            FieldMask user_mask;
+            derez.deserialize(user_mask);
+            bool invalidates;
+            derez.deserialize<bool>(invalidates);
+            derez.deserialize(done);
+            if (view_ready.exists() && !view_ready.has_triggered())
+              view_ready.wait();
+            if (eq_ready.exists() && !eq_ready.has_triggered())
+              eq_ready.wait();
+            // We already know we're on the right shard so just do it
+            PhysicalTemplate::update_valid_views(view, eq, usage, user_mask,
+                                                 invalidates, applied);
+            break;
+          }
+        case UPDATE_PRE_FILL:
+          {
+            DistributedID view_did;
+            derez.deserialize(view_did);
+            RtEvent view_ready;
+            FillView *view = static_cast<FillView*>(
+                runtime->find_or_request_logical_view(view_did, view_ready));
+            FieldMask view_mask;
+            derez.deserialize(view_mask);
+            derez.deserialize(done);
+            FieldMaskSet<FillView> views;
+            views.insert(view, view_mask);
+            if (view_ready.exists() && !view_ready.has_triggered())
+              view_ready.wait();
+            // We already know we're on the right shard, so just do it
+            PhysicalTemplate::record_fill_views(views, applied);
+            break;
+          }
+        case UPDATE_POST_FILL:
+          {
+            DistributedID view_did;
+            derez.deserialize(view_did);
+            RtEvent view_ready;
+            FillView *view = static_cast<FillView*>(
+                runtime->find_or_request_logical_view(view_did, view_ready));
+            FieldMask view_mask;
+            derez.deserialize(view_mask);
+            derez.deserialize(done);
+            if (view_ready.exists() && !view_ready.has_triggered())
+              view_ready.wait();
+            // We already know we're on the right shard, so just do it
+            PhysicalTemplate::record_fill_view(view, view_mask, applied);
+            break;
+          }
+        default:
+          assert(false);
+      }
+#ifdef DEBUG_LEGION
+      assert(done.exists());
+#endif
+      if (!applied.empty())
+        Runtime::trigger_event(done, Runtime::merge_events(applied));
+      else
+        Runtime::trigger_event(done);
+    }
+
+    //--------------------------------------------------------------------------
     void ShardedPhysicalTemplate::request_remote_shard_event(ApEvent event,
                                                          RtUserEvent done_event)
     //--------------------------------------------------------------------------
@@ -4692,6 +4784,181 @@ namespace Legion {
           all_events.insert(it->first);
       }
       return Runtime::merge_events(NULL, all_events);
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardedPhysicalTemplate::update_valid_views(InstanceView *view,
+                                                     EquivalenceSet *eq,
+                                                     const RegionUsage &usage,
+                                                     const FieldMask &user_mask,
+                                                     bool invalidates,
+                                                     std::set<RtEvent> &applied)
+    //--------------------------------------------------------------------------
+    {
+      // Figure out where the owner for this view is and then send it to 
+      // the appropriate shard trace. The algorithm we use for determining
+      // the right shard trace is to send a view to a shard trace on the node
+      // that owns the instance. If there is no shard on that node we 
+      // round-robin views based on their owner node mod the number of nodes
+      // where there are shards. Once on the correct node, then we pick the
+      // shard corresponding to their tree_id mod the number of shards on
+      // that node. This algorithm guarantees that all the related instances
+      // end up on the same shard for analysis to determine if the trace is
+      // replayable or not.
+      PhysicalManager *manager = view->get_manager();
+      const AddressSpaceID inst_owner = manager->owner_space;
+      std::vector<ShardID> owner_shards;
+      find_view_shards(inst_owner, owner_shards);
+#ifdef DEBUG_LEGION
+      assert(!owner_shards.empty());
+#endif
+      // Figure out which shard we should be sending this view to based on
+      // its tree ID
+      ShardID target_shard;
+      if (owner_shards.size() > 1)
+      {
+        const RegionTreeID tid = manager->tree_id;
+        target_shard = owner_shards[tid % owner_shards.size()];
+      }
+      else // If there's only one shard then there is only one choice
+        target_shard = owner_shards.front();
+      // Check to see if we're on the right shard, if not send the message
+      if (target_shard != repl_ctx->owner_shard->shard_id)
+      {
+        RtUserEvent done = Runtime::create_rt_user_event();
+        Serializer rez;
+        rez.serialize(repl_ctx->shard_manager->repl_id);
+        rez.serialize(target_shard);
+        rez.serialize(template_index);
+        rez.serialize(UPDATE_VALID_VIEWS);
+        rez.serialize(view->did);
+        rez.serialize(eq->did);
+        rez.serialize(usage);
+        rez.serialize(user_mask);
+        rez.serialize<bool>(invalidates);
+        rez.serialize(done);
+        repl_ctx->shard_manager->send_trace_update(target_shard, rez);
+        applied.insert(done);
+        return;
+      }
+      else // Now that we are on the right shard we can do the update call
+        PhysicalTemplate::update_valid_views(view, eq, usage, user_mask,
+                                             invalidates, applied);
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardedPhysicalTemplate::record_fill_view(FillView *view, 
+                         const FieldMask &user_mask, std::set<RtEvent> &applied)
+    //--------------------------------------------------------------------------
+    {
+      const AddressSpaceID view_owner = view->owner_space;
+      std::vector<ShardID> owner_shards;
+      {
+        AutoLock tpl_lock(template_lock);
+        find_view_shards(view_owner, owner_shards);
+      }
+#ifdef DEBUG_LEGION
+      assert(!owner_shards.empty());
+#endif
+      // For now just send all views to the first shard on each node
+      const ShardID target_shard = owner_shards.front();
+      if (target_shard != repl_ctx->owner_shard->shard_id)
+      {
+        RtUserEvent done = Runtime::create_rt_user_event(); 
+        Serializer rez;
+        rez.serialize(repl_ctx->shard_manager->repl_id);
+        rez.serialize(target_shard);
+        rez.serialize(template_index);
+        rez.serialize(UPDATE_POST_FILL);
+        rez.serialize(view->did);
+        rez.serialize(user_mask);
+        rez.serialize(done);
+        repl_ctx->shard_manager->send_trace_update(target_shard,rez);
+        applied.insert(done);
+      }
+      else
+        PhysicalTemplate::record_fill_view(view, user_mask, applied);
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardedPhysicalTemplate::record_fill_views(
+         const FieldMaskSet<FillView> &views, std::set<RtEvent> &applied_events)
+    //--------------------------------------------------------------------------
+    {
+      FieldMaskSet<FillView> local_set;
+      for (FieldMaskSet<FillView>::const_iterator it =
+            views.begin(); it != views.end(); it++)
+      {
+        // Figure out which shard these fill views should be stored on 
+        // using the same algorithm that we use for other views above
+        const AddressSpaceID view_owner = it->first->owner_space;
+        std::vector<ShardID> owner_shards;
+        find_view_shards(view_owner, owner_shards);
+#ifdef DEBUG_LEGION
+        assert(!owner_shards.empty());
+#endif
+        // For now just send all views to the first shard on each node
+        const ShardID target_shard = owner_shards.front();
+        if (target_shard != repl_ctx->owner_shard->shard_id)
+        {
+          RtUserEvent applied = Runtime::create_rt_user_event(); 
+          Serializer rez;
+          rez.serialize(repl_ctx->shard_manager->repl_id);
+          rez.serialize(target_shard);
+          rez.serialize(template_index);
+          rez.serialize(UPDATE_PRE_FILL);
+          rez.serialize(it->first->did);
+          rez.serialize(it->second);
+          rez.serialize(applied);
+          repl_ctx->shard_manager->send_trace_update(target_shard,rez);
+          applied_events.insert(applied);
+        }
+        else
+          local_set.insert(it->first, it->second);
+      }
+      if (!local_set.empty())
+        PhysicalTemplate::record_fill_views(local_set, applied_events);
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardedPhysicalTemplate::find_view_shards(AddressSpaceID owner,
+                                                   std::vector<ShardID> &shards)
+    //--------------------------------------------------------------------------
+    {
+      // See if we already computed it or not
+      std::map<AddressSpaceID,std::vector<ShardID> >::const_iterator finder = 
+        view_shard_owners.find(owner);
+      if (finder != view_shard_owners.end())
+      {
+        shards = finder->second;
+        return;
+      }
+      // If we haven't computed it yet, then we need to do that now
+      const ShardMapping &shard_spaces = repl_ctx->shard_manager->get_mapping();
+      for (unsigned idx = 0; idx < shard_spaces.size(); idx++)
+        if (shard_spaces[idx] == owner)
+          shards.push_back(idx);
+      // If we didn't find any then take the owner mod the number of total
+      // spaces and then send it to the shards on that space
+      if (shards.empty())
+      {
+        std::set<AddressSpaceID> unique_spaces;
+        for (unsigned idx = 0; idx < shard_spaces.size(); idx++)
+          unique_spaces.insert(shard_spaces[idx]);
+        const unsigned count = owner % unique_spaces.size();
+        std::set<AddressSpaceID>::const_iterator target_space = 
+          unique_spaces.begin();
+        for (unsigned idx = 0; idx < count; idx++)
+          target_space++;
+        for (unsigned idx = 0; idx < shard_spaces.size(); idx++)
+          if (shard_spaces[idx] == *target_space)
+            shards.push_back(idx);
+      }
+#ifdef DEBUG_LEGION
+      assert(!shards.empty());
+#endif
+      // Save the result so we don't have to do this again for this space
+      view_shard_owners[owner] = shards;
     }
 
     /////////////////////////////////////////////////////////////
@@ -4960,7 +5227,7 @@ namespace Legion {
                                      handle, src_tree_id, dst_tree_id,
 #endif
                                      precondition, PredEvent::NO_PRED_EVENT,
-                                     redop, reduction_fold, NULL, NULL);
+                                     redop, reduction_fold, NULL, NULL, NULL);
     }
 
     //--------------------------------------------------------------------------
@@ -5055,7 +5322,7 @@ namespace Legion {
                                      handle, tree_id,
 #endif
                                      precondition, PredEvent::NO_PRED_EVENT,
-                                     NULL, NULL);
+                                     NULL, NULL, NULL);
     }
 
     //--------------------------------------------------------------------------

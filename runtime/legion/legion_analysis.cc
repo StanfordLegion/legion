@@ -504,12 +504,14 @@ namespace Legion {
                                              ReductionOpID redop,
                                              bool reduction_fold,
                                  const FieldMaskSet<InstanceView> &tracing_srcs,
-                                 const FieldMaskSet<InstanceView> &tracing_dsts)
+                                 const FieldMaskSet<InstanceView> &tracing_dsts,
+                                             std::set<RtEvent> &effects)
     //--------------------------------------------------------------------------
     {
       if (local_space != origin_space)
       {
         RtUserEvent done = Runtime::create_rt_user_event(); 
+        RtUserEvent applied = Runtime::create_rt_user_event();
         Serializer rez;
         {
           RezCheck z(rez);
@@ -553,8 +555,10 @@ namespace Legion {
             rez.serialize(it->first->did);
             rez.serialize(it->second);
           }
+          rez.serialize(applied);
         }
         runtime->send_remote_trace_update(origin_space, rez);
+        effects.insert(applied);
         // Wait to see if lhs changes
         done.wait();
       }
@@ -565,7 +569,7 @@ namespace Legion {
                                       handle, src_tree_id, dst_tree_id,
 #endif
                                       precondition, redop, reduction_fold,
-                                      tracing_srcs, tracing_dsts);
+                                      tracing_srcs, tracing_dsts, effects);
     }
 
     //--------------------------------------------------------------------------
@@ -601,12 +605,14 @@ namespace Legion {
 #endif
                                              ApEvent precondition,
                                  const FieldMaskSet<FillView> &tracing_srcs,
-                                 const FieldMaskSet<InstanceView> &tracing_dsts)
+                                 const FieldMaskSet<InstanceView> &tracing_dsts,
+                                             std::set<RtEvent> &effects)
     //--------------------------------------------------------------------------
     {
       if (local_space != origin_space)
       {
         RtUserEvent done = Runtime::create_rt_user_event(); 
+        RtUserEvent applied = Runtime::create_rt_user_event();
         Serializer rez;
         {
           RezCheck z(rez);
@@ -642,8 +648,10 @@ namespace Legion {
             rez.serialize(it->first->did);
             rez.serialize(it->second);
           }
+          rez.serialize(applied);
         }
         runtime->send_remote_trace_update(origin_space, rez);
+        effects.insert(applied);
         // Wait to see if lhs changes
         done.wait();
       }
@@ -653,12 +661,14 @@ namespace Legion {
 #ifdef LEGION_SPY
                                       handle, tree_id,
 #endif
-                                      precondition, tracing_srcs, tracing_dsts);
+                                      precondition, tracing_srcs, 
+                                      tracing_dsts, effects);
     }
 
     //--------------------------------------------------------------------------
     void RemoteTraceRecorder::record_fill_view(FillView *view,
-                                               const FieldMask &user_mask)
+                                               const FieldMask &user_mask,
+                                               std::set<RtEvent> &effects)
     //--------------------------------------------------------------------------
     {
       // this should never be called on remote nodes
@@ -671,7 +681,8 @@ namespace Legion {
                                              InstanceView *view,
                                              const RegionUsage &usage,
                                              const FieldMask &user_mask,
-                                             bool update_validity)
+                                             bool update_validity,
+                                             std::set<RtEvent> &effects)
     //--------------------------------------------------------------------------
     {
       if (local_space != origin_space)
@@ -696,7 +707,7 @@ namespace Legion {
       }
       else
         remote_tpl->record_op_view(memo, idx, view, usage, 
-                                   user_mask, update_validity);
+                                   user_mask, update_validity, effects);
     }
 
     //--------------------------------------------------------------------------
@@ -998,6 +1009,8 @@ namespace Legion {
               derez.deserialize(mask);
               tracing_dsts.insert(view, mask);
             }
+            RtUserEvent applied;
+            derez.deserialize(applied);
             // Use this to track if lhs changes
             const ApUserEvent lhs_copy = lhs;
             if (!ready_events.empty())
@@ -1007,13 +1020,14 @@ namespace Legion {
                 wait_on.wait();
             }
             // Do the base call
+            std::set<RtEvent> effects;
             tpl->record_issue_copy(memo, src_idx, dst_idx, lhs, expr,
                                    src_fields, dst_fields,
 #ifdef LEGION_SPY
                                    handle, src_tree_id, dst_tree_id,
 #endif
                                    precondition, redop, reduction_fold,
-                                   tracing_srcs, tracing_dsts);
+                                   tracing_srcs, tracing_dsts, effects);
             if (lhs != lhs_copy)
             {
               Serializer rez;
@@ -1028,6 +1042,10 @@ namespace Legion {
             }
             else // lhs was unchanged
               Runtime::trigger_event(done);
+            if (!effects.empty())
+              Runtime::trigger_event(applied, Runtime::merge_events(effects));
+            else
+              Runtime::trigger_event(applied);
             break;
           }
         case REMOTE_TRACE_ISSUE_FILL:
@@ -1095,6 +1113,8 @@ namespace Legion {
               derez.deserialize(mask);
               tracing_dsts.insert(view, mask);
             }
+            RtUserEvent applied;
+            derez.deserialize(applied);
             // Use this to track if lhs changes
             const ApUserEvent lhs_copy = lhs;
             if (!ready_events.empty())
@@ -1104,12 +1124,14 @@ namespace Legion {
                 wait_on.wait();
             }
             // Do the base call
+            std::set<RtEvent> effects;
             tpl->record_issue_fill(memo, index, lhs, expr, fields,
                                    fill_value, fill_size,
 #ifdef LEGION_SPY
                                    handle, tree_id,
 #endif
-                                   precondition, tracing_srcs, tracing_dsts);
+                                   precondition, tracing_srcs, 
+                                   tracing_dsts, effects);
             if (lhs != lhs_copy)
             {
               Serializer rez;
@@ -1124,6 +1146,10 @@ namespace Legion {
             }
             else // lhs was unchanged
               Runtime::trigger_event(done);
+            if (!effects.empty())
+              Runtime::trigger_event(applied, Runtime::merge_events(effects));
+            else
+              Runtime::trigger_event(applied);
             break;
           }
         case REMOTE_TRACE_RECORD_OP_VIEW:
@@ -1147,9 +1173,13 @@ namespace Legion {
             derez.deserialize<bool>(update_validity);
             if (ready.exists() && !ready.has_triggered())
               ready.wait();
+            std::set<RtEvent> effects;
             tpl->record_op_view(memo, index, view, usage, 
-                                user_mask, update_validity);
-            Runtime::trigger_event(applied);
+                                user_mask, update_validity, effects);
+            if (!effects.empty())
+              Runtime::trigger_event(applied, Runtime::merge_events(effects));
+            else
+              Runtime::trigger_event(applied);
             break;
           }
         case REMOTE_TRACE_SET_OP_SYNC:
@@ -4702,8 +4732,8 @@ namespace Legion {
                                                      manager->tree_id,
 #endif
                                                      precondition,
-                                                     predicate_guard,
-                                                     tracing_src_fills,
+                                                     predicate_guard, &effects,
+                                                     tracing_src_fills, 
                                                      tracing_dsts);
         // Record the fill result in the destination 
         if (result.exists())
@@ -4792,7 +4822,7 @@ namespace Legion {
                                                        manager->tree_id,
 #endif
                                                        precondition,
-                                                       predicate_guard,
+                                                       predicate_guard,&effects,
                                                        tracing_src_fills,
                                                        tracing_dsts);
           if (result.exists())
@@ -4878,7 +4908,7 @@ namespace Legion {
                                     manager->tree_id,
 #endif
                                     precondition, predicate_guard,
-                                    update->redop, false/*fold*/,
+                                    update->redop, false/*fold*/, &effects,
                                     tracing_srcs, tracing_dsts);
           if (result.exists())
           {
@@ -4967,7 +4997,7 @@ namespace Legion {
                                     manager->tree_id,
 #endif
                                     precondition, predicate_guard,
-                                    redop, false/*fold*/,
+                                    redop, false/*fold*/, &effects,
                                     tracing_srcs, tracing_dsts);
             if (result.exists())
             {

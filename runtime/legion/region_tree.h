@@ -987,6 +987,7 @@ namespace Legion {
 #endif
                            ApEvent precondition, PredEvent pred_guard,
                            // Can be NULL if we're not tracing
+                           std::set<RtEvent> *effects_applied,
                            const FieldMaskSet<FillView> *tracing_srcs,
                            const FieldMaskSet<InstanceView> *tracing_dsts) = 0;
       virtual ApEvent issue_copy(const PhysicalTraceInfo &trace_info,
@@ -1000,6 +1001,7 @@ namespace Legion {
                            ApEvent precondition, PredEvent pred_guard,
                            ReductionOpID redop, bool reduction_fold,
                            // Can be NULL if we're not tracing
+                           std::set<RtEvent> *effects_applied,
                            const FieldMaskSet<InstanceView> *tracing_srcs,
                            const FieldMaskSet<InstanceView> *tracing_dsts) = 0;
       virtual void construct_indirections(
@@ -1052,6 +1054,7 @@ namespace Legion {
                                RegionTreeID tree_id,
 #endif
                                ApEvent precondition, PredEvent pred_guard,
+                               std::set<RtEvent> *effects_applied,
                                const FieldMaskSet<FillView> *tracing_srcs,
                                const FieldMaskSet<InstanceView> *tracing_dsts);
       template<int DIM, typename T>
@@ -1067,6 +1070,7 @@ namespace Legion {
 #endif
                                ApEvent precondition, PredEvent pred_guard,
                                ReductionOpID redop, bool reduction_fold,
+                               std::set<RtEvent> *effects_applied,
                                const FieldMaskSet<InstanceView> *tracing_srcs,
                                const FieldMaskSet<InstanceView> *tracing_dsts);
       template<int DIM, typename T>
@@ -1243,6 +1247,7 @@ namespace Legion {
 #endif
                            ApEvent precondition, PredEvent pred_guard,
                            // Can be NULL if we're not tracing
+                           std::set<RtEvent> *effects_applied,
                            const FieldMaskSet<FillView> *tracing_srcs,
                            const FieldMaskSet<InstanceView> *tracing_dsts);
       virtual ApEvent issue_copy(const PhysicalTraceInfo &trace_info,
@@ -1256,6 +1261,7 @@ namespace Legion {
                            ApEvent precondition, PredEvent pred_guard,
                            ReductionOpID redop, bool reduction_fold,
                            // Can be NULL if we're not tracing
+                           std::set<RtEvent> *effects_applied,
                            const FieldMaskSet<InstanceView> *tracing_srcs,
                            const FieldMaskSet<InstanceView> *tracing_dsts);
       virtual void construct_indirections(
@@ -2182,6 +2188,7 @@ namespace Legion {
 #endif
                            ApEvent precondition, PredEvent pred_guard,
                            // Can be NULL if we're not tracing
+                           std::set<RtEvent> *effects_applied,
                            const FieldMaskSet<FillView> *tracing_srcs,
                            const FieldMaskSet<InstanceView> *tracing_dsts);
       virtual ApEvent issue_copy(const PhysicalTraceInfo &trace_info,
@@ -2195,6 +2202,7 @@ namespace Legion {
                            ApEvent precondition, PredEvent pred_guard,
                            ReductionOpID redop, bool reduction_fold,
                            // Can be NULL if we're not tracing
+                           std::set<RtEvent> *effects_applied,
                            const FieldMaskSet<InstanceView> *tracing_srcs,
                            const FieldMaskSet<InstanceView> *tracing_dsts);
       virtual void construct_indirections(

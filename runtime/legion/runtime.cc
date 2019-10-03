@@ -7242,6 +7242,11 @@ namespace Legion {
               runtime->handle_control_replicate_trace_event_response(derez);
               break;
             }
+          case SEND_REPL_TRACE_UPDATE:
+            {
+              runtime->handle_control_replicate_trace_update(derez);
+              break;
+            }
           case SEND_MAPPER_MESSAGE:
             {
               runtime->handle_mapper_message(derez);
@@ -16435,6 +16440,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_control_replicate_trace_update(AddressSpaceID target,
+                                                      Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_REPL_TRACE_UPDATE,
+                                DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_mapper_message(AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
@@ -17914,6 +17928,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       ShardManager::handle_trace_event_response(derez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_control_replicate_trace_update(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      ShardManager::handle_trace_update(derez, this);
     }
 
     //--------------------------------------------------------------------------

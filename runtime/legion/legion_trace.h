@@ -726,7 +726,8 @@ namespace Legion {
                              ReductionOpID redop,
                              bool reduction_fold,
                              const FieldMaskSet<InstanceView> &tracing_srcs,
-                             const FieldMaskSet<InstanceView> &tracing_dsts);
+                             const FieldMaskSet<InstanceView> &tracing_dsts,
+                             std::set<RtEvent> &applied);
       virtual void record_issue_indirect(Memoizable *memo, ApEvent &lhs,
                              IndexSpaceExpression *expr,
                              const std::vector<CopySrcDstField>& src_fields,
@@ -744,7 +745,8 @@ namespace Legion {
 #endif
                              ApEvent precondition,
                              const FieldMaskSet<FillView> &tracing_srcs,
-                             const FieldMaskSet<InstanceView> &tracing_dsts);
+                             const FieldMaskSet<InstanceView> &tracing_dsts,
+                             std::set<RtEvent> &applied);
     private:
       void record_issue_fill_for_reduction(Memoizable *memo,
                                            unsigned idx,
@@ -760,26 +762,31 @@ namespace Legion {
                                   InstanceView *view,
                                   const RegionUsage &usage,
                                   const FieldMask &user_mask,
-                                  bool update_validity);
-      virtual void record_fill_view(FillView *view, const FieldMask &user_mask);
-    private:
+                                  bool update_validity,
+                                  std::set<RtEvent> &applied);
+      virtual void record_fill_view(FillView *view, const FieldMask &user_mask,
+                                  std::set<RtEvent> &applied);
+    protected:
       void record_views(unsigned entry,
                         IndexSpaceExpression *expr,
                         const RegionUsage &usage,
                         const FieldMaskSet<InstanceView> &views,
-                    const LegionList<FieldSet<EquivalenceSet*> >::aligned &eqs);
-      void update_valid_views(InstanceView *view,
-                              EquivalenceSet *eq,
-                              const RegionUsage &usage,
-                              const FieldMask &user_mask,
-                              bool invalidates);
+                    const LegionList<FieldSet<EquivalenceSet*> >::aligned &eqs,
+                        std::set<RtEvent> &applied);
+      virtual void update_valid_views(InstanceView *view,
+                                      EquivalenceSet *eq,
+                                      const RegionUsage &usage,
+                                      const FieldMask &user_mask,
+                                      bool invalidates,
+                                      std::set<RtEvent> &applied_events);
       void add_view_user(InstanceView *view,
                          ViewUser *user,
                          const FieldMask &user_mask);
       void record_copy_views(unsigned copy_id,
                              IndexSpaceExpression *expr,
                              const FieldMaskSet<InstanceView> &views);
-      void record_fill_views(const FieldMaskSet<FillView> &views);
+      virtual void record_fill_views(const FieldMaskSet<FillView> &views,
+                                     std::set<RtEvent> &applied_events);
     public:
       virtual void record_set_op_sync_event(ApEvent &lhs, Memoizable *memo);
       virtual void record_complete_replay(Memoizable *memo, ApEvent rhs);
@@ -879,6 +886,12 @@ namespace Legion {
      */
     class ShardedPhysicalTemplate : public PhysicalTemplate {
     public:
+      enum UpdateKind {
+        UPDATE_VALID_VIEWS,
+        UPDATE_PRE_FILL,
+        UPDATE_POST_FILL,
+      };
+    public:
       ShardedPhysicalTemplate(PhysicalTrace *trace, ApEvent fence_event,
                               ReplicateContext *repl_ctx);
       ShardedPhysicalTemplate(const ShardedPhysicalTemplate &rhs);
@@ -912,7 +925,8 @@ namespace Legion {
                              ReductionOpID redop,
                              bool reduction_fold,
                              const FieldMaskSet<InstanceView> &tracing_srcs,
-                             const FieldMaskSet<InstanceView> &tracing_dsts);
+                             const FieldMaskSet<InstanceView> &tracing_dsts,
+                             std::set<RtEvent> &applied);
       virtual void record_issue_indirect(Memoizable *memo, ApEvent &lhs,
                              IndexSpaceExpression *expr,
                              const std::vector<CopySrcDstField>& src_fields,
@@ -930,11 +944,15 @@ namespace Legion {
 #endif
                              ApEvent precondition,
                              const FieldMaskSet<FillView> &tracing_srcs,
-                             const FieldMaskSet<InstanceView> &tracing_dsts);
+                             const FieldMaskSet<InstanceView> &tracing_dsts,
+                             std::set<RtEvent> &applied);
       virtual void record_set_op_sync_event(ApEvent &lhs, Memoizable *memo);
+      virtual void record_fill_view(FillView *view, const FieldMask &user_mask,
+                                    std::set<RtEvent> &applied);
     public:
       ApBarrier find_trace_shard_event(ApEvent event);
       void record_trace_shard_event(ApEvent event, ApBarrier result);
+      void handle_trace_update(Deserializer &derez);
     protected:
       virtual unsigned find_event(const ApEvent &event, AutoLock &tpl_lock);
       void request_remote_shard_event(ApEvent event, RtUserEvent done_event);
@@ -942,16 +960,30 @@ namespace Legion {
       virtual Replayable check_replayable(ReplTraceOp *op,
                             bool has_blocking_call) const;
       virtual ApEvent get_completion_for_deletion(void) const;
+      virtual void update_valid_views(InstanceView *view,
+                                      EquivalenceSet *eq,
+                                      const RegionUsage &usage,
+                                      const FieldMask &user_mask,
+                                      bool invalidates,
+                                      std::set<RtEvent> &applied);
+      virtual void record_fill_views(const FieldMaskSet<FillView> &views,
+                                     std::set<RtEvent> &applied_events);
+    protected:
+      void find_view_shards(AddressSpace owner, std::vector<ShardID> &shards);
     public:
       ReplicateContext *const repl_ctx;
-      const size_t template_index;
       const ShardID local_shard;
       const size_t total_shards;
+      // Make this last since it registers the template with the
+      // context which can trigger calls into the template so 
+      // everything must valid at this point
+      const size_t template_index;
     private:
       static const unsigned NO_INDEX = UINT_MAX;
     protected:
       std::map<ApEvent,RtEvent> pending_event_requests;
       std::map<ApEvent,ApBarrier> remote_barriers;
+      std::map<AddressSpaceID,std::vector<ShardID> > view_shard_owners;
     };
 
     enum InstructionKind
