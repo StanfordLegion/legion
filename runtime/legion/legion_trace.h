@@ -532,7 +532,7 @@ namespace Legion {
       void dump(void) const;
     protected:
       typedef LegionMap<InstanceView*,
-                        FieldMaskSet<EquivalenceSet>  >::aligned ViewSet;
+                        FieldMaskSet<EquivalenceSet> >::aligned ViewSet;
     protected:
       RegionTreeForest * const forest;
     protected:

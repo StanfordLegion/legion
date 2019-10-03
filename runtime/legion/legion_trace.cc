@@ -2028,6 +2028,10 @@ namespace Legion {
 
         IndexSpaceExpression *expr1 = eq->set_expr;
         IndexSpaceExpression *expr2 = it->first->set_expr;
+        // THIS IS NOT A COMPLETE DOMINANCE TEST!!!
+        // We are assuming that equivalence sets are always uniquely
+        // represented at the leaves of the equivalence set tree and
+        // therefore we can test expressions more directly
         if (expr1 == expr2)
         {
           non_dominated -= overlap;
@@ -2057,11 +2061,11 @@ namespace Legion {
            it != conditions.end(); ++it)
         for (FieldMaskSet<EquivalenceSet>::const_iterator eit =
              it->second.begin(); eit != it->second.end(); ++eit)
-      {
-        FieldMask mask = eit->second;
-        if (!set.dominates(it->first, eit->first, mask))
-          return false;
-      }
+        {
+          FieldMask mask = eit->second;
+          if (!set.dominates(it->first, eit->first, mask))
+            return false;
+        }
 
       return true;
     }
@@ -4665,6 +4669,7 @@ namespace Legion {
             if (eq_ready.exists() && !eq_ready.has_triggered())
               eq_ready.wait();
             // We already know we're on the right shard so just do it
+            AutoLock tpl_lock(template_lock);
             PhysicalTemplate::update_valid_views(view, eq, usage, user_mask,
                                                  invalidates, applied);
             break;
@@ -4684,6 +4689,7 @@ namespace Legion {
             if (view_ready.exists() && !view_ready.has_triggered())
               view_ready.wait();
             // We already know we're on the right shard, so just do it
+            AutoLock tpl_lock(template_lock);
             PhysicalTemplate::record_fill_views(views, applied);
             break;
           }
@@ -4746,6 +4752,9 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(op != NULL);
 #endif
+      // We need everyone else to be done capturing their traces
+      // before we can do our own replayable check
+      op->sync_for_replayable_check();
       // Do the base call first to determine if our local shard is replayable
       const Replayable result = 
         PhysicalTemplate::check_replayable(op, has_blocking_call);

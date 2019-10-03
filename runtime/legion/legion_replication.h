@@ -1529,7 +1529,11 @@ namespace Legion {
       ReplTraceOp& operator=(const ReplTraceOp &rhs);
     public:
       virtual void execute_dependence_analysis(void);
+      virtual void sync_for_replayable_check(void);
       virtual bool exchange_replayable(ReplicateContext *ctx, bool replayable);
+    protected:
+      // Should only ever be called from logical dependence analysis stage
+      RtBarrier get_next_tracing_barrier(void) const;
     protected:
       LegionTrace *local_trace;
     };
@@ -1556,11 +1560,13 @@ namespace Legion {
       virtual OpKind get_operation_kind(void) const;
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_mapping(void);
+      virtual void sync_for_replayable_check(void);
       virtual bool exchange_replayable(ReplicateContext *ctx, bool replayable);
     protected:
       DynamicTrace *dynamic_trace;
       PhysicalTemplate *current_template;
       CollectiveID replayable_collective_id;
+      RtBarrier replay_sync_barrier;
       bool has_blocking_call;
     };
 
@@ -1586,11 +1592,13 @@ namespace Legion {
       virtual OpKind get_operation_kind(void) const;
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_mapping(void);
+      virtual void sync_for_replayable_check(void);
       virtual bool exchange_replayable(ReplicateContext *ctx, bool replayable);
     protected:
       PhysicalTemplate *current_template;
       ApEvent template_completion;
       CollectiveID replayable_collective_id;
+      RtBarrier replay_sync_barrier;
       bool replayed;
       bool has_blocking_call;
     };
@@ -1764,6 +1772,8 @@ namespace Legion {
         { return attach_broadcast_barrier; }
       inline ApBarrier get_attach_reduce_barrier(void) const
         { return attach_reduce_barrier; }
+      inline RtBarrier get_tracing_barrier(void) const
+        { return tracing_barrier; }
 #ifdef DEBUG_LEGION_COLLECTIVES
       inline RtBarrier get_collective_check_barrier(void) const
         { return collective_check_barrier; }
@@ -1891,6 +1901,7 @@ namespace Legion {
       ApBarrier execution_fence_barrier;
       ApBarrier attach_broadcast_barrier;
       ApBarrier attach_reduce_barrier;
+      RtBarrier tracing_barrier;
 #ifdef DEBUG_LEGION_COLLECTIVES
       RtBarrier collective_check_barrier;
       RtBarrier close_check_barrier;

@@ -4971,12 +4971,33 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void ReplTraceOp::sync_for_replayable_check(void)
+    //--------------------------------------------------------------------------
+    {
+      // Should only be called by derived classes
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
     bool ReplTraceOp::exchange_replayable(ReplicateContext *ctx,bool replayable)
     //--------------------------------------------------------------------------
     {
       // Should only be called by derived classes
       assert(false);
       return false;
+    }
+
+    //--------------------------------------------------------------------------
+    RtBarrier ReplTraceOp::get_next_tracing_barrier(void) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      ReplicateContext *repl_ctx =dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+      return repl_ctx->get_next_tracing_barrier();
     }
 
     /////////////////////////////////////////////////////////////
@@ -5042,6 +5063,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       activate_operation();
+      dynamic_trace = NULL;
+      current_template = NULL;
+      replayable_collective_id = 0;
+      replay_sync_barrier = RtBarrier::NO_RT_BARRIER;
+      has_blocking_call = false;
     }
 
     //--------------------------------------------------------------------------
@@ -5090,6 +5116,12 @@ namespace Legion {
         physical_trace->record_previous_template_completion(
             get_completion_event());
         physical_trace->clear_cached_template();
+        // This is a little scary that we're going to go get a fence
+        // from the context which we should really only touch from the
+        // application task, but we know we're in the logical dependence
+        // analysis stage of the pipeline which happens in order for all
+        // operations from the same context so we're safe
+        replay_sync_barrier = get_next_tracing_barrier();
       }
     }
 
@@ -5123,6 +5155,14 @@ namespace Legion {
         local_trace->initialize_tracing_state();
       }
       ReplFenceOp::trigger_mapping();
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplTraceCaptureOp::sync_for_replayable_check(void)
+    //--------------------------------------------------------------------------
+    {
+      Runtime::phase_barrier_arrive(replay_sync_barrier, 1/*count*/);
+      replay_sync_barrier.wait();
     }
 
     //--------------------------------------------------------------------------
@@ -5198,6 +5238,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       activate_operation();
+      current_template = NULL;
+      template_completion = ApEvent::NO_AP_EVENT;
+      replayable_collective_id = 0;
+      replay_sync_barrier = RtBarrier::NO_RT_BARRIER;
+      replayed = false;
+      has_blocking_call = false;
     }
 
     //--------------------------------------------------------------------------
@@ -5271,6 +5317,12 @@ namespace Legion {
         physical_trace->record_previous_template_completion(
             get_completion_event());
         physical_trace->clear_cached_template();
+        // This is a little scary that we're going to go get a fence
+        // from the context which we should really only touch from the
+        // application task, but we know we're in the logical dependence
+        // analysis stage of the pipeline which happens in order for all
+        // operations from the same context so we're safe
+        replay_sync_barrier = get_next_tracing_barrier();
       }
 
       // Indicate that this trace is done being captured
@@ -5341,6 +5393,14 @@ namespace Legion {
         return;
       }
       ReplFenceOp::trigger_mapping();
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplTraceCompleteOp::sync_for_replayable_check(void)
+    //--------------------------------------------------------------------------
+    {
+      Runtime::phase_barrier_arrive(replay_sync_barrier, 1/*count*/);
+      replay_sync_barrier.wait();
     }
 
     //--------------------------------------------------------------------------
@@ -5896,6 +5956,8 @@ namespace Legion {
           ApBarrier(Realm::Barrier::create_barrier(1));
         attach_reduce_barrier = 
           ApBarrier(Realm::Barrier::create_barrier(total_shards));
+        tracing_barrier = 
+          RtBarrier(Realm::Barrier::create_barrier(total_shards));
 #ifdef DEBUG_LEGION_COLLECTIVES
         collective_check_barrier = 
           RtBarrier(Realm::Barrier::create_barrier(total_shards,
@@ -5952,6 +6014,7 @@ namespace Legion {
           execution_fence_barrier.destroy_barrier();
           attach_broadcast_barrier.destroy_barrier();
           attach_reduce_barrier.destroy_barrier();
+          tracing_barrier.destroy_barrier();
 #ifdef DEBUG_LEGION_COLLECTIVES
           collective_check_barrier.destroy_barrier();
           close_check_barrier.destroy_barrier();
@@ -6101,6 +6164,7 @@ namespace Legion {
           assert(execution_fence_barrier.exists());
           assert(attach_broadcast_barrier.exists());
           assert(attach_reduce_barrier.exists());
+          assert(tracing_barrier.exists());
           assert(shard_mapping.size() == total_shards);
 #endif
           rez.serialize(pending_partition_barrier);
@@ -6113,6 +6177,7 @@ namespace Legion {
           rez.serialize(execution_fence_barrier);
           rez.serialize(attach_broadcast_barrier);
           rez.serialize(attach_reduce_barrier);
+          rez.serialize(tracing_barrier);
 #ifdef DEBUG_LEGION_COLLECTIVES
           assert(collective_check_barrier.exists());
           rez.serialize(collective_check_barrier);
@@ -6159,6 +6224,7 @@ namespace Legion {
         derez.deserialize(execution_fence_barrier);
         derez.deserialize(attach_broadcast_barrier);
         derez.deserialize(attach_reduce_barrier);
+        derez.deserialize(tracing_barrier);
 #ifdef DEBUG_LEGION_COLLECTIVES
         derez.deserialize(collective_check_barrier);
         derez.deserialize(close_check_barrier);

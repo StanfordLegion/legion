@@ -8465,6 +8465,7 @@ namespace Legion {
       execution_fence_barrier = manager->get_execution_fence_barrier();
       attach_broadcast_barrier = manager->get_attach_broadcast_barrier();
       attach_reduce_barrier = manager->get_attach_reduce_barrier();
+      tracing_barrier = manager->get_tracing_barrier();
 #ifdef DEBUG_LEGION_COLLECTIVES
       collective_check_barrier = manager->get_collective_check_barrier();
       close_check_barrier = manager->get_close_check_barrier();
@@ -12026,15 +12027,16 @@ namespace Legion {
         // Already fixed, dump a complete trace op into the stream
         ReplTraceCompleteOp *complete_op = 
           runtime->get_available_repl_trace_op();
-        complete_op->initialize_complete(this, has_blocking_call);
-        runtime->add_to_dependence_queue(this, executing_processor, complete_op);
+        complete_op->initialize_complete(this, tracing_barrier,
+                                         has_blocking_call);
+        runtime->add_to_dependence_queue(this, executing_processor,complete_op);
       }
       else
       {
         // Not fixed yet, dump a capture trace op into the stream
         ReplTraceCaptureOp *capture_op = 
           runtime->get_available_repl_capture_op();
-        capture_op->initialize_capture(this, has_blocking_call);
+        capture_op->initialize_capture(this, tracing_barrier,has_blocking_call);
         runtime->add_to_dependence_queue(this, executing_processor, capture_op);
         // Mark that the current trace is now fixed
         current_trace->as_dynamic_trace()->fix_trace();
@@ -13348,6 +13350,15 @@ namespace Legion {
     {
       ApBarrier result = execution_fence_barrier;
       advance_replicate_barrier(execution_fence_barrier, total_shards);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    RtBarrier ReplicateContext::get_next_tracing_barrier(void)
+    //--------------------------------------------------------------------------
+    {
+      RtBarrier result = tracing_barrier;
+      advance_replicate_barrier(tracing_barrier, total_shards);
       return result;
     }
 

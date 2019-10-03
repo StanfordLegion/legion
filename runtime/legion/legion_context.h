@@ -1684,6 +1684,7 @@ namespace Legion {
       // Fence barrier methods
       RtBarrier get_next_mapping_fence_barrier(void);
       ApBarrier get_next_execution_fence_barrier(void);
+      RtBarrier get_next_tracing_barrier(void);
       inline void advance_replicate_barrier(RtBarrier &bar, size_t arrivals)
         {
           Runtime::advance_barrier(bar);
@@ -1730,6 +1731,7 @@ namespace Legion {
       ApBarrier execution_fence_barrier;
       ApBarrier attach_broadcast_barrier;
       ApBarrier attach_reduce_barrier;
+      RtBarrier tracing_barrier;
 #ifdef DEBUG_LEGION_COLLECTIVES
     protected:
       RtBarrier collective_check_barrier;
