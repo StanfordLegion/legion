@@ -585,17 +585,6 @@ namespace Legion {
     this->sparsity = rhs.sparsity;
     return *this;
   }
-
-  //----------------------------------------------------------------------------
-  template<int DIM, typename T>
-  inline DomainT<DIM,T>::operator Rect<DIM,T>(void) const
-  //----------------------------------------------------------------------------
-  {
-    // Can't convert to rect if we have a sparsity map
-    assert(this->dense());
-    const Rect<DIM,T> result = this->bounds;
-    return result;
-  }
 #endif // pre c++11
 
   //----------------------------------------------------------------------------
@@ -1332,6 +1321,13 @@ namespace Legion {
   //----------------------------------------------------------------------------
   {
     return is_valid && rect_valid;
+  }
+
+  //----------------------------------------------------------------------------
+  inline DomainPoint& Domain::DomainPointIterator::operator*(void)
+  //----------------------------------------------------------------------------
+  {
+    return p;
   }
   
   //----------------------------------------------------------------------------

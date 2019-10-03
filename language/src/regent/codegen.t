@@ -7879,7 +7879,6 @@ function codegen.expr_import_partition(cx, node)
     [check_actions];
     do
       var parent = std.c.legion_logical_partition_get_parent_logical_region([cx.runtime], [lp])
-      parent = get_root_of_tree([cx.runtime], parent)
       std.assert_error([eq_struct(c.legion_logical_region_t, `([region.value].impl), parent)],
         [get_source_location(node) .. ": " .. pretty.entry_expr(node.value) ..
         " is not a logical partition of " .. pretty.entry_expr(node.region)])
