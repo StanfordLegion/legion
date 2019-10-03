@@ -44,7 +44,9 @@
 // dynamic loading via dlfcn and a not-completely standard dladdr extension
 #ifdef USE_LIBDL
 #define REALM_USE_DLFCN
+#ifndef REALM_NO_USE_DLADDR
 #define REALM_USE_DLADDR
+#endif
 #endif
 
 // can Realm use exceptions to propagate errors back to the profiling interace?

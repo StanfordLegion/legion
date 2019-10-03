@@ -8311,6 +8311,11 @@ namespace Legion {
       }
       else
         variant_name = strdup(registrar.task_variant_name);
+      // If a global registration was requested, but the code descriptor
+      // provided does not have portable implementations, try to make one
+      // (if it fails, we'll complain below)
+      if (global && !realm_descriptor->has_portable_implementations())
+	realm_descriptor->create_portable_implementation();
       // Perform the registration, the normal case is not to have separate
       // runtime instances, but if we do have them, we only register on
       // the local processor

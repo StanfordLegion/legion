@@ -252,7 +252,9 @@ namespace Realm {
 
       // remote processors need a portable implementation available
       if(!remote_procs.empty()) {
-	if(!tro->codedesc.has_portable_implementations()) {
+	// try to create one if we don't have one
+	if(!tro->codedesc.has_portable_implementations() &&
+	   !tro->codedesc.create_portable_implementation()) {
 	  log_taskreg.fatal() << "cannot remotely register a task with no portable implementations";
 	  assert(0);
 	}
@@ -947,6 +949,9 @@ namespace Realm {
   void LocalTaskProcessor::execute_task(Processor::TaskFuncID func_id,
 					const ByteArrayRef& task_args)
   {
+    if(func_id == Processor::TASK_ID_PROCESSOR_NOP)
+      return;
+
     std::map<Processor::TaskFuncID, TaskTableEntry>::const_iterator it = task_table.find(func_id);
     if(it == task_table.end()) {
       // TODO: remove this hack once the tools are available to the HLR to call these directly
