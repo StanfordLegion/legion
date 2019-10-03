@@ -1333,6 +1333,13 @@ namespace Legion {
   {
     return is_valid && rect_valid;
   }
+
+  //----------------------------------------------------------------------------
+  inline DomainPoint& Domain::DomainPointIterator::operator*(void)
+  //----------------------------------------------------------------------------
+  {
+    return p;
+  }
   
   //----------------------------------------------------------------------------
   inline Domain::DomainPointIterator& Domain::DomainPointIterator::operator=(
