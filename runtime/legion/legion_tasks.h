@@ -1181,7 +1181,7 @@ namespace Legion {
     public:
       virtual void register_must_epoch(void);
       PointTask* clone_as_point_task(const DomainPoint &point);
-      void enumerate_points(void);
+      size_t enumerate_points(void);
       const void* get_predicate_false_result(size_t &result_size);
     public:
       std::map<PhysicalManager*,std::pair<unsigned,bool> >* 

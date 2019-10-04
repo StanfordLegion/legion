@@ -875,6 +875,7 @@ namespace Legion {
     public:
       virtual void trigger_prepipeline_stage(void);
       virtual void trigger_ready(void);
+      virtual void replay_analysis(void);
     public:
       // Override these so we can broadcast the future result
       virtual void handle_future(const void *res, size_t res_size, bool owned);
@@ -918,6 +919,7 @@ namespace Legion {
       virtual void trigger_prepipeline_stage(void);
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
+      virtual void replay_analysis(void);
     public:
       // Override this so we can exchange reduction results
       virtual void trigger_task_complete(bool deferred = false);
@@ -985,6 +987,7 @@ namespace Legion {
     public:
       virtual void trigger_prepipeline_stage(void);
       virtual void trigger_ready(void);
+      virtual void replay_analysis(void);
     protected:
       ShardingID sharding_functor;
       ShardingFunction *sharding_function;
@@ -1020,6 +1023,7 @@ namespace Legion {
       virtual void trigger_prepipeline_stage(void);
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
+      virtual void replay_analysis(void);
     public:
       void initialize_replication(ReplicateContext *ctx);
     protected:
@@ -1055,6 +1059,7 @@ namespace Legion {
     public:
       virtual void trigger_prepipeline_stage(void);
       virtual void trigger_ready(void);
+      virtual void replay_analysis(void);
     protected:
       ShardingID sharding_functor;
       ShardingFunction *sharding_function;
@@ -1089,6 +1094,7 @@ namespace Legion {
       virtual void trigger_prepipeline_stage(void);
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
+      virtual void replay_analysis(void);
       virtual ApEvent exchange_indirect_records(const unsigned index,
           const ApEvent local_done, const PhysicalTraceInfo &trace_info,
           const InstanceSet &instances, const IndexSpace space,

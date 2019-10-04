@@ -791,6 +791,12 @@ namespace Legion {
       virtual void record_set_op_sync_event(ApEvent &lhs, Memoizable *memo);
       virtual void record_complete_replay(Memoizable *memo, ApEvent rhs);
     public:
+      virtual void record_owner_shard(unsigned trace_local_id, ShardID owner);
+      virtual void record_local_space(unsigned trace_local_id, IndexSpace sp);
+    public:
+      virtual ShardID find_owner_shard(unsigned trace_local_id);
+      virtual IndexSpace find_local_space(unsigned trace_local_id);
+    public:
       RtEvent defer_template_deletion(void);
     public:
       static void handle_replay_slice(const void *args);
@@ -950,6 +956,12 @@ namespace Legion {
       virtual void record_fill_view(FillView *view, const FieldMask &user_mask,
                                     std::set<RtEvent> &applied);
     public:
+      virtual void record_owner_shard(unsigned trace_local_id, ShardID owner);
+      virtual void record_local_space(unsigned trace_local_id, IndexSpace sp);
+    public:
+      virtual ShardID find_owner_shard(unsigned trace_local_id);
+      virtual IndexSpace find_local_space(unsigned trace_local_id);
+    public:
       ApBarrier find_trace_shard_event(ApEvent event);
       void record_trace_shard_event(ApEvent event, ApBarrier result);
       void handle_trace_update(Deserializer &derez);
@@ -984,6 +996,8 @@ namespace Legion {
       std::map<ApEvent,RtEvent> pending_event_requests;
       std::map<ApEvent,ApBarrier> remote_barriers;
       std::map<AddressSpaceID,std::vector<ShardID> > view_shard_owners;
+      std::map<unsigned/*Trace Local ID*/,ShardID> owner_shards;
+      std::map<unsigned/*Trace Local ID*/,IndexSpace> local_spaces;
     };
 
     enum InstructionKind

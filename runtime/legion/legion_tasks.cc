@@ -8779,15 +8779,14 @@ namespace Legion {
         for (unsigned idx = 0; idx < regions.size(); idx++)
           TaskOp::log_requirement(unique_op_id, idx, regions[idx]);
       }
-      // Count how many total points we need for this index space task
-      total_points = index_domain.get_volume();
       // Mark that this is origin mapped effectively in case we
       // have any remote tasks, do this before we clone it
       map_origin = true;
       SliceTask *new_slice = this->clone_as_slice_task(internal_space,
                                                        current_proc,
                                                        false, false);
-      new_slice->enumerate_points();
+      // Count how many total points we need for this index space task
+      total_points = new_slice->enumerate_points();
       // We need to make one slice per point here in case we need to move
       // points to remote nodes. The way we do slicing right now prevents
       // us from knowing which point tasks are going remote until later in
@@ -9484,13 +9483,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void SliceTask::enumerate_points(void)
+    size_t SliceTask::enumerate_points(void)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, SLICE_ENUMERATE_POINTS_CALL);
       Domain internal_domain;
       runtime->forest->find_launch_space_domain(internal_space,internal_domain);
-      size_t num_points = internal_domain.get_volume();
+      const size_t num_points = internal_domain.get_volume();
 #ifdef DEBUG_LEGION
       assert(num_points > 0);
 #endif
@@ -9514,12 +9513,13 @@ namespace Legion {
         }
       }
       // Update the no access regions
-      for (unsigned idx = 0; idx < points.size(); idx++)
+      for (unsigned idx = 0; idx < num_points; idx++)
         points[idx]->complete_point_projection();
       // Mark how many points we have
-      num_unmapped_points = points.size();
-      num_uncomplete_points = points.size();
-      num_uncommitted_points = points.size();
+      num_unmapped_points = num_points;
+      num_uncomplete_points = num_points;
+      num_uncommitted_points = num_points;
+      return num_points;
     } 
 
     //--------------------------------------------------------------------------

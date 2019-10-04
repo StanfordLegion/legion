@@ -314,7 +314,7 @@ namespace Legion {
                       "(UID %lld)", mapper->get_mapper_name(), get_task_name(), 
                       get_unique_id(), parent_ctx->get_task_name(), 
                       parent_ctx->get_unique_id())
-#endif
+#endif 
       // Now we can do the normal prepipeline stage
       IndividualTask::trigger_prepipeline_stage();
     }
@@ -339,6 +339,15 @@ namespace Legion {
       }
       else
         owner_shard = sharding_function->find_owner(index_point, index_domain);
+      // If we're recording then record the owner shard
+      if (is_recording())
+      {
+#ifdef DEBUG_LEGION
+        assert(!is_remote());
+        assert((tpl != NULL) && tpl->is_recording());
+#endif
+        tpl->record_owner_shard(trace_local_id, owner_shard);
+      }
       if (runtime->legion_spy_enabled)
         LegionSpy::log_owner_shard(get_unique_id(), owner_shard);
 #ifdef DEBUG_LEGION
@@ -371,6 +380,39 @@ namespace Legion {
         // Then we can do the normal analysis
         IndividualTask::trigger_ready();
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplIndividualTask::replay_analysis(void)
+    //--------------------------------------------------------------------------
+    {
+      // Figure out if we're the one to do the replay
+#ifdef DEBUG_LEGION
+      assert(!is_remote());
+      assert(tpl != NULL);
+      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+      owner_shard = tpl->find_owner_shard(trace_local_id);
+      if (owner_shard != repl_ctx->owner_shard->shard_id)
+      {
+#ifdef LEGION_SPY
+        // Still have to do this for legion spy
+        LegionSpy::log_operation_events(unique_op_id, 
+            ApEvent::NO_AP_EVENT, ApEvent::NO_AP_EVENT);
+#endif
+        // We don't need to sync mapping here across shards since
+        // shards can replay in any order with a mapping fence
+        // at the end
+        complete_mapping();
+        complete_execution();
+        trigger_children_complete();
+        trigger_children_committed(); 
+      }
+      else
+        IndividualTask::replay_analysis();
     }
 
     //--------------------------------------------------------------------------
@@ -622,6 +664,15 @@ namespace Legion {
         internal_space =
           sharding_function->find_shard_space(repl_ctx->owner_shard->shard_id,
                                           launch_space, launch_space->handle);
+      // If we're recording then record the local_space
+      if (is_recording())
+      {
+#ifdef DEBUG_LEGION
+        assert(!is_remote());
+        assert((tpl != NULL) && tpl->is_recording());
+#endif
+        tpl->record_local_space(trace_local_id, internal_space);
+      }
       // If it's empty we're done, otherwise we go back on the queue
       if (!internal_space.exists())
       {
@@ -647,6 +698,36 @@ namespace Legion {
 #endif
         enqueue_ready_operation();
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplIndexTask::replay_analysis(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(tpl != NULL);
+      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+      internal_space = tpl->find_local_space(trace_local_id);
+      // If it's empty we're done, otherwise we do the replay
+      if (!internal_space.exists())
+      {
+#ifdef LEGION_SPY
+        // Still have to do this for legion spy
+        LegionSpy::log_operation_events(unique_op_id, 
+            ApEvent::NO_AP_EVENT, ApEvent::NO_AP_EVENT);
+#endif
+        // We have no local points, so we can just trigger
+        complete_mapping();
+        complete_execution();
+        trigger_children_complete();
+        trigger_children_committed();
+      }
+      else
+        IndexTask::replay_analysis();
     }
 
     //--------------------------------------------------------------------------
@@ -1020,6 +1101,14 @@ namespace Legion {
       }
       else
         owner_shard = sharding_function->find_owner(index_point, index_domain); 
+      // If we're recording then record the owner shard
+      if (is_recording())
+      {
+#ifdef DEBUG_LEGION
+        assert((tpl != NULL) && tpl->is_recording());
+#endif
+        tpl->record_owner_shard(trace_local_id, owner_shard);
+      }
       if (runtime->legion_spy_enabled)
         LegionSpy::log_owner_shard(get_unique_id(), owner_shard);
 #ifdef DEBUG_LEGION
@@ -1050,6 +1139,32 @@ namespace Legion {
         // Perform the base operation 
         FillOp::trigger_ready();
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplFillOp::replay_analysis(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(tpl != NULL);
+      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+      const ShardID owner_shard = tpl->find_owner_shard(trace_local_id);
+      if (owner_shard != repl_ctx->owner_shard->shard_id)
+      {
+#ifdef LEGION_SPY
+        // Still have to do this for legion spy
+        LegionSpy::log_operation_events(unique_op_id, 
+            ApEvent::NO_AP_EVENT, ApEvent::NO_AP_EVENT);
+#endif
+        complete_mapping();
+        complete_execution();
+      }
+      else // We own it, so do the base call
+        FillOp::replay_analysis();
     }
 
     /////////////////////////////////////////////////////////////
@@ -1188,6 +1303,14 @@ namespace Legion {
         local_space =
           sharding_function->find_shard_space(repl_ctx->owner_shard->shard_id, 
                                           launch_space, launch_space->handle);
+      // If we're recording then record the local_space
+      if (is_recording())
+      {
+#ifdef DEBUG_LEGION
+        assert((tpl != NULL) && tpl->is_recording());
+#endif
+        tpl->record_local_space(trace_local_id, local_space);
+      }
       // If it's empty we're done, otherwise we go back on the queue
       if (!local_space.exists())
       {
@@ -1207,6 +1330,40 @@ namespace Legion {
         launch_space = runtime->forest->get_node(local_space);
         add_launch_space_reference(launch_space);
         IndexFillOp::trigger_ready();
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplIndexFillOp::replay_analysis(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(tpl != NULL);
+      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+      const IndexSpace local_space = tpl->find_local_space(trace_local_id);
+      // If it's empty we're done, otherwise we do the replay
+      if (!local_space.exists())
+      {
+#ifdef LEGION_SPY
+        // Still have to do this for legion spy
+        LegionSpy::log_operation_events(unique_op_id, 
+            ApEvent::NO_AP_EVENT, ApEvent::NO_AP_EVENT);
+#endif
+        // We have no local points, so we can just trigger
+        complete_mapping();
+        complete_execution();
+      }
+      else
+      {
+        if (remove_launch_space_reference(launch_space))
+          delete launch_space;
+        launch_space = runtime->forest->get_node(local_space);
+        add_launch_space_reference(launch_space);
+        IndexFillOp::replay_analysis();
       }
     }
 
@@ -1350,6 +1507,14 @@ namespace Legion {
       }
       else
         owner_shard = sharding_function->find_owner(index_point, index_domain); 
+      // If we're recording then record the owner shard
+      if (is_recording())
+      {
+#ifdef DEBUG_LEGION
+        assert((tpl != NULL) && tpl->is_recording());
+#endif
+        tpl->record_owner_shard(trace_local_id, owner_shard);
+      }
       if (runtime->legion_spy_enabled)
         LegionSpy::log_owner_shard(get_unique_id(), owner_shard);
 #ifdef DEBUG_LEGION
@@ -1380,6 +1545,32 @@ namespace Legion {
         // Perform the base operation 
         CopyOp::trigger_ready();
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplCopyOp::replay_analysis(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(tpl != NULL);
+      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+      const ShardID owner_shard = tpl->find_owner_shard(trace_local_id);
+      if (owner_shard != repl_ctx->owner_shard->shard_id)
+      {
+#ifdef LEGION_SPY
+        // Still have to do this for legion spy
+        LegionSpy::log_operation_events(unique_op_id, 
+            ApEvent::NO_AP_EVENT, ApEvent::NO_AP_EVENT);
+#endif
+        complete_mapping();
+        complete_execution();
+      }
+      else // We own it, so do the base call
+        CopyOp::replay_analysis();
     }
 
     /////////////////////////////////////////////////////////////
@@ -1550,6 +1741,14 @@ namespace Legion {
         local_space =
           sharding_function->find_shard_space(repl_ctx->owner_shard->shard_id,
                                           launch_space, launch_space->handle);
+      // If we're recording then record the local_space
+      if (is_recording())
+      {
+#ifdef DEBUG_LEGION
+        assert((tpl != NULL) && tpl->is_recording());
+#endif
+        tpl->record_local_space(trace_local_id, local_space);
+      }
       // If it's empty we're done, otherwise we go back on the queue
       if (!local_space.exists())
       {
@@ -1594,6 +1793,40 @@ namespace Legion {
         launch_space = runtime->forest->get_node(local_space);
         add_launch_space_reference(launch_space);
         IndexCopyOp::trigger_ready();
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplIndexCopyOp::replay_analysis(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(tpl != NULL);
+      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+      const IndexSpace local_space = tpl->find_local_space(trace_local_id);
+      // If it's empty we're done, otherwise we do the replay
+      if (!local_space.exists())
+      {
+#ifdef LEGION_SPY
+        // Still have to do this for legion spy
+        LegionSpy::log_operation_events(unique_op_id, 
+            ApEvent::NO_AP_EVENT, ApEvent::NO_AP_EVENT);
+#endif
+        // We have no local points, so we can just trigger
+        complete_mapping();
+        complete_execution();
+      }
+      else
+      {
+        if (remove_launch_space_reference(launch_space))
+          delete launch_space;
+        launch_space = runtime->forest->get_node(local_space);
+        add_launch_space_reference(launch_space);
+        IndexCopyOp::replay_analysis();
       }
     }
 

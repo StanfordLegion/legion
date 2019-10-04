@@ -4085,6 +4085,40 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void PhysicalTemplate::record_owner_shard(unsigned tid, ShardID owner)
+    //--------------------------------------------------------------------------
+    {
+      // Only called on sharded physical template
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalTemplate::record_local_space(unsigned tid, IndexSpace sp)
+    //--------------------------------------------------------------------------
+    {
+      // Only called on sharded physical template
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    ShardID PhysicalTemplate::find_owner_shard(unsigned tid)
+    //--------------------------------------------------------------------------
+    {
+      // Only called on sharded physical template
+      assert(false);
+      return 0;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace PhysicalTemplate::find_local_space(unsigned tid)
+    //--------------------------------------------------------------------------
+    {
+      // Only called on sharded physical template
+      assert(false);
+      return IndexSpace::NO_SPACE;
+    }
+
+    //--------------------------------------------------------------------------
     RtEvent PhysicalTemplate::defer_template_deletion(void)
     //--------------------------------------------------------------------------
     {
@@ -4968,6 +5002,58 @@ namespace Legion {
 #endif
       // Save the result so we don't have to do this again for this space
       view_shard_owners[owner] = shards;
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardedPhysicalTemplate::record_owner_shard(unsigned tid,ShardID owner)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock tpl_lock(template_lock);
+#ifdef DEBUG_LEGION
+      assert(owner_shards.find(tid) == owner_shards.end());
+#endif
+      owner_shards[tid] = owner;
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardedPhysicalTemplate::record_local_space(unsigned tid,IndexSpace sp)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock tpl_lock(template_lock);
+#ifdef DEBUG_LEGION
+      assert(local_spaces.find(tid) == local_spaces.end());
+#endif
+      local_spaces[tid] = sp;
+    }
+
+    //--------------------------------------------------------------------------
+    ShardID ShardedPhysicalTemplate::find_owner_shard(unsigned tid)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock tpl_lock(template_lock);
+#ifdef DEBUG_LEGION
+      std::map<unsigned,ShardID>::const_iterator finder = 
+        owner_shards.find(tid);
+      assert(finder != owner_shards.end());
+      return finder->second;
+#else
+      return owner_shards[tid];
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace ShardedPhysicalTemplate::find_local_space(unsigned tid)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock tpl_lock(template_lock);
+#ifdef DEBUG_LEGION
+      std::map<unsigned,IndexSpace>::const_iterator finder = 
+        local_spaces.find(tid);
+      assert(finder != local_spaces.end());
+      return finder->second;
+#else
+      return local_spaces[tid];
+#endif
     }
 
     /////////////////////////////////////////////////////////////

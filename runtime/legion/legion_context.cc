@@ -12027,8 +12027,7 @@ namespace Legion {
         // Already fixed, dump a complete trace op into the stream
         ReplTraceCompleteOp *complete_op = 
           runtime->get_available_repl_trace_op();
-        complete_op->initialize_complete(this, tracing_barrier,
-                                         has_blocking_call);
+        complete_op->initialize_complete(this, has_blocking_call);
         runtime->add_to_dependence_queue(this, executing_processor,complete_op);
       }
       else
@@ -12036,7 +12035,7 @@ namespace Legion {
         // Not fixed yet, dump a capture trace op into the stream
         ReplTraceCaptureOp *capture_op = 
           runtime->get_available_repl_capture_op();
-        capture_op->initialize_capture(this, tracing_barrier,has_blocking_call);
+        capture_op->initialize_capture(this, has_blocking_call);
         runtime->add_to_dependence_queue(this, executing_processor, capture_op);
         // Mark that the current trace is now fixed
         current_trace->as_dynamic_trace()->fix_trace();
