@@ -672,6 +672,9 @@ namespace Legion {
         assert((tpl != NULL) && tpl->is_recording());
 #endif
         tpl->record_local_space(trace_local_id, internal_space);
+        // Record the sharding function if needed for the future map
+        if (redop == 0)
+          tpl->record_sharding_function(trace_local_id, sharding_function);
       }
       // If it's empty we're done, otherwise we go back on the queue
       if (!internal_space.exists())
@@ -708,6 +711,20 @@ namespace Legion {
       assert(tpl != NULL);
 #endif
       internal_space = tpl->find_local_space(trace_local_id);
+      if (redop == 0)
+      {
+        sharding_function = tpl->find_sharding_function(trace_local_id);
+#ifdef DEBUG_LEGION
+        assert(future_map.impl != NULL);
+        ReplFutureMapImpl *impl = 
+          dynamic_cast<ReplFutureMapImpl*>(future_map.impl);
+        assert(impl != NULL);
+#else
+        ReplFutureMapImpl *impl = 
+          static_cast<ReplFutureMapImpl*>(future_map.impl);
+#endif
+        impl->set_sharding_function(sharding_function);
+      }
       // If it's empty we're done, otherwise we do the replay
       if (!internal_space.exists())
       {

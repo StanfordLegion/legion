@@ -793,9 +793,12 @@ namespace Legion {
     public:
       virtual void record_owner_shard(unsigned trace_local_id, ShardID owner);
       virtual void record_local_space(unsigned trace_local_id, IndexSpace sp);
+      virtual void record_sharding_function(unsigned trace_local_id, 
+                                            ShardingFunction *function);
     public:
       virtual ShardID find_owner_shard(unsigned trace_local_id);
       virtual IndexSpace find_local_space(unsigned trace_local_id);
+      virtual ShardingFunction* find_sharding_function(unsigned trace_local_id);
     public:
       RtEvent defer_template_deletion(void);
     public:
@@ -958,9 +961,12 @@ namespace Legion {
     public:
       virtual void record_owner_shard(unsigned trace_local_id, ShardID owner);
       virtual void record_local_space(unsigned trace_local_id, IndexSpace sp);
+      virtual void record_sharding_function(unsigned trace_local_id, 
+                                            ShardingFunction *function);
     public:
       virtual ShardID find_owner_shard(unsigned trace_local_id);
       virtual IndexSpace find_local_space(unsigned trace_local_id);
+      virtual ShardingFunction* find_sharding_function(unsigned trace_local_id);
     public:
       ApBarrier find_trace_shard_event(ApEvent event);
       void record_trace_shard_event(ApEvent event, ApBarrier result);
@@ -998,6 +1004,7 @@ namespace Legion {
       std::map<AddressSpaceID,std::vector<ShardID> > view_shard_owners;
       std::map<unsigned/*Trace Local ID*/,ShardID> owner_shards;
       std::map<unsigned/*Trace Local ID*/,IndexSpace> local_spaces;
+      std::map<unsigned/*Trace Local ID*/,ShardingFunction*> sharding_functions;
     };
 
     enum InstructionKind

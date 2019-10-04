@@ -4101,6 +4101,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void PhysicalTemplate::record_sharding_function(unsigned tid, 
+                                                    ShardingFunction *function)
+    //--------------------------------------------------------------------------
+    {
+      // Only called on sharded physical template
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
     ShardID PhysicalTemplate::find_owner_shard(unsigned tid)
     //--------------------------------------------------------------------------
     {
@@ -4116,6 +4125,15 @@ namespace Legion {
       // Only called on sharded physical template
       assert(false);
       return IndexSpace::NO_SPACE;
+    }
+
+    //--------------------------------------------------------------------------
+    ShardingFunction* PhysicalTemplate::find_sharding_function(unsigned tid)
+    //--------------------------------------------------------------------------
+    {
+      // Only called on sharded physical template
+      assert(false);
+      return NULL;
     }
 
     //--------------------------------------------------------------------------
@@ -5027,6 +5045,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void ShardedPhysicalTemplate::record_sharding_function(unsigned tid,
+                                                     ShardingFunction *function)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock tpl_lock(template_lock);
+#ifdef DEBUG_LEGION
+      assert(sharding_functions.find(tid) == sharding_functions.end());
+#endif
+      sharding_functions[tid] = function;
+    }
+
+    //--------------------------------------------------------------------------
     ShardID ShardedPhysicalTemplate::find_owner_shard(unsigned tid)
     //--------------------------------------------------------------------------
     {
@@ -5053,6 +5083,22 @@ namespace Legion {
       return finder->second;
 #else
       return local_spaces[tid];
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    ShardingFunction* ShardedPhysicalTemplate::find_sharding_function(
+                                                                   unsigned tid)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock tpl_lock(template_lock);
+#ifdef DEBUG_LEGION
+      std::map<unsigned,ShardingFunction*>::const_iterator finder = 
+        sharding_functions.find(tid);
+      assert(finder != sharding_functions.end());
+      return finder->second;
+#else
+      return sharding_functions[tid];
 #endif
     }
 
