@@ -19,7 +19,17 @@ import "regent"
 
 do
   local root_dir = arg[0]:match(".*/") or "./"
-  local runtime_dir = os.getenv('LG_RT_DIR') .. "/"
+
+  local include_path = ""
+  local include_dirs = terralib.newlist()
+  include_dirs:insert("-I")
+  include_dirs:insert(root_dir)
+  for path in string.gmatch(os.getenv("INCLUDE_PATH"), "[^;]+") do
+    include_path = include_path .. " -I " .. path
+    include_dirs:insert("-I")
+    include_dirs:insert(path)
+  end
+
   local mapper_cc = root_dir .. "task_variant_io.cc"
   if os.getenv('SAVEOBJ') == '1' then
     mapper_so = root_dir .. "libtask_variant_io.so"
@@ -38,7 +48,7 @@ do
     cxx_flags = cxx_flags .. " -shared -fPIC"
   end
 
-  local cmd = (cxx .. " " .. cxx_flags .. " -I " .. runtime_dir .. " " ..
+  local cmd = (cxx .. " " .. cxx_flags .. " " .. include_path .. " " ..
                  mapper_cc .. " -o " .. mapper_so)
   if os.execute(cmd) ~= 0 then
     print(cmd)
@@ -46,7 +56,7 @@ do
     assert(false)
   end
   terralib.linklibrary(mapper_so)
-  cmapper = terralib.includec("task_variant_io.h", {"-I", root_dir, "-I", runtime_dir})
+  cmapper = terralib.includec("task_variant_io.h", include_dirs)
 end
 
 local c = regentlib.c

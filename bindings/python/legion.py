@@ -58,8 +58,6 @@ from io import StringIO
 
 _pickle_version = pickle.HIGHEST_PROTOCOL # Use latest Pickle protocol
 
-_max_dim = int(os.environ.get('MAX_DIM', 3))
-
 def find_legion_header():
     def try_prefix(prefix_dir):
         legion_h_path = os.path.join(prefix_dir, 'legion.h')
@@ -98,11 +96,31 @@ try:
 except IOError as e:
     print('Unable to find cached_legion.h, falling back to reading legion.h')
     prefix_dir, legion_h_path = find_legion_header()
-    header = subprocess.check_output(['gcc', '-I', prefix_dir, '-DLEGION_USE_PYTHON_CFFI', '-DLEGION_MAX_DIM=%s' % _max_dim, '-DREALM_MAX_DIM=%s' % _max_dim, '-E', '-P', legion_h_path]).decode('utf-8')
+
+    # If we're running from a local Python build, we need to include
+    # the path where legion.py is located in order to find
+    # legion_defines.h.
+    legion_py_dir = os.path.dirname(os.path.realpath(__file__))
+
+    # If we're running inside of Regent, try to parse the include path
+    # since we'll need it to locate legion_defines.h.
+    include_path = os.environ.get('INCLUDE_PATH', '').split(';')
+    include_path = [x for y in include_path for x in ['-I', y]]
+
+    header = subprocess.check_output(['gcc', '-I', prefix_dir, '-I', legion_py_dir] + include_path + ['-DLEGION_USE_PYTHON_CFFI', '-E', '-P', legion_h_path]).decode('utf-8')
 
 ffi = cffi.FFI()
 ffi.cdef(header)
 c = ffi.dlopen(None)
+
+_max_dim = None
+for dim in range(1, 9):
+    try:
+        getattr(c, 'legion_domain_get_rect_{}d'.format(dim))
+    except AttributeError:
+        break
+    _max_dim = dim
+assert _max_dim is not None, 'Unable to detect LEGION_MAX_DIM'
 
 # Can't seem to pull this out of the header, so reproduce it here.
 AUTO_GENERATE_ID = -1

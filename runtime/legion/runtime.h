@@ -253,13 +253,16 @@ namespace Legion {
       FutureImpl& operator=(const FutureImpl &rhs);
     public:
       void get_void_result(bool silence_warnings = true,
-                           const char *warning_string = NULL);
+                           const char *warning_string = NULL,
+                           bool internal = false);
       void* get_untyped_result(bool silence_warnings = true,
-                               const char *warning_string = NULL);
+                               const char *warning_string = NULL,
+                               bool internal = false);
       bool is_empty(bool block, bool silence_warnings = true,
-                    const char *warning_string = NULL);
+                    const char *warning_string = NULL,
+                    bool internal = false);
       bool is_ready(void);
-      size_t get_untyped_size(void);
+      size_t get_untyped_size(bool internal = false);
       ApEvent get_ready_event(void) const { return ready_event; }
     public:
       // This will simply save the value of the future

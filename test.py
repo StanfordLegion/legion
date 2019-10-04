@@ -192,6 +192,8 @@ def cmd(command, env=None, cwd=None, timelimit=None):
             ret = child.wait()
             signal.alarm(0)  # disable alarm
             signal.signal(signal.SIGALRM, signal.SIG_DFL)
+            if ret:
+                raise subprocess.CalledProcessError(ret, command)
             return ret
         except TestTimeoutException:
             child.kill()
@@ -280,6 +282,7 @@ def run_test_fuzzer(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
 def run_test_realm(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit):
     test_dir = os.path.join(root_dir, 'test/realm')
     cmd([make_exe, '-C', test_dir, 'DEBUG=0', 'clean'], env=env)
+    cmd([make_exe, '-C', test_dir, 'DEBUG=0', 'build'], env=env)
     cmd([make_exe, '-C', test_dir, 'DEBUG=0', 'run_all'], env=env, timelimit=timelimit)
 
 def run_test_external(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit):
@@ -746,7 +749,7 @@ def run_tests(test_modules=None,
         return option_enabled(module, test_modules, 'TEST_', default)
     test_regent = module_enabled('regent')
     test_legion_cxx = module_enabled('legion_cxx')
-    test_fuzzer = module_enabled('fuzzer', debug)
+    test_fuzzer = module_enabled('fuzzer', False)
     test_realm = module_enabled('realm', not debug)
     test_external = module_enabled('external', False)
     test_private = module_enabled('private', False)
@@ -828,6 +831,7 @@ def run_tests(test_modules=None,
         ('USE_RDIR', '1' if use_rdir else '0'),
         ('MAX_DIM', str(max_dim)),
         ('LG_RT_DIR', os.path.join(root_dir, 'runtime')),
+        ('DEFINE_HEADERS_DIR', os.path.join(root_dir, 'runtime')),
         ('CMAKE_BUILD_DIR', os.path.join(tmp_dir, 'build'))] + (
 
         # Gcov doesn't get a USE_GCOV flag, but instead stuff the GCC

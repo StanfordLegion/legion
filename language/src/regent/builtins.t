@@ -16,8 +16,6 @@
 
 local std = require("regent/std")
 
-local max_dim = std.config["legion-dim"]
-
 local builtins = {}
 
 -- Builtins consists of a list of which will be stuffed into the
@@ -32,7 +30,7 @@ builtins.cross_product = std.cross_product
 builtins.disjoint = std.disjoint
 builtins.dynamic_collective = std.dynamic_collective
 builtins.index_type = std.index_type
-for dim = 1, max_dim do
+for dim = 1, std.max_dim do
   builtins["int" .. dim .. "d"] = std["int" .. dim .. "d"]
   builtins["rect" .. dim .. "d"] = std["rect" .. dim .. "d"]
 end

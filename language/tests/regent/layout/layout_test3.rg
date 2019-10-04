@@ -18,7 +18,17 @@ import "regent"
 local clayout_test
 do
   local root_dir = arg[0]:match(".*/") or "./"
-  local runtime_dir = os.getenv('LG_RT_DIR') .. "/"
+
+  local include_path = ""
+  local include_dirs = terralib.newlist()
+  include_dirs:insert("-I")
+  include_dirs:insert(root_dir)
+  for path in string.gmatch(os.getenv("INCLUDE_PATH"), "[^;]+") do
+    include_path = include_path .. " -I " .. path
+    include_dirs:insert("-I")
+    include_dirs:insert(path)
+  end
+
   local layout_test_cc = root_dir .. "layout_test.cc"
   local layout_test_so
   if os.getenv('OBJNAME') then
@@ -30,11 +40,10 @@ do
     layout_test_so = os.tmpname() .. ".so" -- root_dir .. "layout_test.so"
   end
   local cxx = os.getenv('CXX') or 'c++'
-  local max_dim = os.getenv('MAX_DIM') or '3'
 
   local cxx_flags = os.getenv('CC_FLAGS') or ''
-  --cxx_flags = cxx_flags .. " -O2 -Wall -Werror -DLEGION_MAX_DIM=" .. max_dim .. " -DREALM_MAX_DIM=" .. max_dim
-  cxx_flags = cxx_flags .. " -g -O0 -DLEGION_MAX_DIM=" .. max_dim .. " -DREALM_MAX_DIM=" .. max_dim
+  --cxx_flags = cxx_flags .. " -O2 -Wall -Werror"
+  cxx_flags = cxx_flags .. " -g -O0"
   if os.execute('test "$(uname)" = Darwin') == 0 then
     cxx_flags =
       (cxx_flags ..
@@ -43,14 +52,14 @@ do
     cxx_flags = cxx_flags .. " -shared -fPIC"
   end
 
-  local cmd = (cxx .. " " .. cxx_flags .. " -I " .. runtime_dir .. " " ..
+  local cmd = (cxx .. " " .. cxx_flags .. " " .. include_path .. " " ..
                  layout_test_cc .. " -o " .. layout_test_so)
   if os.execute(cmd) ~= 0 then
     print("Error: failed to compile " .. layout_test_cc)
     assert(false)
   end
   terralib.linklibrary(layout_test_so)
-  clayout_test = terralib.includec("layout_test.h", {"-I", root_dir, "-I", runtime_dir})
+  clayout_test = terralib.includec("layout_test.h", include_dirs)
 end
 
 fspace fs

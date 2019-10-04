@@ -63,9 +63,6 @@ local default_options = {
   ["skip-empty-tasks"] = true,
   ["vectorize"] = true,
 
-  -- Legion runtime compile options:
-  ["legion-dim"] = tonumber(os.getenv("MAX_DIM")) or 3, -- Set this to the value of LEGION_MAX_DIM.
-
   -- Legion runtime optimization flags:
   ["legion-leaf"] = true,
   ["legion-inner"] = true,

@@ -468,14 +468,14 @@ mark_as_advanced(Legion_REDOP_COMPLEX)
 #------------------------------------------------------------------------------#
 
 configure_file(${PROJECT_SOURCE_DIR}/cmake/legion_defines.h.in
-  ${PROJECT_BINARY_DIR}/runtime/legion/legion_defines.h @ONLY)
-install(FILES ${PROJECT_BINARY_DIR}/runtime/legion/legion_defines.h
-  DESTINATION  ${CMAKE_INSTALL_INCLUDEDIR}/legion)
+  ${PROJECT_BINARY_DIR}/runtime/legion_defines.h @ONLY)
+install(FILES ${PROJECT_BINARY_DIR}/runtime/legion_defines.h
+  DESTINATION  ${CMAKE_INSTALL_INCLUDEDIR})
 
 configure_file(${PROJECT_SOURCE_DIR}/cmake/realm_defines.h.in
-  ${PROJECT_BINARY_DIR}/runtime/realm/realm_defines.h @ONLY)
-install(FILES ${PROJECT_BINARY_DIR}/runtime/realm/realm_defines.h
-  DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/realm)
+  ${PROJECT_BINARY_DIR}/runtime/realm_defines.h @ONLY)
+install(FILES ${PROJECT_BINARY_DIR}/runtime/realm_defines.h
+  DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 
 #------------------------------------------------------------------------------#
 # vim: set tabstop=2 shiftwidth=2 expandtab :

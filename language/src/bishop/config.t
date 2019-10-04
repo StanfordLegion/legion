@@ -22,9 +22,6 @@ local default_options = {
   ["standalone"] = false,
   ["taskid-map"] = "",
   ["dump-dfa"] = "",
-
-  -- Legion runtime compile options:
-  ["legion-dim"] = tonumber(os.getenv("MAX_DIM")) or 3, -- Set this to the value of LEGION_MAX_DIM.
 }
 
 local function make_default_options(prefix, options)

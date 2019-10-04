@@ -64,7 +64,7 @@ all: $(OUTFILE) cached_legion.h
 
 include $(LG_RT_DIR)/runtime.mk
 
-cached_legion.h: $(LG_RT_DIR)/legion.h
+cached_legion.h: $(LG_RT_DIR)/legion.h $(LEGION_DEFINES_HEADER) $(REALM_DEFINES_HEADER)
 	gcc -DLEGION_USE_PYTHON_CFFI $(CC_FLAGS) $(INC_FLAGS) -E -P $< > $@
 
 clean::

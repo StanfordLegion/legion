@@ -280,6 +280,9 @@ namespace Realm {
     //  usable in another process/address space)?
     bool has_portable_implementations(void) const;
 
+    // attempt to make a portable implementation from what we have
+    bool create_portable_implementation(void);
+
     template <typename T>
     const T *find_impl(void) const;
 

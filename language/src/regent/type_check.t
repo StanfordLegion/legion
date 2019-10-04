@@ -4086,7 +4086,7 @@ local opaque_types = {
 }
 
 do
-  for d = 1, std.config["legion-dim"] do
+  for d = 1, std.max_dim do
     local dim = tostring(d)
     opaque_types[ std.c["legion_rect_in_domain_iterator_" .. dim .. "d_t"] ] = true
     opaque_types[ std.c["legion_deferred_buffer_char_" .. dim .. "d_t"] ]    = true

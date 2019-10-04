@@ -21,8 +21,6 @@ local base = {}
 
 base.config, base.args = config.args()
 
-local max_dim = base.config["legion-dim"]
-
 -- Hack: Terra symbols don't support the hash() method so monkey patch
 -- it in here. This allows deterministic hashing of Terra symbols,
 -- which is currently required by OpenMP codegen.
@@ -59,10 +57,11 @@ local c = terralib.includecstring([[
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
-]], {"-DREALM_MAX_DIM=" .. tostring(max_dim),
-     "-DLEGION_MAX_DIM=" .. tostring(max_dim),
-     "-DLEGION_REDOP_COMPLEX"})
+]], {"-DLEGION_REDOP_COMPLEX"})
 base.c = c
+
+local max_dim = c.LEGION_MAX_DIM
+base.max_dim = max_dim
 
 -- #####################################
 -- ## Utilities

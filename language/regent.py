@@ -69,7 +69,8 @@ include_path = (
      if 'INCLUDE_PATH' in os.environ else []) +
     [bindings_dir,
      runtime_dir,
-])
+    ] +
+    ([os.path.join(cmake_build_dir, 'runtime')] if cmake else []))
 if cuda_include_dir is not None:
     include_path.append(cuda_include_dir)
 
