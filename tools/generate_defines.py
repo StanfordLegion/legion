@@ -47,7 +47,7 @@ def make_define(arg):
 
 def generate_defines():
     parser = argparse.ArgumentParser()
-    parser.add_argument('-D', dest='defines', action='append')
+    parser.add_argument('-D', dest='defines', action='append', default=[])
     parser.add_argument('-o', '--output',
                         help='name of output file to write')
     parser.add_argument('-c', '--check-unchanged', action='store_true',
