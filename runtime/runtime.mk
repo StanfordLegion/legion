@@ -36,6 +36,18 @@ SLIB_LEGION     := liblegion.a
 SLIB_REALM      := librealm.a
 LEGION_LIBS     := -L. -llegion -lrealm
 
+# generate header files for public-facing defines
+DEFINE_HEADERS_DIR ?= $(CURDIR)
+LEGION_DEFINES_HEADER := $(DEFINE_HEADERS_DIR)/legion_defines.h
+REALM_DEFINES_HEADER := $(DEFINE_HEADERS_DIR)/realm_defines.h
+
+# These flags are NOT passed on the command line, but are used to
+# generate the public-facing legion/realm_defines.h files.
+# (Additional flags will be picked up from environment variables of
+# the same names.)
+LEGION_CC_FLAGS ?=
+REALM_CC_FLAGS ?=
+
 # Handle some of the common machines we frequent
 
 ifeq ($(findstring xs,$(shell uname -n)), xs)
@@ -113,7 +125,7 @@ ifneq (${MARCH},)
   endif
 endif
 
-INC_FLAGS	+= -I$(LG_RT_DIR) -I$(LG_RT_DIR)/mappers
+INC_FLAGS	+= -I$(LG_RT_DIR) -I$(LG_RT_DIR)/mappers -I$(DEFINE_HEADERS_DIR)
 # support libraries are OS specific unfortunately
 ifeq ($(shell uname -s),Linux)
 LEGION_LD_FLAGS	+= -lrt -lpthread
@@ -161,7 +173,7 @@ endif
 
 USE_LIBDL ?= 1
 ifeq ($(strip $(USE_LIBDL)),1)
-CC_FLAGS += -DUSE_LIBDL
+REALM_CC_FLAGS += -DUSE_LIBDL
 ifneq ($(shell uname -s),Darwin)
 #CC_FLAGS += -rdynamic
 # FreeBSD doesn't actually have a separate libdl
@@ -182,7 +194,7 @@ ifeq ($(strip $(USE_LLVM)),1)
     $(error cannot find llvm-config-* - set with LLVM_CONFIG if not in path)
   endif
   LLVM_VERSION_NUMBER := $(shell $(LLVM_CONFIG) --version | cut -c1,3)
-  CC_FLAGS += -DREALM_USE_LLVM -DREALM_LLVM_VERSION=$(LLVM_VERSION_NUMBER)
+  REALM_CC_FLAGS += -DREALM_USE_LLVM -DREALM_LLVM_VERSION=$(LLVM_VERSION_NUMBER)
   # NOTE: do not use these for all source files - just the ones that include llvm include files
   LLVM_CXXFLAGS ?= -std=c++11 -I$(shell $(LLVM_CONFIG) --includedir)
   ifeq ($(LLVM_VERSION_NUMBER),35)
@@ -199,18 +211,18 @@ endif
 
 OMP_FLAGS ?=
 ifeq ($(strip $(USE_OPENMP)),1)
-  CC_FLAGS += -DREALM_USE_OPENMP
+  REALM_CC_FLAGS += -DREALM_USE_OPENMP
   # Add the -fopenmp flag for Linux, but not for Mac as clang doesn't need it
   #ifneq ($(strip $(DARWIN)),1)
   OMP_FLAGS += -fopenmp 
   #endif
   REALM_OPENMP_GOMP_SUPPORT ?= 1
   ifeq ($(strip $(REALM_OPENMP_GOMP_SUPPORT)),1)
-    CC_FLAGS += -DREALM_OPENMP_GOMP_SUPPORT
+    REALM_CC_FLAGS += -DREALM_OPENMP_GOMP_SUPPORT
   endif
   REALM_OPENMP_KMP_SUPPORT ?= 1	
   ifeq ($(strip $(REALM_OPENMP_KMP_SUPPORT)),1)
-    CC_FLAGS += -DREALM_OPENMP_KMP_SUPPORT
+    REALM_CC_FLAGS += -DREALM_OPENMP_KMP_SUPPORT
   endif
 endif
 
@@ -272,10 +284,10 @@ ifeq ($(strip $(USE_PYTHON)),1)
   ifndef PYTHON_VERSION_MAJOR
     $(error cannot auto-detect Python version - please set PYTHON_VERSION_MAJOR)
   else
-    CC_FLAGS += -DREALM_PYTHON_VERSION_MAJOR=$(PYTHON_VERSION_MAJOR)
+    REALM_CC_FLAGS += -DREALM_PYTHON_VERSION_MAJOR=$(PYTHON_VERSION_MAJOR)
   endif
 
-  CC_FLAGS += -DREALM_USE_PYTHON
+  REALM_CC_FLAGS += -DREALM_USE_PYTHON
 endif
 
 USE_DLMOPEN ?= 0
@@ -309,12 +321,11 @@ endif
 ifeq ($(strip $(USE_CUDA)),1)
 NVCC	        ?= $(CUDA)/bin/nvcc
 # Latter is preferred, former is for backwards compatability
-CC_FLAGS        += -DUSE_CUDA -DREALM_USE_CUDA -DLEGION_USE_CUDA
-# Latter is preferred, former is for backwards compatability
-NVCC_FLAGS      += -DUSE_CUDA -DREALM_USE_CUDA -DLEGION_USE_CUDA
+REALM_CC_FLAGS        += -DUSE_CUDA -DREALM_USE_CUDA
+LEGION_CC_FLAGS       += -DLEGION_USE_CUDA
 INC_FLAGS	+= -I$(CUDA)/include -I$(LG_RT_DIR)/realm/transfer
 ifeq ($(strip $(DEBUG)),1)
-NVCC_FLAGS	+= -DDEBUG_REALM -DDEBUG_LEGION -g -O0
+NVCC_FLAGS	+= -g -O0
 #NVCC_FLAGS	+= -G
 else
 NVCC_FLAGS	+= -O2
@@ -406,48 +417,48 @@ ifeq ($(strip $(USE_GASNET)),1)
   else
     LEGION_LD_FLAGS	+= -L$(GASNET)/lib -lrt -lm
   endif
-  CC_FLAGS	+= -DUSE_GASNET
+  REALM_CC_FLAGS	+= -DUSE_GASNET
   # newer versions of gasnet seem to need this
-  CC_FLAGS	+= -DGASNETI_BUG1389_WORKAROUND=1
+  REALM_CC_FLAGS	+= -DGASNETI_BUG1389_WORKAROUND=1
 
   # GASNET conduit variables
   ifeq ($(strip $(CONDUIT)),ibv)
     INC_FLAGS 	+= -I$(GASNET)/include/ibv-conduit
-    CC_FLAGS	+= -DGASNET_CONDUIT_IBV
+    REALM_CC_FLAGS	+= -DGASNET_CONDUIT_IBV
     LEGION_LD_FLAGS	+= -lgasnet-ibv-par -libverbs
     # GASNet needs MPI for interop support
     USE_MPI	= 1
   endif
   ifeq ($(strip $(CONDUIT)),gemini)
     INC_FLAGS	+= -I$(GASNET)/include/gemini-conduit
-    CC_FLAGS	+= -DGASNET_CONDUIT_GEMINI
+    REALM_CC_FLAGS	+= -DGASNET_CONDUIT_GEMINI
     LEGION_LD_FLAGS	+= -lgasnet-gemini-par -lugni -ludreg -lpmi -lhugetlbfs
     # GASNet needs MPI for interop support
     USE_MPI	= 1
   endif
   ifeq ($(strip $(CONDUIT)),aries)
     INC_FLAGS   += -I$(GASNET)/include/aries-conduit
-    CC_FLAGS    += -DGASNET_CONDUIT_ARIES
+    REALM_CC_FLAGS    += -DGASNET_CONDUIT_ARIES
     LEGION_LD_FLAGS    += -lgasnet-aries-par -lugni -ludreg -lpmi -lhugetlbfs
     # GASNet needs MPI for interop support
     USE_MPI	= 1
   endif
   ifeq ($(strip $(CONDUIT)),psm)
     INC_FLAGS 	+= -I$(GASNET)/include/psm-conduit
-    CC_FLAGS	+= -DGASNET_CONDUIT_PSM
+    REALM_CC_FLAGS	+= -DGASNET_CONDUIT_PSM
     LEGION_LD_FLAGS	+= -lgasnet-psm-par -lpsm2 -lpmi2 # PMI2 is required for OpenMPI
     # GASNet needs MPI for interop support
     USE_MPI	= 1
   endif
   ifeq ($(strip $(CONDUIT)),mpi)
     INC_FLAGS	+= -I$(GASNET)/include/mpi-conduit
-    CC_FLAGS	+= -DGASNET_CONDUIT_MPI
+    REALM_CC_FLAGS	+= -DGASNET_CONDUIT_MPI
     LEGION_LD_FLAGS	+= -lgasnet-mpi-par -lammpi -lmpi
     USE_MPI	= 1
   endif
   ifeq ($(strip $(CONDUIT)),udp)
     INC_FLAGS	+= -I$(GASNET)/include/udp-conduit
-    CC_FLAGS	+= -DGASNET_CONDUIT_UDP
+    REALM_CC_FLAGS	+= -DGASNET_CONDUIT_UDP
     LEGION_LD_FLAGS	+= -lgasnet-udp-par -lamudp
   endif
 
@@ -457,7 +468,7 @@ endif
 USE_HDF ?= 0
 HDF_LIBNAME ?= hdf5
 ifeq ($(strip $(USE_HDF)), 1)
-  CC_FLAGS      += -DUSE_HDF
+  REALM_CC_FLAGS      += -DUSE_HDF
   LEGION_LD_FLAGS      += -l$(HDF_LIBNAME)
   ifdef HDF_ROOT
        CC_FLAGS    += -I$(HDF_ROOT)/include
@@ -495,7 +506,9 @@ endif
 
 
 ifeq ($(strip $(DEBUG)),1)
-CC_FLAGS	+= -DDEBUG_REALM -DDEBUG_LEGION -O0 -ggdb #-ggdb -Wall
+CC_FLAGS	+= -O0 -ggdb #-ggdb -Wall
+REALM_CC_FLAGS	+= -DDEBUG_REALM
+LEGION_CC_FLAGS	+= -DDEBUG_LEGION
 else
 CC_FLAGS	+= -O2 -fno-strict-aliasing #-ggdb
 endif
@@ -508,18 +521,17 @@ endif
 
 # Set maximum number of dimensions
 ifneq ($(strip ${MAX_DIM}),)
-CC_FLAGS	+= -DREALM_MAX_DIM=$(MAX_DIM) -DLEGION_MAX_DIM=$(MAX_DIM)
-NVCC_FLAGS	+= -DREALM_MAX_DIM=$(MAX_DIM) -DLEGION_MAX_DIM=$(MAX_DIM)
+REALM_CC_FLAGS	+= -DREALM_MAX_DIM=$(MAX_DIM)
+LEGION_CC_FLAGS	+= -DLEGION_MAX_DIM=$(MAX_DIM)
 endif
 
 # Set maximum number of fields
 ifneq ($(strip ${MAX_FIELDS}),)
-CC_FLAGS	+= -DLEGION_MAX_FIELDS=$(MAX_FIELDS)
-NVCC_FLAGS	+= -DLEGION_MAX_FIELDS=$(MAX_FIELDS)
+LEGION_CC_FLAGS	+= -DLEGION_MAX_FIELDS=$(MAX_FIELDS)
 endif
 
 # Manage the output setting
-CC_FLAGS	+= -DCOMPILE_TIME_MIN_LEVEL=$(OUTPUT_LEVEL)
+REALM_CC_FLAGS	+= -DCOMPILE_TIME_MIN_LEVEL=$(OUTPUT_LEVEL)
 
 # demand warning-free compilation
 CC_FLAGS        += -Wall -Wno-strict-overflow
@@ -639,6 +651,7 @@ TOUCH	:= touch
 MAKE	:= make
 SSH	:= ssh
 SCP	:= scp
+PYTHON  := python
 
 GEN_OBJS	:= $(GEN_SRC:.cc=.cc.o)
 REALM_OBJS	:= $(REALM_SRC:.cc=.cc.o)
@@ -675,288 +688,55 @@ $(SLIB_REALM) : $(REALM_OBJS)
 	rm -f $@
 	$(AR) rc $@ $^
 
-$(GEN_OBJS) : %.cc.o : %.cc #legion_defines.h realm_defines.h
+$(GEN_OBJS) : %.cc.o : %.cc $(LEGION_DEFINES_HEADER) $(REALM_DEFINES_HEADER)
 	$(CXX) -o $@ -c $< $(CC_FLAGS) $(INC_FLAGS) $(OMP_FLAGS)
 
 $(ASM_OBJS) : %.S.o : %.S
 	$(CXX) -o $@ -c $< $(CC_FLAGS) $(INC_FLAGS)
 
-$(REALM_OBJS) : %.cc.o : %.cc #legion_defines.h realm_defines.h
+$(REALM_OBJS) : %.cc.o : %.cc $(LEGION_DEFINES_HEADER) $(REALM_DEFINES_HEADER)
 	$(CXX) -o $@ -c $< $(CC_FLAGS) $(INC_FLAGS)
 
-$(LEGION_OBJS) : %.cc.o : %.cc #legion_defines.h realm_defines.h
+$(LEGION_OBJS) : %.cc.o : %.cc $(LEGION_DEFINES_HEADER) $(REALM_DEFINES_HEADER)
 	$(CXX) -o $@ -c $< $(CC_FLAGS) $(INC_FLAGS)
 
-$(MAPPER_OBJS) : %.cc.o : %.cc #legion_defines.h realm_defines.h
+$(MAPPER_OBJS) : %.cc.o : %.cc $(LEGION_DEFINES_HEADER) $(REALM_DEFINES_HEADER)
 	$(CXX) -o $@ -c $< $(CC_FLAGS) $(INC_FLAGS)
 
-$(GEN_GPU_OBJS) : %.cu.o : %.cu #legion_defines.h realm_defines.h
+$(GEN_GPU_OBJS) : %.cu.o : %.cu $(LEGION_DEFINES_HEADER) $(REALM_DEFINES_HEADER)
 	$(NVCC) -o $@ -c $< $(NVCC_FLAGS) $(INC_FLAGS)
 
-$(GPU_RUNTIME_OBJS): %.cu.o : %.cu #legion_defines.h realm_defines.h
+$(GPU_RUNTIME_OBJS): %.cu.o : %.cu $(LEGION_DEFINES_HEADER) $(REALM_DEFINES_HEADER)
 	$(NVCC) -o $@ -c $< $(NVCC_FLAGS) $(INC_FLAGS)
 
 # disable gmake's default rule for building % from %.o
 % : %.o
 
 clean::
-	$(RM) -f $(OUTFILE) $(SLIB_LEGION) $(SLIB_REALM) $(GEN_OBJS) $(GEN_GPU_OBJS) $(REALM_OBJS) $(LEGION_OBJS) $(GPU_RUNTIME_OBJS) $(MAPPER_OBJS) $(ASM_OBJS) legion_defines.h realm_defines.h
-
-legion_defines.h : Makefile
-	@echo "/**" > $@
-	@echo " * \\\file legion_defines.h" >> $@
-	@echo " * Public-facing definitions of variables configured at build time" >> $@
-	@echo " */\n" >> $@
-	@echo "// ******************** IMPORTANT **************************" >> $@
-	@echo "//" >> $@
-	@echo "// This file is PURE C, **NOT** C++. Keep any C++-isms in" >> $@
-	@echo "// legion_types.h, or elsewhere." >> $@
-	@echo "//" >> $@
-	@echo "// ******************** IMPORTANT **************************\n" >> $@
-	@echo "#ifndef DEBUG_LEGION" >> $@
-ifeq ($(strip $(DEBUG)),1)
-	@echo "#define DEBUG_LEGION" >> $@
-else
-	@echo "/* #undef DEBUG_LEGION */" >> $@
-endif
-	@echo "#endif\n" >> $@
-	@echo "#ifndef PRIVILEGE_CHECKS" >> $@
-ifeq ($(strip $(DEBUG)),1)
-	@echo "#define PRIVILEGE_CHECKS" >> $@
-else
-	@echo "/* #undef PRIVILEGE_CHECKS */" >> $@
-endif
-	@echo "#endif\n" >> $@
-	@echo "#ifndef BOUNDS_CHECKS" >> $@
-ifeq ($(strip $(BOUNDS_CHECKS)),1)
-	@echo "#define BOUNDS_CHECKS" >> $@
-else
-	@echo "/* #undef BOUNDS_CHECKS */" >> $@
-endif
-	@echo "#endif\n" >> $@
-	@echo "#ifndef LEGION_MAX_DIM" >> $@
-ifeq ($(strip ${MAX_DIM}),)
-	@echo "#define LEGION_MAX_DIM 3" >> $@
-else
-	@echo "#define LEGION_MAX_DIM $(MAX_DIM)" >> $@
-endif
-	@echo "#endif\n" >> $@
-	@echo "#ifndef MAX_FIELDS" >> $@
-ifeq ($(strip ${MAX_FIELDS}),)
-	@echo "#define MAX_FIELDS 512" >> $@
-else
-	@echo "#define MAX_FIELDS $(MAX_FIELDS)" >> $@
-endif
-	@echo "#endif\n" >> $@
-	@echo "#ifndef ENABLE_LEGION_TLS" >> $@
-	@echo "#define ENABLE_LEGION_TLS" >> $@
-	@echo "#endif\n" >> $@
-	@echo "#ifndef __STDC_FORMAT_MACROS" >> $@
-	@echo "#define __STDC_FORMAT_MACROS" >> $@
-	@echo "#endif\n" >> $@
-	@echo "#ifndef LEGION_USE_CUDA" >> $@
-ifeq ($(strip $(USE_CUDA)),1)
-	@echo "#define LEGION_USE_CUDA" >> $@
-else
-	@echo "/* #undef LEGION_USE_CUDA */" >> $@
-endif
-	@echo "#endif" >> $@
-
-realm_defines.h : Makefile
-	@echo "/**" > $@
-	@echo " * \\\file realm_defines.h" >> $@
-	@echo " * Public-facing definitions of variables configured at build time" >> $@
-	@echo " */\n" >> $@
-	@echo "// ******************** IMPORTANT **************************" >> $@
-	@echo "//" >> $@
-	@echo "// This file is PURE C, **NOT** C++. Keep any C++-isms in" >> $@
-	@echo "// realm_config.h, or elsewhere." >> $@
-	@echo "//" >> $@
-	@echo "// ******************** IMPORTANT **************************\n" >> $@
-	@echo "#ifndef DEBUG_REALM" >> $@
-ifeq ($(strip $(DEBUG)),1)
-	@echo "#define DEBUG_REALM" >> $@
-else
-	@echo "/* #undef DEBUG_REALM*/" >> $@
-endif
-	@echo "#endif\n" >> $@
-	@echo "#ifndef COMPILE_TIME_MIN_LEVEL" >> $@
-	@echo "#define COMPILE_TIME_MIN_LEVEL $(OUTPUT_LEVEL)" >> $@
-	@echo "#endif\n" >> $@
-	@echo "#ifndef REALM_MAX_DIM" >> $@
-ifeq ($(strip ${MAX_DIM}),)
-	@echo "#define REALM_MAX_DIM 3" >> $@
-else
-	@echo "#define REALM_MAX_DIM $(MAX_DIM)" >> $@
-endif
-	@echo "#endif\n" >> $@
-	@echo "#ifndef REALM_USE_OPENMP" >> $@
-ifeq ($(strip $(USE_OPENMP)),1)
-	@echo "#define REALM_USE_OPENMP" >> $@
-else
-	@echo "/* #undef REALM_USE_OPENMP */" >> $@
-endif
-	@echo "#endif\n" >> $@
-	@echo "#ifndef REALM_OPENMP_GOMP_SUPPORT" >> $@
-ifeq ($(strip $(USE_OPENMP)),1)
-	@echo "#define REALM_OPENMP_GOMP_SUPPORT" >> $@
-else
-	@echo "/* #undef REALM_OPENMP_GOMP_SUPPORT*/" >> $@
-endif
-	@echo "#endif\n" >> $@
-	@echo "#ifndef REALM_OPENMP_KMP_SUPPORT" >> $@
-ifeq ($(strip $(USE_OPENMP)),1)
-	@echo "#define REALM_OPENMP_KMP_SUPPORT" >> $@
-else
-	@echo "/* #undef REALM_OPENMP_KMP_SUPPORT*/" >> $@
-endif
-	@echo "#endif\n" >> $@
-	@echo "#ifndef REALM_USE_PYTHON" >> $@
-ifeq ($(strip ${USE_PYTHON}),)
-	@echo "#define REALM_USE_PYTHON" >> $@
-else
-	@echo "/* #undef REALM_USE_PYTHON */" >> $@
-endif
-	@echo "#endif\n" >> $@
-	@echo "#ifndef REALM_PYTHON_VERSION_MAJOR" >> $@
-ifeq ($(strip ${USE_PYTHON}),)
-	@echo "#define REALM_PYTHON_VERSION_MAJOR $(PYTHON_VERSION_MAJOR)" >> $@
-else
-	@echo "/* #undef REALM_PYTHON_VERSION_MAJOR */" >> $@
-endif
-	@echo "#endif\n" >> $@
-	@echo "#ifndef REALM_USE_CUDA" >> $@
-ifeq ($(strip $(USE_CUDA)),1)
-	@echo "#define REALM_USE_CUDA" >> $@
-else
-	@echo "/* #undef REALM_USE_CUDA */" >> $@
-endif
-	@echo "#endif\n" >> $@
-	@echo "#ifndef USE_CUDA" >> $@
-ifeq ($(strip $(USE_CUDA)),1)
-	@echo "#define USE_CUDA" >> $@
-else
-	@echo "/* #undef USE_CUDA */" >> $@
-endif
-	@echo "#endif\n" >> $@
-	@echo "#ifndef USE_GASNET" >> $@
-ifeq ($(strip $(USE_GASNET)),1)
-	@echo "#define USE_GASNET" >> $@
-else
-	@echo "/* #undef USE_GASNET */" >> $@
-endif
-	@echo "#endif\n" >> $@
-	@echo "#ifndef GASNET_CONDUIT_MPI" >> $@
-ifeq ($(strip $(USE_GASNET)),1)
-ifeq ($(strip $(CONDUIT)),mpi)
-	@echo "#define GASNET_CONDUIT_MPI" >> $@
-else
-	@echo "/* #undef GASNET_CONDUIT_MPI */" >> $@
-endif
-else
-	@echo "/* #undef GASNET_CONDUIT_MPI */" >> $@
-endif
-	@echo "#endif\n" >> $@
-	@echo "#ifndef GASNET_CONDUIT_IBV" >> $@
-ifeq ($(strip $(USE_GASNET)),1)
-ifeq ($(strip $(CONDUIT)),ibv)
-	@echo "#define GASNET_CONDUIT_IBV" >> $@
-else
-	@echo "/* #undef GASNET_CONDUIT_IBV */" >> $@
-endif
-else
-	@echo "/* #undef GASNET_CONDUIT_IBV */" >> $@
-endif
-	@echo "#endif\n" >> $@
-	@echo "#ifndef GASNET_CONDUIT_UDP" >> $@
-ifeq ($(strip $(USE_GASNET)),1)
-ifeq ($(strip $(CONDUIT)),udp)
-	@echo "#define GASNET_CONDUIT_UDP" >> $@
-else
-	@echo "/* #undef GASNET_CONDUIT_UDP */" >> $@
-endif
-else
-	@echo "/* #undef GASNET_CONDUIT_UDP */" >> $@
-endif
-	@echo "#endif\n" >> $@
-	@echo "#ifndef GASNET_CONDUIT_ARIES" >> $@
-ifeq ($(strip $(USE_GASNET)),1)
-ifeq ($(strip $(CONDUIT)),aries)
-	@echo "#define GASNET_CONDUIT_ARIES" >> $@
-else
-	@echo "/* #undef GASNET_CONDUIT_ARIES */" >> $@
-endif
-else
-	@echo "/* #undef GASNET_CONDUIT_ARIES */" >> $@
-endif
-	@echo "#endif\n" >> $@
-	@echo "#ifndef GASNET_CONDUIT_GEMINI" >> $@
-ifeq ($(strip $(USE_GASNET)),1)
-ifeq ($(strip $(CONDUIT)),gemini)
-	@echo "#define GASNET_CONDUIT_GEMINI" >> $@
-else
-	@echo "/* #undef GASNET_CONDUIT_GEMINI */" >> $@
-endif
-else
-	@echo "/* #undef GASNET_CONDUIT_GEMINI */" >> $@
-endif
-	@echo "#endif\n" >> $@
-	@echo "#ifndef GASNET_CONDUIT_PSM" >> $@
-ifeq ($(strip $(USE_GASNET)),1)
-ifeq ($(strip $(CONDUIT)),psm)
-	@echo "#define GASNET_CONDUIT_PSM" >> $@
-else
-	@echo "/* #undef GASNET_CONDUIT_PSM */" >> $@
-endif
-else
-	@echo "/* #undef GASNET_CONDUIT_PSM */" >> $@
-endif
-	@echo "#endif\n" >> $@
-	@echo "#ifndef GASNETI_BUG1389_WORKAROUND" >> $@
-	@echo "#define GASNETI_BUG1389_WORKAROUND 1" >> $@
-	@echo "#endif\n" >> $@
-	@echo "#ifndef REALM_USE_LLVM" >> $@
-ifeq ($(strip $(USE_LLVM)),1)
-	@echo "#define REALM_USE_LLVM" >> $@
-else
-	@echo "/* #undef REALM_USE_LLVM */" >> $@
-endif
-	@echo "#endif\n" >> $@
-	@echo "#ifndef REALM_LLVM_VERSION" >> $@
-ifeq ($(strip $(USE_LLVM)),1)
-	@echo "#define REALM_LLVM_VERSION $(LLVM_VERSION_NUMBER)" >> $@
-else
-	@echo "/* #undef REALM_LLVM_VERSION */" >> $@
-endif
-	@echo "#endif\n" >> $@
-	@echo "#ifndef REALM_ALLOW_MISSING_LLVM_LIBS" >> $@
-ifeq ($(strip $(USE_LLVM)),1)
-	@echo "#define REALM_ALLOW_MISSING_LLVM_LIBS" >> $@
-else
-	@echo "/* #undef REALM_ALLOW_MISSING_LLVM_LIBS */" >> $@
-endif
-	@echo "#endif\n" >> $@
-	@echo "#ifndef USE_HDF" >> $@
-ifeq ($(strip $(USE_HDF)),1)
-	@echo "#define USE_HDF" >> $@
-else
-	@echo "/* #undef USE_HDF*/" >> $@
-endif
-	@echo "#endif\n" >> $@
-	@echo "#ifndef USE_LIBDL" >> $@
-ifeq ($(strip $(USE_LIBDL)),1)
-	@echo "#define USE_LIBDL" >> $@
-else
-	@echo "/* #undef USE_LIBDL*/" >> $@
-endif
-	@echo "#endif\n" >> $@
-	@echo "#ifndef __STDC_FORMAT_MACROS" >> $@
-	@echo "#define __STDC_FORMAT_MACROS" >> $@
-	@echo "#endif" >> $@
-
-endif
+	$(RM) -f $(OUTFILE) $(SLIB_LEGION) $(SLIB_REALM) $(GEN_OBJS) $(GEN_GPU_OBJS) $(REALM_OBJS) $(LEGION_OBJS) $(GPU_RUNTIME_OBJS) $(MAPPER_OBJS) $(ASM_OBJS) $(LEGION_DEFINES_HEADER) $(REALM_DEFINES_HEADER)
 
 ifeq ($(strip $(USE_LLVM)),1)
 llvmjit_internal.cc.o : CC_FLAGS += $(LLVM_CXXFLAGS)
 %/llvmjit_internal.cc.o : CC_FLAGS += $(LLVM_CXXFLAGS)
 endif
+
+endif # NO_BUILD_RULES
+
+# you get these build rules even with NO_BUILD_RULES=1
+
+# by default, we'll always check to see if the defines headers need to be
+#  overwritten due to changes in compile settings (from makefile or command line)
+# set CHECK_DEFINES_HEADER_CONTENT=0 if you want to only rebuild when makefiles
+#  change
+ifneq ($(strip $(CHECK_DEFINES_HEADER_CONTENT)),0)
+.PHONY: FORCE_DEFINES_HEADERS
+DEFINES_HEADERS_DEPENDENCY = FORCE_DEFINES_HEADERS
+GENERATE_DEFINES_FLAGS = -c
+else
+DEFINES_HEADERS_DEPENDENCY = $(MAKEFILE_LIST)
+endif
+$(LEGION_DEFINES_HEADER) : $(DEFINES_HEADERS_DEPENDENCY)
+	$(PYTHON) $(LG_RT_DIR)/../tools/generate_defines.py $(LEGION_CC_FLAGS) $(GENERATE_DEFINES_FLAGS) -o $@
+
+$(REALM_DEFINES_HEADER) : $(DEFINES_HEADERS_DEPENDENCY)
+	$(PYTHON) $(LG_RT_DIR)/../tools/generate_defines.py $(REALM_CC_FLAGS) $(GENERATE_DEFINES_FLAGS) -o $@

@@ -111,11 +111,11 @@ ifeq ($(strip $(USE_CUDA)),1)
 EXTRAOBJS_memspeed := memspeed_gpu.o
 memspeed : memspeed_gpu.o
 
-%.o : %.cu
+%.o : %.cu $(REALM_DEFINES_HEADER) $(LEGION_DEFINES_HEADER)
 	$(NVCC) -o $@ -c $< $(INC_FLAGS) $(NVCC_FLAGS)
 endif
 
-%.o : %.cc
+%.o : %.cc $(REALM_DEFINES_HEADER) $(LEGION_DEFINES_HEADER)
 	$(CXX) -fPIC -o $@ -c $< $(INC_FLAGS) $(CC_FLAGS)
 
 %.o : %.S

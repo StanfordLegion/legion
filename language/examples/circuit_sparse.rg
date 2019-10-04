@@ -30,7 +30,17 @@ local cmapper
 local cconfig
 do
   local root_dir = arg[0]:match(".*/") or "./"
-  local runtime_dir = os.getenv('LG_RT_DIR') .. "/"
+
+  local include_path = ""
+  local include_dirs = terralib.newlist()
+  include_dirs:insert("-I")
+  include_dirs:insert(root_dir)
+  for path in string.gmatch(os.getenv("INCLUDE_PATH"), "[^;]+") do
+    include_path = include_path .. " -I " .. path
+    include_dirs:insert("-I")
+    include_dirs:insert(path)
+  end
+
   local mapper_cc = root_dir .. "circuit_mapper.cc"
   local mapper_so
   if os.getenv('OBJNAME') then
@@ -54,15 +64,15 @@ do
     cxx_flags = cxx_flags .. " -shared -fPIC"
   end
 
-  local cmd = (cxx .. " " .. cxx_flags .. " -I " .. runtime_dir .. " " ..
+  local cmd = (cxx .. " " .. cxx_flags .. " " .. include_path .. " " ..
                  mapper_cc .. " -o " .. mapper_so)
   if os.execute(cmd) ~= 0 then
     print("Error: failed to compile " .. mapper_cc)
     assert(false)
   end
   terralib.linklibrary(mapper_so)
-  cmapper = terralib.includec("circuit_mapper.h", {"-I", root_dir, "-I", runtime_dir})
-  cconfig = terralib.includec("circuit_config.h", {"-I", root_dir, "-I", runtime_dir})
+  cmapper = terralib.includec("circuit_mapper.h", include_dirs)
+  cconfig = terralib.includec("circuit_config.h", include_dirs)
 end
 
 local c = regentlib.c

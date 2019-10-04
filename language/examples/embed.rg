@@ -20,8 +20,12 @@ local embed_tasks_dir = require("embed_tasks")
 local exe
 local root_dir = arg[0]:match(".*/") or "./"
 do
-  local runtime_dir = os.getenv("LG_RT_DIR") .. "/"
   local binding_dir = root_dir .. "../../bindings/regent/"
+
+  local include_path = ""
+  for path in string.gmatch(os.getenv("INCLUDE_PATH"), "[^;]+") do
+    include_path = include_path .. " -I " .. path
+  end
 
   local embed_cc = root_dir .. "embed.cc"
   exe = embed_tasks_dir .. "embed.exe"
@@ -37,7 +41,7 @@ do
     lib_dir = os.getenv("CMAKE_BUILD_DIR") .. "/lib"
     libs = libs .. " -llegion -lrealm"
   end
-  local cmd = (cxx .. " " .. cxx_flags .. " -I " .. runtime_dir .. " " ..
+  local cmd = (cxx .. " " .. cxx_flags .. " " .. include_path .. " " ..
                  embed_cc ..
 		 " -I " .. embed_tasks_dir ..
                  " -L " .. embed_tasks_dir .. " " .. " -lembed_tasks " ..

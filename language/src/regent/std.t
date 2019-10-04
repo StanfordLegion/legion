@@ -32,10 +32,11 @@ local std = {}
 std.config, std.args = base.config, base.args
 std.binding_library = base.binding_library
 
-local max_dim = std.config["legion-dim"]
-
 local c = base.c
 std.c = c
+
+local max_dim = base.max_dim
+std.max_dim = max_dim
 
 std.replicable_whitelist = base.replicable_whitelist
 

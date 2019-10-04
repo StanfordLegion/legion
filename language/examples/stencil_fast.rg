@@ -90,7 +90,17 @@ end
 
 do
   local root_dir = arg[0]:match(".*/") or "./"
-  local runtime_dir = os.getenv('LG_RT_DIR') .. "/"
+
+  local include_path = ""
+  local include_dirs = terralib.newlist()
+  include_dirs:insert("-I")
+  include_dirs:insert(root_dir)
+  for path in string.gmatch(os.getenv("INCLUDE_PATH"), "[^;]+") do
+    include_path = include_path .. " -I " .. path
+    include_dirs:insert("-I")
+    include_dirs:insert(path)
+  end
+
   local mapper_cc = root_dir .. "stencil_mapper.cc"
   if os.getenv('OBJNAME') then
     local out_dir = os.getenv('OBJNAME'):match('.*/') or './'
@@ -114,14 +124,14 @@ do
     cxx_flags = cxx_flags .. " -shared -fPIC"
   end
 
-  local cmd = (cxx .. " " .. cxx_flags .. " -I " .. runtime_dir .. " " ..
+  local cmd = (cxx .. " " .. cxx_flags .. " " .. include_path .. " " ..
                  mapper_cc .. " -o " .. mapper_so)
   if os.execute(cmd) ~= 0 then
     print("Error: failed to compile " .. mapper_cc)
     assert(false)
   end
   terralib.linklibrary(mapper_so)
-  cmapper = terralib.includec("stencil_mapper.h", {"-I", root_dir, "-I", runtime_dir})
+  cmapper = terralib.includec("stencil_mapper.h", include_dirs)
 end
 
 local min = regentlib.fmin

@@ -16,9 +16,18 @@ import "regent"
 
 local clegion_interop
 do
-  assert(os.getenv('LG_RT_DIR') ~= nil, "$LG_RT_DIR should be set!")
   local root_dir = arg[0]:match(".*/") or "./"
-  local runtime_dir = os.getenv('LG_RT_DIR') .. "/"
+
+  local include_path = ""
+  local include_dirs = terralib.newlist()
+  include_dirs:insert("-I")
+  include_dirs:insert(root_dir)
+  for path in string.gmatch(os.getenv("INCLUDE_PATH"), "[^;]+") do
+    include_path = include_path .. " -I " .. path
+    include_dirs:insert("-I")
+    include_dirs:insert(path)
+  end
+
   local legion_interop_cc = root_dir .. "legion_interop.cc"
   local legion_interop_so
   if os.getenv('SAVEOBJ') == '1' then
@@ -38,7 +47,7 @@ do
     cxx_flags = cxx_flags .. " -shared -fPIC"
   end
 
-  local cmd = (cxx .. " " .. cxx_flags .. " -I " .. runtime_dir .. " " ..
+  local cmd = (cxx .. " " .. cxx_flags .. " " .. include_path .. " " ..
                  legion_interop_cc .. " -o " .. legion_interop_so)
   if os.execute(cmd) ~= 0 then
     print("Error: failed to compile " .. legion_interop_cc)
@@ -46,7 +55,7 @@ do
   end
   terralib.linklibrary(legion_interop_so)
   clegion_interop =
-    terralib.includec("legion_interop.h", {"-I", root_dir, "-I", runtime_dir})
+    terralib.includec("legion_interop.h", include_dirs)
 end
 
 struct s {
