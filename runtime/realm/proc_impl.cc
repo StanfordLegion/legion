@@ -337,7 +337,8 @@ namespace Realm {
 
       if(global) {
 	// remote processors need a portable implementation available
-	if(!tro->codedesc.has_portable_implementations()) {
+	if(!tro->codedesc.has_portable_implementations() &&
+	   !tro->codedesc.create_portable_implementation()) {
 	  log_taskreg.fatal() << "cannot remotely register a task with no portable implementations";
 	  assert(0);
 	}
