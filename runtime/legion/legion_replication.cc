@@ -706,10 +706,6 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(tpl != NULL);
-      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
-      assert(repl_ctx != NULL);
-#else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
       internal_space = tpl->find_local_space(trace_local_id);
       // If it's empty we're done, otherwise we do the replay
@@ -1339,10 +1335,6 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(tpl != NULL);
-      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
-      assert(repl_ctx != NULL);
-#else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
       const IndexSpace local_space = tpl->find_local_space(trace_local_id);
       // If it's empty we're done, otherwise we do the replay
@@ -1802,10 +1794,6 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(tpl != NULL);
-      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
-      assert(repl_ctx != NULL);
-#else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
       const IndexSpace local_space = tpl->find_local_space(trace_local_id);
       // If it's empty we're done, otherwise we do the replay
