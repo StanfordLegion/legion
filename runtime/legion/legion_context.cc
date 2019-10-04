@@ -11944,7 +11944,6 @@ namespace Legion {
     void ReplicateContext::begin_trace(TraceID tid, bool logical_only)
     //--------------------------------------------------------------------------
     {
-#ifdef CTRL_REPL_TRACING
       if (runtime->no_tracing) return;
 
       AutoRuntimeCall call(this);
@@ -11990,20 +11989,12 @@ namespace Legion {
 
       // Now mark that we are starting a trace
       current_trace = dynamic_trace;
-#else
-      if (!logical_only)
-        log_run.warning("Physical tracing is not yet supported with control "
-            "replication. Downgrading trace %d in task %s (UID %lld) to a "
-            "logical-only trace.", tid, get_task_name(), get_unique_id());
-      InnerContext::begin_trace(tid, true/*logical only*/);
-#endif
     }
 
     //--------------------------------------------------------------------------
     void ReplicateContext::end_trace(TraceID tid)
     //--------------------------------------------------------------------------
     {
-#ifdef CTRL_REPL_TRACING
       if (runtime->no_tracing) return;
 
       AutoRuntimeCall call(this);
@@ -12042,9 +12033,6 @@ namespace Legion {
       }
       // We no longer have a trace that we're executing 
       current_trace = NULL;
-#else
-      InnerContext::end_trace(tid);
-#endif
     }
 
     //--------------------------------------------------------------------------
