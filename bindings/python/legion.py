@@ -96,7 +96,18 @@ try:
 except IOError as e:
     print('Unable to find cached_legion.h, falling back to reading legion.h')
     prefix_dir, legion_h_path = find_legion_header()
-    header = subprocess.check_output(['gcc', '-I', prefix_dir, '-DLEGION_USE_PYTHON_CFFI', '-E', '-P', legion_h_path]).decode('utf-8')
+
+    # If we're running from a local Python build, we need to include
+    # the path where legion.py is located in order to find
+    # legion_defines.h.
+    legion_py_dir = os.path.dirname(os.path.realpath(__file__))
+
+    # If we're running inside of Regent, try to parse the include path
+    # since we'll need it to locate legion_defines.h.
+    include_path = os.environ.get('INCLUDE_PATH', '').split(';')
+    include_path = [x for y in include_path for x in ['-I', y]]
+
+    header = subprocess.check_output(['gcc', '-I', prefix_dir, '-I', legion_py_dir] + include_path + ['-DLEGION_USE_PYTHON_CFFI', '-E', '-P', legion_h_path]).decode('utf-8')
 
 ffi = cffi.FFI()
 ffi.cdef(header)
