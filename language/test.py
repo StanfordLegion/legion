@@ -266,10 +266,8 @@ class Counter:
 
 def get_test_specs(legion_dir, use_run, use_spy, use_prof, use_hdf5, use_openmp, use_cuda, use_python, max_dim, short, extra_flags):
     base_env = {
-        'MAX_DIM': str(max_dim),
     }
     run_env = {
-        'MAX_DIM': str(max_dim),
         'REALM_BACKTRACE': '1',
     }
 
