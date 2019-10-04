@@ -4341,7 +4341,6 @@ namespace Legion {
     ShardedPhysicalTemplate::~ShardedPhysicalTemplate(void)
     //--------------------------------------------------------------------------
     {
-      repl_ctx->unregister_trace_template(template_index);
       // Clean up our phase barriers too since we're done with them
       for (std::map<ApEvent,ApBarrier>::iterator it = 
             remote_barriers.begin(); it != remote_barriers.end(); it++)
@@ -4813,14 +4812,21 @@ namespace Legion {
       if (result)
       {
         if (op->exchange_replayable(repl_ctx, true/*replayable*/))
+        {
+          repl_ctx->unregister_trace_template(template_index);
           return result;
+        }
         else
+        {
+          repl_ctx->unregister_trace_template(template_index);
           return Replayable(false, "Remote shard not replyable");
+        }
       }
       else
       {
         // Still need to do the exchange
         op->exchange_replayable(repl_ctx, false/*replayable*/);
+        repl_ctx->unregister_trace_template(template_index);
         return result;
       }
     }
