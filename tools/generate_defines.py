@@ -35,7 +35,7 @@ def make_define(arg):
     if len(values) == 1:
         return '''
 #ifndef {}
-#define {}
+#define {} 1
 #endif
 '''.format(values[0], values[0])
     else:
