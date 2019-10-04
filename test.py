@@ -191,6 +191,8 @@ def cmd(command, env=None, cwd=None, timelimit=None):
             ret = child.wait()
             signal.alarm(0)  # disable alarm
             signal.signal(signal.SIGALRM, signal.SIG_DFL)
+            if ret:
+                raise subprocess.CalledProcessError(ret, command)
             return ret
         except TestTimeoutException:
             child.kill()
@@ -279,6 +281,7 @@ def run_test_fuzzer(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
 def run_test_realm(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit):
     test_dir = os.path.join(root_dir, 'test/realm')
     cmd([make_exe, '-C', test_dir, 'DEBUG=0', 'clean'], env=env)
+    cmd([make_exe, '-C', test_dir, 'DEBUG=0', 'build'], env=env)
     cmd([make_exe, '-C', test_dir, 'DEBUG=0', 'run_all'], env=env, timelimit=timelimit)
 
 def run_test_external(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit):
