@@ -125,7 +125,7 @@ ifneq (${MARCH},)
   endif
 endif
 
-INC_FLAGS	+= -I$(LG_RT_DIR) -I$(LG_RT_DIR)/mappers -I$(DEFINE_HEADERS_DIR)
+INC_FLAGS	+= -I$(DEFINE_HEADERS_DIR) -I$(LG_RT_DIR) -I$(LG_RT_DIR)/mappers
 # support libraries are OS specific unfortunately
 ifeq ($(shell uname -s),Linux)
 LEGION_LD_FLAGS	+= -lrt -lpthread
