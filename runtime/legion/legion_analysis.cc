@@ -10341,40 +10341,46 @@ namespace Legion {
       if (IS_REDUCE(analysis.usage))
       {
         // Reduction-only
-        // Record the reduction instances
-        for (unsigned idx = 0; idx < analysis.target_views.size(); idx++)
+        // We only record reductions if the set expression is not empty
+        // as we can't guarantee the reductions will ever be read for 
+        // empty equivalence sets which can lead to leaked instances
+        if (!set_expr->is_empty())
         {
-          ReductionView *red_view = 
-            analysis.target_views[idx]->as_reduction_view();
-#ifdef DEBUG_LEGION
-          assert(red_view->get_redop() == analysis.usage.redop);
-#endif
-          const FieldMask &update_fields = 
-            analysis.target_instances[idx].get_valid_fields(); 
-          int fidx = update_fields.find_first_set();
-          while (fidx >= 0)
+          // Record the reduction instances
+          for (unsigned idx = 0; idx < analysis.target_views.size(); idx++)
           {
-            std::vector<ReductionView*> &field_views = 
-              reduction_instances[fidx];
-            red_view->add_nested_valid_ref(did, &mutator); 
-            field_views.push_back(red_view);
-            fidx = update_fields.find_next_set(fidx+1);
+            ReductionView *red_view = 
+              analysis.target_views[idx]->as_reduction_view();
+#ifdef DEBUG_LEGION
+            assert(red_view->get_redop() == analysis.usage.redop);
+#endif
+            const FieldMask &update_fields = 
+              analysis.target_instances[idx].get_valid_fields(); 
+            int fidx = update_fields.find_first_set();
+            while (fidx >= 0)
+            {
+              std::vector<ReductionView*> &field_views = 
+                reduction_instances[fidx];
+              red_view->add_nested_valid_ref(did, &mutator); 
+              field_views.push_back(red_view);
+              fidx = update_fields.find_next_set(fidx+1);
+            }
           }
+          // Flush any restricted fields
+          if (!!restricted_fields)
+          {
+            const FieldMask reduce_mask = user_mask & restricted_fields;
+            if (!!reduce_mask)
+              apply_reductions(reduce_mask, analysis.output_aggregator,
+                  RtEvent::NO_RT_EVENT, analysis.op, 
+                  analysis.index, true/*track events*/); 
+            // No need to record that we applied the reductions, we'll
+            // discover that when we collapse the single/multi-reduce state
+            reduction_fields |= (user_mask - restricted_fields);
+          }
+          else
+            reduction_fields |= user_mask;
         }
-        // Flush any restricted fields
-        if (!!restricted_fields)
-        {
-          const FieldMask reduce_mask = user_mask & restricted_fields;
-          if (!!reduce_mask)
-            apply_reductions(reduce_mask, analysis.output_aggregator,
-                RtEvent::NO_RT_EVENT, analysis.op, 
-                analysis.index, true/*track events*/); 
-          // No need to record that we applied the reductions, we'll
-          // discover that when we collapse the single/multi-reduce state
-          reduction_fields |= (user_mask - restricted_fields);
-        }
-        else
-          reduction_fields |= user_mask;
       }
       else if (IS_WRITE(analysis.usage) && IS_DISCARD(analysis.usage))
       {
@@ -12019,9 +12025,8 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(!!reduce_mask);
+      assert(!set_expr->is_empty());
 #endif
-      if (set_expr->is_empty())
-        return;
       int fidx = reduce_mask.find_first_set();
       while (fidx >= 0)
       {
