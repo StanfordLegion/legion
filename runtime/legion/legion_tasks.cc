@@ -952,7 +952,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(impl != NULL);
 #endif
-      const size_t result_size = impl->get_untyped_size();
+      const size_t result_size = impl->get_untyped_size(true);
       // TODO: figure out a way to put this check back in with dynamic task
       // registration where we might not know the return size until later
 #ifdef PERFORM_PREDICATE_SIZE_CHECKS
@@ -5131,7 +5131,7 @@ namespace Legion {
             check_future_size(predicate_false_future.impl);
           if (result_size > 0)
             result.impl->set_result(
-                predicate_false_future.impl->get_untyped_result(true),
+                predicate_false_future.impl->get_untyped_result(true,NULL,true),
                 result_size, false/*own*/);
         }
         else
@@ -5534,8 +5534,9 @@ namespace Legion {
         // Wait for the future to be ready
         ApEvent wait_on = predicate_false_future.impl->get_ready_event();
         wait_on.wait();
-        void *ptr = predicate_false_future.impl->get_untyped_result(true);
-        size_t size = predicate_false_future.impl->get_untyped_size();
+        void *ptr = 
+          predicate_false_future.impl->get_untyped_result(true, NULL, true);
+        size_t size = predicate_false_future.impl->get_untyped_size(true);
         execution_context->end_misspeculation(ptr, size); 
       }
       else
@@ -6501,12 +6502,13 @@ namespace Legion {
         {
           ApEvent ready = f.impl->get_ready_event();
           ready.wait();
-          local_arglen = f.impl->get_untyped_size();
+          local_arglen = f.impl->get_untyped_size(true/*internal*/);
           // Have to make a local copy since the point takes ownership
           if (local_arglen > 0)
           {
             local_args = malloc(local_arglen);
-            memcpy(local_args, f.impl->get_untyped_result(), local_arglen);
+            memcpy(local_args, 
+                f.impl->get_untyped_result(true, NULL, true), local_arglen);
           }
         }
       }
@@ -7046,7 +7048,7 @@ namespace Legion {
             const size_t result_size = 
               check_future_size(predicate_false_future.impl);
             const void *result = 
-              predicate_false_future.impl->get_untyped_result(true);
+              predicate_false_future.impl->get_untyped_result(true, NULL, true);
             for (Domain::DomainPointIterator itr(index_domain); itr; itr++)
             {
               Future f = future_map.get_future(itr.p);
@@ -7090,8 +7092,8 @@ namespace Legion {
                         check_future_size(predicate_false_future.impl);
             if (result_size > 0)
               reduction_future.impl->set_result(
-                  predicate_false_future.impl->get_untyped_result(true),
-                  result_size, false/*own*/);
+                predicate_false_future.impl->get_untyped_result(true,NULL,true),
+                result_size, false/*own*/);
           }
           else
           {
@@ -7399,8 +7401,8 @@ namespace Legion {
         Future local_arg = point_arguments.impl->get_future(index_point);
         if (local_arg.impl != NULL)
         {
-          local_args = local_arg.impl->get_untyped_result(true);
-          local_arglen = local_arg.impl->get_untyped_size();
+          local_args = local_arg.impl->get_untyped_result(true, NULL, true);
+          local_arglen = local_arg.impl->get_untyped_size(true);
         }
         else
         {
@@ -8566,8 +8568,8 @@ namespace Legion {
         // Wait for the future to be ready
         ApEvent wait_on = predicate_false_future.impl->get_ready_event();
         wait_on.wait(); 
-        result_size = predicate_false_future.impl->get_untyped_size();
-        return predicate_false_future.impl->get_untyped_result(true);
+        result_size = predicate_false_future.impl->get_untyped_size(true);
+        return predicate_false_future.impl->get_untyped_result(true,NULL,true);
       }
       else
       {

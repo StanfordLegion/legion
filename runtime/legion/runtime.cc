@@ -391,26 +391,29 @@ namespace Legion {
     
     //--------------------------------------------------------------------------
     void FutureImpl::get_void_result(bool silence_warnings,
-                                     const char *warning_string)
+                                     const char *warning_string, bool internal)
     //--------------------------------------------------------------------------
     {
-      if (runtime->runtime_warnings && !silence_warnings && 
-          (implicit_context != NULL))
+      if (!internal)
       {
-        if (implicit_context->is_leaf_context())
+        if (runtime->runtime_warnings && !silence_warnings && 
+            (implicit_context != NULL))
         {
-          REPORT_LEGION_WARNING(LEGION_WARNING_WAITING_FUTURE_NONLEAF,
-             "Waiting on a future in non-leaf task %s "
-             "(UID %lld) is a violation of Legion's deferred execution model "
-             "best practices. You may notice a severe performance degradation. "
-             "Warning string: %s",
-             implicit_context->get_task_name(), 
-             implicit_context->get_unique_id(),
-             (warning_string == NULL) ? "" : warning_string)
+          if (implicit_context->is_leaf_context())
+          {
+            REPORT_LEGION_WARNING(LEGION_WARNING_WAITING_FUTURE_NONLEAF,
+               "Waiting on a future in non-leaf task %s "
+               "(UID %lld) is a violation of Legion's deferred execution model "
+               "best practices. You may notice a severe performance "
+               "degradation. Warning string: %s",
+               implicit_context->get_task_name(), 
+               implicit_context->get_unique_id(),
+               (warning_string == NULL) ? "" : warning_string)
+          }
         }
+        if ((implicit_context != NULL) && !runtime->separate_runtime_instances)
+          implicit_context->record_blocking_call();
       }
-      if ((implicit_context != NULL) && !runtime->separate_runtime_instances)
-        implicit_context->record_blocking_call();
       if (!ready_event.has_triggered())
       {
         TaskContext *context = implicit_context;
@@ -427,24 +430,27 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void* FutureImpl::get_untyped_result(bool silence_warnings,
-                                         const char *warning_string)
+                                      const char *warning_string, bool internal)
     //--------------------------------------------------------------------------
     {
-      if (runtime->runtime_warnings && !silence_warnings && 
-          (implicit_context != NULL))
+      if (!internal)
       {
-        if (!implicit_context->is_leaf_context())
-          REPORT_LEGION_WARNING(LEGION_WARNING_WAITING_FUTURE_NONLEAF, 
-             "Waiting on a future in non-leaf task %s "
-             "(UID %lld) is a violation of Legion's deferred execution model "
-             "best practices. You may notice a severe performance degradation. "
-             "Warning string: %s",
-             implicit_context->get_task_name(), 
-             implicit_context->get_unique_id(),
-             (warning_string == NULL) ? "" : warning_string)
+        if (runtime->runtime_warnings && !silence_warnings && 
+            (implicit_context != NULL))
+        {
+          if (!implicit_context->is_leaf_context())
+            REPORT_LEGION_WARNING(LEGION_WARNING_WAITING_FUTURE_NONLEAF, 
+               "Waiting on a future in non-leaf task %s "
+               "(UID %lld) is a violation of Legion's deferred execution model "
+               "best practices. You may notice a severe performance "
+               "degradation. Warning string: %s",
+               implicit_context->get_task_name(), 
+               implicit_context->get_unique_id(),
+               (warning_string == NULL) ? "" : warning_string)
+        }
+        if ((implicit_context != NULL) && !runtime->separate_runtime_instances)
+          implicit_context->record_blocking_call();
       }
-      if ((implicit_context != NULL) && !runtime->separate_runtime_instances)
-        implicit_context->record_blocking_call();
       if (!ready_event.has_triggered())
       {
         TaskContext *context = implicit_context;
@@ -467,35 +473,38 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    size_t FutureImpl::get_untyped_size(void)
+    size_t FutureImpl::get_untyped_size(bool internal)
     //--------------------------------------------------------------------------
     {
       // Call this first to make sure the future is ready
-      get_void_result();
+      get_void_result(true, NULL, internal);
       return result_size;
     }
 
     //--------------------------------------------------------------------------
     bool FutureImpl::is_empty(bool block, bool silence_warnings,
-                              const char *warning_string)
+                              const char *warning_string, bool internal)
     //--------------------------------------------------------------------------
     {
-      if (runtime->runtime_warnings && !silence_warnings && 
-          (producer_op != NULL))
+      if (!internal)
       {
-        TaskContext *context = producer_op->get_context();
-        if (!context->is_leaf_context())
-          REPORT_LEGION_WARNING(LEGION_WARNING_BLOCKING_EMPTY, 
-              "Performing a blocking is_empty test on a "
-              "in non-leaf task %s (UID %lld) is a violation of Legion's "
-              "deferred execution model best practices. You may notice a "
-              "severe performance degradation. Warning string: %s", 
-              context->get_task_name(), 
-              context->get_unique_id(),
-              (warning_string == NULL) ? "" : warning_string)
+        if (runtime->runtime_warnings && !silence_warnings && 
+            (producer_op != NULL))
+        {
+          TaskContext *context = producer_op->get_context();
+          if (!context->is_leaf_context())
+            REPORT_LEGION_WARNING(LEGION_WARNING_BLOCKING_EMPTY, 
+                "Performing a blocking is_empty test on a "
+                "in non-leaf task %s (UID %lld) is a violation of Legion's "
+                "deferred execution model best practices. You may notice a "
+                "severe performance degradation. Warning string: %s", 
+                context->get_task_name(), 
+                context->get_unique_id(),
+                (warning_string == NULL) ? "" : warning_string)
+        }
+        if (block && producer_op != NULL && Internal::implicit_context != NULL)
+          Internal::implicit_context->record_blocking_call();
       }
-      if (block && producer_op != NULL && Internal::implicit_context != NULL)
-        Internal::implicit_context->record_blocking_call();
       if (block && !ready_event.has_triggered())
       {
         TaskContext *context =
@@ -20893,8 +20902,9 @@ namespace Legion {
         if ((!local_util_procs.empty() && 
               (it->first.kind() == Processor::UTIL_PROC)) ||
             ((local_util_procs.empty() || config.replay_on_cpus) &&
-              (it->first.kind() == Processor::LOC_PROC ||
-               it->first.kind() == Processor::IO_PROC)))
+              ((it->first.kind() == Processor::LOC_PROC) ||
+               (it->first.kind() == Processor::TOC_PROC) ||
+               (it->first.kind() == Processor::IO_PROC))))
         {
           registered_events.insert(RtEvent(
                 it->first.register_task(LG_SHUTDOWN_TASK_ID, shutdown_task,
@@ -20915,6 +20925,7 @@ namespace Legion {
         }
         // Profiling tasks get registered on CPUs and utility processors
         if ((it->first.kind() == Processor::LOC_PROC) ||
+            (it->first.kind() == Processor::TOC_PROC) ||
             (it->first.kind() == Processor::UTIL_PROC) ||
             (it->first.kind() == Processor::IO_PROC))
           registered_events.insert(RtEvent(
