@@ -10480,18 +10480,21 @@ namespace Legion {
         if (!future_index_counts.empty())
         {
           std::map<int,std::map<int,unsigned> >::iterator next = 
-            future_index_counts.begin();
-          for (std::map<int,unsigned>::const_iterator it = 
-                next->second.begin(); it != next->second.end(); it++)
+            future_index_counts.find(stage-1);
+          if (next != future_index_counts.end())
           {
-            std::map<int,unsigned>::iterator finder = 
-              index_counts.find(it->first);
-            if (finder == index_counts.end())
-              index_counts.insert(*it);
-            else
-              finder->second += it->second;
+            for (std::map<int,unsigned>::const_iterator it = 
+                  next->second.begin(); it != next->second.end(); it++)
+            {
+              std::map<int,unsigned>::iterator finder = 
+                index_counts.find(it->first);
+              if (finder == index_counts.end())
+                index_counts.insert(*it);
+              else
+                finder->second += it->second;
+            }
+            future_index_counts.erase(next);
           }
-          future_index_counts.erase(next);
         }
         current_stage = stage;
       }
@@ -10546,37 +10549,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       perform_collective_wait(true/*block*/);
-      result_counts = index_counts;
-      // Need to avoid races here so we have to always recompute the last stage
-      if (!future_index_counts.empty())
-      {
 #ifdef DEBUG_LEGION
-        // Should be at most one stage left
-        assert(future_index_counts.size() == 1);
+      // Should be at most one stage left
+      assert(future_index_counts.size() == 1);
 #endif
-        std::map<int,std::map<int,unsigned> >::const_iterator last = 
-          future_index_counts.begin();
-        if (last->first == -1)
-        {
-          // Special case for the last stage which already includes our
-          // value so just do the overwrite
-          result_counts = last->second;
-        }
-        else
-        {
-          // Do the reduction here
-          for (std::map<int,unsigned>::const_iterator it = 
-                last->second.begin(); it != last->second.end(); it++)
-          {
-            std::map<int,unsigned>::iterator finder = 
-              result_counts.find(it->first);
-            if (finder == result_counts.end())
-              result_counts.insert(*it);
-            else
-              finder->second += it->second;
-          }
-        }
-      }
+      result_counts = future_index_counts.begin()->second;
     }
 
   }; // namespace Internal
