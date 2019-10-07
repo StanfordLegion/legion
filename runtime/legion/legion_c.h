@@ -2008,7 +2008,7 @@ extern "C" {
    * @see Legion::ArgumentMap::ArgumentMap()
    */
   legion_argument_map_t
-  legion_argument_map_create();
+  legion_argument_map_create(void);
 
   /**
    * @see Legion::ArgumentMap::set_point()
@@ -2963,7 +2963,7 @@ extern "C" {
    * @return Caller takes ownership of return value.
    */
   legion_field_map_t
-  legion_field_map_create();
+  legion_field_map_create(void);
 
   /**
    * @param handle Caller must have ownership of parameter `handle`.
@@ -3678,7 +3678,7 @@ extern "C" {
    * @see Legion::Runtime::get_runtime()
    */
   legion_runtime_t
-  legion_runtime_get_runtime();
+  legion_runtime_get_runtime(void);
 
   /**
    * @see Legion::Runtime::get_executing_processor()
@@ -3688,10 +3688,10 @@ extern "C" {
                                          legion_context_t ctx);
 
   void
-  legion_runtime_enable_scheduler_lock();
+  legion_runtime_enable_scheduler_lock(void);
 
   void
-  legion_runtime_disable_scheduler_lock();
+  legion_runtime_disable_scheduler_lock(void);
 
   /**
    * @see Legion::Runtime::print_once()
@@ -4655,7 +4655,7 @@ extern "C" {
    * @see Realm::Machine::get_machine()
    */
   legion_machine_t
-  legion_machine_create();
+  legion_machine_create(void);
 
   /**
    * @param handle Caller must have ownership of parameter `handle`.
