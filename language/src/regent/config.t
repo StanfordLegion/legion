@@ -85,6 +85,7 @@ local default_options = {
   ["debug"] = false,
   ["no-dynamic-branches"] = true,
   ["no-dynamic-branches-assert"] = false,
+  ["override-demand-index-launch"] = false,
   ["override-demand-openmp"] = false,
   ["override-demand-cuda"] = false,
   ["allow-multi-field-expansion"] = false,
