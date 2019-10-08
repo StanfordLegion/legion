@@ -246,9 +246,6 @@ namespace Legion {
     public:
       FutureImpl& operator=(const FutureImpl &rhs);
     public:
-      void get_void_result(bool silence_warnings = true,
-                           const char *warning_string = NULL,
-                           bool internal = false);
       void* get_untyped_result(bool silence_warnings = true,
                                const char *warning_string = NULL,
                                bool internal = false,
