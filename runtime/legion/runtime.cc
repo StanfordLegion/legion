@@ -430,7 +430,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void* FutureImpl::get_untyped_result(bool silence_warnings,
-                                      const char *warning_string, bool internal)
+                                      const char *warning_string, bool internal, 
+                                      bool check_size, size_t future_size)
     //--------------------------------------------------------------------------
     {
       if (!internal)
@@ -464,10 +465,16 @@ namespace Legion {
           ready_event.wait();
       }
       if (empty)
-        REPORT_LEGION_ERROR(ERROR_ACCESSING_EMPTY_FUTURE, 
+        REPORT_LEGION_ERROR(ERROR_REQUEST_FOR_EMPTY_FUTURE, 
                             "Accessing empty future! (UID %lld)",
                             (producer_op == NULL) ? 0 :
                               producer_op->get_unique_op_id())
+      else if (check_size && (future_size != result_size))
+        REPORT_LEGION_ERROR(ERROR_FUTURE_SIZE_MISMATCH,
+            "Future size mismatch! Expected type of %zd bytes but "
+            "requested type is %zd bytes. (UID %lld)", 
+            result_size, future_size, (producer_op == NULL) ? 0 : 
+            producer_op->get_unique_op_id())
       mark_sampled();
       return result;
     }

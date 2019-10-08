@@ -251,7 +251,9 @@ namespace Legion {
                            bool internal = false);
       void* get_untyped_result(bool silence_warnings = true,
                                const char *warning_string = NULL,
-                               bool internal = false);
+                               bool internal = false,
+                               bool check_size = false,
+                               size_t future_size = 0);
       bool is_empty(bool block, bool silence_warnings = true,
                     const char *warning_string = NULL,
                     bool internal = false);

@@ -1204,7 +1204,7 @@ namespace Legion {
        */
       template<typename T> 
         inline const T& get_reference(bool silence_warnings = false,
-                                      const char *warning_string = NULL);
+                                      const char *warning_string = NULL) const;
       /**
        * Return an untyped pointer to the 
        * future result.  WARNING: this
@@ -1216,11 +1216,11 @@ namespace Legion {
        * @param warning_string a string to be reported with the warning
        */
       inline const void* get_untyped_pointer(bool silence_warnings = false,
-                                             const char *warning_string = NULL);
+                                       const char *warning_string = NULL) const;
       /**
        * Return the number of bytes contained in the future.
        */
-      size_t get_untyped_size(void);
+      size_t get_untyped_size(void) const;
     public:
       // These methods provide partial support the C++ future interface
       template<typename T>
@@ -1247,7 +1247,8 @@ namespace Legion {
 						size_t bytes);
     private:
       void* get_untyped_result(bool silence_warnings,
-                               const char *warning_string) const; 
+                               const char *warning_string,
+                               bool check_size, size_t future_size = 0) const;
     };
 
     /**

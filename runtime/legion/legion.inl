@@ -88,8 +88,11 @@ namespace Legion {
           value->legion_serialize(buffer);
           return from_value_helper(rt, buffer, buffer_size, true/*owned*/);
         }
-        static inline T unpack(const void *result)
+        static inline T unpack(const Future &f, bool silence_warnings,
+                               const char *warning_string)
         {
+          const void *result = 
+            f.get_untyped_pointer(silence_warnings, warning_string);
           T derez;
           derez.legion_deserialize(result);
           return derez;
@@ -113,10 +116,11 @@ namespace Legion {
             sizeof(DeferredReduction<REDOP,EXCLUSIVE>), false/*owned*/);
         }
         static inline DeferredReduction<REDOP,EXCLUSIVE> 
-          unpack(const void *result)
+          unpack(const Future &f, bool silence_warnings, const char *warning)
         {
           // Should never be called
           assert(false);
+          const void *result = f.get_untyped_pointer(silence_warnings, warning);
           return (*((const DeferredReduction<REDOP,EXCLUSIVE>*)result));
         }
       };
@@ -136,10 +140,13 @@ namespace Legion {
           return from_value_helper(rt, (const void*)value,
                                    sizeof(DeferredValue<T>), false/*owned*/);
         }
-        static inline DeferredValue<T> unpack(const void *result)
+        static inline DeferredValue<T> unpack(const Future &f,
+            bool silence_warnings, const char *warning_string)
         {
           // Should never be called
           assert(false);
+          const void *result = 
+            f.get_untyped_pointer(silence_warnings, warning_string);
           return (*((const DeferredValue<T>*)result));
         }
       }; 
@@ -156,9 +163,10 @@ namespace Legion {
           return from_value_helper(rt, (const void*)value,
                                    sizeof(T), false/*owned*/);
         }
-        static inline T unpack(const void *result)
+        static inline T unpack(const Future &f, bool silence_warnings,
+                               const char *warning_string)
         {
-          return (*((const T*)result));
+          return f.get_reference<T>(silence_warnings, warning_string);
         }
       };
 
@@ -196,9 +204,11 @@ namespace Legion {
           return NonPODSerializer<T,HasSerialize<T>::value>::from_value(
                                                                   rt, value);
         }
-        static inline T unpack(const void *result)
+        static inline T unpack(const Future &f, bool silence_warnings,
+                               const char *warning_string)
         {
-          return NonPODSerializer<T,HasSerialize<T>::value>::unpack(result); 
+          return NonPODSerializer<T,HasSerialize<T>::value>::unpack(f,
+                                    silence_warnings, warning_string); 
         }
       };
       // False case of template specialization
@@ -214,9 +224,10 @@ namespace Legion {
           return from_value_helper(rt, (const void*)value, 
                                    sizeof(T), false/*owned*/);
         }
-        static inline T unpack(const void *result)
+        static inline T unpack(const Future &f, bool silence_warnings,
+                               const char *warning_string)
         {
-          return (*((const T*)result));
+          return f.get_reference<T>(silence_warnings, warning_string);
         }
       };
 
@@ -247,9 +258,11 @@ namespace Legion {
       }
 
       template<typename T>
-      static inline T unpack(const void *result)
+      static inline T unpack(const Future &f, bool silence_warnings,
+                             const char *warning_string)
       {
-        return StructHandler<T,IsAStruct<T>::value>::unpack(result);
+        return StructHandler<T,IsAStruct<T>::value>::unpack(f, 
+                            silence_warnings, warning_string);
       }
 
       // Some more help for reduction operations with RHS types
@@ -8008,25 +8021,25 @@ namespace Legion {
       // Unpack the value using LegionSerialization in case
       // the type has an alternative method of unpacking
       return 
-        LegionSerialization::unpack<T>(
-            get_untyped_result(silence_warnings, warning_string));
+        LegionSerialization::unpack<T>(*this, silence_warnings, warning_string);
     }
 
     //--------------------------------------------------------------------------
     template<typename T>
     inline const T& Future::get_reference(bool silence_warnings,
-                                          const char *warning_string)
+                                          const char *warning_string) const
     //--------------------------------------------------------------------------
     {
-      return *((const T*)get_untyped_result(silence_warnings, warning_string));
+      return *((const T*)get_untyped_result(silence_warnings, warning_string,
+                                            true/*check size*/, sizeof(T)));
     }
 
     //--------------------------------------------------------------------------
     inline const void* Future::get_untyped_pointer(bool silence_warnings,
-                                                   const char *warning_string)
+                                               const char *warning_string) const
     //--------------------------------------------------------------------------
     {
-      return get_untyped_result(silence_warnings, warning_string);
+      return get_untyped_result(silence_warnings, warning_string, false);
     }
 
     //--------------------------------------------------------------------------
