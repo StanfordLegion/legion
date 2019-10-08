@@ -372,6 +372,7 @@ namespace Legion {
 #endif
     /**
      * \class IndexIterator
+     * @deprecated
      * This is a helper class for iterating over the points within
      * an index space or the index space of a given logical region.
      * It should never be copied and will assert fail if a copy is
@@ -415,6 +416,7 @@ namespace Legion {
 
     /**
      * \class IndexAllocator
+     * @deprecated
      * Index allocators provide objects for doing allocation on
      * index spaces.  They must be explicitly created by the
      * runtime so that they can be linked back to the runtime.
@@ -445,18 +447,21 @@ namespace Legion {
       inline bool operator==(const IndexAllocator &rhs) const;
     public:
       /**
+       * @deprecated
        * @param num_elements number of elements to allocate
        * @return pointer to the first element in the allocated block
        */
       LEGION_DEPRECATED("Dynamic allocation is no longer supported")
       ptr_t alloc(unsigned num_elements = 1);
       /**
+       * @deprecated
        * @param ptr pointer to the first element to free
        * @param num_elements number of elements to be freed
        */
       LEGION_DEPRECATED("Dynamic allocation is no longer supported")
       void free(ptr_t ptr, unsigned num_elements = 1);
       /**
+       * @deprecated
        * @return the index space associated with this allocator
        */
       inline IndexSpace get_index_space(void) const { return index_space; }
@@ -7062,6 +7067,7 @@ namespace Legion {
                                                  int legion_participants = 1);
 
       /**
+       * @deprecated
        * Register a region projection function that can be used to map
        * from an upper bound of a logical region down to a specific
        * logical sub-region for a given domain point during index
@@ -7077,6 +7083,7 @@ namespace Legion {
       static ProjectionID register_region_function(ProjectionID handle);
 
       /**
+       * @deprecated
        * Register a partition projection function that can be used to
        * map from an upper bound of a logical partition down to a specific
        * logical sub-region for a given domain point during index task
