@@ -1069,9 +1069,9 @@ namespace Legion {
       current_ctx = ctx;
       // call old version - returns int directly, but we'll store as size_t
       //  for consistency with the new DefaultMapper tunables
-      size_t *result = (size_t*)malloc(sizeof(size_t));
+      int *result = (int*)malloc(sizeof(int));
       output.value = result;
-      output.size = sizeof(size_t);
+      output.size = sizeof(int);
       *result = get_tunable_value(&local_task,
 				  input.tunable_id,
 				  input.mapping_tag);

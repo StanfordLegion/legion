@@ -2421,7 +2421,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (impl != NULL)
-        impl->get_void_result(silence_warnings);
+        impl->get_untyped_result(silence_warnings, warning_string);
     }
 
     //--------------------------------------------------------------------------
@@ -2446,17 +2446,19 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void* Future::get_untyped_result(bool silence_warnings,
-                                     const char *warning_string) const
+                                     const char *warning_string,
+                                     bool check_size, size_t future_size) const
     //--------------------------------------------------------------------------
     {
       if (impl == NULL)
         REPORT_LEGION_ERROR(ERROR_REQUEST_FOR_EMPTY_FUTURE, 
                           "Illegal request for future value from empty future")
-      return impl->get_untyped_result(silence_warnings, warning_string);
+      return impl->get_untyped_result(silence_warnings, warning_string,
+                                    false/*internal*/, check_size, future_size);
     }
 
     //--------------------------------------------------------------------------
-    size_t Future::get_untyped_size(void)
+    size_t Future::get_untyped_size(void) const
     //--------------------------------------------------------------------------
     {
       if (impl == NULL)

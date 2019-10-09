@@ -12,18 +12,36 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
+-- runs-with:
+-- [["-fflow", "0", "-foverride-demand-index-launch", "1"]]
+
 import "regent"
 
+task f(r : region(ispace(int1d), int))
+where reads writes(r) do
+end
+
+task g(r : region(ispace(int1d), int), s : region(ispace(int1d), int))
+where reads(r), reads writes(s) do
+end
+
 task main()
-  var x : uint = int1d(5)
-  regentlib.assert(x == 5, "test failed")
+  var r = region(ispace(int1d, 10), int)
+  var N = 4
+  var pr = partition(equal, r, ispace(int1d, N))
 
-  var y : regentlib.c.legion_domain_point_t = int2d({2, 3})
-  regentlib.assert(int2d(y) == int2d({2, 3}), "test failed")
+  fill(r, 0)
 
-  var z : regentlib.c.legion_point_2d_t = int2d({4, 5})
-  regentlib.assert(z.x[0] == 4, "test failed")
-  regentlib.assert(z.x[1] == 5, "test failed")
-  regentlib.assert(int2d(z) == int2d({4, 5}), "test failed")
+  -- These are checks the compiler couldn't normally do because the
+  -- optimizer isn't sophisticated enough.
+  __demand(__index_launch)
+  for i = 0, N do
+    f(pr[(i + 1) % N])
+  end
+
+  __demand(__index_launch)
+  for i = 1, N do
+    g(pr[0], pr[i])
+  end
 end
 regentlib.start(main)

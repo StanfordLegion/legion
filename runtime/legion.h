@@ -369,6 +369,7 @@ namespace Legion {
 #endif
     /**
      * \class IndexIterator
+     * @deprecated
      * This is a helper class for iterating over the points within
      * an index space or the index space of a given logical region.
      * It should never be copied and will assert fail if a copy is
@@ -412,6 +413,7 @@ namespace Legion {
 
     /**
      * \class IndexAllocator
+     * @deprecated
      * Index allocators provide objects for doing allocation on
      * index spaces.  They must be explicitly created by the
      * runtime so that they can be linked back to the runtime.
@@ -442,18 +444,21 @@ namespace Legion {
       inline bool operator==(const IndexAllocator &rhs) const;
     public:
       /**
+       * @deprecated
        * @param num_elements number of elements to allocate
        * @return pointer to the first element in the allocated block
        */
       LEGION_DEPRECATED("Dynamic allocation is no longer supported")
       ptr_t alloc(unsigned num_elements = 1);
       /**
+       * @deprecated
        * @param ptr pointer to the first element to free
        * @param num_elements number of elements to be freed
        */
       LEGION_DEPRECATED("Dynamic allocation is no longer supported")
       void free(ptr_t ptr, unsigned num_elements = 1);
       /**
+       * @deprecated
        * @return the index space associated with this allocator
        */
       inline IndexSpace get_index_space(void) const { return index_space; }
@@ -1201,7 +1206,7 @@ namespace Legion {
        */
       template<typename T> 
         inline const T& get_reference(bool silence_warnings = false,
-                                      const char *warning_string = NULL);
+                                      const char *warning_string = NULL) const;
       /**
        * Return an untyped pointer to the 
        * future result.  WARNING: this
@@ -1213,11 +1218,11 @@ namespace Legion {
        * @param warning_string a string to be reported with the warning
        */
       inline const void* get_untyped_pointer(bool silence_warnings = false,
-                                             const char *warning_string = NULL);
+                                       const char *warning_string = NULL) const;
       /**
        * Return the number of bytes contained in the future.
        */
-      size_t get_untyped_size(void);
+      size_t get_untyped_size(void) const;
     public:
       // These methods provide partial support the C++ future interface
       template<typename T>
@@ -1244,7 +1249,8 @@ namespace Legion {
 						size_t bytes);
     private:
       void* get_untyped_result(bool silence_warnings,
-                               const char *warning_string) const; 
+                               const char *warning_string,
+                               bool check_size, size_t future_size = 0) const;
     };
 
     /**
@@ -7063,6 +7069,7 @@ namespace Legion {
                                                  int legion_participants = 1);
 
       /**
+       * @deprecated
        * Register a region projection function that can be used to map
        * from an upper bound of a logical region down to a specific
        * logical sub-region for a given domain point during index
@@ -7078,6 +7085,7 @@ namespace Legion {
       static ProjectionID register_region_function(ProjectionID handle);
 
       /**
+       * @deprecated
        * Register a partition projection function that can be used to
        * map from an upper bound of a logical partition down to a specific
        * logical sub-region for a given domain point during index task

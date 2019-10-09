@@ -23,6 +23,8 @@ local data = require("common/data")
 local report = require("common/report")
 local std = require("regent/std")
 
+local skip_interference_check = std.config["override-demand-index-launch"]
+
 local context = {}
 
 function context:__index (field)
@@ -1039,7 +1041,7 @@ local function optimize_loop_body(cx, node, report_pass, report_fail)
       end
 
       -- Tests for non-interference.
-      if std.is_region(arg_type) then
+      if std.is_region(arg_type) and not skip_interference_check then
         do
           local passed, failure_i = analyze_noninterference_previous(
             loop_cx, task, arg, regions_previously_used, mapping)

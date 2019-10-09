@@ -17,8 +17,6 @@
 
 import "regent"
 
-local C = regentlib.c
-
 local Np = 10
 
 local Nx = 4
@@ -31,62 +29,62 @@ struct Fields {
 
 task func1(t : region(ispace(int1d),Fields))
 where
-   reads writes(t)
+  reads writes(t)
 do
 end
 
 task func2(s : region(ispace(int2d),Fields))
 where
-   reads writes(s)
+  reads writes(s)
 do
 end
 
 task func3(r : region(ispace(int3d),Fields))
 where
-   reads writes(r)
+  reads writes(r)
 do
 end
 
 task func5(r : region(ispace(int3d),Fields),
            s : region(ispace(int2d),Fields))
 where
-   reads writes(r, s)
+  reads writes(r, s)
 do
 end
 
 task main()
-   var r = region(ispace(int3d,{Np,Np,Np}),Fields)
-   var s = region(ispace(int2d,{Np,Np}),Fields)
-   var t = region(ispace(int1d,{Np}),Fields)
+  var r = region(ispace(int3d,{Np,Np,Np}),Fields)
+  var s = region(ispace(int2d,{Np,Np}),Fields)
+  var t = region(ispace(int1d,{Np}),Fields)
 
-   var cr = ispace(int3d,{Nx,Ny,Nz})
-   var pr = partition(equal, r, cr)
+  var cr = ispace(int3d,{Nx,Ny,Nz})
+  var pr = partition(equal, r, cr)
 
-   var cs = ispace(int2d,{Nx,Ny})
-   var ps = partition(equal, s, cs)
+  var cs = ispace(int2d,{Nx,Ny})
+  var ps = partition(equal, s, cs)
 
-   var ct = ispace(int1d,{Nx})
-   var pt = partition(equal, t, ct)
+  var ct = ispace(int1d,{Nx})
+  var pt = partition(equal, t, ct)
 
-   fill(r.y, 0.0)
-   fill(s.y, 0.0)
+  fill(r.y, 0.0)
+  fill(s.y, 0.0)
 
 
-   -- simple multi-dimensional index ctors
-   __demand(__index_launch)
-   for c in cr do
-      func3(pr[int3d{c.x, c.y, c.z}])
-   end
+  -- simple multi-dimensional index ctors
+  __demand(__index_launch)
+  for c in cr do
+    func3(pr[int3d{c.x, c.y, c.z}])
+  end
 
-   -- simple multi-dimensional index ctors
-   __demand(__index_launch)
-   for i in cs do
-      func5(pr[int3d{i.x, i.y, 0}], ps[int2d{0,0} + i])
-   end
+  -- simple multi-dimensional index ctors
+  __demand(__index_launch)
+  for i in cs do
+    func5(pr[int3d{i.x, i.y, 0}], ps[int2d{0,0} + i])
+  end
 
   __demand(__index_launch)
   for i in cs do
-    func2(ps[int2d{0,0} + i])
+   func2(ps[int2d{0,0} + i])
   end
 
   __demand(__index_launch)
@@ -105,18 +103,18 @@ task main()
     func1(pt[B + 0])
   end
 
- __demand(__index_launch)
- for a in ct do
-   func1(pt[2 + 1 * a - 2])
- end
+  __demand(__index_launch)
+  for a in ct do
+    func1(pt[2 + 1 * a - 2])
+  end
 
- __demand(__index_launch)
- for i in cr do
-   var temp = int3d{0,0,0}
-   func3(pr[{0,0,0} + i + {0,0,0}])
- end
+  __demand(__index_launch)
+  for i in cr do
+    var temp = int3d{0,0,0}
+    func3(pr[{0,0,0} + i + {0,0,0}])
+  end
 
-   -- nested loop free variable
+  -- nested loop free variable
   for i = 0, 2 do
     __demand(__index_launch)
     for c in ct do
@@ -124,20 +122,19 @@ task main()
     end
   end
 
-   var zero = 0
-   __demand(__index_launch)
-   for c in ct do
-     func1(pt[zero + c])
-   end
+  var zero = 0
+  __demand(__index_launch)
+  for c in ct do
+    func1(pt[zero + c])
+  end
 
-
-   for i = 0, 4 do
-     __demand(__index_launch)
-     for c in ct do
-       var temp = c - i
-       func1(pt[temp + i])
-     end
-   end
+  for i = 0, 4 do
+    __demand(__index_launch)
+    for c in ct do
+      var temp = c - i
+      func1(pt[temp + i])
+    end
+  end
 
   -- constant * index
   __demand(__index_launch)
