@@ -5595,7 +5595,7 @@ class Operation(object):
                             key = (point,field,req.tid)
                             if key not in self.eq_privileges:
                                 self.eq_privileges[key] = req.priv
-                            elif self.launch_rect is None:
+                            elif not self.is_index_op():
                                 # If we have aliased region requirements
                                 # then they shouldn't interfere with each other
                                 # However, some privileges can appear to interfere
