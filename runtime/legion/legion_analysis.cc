@@ -3071,10 +3071,11 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(effects_applied.exists());
 #endif
+      // We only ever pack the effects applied event here because once a
+      // guard is on a remote node then the guard postcondition is no longer
+      // useful since all remote copy fill operations will need to key off
+      // the effects applied event to be correct
       rez.serialize(effects_applied);
-#ifndef NON_AGGRESSIVE_AGGREGATORS
-      rez.serialize(guard_postcondition);
-#endif
       // Make an event for recording when all the remote events are applied
       RtUserEvent remote_release = Runtime::create_rt_user_event();
       rez.serialize(remote_release);
@@ -3091,10 +3092,11 @@ namespace Legion {
       if (!effects_applied.exists())
         return NULL;
 #ifndef NON_AGGRESSIVE_AGGREGATORS
-      RtUserEvent guard_postcondition;
-      derez.deserialize(guard_postcondition);
+      // Note we use the effects applied event here twice because all
+      // copy-fill aggregators on this node will need to wait for the
+      // full effects to be applied of any guards on a remote node
       CopyFillGuard *result = 
-        new CopyFillGuard(guard_postcondition, effects_applied);
+        new CopyFillGuard(effects_applied, effects_applied);
 #else
       CopyFillGuard *result = new CopyFillGuard(effects_applied);
 #endif
