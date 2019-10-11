@@ -599,12 +599,63 @@ namespace Realm {
         return result;
       }
 
+      cudaError_t cudaGetDeviceCount(int *count)
+      {
+	// TODO: lie here and report just one device?
+	CUresult res = cuDeviceGetCount(count);
+	if(res == CUDA_SUCCESS)
+	  return cudaSuccess;
+	else
+	  return cudaErrorInvalidValue;
+      }
+
       cudaError_t cudaSetDevice(int device)
       {
         get_gpu_or_die("cudaSetDevice");
         // Ignore calls to set the device here since we already
         // know which device we are running on
         return cudaSuccess;
+      }
+
+      cudaError_t cudaFuncSetCacheConfig(const void *func, cudaFuncCache config)
+      {
+        get_gpu_or_die("cudaFuncSetCacheConfig");
+	// TODO: actually do something with this
+	return cudaSuccess;
+      }
+
+      cudaError_t cudaDeviceSetCacheConfig(cudaFuncCache config)
+      {
+        get_gpu_or_die("cudaDeviceSetCacheConfig");
+	// TODO: actually do something with this
+	return cudaSuccess;
+      }
+
+      cudaError_t cudaThreadSetCacheConfig(cudaFuncCache config)
+      {
+	// old name for cudaDeviceSetCacheConfig
+	return cudaDeviceSetCacheConfig(config);
+      }
+
+      cudaChannelFormatDesc cudaCreateChannelDesc(int x, int y, int z, int w,
+						  cudaChannelFormatKind f)
+      {
+	cudaChannelFormatDesc desc;
+	desc.x = x;
+	desc.y = y;
+	desc.z = z;
+	desc.w = w;
+	desc.f = f;
+	return desc;
+      }
+
+      cudaError_t cudaCreateTextureObject(cudaTextureObject_t *tex,
+					  const cudaResourceDesc *res_desc,
+					  const cudaTextureDesc *tex_desc,
+					  const cudaResourceViewDesc *view_desc)
+      {
+	// TODO: support
+	return cudaErrorInvalidValue;
       }
 
     }; // extern "C"
