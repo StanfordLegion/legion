@@ -1444,6 +1444,9 @@ namespace Legion {
         }
         ~Tester(void)
         {
+          // The CUDA compiler also doesn't deal correctly with this block 
+          // of code for c++11 when it passes it back to the host compiler
+#if !defined(__NVCC__) || __cplusplus < 201103L || defined(__CUDACC__)
           switch (M)
           {
             case 0:
@@ -1477,6 +1480,7 @@ namespace Legion {
             default:
               assert(false);
           }
+#endif
         }
       public:
         __CUDA_HD__
