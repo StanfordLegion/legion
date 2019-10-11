@@ -232,6 +232,16 @@ function data.set(list)
   return result
 end
 
+function data.contains(set, elem)
+  for k, _ in pairs(set) do
+    if k == elem then
+      return true
+    end
+  end
+  return false
+end
+
+
 -- #####################################
 -- ## Tuples
 -- #################
