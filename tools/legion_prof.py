@@ -128,12 +128,14 @@ def get_prof_uid():
     prof_uid_ctr += 1
     return prof_uid_ctr
 
-def data_tsv_str(level, start, end, color, opacity, title, 
-                 initiation, _in, out, children, parents, prof_uid):
+def data_tsv_str(level, level_ready, ready, start, end, color, opacity, title,
+                  initiation, _in, out, children, parents, prof_uid):
     # replace None with ''
     def xstr(s):
         return str(s or '')
-    return xstr(level) + "\t" + xstr(start) + "\t" + xstr(end) + "\t" + \
+    return xstr(level) + "\t" + xstr(level_ready) + "\t" + xstr(ready) + "\t" + \
+           xstr(start) + "\t" + \
+           xstr(end) + "\t" + \
            xstr(color) + "\t" + xstr(opacity) + "\t" + xstr(title) + "\t" + \
            xstr(initiation) + "\t" + xstr(_in) + "\t" + xstr(out) + "\t" + \
            xstr(children) + "\t" + xstr(parents) + "\t" + xstr(prof_uid) + "\n"
@@ -348,11 +350,15 @@ class TimeRange(object):
         return self.__cmp__(other) > 0
 
     def __repr__(self):
-        return "Start: %d us  Stop: %d us  Total: %d us" % (
-                self.start, self.end, self.total_time())
+        return "Delay: %d us  Start: %d us  Stop: %d us  Total: %d us" % (
+                self.queue_time(), self.start, self.end, self.total_time())
 
     def total_time(self):
         return self.stop - self.start
+
+    def queue_time(self):
+        print(str(self.start - self.ready))
+        return self.start - self.ready
 
     # The following must be overridden by subclasses that need them
     def mapper_time(self):
@@ -504,9 +510,9 @@ class Processor(object):
         self.last_time = None
         self.tasks = list()
         self.max_levels = 0
+        self.max_levels_ready = 0
         self.time_points = list()
         self.util_time_points = list()
-
     def get_short_text(self):
         return self.kind + " Proc " + str(self.proc_in_node)
 
@@ -537,7 +543,17 @@ class Processor(object):
         self.tasks = trimmed_tasks 
 
     def sort_time_range(self):
+        time_points_all = list()
         for task in self.tasks:
+            if (task.stop-task.start > 10 and task.ready != None):
+                print("appending: stop = " + str(task.stop) + " start = "
+                      + str(task.start))
+                time_points_all.append(TimePoint(task.ready, task, True))
+                time_points_all.append(TimePoint(task.stop, task, False))
+            else:
+                time_points_all.append(TimePoint(task.start, task, True))
+                time_points_all.append(TimePoint(task.stop, task, False))
+
             self.time_points.append(TimePoint(task.start, task, True))
             self.time_points.append(TimePoint(task.stop, task, False))
 
@@ -554,6 +570,7 @@ class Processor(object):
         self.util_time_points.sort(key=lambda p: p.time_key)
         self.time_points.sort(key=lambda p: p.time_key)
         free_levels = set()
+        # level without ready state
         for point in self.time_points:
             if point.first:
                 if free_levels:
@@ -564,6 +581,25 @@ class Processor(object):
                     point.thing.set_level(self.max_levels)
             else:
                 free_levels.add(point.thing.level)
+
+        # level with ready state
+        # add the ready times
+        free_levels_ready = set()
+        time_points_all.sort(key=lambda p: p.time_key)
+
+        free_levels_ready = set()
+        self.max_levels_ready=0;
+
+        for point in time_points_all:
+            if point.first:
+                if free_levels_ready:
+                    point.thing.set_level_ready(min(free_levels_ready))
+                    free_levels_ready.remove(point.thing.level_ready)
+                else:
+                    self.max_levels_ready += 1
+                    point.thing.set_level_ready(self.max_levels_ready)
+            else:
+                free_levels_ready.add(point.thing.level_ready)
 
     def add_initiation_dependencies(self, state, op_dependencies, transitive_map):
         for point in self.time_points:
@@ -576,12 +612,14 @@ class Processor(object):
                 point.thing.attach_dependencies(state, op_dependencies, transitive_map)
 
     def emit_tsv(self, tsv_file, base_level):
-        # iterate over tasks in start time order
+        # iterate over tasks in start/ready time order
         for point in self.time_points:
             if point.first:
                 point.thing.emit_tsv(tsv_file, base_level,
                                      self.max_levels + 1,
-                                     point.thing.level)
+                                     self.max_levels_ready + 1,
+                                     point.thing.level,
+                                     point.thing.level_ready)
         return base_level + max(self.max_levels, 1) + 1
 
     def total_time(self):
@@ -744,7 +782,8 @@ class Memory(object):
             for point in self.time_points:
                 if point.first:
                     point.thing.emit_tsv(tsv_file, base_level,\
-                                max_levels, point.thing.level)
+                                         max_levels, None,
+                                         point.thing.level, None)
 
         return base_level + max_levels
 
@@ -919,7 +958,8 @@ class Channel(object):
             for point in self.time_points:
                 if point.first:
                     point.thing.emit_tsv(tsv_file, base_level,\
-                                max_levels, point.thing.level)
+                                         max_levels, None,
+                                         point.thing.level, None)
 
         return base_level + max_levels
 
@@ -1119,9 +1159,13 @@ class Base(object):
     def __init__(self):
         self.prof_uid = get_prof_uid()
         self.level = None
+        self.level_ready = None
 
     def set_level(self, level):
         self.level = level
+
+    def set_level_ready(self, level):
+        self.level_ready = level
 
     def get_unique_tuple(self):
         assert self.proc is not None
@@ -1213,7 +1257,8 @@ class HasWaiters(object):
             active_time += (self.stop - start)
         return active_time
 
-    def emit_tsv(self, tsv_file, base_level, max_levels, level):
+    def emit_tsv(self, tsv_file, base_level, max_levels, max_levels_ready,
+                 level, level_ready):
         title = repr(self)
         initiation = str(self.initiation)
         color = self.get_color()
@@ -1222,12 +1267,17 @@ class HasWaiters(object):
         out = json.dumps(list(self.deps["out"])) if len(self.deps["out"]) > 0 else ""
         children = json.dumps(list(self.deps["children"])) if len(self.deps["children"]) > 0 else ""
         parents = json.dumps(list(self.deps["parents"])) if len(self.deps["parents"]) > 0 else ""
-
+        if (level_ready != None):
+            l_ready = base_level + (max_levels_ready - level_ready);
+        else:
+            l_ready = None;
         if len(self.wait_intervals) > 0:
             start = self.start
             cur_level = base_level + (max_levels - level)
             for wait_interval in self.wait_intervals:
                 init = data_tsv_str(level = cur_level,
+                                    level_ready = l_ready,
+                                    ready = start,
                                     start = start,
                                     end = wait_interval.start,
                                     color = color,
@@ -1245,6 +1295,8 @@ class HasWaiters(object):
                 children = ""
                 parents = ""
                 wait = data_tsv_str(level = cur_level,
+                                    level_ready = l_ready,
+                                    ready = wait_interval.start,
                                     start = wait_interval.start,
                                     end = wait_interval.ready,
                                     color = color,
@@ -1257,6 +1309,8 @@ class HasWaiters(object):
                                     parents = "",
                                     prof_uid = self.prof_uid)
                 ready = data_tsv_str(level = cur_level,
+                                     level_ready = l_ready,
+                                     ready = wait_interval.ready,
                                      start = wait_interval.ready,
                                      end = wait_interval.end,
                                      color = color,
@@ -1275,6 +1329,8 @@ class HasWaiters(object):
                 start = max(start, wait_interval.end)
             if start < self.stop:
                 end = data_tsv_str(level = cur_level,
+                                   level_ready = l_ready,
+                                   ready = start,
                                    start = start,
                                    end = self.stop,
                                    color = color,
@@ -1289,7 +1345,13 @@ class HasWaiters(object):
 
                 tsv_file.write(end)
         else:
+            if (level_ready != None):
+                l_ready = base_level + (max_levels_ready - level_ready);
+            else:
+                l_ready = None;
             line = data_tsv_str(level = base_level + (max_levels - level),
+                                level_ready = l_ready,
+                                ready = self.ready,
                                 start = self.start,
                                 end = self.stop,
                                 color = color,
@@ -1301,6 +1363,7 @@ class HasWaiters(object):
                                 children = children,
                                 parents = parents,
                                 prof_uid = self.prof_uid)
+
             tsv_file.write(line)
 
 class Task(Operation, TimeRange, HasDependencies, HasWaiters):
@@ -1323,8 +1386,12 @@ class Task(Operation, TimeRange, HasDependencies, HasWaiters):
         self.color = self.variant.color
         self.base_op.color = self.color
 
-    def emit_tsv(self, tsv_file, base_level, max_levels, level):
-        return HasWaiters.emit_tsv(self, tsv_file, base_level, max_levels, level)
+    def emit_tsv(self, tsv_file, base_level, max_levels, max_levels_ready,
+                 level, level_ready):
+        return HasWaiters.emit_tsv(self, tsv_file, base_level, max_levels,
+                                   max_levels_ready,
+                                   level,
+                                   level_ready)
 
     def get_color(self):
         assert self.color is not None
@@ -1381,8 +1448,12 @@ class MetaTask(Base, TimeRange, HasInitiationDependencies, HasWaiters):
     def mapper_time(self):
         return 0
 
-    def emit_tsv(self, tsv_file, base_level, max_levels, level):
-        return HasWaiters.emit_tsv(self, tsv_file, base_level, max_levels, level)
+    def emit_tsv(self, tsv_file, base_level, max_levels, max_levels_ready,
+                 level, level_ready):
+        return HasWaiters.emit_tsv(self, tsv_file, base_level, max_levels,
+                                   max_levels_ready,
+                                   level,
+                                   level_ready)
 
     def __repr__(self):
         assert self.variant is not None
@@ -1412,8 +1483,15 @@ class ProfTask(Base, TimeRange, HasNoDependencies):
     def mapper_time(self):
         return 0
 
-    def emit_tsv(self, tsv_file, base_level, max_levels, level):
+    def emit_tsv(self, tsv_file, base_level, max_levels, max_levels_ready,
+                 level, level_ready):
+        if (level_ready != None):
+            l_ready = base_level + (max_levels_ready - level_ready);
+        else:
+            l_ready = None;
         tsv_line = data_tsv_str(level = base_level + (max_levels - level),
+                                level_ready = l_ready,
+                                ready = self.start,
                                 start = self.start,
                                 end = self.stop,
                                 color = self.get_color(),
@@ -1454,8 +1532,15 @@ class UserMarker(Base, TimeRange, HasNoDependencies):
     def mapper_time(self):
         return 0
 
-    def emit_tsv(self, tsv_file, base_level, max_levels, level):
+    def emit_tsv(self, tsv_file, base_level, max_levels, max_levels_ready,
+                 level, level_ready):
+        if (level_ready != None):
+            l_ready = base_level + (max_levels_ready - level_ready);
+        else:
+            l_ready = None;
         tsv_line = data_tsv_str(level = base_level + (max_levels - level),
+                                level_ready = l_ready,
+                                ready = None,
                                 start = self.start,
                                 end = self.stop,
                                 color = self.get_color(),
@@ -1497,7 +1582,8 @@ class Copy(Base, TimeRange, HasInitiationDependencies):
         cur_level = self.chan.max_live_copies+1 - self.level
         return (str(self.chan), self.prof_uid)
 
-    def emit_tsv(self, tsv_file, base_level, max_levels, level):
+    def emit_tsv(self, tsv_file, base_level, max_levels, max_levels_ready,
+                 level, level_ready):
         assert self.level is not None
         assert self.start is not None
         assert self.stop is not None
@@ -1508,6 +1594,8 @@ class Copy(Base, TimeRange, HasInitiationDependencies):
         parents = json.dumps(list(self.deps["parents"])) if len(self.deps["parents"]) > 0 else ""
 
         tsv_line = data_tsv_str(level = base_level + (max_levels - level),
+                                level_ready = None,
+                                ready = None,
                                 start = self.start,
                                 end = self.stop,
                                 color = self.get_color(),
@@ -1540,7 +1628,8 @@ class Fill(Base, TimeRange, HasInitiationDependencies):
         cur_level = self.chan.max_live_copies+1 - self.level
         return (str(self.chan), self.prof_uid)
 
-    def emit_tsv(self, tsv_file, base_level, max_levels, level):
+    def emit_tsv(self, tsv_file, base_level, max_levels, max_levels_ready,
+                 level, level_ready):
         fill_name = repr(self)
         _in = json.dumps(self.deps["in"]) if len(self.deps["in"]) > 0 else ""
         out = json.dumps(self.deps["out"]) if len(self.deps["out"]) > 0 else ""
@@ -1548,6 +1637,8 @@ class Fill(Base, TimeRange, HasInitiationDependencies):
         parents = json.dumps(list(self.deps["parents"])) if len(self.deps["parents"]) > 0 else ""
 
         tsv_line = data_tsv_str(level = base_level + (max_levels - level),
+                                level_ready = None,
+                                ready = None,
                                 start = self.start,
                                 end = self.stop,
                                 color = self.get_color(),
@@ -1581,7 +1672,8 @@ class DepPart(Base, TimeRange, HasInitiationDependencies):
         cur_level = self.chan.max_live_copies+1 - self.level
         return (str(self.chan), self.prof_uid)
         
-    def emit_tsv(self, tsv_file, base_level, max_levels, level):
+    def emit_tsv(self, tsv_file, base_level, max_levels, max_levels_ready,
+                 level, level_ready):
         deppart_name = repr(self)
         _in = json.dumps(self.deps["in"]) if len(self.deps["in"]) > 0 else ""
         out = json.dumps(self.deps["out"]) if len(self.deps["out"]) > 0 else ""
@@ -1589,6 +1681,8 @@ class DepPart(Base, TimeRange, HasInitiationDependencies):
         parents = json.dumps(list(self.deps["parents"])) if len(self.deps["parents"]) > 0 else ""
 
         tsv_line = data_tsv_str(level = base_level + (max_levels - level),
+                                level_ready = None,
+                                ready = None,
                                 start = self.start,
                                 end = self.stop,
                                 color = self.get_color(),
@@ -1624,7 +1718,8 @@ class Instance(Base, TimeRange, HasInitiationDependencies):
         cur_level = self.mem.max_live_instances+1 - self.level
         return (str(self.mem), self.prof_uid)
 
-    def emit_tsv(self, tsv_file, base_level, max_levels, level):
+    def emit_tsv(self, tsv_file, base_level, max_levels, max_levels_ready,
+                 level, level_ready):
         assert self.level is not None
         assert self.start is not None
         assert self.stop is not None
@@ -1636,6 +1731,8 @@ class Instance(Base, TimeRange, HasInitiationDependencies):
         parents = json.dumps(list(self.deps["parents"])) if len(self.deps["parents"]) > 0 else ""
 
         tsv_line = data_tsv_str(level = base_level + (max_levels - level),
+                                level_ready = None,
+                                ready = None,
                                 start = self.start,
                                 end = self.stop,
                                 color = self.get_color(),
@@ -1741,8 +1838,11 @@ class Message(Base, TimeRange, HasNoDependencies):
     def mapper_time(self):
         return 0
 
-    def emit_tsv(self, tsv_file, base_level, max_levels, level):
+    def emit_tsv(self, tsv_file, base_level, max_levels, max_levels_ready,
+                 level, level_ready):
         tsv_line = data_tsv_str(level = base_level + (max_levels - level),
+                                level_ready = None,
+                                ready = None,
                                 start = self.start,
                                 end = self.stop,
                                 color = self.get_color(),
@@ -1787,14 +1887,21 @@ class MapperCall(Base, TimeRange, HasInitiationDependencies):
         assert self.kind is not None and self.kind.color is not None
         return self.kind.color
 
-    def emit_tsv(self, tsv_file, base_level, max_levels, level):
+    def emit_tsv(self, tsv_file, base_level, max_levels, max_levels_ready,
+                 level, level_ready):
         title = repr(self)
         _in = json.dumps(list(self.deps["in"])) if len(self.deps["in"]) > 0 else ""
         out = json.dumps(list(self.deps["out"])) if len(self.deps["out"]) > 0 else ""
         children = json.dumps(list(self.deps["children"])) if len(self.deps["children"]) > 0 else ""
         parents = json.dumps(list(self.deps["parents"])) if len(self.deps["parents"]) > 0 else ""
 
+        if (level_ready != None):
+            l_ready = base_level + (max_levels_ready - level_ready);
+        else:
+            l_ready = None;
         tsv_line = data_tsv_str(level = base_level + (max_levels - level),
+                                level_ready = l_ready,
+                                ready = None,
                                 start = self.start,
                                 end = self.stop,
                                 color = self.get_color(),
@@ -2017,8 +2124,15 @@ class RuntimeCall(Base, TimeRange, HasNoDependencies):
         assert self.kind.color is not None
         return self.kind.color
 
-    def emit_tsv(self, tsv_file, base_level, max_levels, level):
+    def emit_tsv(self, tsv_file, base_level, max_levels, max_levels_ready,
+                 level, level_ready):
+        if (level_ready != None):
+            l_ready = base_level + (max_levels_ready - level_ready);
+        else:
+            l_ready = None;
         tsv_line = data_tsv_str(level = base_level + (max_levels - level),
+                                level_ready = l_ready,
+                                ready = None,
                                 start = self.start,
                                 end = self.stop,
                                 color = self.get_color(),
@@ -2309,8 +2423,9 @@ class State(object):
                           create, ready, start, stop, gpu_start, gpu_stop):
         variant = self.find_variant(task_id, variant_id)
         task = self.find_task(op_id, variant, create, ready, gpu_start, gpu_stop)
-        if stop > self.last_time:
-            self.last_time = stop
+
+        if gpu_stop > self.last_time:
+            self.last_time = gpu_stop
         proc = self.find_processor(proc_id)
         proc.add_task(task)
 
@@ -3453,7 +3568,7 @@ class State(object):
         dep_json_file_name = os.path.join(output_dirname, "json", 
                                           "op_dependencies.json")
 
-        data_tsv_header = "level\tstart\tend\tcolor\topacity\ttitle\tinitiation\tin\tout\tchildren\tparents\tprof_uid\n"
+        data_tsv_header = "level\tlevel_ready\tready\tstart\tend\tcolor\topacity\ttitle\tinitiation\tin\tout\tchildren\tparents\tprof_uid\n"
 
         tsv_dir = os.path.join(output_dirname, "tsv")
         json_dir = os.path.join(output_dirname, "json")

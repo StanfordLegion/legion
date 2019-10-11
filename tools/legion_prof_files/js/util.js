@@ -183,6 +183,69 @@ function binarySearch(data, level, time, useStart) {
   }
 }
 
+dataReady = {};
+function redoData(proc) {
+    dataReady = {};
+    var items =  state.processorData[proc.full_text];
+    for (var level in items) {
+	for (var j = 0; j< items[level].length; j++) {
+	    d = items[level][j];
+	    // ready state items
+	    if (d.level_ready != undefined && d.level_ready !=0 ) {
+		// if the level has already been switched, then don't do anything
+		var level_to_set = d.level_ready;
+		if (d.level_ready_set != undefined && d.level_ready_set == true)
+		    level_to_set = d.level;
+		var d_ready = {
+                    id: d.id+items[level].length+1, // unique id
+                    level: level_to_set,
+		    level_ready: d.level,
+                    ready: d.ready,
+                    start: d.ready,
+                    end: d.start,
+                    color: d.color,
+                    opacity: "0.45",
+                    initiation: d.initiation,
+                    title: d.title + " (ready)",
+		    in: d.in,
+                    out: d.out,
+                    children: d.children,
+                    parents: d.parents,
+                    prof_uid: d.prof_uid,
+                    proc: d.proc
+		};
+		// switch levels if we need to
+		if (d.level_ready_set == undefined || d.level_ready_set == false)
+		{
+		    var level_tmp = d.level;
+		    d.level = d.level_ready;
+		    d.level_ready = level_tmp;
+		    d.level_ready_set = true;
+		}
+		if (d.level_ready in dataReady){
+		    dataReady[d.level_ready].push(d_ready);
+		    dataReady[d.level_ready].push(d);
+		}
+		else {
+		    dataReady[d.level_ready] = [d_ready];
+		    dataReady[d.level_ready].push(d);
+		}
+	    }
+	    // add items to the level
+	    else {
+		if (d.level in dataReady)
+		    dataReady[d.level].push(d);
+		else
+		    dataReady[d.level] = [d];
+	    }
+	}
+    }
+}
+
+function readyData(proc) {
+    redoData(proc);
+}
+
 function filterAndMergeBlocks(state) {
   var windowStart = $("#timeline").scrollLeft();
   var windowEnd = windowStart + $("#timeline").width();
@@ -198,6 +261,11 @@ function filterAndMergeBlocks(state) {
       var items = state.processorData[timelineElement.full_text];
       var memoryRegex = /Memory/;
       var isMemory = memoryRegex.exec(timelineElement.text);
+	if (state.ready_selected) {
+	    readyData(timelineElement);
+	    items = dataReady;
+	}
+
       for (var level in items) {
         // gap merging below assumes intervals are sorted - do that first
         //items[level].sort(function(a,b) { return a.start - b.start; });
@@ -209,6 +277,16 @@ function filterAndMergeBlocks(state) {
           var d = items[level][i];
           var start = d.start;
           var end = d.end;
+	    // fix the level here
+	    if (state.ready_selected == false && d.level_ready_set != undefined
+		&& d.level_ready_set == true)
+	    {
+		// switch levels
+		var level_tmp = d.level;
+		d.level = d.level_ready;
+		d.level_ready = level_tmp;
+	        d.level_ready_set = false;
+	    }
           // is this block too narrow?
           if ((end - start) < min_feature_time) {
             // see how many more after this are also too narrow and too close to us
@@ -236,6 +314,7 @@ function filterAndMergeBlocks(state) {
                 prof_uid: d.prof_uid,
                 proc: timelineElement,
                 level: d.level,
+                ready: d.ready,
                 start: d.start,
                 end: Math.round(end),
                 color: "#808080",
@@ -252,6 +331,7 @@ function filterAndMergeBlocks(state) {
                 prof_uid: d.prof_uid,
                 proc: timelineElement,
                 level: d.level,
+                ready: d.ready,
                 start: d.start,
                 end: d.end,
                 color: d.color,
@@ -273,11 +353,11 @@ function filterAndMergeBlocks(state) {
               prof_uid: d.prof_uid,
               proc: timelineElement,
               level: d.level,
+              ready: d.ready,
               start: d.start,
               end: d.end,
               opacity: d.opacity,
               color: d.color,
-              opacity: d.opacity,
               initiation: d.initiation,
               title: d.title,
               in: d.in,
