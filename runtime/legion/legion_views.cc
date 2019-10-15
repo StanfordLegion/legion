@@ -26,6 +26,9 @@
 #include "legion/legion_trace.h"
 #include "legion/legion_context.h"
 
+// Turn off view replication until we can figure out issue #653
+#define DISABLE_VIEW_REPLICATION
+
 namespace Legion {
   namespace Internal {
 
