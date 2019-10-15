@@ -546,8 +546,6 @@ class Processor(object):
         time_points_all = list()
         for task in self.tasks:
             if (task.stop-task.start > 10 and task.ready != None):
-                print("appending: stop = " + str(task.stop) + " start = "
-                      + str(task.start))
                 time_points_all.append(TimePoint(task.ready, task, True))
                 time_points_all.append(TimePoint(task.stop, task, False))
             else:
@@ -1901,7 +1899,7 @@ class MapperCall(Base, TimeRange, HasInitiationDependencies):
             l_ready = None;
         tsv_line = data_tsv_str(level = base_level + (max_levels - level),
                                 level_ready = l_ready,
-                                ready = None,
+                                ready = self.start,
                                 start = self.start,
                                 end = self.stop,
                                 color = self.get_color(),

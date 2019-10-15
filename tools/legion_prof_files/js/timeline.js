@@ -554,7 +554,6 @@ function createMenuList1() {
     $('#dropdown').multiselect({
       maxHeight:200,
       includeSelectAllOption: true,
-      passive: true,
 	buttonText: function(options) {
 	    return 'Profiling Options';
 	}
@@ -731,12 +730,16 @@ function profileSelect(event) {
 	var count = 0;
 	$('#dropdown option:selected').each(function() {
 		map_selected[$(this).val()] = true;
-		count = 1;
+		count = count + 1;
 	    });
 	if (count == 0){
 	    text = "Must select at least one option";
 	    alert(text);
 	}
+	else if ((count == 1) && ("rdy" in map_selected)) {
+	    text = "Select additional options with View Ready State"
+	    alert(text);
+	    }
 	else {
 	    var lower_range =  $('#node_slider').slider("values", 0);
 	    var upper_range =  $('#node_slider').slider("values", 1);

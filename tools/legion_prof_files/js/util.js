@@ -191,7 +191,8 @@ function redoData(proc) {
 	for (var j = 0; j< items[level].length; j++) {
 	    d = items[level][j];
 	    // ready state items
-	    if (d.level_ready != undefined && d.level_ready !=0 ) {
+	    if (d.level_ready != undefined && d.level_ready != "" &&
+		d.ready != undefined && d.ready != "")  {
 		// if the level has already been switched, then don't do anything
 		var level_to_set = d.level_ready;
 		if (d.level_ready_set != undefined && d.level_ready_set == true)
