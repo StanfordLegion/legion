@@ -5882,6 +5882,14 @@ namespace Legion {
       parent_ctx->update_current_fence(this, true, true);
     }
 
+    //--------------------------------------------------------------------------
+    void ReplTraceReplayOp::pack_remote_operation(Serializer &rez,
+                                                  AddressSpaceID target) const
+    //--------------------------------------------------------------------------
+    {
+      pack_local_remote_operation(rez);
+    }
+
     /////////////////////////////////////////////////////////////
     // ReplTraceBeginOp
     /////////////////////////////////////////////////////////////
@@ -6061,6 +6069,14 @@ namespace Legion {
       if (current_template->is_replayable())
         current_template->apply_postcondition(this);
       ReplFenceOp::trigger_mapping();
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplTraceSummaryOp::pack_remote_operation(Serializer &rez,
+                                                   AddressSpaceID target) const
+    //--------------------------------------------------------------------------
+    {
+      pack_local_remote_operation(rez);
     }
 
     /////////////////////////////////////////////////////////////

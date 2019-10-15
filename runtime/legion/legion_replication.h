@@ -1630,6 +1630,8 @@ namespace Legion {
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
       virtual void trigger_dependence_analysis(void);
+      virtual void pack_remote_operation(Serializer &rez, 
+                                         AddressSpaceID target) const;
     protected:
       // This a parameter that controls how many rounds of template
       // selection we want shards to go through before giving up
@@ -1691,6 +1693,8 @@ namespace Legion {
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
       virtual void trigger_mapping(void);
+      virtual void pack_remote_operation(Serializer &rez,
+                                         AddressSpaceID target) const;
     protected:
       PhysicalTemplate *current_template;
     };
