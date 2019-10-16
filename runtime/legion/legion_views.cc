@@ -27,9 +27,6 @@
 #include "legion/legion_context.h"
 #include "legion/legion_replication.h"
 
-// Turn off view replication until we can figure out issue #653
-#define DISABLE_VIEW_REPLICATION
-
 namespace Legion {
   namespace Internal {
 
@@ -93,6 +90,7 @@ namespace Legion {
     { 
     }
 
+#ifdef ENABLE_VIEW_REPLICATION
     //--------------------------------------------------------------------------
     void InstanceView::process_replication_request(AddressSpaceID source,
                                                   const FieldMask &request_mask,
@@ -120,6 +118,7 @@ namespace Legion {
       // Should only be called by derived classes
       assert(false);
     }
+#endif // ENABLE_VIEW_REPLICATION
 
     //--------------------------------------------------------------------------
     /*static*/ void InstanceView::handle_view_register_user(Deserializer &derez,
@@ -424,6 +423,7 @@ namespace Legion {
       }
     }
 
+#ifdef ENABLE_VIEW_REPLICATION
     //--------------------------------------------------------------------------
     /*static*/ void InstanceView::handle_view_replication_request(
                    Deserializer &derez, Runtime *runtime, AddressSpaceID source)
@@ -499,6 +499,7 @@ namespace Legion {
       // Trigger the done event now that we are done
       Runtime::trigger_event(done_event);
     }
+#endif // ENABLE_VIEW_REPLICATION
 
     /////////////////////////////////////////////////////////////
     // CollectableView 
@@ -2259,15 +2260,19 @@ namespace Legion {
                                UniqueID own_ctx, bool register_now)
       : InstanceView(ctx, encode_materialized_did(did), own_addr,
                      log_own, own_ctx, register_now), 
-        manager(man), expr_cache_uses(0), outstanding_additions(0),
-        remote_added_users(0), remote_pending_users(NULL)
+        manager(man), expr_cache_uses(0), outstanding_additions(0)
+#ifdef ENABLE_VIEW_REPLICATION
+        , remote_added_users(0), remote_pending_users(NULL)
+#endif
     //--------------------------------------------------------------------------
     {
       // Otherwise the instance lock will get filled in when we are unpacked
 #ifdef DEBUG_LEGION
       assert(manager != NULL);
 #endif
+#ifdef ENABLE_VIEW_REPLICATION
       repl_ptr.replicated_copies = NULL;
+#endif
       // Keep the manager from being collected
       manager->add_nested_resource_ref(did);
       if (is_logical_owner())
@@ -2315,6 +2320,7 @@ namespace Legion {
       }
       if ((current_users != NULL) && current_users->remove_reference())
         delete current_users;
+#ifdef ENABLE_VIEW_REPLICATION
       if (repl_ptr.replicated_copies != NULL)
       {
 #ifdef DEBUG_LEGION
@@ -2326,6 +2332,7 @@ namespace Legion {
       }
 #ifdef DEBUG_LEGION
       assert(remote_pending_users == NULL);
+#endif
 #endif
     }
 
@@ -2492,6 +2499,7 @@ namespace Legion {
           runtime->send_view_register_user(logical_owner, rez);
           applied_events.insert(applied_event);
         }
+#ifdef ENABLE_VIEW_REPLICATION
         // If we have any local fields then we also need to update
         // them here too since the owner isn't going to send us any
         // updates itself, Do this after sending the message to make
@@ -2558,10 +2566,12 @@ namespace Legion {
         }
         if (remote_added_users >= user_cache_timeout)
           update_remote_replication_state(applied_events);
+#endif // ENABLE_VIEW_REPLICATION
         return ready_event;
       }
       else
       {
+#ifdef ENABLE_VIEW_REPLICATION
         // We need to hold a read-only copy of the replicated lock when
         // doing this in order to make sure it's atomic with any 
         // replication requests that arrive
@@ -2606,6 +2616,7 @@ namespace Legion {
             }
           }
         }
+#endif // ENABLE_VIEW_REPLICATION
         // Now we can do our local analysis
         std::set<ApEvent> wait_on_events;
         ApEvent start_use_event = manager->get_use_event();
@@ -2653,8 +2664,11 @@ namespace Legion {
         // Check to see if there are any replicated fields here which we
         // can handle locally so we don't have to send a message to the owner
         RtUserEvent ready_event;
+#ifdef ENABLE_VIEW_REPLICATION
         FieldMask new_remote_fields;
+#endif
         FieldMask request_mask(copy_mask);
+#ifdef ENABLE_VIEW_REPLICATION
         // See if we can handle this now while all the fields are local
         {
           AutoLock r_lock(replicated_lock,1,false/*exclusive*/);
@@ -2702,6 +2716,7 @@ namespace Legion {
           }
         }
         if (!!request_mask)
+#endif // ENABLE_VIEW_REPLICATION
         {
           // All the fields are not local, first send the request to 
           // the owner to do the analysis since we're going to need 
@@ -2723,6 +2738,7 @@ namespace Legion {
             rez.serialize<bool>(trace_recording);
           }
           runtime->send_view_find_copy_preconditions_request(logical_owner,rez);
+#ifdef ENABLE_VIEW_REPLICATION
 #ifndef DISABLE_VIEW_REPLICATION
           // Need the lock for this next part
           AutoLock r_lock(replicated_lock);
@@ -2762,7 +2778,9 @@ namespace Legion {
             aggregator.record_reference_mutation_effect(request_event);
           }
 #endif
+#endif
         }
+#ifdef ENABLE_VIEW_REPLICATION
         else if (!!new_remote_fields)
         {
           AutoLock r_lock(replicated_lock);
@@ -2770,6 +2788,7 @@ namespace Legion {
           remote_copy_pre_fields |= (new_remote_fields & replicated_fields);
           // Then fall through like normal
         }
+#endif
         return ready_event;
       }
       else
@@ -2861,6 +2880,7 @@ namespace Legion {
           runtime->send_view_add_copy_user(logical_owner, rez);
           applied_events.insert(applied_event);
         }
+#ifdef ENABLE_VIEW_REPLICATION
         AutoLock r_lock(replicated_lock);
         // Only need to add it if it's still replicated
         const FieldMask local_mask = copy_mask & replicated_fields;
@@ -2924,9 +2944,11 @@ namespace Legion {
         }
         if (remote_added_users >= user_cache_timeout)
           update_remote_replication_state(applied_events);
+#endif // ENABLE_VIEW_REPLICATION
       }
       else
       {
+#ifdef ENABLE_VIEW_REPLICATION
         // We need to hold this lock in read-only mode to properly
         // synchronize this with any replication requests that arrive
         AutoLock r_lock(replicated_lock,1,false/*exclusive*/);
@@ -2967,6 +2989,7 @@ namespace Legion {
             }
           }
         }
+#endif
         // Now we can do our local analysis
         const RegionUsage usage(reading ? READ_ONLY : READ_WRITE, EXCLUSIVE, 0);
         add_internal_copy_user(usage, copy_expr, copy_mask, term_event, 
@@ -2974,6 +2997,7 @@ namespace Legion {
       }
     }
 
+#ifdef ENABLE_VIEW_REPLICATION
     //--------------------------------------------------------------------------
     void MaterializedView::process_replication_request(AddressSpaceID source,
                                                   const FieldMask &request_mask,
@@ -3125,6 +3149,7 @@ namespace Legion {
       else
         replicated_fields = repl_ptr.replicated_copies->begin()->second;
     }
+#endif // ENABLE_VIEW_REPLICATION
  
     //--------------------------------------------------------------------------
     void MaterializedView::notify_active(ReferenceMutator *mutator)
@@ -3477,6 +3502,7 @@ namespace Legion {
       }
     }
 
+#ifdef ENABLE_VIEW_REPLICATION
     //--------------------------------------------------------------------------
     void MaterializedView::update_remote_replication_state(
                                               std::set<RtEvent> &applied_events)
@@ -3545,6 +3571,7 @@ namespace Legion {
       // Record that these fields are no longer replicated 
       replicated_fields -= deactivate_mask;
     }
+#endif // ENABLE_VIEW_REPLICATION
 
     //--------------------------------------------------------------------------
     void MaterializedView::send_view(AddressSpaceID target)

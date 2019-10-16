@@ -200,12 +200,12 @@ namespace Legion {
       FieldID allocate_field(size_t field_size, 
                              FieldID desired_fieldid,
                              CustomSerdezID serdez_id, bool local);
-      void free_field(FieldID fid);
+      void free_field(FieldID fid, const bool unordered);
     public:
       void allocate_fields(const std::vector<size_t> &field_sizes,
                            std::vector<FieldID> &resulting_fields,
                            CustomSerdezID serdez_id, bool local);
-      void free_fields(const std::set<FieldID> &to_free);
+      void free_fields(const std::set<FieldID> &to_free, const bool unordered);
     public:
       const FieldSpace field_space;
       TaskContext *const context;
@@ -1961,9 +1961,11 @@ namespace Legion {
                                     const std::vector<IndexSpace> &spaces);
       IndexSpace subtract_index_spaces(Context ctx,
                                     IndexSpace left, IndexSpace right);
-      void destroy_index_space(Context ctx, IndexSpace handle);
+      void destroy_index_space(Context ctx, IndexSpace handle,
+                               const bool unordered);
     public:
-      void destroy_index_partition(Context ctx, IndexPartition handle);
+      void destroy_index_partition(Context ctx, IndexPartition handle,
+                                   const bool unordered);
     public:
       IndexPartition create_equal_partition(Context ctx, IndexSpace parent,
                                             IndexSpace color_space, 
@@ -2137,7 +2139,8 @@ namespace Legion {
                      const void *realm_point, TypeTag type_tag);
     public:
       FieldSpace create_field_space(Context ctx);
-      void destroy_field_space(Context ctx, FieldSpace handle);
+      void destroy_field_space(Context ctx, FieldSpace handle,
+                               const bool unordered);
       size_t get_field_size(Context ctx, FieldSpace handle, FieldID fid);
       size_t get_field_size(FieldSpace handle, FieldID fid);
       void get_field_space_fields(Context ctx, FieldSpace handle,
@@ -2147,8 +2150,10 @@ namespace Legion {
     public:
       LogicalRegion create_logical_region(Context ctx, IndexSpace index,
                                           FieldSpace fields, bool task_local);
-      void destroy_logical_region(Context ctx, LogicalRegion handle);
-      void destroy_logical_partition(Context ctx, LogicalPartition handle);
+      void destroy_logical_region(Context ctx, LogicalRegion handle,
+                                  const bool unordered);
+      void destroy_logical_partition(Context ctx, LogicalPartition handle,
+                                     const bool unordered);
     public:
       LogicalPartition get_logical_partition(Context ctx, LogicalRegion parent, 
                                              IndexPartition handle);
@@ -2233,7 +2238,7 @@ namespace Legion {
       PhysicalRegion attach_external_resource(Context ctx,
                                               const AttachLauncher &launcher);
       Future detach_external_resource(Context ctx, PhysicalRegion region, 
-                                      const bool flush);
+                                      const bool flush, const bool unordered);
       void issue_copy_operation(Context ctx, const CopyLauncher &launcher);
       void issue_copy_operation(Context ctx, const IndexCopyLauncher &launcher);
     public:
@@ -2535,10 +2540,12 @@ namespace Legion {
       void send_view_find_copy_preconditions_response(AddressSpaceID target,
                                                       Serializer &rez);
       void send_view_add_copy_user(AddressSpaceID target, Serializer &rez);
+#ifdef ENABLE_VIEW_REPLICATION
       void send_view_replication_request(AddressSpaceID target,Serializer &rez);
       void send_view_replication_response(AddressSpaceID target,
                                           Serializer &rez);
       void send_view_replication_removal(AddressSpaceID target,Serializer &rez);
+#endif
       void send_future_result(AddressSpaceID target, Serializer &rez);
       void send_future_subscription(AddressSpaceID target, Serializer &rez);
       void send_future_map_request_future(AddressSpaceID target, 
@@ -2792,11 +2799,13 @@ namespace Legion {
       void handle_view_copy_pre_response(Deserializer &derez,
                                          AddressSpaceID source);
       void handle_view_add_copy_user(Deserializer &derez,AddressSpaceID source);
+#ifdef ENABLE_VIEW_REPLICATION
       void handle_view_replication_request(Deserializer &derez,
                                            AddressSpaceID source);
       void handle_view_replication_response(Deserializer &derez);
       void handle_view_replication_removal(Deserializer &derez, 
                                            AddressSpaceID source);
+#endif
       void handle_manager_request(Deserializer &derez, AddressSpaceID source);
       void handle_future_result(Deserializer &derez);
       void handle_future_subscription(Deserializer &derez, 
@@ -3004,7 +3013,8 @@ namespace Legion {
       void activate_context(InnerContext *context);
       void deactivate_context(InnerContext *context);
     public:
-      void add_to_dependence_queue(TaskContext *ctx, Processor p,Operation *op);
+      void add_to_dependence_queue(TaskContext *ctx, Processor p,
+                                   Operation *op, const bool unordered = false);
       void add_to_ready_queue(Processor p, TaskOp *task_op, 
                               RtEvent wait_on = RtEvent::NO_RT_EVENT);
       void add_to_local_queue(Processor p, Operation *op, LgPriority priority,

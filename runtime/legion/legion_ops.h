@@ -284,6 +284,7 @@ namespace Legion {
       void initialize_mapping_path(RegionTreePath &path,
                                    const RegionRequirement &req,
                                    LogicalPartition start_node);
+      void set_tracking_parent(size_t index);
       void set_trace(LegionTrace *trace, bool is_tracing,
                      const std::vector<StaticDependence> *dependences);
       void set_trace_local_id(unsigned id);
@@ -1430,19 +1431,25 @@ namespace Legion {
       DeletionOp& operator=(const DeletionOp &rhs);
     public:
       void initialize_index_space_deletion(InnerContext *ctx, IndexSpace handle,
-                                   std::vector<IndexPartition> &sub_partitions);
+                                   std::vector<IndexPartition> &sub_partitions,
+                                   const bool unordered);
       void initialize_index_part_deletion(InnerContext *ctx,IndexPartition part,
-                                   std::vector<IndexPartition> &sub_partitions);
+                                   std::vector<IndexPartition> &sub_partitions,
+                                   const bool unordered);
       void initialize_field_space_deletion(InnerContext *ctx,
-                                           FieldSpace handle);
+                                           FieldSpace handle,
+                                           const bool unordered);
       void initialize_field_deletion(InnerContext *ctx, FieldSpace handle,
-                                     FieldID fid);
+                                     FieldID fid, const bool unordered);
       void initialize_field_deletions(InnerContext *ctx, FieldSpace handle,
-                                      const std::set<FieldID> &to_free);
+                                      const std::set<FieldID> &to_free,
+                                      const bool unordered);
       void initialize_logical_region_deletion(InnerContext *ctx, 
-                                              LogicalRegion handle);
+                                              LogicalRegion handle,
+                                              const bool unordered);
       void initialize_logical_partition_deletion(InnerContext *ctx, 
-                                                 LogicalPartition handle);
+                                                 LogicalPartition handle,
+                                                 const bool unordered);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -3143,8 +3150,8 @@ namespace Legion {
     public:
       DetachOp& operator=(const DetachOp &rhs);
     public:
-      Future initialize_detach(InnerContext *ctx, 
-                               PhysicalRegion region, const bool flush);
+      Future initialize_detach(InnerContext *ctx, PhysicalRegion region,
+                               const bool flush, const bool unordered);
     public:
       void activate_detach_op(void);
       void deactivate_detach_op(void);

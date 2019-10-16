@@ -3383,7 +3383,8 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
-    void InnerContext::destroy_index_space(IndexSpace handle)
+    void InnerContext::destroy_index_space(IndexSpace handle, 
+                                           const bool unordered)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -3430,12 +3431,14 @@ namespace Legion {
         }
       }
       DeletionOp *op = runtime->get_available_deletion_op();
-      op->initialize_index_space_deletion(this, handle, sub_partitions);
-      runtime->add_to_dependence_queue(this, executing_processor, op);
+      op->initialize_index_space_deletion(this, handle, 
+                                          sub_partitions, unordered);
+      runtime->add_to_dependence_queue(this, executing_processor, op,unordered);
     }
 
     //--------------------------------------------------------------------------
-    void InnerContext::destroy_index_partition(IndexPartition handle)
+    void InnerContext::destroy_index_partition(IndexPartition handle,
+                                               const bool unordered)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -3475,8 +3478,9 @@ namespace Legion {
         }
       }
       DeletionOp *op = runtime->get_available_deletion_op();
-      op->initialize_index_part_deletion(this, handle, sub_partitions);
-      runtime->add_to_dependence_queue(this, executing_processor, op);
+      op->initialize_index_part_deletion(this, handle, 
+                                         sub_partitions, unordered);
+      runtime->add_to_dependence_queue(this, executing_processor, op,unordered);
     }
 
     //--------------------------------------------------------------------------
@@ -4383,7 +4387,8 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
-    void InnerContext::destroy_field_space(FieldSpace handle)
+    void InnerContext::destroy_field_space(FieldSpace handle,
+                                           const bool unordered)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -4441,8 +4446,8 @@ namespace Legion {
         }
       }
       DeletionOp *op = runtime->get_available_deletion_op();
-      op->initialize_field_space_deletion(this, handle);
-      runtime->add_to_dependence_queue(this, executing_processor, op);
+      op->initialize_field_space_deletion(this, handle, unordered);
+      runtime->add_to_dependence_queue(this, executing_processor, op,unordered);
     } 
 
     //--------------------------------------------------------------------------
@@ -4571,7 +4576,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InnerContext::free_field(FieldSpace space, FieldID fid)
+    void InnerContext::free_field(FieldSpace space, FieldID fid,
+                                  const bool unordered)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -4598,13 +4604,14 @@ namespace Legion {
       }
       // Launch off the deletion operation
       DeletionOp *op = runtime->get_available_deletion_op();
-      op->initialize_field_deletion(this, space, fid);
-      runtime->add_to_dependence_queue(this, executing_processor, op);
+      op->initialize_field_deletion(this, space, fid, unordered);
+      runtime->add_to_dependence_queue(this, executing_processor, op,unordered);
     } 
 
     //--------------------------------------------------------------------------
     void InnerContext::free_fields(FieldSpace space, 
-                                   const std::set<FieldID> &to_free)
+                                   const std::set<FieldID> &to_free,
+                                   const bool unordered)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -4637,12 +4644,13 @@ namespace Legion {
       if (free_now.empty())
         return;
       DeletionOp *op = runtime->get_available_deletion_op();
-      op->initialize_field_deletions(this, space, free_now);
-      runtime->add_to_dependence_queue(this, executing_processor, op);
+      op->initialize_field_deletions(this, space, free_now, unordered);
+      runtime->add_to_dependence_queue(this, executing_processor, op,unordered);
     }
 
     //--------------------------------------------------------------------------
-    void InnerContext::destroy_logical_region(LogicalRegion handle)
+    void InnerContext::destroy_logical_region(LogicalRegion handle,
+                                              const bool unordered)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -4684,12 +4692,13 @@ namespace Legion {
         }
       }
       DeletionOp *op = runtime->get_available_deletion_op();
-      op->initialize_logical_region_deletion(this, handle);
-      runtime->add_to_dependence_queue(this, executing_processor, op);
+      op->initialize_logical_region_deletion(this, handle, unordered);
+      runtime->add_to_dependence_queue(this, executing_processor, op,unordered);
     }
 
     //--------------------------------------------------------------------------
-    void InnerContext::destroy_logical_partition(LogicalPartition handle)
+    void InnerContext::destroy_logical_partition(LogicalPartition handle,
+                                                 const bool unordered)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -4700,8 +4709,8 @@ namespace Legion {
                        handle.field_space.id, get_task_name(), get_unique_id());
 #endif
       DeletionOp *op = runtime->get_available_deletion_op();
-      op->initialize_logical_partition_deletion(this, handle);
-      runtime->add_to_dependence_queue(this, executing_processor, op);
+      op->initialize_logical_partition_deletion(this, handle, unordered);
+      runtime->add_to_dependence_queue(this, executing_processor, op,unordered);
     } 
 
     //--------------------------------------------------------------------------
@@ -5356,22 +5365,23 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Future InnerContext::detach_resource(PhysicalRegion region,const bool flush)
+    Future InnerContext::detach_resource(PhysicalRegion region,const bool flush,
+                                         const bool unordered)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
       // Make sure this region is valid before we try to detach it
       if (!region.is_valid())
         region.wait_until_valid(true/*silence warnings*/);
-      DetachOp *detach_op = runtime->get_available_detach_op();
-      Future result = detach_op->initialize_detach(this, region, flush);
+      DetachOp *op = runtime->get_available_detach_op();
+      Future result = op->initialize_detach(this,region,flush,unordered);
       // If the region is still mapped, then unmap it
       if (region.is_mapped())
       {
         unregister_inline_mapped_region(region);
         region.impl->unmap_region();
       }
-      runtime->add_to_dependence_queue(this, executing_processor, detach_op);
+      runtime->add_to_dependence_queue(this, executing_processor, op,unordered);
       return result;
     }
 
@@ -5736,6 +5746,24 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void InnerContext::insert_unordered_ops(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!unordered_ops.empty());
+      assert(current_trace == NULL);
+#endif
+      for (std::vector<Operation*>::const_iterator it = 
+            unordered_ops.begin(); it != unordered_ops.end(); it++)
+      {
+        (*it)->set_tracking_parent(total_children_count++);
+        dependence_queue.push_back(*it);
+      }
+      __sync_fetch_and_add(&outstanding_children_count, unordered_ops.size());
+      unordered_ops.clear();
+    }
+
+    //--------------------------------------------------------------------------
     size_t InnerContext::register_new_close_operation(CloseOp *op)
     //--------------------------------------------------------------------------
     {
@@ -5885,12 +5913,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InnerContext::add_to_dependence_queue(Operation *op)
+    void InnerContext::add_to_dependence_queue(Operation *op, bool unordered)
     //--------------------------------------------------------------------------
     {
-      LgPriority priority = LG_THROUGHPUT_WORK_PRIORITY;
+      LgPriority priority = LG_THROUGHPUT_WORK_PRIORITY; 
       // If this is tracking, add it to our data structure first
-      if (op->is_tracking_parent())
+      if (op->is_tracking_parent() || unordered)
       {
         AutoLock child_lock(child_op_lock);
 #ifdef DEBUG_LEGION
@@ -5905,10 +5933,18 @@ namespace Legion {
         if (!currently_active_context)
           priority = LG_THROUGHPUT_DEFERRED_PRIORITY;
       }
+      
       bool issue_task = false;
       RtEvent precondition;
       {
         AutoLock d_lock(dependence_lock);
+        if (unordered)
+        {
+          // If this is unordered, stick it on the list of 
+          // unordered ops to be added later and then we're done
+          unordered_ops.push_back(op);
+          return;
+        }
         if (!outstanding_dependence)
         {
 #ifdef DEBUG_LEGION
@@ -5920,6 +5956,10 @@ namespace Legion {
           dependence_precondition = RtEvent::NO_RT_EVENT;
         }
         dependence_queue.push_back(op);
+        // If we have any unordered ops and we're not in the middle of
+        // a trace then add them into the queue
+        if (!unordered_ops.empty() && (current_trace == NULL))
+          insert_unordered_ops();
       }
       if (issue_task)
       {
@@ -7621,7 +7661,7 @@ namespace Legion {
     void InnerContext::end_task(const void *res, size_t res_size, bool owned,
                                 PhysicalInstance deferred_result_instance)
     //--------------------------------------------------------------------------
-    {
+    { 
       // See if we have any local regions or fields that need to be deallocated
       std::vector<LogicalRegion> local_regions_to_delete;
       std::map<FieldSpace,std::set<FieldID> > local_fields_to_delete;
@@ -7641,21 +7681,21 @@ namespace Legion {
         for (std::vector<LogicalRegion>::const_iterator it = 
               local_regions_to_delete.begin(); it != 
               local_regions_to_delete.end(); it++)
-          destroy_logical_region(*it);
+          destroy_logical_region(*it, false/*unordered*/);
       }
       if (!local_fields_to_delete.empty())
       {
         for (std::map<FieldSpace,std::set<FieldID> >::const_iterator it = 
               local_fields_to_delete.begin(); it !=
               local_fields_to_delete.end(); it++)
-          free_fields(it->first, it->second);
+          free_fields(it->first, it->second, false/*unordered*/);
       }
       if (!index_launch_spaces.empty())
       {
         for (std::map<Domain,IndexSpace>::const_iterator it = 
               index_launch_spaces.begin(); it != 
               index_launch_spaces.end(); it++)
-          destroy_index_space(it->second);
+          destroy_index_space(it->second, false/*unordered*/);
       }
       if (overhead_tracker != NULL)
       {
@@ -7721,7 +7761,7 @@ namespace Legion {
       if (current_trace != NULL)
         REPORT_LEGION_ERROR(ERROR_TASK_FAILED_END_TRACE,
           "Task %s (UID %lld) failed to end trace before exiting!",
-                        get_task_name(), get_unique_id())
+                        get_task_name(), get_unique_id()) 
       // Unmap any of our mapped regions before issuing any close operations
       unmap_all_regions();
       const std::deque<InstanceSet> &physical_instances = 
@@ -7753,6 +7793,12 @@ namespace Legion {
           close_op->initialize(this, idx, regions[idx]);
           runtime->add_to_dependence_queue(this, executing_processor, close_op);
         }
+      }
+      // Check to see if we have any unordered operations that we need to inject
+      {
+        AutoLock d_lock(dependence_lock);
+        if (!unordered_ops.empty())
+          insert_unordered_ops();
       }
       // Mark that we are done executing this operation
       // We're not actually done until we have registered our pending
@@ -8972,7 +9018,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplicateContext::destroy_index_space(IndexSpace handle)
+    void ReplicateContext::destroy_index_space(IndexSpace handle,
+                                               const bool unordered)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -9020,15 +9067,17 @@ namespace Legion {
         }
       }
       ReplDeletionOp *op = runtime->get_available_repl_deletion_op();
-      op->initialize_index_space_deletion(this, handle, sub_partitions);
+      op->initialize_index_space_deletion(this, handle, 
+                                          sub_partitions, unordered);
       op->initialize_replication(this, deletion_barrier, 
                       shard_manager->is_total_sharding(),
                       shard_manager->is_first_local_shard(owner_shard));
-      runtime->add_to_dependence_queue(this, executing_processor, op);
+      runtime->add_to_dependence_queue(this, executing_processor, op,unordered);
     }
 
     //--------------------------------------------------------------------------
-    void ReplicateContext::destroy_index_partition(IndexPartition handle)
+    void ReplicateContext::destroy_index_partition(IndexPartition handle,
+                                                   const bool unordered)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -9069,11 +9118,12 @@ namespace Legion {
         }
       }
       ReplDeletionOp *op = runtime->get_available_repl_deletion_op();
-      op->initialize_index_part_deletion(this, handle, sub_partitions);
+      op->initialize_index_part_deletion(this, handle, 
+                                         sub_partitions, unordered);
       op->initialize_replication(this, deletion_barrier, 
                       shard_manager->is_total_sharding(),
                       shard_manager->is_first_local_shard(owner_shard));
-      runtime->add_to_dependence_queue(this, executing_processor, op);
+      runtime->add_to_dependence_queue(this, executing_processor, op,unordered);
     }
 
     //--------------------------------------------------------------------------
@@ -10853,7 +10903,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplicateContext::destroy_field_space(FieldSpace handle)
+    void ReplicateContext::destroy_field_space(FieldSpace handle,
+                                               const bool unordered)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -10912,11 +10963,11 @@ namespace Legion {
         }
       }
       ReplDeletionOp *op = runtime->get_available_repl_deletion_op();
-      op->initialize_field_space_deletion(this, handle);
+      op->initialize_field_space_deletion(this, handle, unordered);
       op->initialize_replication(this, deletion_barrier, 
                       shard_manager->is_total_sharding(),
                       shard_manager->is_first_local_shard(owner_shard));
-      runtime->add_to_dependence_queue(this, executing_processor, op);
+      runtime->add_to_dependence_queue(this, executing_processor, op,unordered);
     }
 
     //--------------------------------------------------------------------------
@@ -10967,7 +11018,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplicateContext::free_field(FieldSpace space, FieldID fid)
+    void ReplicateContext::free_field(FieldSpace space, FieldID fid,
+                                      const bool unordered)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -10993,11 +11045,11 @@ namespace Legion {
         }
       }
       ReplDeletionOp *op = runtime->get_available_repl_deletion_op();
-      op->initialize_field_deletion(this, space, fid);
+      op->initialize_field_deletion(this, space, fid, unordered);
       op->initialize_replication(this, deletion_barrier, 
                       shard_manager->is_total_sharding(),
                       shard_manager->is_first_local_shard(owner_shard));
-      runtime->add_to_dependence_queue(this, executing_processor, op);
+      runtime->add_to_dependence_queue(this, executing_processor, op,unordered);
     }
 
     //--------------------------------------------------------------------------
@@ -11071,7 +11123,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ReplicateContext::free_fields(FieldSpace space, 
-                                       const std::set<FieldID> &to_free)
+                                       const std::set<FieldID> &to_free,
+                                       const bool unordered)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -11104,11 +11157,11 @@ namespace Legion {
       if (free_now.empty())
         return;
       ReplDeletionOp *op = runtime->get_available_repl_deletion_op();
-      op->initialize_field_deletions(this, space, free_now);
+      op->initialize_field_deletions(this, space, free_now, unordered);
       op->initialize_replication(this, deletion_barrier, 
                       shard_manager->is_total_sharding(),
                       shard_manager->is_first_local_shard(owner_shard));
-      runtime->add_to_dependence_queue(this, executing_processor, op);
+      runtime->add_to_dependence_queue(this, executing_processor, op,unordered);
     }
 
     //--------------------------------------------------------------------------
@@ -11168,7 +11221,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplicateContext::destroy_logical_region(LogicalRegion handle)
+    void ReplicateContext::destroy_logical_region(LogicalRegion handle,
+                                                  const bool unordered)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -11211,15 +11265,16 @@ namespace Legion {
         }
       }
       ReplDeletionOp *op = runtime->get_available_repl_deletion_op();
-      op->initialize_logical_region_deletion(this, handle);
+      op->initialize_logical_region_deletion(this, handle, unordered);
       op->initialize_replication(this, deletion_barrier, 
                       shard_manager->is_total_sharding(),
                       shard_manager->is_first_local_shard(owner_shard));
-      runtime->add_to_dependence_queue(this, executing_processor, op);
+      runtime->add_to_dependence_queue(this, executing_processor, op,unordered);
     }
 
     //--------------------------------------------------------------------------
-    void ReplicateContext::destroy_logical_partition(LogicalPartition handle)
+    void ReplicateContext::destroy_logical_partition(LogicalPartition handle,
+                                                     const bool unordered)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -11231,11 +11286,11 @@ namespace Legion {
                          get_unique_id());
 #endif
       ReplDeletionOp *op = runtime->get_available_repl_deletion_op();
-      op->initialize_logical_partition_deletion(this, handle);
+      op->initialize_logical_partition_deletion(this, handle, unordered);
       op->initialize_replication(this, deletion_barrier, 
                       shard_manager->is_total_sharding(),
                       shard_manager->is_first_local_shard(owner_shard));
-      runtime->add_to_dependence_queue(this, executing_processor, op);
+      runtime->add_to_dependence_queue(this, executing_processor, op,unordered);
     }
 
     //--------------------------------------------------------------------------
@@ -11806,20 +11861,20 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     Future ReplicateContext::detach_resource(PhysicalRegion region, 
-                                             const bool flush)
+                                         const bool flush, const bool unordered)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      ReplDetachOp *detach_op = runtime->get_available_repl_detach_op();
-      Future result = detach_op->initialize_detach(this, region, flush);
-      detach_op->initialize_replication(this, external_resource_barrier); 
+      ReplDetachOp *op = runtime->get_available_repl_detach_op();
+      Future result = op->initialize_detach(this, region, flush, unordered);
+      op->initialize_replication(this, external_resource_barrier); 
       // If the region is still mapped, then unmap it
       if (region.is_mapped())
       {
         unregister_inline_mapped_region(region);
         region.impl->unmap_region();
       }
-      runtime->add_to_dependence_queue(this, executing_processor, detach_op);
+      runtime->add_to_dependence_queue(this, executing_processor, op,unordered);
       return result;
     }
 
@@ -14131,7 +14186,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LeafContext::destroy_index_space(IndexSpace handle)
+    void LeafContext::destroy_index_space(IndexSpace handle, 
+                                          const bool unordered)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -14146,7 +14202,7 @@ namespace Legion {
       // Check to see if this is one that we should be allowed to destory
       bool has_created = true;
       {
-        // No need for the lock since this is a leaf context
+        AutoLock priv_lock(privilege_lock);
         std::set<IndexSpace>::iterator finder = 
           created_index_spaces.find(handle);
         if (finder != created_index_spaces.end())
@@ -14170,20 +14226,21 @@ namespace Legion {
                                            preconditions);
       if (!preconditions.empty())
       {
-        const RtEvent wait_on = Runtime::merge_events(preconditions);
-        wait_on.wait();
+        AutoLock l_lock(leaf_lock);
+        deletion_events.insert(preconditions.begin(), preconditions.end());
       }
     }
 
     //--------------------------------------------------------------------------
-    void LeafContext::destroy_index_partition(IndexPartition handle)
+    void LeafContext::destroy_index_partition(IndexPartition handle,
+                                              const bool unordered)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
       // Check to see if this is one that we should be allowed to destory
       bool has_created = true;
       {
-        // No need for a lock since this is a leaf context
+        AutoLock priv_lock(privilege_lock);
         std::set<IndexPartition>::iterator finder = 
           created_index_partitions.find(handle);
         if (finder != created_index_partitions.end())
@@ -14223,8 +14280,8 @@ namespace Legion {
                                                preconditions);
       if (!preconditions.empty())
       {
-        const RtEvent wait_on = Runtime::merge_events(preconditions);
-        wait_on.wait();
+        AutoLock l_lock(leaf_lock);
+        deletion_events.insert(preconditions.begin(), preconditions.end());
       }
     }
 
@@ -14534,14 +14591,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LeafContext::destroy_field_space(FieldSpace handle)
+    void LeafContext::destroy_field_space(FieldSpace handle, 
+                                          const bool unordered)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
       // Check to see if this is one that we should be allowed to destory
       bool has_created = true;
       {
-        // No need for a lock since this is a leaf context
+        AutoLock priv_lock(privilege_lock);
         std::set<FieldSpace>::iterator finder = 
           created_field_spaces.find(handle);
         if (finder != created_field_spaces.end())
@@ -14565,19 +14623,20 @@ namespace Legion {
                                            preconditions);
       if (!preconditions.empty())
       {
-        const RtEvent wait_on = Runtime::merge_events(preconditions);
-        wait_on.wait();
+        AutoLock l_lock(leaf_lock);
+        deletion_events.insert(preconditions.begin(), preconditions.end());
       }
     }
 
     //--------------------------------------------------------------------------
-    void LeafContext::free_field(FieldSpace space, FieldID fid)
+    void LeafContext::free_field(FieldSpace space, FieldID fid,
+                                 const bool unordered)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
       bool has_created = true;
       {
-        // No need for the lock since this is a leaf context
+        AutoLock priv_lock(privilege_lock);
         const std::pair<FieldSpace,FieldID> key(space, fid);
         std::set<std::pair<FieldSpace,FieldID> >::iterator finder = 
           created_fields.find(key);
@@ -14598,20 +14657,21 @@ namespace Legion {
       runtime->forest->free_field(space, fid, preconditions);
       if (!preconditions.empty())
       {
-        const RtEvent wait_on = Runtime::merge_events(preconditions);
-        wait_on.wait();
+        AutoLock l_lock(leaf_lock);
+        deletion_events.insert(preconditions.begin(), preconditions.end());
       }
     }
 
     //--------------------------------------------------------------------------
     void LeafContext::free_fields(FieldSpace space, 
-                                  const std::set<FieldID> &to_free)
+                                  const std::set<FieldID> &to_free,
+                                  const bool unordered)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
       long bad_fid = -1;
       {
-        // No need for the lock since this is a leaf context 
+        AutoLock priv_lock(privilege_lock);
         for (std::set<FieldID>::const_iterator it = 
               to_free.begin(); it != to_free.end(); it++)
         {
@@ -14642,8 +14702,8 @@ namespace Legion {
       runtime->forest->free_fields(space, field_vec, preconditions);
       if (!preconditions.empty())
       {
-        const RtEvent wait_on = Runtime::merge_events(preconditions);
-        wait_on.wait();
+        AutoLock l_lock(leaf_lock);
+        deletion_events.insert(preconditions.begin(), preconditions.end());
       }
     }
 
@@ -14672,7 +14732,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LeafContext::destroy_logical_region(LogicalRegion handle)
+    void LeafContext::destroy_logical_region(LogicalRegion handle,
+                                             const bool unordered)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -14688,7 +14749,7 @@ namespace Legion {
       // Check to see if this is one that we should be allowed to destory
       bool has_created = true;
       {
-        // No need for a lock since this is a leaf context
+        AutoLock priv_lock(privilege_lock);
         std::set<LogicalRegion>::iterator finder = created_regions.find(handle);
         if (finder == created_regions.end())
           has_created = false;
@@ -14713,13 +14774,14 @@ namespace Legion {
                                               preconditions);
       if (!preconditions.empty())
       {
-        const RtEvent wait_on = Runtime::merge_events(preconditions);
-        wait_on.wait();
+        AutoLock l_lock(leaf_lock);
+        deletion_events.insert(preconditions.begin(), preconditions.end());
       }
     }
 
     //--------------------------------------------------------------------------
-    void LeafContext::destroy_logical_partition(LogicalPartition handle)
+    void LeafContext::destroy_logical_partition(LogicalPartition handle,
+                                                const bool unordered)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -14734,8 +14796,8 @@ namespace Legion {
                                                  preconditions);
       if (!preconditions.empty())
       {
-        const RtEvent wait_on = Runtime::merge_events(preconditions);
-        wait_on.wait();
+        AutoLock l_lock(leaf_lock);
+        deletion_events.insert(preconditions.begin(), preconditions.end());
       }
     }
 
@@ -14885,7 +14947,8 @@ namespace Legion {
     }
     
     //--------------------------------------------------------------------------
-    Future LeafContext::detach_resource(PhysicalRegion region, const bool flush)
+    Future LeafContext::detach_resource(PhysicalRegion region, const bool flush,
+                                        const bool unordered)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_DETACH_RESOURCE_OPERATION,
@@ -15100,7 +15163,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LeafContext::add_to_dependence_queue(Operation *op)
+    void LeafContext::add_to_dependence_queue(Operation *op, bool unordered)
     //--------------------------------------------------------------------------
     {
       assert(false);
@@ -15424,6 +15487,11 @@ namespace Legion {
         if (it->is_mapped())
           it->impl->unmap_region();
       }
+      if (!deletion_events.empty())
+      {
+        const RtEvent wait_on = Runtime::merge_events(deletion_events);
+        wait_on.wait();
+      }
       // Mark that we are done executing this operation
       // We're not actually done until we have registered our pending
       // decrement of our parent task and recorded any profiling
@@ -15687,17 +15755,19 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InlineContext::destroy_index_space(IndexSpace handle)
+    void InlineContext::destroy_index_space(IndexSpace handle, 
+                                            const bool unordered)
     //--------------------------------------------------------------------------
     {
-      enclosing->destroy_index_space(handle);
+      enclosing->destroy_index_space(handle, unordered);
     }
 
     //--------------------------------------------------------------------------
-    void InlineContext::destroy_index_partition(IndexPartition handle)
+    void InlineContext::destroy_index_partition(IndexPartition handle,
+                                                const bool unordered)
     //--------------------------------------------------------------------------
     {
-      enclosing->destroy_index_partition(handle);
+      enclosing->destroy_index_partition(handle, unordered);
     }
 
     //--------------------------------------------------------------------------
@@ -15991,10 +16061,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InlineContext::destroy_field_space(FieldSpace handle)
+    void InlineContext::destroy_field_space(FieldSpace handle,
+                                            const bool unordered)
     //--------------------------------------------------------------------------
     {
-      enclosing->destroy_field_space(handle);
+      enclosing->destroy_field_space(handle, unordered);
     }
 
     //--------------------------------------------------------------------------
@@ -16007,10 +16078,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InlineContext::free_field(FieldSpace space, FieldID fid)
+    void InlineContext::free_field(FieldSpace space, FieldID fid,
+                                   const bool unordered)
     //--------------------------------------------------------------------------
     {
-      enclosing->free_field(space, fid);
+      enclosing->free_field(space, fid, unordered);
     }
 
     //--------------------------------------------------------------------------
@@ -16025,10 +16097,11 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void InlineContext::free_fields(FieldSpace space, 
-                                    const std::set<FieldID> &to_free)
+                                    const std::set<FieldID> &to_free,
+                                    const bool unordered)
     //--------------------------------------------------------------------------
     {
-      enclosing->free_fields(space, to_free);
+      enclosing->free_fields(space, to_free, unordered);
     }
 
     //--------------------------------------------------------------------------
@@ -16065,17 +16138,19 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InlineContext::destroy_logical_region(LogicalRegion handle)
+    void InlineContext::destroy_logical_region(LogicalRegion handle,
+                                               const bool unordered)
     //--------------------------------------------------------------------------
     {
-      return enclosing->destroy_logical_region(handle);
+      return enclosing->destroy_logical_region(handle, unordered);
     }
 
     //--------------------------------------------------------------------------
-    void InlineContext::destroy_logical_partition(LogicalPartition handle)
+    void InlineContext::destroy_logical_partition(LogicalPartition handle,
+                                                  const bool unordered)
     //--------------------------------------------------------------------------
     {
-      return enclosing->destroy_logical_partition(handle);
+      return enclosing->destroy_logical_partition(handle, unordered);
     }
 
     //--------------------------------------------------------------------------
@@ -16206,10 +16281,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     Future InlineContext::detach_resource(PhysicalRegion region, 
-                                          const bool flush)
+                                          const bool flush,const bool unordered)
     //--------------------------------------------------------------------------
     {
-      return enclosing->detach_resource(region, flush);
+      return enclosing->detach_resource(region, flush, unordered);
     }
 
     //--------------------------------------------------------------------------
@@ -16372,10 +16447,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InlineContext::add_to_dependence_queue(Operation *op)
+    void InlineContext::add_to_dependence_queue(Operation *op, bool unordered)
     //--------------------------------------------------------------------------
     {
-      enclosing->add_to_dependence_queue(op);
+      enclosing->add_to_dependence_queue(op, unordered);
     }
 
     //--------------------------------------------------------------------------

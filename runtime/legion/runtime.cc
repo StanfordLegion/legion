@@ -303,10 +303,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void FieldAllocatorImpl::free_field(FieldID fid)
+    void FieldAllocatorImpl::free_field(FieldID fid, const bool unordered)
     //--------------------------------------------------------------------------
     {
-      context->free_field(field_space, fid);
+      context->free_field(field_space, fid, unordered);
     }
 
     //--------------------------------------------------------------------------
@@ -321,10 +321,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void FieldAllocatorImpl::free_fields(const std::set<FieldID> &to_free)
+    void FieldAllocatorImpl::free_fields(const std::set<FieldID> &to_free,
+                                         const bool unordered)
     //--------------------------------------------------------------------------
     {
-      context->free_fields(field_space, to_free);
+      context->free_fields(field_space, to_free, unordered);
     }
 
     /////////////////////////////////////////////////////////////
@@ -7132,6 +7133,7 @@ namespace Legion {
               runtime->handle_view_add_copy_user(derez, remote_address_space);
               break;
             }
+#ifdef ENABLE_VIEW_REPLICATION
           case SEND_VIEW_REPLICATION_REQUEST:
             {
               runtime->handle_view_replication_request(derez, 
@@ -7149,6 +7151,7 @@ namespace Legion {
                                                        remote_address_space);
               break;
             }
+#endif
           case SEND_MANAGER_REQUEST:
             {
               runtime->handle_manager_request(derez, remote_address_space);
@@ -11889,24 +11892,25 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::destroy_index_space(Context ctx, IndexSpace handle)
+    void Runtime::destroy_index_space(Context ctx, IndexSpace handle,
+                                      const bool unordered)
     //--------------------------------------------------------------------------
     {
       if (!handle.exists())
         return;
       if (ctx == DUMMY_CONTEXT)
         REPORT_DUMMY_CONTEXT("Illegal dummy context destroy index space!");
-      ctx->destroy_index_space(handle);
+      ctx->destroy_index_space(handle, unordered);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::destroy_index_partition(Context ctx, 
-                                                   IndexPartition handle)
+    void Runtime::destroy_index_partition(Context ctx, IndexPartition handle,
+                                          const bool unordered)
     //--------------------------------------------------------------------------
     {
       if (ctx == DUMMY_CONTEXT)
         REPORT_DUMMY_CONTEXT("Illegal dummy context destroy index partition!");
-      ctx->destroy_index_partition(handle);
+      ctx->destroy_index_partition(handle, unordered);
     }
 
     //--------------------------------------------------------------------------
@@ -12781,12 +12785,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::destroy_field_space(Context ctx, FieldSpace handle)
+    void Runtime::destroy_field_space(Context ctx, FieldSpace handle,
+                                      const bool unordered)
     //--------------------------------------------------------------------------
     {
       if (ctx == DUMMY_CONTEXT)
         REPORT_DUMMY_CONTEXT("Illegal dummy context destroy field space!");
-      ctx->destroy_field_space(handle);
+      ctx->destroy_field_space(handle, unordered);
     }
 
     //--------------------------------------------------------------------------
@@ -12841,23 +12846,25 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::destroy_logical_region(Context ctx, LogicalRegion handle)
+    void Runtime::destroy_logical_region(Context ctx, LogicalRegion handle,
+                                         const bool unordered)
     //--------------------------------------------------------------------------
     {
       if (ctx == DUMMY_CONTEXT)
         REPORT_DUMMY_CONTEXT(
             "Illegal dummy context destroy logical region!");
-      ctx->destroy_logical_region(handle); 
+      ctx->destroy_logical_region(handle, unordered); 
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::destroy_logical_partition(Context ctx,LogicalPartition handle)
+    void Runtime::destroy_logical_partition(Context ctx,LogicalPartition handle,
+                                            const bool unordered)
     //--------------------------------------------------------------------------
     {
       if (ctx == DUMMY_CONTEXT)
         REPORT_DUMMY_CONTEXT(
             "Illegal dummy context destroy logical partition!");
-      ctx->destroy_logical_partition(handle); 
+      ctx->destroy_logical_partition(handle, unordered); 
     }
 
     //--------------------------------------------------------------------------
@@ -13296,13 +13303,13 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     Future Runtime::detach_external_resource(Context ctx, PhysicalRegion region,
-                                             const bool flush)
+                                         const bool flush, const bool unordered)
     //--------------------------------------------------------------------------
     {
       if (ctx == DUMMY_CONTEXT)
         REPORT_DUMMY_CONTEXT(
             "Illegal dummy context detach external resource!");
-      return ctx->detach_resource(region, flush);
+      return ctx->detach_resource(region, flush, unordered);
     }
 
     //--------------------------------------------------------------------------
@@ -16274,6 +16281,7 @@ namespace Legion {
                                          UPDATE_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
+#ifdef ENABLE_VIEW_REPLICATION
     //--------------------------------------------------------------------------
     void Runtime::send_view_replication_request(AddressSpaceID target,
                                                 Serializer &rez)
@@ -16300,6 +16308,7 @@ namespace Legion {
       find_messenger(target)->send_message(rez, SEND_VIEW_REPLICATION_REMOVAL,
                                        UPDATE_VIRTUAL_CHANNEL, true/*flush*/);
     }
+#endif
 
     //--------------------------------------------------------------------------
     void Runtime::send_future_result(AddressSpaceID target, Serializer &rez)
@@ -17793,6 +17802,7 @@ namespace Legion {
       PhysicalManager::handle_manager_request(derez, this, source);
     }
 
+#ifdef ENABLE_VIEW_REPLICATION
     //--------------------------------------------------------------------------
     void Runtime::handle_view_replication_request(Deserializer &derez,
                                                   AddressSpaceID source)
@@ -17815,6 +17825,7 @@ namespace Legion {
     {
       InstanceView::handle_view_replication_removal(derez, this, source);
     }
+#endif // ENABLE_VIEW_REPLICATION
 
     //--------------------------------------------------------------------------
     void Runtime::handle_future_result(Deserializer &derez)
@@ -19107,8 +19118,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::add_to_dependence_queue(TaskContext *ctx,
-                                          Processor p, Operation *op)
+    void Runtime::add_to_dependence_queue(TaskContext *ctx, Processor p, 
+                                          Operation *op, const bool unordered)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -19117,16 +19128,16 @@ namespace Legion {
       // Launch the task to perform the prepipeline stage for the operation
       if (op->has_prepipeline_stage())
         ctx->add_to_prepipeline_queue(op);
-      if (program_order_execution)
+      if (program_order_execution && !unordered)
       {
         ApEvent term_event = op->get_completion_event();
-        ctx->add_to_dependence_queue(op);
+        ctx->add_to_dependence_queue(op, false/*unordered*/);
         ctx->begin_task_wait(true/*from runtime*/);
         term_event.wait();
         ctx->end_task_wait();
       }
       else
-        ctx->add_to_dependence_queue(op);
+        ctx->add_to_dependence_queue(op, unordered);
     }
     
     //--------------------------------------------------------------------------
