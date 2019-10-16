@@ -272,6 +272,7 @@ static int payload_count = 0;
 
 Realm::Logger log_amsg("activemsg");
 Realm::Logger log_spill("spill");
+Realm::Logger log_amhandler("amhandler");
 
 #ifdef ACTIVE_MESSAGE_TRACE
 Realm::Logger log_amsg_trace("amtrace");
@@ -906,7 +907,7 @@ size_t get_lmb_size(NodeID target_node)
 }
 
 #ifdef DETAILED_MESSAGE_TIMING
-static const size_t DEFAULT_MESSAGE_MAX_COUNT = 4 << 20;  // 4 million messages should be plenty
+static const size_t DEFAULT_MESSAGE_MAX_COUNT = 16 << 20;  // 16 million messages should be plenty
 
 // some helper state to make sure we don't repeatedly log stall conditions
 enum {
@@ -940,8 +941,8 @@ public:
 
 struct MessageTimingData {
 public:
-  unsigned char msg_id;
-  char write_lmb;
+  unsigned short msg_id;
+  //char write_lmb;
   unsigned short target;
   unsigned msg_size;
   long long start;
@@ -982,13 +983,13 @@ public:
       return -1;
   }
 
-  void record(int index, int peer, unsigned char msg_id, char write_lmb, unsigned msg_size, unsigned queue_depth,
+  void record(int index, int peer, unsigned short msg_id, char write_lmb, unsigned msg_size, unsigned queue_depth,
 	      const CurrentTime& t_start, const CurrentTime& t_end)
   {
     if((index >= 0) && (index < message_max_count)) {
       MessageTimingData &mtd(message_timing[index]);
-      mtd.msg_id = msg_id;
-      mtd.write_lmb = write_lmb;
+      mtd.msg_id = msg_id || (write_lmb << 12);
+      //mtd.write_lmb = write_lmb;
       mtd.target = peer;
       mtd.msg_size = msg_size;
 #ifdef USE_REALM_TIMER
@@ -2556,7 +2557,7 @@ void IncomingMessageManager::handler_thread_loop(void)
       detailed_message_timing.record(timing_idx, 
 				     current_msg->get_peer(),
 				     current_msg->get_msgid(),
-				     -18, // 0xee - flagged as an incoming message,
+				     -4, // 0xc - flagged as an incoming message,
 				     current_msg->get_msgsize(),
 				     count++, // how many messages we handle in a batch
 				     start_time, CurrentTime());
@@ -3226,7 +3227,13 @@ ActiveMessageHandlerTable::ActiveMessageHandlerTable(void)
 {}
 
 ActiveMessageHandlerTable::~ActiveMessageHandlerTable(void)
-{}
+{
+  for(std::vector<HandlerEntry>::iterator it = handlers.begin();
+      it != handlers.end();
+      ++it)
+    if(it->must_free)
+      free(const_cast<char *>(it->name));
+}
 
 ActiveMessageHandlerTable::MessageHandler ActiveMessageHandlerTable::lookup_message_handler(ActiveMessageHandlerTable::MessageID id)
 {
@@ -3260,11 +3267,16 @@ void ActiveMessageHandlerTable::construct_handler_table(void)
     HandlerEntry e;
     e.hash = nextreg->hash;
     e.name = nextreg->name;
+    e.must_free = nextreg->must_free;
     e.handler = nextreg->get_handler();
     handlers.push_back(e);
   }
 
   std::sort(handlers.begin(), handlers.end(), hash_less);
+  // handler ids are the same everywhere, so only log on node 0
+  if(my_node_id == 0)
+    for(size_t i = 0; i < handlers.size(); i++)
+      log_amhandler.info() << "handler " << std::hex << i << std::dec << ": " << handlers[i].name;
 }
 
 /*static*/ ActiveMessageHandlerRegBase *ActiveMessageHandlerTable::pending_handlers = 0;
