@@ -508,8 +508,11 @@ namespace Realm {
   {
     ID nextid(id);
     EventImpl::gen_t gen = ID(id).barrier_generation() + 1;
+#ifdef DEBUG_REALM
+    assert(MAX_PHASES <= nextid.barrier_generation().MAXVAL);
+#endif
     // return NO_BARRIER if the count overflows
-    if(gen > nextid.barrier_generation().MAXVAL)
+    if(gen > MAX_PHASES)
       return Barrier::NO_BARRIER;
     nextid.barrier_generation() = ID(id).barrier_generation() + 1;
 

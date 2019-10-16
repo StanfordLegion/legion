@@ -38,6 +38,7 @@ typedef unsigned realm_task_func_id_t;
 typedef int realm_reduction_op_id_t;
 typedef int realm_custom_serdez_id_t;
 typedef unsigned realm_event_gen_t;
+#define REALM_EVENT_GENERATION_BITS  20
 typedef unsigned long long realm_barrier_timestamp_t;
 
 // Different Processor types

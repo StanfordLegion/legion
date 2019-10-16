@@ -56,7 +56,7 @@ namespace Realm {
 
       static const int NODE_FIELD_WIDTH = 16;
       static const unsigned MAX_NODE_ID = (1U << NODE_FIELD_WIDTH) - 2; // reserve all 1's for special cases
-      static const int EVENT_GENERATION_WIDTH = 20;
+      static const int EVENT_GENERATION_WIDTH = REALM_EVENT_GENERATION_BITS; // fom realm_c.h
       static const int INSTANCE_INDEX_WIDTH = 16;
 
 #define ACCESSOR(structname, name, field) \
