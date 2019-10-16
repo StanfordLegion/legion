@@ -11943,7 +11943,7 @@ namespace Legion {
           {
             // Sort these info field mask sets
             LegionList<FieldSet<EquivalenceSet*> >::aligned field_sets;
-            complete_subsets.compute_field_sets(FieldMask(), field_sets);
+            complete_subsets.compute_field_sets(complete_mask, field_sets);
             for (LegionList<FieldSet<EquivalenceSet*> >::aligned::const_iterator
                   fit = field_sets.begin(); fit != field_sets.end(); fit++)
             {
@@ -11972,6 +11972,20 @@ namespace Legion {
                 for (std::set<EquivalenceSet*>::const_iterator it = 
                       fit->elements.begin(); it != fit->elements.end(); it++)
                 {
+                  bool found = false;
+                  for (std::vector<EquivalenceSet*>::const_iterator nit = 
+                        new_subsets.begin(); nit != new_subsets.end(); nit++)
+                  {
+                    if ((*nit) != (*it))
+                      continue;
+                    found = true;
+                    break;
+                  }
+                  // If the eq set is in the new set then there is nothing to do
+                  if (found)
+                    continue;
+                  // If it's not in the new set, then we need to remove its
+                  // fields from the existing subsets
                   FieldMaskSet<EquivalenceSet>::iterator finder = 
                     subsets.find(*it);
 #ifdef DEBUG_LEGION
@@ -11984,7 +11998,7 @@ namespace Legion {
                       delete finder->first;
                     subsets.erase(finder);
                   }
-                  // Also update the complete subsets
+                  // Also remove it from the complete subsets
                   finder = complete_subsets.find(*it);
 #ifdef DEBUG_LEGION
                   assert(finder != complete_subsets.end());
