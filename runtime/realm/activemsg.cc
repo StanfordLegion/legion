@@ -3273,10 +3273,12 @@ void ActiveMessageHandlerTable::construct_handler_table(void)
   }
 
   std::sort(handlers.begin(), handlers.end(), hash_less);
+#ifdef USE_GASNET
   // handler ids are the same everywhere, so only log on node 0
   if(my_node_id == 0)
     for(size_t i = 0; i < handlers.size(); i++)
       log_amhandler.info() << "handler " << std::hex << i << std::dec << ": " << handlers[i].name;
+#endif
 }
 
 /*static*/ ActiveMessageHandlerRegBase *ActiveMessageHandlerTable::pending_handlers = 0;
