@@ -6754,6 +6754,7 @@ namespace Legion {
               runtime->handle_view_add_copy_user(derez, remote_address_space);
               break;
             }
+#ifdef ENABLE_VIEW_REPLICATION
           case SEND_VIEW_REPLICATION_REQUEST:
             {
               runtime->handle_view_replication_request(derez, 
@@ -6771,6 +6772,7 @@ namespace Legion {
                                                        remote_address_space);
               break;
             }
+#endif
           case SEND_MANAGER_REQUEST:
             {
               runtime->handle_manager_request(derez, remote_address_space);
@@ -14949,6 +14951,7 @@ namespace Legion {
                                          UPDATE_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
+#ifdef ENABLE_VIEW_REPLICATION
     //--------------------------------------------------------------------------
     void Runtime::send_view_replication_request(AddressSpaceID target,
                                                 Serializer &rez)
@@ -14975,6 +14978,7 @@ namespace Legion {
       find_messenger(target)->send_message(rez, SEND_VIEW_REPLICATION_REMOVAL,
                                        UPDATE_VIRTUAL_CHANNEL, true/*flush*/);
     }
+#endif
 
     //--------------------------------------------------------------------------
     void Runtime::send_future_result(AddressSpaceID target, Serializer &rez)
@@ -16312,6 +16316,7 @@ namespace Legion {
       InstanceView::handle_view_add_copy_user(derez, this, source);
     }
 
+#ifdef ENABLE_VIEW_REPLICATION
     //--------------------------------------------------------------------------
     void Runtime::handle_view_replication_request(Deserializer &derez,
                                                   AddressSpaceID source)
@@ -16334,6 +16339,7 @@ namespace Legion {
     {
       InstanceView::handle_view_replication_removal(derez, this, source);
     }
+#endif // ENABLE_VIEW_REPLICATION
 
     //--------------------------------------------------------------------------
     void Runtime::handle_manager_request(Deserializer &derez, 

@@ -22,6 +22,17 @@
 #include "legion/legion_allocation.h"
 #include "legion/garbage_collection.h"
 
+// It's unclear what is causing view replication to be buggy, but my guess
+// is that it has something to do with the "out-of-order" updates applied
+// to remote views that gets us into trouble. It seems like view replication
+// is also in general slower than not replicating, so we're turning it off
+// for now as it is better to be both correct and faster. We're leaving
+// the implementation though here in case a program arises in the future
+// where view replication could lead to a performance win.
+#ifdef ENABLE_VIEW_REPLICATION
+#warning "ENABLE_VIEW_REPLICATION is buggy, see issue #653, please be careful!"
+#endif
+
 namespace Legion {
   namespace Internal {
 
@@ -173,6 +184,7 @@ namespace Legion {
                                  std::set<RtEvent> &applied_events,
                                  const bool trace_recording,
                                  const AddressSpaceID source) = 0;
+#ifdef ENABLE_VIEW_REPLICATION
     public:
       virtual void process_replication_request(AddressSpaceID source,
                                  const FieldMask &request_mask,
@@ -181,6 +193,7 @@ namespace Legion {
                                  Deserializer &derez);
       virtual void process_replication_removal(AddressSpaceID source,
                                  const FieldMask &removal_mask);
+#endif
     public:
       // Reference counting state change functions
       virtual void notify_active(ReferenceMutator *mutator) = 0;
@@ -207,12 +220,14 @@ namespace Legion {
                         Runtime *runtime, AddressSpaceID source);
       static void handle_view_add_copy_user(Deserializer &derez,
                         Runtime *runtime, AddressSpaceID source);
+#ifdef ENABLE_VIEW_REPLICATION
       static void handle_view_replication_request(Deserializer &derez,
                         Runtime *runtime, AddressSpaceID source);
       static void handle_view_replication_response(Deserializer &derez,
                         Runtime *runtime);
       static void handle_view_replication_removal(Deserializer &derez,
                         Runtime *runtime, AddressSpaceID source);
+#endif
     public:
       // The ID of the context that made this view
       // instance made for a virtual mapping
@@ -569,6 +584,7 @@ namespace Legion {
                                  std::set<RtEvent> &applied_events,
                                  const bool trace_recording,
                                  const AddressSpaceID source); 
+#ifdef ENABLE_VIEW_REPLICATION
     public:
       virtual void process_replication_request(AddressSpaceID source,
                                  const FieldMask &request_mask,
@@ -577,6 +593,7 @@ namespace Legion {
                                  Deserializer &derez);
       virtual void process_replication_removal(AddressSpaceID source,
                                  const FieldMask &removal_mask);
+#endif
     public:
       virtual void notify_active(ReferenceMutator *mutator);
       virtual void notify_inactive(ReferenceMutator *mutator);
@@ -601,8 +618,10 @@ namespace Legion {
                                   const bool trace_recording);
       template<bool NEED_EXPR_LOCK>
       void clean_cache(void);
+#ifdef ENABLE_VIEW_REPLICATION
       // Must be called while holding the replication lock
       void update_remote_replication_state(std::set<RtEvent> &applied_events);
+#endif
     public:
       void find_atomic_reservations(const FieldMask &mask, Operation *op, 
                                     const unsigned index, bool exclusive);
@@ -645,6 +664,7 @@ namespace Legion {
       // added for when we go to invalidate the cache and clean the views
       unsigned outstanding_additions;
       RtUserEvent clean_waiting; 
+#ifdef ENABLE_VIEW_REPLICATION
     protected:
       // Lock for protecting the following replication data structures
       mutable LocalLock replicated_lock;
@@ -666,6 +686,8 @@ namespace Legion {
       unsigned remote_added_users; 
       // Users that we need to apply once we receive an update from the owner
       std::list<RemotePendingUser*> *remote_pending_users;
+#endif
+    protected:
       // Keep track of the current version numbers for each field
       // This will allow us to detect when physical instances are no
       // longer valid from a particular view when doing rollbacks for
