@@ -93,8 +93,10 @@ namespace Legion {
                            const std::vector<IndexSpace> &spaces);
       virtual IndexSpace subtract_index_spaces(RegionTreeForest *forest,
                            IndexSpace left, IndexSpace right);
-      virtual void destroy_index_space(IndexSpace handle) = 0;
-      virtual void destroy_index_partition(IndexPartition handle) = 0;
+      virtual void destroy_index_space(IndexSpace handle,
+                                       const bool unordered) = 0;
+      virtual void destroy_index_partition(IndexPartition handle,
+                                           const bool unordered) = 0;
       virtual IndexPartition create_equal_partition(RegionTreeForest *forest,
                                             IndexSpace parent,
                                             IndexSpace color_space,
@@ -238,7 +240,8 @@ namespace Legion {
                                             IndexSpace initial,
                                 const std::vector<IndexSpace> &handles) = 0;
       virtual FieldSpace create_field_space(RegionTreeForest *forest);
-      virtual void destroy_field_space(FieldSpace handle) = 0;
+      virtual void destroy_field_space(FieldSpace handle,
+                                       const bool unordered) = 0;
       virtual FieldID allocate_field(FieldSpace space, size_t field_size,
                                      FieldID fid, bool local,
                                      CustomSerdezID serdez_id);
@@ -246,7 +249,8 @@ namespace Legion {
                                      FieldSpace space, size_t field_size,
                                      FieldID fid, CustomSerdezID serdez_id,
                                      std::set<RtEvent> &done_events) = 0;
-      virtual void free_field(FieldSpace space, FieldID fid) = 0;
+      virtual void free_field(FieldSpace space, FieldID fid,
+                              const bool unordered) = 0;
       virtual void allocate_fields(FieldSpace space,
                                    const std::vector<size_t> &sizes,
                                    std::vector<FieldID> &resuling_fields,
@@ -257,13 +261,16 @@ namespace Legion {
                                    CustomSerdezID serdez_id,
                                    std::set<RtEvent> &done_events) = 0;
       virtual void free_fields(FieldSpace space, 
-                               const std::set<FieldID> &to_free) = 0; 
+                               const std::set<FieldID> &to_free,
+                               const bool unordered) = 0; 
       virtual LogicalRegion create_logical_region(RegionTreeForest *forest,
                                             IndexSpace index_space,
                                             FieldSpace field_space,
                                             bool task_local);
-      virtual void destroy_logical_region(LogicalRegion handle) = 0;
-      virtual void destroy_logical_partition(LogicalPartition handle) = 0;
+      virtual void destroy_logical_region(LogicalRegion handle,
+                                          const bool unordered) = 0;
+      virtual void destroy_logical_partition(LogicalPartition handle,
+                                             const bool unordered) = 0;
       virtual FieldAllocatorImpl* create_field_allocator(FieldSpace handle);
       virtual void destroy_field_allocator(FieldSpace handle);
       virtual void get_local_field_set(const FieldSpace handle,
@@ -290,7 +297,7 @@ namespace Legion {
       virtual PhysicalRegion attach_resource(
                                   const AttachLauncher &launcher) = 0;
       virtual Future detach_resource(PhysicalRegion region, 
-                                     const bool flush) = 0;
+                                     const bool flush,const bool unordered) = 0;
       virtual FutureMap execute_must_epoch(
                                  const MustEpochLauncher &launcher) = 0;
       virtual Future issue_timing_measurement(
@@ -313,7 +320,7 @@ namespace Legion {
       virtual size_t register_new_close_operation(CloseOp *op) = 0;
       virtual size_t register_new_summary_operation(TraceSummaryOp *op) = 0;
       virtual void add_to_prepipeline_queue(Operation *op) = 0;
-      virtual void add_to_dependence_queue(Operation *op) = 0;
+      virtual void add_to_dependence_queue(Operation *op, bool unordered) = 0;
       virtual void add_to_post_task_queue(TaskContext *ctx, RtEvent wait_on,
           const void *result, size_t size, PhysicalInstance instance) = 0;
       virtual void register_executing_child(Operation *op) = 0;
@@ -754,8 +761,9 @@ namespace Legion {
                                  const std::vector<FieldID> &to_remove);
     public:
       // Interface to operations performed by a context
-      virtual void destroy_index_space(IndexSpace handle);
-      virtual void destroy_index_partition(IndexPartition handle);
+      virtual void destroy_index_space(IndexSpace handle, const bool unordered);
+      virtual void destroy_index_partition(IndexPartition handle,
+                                           const bool unordered);
       virtual IndexPartition create_equal_partition(RegionTreeForest *forest,
                                             IndexSpace parent,
                                             IndexSpace color_space,
@@ -898,7 +906,7 @@ namespace Legion {
                                             TypeTag type_tag,
                                             IndexSpace initial,
                                 const std::vector<IndexSpace> &handles);
-      virtual void destroy_field_space(FieldSpace handle);
+      virtual void destroy_field_space(FieldSpace handle, const bool unordered);
       virtual void allocate_local_field(FieldSpace space, size_t field_size,
                                      FieldID fid, CustomSerdezID serdez_id,
                                      std::set<RtEvent> &done_events);
@@ -907,11 +915,15 @@ namespace Legion {
                                    const std::vector<FieldID> &resuling_fields,
                                    CustomSerdezID serdez_id,
                                    std::set<RtEvent> &done_events);
-      virtual void free_field(FieldSpace space, FieldID fid);
+      virtual void free_field(FieldSpace space, FieldID fid,
+                              const bool unordered);
       virtual void free_fields(FieldSpace space, 
-                               const std::set<FieldID> &to_free);
-      virtual void destroy_logical_region(LogicalRegion handle);
-      virtual void destroy_logical_partition(LogicalPartition handle);
+                               const std::set<FieldID> &to_free,
+                               const bool unordered);
+      virtual void destroy_logical_region(LogicalRegion handle,
+                                          const bool unordered);
+      virtual void destroy_logical_partition(LogicalPartition handle,
+                                             const bool unordered);
       virtual void get_local_field_set(const FieldSpace handle,
                                        const std::set<unsigned> &indexes,
                                        std::set<FieldID> &to_set) const;
@@ -933,7 +945,8 @@ namespace Legion {
       virtual void issue_acquire(const AcquireLauncher &launcher);
       virtual void issue_release(const ReleaseLauncher &launcher);
       virtual PhysicalRegion attach_resource(const AttachLauncher &launcher);
-      virtual Future detach_resource(PhysicalRegion region, const bool flush);
+      virtual Future detach_resource(PhysicalRegion region, const bool flush,
+                                     const bool unordered);
       virtual FutureMap execute_must_epoch(const MustEpochLauncher &launcher);
       virtual Future issue_timing_measurement(const TimingLauncher &launcher);
       virtual void issue_mapping_fence(void);
@@ -955,7 +968,7 @@ namespace Legion {
       virtual size_t register_new_summary_operation(TraceSummaryOp *op);
       virtual void add_to_prepipeline_queue(Operation *op);
       bool process_prepipeline_stage(void);
-      virtual void add_to_dependence_queue(Operation *op);
+      virtual void add_to_dependence_queue(Operation *op, bool unordered);
       void process_dependence_stage(void);
       virtual void add_to_post_task_queue(TaskContext *ctx, RtEvent wait_on,
           const void *result, size_t size, PhysicalInstance instance);
@@ -1065,6 +1078,8 @@ namespace Legion {
       void execute_task_launch(TaskOp *task, bool index, 
                                LegionTrace *current_trace, 
                                bool silence_warnings, bool inlining_enabled);
+      // Must be called while holding the dependence lock
+      void insert_unordered_ops(void);
     public:
       void clone_local_fields(
           std::map<FieldSpace,std::vector<LocalFieldInfo> > &child_local) const;
@@ -1097,6 +1112,10 @@ namespace Legion {
                 EXECUTED_CHILD_ALLOC>::tracked executed_children;
       LegionMap<Operation*,GenerationID,
                 COMPLETE_CHILD_ALLOC>::tracked complete_children; 
+      // For tracking any operations that come from outside the
+      // task like a garbage collector that need to be inserted
+      // into the stream of operations from the task
+      std::vector<Operation*> unordered_ops;
 #ifdef DEBUG_LEGION
       // In debug mode also keep track of them in context order so
       // we can see what the longest outstanding operation is which
@@ -1360,8 +1379,9 @@ namespace Legion {
       virtual bool is_leaf_context(void) const;
     public:
       // Interface to operations performed by a context
-      virtual void destroy_index_space(IndexSpace handle);
-      virtual void destroy_index_partition(IndexPartition handle);
+      virtual void destroy_index_space(IndexSpace handle, const bool unordered);
+      virtual void destroy_index_partition(IndexPartition handle,
+                                           const bool unordered);
       virtual IndexPartition create_equal_partition(RegionTreeForest *forest,
                                             IndexSpace parent,
                                             IndexSpace color_space,
@@ -1504,7 +1524,7 @@ namespace Legion {
                                             TypeTag type_tag,
                                             IndexSpace initial,
                                 const std::vector<IndexSpace> &handles);
-      virtual void destroy_field_space(FieldSpace handle);
+      virtual void destroy_field_space(FieldSpace handle, const bool unordered);
       virtual void allocate_local_field(FieldSpace space, size_t field_size,
                                      FieldID fid, CustomSerdezID serdez_id,
                                      std::set<RtEvent> &done_events);
@@ -1513,11 +1533,15 @@ namespace Legion {
                                    const std::vector<FieldID> &resuling_fields,
                                    CustomSerdezID serdez_id,
                                    std::set<RtEvent> &done_events);
-      virtual void free_field(FieldSpace space, FieldID fid);
+      virtual void free_field(FieldSpace space, FieldID fid, 
+                              const bool unordered);
       virtual void free_fields(FieldSpace space, 
-                               const std::set<FieldID> &to_free);
-      virtual void destroy_logical_region(LogicalRegion handle);
-      virtual void destroy_logical_partition(LogicalPartition handle);
+                               const std::set<FieldID> &to_free,
+                               const bool unordered);
+      virtual void destroy_logical_region(LogicalRegion handle,
+                                          const bool unordered);
+      virtual void destroy_logical_partition(LogicalPartition handle,
+                                             const bool unordered);
       virtual void get_local_field_set(const FieldSpace handle,
                                        const std::set<unsigned> &indexes,
                                        std::set<FieldID> &to_set) const;
@@ -1539,7 +1563,8 @@ namespace Legion {
       virtual void issue_acquire(const AcquireLauncher &launcher);
       virtual void issue_release(const ReleaseLauncher &launcher);
       virtual PhysicalRegion attach_resource(const AttachLauncher &launcher);
-      virtual Future detach_resource(PhysicalRegion region, const bool flush);
+      virtual Future detach_resource(PhysicalRegion region, const bool flush,
+                                     const bool unordered);
       virtual FutureMap execute_must_epoch(const MustEpochLauncher &launcher);
       virtual Future issue_timing_measurement(const TimingLauncher &launcher);
       virtual void issue_mapping_fence(void);
@@ -1560,7 +1585,7 @@ namespace Legion {
       virtual size_t register_new_close_operation(CloseOp *op);
       virtual size_t register_new_summary_operation(TraceSummaryOp *op);
       virtual void add_to_prepipeline_queue(Operation *op);
-      virtual void add_to_dependence_queue(Operation *op);
+      virtual void add_to_dependence_queue(Operation *op, bool unordered);
       virtual void add_to_post_task_queue(TaskContext *ctx, RtEvent wait_on,
           const void *result, size_t size, PhysicalInstance instance);
       virtual void register_executing_child(Operation *op);
@@ -1628,6 +1653,7 @@ namespace Legion {
       virtual Future get_dynamic_collective_result(DynamicCollective dc);
     protected:
       mutable LocalLock                            leaf_lock;
+      std::set<RtEvent>                            deletion_events;
     public:
       virtual TaskPriority get_current_priority(void) const;
       virtual void set_current_priority(TaskPriority priority);
@@ -1667,8 +1693,9 @@ namespace Legion {
                            const std::vector<IndexSpace> &spaces);
       virtual IndexSpace subtract_index_spaces(RegionTreeForest *forest,
                            IndexSpace left, IndexSpace right);
-      virtual void destroy_index_space(IndexSpace handle);
-      virtual void destroy_index_partition(IndexPartition handle);
+      virtual void destroy_index_space(IndexSpace handle, const bool unordered);
+      virtual void destroy_index_partition(IndexPartition handle,
+                                           const bool unordered);
       virtual IndexPartition create_equal_partition(RegionTreeForest *forest,
                                             IndexSpace parent,
                                             IndexSpace color_space,
@@ -1812,17 +1839,19 @@ namespace Legion {
                                             IndexSpace initial,
                                 const std::vector<IndexSpace> &handles);
       virtual FieldSpace create_field_space(RegionTreeForest *forest);
-      virtual void destroy_field_space(FieldSpace handle);
+      virtual void destroy_field_space(FieldSpace handle, const bool unordered);
       virtual FieldID allocate_field(FieldSpace space, size_t field_size,
                                      FieldID fid, bool local,
                                      CustomSerdezID serdez_id);
-      virtual void free_field(FieldSpace space, FieldID fid);
+      virtual void free_field(FieldSpace space, FieldID fid,
+                              const bool unordered);
       virtual void allocate_fields(FieldSpace space,
                                    const std::vector<size_t> &sizes,
                                    std::vector<FieldID> &resuling_fields,
                                    bool local, CustomSerdezID serdez_id);
       virtual void free_fields(FieldSpace space, 
-                               const std::set<FieldID> &to_free);
+                               const std::set<FieldID> &to_free,
+                               const bool unordered);
       virtual void allocate_local_field(FieldSpace space, size_t field_size,
                                      FieldID fid, CustomSerdezID serdez_id,
                                      std::set<RtEvent> &done_events);
@@ -1835,8 +1864,10 @@ namespace Legion {
                                             IndexSpace index_space,
                                             FieldSpace field_space,
                                             bool task_local);
-      virtual void destroy_logical_region(LogicalRegion handle);
-      virtual void destroy_logical_partition(LogicalPartition handle);
+      virtual void destroy_logical_region(LogicalRegion handle,
+                                          const bool unordered);
+      virtual void destroy_logical_partition(LogicalPartition handle,
+                                             const bool unordered);
       virtual FieldAllocatorImpl* create_field_allocator(FieldSpace handle);
       virtual void destroy_field_allocator(FieldSpace handle);
       virtual void get_local_field_set(const FieldSpace handle,
@@ -1860,7 +1891,8 @@ namespace Legion {
       virtual void issue_acquire(const AcquireLauncher &launcher);
       virtual void issue_release(const ReleaseLauncher &launcher);
       virtual PhysicalRegion attach_resource(const AttachLauncher &launcher);
-      virtual Future detach_resource(PhysicalRegion region, const bool flush);
+      virtual Future detach_resource(PhysicalRegion region, const bool flush,
+                                     const bool unordered);
       virtual FutureMap execute_must_epoch(const MustEpochLauncher &launcher);
       virtual Future issue_timing_measurement(const TimingLauncher &launcher);
       virtual void issue_mapping_fence(void);
@@ -1881,7 +1913,7 @@ namespace Legion {
       virtual size_t register_new_close_operation(CloseOp *op);
       virtual size_t register_new_summary_operation(TraceSummaryOp *op);
       virtual void add_to_prepipeline_queue(Operation *op);
-      virtual void add_to_dependence_queue(Operation *op);
+      virtual void add_to_dependence_queue(Operation *op, bool unordered);
       virtual void add_to_post_task_queue(TaskContext *ctx, RtEvent wait_on,
           const void *result, size_t size, PhysicalInstance instance);
       virtual void register_executing_child(Operation *op);

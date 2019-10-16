@@ -206,6 +206,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Operation::set_tracking_parent(size_t index)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!track_parent);
+#endif
+      track_parent = true;
+      context_index = index;
+    }
+
+    //--------------------------------------------------------------------------
     void Operation::set_trace(LegionTrace *t, bool is_tracing,
                               const std::vector<StaticDependence> *dependences)
     //--------------------------------------------------------------------------
@@ -7175,10 +7186,11 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void DeletionOp::initialize_index_space_deletion(InnerContext *ctx,
-                           IndexSpace handle, std::vector<IndexPartition> &subs)
+                           IndexSpace handle, std::vector<IndexPartition> &subs,
+                           const bool unordered)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(ctx, true/*track*/);
+      initialize_operation(ctx, !unordered/*track*/);
       kind = INDEX_SPACE_DELETION;
       index_space = handle;
       sub_partitions.swap(subs);
@@ -7189,10 +7201,11 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void DeletionOp::initialize_index_part_deletion(InnerContext *ctx,
-                       IndexPartition handle, std::vector<IndexPartition> &subs)
+                       IndexPartition handle, std::vector<IndexPartition> &subs,
+                       const bool unordered)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(ctx, true/*track*/);
+      initialize_operation(ctx, !unordered/*track*/);
       kind = INDEX_PARTITION_DELETION;
       index_part = handle;
       sub_partitions.swap(subs);
@@ -7203,10 +7216,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void DeletionOp::initialize_field_space_deletion(InnerContext *ctx,
-                                                     FieldSpace handle)
+                                        FieldSpace handle, const bool unordered)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(ctx, true/*track*/);
+      initialize_operation(ctx, !unordered/*track*/);
       kind = FIELD_SPACE_DELETION;
       field_space = handle;
       if (runtime->legion_spy_enabled)
@@ -7216,10 +7229,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void DeletionOp::initialize_field_deletion(InnerContext *ctx, 
-                                               FieldSpace handle, FieldID fid)
+                           FieldSpace handle, FieldID fid, const bool unordered)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(ctx, true/*track*/);
+      initialize_operation(ctx, !unordered/*track*/);
       kind = FIELD_DELETION;
       field_space = handle;
       free_fields.insert(fid);
@@ -7230,10 +7243,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void DeletionOp::initialize_field_deletions(InnerContext *ctx,
-                            FieldSpace handle, const std::set<FieldID> &to_free)
+      FieldSpace handle, const std::set<FieldID> &to_free, const bool unordered)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(ctx, true/*track*/);
+      initialize_operation(ctx, !unordered/*track*/);
       kind = FIELD_DELETION;
       field_space = handle;
       free_fields = to_free; 
@@ -7244,10 +7257,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void DeletionOp::initialize_logical_region_deletion(InnerContext *ctx,
-                                                        LogicalRegion handle)
+                                     LogicalRegion handle, const bool unordered)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(ctx, true/*track*/);
+      initialize_operation(ctx, !unordered/*track*/);
       kind = LOGICAL_REGION_DELETION;
       logical_region = handle; 
       if (runtime->legion_spy_enabled)
@@ -7257,10 +7270,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void DeletionOp::initialize_logical_partition_deletion(InnerContext *ctx,
-                                                       LogicalPartition handle)
+                                  LogicalPartition handle, const bool unordered)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(ctx, true/*track*/);
+      initialize_operation(ctx, !unordered/*track*/);
       kind = LOGICAL_PARTITION_DELETION;
       logical_part = handle; 
       if (runtime->legion_spy_enabled)
@@ -15743,10 +15756,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     Future DetachOp::initialize_detach(InnerContext *ctx, PhysicalRegion region,
-                                       const bool flsh)
+                                       const bool flsh, const bool unordered)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(ctx, true/*track*/);
+      initialize_operation(ctx, !unordered/*track*/);
       flush = flsh;
       requirement = region.impl->get_requirement();
       // Make sure that the privileges are read-write so that we wait for

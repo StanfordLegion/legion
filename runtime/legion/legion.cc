@@ -2924,13 +2924,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void FieldAllocator::free_field(FieldID fid)
+    void FieldAllocator::free_field(FieldID fid, const bool unordered)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(impl != NULL);
 #endif     
-      impl->free_field(fid);
+      impl->free_field(fid, unordered);
     }
 
     //--------------------------------------------------------------------------
@@ -2959,13 +2959,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void FieldAllocator::free_fields(const std::set<FieldID> &to_free)
+    void FieldAllocator::free_fields(const std::set<FieldID> &to_free,
+                                     const bool unordered)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(impl != NULL);
 #endif
-      impl->free_fields(to_free);
+      impl->free_fields(to_free, unordered);
     }
 
     //--------------------------------------------------------------------------
@@ -3527,10 +3528,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::destroy_index_space(Context ctx, IndexSpace handle)
+    void Runtime::destroy_index_space(Context ctx, IndexSpace handle,
+                                      const bool unordered)
     //--------------------------------------------------------------------------
     {
-      runtime->destroy_index_space(ctx, handle);
+      runtime->destroy_index_space(ctx, handle, unordered);
     } 
 
     //--------------------------------------------------------------------------
@@ -4130,11 +4132,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::destroy_index_partition(Context ctx, 
-                                                   IndexPartition handle)
+    void Runtime::destroy_index_partition(Context ctx, IndexPartition handle,
+                                          const bool unordered)
     //--------------------------------------------------------------------------
     {
-      runtime->destroy_index_partition(ctx, handle);
+      runtime->destroy_index_partition(ctx, handle, unordered);
     }
 
     //--------------------------------------------------------------------------
@@ -5142,10 +5144,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::destroy_field_space(Context ctx, FieldSpace handle)
+    void Runtime::destroy_field_space(Context ctx, FieldSpace handle,
+                                      const bool unordered)
     //--------------------------------------------------------------------------
     {
-      runtime->destroy_field_space(ctx, handle);
+      runtime->destroy_field_space(ctx, handle, unordered);
     }
 
     //--------------------------------------------------------------------------
@@ -5208,19 +5211,19 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::destroy_logical_region(Context ctx, 
-                                                  LogicalRegion handle)
+    void Runtime::destroy_logical_region(Context ctx, LogicalRegion handle,
+                                         const bool unordered)
     //--------------------------------------------------------------------------
     {
-      runtime->destroy_logical_region(ctx, handle);
+      runtime->destroy_logical_region(ctx, handle, unordered);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::destroy_logical_partition(Context ctx, 
-                                                     LogicalPartition handle)
+    void Runtime::destroy_logical_partition(Context ctx,LogicalPartition handle,
+                                            const bool unordered)
     //--------------------------------------------------------------------------
     {
-      runtime->destroy_logical_partition(ctx, handle);
+      runtime->destroy_logical_partition(ctx, handle, unordered);
     }
 
     //--------------------------------------------------------------------------
@@ -5820,10 +5823,11 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     Future Runtime::detach_external_resource(Context ctx, PhysicalRegion region,
-                                             const bool flush /*= true*/)
+                                             const bool flush /*= true*/,
+                                             const bool unordered/*= false*/)
     //--------------------------------------------------------------------------
     {
-      return runtime->detach_external_resource(ctx, region, flush);
+      return runtime->detach_external_resource(ctx, region, flush, unordered);
     }
 
     //--------------------------------------------------------------------------
@@ -5844,7 +5848,8 @@ namespace Legion {
     void Runtime::detach_hdf5(Context ctx, PhysicalRegion region)
     //--------------------------------------------------------------------------
     {
-      runtime->detach_external_resource(ctx, region, true/*flush*/);
+      runtime->detach_external_resource(ctx, region, true/*flush*/, 
+                                        false/*unordered*/);
     }
 
     //--------------------------------------------------------------------------
@@ -5865,7 +5870,8 @@ namespace Legion {
     void Runtime::detach_file(Context ctx, PhysicalRegion region)
     //--------------------------------------------------------------------------
     {
-      runtime->detach_external_resource(ctx, region, true/*flush*/);
+      runtime->detach_external_resource(ctx, region, true/*flush*/,
+                                        false/*unordered*/);
     }
     
     //--------------------------------------------------------------------------

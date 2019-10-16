@@ -530,8 +530,10 @@ namespace Legion {
       /**
        * Deallocate the specified field from the field space.
        * @param fid the field ID to be deallocated
+       * @param unordered set to true if this is performed by a different
+       *          thread than the one for the task (e.g a garbage collector)
        */
-      void free_field(FieldID fid);
+      void free_field(FieldID fid, const bool unordered = false);
 
       /**
        * Same as allocate field, but this field will only
@@ -565,8 +567,11 @@ namespace Legion {
       /**
        * Free a collection of field IDs
        * @param to_free set of field IDs to be freed
+       * @param unordered set to true if this is performed by a different
+       *          thread than the one for the task (e.g a garbage collector)
        */
-      void free_fields(const std::set<FieldID> &to_free);
+      void free_fields(const std::set<FieldID> &to_free, 
+                       const bool unordered = false);
       /**
        * Same as allocate_fields but the fields that are allocated
        * will only be available locally on the node on which 
@@ -3459,8 +3464,11 @@ namespace Legion {
        * Destroy an existing index space
        * @param ctx the enclosing task context
        * @param handle the index space to destroy
+       * @param unordered set to true if this is performed by a different
+       *          thread than the one for the task (e.g a garbage collector)
        */
-      void destroy_index_space(Context ctx, IndexSpace handle);
+      void destroy_index_space(Context ctx, IndexSpace handle,
+                               const bool unordered = false);
     public:
       //------------------------------------------------------------------------
       // Index Partition Operations Based on Coloring
@@ -3618,8 +3626,11 @@ namespace Legion {
        * Destroy an index partition
        * @param ctx the enclosing task context
        * @param handle index partition to be destroyed
+       * @param unordered set to true if this is performed by a different
+       *          thread than the one for the task (e.g a garbage collector)
        */
-      void destroy_index_partition(Context ctx, IndexPartition handle);
+      void destroy_index_partition(Context ctx, IndexPartition handle,
+                                   const bool unordered = false);
     public:
       //------------------------------------------------------------------------
       // Dependent Partitioning Operations
@@ -4756,8 +4767,11 @@ namespace Legion {
        * Destroy an existing field space.
        * @param ctx enclosing task context
        * @param handle of the field space to be destroyed
+       * @param unordered set to true if this is performed by a different
+       *          thread than the one for the task (e.g a garbage collector)
        */
-      void destroy_field_space(Context ctx, FieldSpace handle);
+      void destroy_field_space(Context ctx, FieldSpace handle, 
+                               const bool unordered = false);
 
       ///@{
       /**
@@ -4827,15 +4841,21 @@ namespace Legion {
        * Destroy a logical region and all of its logical sub-regions.
        * @param ctx enclosing task context
        * @param handle logical region handle to destroy
+       * @param unordered set to true if this is performed by a different
+       *          thread than the one for the task (e.g a garbage collector)
        */
-      void destroy_logical_region(Context ctx, LogicalRegion handle);
+      void destroy_logical_region(Context ctx, LogicalRegion handle,
+                                  const bool unordered = false);
 
       /**
        * Destroy a logical partition and all of it is logical sub-regions.
        * @param ctx enclosing task context
        * @param handle logical partition handle to destroy
+       * @param unordered set to true if this is performed by a different
+       *          thread than the one for the task (e.g a garbage collector)
        */
-      void destroy_logical_partition(Context ctx, LogicalPartition handle);
+      void destroy_logical_partition(Context ctx, LogicalPartition handle,
+                                     const bool unordered = false);
     public:
       //------------------------------------------------------------------------
       // Logical Region Tree Traversal Operations
@@ -5502,10 +5522,13 @@ namespace Legion {
        * @param ctx enclosing task context
        * @param region the physical region for the external resource
        * @param flush copy out data to the physical region before detaching
+       * @param unordered set to true if this is performed by a different
+       *          thread than the one for the task (e.g a garbage collector)
        * @return an empty future indicating when the resource is detached
        */
       Future detach_external_resource(Context ctx, PhysicalRegion region,
-                                      const bool flush = true);
+                                      const bool flush = true,
+                                      const bool unordered = false);
 
       /**
        * @deprecated
