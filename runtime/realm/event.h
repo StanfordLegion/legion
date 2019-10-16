@@ -123,7 +123,7 @@ namespace Realm {
 				    const void *initial_value = 0, size_t initial_value_size = 0);
       void destroy_barrier(void);
 
-      static const ::realm_event_gen_t MAX_PHASES = (::realm_event_gen_t(1) << REALM_EVENT_GENERATION_BITS) - 1;
+      static const ::realm_event_gen_t MAX_PHASES;
 
       // barriers can be reused up to MAX_PHASES times by using "advance_barrier"
       //  to advance a Barrier handle to the next phase - attempts to advance

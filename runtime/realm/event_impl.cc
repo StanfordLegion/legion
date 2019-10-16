@@ -482,6 +482,8 @@ namespace Realm {
 
   /*static*/ const Barrier Barrier::NO_BARRIER = make_no_barrier();
 
+  /*static*/ const ::realm_event_gen_t Barrier::MAX_PHASES = (::realm_event_gen_t(1) << REALM_EVENT_GENERATION_BITS) - 1;
+
   /*static*/ Barrier Barrier::create_barrier(unsigned expected_arrivals,
 					     ReductionOpID redop_id /*= 0*/,
 					     const void *initial_value /*= 0*/,
