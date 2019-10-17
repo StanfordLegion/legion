@@ -7524,6 +7524,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void IndexTask::add_copy_profiling_request(Realm::ProfilingRequestSet &reqs)
+    //--------------------------------------------------------------------------
+    {
+      // Nothing to do, there are no copy profiling requests for premap_task
+      // If that ever changes then we need to put something here
+    }
+
+    //--------------------------------------------------------------------------
     void IndexTask::register_must_epoch(void)
     //--------------------------------------------------------------------------
     {
