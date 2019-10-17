@@ -58,12 +58,14 @@ TESTS += deppart
 TESTS += scatter
 TESTS += compqueue
 TESTS += event_subscribe
+TESTS += deferred_allocs
 
 # can set arguments to be passed to a test when running
 TESTARGS_ctxswitch := -ll:io 1 -t 20 -i 10000
 TESTARGS_proc_group := -ll:cpu 4
 TESTARGS_compqueue := -ll:cpu 4
 TESTARGS_event_subscribe := -ll:cpu 4
+TESTARGS_deferred_allocs := -ll:gsize 0 -all
 
 REALM_OBJS := $(patsubst %.cc,%.o,$(notdir $(REALM_SRC))) \
               $(patsubst %.cc.o,%.o,$(notdir $(REALM_INST_OBJS))) \
