@@ -5746,14 +5746,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InnerContext::insert_unordered_ops(void)
+    void InnerContext::insert_unordered_ops(const bool end_task)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(!unordered_ops.empty());
-      assert(current_trace == NULL);
-#endif
-      for (std::vector<Operation*>::const_iterator it = 
+      // If there are no unordered ops then we're done
+      if (unordered_ops.empty())
+        return;
+      // If we're still in the middle of a trace then don't do any insertions
+      if (current_trace != NULL)
+        return;
+      for (std::list<Operation*>::const_iterator it = 
             unordered_ops.begin(); it != unordered_ops.end(); it++)
       {
         (*it)->set_tracking_parent(total_children_count++);
@@ -5956,10 +5958,8 @@ namespace Legion {
           dependence_precondition = RtEvent::NO_RT_EVENT;
         }
         dependence_queue.push_back(op);
-        // If we have any unordered ops and we're not in the middle of
-        // a trace then add them into the queue
-        if (!unordered_ops.empty() && (current_trace == NULL))
-          insert_unordered_ops();
+        // Insert any unordered operations into the stream
+        insert_unordered_ops(false/*end task*/);
       }
       if (issue_task)
       {
@@ -7797,8 +7797,7 @@ namespace Legion {
       // Check to see if we have any unordered operations that we need to inject
       {
         AutoLock d_lock(dependence_lock);
-        if (!unordered_ops.empty())
-          insert_unordered_ops();
+        insert_unordered_ops(true/*end task*/);
       }
       // Mark that we are done executing this operation
       // We're not actually done until we have registered our pending
@@ -8497,7 +8496,8 @@ namespace Legion {
         index_space_allocator_shard(0), index_partition_allocator_shard(0),
         field_space_allocator_shard(0), field_allocator_shard(0),
         logical_region_allocator_shard(0), next_available_collective_index(0),
-        next_physical_template_index(0), next_replicate_bar_index(0)
+        next_physical_template_index(0), next_replicate_bar_index(0),
+        unordered_ops_counter(0), unordered_ops_epoch(MIN_UNORDERED_OPS_EPOCH)
     //--------------------------------------------------------------------------
     {
       // Get our allocation barriers
@@ -11291,6 +11291,94 @@ namespace Legion {
                       shard_manager->is_total_sharding(),
                       shard_manager->is_first_local_shard(owner_shard));
       runtime->add_to_dependence_queue(this, executing_processor, op,unordered);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplicateContext::insert_unordered_ops(const bool end_task)
+    //--------------------------------------------------------------------------
+    {
+      // If we have a trace then we're definitely not inserting operations
+      if (current_trace != NULL)
+        return;
+      // For control replication, we need to have an algorithm to determine
+      // when the shards try to sync up to insert operations that doesn't
+      // rely on knowing if or when any one shard has unordered ops
+      // We employ a sampling based algorithm here with exponential backoff
+      // to detect when we are doing unordered ops since it's likely a 
+      // binary state where either we are or we aren't doing unordered ops
+      if (!end_task)
+      {
+#ifdef DEBUG_LEGION
+        assert(unordered_ops_counter < unordered_ops_epoch);
+#endif
+        if (++unordered_ops_counter < unordered_ops_epoch)
+          return;
+      }
+      // If we're at the end of the task and we don't have any unordered ops
+      // then nobody else should have any either so we are done
+      else if (unordered_ops.empty())
+        return;
+      // If we make it here then all the shards are agreed that they are
+      // going to do the sync up and will exchange information 
+      UnorderedExchange exchange(this, COLLECTIVE_LOC_88); 
+      std::vector<Operation*> ready_ops;
+      const bool any_unordered_ops = 
+        exchange.exchange_unordered_ops(unordered_ops, ready_ops);
+      if (!ready_ops.empty())
+      {
+        for (std::vector<Operation*>::const_iterator it = 
+              ready_ops.begin(); it != ready_ops.end(); it++)
+        {
+          (*it)->set_tracking_parent(total_children_count++);
+          dependence_queue.push_back(*it);
+        }
+        __sync_fetch_and_add(&outstanding_children_count, ready_ops.size());
+        if (ready_ops.size() != unordered_ops.size())
+        {
+          // Filter out all the ready ops from the unordered list
+          unsigned removed = 0;
+          for (std::list<Operation*>::iterator it = 
+                unordered_ops.begin(); it != unordered_ops.end(); /*nothing*/)
+          {
+            bool found = false;
+            for (unsigned idx = 0; idx < ready_ops.size(); idx++)
+            {
+              if (ready_ops[idx] != (*it))
+                continue;
+              found = true;
+              break;
+            }
+            if (found)
+            {
+              it = unordered_ops.erase(it);
+              if (++removed == ready_ops.size())
+                break;
+            }
+            else
+              it++;
+          }
+        }
+        else // If they're the same size we know we did them all
+          unordered_ops.clear();
+      }
+      if (!end_task)
+      {
+        // Reset the count
+        unordered_ops_counter = 0;
+        // Check to see how to adjust the epoch size
+        if (!any_unordered_ops)
+        {
+          // If there were no ready unordered ops then we double the epoch
+          if (unordered_ops_epoch < MAX_UNORDERED_OPS_EPOCH)
+            unordered_ops_epoch *= 2;
+        }
+        else // Otherwise reset to min epoch size
+          unordered_ops_epoch = MIN_UNORDERED_OPS_EPOCH;
+#ifdef DEBUG_LEGION
+        assert(MIN_UNORDERED_OPS_EPOCH <= unordered_ops_epoch);
+        assert(unordered_ops_epoch <= MAX_UNORDERED_OPS_EPOCH);
+#endif
+      }
     }
 
     //--------------------------------------------------------------------------

@@ -858,6 +858,82 @@ namespace Legion {
     };
 
     /**
+     * \class UnorderedExchange
+     * This is a class that exchanges information about unordered operations
+     * that are ready to execute on each shard so that we can determine which
+     * operations can be inserted into a task stream
+     */
+    class UnorderedExchange : public AllGatherCollective {
+    public:
+      UnorderedExchange(ReplicateContext *ctx, CollectiveIndexLocation loc);
+      UnorderedExchange(const UnorderedExchange &rhs);
+      virtual ~UnorderedExchange(void);
+    public:
+      UnorderedExchange& operator=(const UnorderedExchange &rhs);
+    public:
+      virtual void pack_collective_stage(Serializer &rez, int stage);
+      virtual void unpack_collective_stage(Deserializer &derez, int stage);
+    public:
+      bool exchange_unordered_ops(const std::list<Operation*> &unordered_ops,
+                                  std::vector<Operation*> &ready_ops);
+    protected:
+      template<typename T>
+      void update_future_counts(const int stage,
+          std::map<int,std::map<T,unsigned> > &future_counts,
+          std::map<T,unsigned> &counts);
+      template<typename T>
+      void pack_counts(Serializer &rez, const std::map<T,unsigned> &counts);
+      template<typename T>
+      void unpack_counts(const int stage, Deserializer &derez, 
+          std::map<int,std::map<T,unsigned> > &future_counts);
+      template<typename T, typename OP>
+      void initialize_counts(const std::map<T,OP*> &ops,
+                             std::map<T,unsigned> &counts);
+      template<typename T, typename OP>
+      void find_ready_ops(const size_t total_shards,
+          const std::map<int,std::map<T,unsigned> > &final_counts,
+          const std::map<T,OP*> &ops, std::vector<Operation*> &ready_ops);
+    protected:
+      int current_stage;
+    protected:
+      std::map<IndexSpace,unsigned> index_space_counts;
+      std::map<IndexPartition,unsigned> index_partition_counts;
+      std::map<FieldSpace,unsigned> field_space_counts;
+      // Use the lowest field ID here as the key
+      std::map<std::pair<FieldSpace,FieldID>,unsigned> field_counts;
+      std::map<LogicalRegion,unsigned> logical_region_counts;
+      std::map<LogicalPartition,unsigned> logical_partition_counts;
+      // Use the lowest field ID here as the key
+      std::map<std::pair<LogicalRegion,FieldID>,unsigned> detach_counts;
+    protected:
+      // Future counts for handling out-of-order stage arrivals
+      std::map<int,std::map<IndexSpace,unsigned> > 
+        future_index_space_counts;
+      std::map<int,std::map<IndexPartition,unsigned> > 
+        future_index_partition_counts;
+      std::map<int,std::map<FieldSpace,unsigned> >
+        future_field_space_counts;
+      std::map<int,std::map<std::pair<FieldSpace,FieldID>,unsigned> >
+        future_field_counts;
+      std::map<int,std::map<LogicalRegion,unsigned> >
+        future_logical_region_counts;
+      std::map<int,std::map<LogicalPartition,unsigned> >
+        future_logical_partition_counts;
+      std::map<int,std::map<std::pair<LogicalRegion,FieldID>,unsigned> >
+        future_detach_counts;
+    protected:
+      std::map<IndexSpace,ReplDeletionOp*> index_space_deletions;
+      std::map<IndexPartition,ReplDeletionOp*> index_partition_deletions;
+      std::map<FieldSpace,ReplDeletionOp*> field_space_deletions;
+      // Use the lowest field ID here as the key
+      std::map<std::pair<FieldSpace,FieldID>,ReplDeletionOp*> field_deletions;
+      std::map<LogicalRegion,ReplDeletionOp*> logical_region_deletions;
+      std::map<LogicalPartition,ReplDeletionOp*> logical_partition_deletions;
+      // Use the lowest field ID here as the key
+      std::map<std::pair<LogicalRegion,FieldID>,ReplDetachOp*> detachments;
+    };
+
+    /**
      * \class ReplIndividualTask
      * An individual task that is aware that it is 
      * being executed in a control replication context.
@@ -1140,6 +1216,14 @@ namespace Legion {
     public:
       void initialize_replication(ReplicateContext *ctx, 
           RtBarrier &deletion_barrier, bool is_total, bool is_first);
+      // Help for handling unordered deletions 
+      void record_unordered_kind(
+       std::map<IndexSpace,ReplDeletionOp*> &index_space_deletions,
+       std::map<IndexPartition,ReplDeletionOp*> &index_partition_deletions,
+       std::map<FieldSpace,ReplDeletionOp*> field_space_deletions,
+       std::map<std::pair<FieldSpace,FieldID>,ReplDeletionOp*> &field_deletions,
+       std::map<LogicalRegion,ReplDeletionOp*> &logical_region_deletions,
+       std::map<LogicalPartition,ReplDeletionOp*> &logical_partition_deletions);
     protected:
       RtBarrier mapping_barrier;
       RtBarrier execution_barrier;
@@ -1518,6 +1602,10 @@ namespace Legion {
                                   const InstanceRef &target,
                                   const InstanceSet &sources,
                                   std::vector<unsigned> &ranking);
+    public:
+      // Help for unordered detachments
+      void record_unordered_kind(
+        std::map<std::pair<LogicalRegion,FieldID>,ReplDetachOp*> &detachments);
     public:
       RtBarrier resource_barrier;
     };

@@ -1031,11 +1031,13 @@ namespace Legion {
       virtual size_t register_new_child_operation(Operation *op,
                 const std::vector<StaticDependence> *dependences);
       virtual void register_new_internal_operation(InternalOp *op);
+      // Must be called while holding the dependence lock
+      virtual void insert_unordered_ops(const bool end_task);
       virtual size_t register_new_close_operation(CloseOp *op);
       virtual size_t register_new_summary_operation(TraceSummaryOp *op);
       virtual void add_to_prepipeline_queue(Operation *op);
       bool process_prepipeline_stage(void);
-      virtual void add_to_dependence_queue(Operation *op, bool unordered);
+      virtual void add_to_dependence_queue(Operation *op, bool unordered); 
       void process_dependence_stage(void);
       virtual void add_to_post_task_queue(TaskContext *ctx, RtEvent wait_on,
           const void *result, size_t size, PhysicalInstance instance);
@@ -1152,9 +1154,7 @@ namespace Legion {
       void execute_task_launch(TaskOp *task, bool index, 
                                LegionTrace *current_trace, 
                                bool silence_warnings, bool inlining_enabled);
-      EquivalenceSet* find_or_create_top_equivalence_set(RegionTreeID tree_id);
-      // Must be called while holding the dependence lock
-      void insert_unordered_ops(void);
+      EquivalenceSet* find_or_create_top_equivalence_set(RegionTreeID tree_id); 
     public:
       void clone_local_fields(
           std::map<FieldSpace,std::vector<LocalFieldInfo> > &child_local) const;
@@ -1194,7 +1194,7 @@ namespace Legion {
       // For tracking any operations that come from outside the
       // task like a garbage collector that need to be inserted
       // into the stream of operations from the task
-      std::vector<Operation*> unordered_ops;
+      std::list<Operation*> unordered_ops;
 #ifdef DEBUG_LEGION
       // In debug mode also keep track of them in context order so
       // we can see what the longest outstanding operation is which
@@ -1610,6 +1610,7 @@ namespace Legion {
       virtual void destroy_logical_partition(LogicalPartition handle,
                                              const bool unordered);
     public:
+      virtual void insert_unordered_ops(const bool end_task);
       virtual Future execute_task(const TaskLauncher &launcher);
       virtual FutureMap execute_index_space(const IndexTaskLauncher &launcher);
       virtual Future execute_index_space(const IndexTaskLauncher &launcher,
@@ -1790,6 +1791,11 @@ namespace Legion {
       std::map<std::pair<unsigned,unsigned>,RtUserEvent> pending_clone_barriers;
     protected:
       unsigned next_replicate_bar_index;
+    protected:
+      static const unsigned MIN_UNORDERED_OPS_EPOCH = 32;
+      static const unsigned MAX_UNORDERED_OPS_EPOCH = 32768;
+      unsigned unordered_ops_counter;
+      unsigned unordered_ops_epoch;
     };
 
     /**

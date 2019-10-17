@@ -2463,6 +2463,81 @@ namespace Legion {
       is_first_local_shard = is_first;
     }
 
+    //--------------------------------------------------------------------------
+    void ReplDeletionOp::record_unordered_kind(
+       std::map<IndexSpace,ReplDeletionOp*> &index_space_deletions,
+       std::map<IndexPartition,ReplDeletionOp*> &index_partition_deletions,
+       std::map<FieldSpace,ReplDeletionOp*> field_space_deletions,
+       std::map<std::pair<FieldSpace,FieldID>,ReplDeletionOp*> &field_deletions,
+       std::map<LogicalRegion,ReplDeletionOp*> &logical_region_deletions,
+       std::map<LogicalPartition,ReplDeletionOp*> &logical_partition_deletions)
+    //--------------------------------------------------------------------------
+    {
+      switch (kind)
+      {
+        case INDEX_SPACE_DELETION:
+          {
+#ifdef DEBUG_LEGION
+            assert(index_space_deletions.find(index_space) ==
+                    index_space_deletions.end());
+#endif
+            index_space_deletions[index_space] = this;
+            break;
+          }
+        case INDEX_PARTITION_DELETION:
+          {
+#ifdef DEBUG_LEGION
+            assert(index_partition_deletions.find(index_part) ==
+                    index_partition_deletions.end());
+#endif
+            index_partition_deletions[index_part] = this;
+            break;
+          }
+        case FIELD_SPACE_DELETION:
+          {
+#ifdef DEBUG_LEGION
+            assert(field_space_deletions.find(field_space) ==
+                    field_space_deletions.end());
+#endif
+            field_space_deletions[field_space] = this;
+            break;
+          }
+        case FIELD_DELETION:
+          {
+#ifdef DEBUG_LEGION
+            assert(!free_fields.empty());
+#endif
+            const std::pair<FieldSpace,FieldID> key(field_space,
+                *(free_fields.begin()));
+#ifdef DEBUG_LEGION
+            assert(field_deletions.find(key) == field_deletions.end());
+#endif
+            field_deletions[key] = this;
+            break;
+          }
+        case LOGICAL_REGION_DELETION:
+          {
+#ifdef DEBUG_LEGION
+            assert(logical_region_deletions.find(logical_region) ==
+                    logical_region_deletions.end());
+#endif
+            logical_region_deletions[logical_region] = this;
+            break;
+          }
+        case LOGICAL_PARTITION_DELETION:
+          {
+#ifdef DEBUG_LEGION
+            assert(logical_partition_deletions.find(logical_part) ==
+                    logical_partition_deletions.end());
+#endif
+            logical_partition_deletions[logical_part] = this;
+            break;
+          }
+        default:
+          assert(false); // should never get here
+      }
+    }
+
     /////////////////////////////////////////////////////////////
     // Repl Pending Partition Op 
     /////////////////////////////////////////////////////////////
@@ -5166,6 +5241,23 @@ namespace Legion {
       if (!remote_ranking.empty())
         ranking.insert(ranking.end(), 
                        remote_ranking.begin(), remote_ranking.end());
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplDetachOp::record_unordered_kind(
+          std::map<std::pair<LogicalRegion,FieldID>,ReplDetachOp*> &detachments)
+    //--------------------------------------------------------------------------
+    {
+      const RegionRequirement &req = region.impl->get_requirement();
+#ifdef DEBUG_LEGION
+      assert(!req.privilege_fields.empty());
+#endif
+      const std::pair<LogicalRegion,FieldID> key(req.region,
+          *(req.privilege_fields.begin()));
+#ifdef DEBUG_LEGION
+      assert(detachments.find(key) == detachments.end());
+#endif
+      detachments[key] = this; 
     }
 
     /////////////////////////////////////////////////////////////
@@ -10570,6 +10662,286 @@ namespace Legion {
       assert(future_index_counts.size() == 1);
 #endif
       result_counts = future_index_counts.begin()->second;
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Unordered Exchange 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    UnorderedExchange::UnorderedExchange(ReplicateContext *ctx, 
+                                         CollectiveIndexLocation loc)
+      : AllGatherCollective(loc, ctx), current_stage(-1)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    UnorderedExchange::UnorderedExchange(const UnorderedExchange &rhs)
+      : AllGatherCollective(rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    UnorderedExchange::~UnorderedExchange(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    UnorderedExchange& UnorderedExchange::operator=(
+                                                   const UnorderedExchange &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename T>
+    void UnorderedExchange::update_future_counts(const int stage,
+                            std::map<int,std::map<T,unsigned> > &future_counts,
+                            std::map<T,unsigned> &counts)
+    //--------------------------------------------------------------------------
+    {
+      typename std::map<int,std::map<T,unsigned> >::iterator next =
+        future_counts.find(stage-1);
+      if (next != future_counts.end())
+      {
+        for (typename std::map<T,unsigned>::const_iterator it = 
+              next->second.begin(); it != next->second.end(); it++)
+        {
+          typename std::map<T,unsigned>::iterator finder = 
+            counts.find(it->first);
+          if (finder == counts.end())
+            counts.insert(*it);
+          else
+            finder->second += it->second;
+        }
+        future_counts.erase(next);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename T>
+    void UnorderedExchange::pack_counts(Serializer &rez,   
+                                        const std::map<T,unsigned> &counts)
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize<size_t>(counts.size());
+      for (typename std::map<T,unsigned>::const_iterator it = 
+            counts.begin(); it != counts.end(); it++)
+      {
+        rez.serialize(it->first);
+        rez.serialize(it->second);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename T>
+    void UnorderedExchange::unpack_counts(const int stage, Deserializer &derez,   
+                             std::map<int,std::map<T,unsigned> > &future_counts)
+    //--------------------------------------------------------------------------
+    {
+      size_t num_counts;
+      derez.deserialize(num_counts);
+      if (num_counts == 0)
+        return;
+      std::map<T,unsigned> &next = future_counts[stage];
+      for (unsigned idx = 0; idx < num_counts; idx++)
+      {
+        T key;
+        derez.deserialize(key);
+        unsigned count;
+        derez.deserialize(count);
+        typename std::map<T,unsigned>::iterator finder = next.find(key);
+        if (finder == next.end())
+          next[key] = count;
+        else
+          finder->second += count;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename T, typename OP>
+    void UnorderedExchange::initialize_counts(const std::map<T,OP*> &ops,
+                                              std::map<T,unsigned> &counts)
+    //--------------------------------------------------------------------------
+    {
+      for (typename std::map<T,OP*>::const_iterator it = 
+            ops.begin(); it != ops.end(); it++) 
+        counts[it->first] = 1;
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename T, typename OP>
+    void UnorderedExchange::find_ready_ops(const size_t total_shards,
+        const std::map<int,std::map<T,unsigned> > &final_counts,
+        const std::map<T,OP*> &ops, std::vector<Operation*> &ready_ops)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(final_counts.size() == 1);
+#endif
+      const std::map<T,unsigned> &counts = final_counts.begin()->second;
+      for (typename std::map<T,unsigned>::const_iterator it = 
+            counts.begin(); it != counts.end(); it++)
+      {
+#ifdef DEBUG_LEGION
+        assert(it->second <= total_shards);
+#endif
+        if (it->second == total_shards)
+        {
+          typename std::map<T,OP*>::const_iterator finder = ops.find(it->first);
+#ifdef DEBUG_LEGION
+          assert(finder != ops.end());
+#endif
+          ready_ops.push_back(finder->second);
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void UnorderedExchange::pack_collective_stage(Serializer &rez, int stage)
+    //--------------------------------------------------------------------------
+    {
+      // The first time we pack a stage we merge any values that we had
+      // unpacked earlier as they are needed for sending this stage for
+      // the first time.
+      if (stage != current_stage)
+      {
+        if (!future_index_space_counts.empty())
+          update_future_counts(stage, future_index_space_counts, 
+                               index_space_counts);
+        if (!future_index_partition_counts.empty())
+          update_future_counts(stage, future_index_partition_counts,
+                               index_partition_counts);
+        if (!future_field_space_counts.empty())
+          update_future_counts(stage, future_field_space_counts, 
+                               field_space_counts);
+        if (!future_field_counts.empty())
+          update_future_counts(stage, future_field_counts, field_counts);
+        if (!future_logical_region_counts.empty())
+          update_future_counts(stage, future_logical_region_counts,
+                               logical_region_counts);
+        if (!future_logical_partition_counts.empty())
+          update_future_counts(stage, future_logical_partition_counts,
+                               logical_partition_counts);
+        if (!future_detach_counts.empty())
+          update_future_counts(stage, future_detach_counts, detach_counts);
+        // Update the current stage
+        current_stage = stage;
+      }
+      pack_counts(rez, index_space_counts);
+      pack_counts(rez, index_partition_counts);
+      pack_counts(rez, field_space_counts);
+      pack_counts(rez, field_counts);
+      pack_counts(rez, logical_region_counts);
+      pack_counts(rez, logical_partition_counts);
+      pack_counts(rez, detach_counts); 
+    }
+
+    //--------------------------------------------------------------------------
+    void UnorderedExchange::unpack_collective_stage(Deserializer &derez, 
+                                                    int stage)
+    //--------------------------------------------------------------------------
+    {
+      // We never eagerly do reductions as they can arrive out of order
+      // and we can't apply them too early or we'll get duplicate 
+      // applications of reductions
+      unpack_counts(stage, derez, future_index_space_counts);
+      unpack_counts(stage, derez, future_index_partition_counts);
+      unpack_counts(stage, derez, future_field_space_counts);
+      unpack_counts(stage, derez, future_field_counts);
+      unpack_counts(stage, derez, future_logical_region_counts);
+      unpack_counts(stage, derez, future_logical_partition_counts);
+      unpack_counts(stage, derez, future_detach_counts); 
+    }
+
+    //--------------------------------------------------------------------------
+    bool UnorderedExchange::exchange_unordered_ops(
+                                    const std::list<Operation*> &unordered_ops,
+                                          std::vector<Operation*> &ready_ops)
+    //--------------------------------------------------------------------------
+    {
+      // Sort our operations
+      if (!unordered_ops.empty())
+      {
+        for (std::list<Operation*>::const_iterator it = 
+              unordered_ops.begin(); it != unordered_ops.end(); it++)
+        {
+          switch ((*it)->get_operation_kind())
+          {
+            case Operation::DELETION_OP_KIND:
+              {
+#ifdef DEBUG_LEGION
+                ReplDeletionOp *op = dynamic_cast<ReplDeletionOp*>(*it);
+                assert(op != NULL);
+#else
+                ReplDeletionOp *op = static_cast<ReplDeletionOp*>(*it);
+#endif
+                op->record_unordered_kind(index_space_deletions,
+                    index_partition_deletions, field_space_deletions,
+                    field_deletions, logical_region_deletions, 
+                    logical_partition_deletions);
+                break; 
+              }
+            case Operation::DETACH_OP_KIND:
+              {
+#ifdef DEBUG_LEGION
+                ReplDetachOp *op = dynamic_cast<ReplDetachOp*>(*it);
+                assert(op != NULL);
+#else
+                ReplDetachOp *op = static_cast<ReplDetachOp*>(*it);
+#endif
+                op->record_unordered_kind(detachments);
+                break;
+              }
+            default: // Unimplemented operation kind
+              assert(false);
+          }
+        }
+        // Set the initial counts to one for all our unordered ops
+        initialize_counts(index_space_deletions, index_space_counts);
+        initialize_counts(index_partition_deletions, index_partition_counts);
+        initialize_counts(field_space_deletions, field_space_counts);
+        initialize_counts(field_deletions, field_counts);
+        initialize_counts(logical_region_deletions, logical_region_counts);
+        initialize_counts(logical_partition_deletions,logical_partition_counts);
+        initialize_counts(detachments, detach_counts);
+      }
+      // Perform the exchange
+      perform_collective_sync();
+      // Now look and see which operations have keys for all shards 
+      // Only need to do this if we have ops, if we didn't have ops then
+      // it's impossible for anyone else to have them all too
+      if (!unordered_ops.empty())
+      {
+        const size_t total_shards = manager->total_shards;
+        find_ready_ops(total_shards, future_index_space_counts,
+                       index_space_deletions, ready_ops);
+        find_ready_ops(total_shards, future_index_partition_counts,
+                       index_partition_deletions, ready_ops);
+        find_ready_ops(total_shards, future_field_space_counts,
+                       field_space_deletions, ready_ops);
+        find_ready_ops(total_shards, future_field_counts,
+                       field_deletions, ready_ops);
+        find_ready_ops(total_shards, future_logical_region_counts,
+                       logical_region_deletions, ready_ops);
+        find_ready_ops(total_shards, future_logical_partition_counts,
+                       logical_partition_deletions, ready_ops);
+        find_ready_ops(total_shards, future_detach_counts,
+                       detachments, ready_ops);
+      }
+      // Return true if anybody anywhere had a non-zero count
+      return (!index_space_counts.empty() || !index_partition_counts.empty() ||
+          !field_space_counts.empty() || !field_counts.empty() || 
+          !logical_region_counts.empty() || !logical_partition_counts.empty() ||
+          !detach_counts.empty());
     }
 
   }; // namespace Internal
