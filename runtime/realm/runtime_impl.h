@@ -75,6 +75,7 @@ namespace Realm {
       static Reservation make_id(const ReservationImpl& dummy, int owner, int index) { return ID::make_reservation(owner, index).convert<Reservation>(); }
       static Processor make_id(const ProcessorGroup& dummy, int owner, int index) { return ID::make_procgroup(owner, 0, index).convert<Processor>(); }
       static ID make_id(const SparsityMapImplWrapper& dummy, int owner, int index) { return ID::make_sparsity(owner, 0, index); }
+      static CompletionQueue make_id(const CompQueueImpl& dummy, int owner, int index) { return ID::make_compqueue(owner, index).convert<CompletionQueue>(); }
       
       static LEAF_TYPE *new_leaf_node(IT first_index, IT last_index, 
 				      int owner, FreeList *free_list)
@@ -109,6 +110,7 @@ namespace Realm {
     typedef DynamicTableAllocator<ReservationImpl, 10, 8> ReservationTableAllocator;
     typedef DynamicTableAllocator<ProcessorGroup, 10, 4> ProcessorGroupTableAllocator;
     typedef DynamicTableAllocator<SparsityMapImplWrapper, 10, 4> SparsityMapTableAllocator;
+    typedef DynamicTableAllocator<CompQueueImpl, 10, 4> CompQueueTableAllocator;
 
     // for each of the ID-based runtime objects, we're going to have an
     //  implementation class and a table to look them up in
@@ -125,6 +127,7 @@ namespace Realm {
       DynamicTable<BarrierTableAllocator> barriers;
       DynamicTable<ReservationTableAllocator> reservations;
       DynamicTable<ProcessorGroupTableAllocator> proc_groups;
+      DynamicTable<CompQueueTableAllocator> compqueues;
 
       // sparsity maps can be created by other nodes, so keep a
       //  map per-creator_node
@@ -275,6 +278,7 @@ namespace Realm {
       RegionInstanceImpl *get_instance_impl(ID id);
       SparsityMapImplWrapper *get_sparsity_impl(ID id);
       SparsityMapImplWrapper *get_available_sparsity_impl(NodeID target_node);
+      CompQueueImpl *get_compqueue_impl(ID id);
 
 #ifdef DEADLOCK_TRACE
       void add_thread(const pthread_t *thread);
@@ -297,6 +301,7 @@ namespace Realm {
       BarrierTableAllocator::FreeList *local_barrier_free_list;
       ReservationTableAllocator::FreeList *local_reservation_free_list;
       ProcessorGroupTableAllocator::FreeList *local_proc_group_free_list;
+      CompQueueTableAllocator::FreeList *local_compqueue_free_list;
 
       // keep a free list for each node we allocate maps on (i.e. indexed
       //   by owner_node)

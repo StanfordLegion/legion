@@ -172,7 +172,7 @@ namespace Realm {
       Processor first(void) const;
 
       // return the next matched processor after the one given, or NO_PROC
-      Processor next(Processor after);
+      Processor next(Processor after) const;
 
       // return a random matched processor, or NO_PROC if none exist
       Processor random(void) const;
@@ -259,7 +259,7 @@ namespace Realm {
       MachineQueryIterator(const QT& _query, RT _result);
 
     protected:
-      QT query;
+      const QT& query;
       RT result;
 
     public:

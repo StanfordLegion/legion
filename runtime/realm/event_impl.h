@@ -324,6 +324,90 @@ namespace Realm {
       char *final_values;   // results of completed reductions
     };
 
+    class CompQueueImpl {
+    public:
+      CompQueueImpl(void);
+      ~CompQueueImpl(void);
+
+      void init(CompletionQueue _me, int _owner);
+
+      void set_capacity(size_t _max_size, bool _resizable);
+
+      void destroy(void);
+
+      void add_event(Event event, bool faultaware);
+
+      Event get_local_progress_event(void);
+      void add_remote_progress_event(Event event);
+
+      size_t pop_events(Event *events, size_t max_to_pop);
+
+      CompletionQueue me;
+      int owner;
+      CompQueueImpl *next_free;
+
+      class DeferredDestroy : public EventWaiter {
+      public:
+	void defer(CompQueueImpl *_cq, Event wait_on);
+	virtual void event_triggered(bool poisoned);
+	virtual void print(std::ostream& os) const;
+	virtual Event get_finish_event(void) const;
+
+      protected:
+	CompQueueImpl *cq;
+      };
+      DeferredDestroy deferred_destroy;
+
+      // used to track pending remote pop requests
+      class RemotePopRequest {
+      public:
+	RemotePopRequest(Event *_events, size_t _capacity);
+
+	GASNetHSL mutex;
+	GASNetCondVar condvar;
+	bool completed;
+	size_t count, capacity;
+	Event *events;
+      };
+
+    protected:
+      void add_completed_event(Event event, bool was_pending);
+
+      class CompQueueWaiter : public EventWaiter {
+      public:
+	virtual void event_triggered(bool poisoned);
+	virtual void print(std::ostream& os) const;
+	virtual Event get_finish_event(void) const;
+
+	CompQueueImpl *cq;
+	Event wait_on;
+	bool faultaware;
+	CompQueueWaiter *next_free;
+      };
+
+      static const size_t CQWAITER_BATCH_SIZE = 16;
+      class CompQueueWaiterBatch {
+      public:
+	CompQueueWaiterBatch(CompQueueImpl *cq, CompQueueWaiterBatch *_next);
+	~CompQueueWaiterBatch(void);
+
+	CompQueueWaiter waiters[CQWAITER_BATCH_SIZE];
+	CompQueueWaiterBatch *next_batch;
+      };
+
+      GASNetHSL mutex; // protects everything below here
+
+      size_t wr_ptr, rd_ptr, cur_events, pending_events, max_events;
+      bool resizable;
+      Event *completed_events;
+      GenEventImpl *local_progress_event;
+      EventImpl::gen_t local_progress_event_gen;
+      // TODO: small vector
+      std::vector<Event> remote_progress_events;
+      CompQueueWaiter *first_free_waiter;
+      CompQueueWaiterBatch *batches;
+    };
+
   // active messages
 
   struct EventSubscribeMessage {
@@ -407,7 +491,52 @@ namespace Realm {
 			       const void *data, size_t datalen);
     static void send_request(NodeID target, Barrier barrier, NodeID owner);
   };
-	
+
+  struct CompQueueDestroyMessage {
+    CompletionQueue comp_queue;
+    Event wait_on;
+
+    static void handle_message(NodeID sender, const CompQueueDestroyMessage &msg,
+			       const void *data, size_t datalen);
+  };
+
+  struct CompQueueAddEventMessage {
+    CompletionQueue comp_queue;
+    Event event;
+    bool faultaware;
+
+    static void handle_message(NodeID sender, const CompQueueAddEventMessage &msg,
+			       const void *data, size_t datalen);
+  };
+
+  struct CompQueueRemoteProgressMessage {
+    CompletionQueue comp_queue;
+    Event progress;
+
+    static void handle_message(NodeID sender, const CompQueueRemoteProgressMessage &msg,
+			       const void *data, size_t datalen);
+  };
+
+  struct CompQueuePopRequestMessage {
+    CompletionQueue comp_queue;
+    size_t max_to_pop;
+    bool discard_events;
+    intptr_t request;
+
+    static void handle_message(NodeID sender,
+			       const CompQueuePopRequestMessage &msg,
+			       const void *data, size_t datalen);
+  };
+
+  struct CompQueuePopResponseMessage {
+    size_t count;
+    intptr_t request;
+
+    static void handle_message(NodeID sender,
+			       const CompQueuePopResponseMessage &msg,
+			       const void *data, size_t datalen);
+  };
+
 }; // namespace Realm
 
 #include "realm/event_impl.inl"

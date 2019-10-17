@@ -141,6 +141,17 @@ int main(int argc, const char *argv[])
     assert(hi.is_sparsity());
   }
 
+  // compqueue
+  {
+    ID lo = ID::make_compqueue(0, 0);
+    ID hi = ID::make_compqueue(-1U, -1U);
+    assert(ranges.count(lo.id) == 0);
+    ranges[lo.id] = hi.id;
+    names[lo.id] = "compqueue";
+    assert(lo.is_compqueue());
+    assert(hi.is_compqueue());
+  }
+
   ID::IDType prev = 0;
   for(std::map<ID::IDType, ID::IDType>::const_iterator it = ranges.begin(); it != ranges.end(); it++) {
     if(verbose)

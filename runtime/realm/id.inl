@@ -202,6 +202,21 @@ namespace Realm {
     return this->sparsity_type_tag() == FMT_Sparsity::TAG_VALUE;
   }
 
+  /*static*/ inline ID ID::make_compqueue(unsigned owner_node, unsigned cq_idx)
+  {
+    ID id;
+    id.id = 0;
+    id.compqueue_type_tag() |= FMT_CompQueue::TAG_VALUE;
+    id.compqueue_owner_node() |= owner_node;
+    id.compqueue_cq_idx() |= cq_idx;
+    return id;
+  }
+
+  inline bool ID::is_compqueue(void) const
+  {
+    return this->compqueue_type_tag() == FMT_CompQueue::TAG_VALUE;
+  }
+
   inline std::ostream& operator<<(std::ostream& os, ID id) { return os << std::hex << static_cast<ID::IDType>(id.id) << std::dec; }
 
 }; // namespace Realm

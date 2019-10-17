@@ -951,6 +951,17 @@ extern "C" {
                              legion_index_space_t handle);
 
   /**
+   * @param handle Caller must have ownership of parameter `handle`.
+   *
+   * @see Legion::Runtime::destroy_index_space()
+   */
+  void
+  legion_index_space_destroy_unordered(legion_runtime_t runtime,
+                                       legion_context_t ctx,
+                                       legion_index_space_t handle,
+                                       bool unordered);
+
+  /**
    * @see Legion::Runtime::attach_semantic_information()
    */
   void
@@ -1481,6 +1492,17 @@ extern "C" {
                              legion_field_space_t handle);
 
   /**
+   * @param handle Caller must have ownership of parameter `handle`.
+   *
+   * @see Legion::Runtime::destroy_field_space()
+   */
+  void
+  legion_field_space_destroy_unordered(legion_runtime_t runtime,
+                                       legion_context_t ctx,
+                                       legion_field_space_t handle,
+                                       bool unordered);
+
+  /**
    * @see Legion::Runtime::attach_semantic_information()
    */
   void
@@ -1615,6 +1637,17 @@ extern "C" {
                                 legion_logical_region_t handle);
 
   /**
+   * @param handle Caller must have ownership of parameter `handle`.
+   *
+   * @see Legion::Runtime::destroy_logical_region()
+   */
+  void
+  legion_logical_region_destroy_unordered(legion_runtime_t runtime,
+                                          legion_context_t ctx,
+                                          legion_logical_region_t handle,
+                                          bool unordered);
+
+  /**
    * @see Legion::Runtime::get_logical_region_color()
    */
   legion_color_t
@@ -1722,6 +1755,17 @@ extern "C" {
   legion_logical_partition_destroy(legion_runtime_t runtime,
                                    legion_context_t ctx,
                                    legion_logical_partition_t handle);
+
+  /**
+   * @param handle Caller must have ownership of parameter `handle`.
+   *
+   * @see Legion::Runtime::destroy_logical_partition()
+   */
+  void
+  legion_logical_partition_destroy_unordered(legion_runtime_t runtime,
+                                             legion_context_t ctx,
+                                             legion_logical_partition_t handle,
+                                             bool unordered);
 
   /**
    * @return Caller does **NOT** take ownership of return value.
@@ -1992,6 +2036,14 @@ extern "C" {
   void
   legion_field_allocator_free_field(legion_field_allocator_t allocator,
                                     legion_field_id_t fid);
+
+  /**
+   * @see Legion::FieldAllocator::free_field()
+   */
+  void
+  legion_field_allocator_free_field_unordered(legion_field_allocator_t allocator,
+                                              legion_field_id_t fid,
+                                              bool unordered);
 
   /**
    * @see Legion::FieldAllocator::allocate_local_field()
@@ -3537,6 +3589,18 @@ extern "C" {
                                         legion_context_t ctx,
                                         legion_physical_region_t handle,
                                         bool flush);
+
+  /**
+   * @return Caller takes ownership of return value
+   *
+   * @see Legion::Runtime::detach_external_resource()
+   */
+  legion_future_t
+  legion_unordered_detach_external_resource(legion_runtime_t runtime,
+                                            legion_context_t ctx,
+                                            legion_physical_region_t handle,
+                                            bool flush,
+                                            bool unordered);
 
   // -----------------------------------------------------------------------
   // Must Epoch Operations
