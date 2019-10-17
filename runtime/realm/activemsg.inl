@@ -18,6 +18,9 @@
 // this is a nop, but it's for the benefit of IDEs trying to parse this file
 #include "realm/activemsg.h"
 
+// for name demangling
+#include <cxxabi.h>
+
 ////////////////////////////////////////////////////////////////////////
 //
 // class ActiveMessage<T>
@@ -222,10 +225,25 @@ template <typename T, typename T2>
 ActiveMessageHandlerReg<T, T2>::ActiveMessageHandlerReg(void)
 {
   hash = 0;
-  name = typeid(T).name();
-  const char *c = name;
+  // we always hash with the mangled name, but try to demangle for debugging
+  //  purposes
+  const char *mangled_name = typeid(T).name();
+  const char *c = mangled_name;
   while(*c)
     hash = hash * 73 + *c++;
+
+  int status = -4;
+  // let __cxa_demagle do a malloc - we have no idea how much to request
+  //  ahead of time
+  char *demangled = abi::__cxa_demangle(mangled_name, 0, 0, &status);
+  if(status == 0) {
+    // success
+    name = demangled;
+    must_free = true;
+  } else {
+    name = mangled_name;
+    must_free = false;
+  }
 
   ActiveMessageHandlerTable::append_handler_reg(this);
 }

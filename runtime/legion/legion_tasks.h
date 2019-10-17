@@ -1070,6 +1070,8 @@ namespace Legion {
     public:
       virtual void handle_future(const DomainPoint &point, const void *result,
                                  size_t result_size, bool owner);
+      virtual void add_copy_profiling_request(
+                                      Realm::ProfilingRequestSet &requests);
     public:
       virtual void register_must_epoch(void);
     public:

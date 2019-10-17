@@ -482,6 +482,8 @@ namespace Realm {
 
   /*static*/ const Barrier Barrier::NO_BARRIER = make_no_barrier();
 
+  /*static*/ const ::realm_event_gen_t Barrier::MAX_PHASES = (::realm_event_gen_t(1) << REALM_EVENT_GENERATION_BITS) - 1;
+
   /*static*/ Barrier Barrier::create_barrier(unsigned expected_arrivals,
 					     ReductionOpID redop_id /*= 0*/,
 					     const void *initial_value /*= 0*/,
@@ -508,8 +510,11 @@ namespace Realm {
   {
     ID nextid(id);
     EventImpl::gen_t gen = ID(id).barrier_generation() + 1;
+#ifdef DEBUG_REALM
+    assert(MAX_PHASES <= nextid.barrier_generation().MAXVAL);
+#endif
     // return NO_BARRIER if the count overflows
-    if(gen > nextid.barrier_generation().MAXVAL)
+    if(gen > MAX_PHASES)
       return Barrier::NO_BARRIER;
     nextid.barrier_generation() = ID(id).barrier_generation() + 1;
 
