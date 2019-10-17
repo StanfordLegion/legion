@@ -1240,7 +1240,7 @@ namespace Realm {
     return ((ProcessorQueryImpl *)impl)->first_match();
   }
 
-  Processor Machine::ProcessorQuery::next(Processor after)
+  Processor Machine::ProcessorQuery::next(Processor after) const
   {
     if (Config::use_machine_query_cache)
       return ((ProcessorQueryImpl *)impl)->cache_next(after);

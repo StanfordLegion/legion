@@ -53,6 +53,7 @@ namespace Realm {
       // PROCESSOR:   tag:8 = 0x1d, owner_node:16,   (unused):28, proc_idx: 12
       // PROCGROUP:   tag:8 = 0x1c, owner_node:16,   creator_node:16, pgroup_idx: 24
       // SPARSITY:    tag:4 = 0x4,  owner_node:16,   creator_node:16, sparsity_idx: 28
+      // COMPQUEUE:   tag:8 = 0x19, owner_node:16,   (unused):28, cq_idx: 12
 
       static const int NODE_FIELD_WIDTH = 16;
       static const unsigned MAX_NODE_ID = (1U << NODE_FIELD_WIDTH) - 2; // reserve all 1's for special cases
@@ -193,6 +194,20 @@ namespace Realm {
       ACCESSOR(FMT_Sparsity, sparsity, creator_node)
       ACCESSOR(FMT_Sparsity, sparsity, sparsity_idx)
 
+      struct FMT_CompQueue {
+	typedef bitfield<8, 56> type_tag;
+	typedef bitfield<NODE_FIELD_WIDTH,
+			 56-NODE_FIELD_WIDTH> owner_node;
+	// middle bits unused
+	typedef bitfield<12, 0> cq_idx;
+
+	static const IDType TAG_VALUE = 0x19;
+      };
+
+      ACCESSOR(FMT_CompQueue, compqueue, type_tag)
+      ACCESSOR(FMT_CompQueue, compqueue, owner_node)
+      ACCESSOR(FMT_CompQueue, compqueue, cq_idx)
+
       static ID make_event(unsigned creator_node, unsigned gen_event_idx, unsigned generation);
       static ID make_barrier(unsigned creator_node, unsigned barrier_idx, unsigned generation);
       static ID make_reservation(unsigned creator_node, unsigned rsrv_idx);
@@ -202,6 +217,7 @@ namespace Realm {
       static ID make_processor(unsigned owner_node, unsigned proc_idx);
       static ID make_procgroup(unsigned owner_node, unsigned creator_node, unsigned pgroup_idx);
       static ID make_sparsity(unsigned owner_node, unsigned creator_node, unsigned sparsity_idx);
+      static ID make_compqueue(unsigned owner_node, unsigned cq_idx);
 
       bool is_null(void) const;
       bool is_event(void) const;
@@ -213,6 +229,7 @@ namespace Realm {
       bool is_processor(void) const;
       bool is_procgroup(void) const;
       bool is_sparsity(void) const;
+      bool is_compqueue(void) const;
 
       enum ID_Types {
 	ID_SPECIAL,

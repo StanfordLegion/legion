@@ -854,6 +854,7 @@ namespace Realm {
 	local_event_free_list(0), local_barrier_free_list(0),
 	local_reservation_free_list(0),
 	local_proc_group_free_list(0),
+	local_compqueue_free_list(0),
 	//local_sparsity_map_free_list(0),
 	run_method_called(false),
 	shutdown_condvar(shutdown_mutex),
@@ -1313,6 +1314,7 @@ namespace Realm {
 	local_barrier_free_list = new BarrierTableAllocator::FreeList(n.barriers, my_node_id);
 	local_reservation_free_list = new ReservationTableAllocator::FreeList(n.reservations, my_node_id);
 	local_proc_group_free_list = new ProcessorGroupTableAllocator::FreeList(n.proc_groups, my_node_id);
+	local_compqueue_free_list = new CompQueueTableAllocator::FreeList(n.compqueues, my_node_id);
 
 	local_sparsity_map_free_lists.resize(max_node_id + 1);
 	for(NodeID i = 0; i <= max_node_id; i++) {
@@ -2323,6 +2325,7 @@ namespace Realm {
 	delete local_barrier_free_list;
 	delete local_reservation_free_list;
 	delete local_proc_group_free_list;
+	delete local_compqueue_free_list;
 	delete_container_contents(local_sparsity_map_free_lists);
 
 	// same for code translators
@@ -2564,6 +2567,20 @@ namespace Realm {
 	  
       return mem->instances[id.instance.inst_idx];
 #endif
+    }
+
+    CompQueueImpl *RuntimeImpl::get_compqueue_impl(ID id)
+    {
+      if(!id.is_compqueue()) {
+	log_runtime.fatal() << "invalid completion queue handle: id=" << id;
+	assert(0 && "invalid completion queue handle");
+      }
+
+      Node *n = &nodes[id.pgroup_owner_node()];
+      CompQueueImpl *impl = n->compqueues.lookup_entry(id.compqueue_cq_idx(),
+						       id.compqueue_owner_node());
+      assert(impl->me == id.convert<CompletionQueue>());
+      return impl;
     }
 
     /*static*/
