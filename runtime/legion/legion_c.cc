@@ -687,11 +687,20 @@ legion_index_space_destroy(legion_runtime_t runtime_,
                            legion_context_t ctx_,
                            legion_index_space_t handle_)
 {
+  legion_index_space_destroy_unordered(runtime_, ctx_, handle_, false);
+}
+
+void
+legion_index_space_destroy_unordered(legion_runtime_t runtime_,
+                                     legion_context_t ctx_,
+                                     legion_index_space_t handle_,
+                                     bool unordered)
+{
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_)->context();
   IndexSpace handle = CObjectWrapper::unwrap(handle_);
 
-  runtime->destroy_index_space(ctx, handle);
+  runtime->destroy_index_space(ctx, handle, unordered);
 }
 
 bool
@@ -1688,11 +1697,20 @@ legion_field_space_destroy(legion_runtime_t runtime_,
                            legion_context_t ctx_,
                            legion_field_space_t handle_)
 {
+  legion_field_space_destroy_unordered(runtime_, ctx_, handle_, false);
+}
+
+void
+legion_field_space_destroy_unordered(legion_runtime_t runtime_,
+                                     legion_context_t ctx_,
+                                     legion_field_space_t handle_,
+                                     bool unordered)
+{
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_)->context();
   FieldSpace handle = CObjectWrapper::unwrap(handle_);
 
-  runtime->destroy_field_space(ctx, handle);
+  runtime->destroy_field_space(ctx, handle, unordered);
 }
 
 void
@@ -1866,11 +1884,20 @@ legion_logical_region_destroy(legion_runtime_t runtime_,
                               legion_context_t ctx_,
                               legion_logical_region_t handle_)
 {
+  legion_logical_region_destroy_unordered(runtime_, ctx_, handle_, false);
+}
+
+void
+legion_logical_region_destroy_unordered(legion_runtime_t runtime_,
+                                        legion_context_t ctx_,
+                                        legion_logical_region_t handle_,
+                                        bool unordered)
+{
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_)->context();
   LogicalRegion handle = CObjectWrapper::unwrap(handle_);
 
-  runtime->destroy_logical_region(ctx, handle);
+  runtime->destroy_logical_region(ctx, handle, unordered);
 }
 
 legion_color_t
@@ -2012,11 +2039,20 @@ legion_logical_partition_destroy(legion_runtime_t runtime_,
                                  legion_context_t ctx_,
                                  legion_logical_partition_t handle_)
 {
+  legion_logical_partition_destroy_unordered(runtime_, ctx_, handle_, false);
+}
+
+void
+legion_logical_partition_destroy_unordered(legion_runtime_t runtime_,
+                                           legion_context_t ctx_,
+                                           legion_logical_partition_t handle_,
+                                           bool unordered)
+{
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_)->context();
   LogicalPartition handle = CObjectWrapper::unwrap(handle_);
 
-  runtime->destroy_logical_partition(ctx, handle);
+  runtime->destroy_logical_partition(ctx, handle, unordered);
 }
 
 legion_logical_region_t
@@ -2345,8 +2381,16 @@ void
 legion_field_allocator_free_field(legion_field_allocator_t allocator_,
                                   legion_field_id_t fid)
 {
+  legion_field_allocator_free_field_unordered(allocator_, fid, false);
+}
+
+void
+legion_field_allocator_free_field_unordered(legion_field_allocator_t allocator_,
+                                            legion_field_id_t fid,
+                                            bool unordered)
+{
   FieldAllocator *allocator = CObjectWrapper::unwrap(allocator_);
-  allocator->free_field(fid);
+  allocator->free_field(fid, unordered);
 }
 
 legion_field_id_t
@@ -4412,13 +4456,7 @@ legion_detach_external_resource(legion_runtime_t runtime_,
                                 legion_context_t ctx_,
                                 legion_physical_region_t handle_)
 {
-  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
-  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
-  PhysicalRegion *handle = CObjectWrapper::unwrap(handle_);
-
-  Future *result = new Future(
-      runtime->detach_external_resource(ctx, *handle));
-  return CObjectWrapper::wrap(result);
+  return legion_unordered_detach_external_resource(runtime_, ctx_, handle_, true, false);
 }
 
 legion_future_t
@@ -4427,12 +4465,21 @@ legion_flush_detach_external_resource(legion_runtime_t runtime_,
                                       legion_physical_region_t handle_,
                                       bool flush)
 {
+  return legion_unordered_detach_external_resource(runtime_, ctx_, handle_, flush, false);
+}
+
+legion_future_t
+legion_unordered_detach_external_resource(legion_runtime_t runtime_,
+                                          legion_context_t ctx_,
+                                          legion_physical_region_t handle_,
+                                          bool flush, bool unordered)
+{
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_)->context();
   PhysicalRegion *handle = CObjectWrapper::unwrap(handle_);
 
   Future *result = new Future(
-      runtime->detach_external_resource(ctx, *handle, flush));
+      runtime->detach_external_resource(ctx, *handle, flush, unordered));
   return CObjectWrapper::wrap(result);
 }
 
