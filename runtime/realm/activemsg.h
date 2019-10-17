@@ -673,6 +673,7 @@ public:
   struct HandlerEntry {
     TypeHash hash;
     const char *name;
+    bool must_free;
     MessageHandler handler;
   };
 
@@ -691,6 +692,7 @@ public:
 
   ActiveMessageHandlerTable::TypeHash hash;
   const char *name;
+  bool must_free;
   ActiveMessageHandlerRegBase *next_handler;
 };
 
