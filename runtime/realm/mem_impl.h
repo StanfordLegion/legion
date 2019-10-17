@@ -35,6 +35,12 @@
 
 namespace Realm {
 
+  namespace Config {
+    // if true, Realm memories attempt to satisfy instance allocation requests
+    //  on the basis of deferred instance destructions
+    extern bool deferred_instance_allocation;
+  };
+
   class RegionInstanceImpl;
   class NetworkModule;
   class NetworkSegment;
@@ -47,24 +53,38 @@ namespace Realm {
   class BasicRangeAllocator {
   public:
     struct Range {
-      Range(RT _first, RT _last);
+      //Range(RT _first, RT _last);
 
       RT first, last;  // half-open range: [first, last)
-      Range *prev, *next;  // double-linked list of all ranges
-      Range *prev_free, *next_free;  // double-linked list of just free ranges
+      unsigned prev, next;  // double-linked list of all ranges (by index)
+      unsigned prev_free, next_free;  // double-linked list of just free ranges
     };
 
-    std::map<TT, Range *> allocated;  // direct lookup of allocated ranges by tag
-    std::map<RT, Range *> by_first;   // direct lookup of all ranges by first
-    Range sentinel;
+    std::map<TT, unsigned> allocated;  // direct lookup of allocated ranges by tag
+#ifdef DEBUG_REALM
+    std::map<RT, unsigned> by_first;   // direct lookup of all ranges by first
     // TODO: sized-based lookup of free ranges
+#endif
+
+    static const unsigned SENTINEL = 0;
+    // TODO: small (medium?) vector opt
+    std::vector<Range> ranges;
 
     BasicRangeAllocator(void);
     ~BasicRangeAllocator(void);
 
+    void swap(BasicRangeAllocator<RT, TT>& swap_with);
+
     void add_range(RT first, RT last);
+    bool can_allocate(TT tag, RT size, RT alignment);
     bool allocate(TT tag, RT size, RT alignment, RT& first);
-    void deallocate(TT tag);
+    void deallocate(TT tag, bool missing_ok = false);
+    bool lookup(TT tag, RT& first, RT& size);
+
+  protected:
+    unsigned first_free_range;
+    unsigned alloc_range(RT first, RT last);
+    void free_range(unsigned index);
   };
   
     class MemoryImpl {
@@ -105,7 +125,8 @@ namespace Realm {
       enum AllocationResult {
 	ALLOC_INSTANT_SUCCESS,
 	ALLOC_INSTANT_FAILURE,
-	ALLOC_DEFERRED
+	ALLOC_DEFERRED,
+	ALLOC_CANCELLED
       };
       virtual AllocationResult allocate_instance_storage(RegionInstance i,
 							 size_t bytes,
@@ -145,6 +166,24 @@ namespace Realm {
 	std::vector<size_t> free_list;
 	Mutex mutex;
       };
+      
+      // should only be called by RegionInstance::DeferredCreate
+      void deferred_creation_triggered(RegionInstanceImpl *inst,
+				       size_t bytes, size_t alignment,
+				       bool poisoned);
+
+      // should only be called by RegionInstance::DeferredDestroy
+      void deferred_destruction_triggered(RegionInstanceImpl *inst,
+					  bool poisoned);
+
+    protected:
+      // for internal use by allocation routines - must be called with
+      //  allocator_mutex held!
+      AllocationResult attempt_deferrable_allocation(RegionInstanceImpl *inst,
+						     size_t bytes,
+						     size_t alignment,
+						     size_t& inst_offset);
+
     public:
       Memory me;
       size_t size;
@@ -162,7 +201,34 @@ namespace Realm {
       Mutex mutex; // protection for resizing vectors
       std::map<off_t, off_t> free_blocks;
       Mutex allocator_mutex;
-      BasicRangeAllocator<size_t, RegionInstance> allocator;
+      // we keep up to three heap states:
+      // current: always valid - tracks all completed allocations and all
+      //                releases that can be applied without risking deadlock
+      // future: valid if pending_allocs exist - tracks heap state including
+      //                all pending allocs and releases
+      // release: valid if pending_allocs exist - models heap state with
+      //                completed allocations and any ready releases
+      BasicRangeAllocator<size_t, RegionInstance> current_allocator;
+      BasicRangeAllocator<size_t, RegionInstance> future_allocator;
+      BasicRangeAllocator<size_t, RegionInstance> release_allocator;
+      unsigned cur_release_seqid;
+      struct PendingAlloc {
+	RegionInstanceImpl *inst;
+	size_t bytes, alignment;
+	unsigned last_release_seqid;
+	PendingAlloc(RegionInstanceImpl *_inst, size_t _bytes, size_t _align,
+		     unsigned _release_seqid);
+      };
+      struct PendingRelease {
+	RegionInstanceImpl *inst;
+	bool is_ready;
+	unsigned seqid;
+
+	PendingRelease(RegionInstanceImpl *_inst, bool _ready,
+		       unsigned _seqid);
+      };
+      std::vector<PendingAlloc> pending_allocs;
+      std::vector<PendingRelease> pending_releases;
       ProfilingGauges::AbsoluteGauge<size_t> usage, peak_usage, peak_footprint;
     };
 
@@ -278,8 +344,7 @@ namespace Realm {
     struct MemStorageAllocResponse {
       RegionInstance inst;
       size_t offset;
-      size_t footprint;
-      bool success;
+      MemoryImpl::AllocationResult result;
 
       static void handle_message(NodeID sender, const MemStorageAllocResponse &msg,
 				 const void *data, size_t datalen);

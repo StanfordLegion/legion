@@ -113,7 +113,7 @@ namespace Realm {
       
     free_blocks[0] = size;
     // tell new allocator about the available memory too
-    allocator.add_range(0, size);
+    current_allocator.add_range(0, size);
   }
 
   GASNet1Memory::~GASNet1Memory(void)

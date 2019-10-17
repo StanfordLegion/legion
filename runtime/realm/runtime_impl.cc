@@ -1131,6 +1131,7 @@ namespace Realm {
       cp.add_option_bool("-ll:force_kthreads", Config::force_kernel_threads);
       cp.add_option_bool("-ll:frsrv_fallback", Config::use_fast_reservation_fallback);
       cp.add_option_int("-ll:machine_query_cache", Config::use_machine_query_cache);
+      cp.add_option_int("-ll:defalloc", Config::deferred_instance_allocation);
 
       bool cmdline_ok = cp.parse_command_line(cmdline);
 
