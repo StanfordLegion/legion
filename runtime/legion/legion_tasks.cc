@@ -8863,9 +8863,11 @@ namespace Legion {
                   point_reqs[it->first].get_index_space(), 
                   other_reqs[it->second].get_index_space()))
             {
-              if (pit->first.get_dim() <= 1) 
+              switch (pit->first.get_dim())
               {
-                REPORT_LEGION_ERROR(ERROR_INDEX_SPACE_TASK,
+                case 1:
+                  {
+                    REPORT_LEGION_ERROR(ERROR_INDEX_SPACE_TASK,
                               "Index space task launch has intefering "
                               "region requirements %d of point %lld and region "
                               "requirement %d of point %lld of %s (UID %lld) "
@@ -8874,10 +8876,12 @@ namespace Legion {
                               oit->first[0], get_task_name(), get_unique_id(),
                               parent_ctx->get_task_name(),
                               parent_ctx->get_unique_id());
-              } 
-              else if (pit->first.get_dim() == 2) 
-              {
-                REPORT_LEGION_ERROR(ERROR_INDEX_SPACE_TASK,
+                    break;
+                  }
+#if LEGION_MAX_DIM >= 2
+                case 2:
+                  {
+                    REPORT_LEGION_ERROR(ERROR_INDEX_SPACE_TASK,
                               "Index space task launch has intefering "
                               "region requirements %d of point (%lld,%lld) and "
                               "region requirement %d of point (%lld,%lld) of "
@@ -8887,10 +8891,13 @@ namespace Legion {
                               oit->first[1], get_task_name(), get_unique_id(),
                               parent_ctx->get_task_name(),
                               parent_ctx->get_unique_id());
-              } 
-              else if (pit->first.get_dim() == 3) 
-              {
-                REPORT_LEGION_ERROR(ERROR_INDEX_SPACE_TASK,
+                    break;
+                  }
+#endif
+#if LEGION_MAX_DIM >= 3
+                case 3:
+                  {
+                    REPORT_LEGION_ERROR(ERROR_INDEX_SPACE_TASK,
                               "Index space task launch has intefering "
                               "region requirements %d of point (%lld,%lld,%lld)"
                               " and region requirement %d of point "
@@ -8901,8 +8908,142 @@ namespace Legion {
                               oit->first[2], get_task_name(), get_unique_id(),
                               parent_ctx->get_task_name(),
                               parent_ctx->get_unique_id());
+                    break;
+                  }
+#endif
+#if LEGION_MAX_DIM >= 4
+                case 4:
+                  {
+                    REPORT_LEGION_ERROR(ERROR_INDEX_SPACE_TASK,
+                              "Index space task launch has intefering "
+                              "region requirements %d of point "
+                              "(%lld,%lld,%lld,%lld)"
+                              " and region requirement %d of point "
+                              "(%lld,%lld,%lld,%lld) of %s (UID %lld) in parent"
+                              " task %s (UID %lld) are interfering.", it->first,
+                              pit->first[0], pit->first[1], pit->first[2],
+                              pit->first[3], it->second, oit->first[0], 
+                              oit->first[1], oit->first[2], oit->first[3],
+                              get_task_name(), get_unique_id(),
+                              parent_ctx->get_task_name(),
+                              parent_ctx->get_unique_id());
+                    break;
+                  }
+#endif
+#if LEGION_MAX_DIM >= 5
+                case 5:
+                  {
+                    REPORT_LEGION_ERROR(ERROR_INDEX_SPACE_TASK,
+                              "Index space task launch has intefering "
+                              "region requirements %d of point "
+                              "(%lld,%lld,%lld,%lld,%lld)"
+                              " and region requirement %d of point "
+                              "(%lld,%lld,%lld,%lld,%lld) of %s (UID %lld) "
+                              "in parent task %s (UID %lld) are interfering.",
+                              it->first, pit->first[0], pit->first[1], 
+                              pit->first[2], pit->first[3], pit->first[4],
+                              it->second, oit->first[0], oit->first[1], 
+                              oit->first[2], oit->first[3], oit->first[4],
+                              get_task_name(), get_unique_id(),
+                              parent_ctx->get_task_name(),
+                              parent_ctx->get_unique_id());
+                    break;
+                  }
+#endif
+#if LEGION_MAX_DIM >= 6
+                case 6:
+                  {
+                    REPORT_LEGION_ERROR(ERROR_INDEX_SPACE_TASK,
+                              "Index space task launch has intefering "
+                              "region requirements %d of point "
+                              "(%lld,%lld,%lld,%lld,%lld,%lld)"
+                              " and region requirement %d of point "
+                              "(%lld,%lld,%lld,%lld,%lld,%lld) of %s " 
+                              "(UID %lld) in parent task %s (UID %lld) "
+                              "are interfering.",
+                              it->first, pit->first[0], pit->first[1], 
+                              pit->first[2], pit->first[3], pit->first[4],
+                              pit->first[5], it->second, oit->first[0], 
+                              oit->first[1], oit->first[2], oit->first[3], 
+                              oit->first[4], oit->first[5],
+                              get_task_name(), get_unique_id(),
+                              parent_ctx->get_task_name(),
+                              parent_ctx->get_unique_id());
+                    break;
+                  }
+#endif
+#if LEGION_MAX_DIM >= 7
+                case 7:
+                  {
+                    REPORT_LEGION_ERROR(ERROR_INDEX_SPACE_TASK,
+                              "Index space task launch has intefering "
+                              "region requirements %d of point "
+                              "(%lld,%lld,%lld,%lld,%lld,%lld,%lld)"
+                              " and region requirement %d of point "
+                              "(%lld,%lld,%lld,%lld,%lld,%lld,%lld) of %s "
+                              "(UID %lld) in parent task %s (UID %lld) "
+                              "are interfering.",
+                              it->first, pit->first[0], pit->first[1], 
+                              pit->first[2], pit->first[3], pit->first[4],
+                              pit->first[5], pit->first[6], it->second, 
+                              oit->first[0], oit->first[1], oit->first[2], 
+                              oit->first[3], oit->first[4], oit->first[5],
+                              oit->first[6], get_task_name(), get_unique_id(),
+                              parent_ctx->get_task_name(),
+                              parent_ctx->get_unique_id());
+                    break;
+                  }
+#endif
+#if LEGION_MAX_DIM >= 8
+                case 8:
+                  {
+                    REPORT_LEGION_ERROR(ERROR_INDEX_SPACE_TASK,
+                              "Index space task launch has intefering "
+                              "region requirements %d of point "
+                              "(%lld,%lld,%lld,%lld,%lld,%lld,%lld,%lld)"
+                              " and region requirement %d of point "
+                              "(%lld,%lld,%lld,%lld,%lld,%lld,%lld,%lld) "
+                              "of %s (UID %lld) in parent task %s (UID %lld) "
+                              "are interfering.",
+                              it->first, pit->first[0], pit->first[1], 
+                              pit->first[2], pit->first[3], pit->first[4],
+                              pit->first[5], pit->first[6], pit->first[7],
+                              it->second, oit->first[0], oit->first[1], 
+                              oit->first[2], oit->first[3], oit->first[4], 
+                              oit->first[5], oit->first[6], oit->first[7],
+                              get_task_name(), get_unique_id(),
+                              parent_ctx->get_task_name(),
+                              parent_ctx->get_unique_id());
+                    break;
+                  }
+#endif
+#if LEGION_MAX_DIM >= 9
+                case 9:
+                  {
+                    REPORT_LEGION_ERROR(ERROR_INDEX_SPACE_TASK,
+                              "Index space task launch has intefering "
+                              "region requirements %d of point "
+                              "(%lld,%lld,%lld,%lld,%lld,%lld,%lld,%lld,%lld)"
+                              " and region requirement %d of point "
+                              "(%lld,%lld,%lld,%lld,%lld,%lld,%lld,%lld,%lld) "
+                              "of %s (UID %lld) in parent task %s (UID %lld) "
+                              "are interfering.",
+                              it->first, pit->first[0], pit->first[1], 
+                              pit->first[2], pit->first[3], pit->first[4],
+                              pit->first[5], pit->first[6], pit->first[7],
+                              pit->first[8], it->second, oit->first[0], 
+                              oit->first[1], oit->first[2], oit->first[3], 
+                              oit->first[4], oit->first[5], oit->first[6], 
+                              oit->first[7], oit->first[8],
+                              get_task_name(), get_unique_id(),
+                              parent_ctx->get_task_name(),
+                              parent_ctx->get_unique_id());
+                    break;
+                  }
+#endif
+                default:
+                  assert(false);
               }
-              assert(false);
             }
           }
         }
