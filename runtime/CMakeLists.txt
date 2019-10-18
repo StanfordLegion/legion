@@ -114,9 +114,19 @@ if (Legion_USE_Python)
   )
 endif()
 
+if(Legion_USE_GASNet)
+  list(APPEND REALM_SRC
+    realm/gasnet1/gasnet1_module.h
+    realm/gasnet1/gasnet1_module.cc
+    realm/gasnet1/gasnetmsg.h
+    realm/gasnet1/gasnetmsg.cc
+  )
+endif()
+
 list(APPEND REALM_SRC
   realm.h
   realm/activemsg.h realm/activemsg.cc
+  realm/network.h          realm/network.cc
   realm/bytearray.h
   realm/bytearray.inl
   realm/circ_queue.h

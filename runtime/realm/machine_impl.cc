@@ -272,7 +272,7 @@ namespace Realm {
 
     size_t Machine::get_address_space_count(void) const
     {
-      return max_node_id + 1;
+      return Network::max_node_id + 1;
     }
 
     void Machine::get_all_memories(std::set<Memory>& mset) const
@@ -429,7 +429,7 @@ namespace Realm {
     {
       AutoLock<> al(mutex);
 
-      assert(node_id <= max_node_id);
+      assert(node_id <= Network::max_node_id);
       Node& n = get_runtime()->nodes[node_id];
 
       Serialization::FixedBufferDeserializer fbd(args, arglen);
@@ -472,20 +472,30 @@ namespace Realm {
 	    Memory m;
 	    Memory::Kind kind;
 	    size_t size;
-	    intptr_t regbase;
+	    bool has_rdma_info = false;
+	    ByteArray rdma_info;
 	    ok = (ok &&
 		  (fbd >> m) &&
 		  (fbd >> kind) &&
 		  (fbd >> size) &&
-		  (fbd >> regbase));
+		  (fbd >> has_rdma_info));
+	    if(has_rdma_info)
+	      ok = ok && (fbd >> rdma_info);
 	    if(ok) {
 	      assert(NodeID(ID(m).memory_owner_node()) == node_id);
 	      assert(ID(m).memory_mem_idx() < num_memories);
 	      log_annc.debug() << "adding memory " << m << " (kind = " << kind
-			       << ", size = " << size << ", regbase = " << std::hex << regbase << std::dec << ")";
+			       << ", size = " << size << ", has_rdma = " << has_rdma_info << ")";
 	      if(remote) {
-		RemoteMemory *mem = new RemoteMemory(m, size, kind,
-						     reinterpret_cast<void *>(regbase));
+		MemoryImpl *mem;
+		if(has_rdma_info) {
+		  mem = Network::get_network(node_id)->create_remote_memory(m,
+									    size,
+									    kind,
+									    rdma_info);
+		} else {
+		  mem = new RemoteMemory(m, size, kind);
+		}
 		n.memories[ID(m).memory_mem_idx()] = mem;
 
 #ifndef REALM_SKIP_INTERNODE_AFFINITIES
@@ -501,7 +511,7 @@ namespace Realm {
 		    continue;
 
 		  // iterate over local memories and check their kinds
-		  Node *mynode = &(get_runtime()->nodes[my_node_id]);
+		  Node *mynode = &(get_runtime()->nodes[Network::my_node_id]);
 		  for(std::vector<MemoryImpl *>::const_iterator it = mynode->memories.begin();
 		      it != mynode->memories.end();
 		      ++it) {
@@ -550,20 +560,30 @@ namespace Realm {
 	    Memory m;
 	    Memory::Kind kind;
 	    size_t size;
-	    intptr_t regbase;
+	    bool has_rdma_info = false;
+	    ByteArray rdma_info;
 	    ok = (ok &&
 		  (fbd >> m) &&
 		  (fbd >> kind) &&
 		  (fbd >> size) &&
-		  (fbd >> regbase));
+		  (fbd >> has_rdma_info));
+	    if(has_rdma_info)
+	      ok = ok && (fbd >> rdma_info);
 	    if(ok) {
 	      assert(NodeID(ID(m).memory_owner_node()) == node_id);
 	      assert(ID(m).memory_mem_idx() < num_ib_memories);
 	      log_annc.debug() << "adding ib memory " << m << " (kind = " << kind
-			       << ", size = " << size << ", regbase = " << std::hex << regbase << std::dec << ")";
+			       << ", size = " << size << ", has_rdma = " << has_rdma_info << ")";
 	      if(remote) {
-		RemoteMemory *mem = new RemoteMemory(m, size, kind,
-						     reinterpret_cast<void *>(regbase));
+		MemoryImpl *mem;
+		if(has_rdma_info) {
+		  mem = Network::get_network(node_id)->create_remote_memory(m,
+									    size,
+									    kind,
+									    rdma_info);
+		} else {
+		  mem = new RemoteMemory(m, size, kind);
+		}
 		n.ib_memories[ID(m).memory_mem_idx()] = mem;
 	      }
 	    }
@@ -699,11 +719,11 @@ namespace Realm {
 	  it != proc_mem_affinities.end();
 	  it++) {
 	Processor p = (*it).p;
-	if(ID(p).proc_owner_node() == my_node_id)
+	if(ID(p).proc_owner_node() == Network::my_node_id)
 	  pset.insert(p);
       }
 #else
-      const MachineNodeInfo *mynode = get_nodeinfo(my_node_id);
+      const MachineNodeInfo *mynode = get_nodeinfo(Network::my_node_id);
       assert(mynode != 0);
       for(std::map<Processor, MachineProcInfo *>::const_iterator it = mynode->procs.begin();
 	  it != mynode->procs.end();
@@ -722,11 +742,11 @@ namespace Realm {
 	  it != proc_mem_affinities.end();
 	  it++) {
 	Processor p = (*it).p;
-	if((ID(p).proc_owner_node() == my_node_id) && (p.kind() == kind))
+	if((ID(p).proc_owner_node() == Network::my_node_id) && (p.kind() == kind))
 	  pset.insert(p);
       }
 #else
-      const MachineNodeInfo *mynode = get_nodeinfo(my_node_id);
+      const MachineNodeInfo *mynode = get_nodeinfo(Network::my_node_id);
       assert(mynode != 0);
       std::map<Processor::Kind, std::map<Processor, MachineProcInfo *> >::const_iterator it = mynode->proc_by_kind.find(kind);
       if(it != mynode->proc_by_kind.end())
@@ -1187,7 +1207,7 @@ namespace Realm {
   Machine::ProcessorQuery& Machine::ProcessorQuery::local_address_space(void)
   {
     impl = ((ProcessorQueryImpl *)impl)->writeable_reference();
-    ((ProcessorQueryImpl *)impl)->restrict_to_node(my_node_id);
+    ((ProcessorQueryImpl *)impl)->restrict_to_node(Network::my_node_id);
     return *this;
   }
 
@@ -1294,7 +1314,7 @@ namespace Realm {
   Machine::MemoryQuery& Machine::MemoryQuery::local_address_space(void)
   {
     impl = ((MemoryQueryImpl *)impl)->writeable_reference();
-    ((MemoryQueryImpl *)impl)->restrict_to_node(my_node_id);
+    ((MemoryQueryImpl *)impl)->restrict_to_node(Network::my_node_id);
     return *this;
   }
 
@@ -3012,7 +3032,7 @@ namespace Realm {
   {
     DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
     log_annc.info("%d: received announce from %d (%d procs, %d memories)\n",
-		  my_node_id,
+		  Network::my_node_id,
 		  sender,
 		  args.num_procs,
 		  args.num_memories);
@@ -3036,10 +3056,16 @@ namespace Realm {
   /*static*/ void NodeAnnounceMessage::await_all_announcements(void)
   {
     // wait until we hear from everyone else?
-    while((int)announcements_received < max_node_id)
-      do_some_polling();
+    while((int)announcements_received < Network::max_node_id) {
+#ifdef __MACH__
+      sched_yield();
+#else
+      pthread_yield();
+#endif
+      //do_some_polling();
+    }
 
-    log_annc.info("node %d has received all of its announcements", my_node_id);
+    log_annc.info("node %d has received all of its announcements", Network::my_node_id);
   }
   
 

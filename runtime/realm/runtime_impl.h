@@ -21,7 +21,7 @@
 #include "realm/runtime.h"
 #include "realm/id.h"
 
-#include "realm/activemsg.h"
+#include "realm/network.h"
 #include "realm/operation.h"
 #include "realm/profiling.h"
 
@@ -40,6 +40,7 @@
 #include "realm/sampling.h"
 
 #include "realm/module.h"
+#include "realm/network.h"
 
 #if __cplusplus >= 201103L
 #define typeof decltype
@@ -51,7 +52,7 @@ namespace Realm {
   class MemoryImpl;
   class ProcessorImpl;
   class RegionInstanceImpl;
-  class Module;
+  class NetworkSegment;
 
   class Channel; // from transfer/channel.h
   typedef Channel DMAChannel;
@@ -296,7 +297,6 @@ namespace Realm {
 #endif
 
       Node *nodes;
-      MemoryImpl *global_memory;
       EventTableAllocator::FreeList *local_event_free_list;
       BarrierTableAllocator::FreeList *local_barrier_free_list;
       ReservationTableAllocator::FreeList *local_reservation_free_list;
@@ -364,16 +364,15 @@ namespace Realm {
 
     protected:
       ID::IDType num_local_memories, num_local_ib_memories, num_local_processors;
-
-#ifndef USE_GASNET
-      // without gasnet, we fake registered memory with a normal malloc
-      void *nongasnet_regmem_base;
-      void *nongasnet_reg_ib_mem_base;
-#endif
+      NetworkSegment reg_ib_mem_segment;
+      NetworkSegment reg_mem_segment;
 
       ModuleRegistrar module_registrar;
       std::vector<Module *> modules;
       std::vector<CodeTranslator *> code_translators;
+
+      std::vector<NetworkModule *> network_modules;
+      std::vector<NetworkSegment *> network_segments;
     };
 
     extern RuntimeImpl *runtime_singleton;

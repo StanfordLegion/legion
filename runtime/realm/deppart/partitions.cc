@@ -527,7 +527,7 @@ namespace Realm {
   // class PartitioningMicroOp
 
   PartitioningMicroOp::PartitioningMicroOp(void)
-    : wait_count(2), requestor(my_node_id), async_microop(0)
+    : wait_count(2), requestor(Network::my_node_id), async_microop(0)
   {}
 
   PartitioningMicroOp::PartitioningMicroOp(NodeID _requestor,
@@ -544,7 +544,7 @@ namespace Realm {
   void PartitioningMicroOp::mark_finished(void)
   {
     if(async_microop) {
-      if(requestor == my_node_id) {
+      if(requestor == Network::my_node_id) {
 	async_microop->mark_finished(true /*successful*/);
       } else {
 	ActiveMessage<RemoteMicroOpCompleteMessage> amsg(requestor);
@@ -579,7 +579,7 @@ namespace Realm {
 
     // if the count was greater than 1, it probably has to be queued, so create an 
     //  AsyncMicroOp so that the op knows we're not done yet
-    if(requestor == my_node_id) {
+    if(requestor == Network::my_node_id) {
       async_microop = new AsyncMicroOp(op, this);
       op->add_async_work_item(async_microop);
     } else {

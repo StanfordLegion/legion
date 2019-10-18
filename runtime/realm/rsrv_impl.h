@@ -21,8 +21,9 @@
 #include "realm/reservation.h"
 
 #include "realm/id.h"
-#include "realm/activemsg.h"
+#include "realm/network.h"
 #include "realm/nodeset.h"
+#include "realm/mutex.h"
 
 #define REALM_RSRV_USE_CIRCQUEUE
 #ifdef REALM_RSRV_USE_CIRCQUEUE

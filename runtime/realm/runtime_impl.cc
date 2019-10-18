@@ -30,32 +30,12 @@
 
 #include "realm/utils.h"
 
-#include "realm/nodeset.h"
-
 // For backwards compatibility with old accessors
 #include "legion/accessor.h"
 
 // For doing backtraces
 #include <execinfo.h> // symbols
 #include <cxxabi.h>   // demangling
-
-#ifdef USE_GASNET
-#ifndef GASNET_PAR
-#define GASNET_PAR
-#endif
-#include <gasnet.h>
-#include <gasnet_coll.h>
-// eliminate GASNet warnings for unused static functions
-static const void *ignore_gasnet_warning1 __attribute__((unused)) = (void *)_gasneti_threadkey_init;
-#ifdef _INCLUDED_GASNET_TOOLS_H
-static const void *ignore_gasnet_warning2 __attribute__((unused)) = (void *)_gasnett_trace_printf_noop;
-#endif
-#endif
-
-#ifndef USE_GASNET
-/*extern*/ void *fake_gasnet_mem_base = 0;
-/*extern*/ size_t fake_gasnet_mem_size = 0;
-#endif
 
 // remote copy active messages from from lowlevel_dma.h for now
 #include "realm/transfer/lowlevel_dma.h"
@@ -83,16 +63,6 @@ static const void *ignore_gasnet_warning2 __attribute__((unused)) = (void *)_gas
     exit(1); \
   } \
 } while(0)
-
-#ifdef USE_GASNET
-#define CHECK_GASNET(cmd) do { \
-  int ret = (cmd); \
-  if(ret != GASNET_OK) { \
-    fprintf(stderr, "GASNET: %s = %d (%s, %s)\n", #cmd, ret, gasnet_ErrorName(ret), gasnet_ErrorDesc(ret)); \
-    exit(1); \
-  } \
-} while(0)
-#endif
 
 TYPE_IS_SERIALIZABLE(Realm::NodeAnnounceTag);
 TYPE_IS_SERIALIZABLE(Realm::Memory);
@@ -190,7 +160,7 @@ namespace Realm {
   void show_event_waiters(std::ostream& os)
   {
     os << "PRINTING ALL PENDING EVENTS:\n";
-    for(NodeID i = 0; i <= max_node_id; i++) {
+    for(NodeID i = 0; i <= Network::max_node_id; i++) {
       Node *n = &get_runtime()->nodes[i];
       // Iterate over all the events and get their implementations
       for (unsigned long j = 0; j < n->events.max_entries(); j++) {
@@ -273,7 +243,7 @@ namespace Realm {
 #if 0
     // // convert from events to barriers
     // fprintf(f,"PRINTING ALL PENDING EVENTS:\n");
-    // for(int i = 0; i <= max_node_id; i++) {
+    // for(int i = 0; i <= Network::max_node_id; i++) {
     // 	Node *n = &get_runtime()->nodes[i];
     //   // Iterate over all the events and get their implementations
     //   for (unsigned long j = 0; j < n->events.max_entries(); j++) {
@@ -415,7 +385,7 @@ namespace Realm {
       CodeDescriptor codedesc(taskptr);
       ProfilingRequestSet prs;
       std::set<Event> events;
-      std::vector<ProcessorImpl *>& procs = ((RuntimeImpl *)impl)->nodes[my_node_id].processors;
+      std::vector<ProcessorImpl *>& procs = ((RuntimeImpl *)impl)->nodes[Network::my_node_id].processors;
       for(std::vector<ProcessorImpl *>::iterator it = procs.begin();
 	  it != procs.end();
 	  it++) {
@@ -539,7 +509,7 @@ namespace Realm {
 
       // send a message to the shutdown master if it's not us
       NodeID shutdown_master_node = 0;
-      if(my_node_id != shutdown_master_node) {
+      if(Network::my_node_id != shutdown_master_node) {
 	ActiveMessage<RuntimeShutdownRequest> amsg(shutdown_master_node);
 	amsg->wait_on = wait_on;
 	amsg->result_code = result_code;
@@ -599,8 +569,8 @@ namespace Realm {
       ID::ID_Types id_type = it->first;
       int batch_size = it->second;
       NodeSet targets;
-      for(NodeID i = 0; i <= max_node_id; i++) {
-	if(i == my_node_id) continue;
+      for(NodeID i = 0; i <= Network::max_node_id; i++) {
+	if(i == Network::my_node_id) continue;
 
 	reqs_in_flight[id_type].insert(i);
 	targets.add(i);
@@ -682,8 +652,8 @@ namespace Realm {
     case ID::ID_SPARSITY: {
       assert(0);
       //get_runtime()->local_sparsity_map_free_list->alloc_range(args.count, first, last);
-      first_id = ID::make_sparsity(my_node_id, 0, first);
-      last_id = ID::make_sparsity(my_node_id, 0, last);
+      first_id = ID::make_sparsity(Network::my_node_id, 0, first);
+      last_id = ID::make_sparsity(Network::my_node_id, 0, last);
       break;
     }
     default: assert(0);
@@ -850,7 +820,7 @@ namespace Realm {
 #ifdef NODE_LOGGING
 	prefix("."),
 #endif
-	nodes(0), global_memory(0),
+	nodes(0),
 	local_event_free_list(0), local_barrier_free_list(0),
 	local_reservation_free_list(0),
 	local_proc_group_free_list(0),
@@ -866,10 +836,6 @@ namespace Realm {
 	sampling_profiler(true /*system default*/),
 	num_local_memories(0), num_local_ib_memories(0),
 	num_local_processors(0),
-#ifndef USE_GASNET
-	nongasnet_regmem_base(0),
-	nongasnet_reg_ib_mem_base(0),
-#endif
 	module_registrar(this)
     {
       machine = new MachineImpl;
@@ -887,21 +853,21 @@ namespace Realm {
 
     Memory RuntimeImpl::next_local_memory_id(void)
     {
-      Memory m = ID::make_memory(my_node_id,
+      Memory m = ID::make_memory(Network::my_node_id,
 				 num_local_memories++).convert<Memory>();
       return m;
     }
 
     Memory RuntimeImpl::next_local_ib_memory_id(void)
     {
-      Memory m = ID::make_ib_memory(my_node_id,
+      Memory m = ID::make_ib_memory(Network::my_node_id,
                                     num_local_ib_memories++).convert<Memory>();
       return m;
     }
 
     Processor RuntimeImpl::next_local_processor_id(void)
     {
-      Processor p = ID::make_processor(my_node_id, 
+      Processor p = ID::make_processor(Network::my_node_id, 
 				       num_local_processors++).convert<Processor>();
       return p;
     }
@@ -910,30 +876,30 @@ namespace Realm {
     {
       // right now expect this to always be for the current node and the next memory ID
       ID id(m->me);
-      assert(NodeID(id.memory_owner_node()) == my_node_id);
-      assert(id.memory_mem_idx() == nodes[my_node_id].memories.size());
+      assert(NodeID(id.memory_owner_node()) == Network::my_node_id);
+      assert(id.memory_mem_idx() == nodes[Network::my_node_id].memories.size());
 
-      nodes[my_node_id].memories.push_back(m);
+      nodes[Network::my_node_id].memories.push_back(m);
     }
 
     void RuntimeImpl::add_ib_memory(MemoryImpl *m)
     {
       // right now expect this to always be for the current node and the next memory ID
       ID id(m->me);
-      assert(NodeID(id.memory_owner_node()) == my_node_id);
-      assert(id.memory_mem_idx() == nodes[my_node_id].ib_memories.size());
+      assert(NodeID(id.memory_owner_node()) == Network::my_node_id);
+      assert(id.memory_mem_idx() == nodes[Network::my_node_id].ib_memories.size());
 
-      nodes[my_node_id].ib_memories.push_back(m);
+      nodes[Network::my_node_id].ib_memories.push_back(m);
     }
 
     void RuntimeImpl::add_processor(ProcessorImpl *p)
     {
       // right now expect this to always be for the current node and the next processor ID
       ID id(p->me);
-      assert(NodeID(id.proc_owner_node()) == my_node_id);
-      assert(id.proc_proc_idx() == nodes[my_node_id].processors.size());
+      assert(NodeID(id.proc_owner_node()) == Network::my_node_id);
+      assert(id.proc_proc_idx() == nodes[Network::my_node_id].processors.size());
 
-      nodes[my_node_id].processors.push_back(p);
+      nodes[Network::my_node_id].processors.push_back(p);
     }
 
     void RuntimeImpl::add_dma_channel(DMAChannel *c)
@@ -1021,85 +987,10 @@ namespace Realm {
     {
       DetailedTimer::init_timers();
 
-      // gasnet_init() must be called before parsing command line arguments, as some
-      //  spawners (e.g. the ssh spawner for gasnetrun_ibv) start with bogus args and
-      //  fetch the real ones from somewhere during gasnet_init()
-
-#ifdef USE_GASNET
-      // SJT: WAR for issue on Titan with duplicate cookies on Gemini
-      //  communication domains
-      char *orig_pmi_gni_cookie = getenv("PMI_GNI_COOKIE");
-      if(orig_pmi_gni_cookie) {
-	char new_pmi_gni_cookie[32];
-	snprintf(new_pmi_gni_cookie, 32, "%d", 1+atoi(orig_pmi_gni_cookie));
-	setenv("PMI_GNI_COOKIE", new_pmi_gni_cookie, 1 /*overwrite*/);
-      }
-      // SJT: another GASNET workaround - if we don't have GASNET_IB_SPAWNER set, assume it was MPI
-      // (This is called GASNET_IB_SPAWNER for versions <= 1.24 and GASNET_SPAWNER for versions >= 1.26)
-      if(!getenv("GASNET_IB_SPAWNER") && !getenv("GASNET_SPAWNER")) {
-	setenv("GASNET_IB_SPAWNER", "mpi", 0 /*no overwrite*/);
-	setenv("GASNET_SPAWNER", "mpi", 0 /*no overwrite*/);
-      }
-
-      // and one more... disable GASNet's probing of pinnable memory - it's
-      //  painfully slow on most systems (the gemini conduit doesn't probe
-      //  at all, so it's ok)
-      // we can do this because in gasnet_attach() we will ask for exactly as
-      //  much as we need, and we can detect failure there if that much memory
-      //  doesn't actually exist
-      // inconveniently, we have to set a PHYSMEM_MAX before we call
-      //  gasnet_init and we don't have our argc/argv until after, so we can't
-      //  set PHYSMEM_MAX correctly, but setting it to something really big to
-      //  prevent all the early checks from failing gets us to that final actual
-      //  alloc/pin in gasnet_attach ok
-      {
-	// the only way to control this is with environment variables, so set
-	//  them unless the user has already set them (in which case, we assume
-	//  they know what they're doing)
-	// do handle the case where NOPROBE is set to 1, but PHYSMEM_MAX isn't
-	const char *e = getenv("GASNET_PHYSMEM_NOPROBE");
-	if(!e || (atoi(e) > 0)) {
-	  if(!e)
-	    setenv("GASNET_PHYSMEM_NOPROBE", "1", 0 /*no overwrite*/);
-	  if(!getenv("GASNET_PHYSMEM_MAX")) {
-	    // just because it's fun to read things like this 20 years later:
-	    // "nobody will ever build a system with more than 1 TB of RAM..."
-	    setenv("GASNET_PHYSMEM_MAX", "1T", 0 /*no overwrite*/);
-	  }
-	}
-      }
-
-      // and yet another GASNet workaround: the Infiniband conduit seems to
-      //  have a problem with AMRDMA mode, consuming receive buffers even for
-      //  request targets that are in AMRDMA mode - disable the mode by default
-#ifdef GASNET_CONDUIT_IBV
-      if(!getenv("GASNET_AMRDMA_MAX_PEERS"))
-        setenv("GASNET_AMRDMA_MAX_PEERS", "0", 0 /*no overwrite*/);
-#endif
-
-#ifdef DEBUG_REALM_STARTUP
-      { // we don't have rank IDs yet, so everybody gets to spew
-        char s[80];
-        gethostname(s, 79);
-        strcat(s, " enter gasnet_init");
-        TimeStamp ts(s, false);
-        fflush(stdout);
-      }
-#endif
-      CHECK_GASNET( gasnet_init(argc, argv) );
-      my_node_id = gasnet_mynode();
-      max_node_id = gasnet_nodes() - 1;
-#ifdef DEBUG_REALM_STARTUP
-      { // once we're convinced there isn't skew here, reduce this to rank 0
-        char s[80];
-        gethostname(s, 79);
-        strcat(s, " exit gasnet_init");
-        TimeStamp ts(s, false);
-        fflush(stdout);
-      }
-#endif
-#endif
-
+      module_registrar.create_network_modules(network_modules,
+					      argc,
+					      const_cast<const char ***>(argv));
+      
       // TODO: this is here to match old behavior, but it'd probably be
       //  better to have REALM_DEFAULT_ARGS only be visible to Realm...
 
@@ -1173,6 +1064,12 @@ namespace Realm {
       // start up the threading subsystem - modules will likely want threads
       if(!Threading::initialize()) exit(1);
 
+      // configure network modules
+      for(std::vector<NetworkModule *>::const_iterator it = network_modules.begin();
+	  it != network_modules.end();
+	  it++)
+	(*it)->parse_command_line(this, cmdline);
+
       // now load modules
       module_registrar.create_static_modules(cmdline, modules);
       module_registrar.create_dynamic_modules(cmdline, modules);
@@ -1181,10 +1078,8 @@ namespace Realm {
 
       // low-level runtime parameters
 #ifdef USE_GASNET
-      size_t gasnet_mem_size = 256 << 20;
       size_t reg_ib_mem_size = 256 << 20;
 #else
-      size_t gasnet_mem_size = 0;
       size_t reg_ib_mem_size = 64 << 20; // for transposes/serdez
 #endif
       size_t reg_mem_size = 0;
@@ -1194,8 +1089,6 @@ namespace Realm {
       stack_size = 2 << 20;
       //unsigned cpu_worker_threads = 1;
       unsigned dma_worker_threads = 1;
-      unsigned active_msg_worker_threads = 1;
-      unsigned active_msg_handler_threads = 1;
 #ifdef EVENT_TRACING
       size_t   event_trace_block_size = 1 << 20;
       double   event_trace_exp_arrv_rate = 1e3;
@@ -1212,15 +1105,12 @@ namespace Realm {
       bool pin_dma_threads = false;
 
       CommandLineParser cp;
-      cp.add_option_int_units("-ll:gsize", gasnet_mem_size, 'm')
-	.add_option_int_units("-ll:rsize", reg_mem_size, 'm')
+      cp.add_option_int_units("-ll:rsize", reg_mem_size, 'm')
 	.add_option_int_units("-ll:ib_rsize", reg_ib_mem_size, 'm')
 	.add_option_int_units("-ll:dsize", disk_mem_size, 'm')
 	.add_option_int_units("-ll:stacksize", stack_size, 'm')
 	.add_option_int("-ll:dma", dma_worker_threads)
         .add_option_bool("-ll:pin_dma", pin_dma_threads)
-	.add_option_int("-ll:amsg", active_msg_worker_threads)
-	.add_option_int("-ll:ahandlers", active_msg_handler_threads)
 	.add_option_int("-ll:dummy_rsrv_ok", dummy_reservation_ok)
 	.add_option_bool("-ll:show_rsrv", show_reservations)
 	.add_option_int("-ll:ht_sharing", hyperthread_sharing);
@@ -1268,19 +1158,19 @@ namespace Realm {
 #endif
 
       // Check that we have enough resources for the number of nodes we are using
-      if (max_node_id > (NodeID)(ID::MAX_NODE_ID))
+      if (Network::max_node_id > (NodeID)(ID::MAX_NODE_ID))
       {
         fprintf(stderr,"ERROR: Launched %d nodes, but low-level IDs are only "
                        "configured for at most %d nodes. Update the allocation "
-		       "of bits in ID", max_node_id+1, (ID::MAX_NODE_ID + 1));
+		       "of bits in ID", Network::max_node_id+1, (ID::MAX_NODE_ID + 1));
         exit(1);
       }
-      if ((max_node_id+1) > REALM_MAX_NUM_NODES)
+      if ((Network::max_node_id+1) > REALM_MAX_NUM_NODES)
       {
         fprintf(stderr,"ERROR: Launched %d nodes, but REALM_MAX_NUM_NODES are only "
                        "configured for at most %d nodes. Update the macro "
                        "REALM_MAX_NUM_NODES in nodeset.h",
-		        max_node_id+1, REALM_MAX_NUM_NODES);
+		        Network::max_node_id+1, REALM_MAX_NUM_NODES);
         exit(1);
       }
 
@@ -1302,32 +1192,44 @@ namespace Realm {
       sampling_profiler.configure_from_cmdline(cmdline, *core_reservations);
 
       // initialize barrier timestamp
-      BarrierImpl::barrier_adjustment_timestamp = (((Barrier::timestamp_t)(my_node_id)) << BarrierImpl::BARRIER_TIMESTAMP_NODEID_SHIFT) + 1;
+      BarrierImpl::barrier_adjustment_timestamp = (((Barrier::timestamp_t)(Network::my_node_id)) << BarrierImpl::BARRIER_TIMESTAMP_NODEID_SHIFT) + 1;
 
-      nodes = new Node[max_node_id + 1];
+      nodes = new Node[Network::max_node_id + 1];
 
       // create allocators for local node events/locks/index spaces - do this before we start handling
       //  active messages
       {
-	Node& n = nodes[my_node_id];
-	local_event_free_list = new EventTableAllocator::FreeList(n.events, my_node_id);
-	local_barrier_free_list = new BarrierTableAllocator::FreeList(n.barriers, my_node_id);
-	local_reservation_free_list = new ReservationTableAllocator::FreeList(n.reservations, my_node_id);
-	local_proc_group_free_list = new ProcessorGroupTableAllocator::FreeList(n.proc_groups, my_node_id);
-	local_compqueue_free_list = new CompQueueTableAllocator::FreeList(n.compqueues, my_node_id);
+	Node& n = nodes[Network::my_node_id];
+	local_event_free_list = new EventTableAllocator::FreeList(n.events, Network::my_node_id);
+	local_barrier_free_list = new BarrierTableAllocator::FreeList(n.barriers, Network::my_node_id);
+	local_reservation_free_list = new ReservationTableAllocator::FreeList(n.reservations, Network::my_node_id);
+	local_proc_group_free_list = new ProcessorGroupTableAllocator::FreeList(n.proc_groups, Network::my_node_id);
+	local_compqueue_free_list = new CompQueueTableAllocator::FreeList(n.compqueues, Network::my_node_id);
 
-	local_sparsity_map_free_lists.resize(max_node_id + 1);
-	for(NodeID i = 0; i <= max_node_id; i++) {
-	  nodes[i].sparsity_maps.resize(max_node_id + 1, 0);
+	local_sparsity_map_free_lists.resize(Network::max_node_id + 1);
+	for(NodeID i = 0; i <= Network::max_node_id; i++) {
+	  nodes[i].sparsity_maps.resize(Network::max_node_id + 1, 0);
 	  DynamicTable<SparsityMapTableAllocator> *m = new DynamicTable<SparsityMapTableAllocator>;
-	  nodes[i].sparsity_maps[my_node_id] = m;
+	  nodes[i].sparsity_maps[Network::my_node_id] = m;
 	  local_sparsity_map_free_lists[i] = new SparsityMapTableAllocator::FreeList(*m, i /*owner_node*/);
 	}
       }
 
-      init_endpoints(gasnet_mem_size, reg_mem_size, reg_ib_mem_size,
-		     *core_reservations,
-		     cmdline);
+      // form requests for network-registered memory
+      if(reg_ib_mem_size > 0) {
+	reg_ib_mem_segment.request(reg_ib_mem_size, 64);
+	network_segments.push_back(&reg_ib_mem_segment);
+      }
+      if(reg_mem_size > 0) {
+	reg_mem_segment.request(reg_mem_size, 64);
+	network_segments.push_back(&reg_mem_segment);
+      }
+
+      // attach to the network
+      for(std::vector<NetworkModule *>::const_iterator it = network_modules.begin();
+	  it != network_modules.end();
+	  it++)
+	(*it)->attach(this, network_segments);
 
       // now that we've done all of our argument parsing, scan through what's
       //  left and see if anything starts with -ll: - probably a misspelled
@@ -1340,17 +1242,13 @@ namespace Realm {
           assert(0);
 	}
 
-#ifndef USE_GASNET
-      // network initialization is also responsible for setting the "zero_time"
-      //  for relative timing - no synchronization necessary in non-gasnet case
-      Realm::Clock::set_zero_time();
-#endif
-
-#ifdef USE_GASNET
-      // Put this here so that it complies with the GASNet specification and
-      // doesn't make any calls between gasnet_init and gasnet_attach
-      gasnet_set_waitmode(GASNET_WAIT_BLOCK);
-#endif
+      {
+	// try to get all nodes to have roughly the same idea of the "zero
+	//  "time" by using network barriers
+	Network::barrier();
+	Realm::Clock::set_zero_time();
+	Network::barrier();
+      }
 
       //remote_id_allocator.set_request_size(ID::ID_SPARSITY, 4096, 3072);
       remote_id_allocator.make_initial_requests();
@@ -1383,24 +1281,13 @@ namespace Realm {
 	  int delay = strtol(e, (char **)&pos, 10);
 	  assert(delay > 0);
 	  if(*pos == '+')
-	    delay += my_node_id * atoi(pos + 1);
+	    delay += Network::my_node_id * atoi(pos + 1);
 	  log_runtime.info() << "setting show_event alarm for " << delay << " seconds";
 	  signal(SIGALRM, realm_show_events);
 	  alarm(delay);
 	}
       }
       
-      start_polling_threads(active_msg_worker_threads);
-
-      start_handler_threads(active_msg_handler_threads,
-			    *core_reservations,
-			    stack_size);
-
-#if defined(USE_GASNET) && (((GEX_SPEC_VERSION_MAJOR << 8) + GEX_SPEC_VERSION_MINOR) < 5)
-      // this needs to happen after init_endpoints
-      gasnet_coll_init(0, 0, 0, 0, 0);
-#endif
-
       start_dma_worker_threads(dma_worker_threads,
 			       *core_reservations);
 
@@ -1427,16 +1314,13 @@ namespace Realm {
       //gasnet_seginfo_t seginfos = new gasnet_seginfo_t[num_nodes];
       //CHECK_GASNET( gasnet_getSegmentInfo(seginfos, num_nodes) );
 
-      if(gasnet_mem_size > 0)
-	// use an 'owner_node' of all 1's for this
-        // SJT: actually, go back to an owner node of 0 and memory_idx of all 1's for now
-	global_memory = new GASNetMemory(ID::make_memory(0, -1U).convert<Memory>(), gasnet_mem_size);
-      else
-	global_memory = 0;
-
-      Node *n = &nodes[my_node_id];
+      Node *n = &nodes[Network::my_node_id];
 
       // create memories and processors for all loaded modules
+      for(std::vector<NetworkModule *>::const_iterator it = network_modules.begin();
+	  it != network_modules.end();
+	  it++)
+	(*it)->create_memories(this);
       for(std::vector<Module *>::const_iterator it = modules.begin();
 	  it != modules.end();
 	  it++)
@@ -1444,23 +1328,15 @@ namespace Realm {
 
       LocalCPUMemory *regmem;
       if(reg_mem_size > 0) {
-#ifdef USE_GASNET
-	gasnet_seginfo_t *seginfos = new gasnet_seginfo_t[max_node_id + 1];
-	CHECK_GASNET( gasnet_getSegmentInfo(seginfos, max_node_id + 1) );
-	char *regmem_base = ((char *)(seginfos[my_node_id].addr)) + gasnet_mem_size;
-	delete[] seginfos;
-#else
-	nongasnet_regmem_base = malloc(reg_mem_size);
-	assert(nongasnet_regmem_base != 0);
-	char *regmem_base = static_cast<char *>(nongasnet_regmem_base);
-#endif
+	void *regmem_base = reg_mem_segment.base;
+	assert(regmem_base != 0);
 	Memory m = get_runtime()->next_local_memory_id();
 	regmem = new LocalCPUMemory(m,
 				    reg_mem_size,
                                     -1/*don't care numa domain*/,
                                     Memory::REGDMA_MEM,
 				    regmem_base,
-				    true);
+				    &reg_mem_segment);
 	get_runtime()->add_memory(regmem);
       } else
 	regmem = 0;
@@ -1472,24 +1348,15 @@ namespace Realm {
 
       LocalCPUMemory *reg_ib_mem;
       if(reg_ib_mem_size > 0) {
-#ifdef USE_GASNET
-	gasnet_seginfo_t *seginfos = new gasnet_seginfo_t[max_node_id + 1];
-	CHECK_GASNET( gasnet_getSegmentInfo(seginfos, max_node_id + 1) );
-	char *reg_ib_mem_base = ((char *)(seginfos[my_node_id].addr)) + gasnet_mem_size
-                                + reg_mem_size;
-	delete[] seginfos;
-#else
-	nongasnet_reg_ib_mem_base = malloc(reg_ib_mem_size);
-	assert(nongasnet_reg_ib_mem_base != 0);
-	char *reg_ib_mem_base = static_cast<char *>(nongasnet_reg_ib_mem_base);
-#endif
+	void *reg_ib_mem_base = reg_ib_mem_segment.base;
+	assert(reg_ib_mem_base != 0);
 	Memory m = get_runtime()->next_local_ib_memory_id();
 	reg_ib_mem = new LocalCPUMemory(m,
 				        reg_ib_mem_size,
                                         -1/*don't care numa domain*/,
                                         Memory::REGDMA_MEM,
 				        reg_ib_mem_base,
-				        true);
+					&reg_ib_mem_segment);
 	get_runtime()->add_ib_memory(reg_ib_mem);
       } else
         reg_ib_mem = 0;
@@ -1498,7 +1365,7 @@ namespace Realm {
       DiskMemory *diskmem;
       if(disk_mem_size > 0) {
         char file_name[30];
-        sprintf(file_name, "disk_file%d.tmp", my_node_id);
+        sprintf(file_name, "disk_file%d.tmp", Network::my_node_id);
         Memory m = get_runtime()->next_local_memory_id();
         diskmem = new DiskMemory(m,
                                  disk_mem_size,
@@ -1567,9 +1434,6 @@ namespace Realm {
 
 	    mems_by_kind[k].insert(m);
 	  }
-
-	if(global_memory)
-	  mems_by_kind[Memory::GLOBAL_MEM].insert(global_memory->me);
 
 	std::set<Processor::Kind> local_cpu_kinds;
 	local_cpu_kinds.insert(Processor::LOC_PROC);
@@ -1659,7 +1523,21 @@ namespace Realm {
 				  );
 	}
       }
-      {
+
+      // announce by network type
+      for(std::vector<NetworkModule *>::iterator nit = network_modules.begin();
+	  nit != network_modules.end();
+	  ++nit) {
+	// first, build the set of nodes we'll talk to
+	bool empty = true;
+	NodeSet targets;
+	for(NodeID i = 0; i <= Network::max_node_id; i++)
+	  if((i != Network::my_node_id) && (Network::get_network(i) == *nit)) {
+	    empty = false;
+	    targets.add(i);
+	  }
+	if(empty) continue;
+	
 	Serialization::DynamicBufferSerializer dbs(4096);
 
 	unsigned num_procs = 0;
@@ -1692,7 +1570,7 @@ namespace Realm {
 	    Memory m = (*it)->me;
 	    Memory::Kind k = (*it)->me.kind();
 	    size_t size = (*it)->size;
-	    intptr_t regptr = reinterpret_cast<intptr_t>((*it)->local_reg_base());
+	    const ByteArray *rdma_info = (*it)->get_rdma_info(*nit);
 
 	    num_memories++;
 	    ok = (ok &&
@@ -1700,7 +1578,9 @@ namespace Realm {
 		  (dbs << m) &&
 		  (dbs << k) &&
 		  (dbs << size) &&
-		  (dbs << regptr));
+		  (dbs << (rdma_info != 0)));
+	    if(rdma_info != 0)
+	      ok = ok && (dbs << *rdma_info);
 	  }
 
         for (std::vector<MemoryImpl *>::const_iterator it = n->ib_memories.begin();
@@ -1710,7 +1590,7 @@ namespace Realm {
             Memory m = (*it)->me;
             Memory::Kind k = (*it)->me.kind();
 	    size_t size = (*it)->size;
-	    intptr_t regptr = reinterpret_cast<intptr_t>((*it)->local_reg_base());
+	    const ByteArray *rdma_info = (*it)->get_rdma_info(*nit);
 
             num_ib_memories++;
 	    ok = (ok &&
@@ -1718,7 +1598,9 @@ namespace Realm {
 		  (dbs << m) &&
 		  (dbs << k) &&
 		  (dbs << size) &&
-		  (dbs << regptr));
+		  (dbs << (rdma_info != 0)));
+	    if(rdma_info != 0)
+	      ok = ok && (dbs << *rdma_info);
           }
 
 	// announce each processor's affinities
@@ -1756,7 +1638,7 @@ namespace Realm {
 		it2++) {
 	      // only announce intra-node ones and only those with this memory as m1 to avoid
 	      //  duplicates
-	      if((it2->m1 != m) || ((NodeID)(it2->m2.address_space()) != my_node_id))
+	      if((it2->m1 != m) || ((NodeID)(it2->m2.address_space()) != Network::my_node_id))
 		continue;
 
 	      ok = (ok &&
@@ -1781,17 +1663,11 @@ namespace Realm {
 	assert(ok);
 
 #ifdef DEBUG_REALM_STARTUP
-	if(my_node_id == 0) {
+	if(Network::my_node_id == 0) {
 	  TimeStamp ts("sending announcements", false);
 	  fflush(stdout);
 	}
 #endif
-
-	// now announce ourselves to everyone else
-	NodeSet targets;
-	for(NodeID i = 0; i <= max_node_id; i++)
-	  if(i != my_node_id)
-	    targets.add(i);
 
 	ActiveMessage<NodeAnnounceMessage> amsg(targets, dbs.bytes_used());
 	amsg->num_procs = num_procs;
@@ -1799,10 +1675,14 @@ namespace Realm {
 	amsg->num_ib_memories = num_ib_memories;
 	amsg.add_payload(dbs.get_buffer(), dbs.bytes_used());
 	amsg.commit();
+      }
+
+      // once we've sent to everybody, wait for all responses
+      {
 	NodeAnnounceMessage::await_all_announcements();
 
 #ifdef DEBUG_REALM_STARTUP
-	if(my_node_id == 0) {
+	if(Network::my_node_id == 0) {
 	  TimeStamp ts("received all announcements", false);
 	  fflush(stdout);
 	}
@@ -1816,8 +1696,8 @@ namespace Realm {
     {
       // all we have to do here is tell the processors to start up their
       //  threads...
-      for(std::vector<ProcessorImpl *>::const_iterator it = nodes[my_node_id].processors.begin();
-	  it != nodes[my_node_id].processors.end();
+      for(std::vector<ProcessorImpl *>::const_iterator it = nodes[Network::my_node_id].processors.begin();
+	  it != nodes[Network::my_node_id].processors.end();
 	  ++it)
 	(*it)->start_threads();
     }
@@ -1847,16 +1727,13 @@ namespace Realm {
 
 #define DEBUG_COLLECTIVES
 
-#if defined(USE_GASNET) && defined(DEBUG_COLLECTIVES)
-  static const int GASNET_COLL_FLAGS = GASNET_COLL_IN_MYSYNC | GASNET_COLL_OUT_MYSYNC | GASNET_COLL_LOCAL;
-  
+#ifdef DEBUG_COLLECTIVES
   template <typename T>
   static void broadcast_check(const T& val, const char *name)
   {
-    T bval;
-    gasnet_coll_broadcast(GASNET_TEAM_ALL, &bval, 0, const_cast<T *>(&val), sizeof(T), GASNET_COLL_FLAGS);
+    T bval = Network::broadcast(0 /*root*/, val);
     if(val != bval) {
-      log_collective.fatal() << "collective mismatch on node " << my_node_id << " for " << name << ": " << val << " != " << bval;
+      log_collective.fatal() << "collective mismatch on node " << Network::my_node_id << " for " << name << ": " << val << " != " << bval;
       assert(false);
     }
   }
@@ -1868,7 +1745,6 @@ namespace Realm {
     {
       log_collective.info() << "collective spawn: proc=" << target_proc << " func=" << task_id << " priority=" << priority << " before=" << wait_on;
 
-#ifdef USE_GASNET
 #ifdef DEBUG_COLLECTIVES
       broadcast_check(target_proc, "target_proc");
       broadcast_check(task_id, "task_id");
@@ -1878,22 +1754,20 @@ namespace Realm {
       // root node will be whoever owns the target proc
       NodeID root = ID(target_proc).proc_owner_node();
 
-      if(my_node_id == root) {
+      if(Network::my_node_id == root) {
 	// ROOT NODE
 
 	// step 1: receive wait_on from every node
-	Event *all_events = 0;
-	all_events = new Event[max_node_id + 1];
-	gasnet_coll_gather(GASNET_TEAM_ALL, root, all_events, &wait_on, sizeof(Event), GASNET_COLL_FLAGS);
+	std::vector<Event> all_events;
+	Network::gather(root, wait_on, all_events);
 
 	// step 2: merge all the events
 	std::set<Event> event_set;
-	for(NodeID i = 0; i <= max_node_id; i++) {
+	for(NodeID i = 0; i <= Network::max_node_id; i++) {
 	  //log_collective.info() << "ev " << i << ": " << all_events[i];
 	  if(all_events[i].exists())
 	    event_set.insert(all_events[i]);
 	}
-	delete[] all_events;
 
 	Event merged_event = Event::merge_events(event_set);
 	log_collective.info() << "merged precondition: proc=" << target_proc << " func=" << task_id << " priority=" << priority << " before=" << merged_event;
@@ -1901,8 +1775,8 @@ namespace Realm {
 	// step 3: run the task
 	Event finish_event = target_proc.spawn(task_id, args, arglen, merged_event, priority);
 
-	// step 4: broadcast the finish event to everyone
-	gasnet_coll_broadcast(GASNET_TEAM_ALL, &finish_event, root, &finish_event, sizeof(Event), GASNET_COLL_FLAGS);
+	// step 4: broadcast the finish event to everyone else
+	(void) Network::broadcast(root, finish_event);
 
 	log_collective.info() << "collective spawn: proc=" << target_proc << " func=" << task_id << " priority=" << priority << " after=" << finish_event;
 
@@ -1911,26 +1785,17 @@ namespace Realm {
 	// NON-ROOT NODE
 
 	// step 1: send our wait_on to the root for merging
-	gasnet_coll_gather(GASNET_TEAM_ALL, root, 0, &wait_on, sizeof(Event), GASNET_COLL_FLAGS);
+	Network::gather(root, wait_on);
 
 	// steps 2 and 3: twiddle thumbs
 
 	// step 4: receive finish event
-	Event finish_event;
-	gasnet_coll_broadcast(GASNET_TEAM_ALL, &finish_event, root, 0, sizeof(Event), GASNET_COLL_FLAGS);
+	Event finish_event = Network::broadcast(root, Event::NO_EVENT);
 
 	log_collective.info() << "collective spawn: proc=" << target_proc << " func=" << task_id << " priority=" << priority << " after=" << finish_event;
 
 	return finish_event;
       }
-#else
-      // no GASNet, so a collective spawn is the same as a regular spawn
-      Event finish_event = target_proc.spawn(task_id, args, arglen, wait_on, priority);
-
-      log_collective.info() << "collective spawn: proc=" << target_proc << " func=" << task_id << " priority=" << priority << " after=" << finish_event;
-
-      return finish_event;
-#endif
     }
 
     Event RuntimeImpl::collective_spawn_by_kind(Processor::Kind target_kind, Processor::TaskFuncID task_id, 
@@ -1940,7 +1805,6 @@ namespace Realm {
     {
       log_collective.info() << "collective spawn: kind=" << target_kind << " func=" << task_id << " priority=" << priority << " before=" << wait_on;
 
-#ifdef USE_GASNET
 #ifdef DEBUG_COLLECTIVES
       broadcast_check(target_kind, "target_kind");
       broadcast_check(task_id, "task_id");
@@ -1952,47 +1816,41 @@ namespace Realm {
 
       Event merged_event;
 
-      if(my_node_id == 0) {
+      if(Network::my_node_id == 0) {
 	// ROOT NODE
 
 	// step 1: receive wait_on from every node
-	Event *all_events = 0;
-	all_events = new Event[max_node_id + 1];
-	gasnet_coll_gather(GASNET_TEAM_ALL, 0, all_events, &wait_on, sizeof(Event), GASNET_COLL_FLAGS);
+	std::vector<Event> all_events;
+	Network::gather(0 /*root*/, wait_on, all_events);
 
 	// step 2: merge all the events
 	std::set<Event> event_set;
-	for(NodeID i = 0; i <= max_node_id; i++) {
+	for(NodeID i = 0; i <= Network::max_node_id; i++) {
 	  //log_collective.info() << "ev " << i << ": " << all_events[i];
 	  if(all_events[i].exists())
 	    event_set.insert(all_events[i]);
 	}
-	delete[] all_events;
 
 	merged_event = Event::merge_events(event_set);
 
-	// step 3: broadcast the merged event back to everyone
-	gasnet_coll_broadcast(GASNET_TEAM_ALL, &merged_event, 0, &merged_event, sizeof(Event), GASNET_COLL_FLAGS);
+	// step 3: broadcast the merged event back to everyone else
+	(void) Network::broadcast(0 /*root*/, merged_event);
       } else {
 	// NON-ROOT NODE
 
 	// step 1: send our wait_on to the root for merging
-	gasnet_coll_gather(GASNET_TEAM_ALL, 0, 0, &wait_on, sizeof(Event), GASNET_COLL_FLAGS);
+	Network::gather(0 /*root*/, wait_on);
 
 	// step 2: twiddle thumbs
 
 	// step 3: receive merged wait_on event
-	gasnet_coll_broadcast(GASNET_TEAM_ALL, &merged_event, 0, 0, sizeof(Event), GASNET_COLL_FLAGS);
+	merged_event = Network::broadcast(0 /*root*/, Event::NO_EVENT);
       }
-#else
-      // no GASNet, so our precondition is the only one
-      Event merged_event = wait_on;
-#endif
 
       // now spawn 0 or more local tasks
       std::set<Event> event_set;
 
-      const std::vector<ProcessorImpl *>& local_procs = nodes[my_node_id].processors;
+      const std::vector<ProcessorImpl *>& local_procs = nodes[Network::my_node_id].processors;
 
       for(std::vector<ProcessorImpl *>::const_iterator it = local_procs.begin();
 	  it != local_procs.end();
@@ -2011,28 +1869,25 @@ namespace Realm {
       // local merge
       Event my_finish = Event::merge_events(event_set);
 
-#ifdef USE_GASNET
-      if(my_node_id == 0) {
+      if(Network::my_node_id == 0) {
 	// ROOT NODE
 
 	// step 1: receive wait_on from every node
-	Event *all_events = 0;
-	all_events = new Event[max_node_id + 1];
-	gasnet_coll_gather(GASNET_TEAM_ALL, 0, all_events, &my_finish, sizeof(Event), GASNET_COLL_FLAGS);
+	std::vector<Event> all_events;
+	Network::gather(0 /*root*/, my_finish, all_events);
 
 	// step 2: merge all the events
 	std::set<Event> event_set;
-	for(NodeID i = 0; i <= max_node_id; i++) {
+	for(NodeID i = 0; i <= Network::max_node_id; i++) {
 	  //log_collective.info() << "ev " << i << ": " << all_events[i];
 	  if(all_events[i].exists())
 	    event_set.insert(all_events[i]);
 	}
-	delete[] all_events;
 
 	Event merged_finish = Event::merge_events(event_set);
 
 	// step 3: broadcast the merged event back to everyone
-	gasnet_coll_broadcast(GASNET_TEAM_ALL, &merged_finish, 0, &merged_finish, sizeof(Event), GASNET_COLL_FLAGS);
+	(void) Network::broadcast(0 /*root*/, merged_finish);
 
 	log_collective.info() << "collective spawn: kind=" << target_kind << " func=" << task_id << " priority=" << priority << " after=" << merged_finish;
 
@@ -2041,24 +1896,17 @@ namespace Realm {
 	// NON-ROOT NODE
 
 	// step 1: send our wait_on to the root for merging
-	gasnet_coll_gather(GASNET_TEAM_ALL, 0, 0, &my_finish, sizeof(Event), GASNET_COLL_FLAGS);
+	Network::gather(0 /*root*/, my_finish);
 
 	// step 2: twiddle thumbs
 
 	// step 3: receive merged wait_on event
-	Event merged_finish;
-	gasnet_coll_broadcast(GASNET_TEAM_ALL, &merged_finish, 0, 0, sizeof(Event), GASNET_COLL_FLAGS);
+	Event merged_finish = Network::broadcast(0 /*root*/, Event::NO_EVENT);
 
 	log_collective.info() << "collective spawn: kind=" << target_kind << " func=" << task_id << " priority=" << priority << " after=" << merged_finish;
 
 	return merged_finish;
       }
-#else
-      // no GASNet, so just return our locally merged event
-      log_collective.info() << "collective spawn: kind=" << target_kind << " func=" << task_id << " priority=" << priority << " after=" << my_finish;
-
-      return my_finish;
-#endif
     }
 
 #if 0
@@ -2172,10 +2020,11 @@ namespace Realm {
     {
       // if we're the master, we need to notify everyone else first
       NodeID shutdown_master_node = 0;
-      if(my_node_id == shutdown_master_node) {
+      if((Network::my_node_id == shutdown_master_node) &&
+	 (Network::max_node_id > 0)) {
       	NodeSet targets;
-	for(NodeID i = 0; i <= max_node_id; i++)
-	  if(i != my_node_id)
+	for(NodeID i = 0; i <= Network::max_node_id; i++)
+	  if(i != Network::my_node_id)
 	    targets.add(i);
 
 	ActiveMessage<RuntimeShutdownMessage> amsg(targets);
@@ -2213,7 +2062,7 @@ namespace Realm {
 	// legacy shutdown - call shutdown task on processors
 	log_runtime.info() << "local processor shutdown tasks initiated";
 
-	const std::vector<ProcessorImpl *>& local_procs = nodes[my_node_id].processors;
+	const std::vector<ProcessorImpl *>& local_procs = nodes[Network::my_node_id].processors;
 	Event e = spawn_on_all(local_procs, flush_task_id, 0, 0,
 			       Event::NO_EVENT,
 			       INT_MIN); // runs with lowest priority
@@ -2224,10 +2073,6 @@ namespace Realm {
       // the operation table should be clear of work
       optable.shutdown_check();
       
-      // flush out all inter-node communication channels to make sure
-      //  we handle any incoming work before we start tearing stuff down
-      flush_activemsg_channels();
-
       // mark that a shutdown is in progress so that we can hopefully catch
       //  things that try to run during teardown
       shutdown_in_progress.store(true);
@@ -2241,8 +2086,8 @@ namespace Realm {
       if(local_request) {
 	log_runtime.info("shutdown request - notifying other nodes");
 	NodeSet targets;
-	for(NodeID i = 0; i <= max_node_id; i++)
-	  if(i != my_node_id)
+	for(NodeID i = 0; i <= Network::max_node_id; i++)
+	  if(i != Network::my_node_id)
 	    targets.add(i);
 
 	ActiveMessage<RuntimeShutdownMessage> amsg(targets);
@@ -2259,12 +2104,17 @@ namespace Realm {
       PartitioningOpQueue::stop_worker_threads();
       stop_dma_worker_threads();
       stop_dma_system();
-      stop_activemsg_threads();
+
+      // detach from the network
+      for(std::vector<NetworkModule *>::const_iterator it = network_modules.begin();
+	  it != network_modules.end();
+	  it++)
+	(*it)->detach(this, network_segments);
 
       sampling_profiler.shutdown();
 
       {
-	std::vector<ProcessorImpl *>& local_procs = nodes[my_node_id].processors;
+	std::vector<ProcessorImpl *>& local_procs = nodes[Network::my_node_id].processors;
 	for(std::vector<ProcessorImpl *>::const_iterator it = local_procs.begin();
 	    it != local_procs.end();
 	    it++)
@@ -2293,7 +2143,7 @@ namespace Realm {
       {
         RuntimeImpl *rt = get_runtime();
         printf("node %d realm resource usage: ev=%d, rsrv=%d, idx=%d, pg=%d\n",
-               my_node_id,
+               Network::my_node_id,
                rt->local_event_free_list->next_alloc,
                rt->local_reservation_free_list->next_alloc,
                rt->local_index_space_free_list->next_alloc,
@@ -2309,7 +2159,7 @@ namespace Realm {
       cleanup_query_caches();
       // delete processors, memories, nodes, etc.
       {
-	for(NodeID i = 0; i <= max_node_id; i++) {
+	for(NodeID i = 0; i <= Network::max_node_id; i++) {
 	  Node& n = nodes[i];
 
 	  delete_container_contents(n.memories);
@@ -2320,7 +2170,6 @@ namespace Realm {
 	}
 	
 	delete[] nodes;
-	delete global_memory;
 	delete local_event_free_list;
 	delete local_barrier_free_list;
 	delete local_reservation_free_list;
@@ -2340,13 +2189,6 @@ namespace Realm {
 
 	module_registrar.unload_module_sofiles();
       }
-
-#ifndef USE_GASNET
-      if(nongasnet_regmem_base != 0)
-	free(nongasnet_regmem_base);
-      if(nongasnet_reg_ib_mem_base != 0)
-	free(nongasnet_reg_ib_mem_base);
-#endif
 
       if(!Threading::cleanup()) exit(1);
 
@@ -2435,7 +2277,7 @@ namespace Realm {
     SparsityMapImplWrapper *RuntimeImpl::get_available_sparsity_impl(NodeID target_node)
     {
       SparsityMapImplWrapper *wrap = local_sparsity_map_free_lists[target_node]->alloc_entry();
-      wrap->me.sparsity_creator_node() = my_node_id;
+      wrap->me.sparsity_creator_node() = Network::my_node_id;
       return wrap;
     }
 
@@ -2470,11 +2312,7 @@ namespace Realm {
     MemoryImpl *RuntimeImpl::get_memory_impl(ID id)
     {
       if(id.is_memory()) {
-        // support old encoding for global memory too
-	if((id.memory_owner_node() > ID::MAX_NODE_ID) || (id.memory_mem_idx() == ((1U << 12) - 1)))
-	  return global_memory;
-	else
-	  return null_check(nodes[id.memory_owner_node()].memories[id.memory_mem_idx()]);
+	return null_check(nodes[id.memory_owner_node()].memories[id.memory_mem_idx()]);
       }
 
       if(id.is_ib_memory()) {
@@ -2482,19 +2320,12 @@ namespace Realm {
       }
 #ifdef TODO
       if(id.is_allocator()) {
-	if(id.allocator.owner_node > ID::MAX_NODE_ID)
-	  return global_memory;
-	else
-	  return null_check(nodes[id.allocator.owner_node].memories[id.allocator.mem_idx]);
+	return null_check(nodes[id.allocator.owner_node].memories[id.allocator.mem_idx]);
       }
 #endif
 
       if(id.is_instance()) {
-        // support old encoding for global memory too
-	if((id.instance_owner_node() > ID::MAX_NODE_ID) || (id.instance_mem_idx() == ((1U << 12) - 1)))
-	  return global_memory;
-	else
-	  return null_check(nodes[id.instance_owner_node()].memories[id.instance_mem_idx()]);
+	return null_check(nodes[id.instance_owner_node()].memories[id.instance_mem_idx()]);
       }
 
       log_runtime.fatal() << "invalid memory handle: id=" << id;
@@ -2544,7 +2375,7 @@ namespace Realm {
 
       // TODO: factor creator_node into lookup!
       if(id.instance.inst_idx >= mem->instances.size()) {
-	assert(id.instance.owner_node != my_node_id);
+	assert(id.instance.owner_node != Network::my_node_id);
 
 	size_t old_size = mem->instances.size();
 	if(id.instance.inst_idx >= old_size) {
@@ -2560,7 +2391,7 @@ namespace Realm {
 
       if(!mem->instances[id.instance.inst_idx]) {
 	if(!mem->instances[id.instance.inst_idx]) {
-	  //printf("[%d] creating proxy instance: inst=" IDFMT "\n", my_node_id, id.id());
+	  //printf("[%d] creating proxy instance: inst=" IDFMT "\n", Network::my_node_id, id.id());
 	  mem->instances[id.instance.inst_idx] = new RegionInstanceImpl(id.convert<RegionInstance>(), mem->me);
 	}
       }
@@ -2646,13 +2477,13 @@ namespace Realm {
         }
       }
       fprintf(stderr,"BACKTRACE (%d, %lx)\n----------\n%s\n----------\n", 
-              my_node_id, (unsigned long)pthread_self(), buffer);
+              Network::my_node_id, (unsigned long)pthread_self(), buffer);
       fflush(stderr);
       free(buffer);
       free(funcname);
 #endif
       unregister_error_signal_handler();
-      std::cerr << "Signal " << signal << " received by node " << my_node_id
+      std::cerr << "Signal " << signal << " received by node " << Network::my_node_id
 		<< ", process " << getpid()
                 << " (thread "  << std::hex << uintptr_t(pthread_self())
                 << std::dec << ") - obtaining backtrace\n" << std::flush;

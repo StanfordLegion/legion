@@ -591,7 +591,7 @@ namespace Realm {
     class Channel {
     public:
       Channel(XferDes::XferKind _kind)
-	: node(my_node_id), kind(_kind) {}
+	: node(Network::my_node_id), kind(_kind) {}
       virtual ~Channel() {};
     public:
       // which node manages this channel
@@ -1242,7 +1242,7 @@ namespace Realm {
         // Next NODE_BITS indicates on which node this xd is generated
         // Last INDEX_BITS means a unique idx, which is used to resolve conflicts
         XferDesID idx = __sync_fetch_and_add(&next_to_assign_idx, 1);
-        return (((XferDesID)execution_node << (NODE_BITS + INDEX_BITS)) | ((XferDesID)my_node_id << INDEX_BITS) | idx);
+        return (((XferDesID)execution_node << (NODE_BITS + INDEX_BITS)) | ((XferDesID)Network::my_node_id << INDEX_BITS) | idx);
       }
 
       void update_pre_bytes_write(XferDesID xd_guid,
@@ -1250,7 +1250,7 @@ namespace Realm {
 				  size_t pre_bytes_total)
       {
         NodeID execution_node = xd_guid >> (NODE_BITS + INDEX_BITS);
-        if (execution_node == my_node_id) {
+        if (execution_node == Network::my_node_id) {
 #ifdef REALM_USE_SUBPROCESSES
 	  guid_lock.lock();
 #else
@@ -1294,7 +1294,7 @@ namespace Realm {
 				  size_t span_start, size_t span_size)
       {
         NodeID execution_node = xd_guid >> (NODE_BITS + INDEX_BITS);
-        if (execution_node == my_node_id) {
+        if (execution_node == Network::my_node_id) {
 #ifdef REALM_USE_SUBPROCESSES
 	  guid_lock.lock();
 #else

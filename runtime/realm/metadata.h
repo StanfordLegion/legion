@@ -21,8 +21,8 @@
 #include "realm/event.h"
 #include "realm/id.h"
 #include "realm/nodeset.h"
-
-#include "realm/activemsg.h"
+#include "realm/network.h"
+#include "realm/mutex.h"
 
 namespace Realm {
 

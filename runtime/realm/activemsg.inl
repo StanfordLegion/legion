@@ -21,6 +21,8 @@
 // for name demangling
 #include <cxxabi.h>
 
+namespace Realm {
+  
 ////////////////////////////////////////////////////////////////////////
 //
 // class ActiveMessage<T>
@@ -30,48 +32,45 @@ template <typename T>
 ActiveMessage<T>::ActiveMessage(NodeID _target,
 				size_t _max_payload_size /*= 0*/,
 				void *_dest_payload_addr /*= 0*/)
-  : valid(true)
-  , target(_target)
-  , is_multicast(false)
-  , max_payload_size(_max_payload_size)
-  , dest_payload_addr(_dest_payload_addr)
 {
-  if(max_payload_size) {
-    payload = reinterpret_cast<char *>(malloc(max_payload_size));
-    fbs.reset(payload, max_payload_size);
-  } else {
-    payload = 0;
-  }
+  unsigned short msgid = activemsg_handler_table.lookup_message_id<T>();
+  impl = Network::create_active_message_impl(_target,
+					     msgid,
+					     sizeof(T),
+					     _max_payload_size,
+					     _dest_payload_addr,
+					     &inline_capacity,
+					     INLINE_STORAGE);
+  header = new(impl->header_base) T;
+  fbs.reset(impl->payload_base, impl->payload_size);
 }
     
 template <typename T>
 ActiveMessage<T>::ActiveMessage(const Realm::NodeSet &_targets,
 				size_t _max_payload_size /*= 0*/)
-  : valid(true)
-  , targets(_targets)
-  , is_multicast(true)
-  , max_payload_size(_max_payload_size)
-  , dest_payload_addr(0)
 {
-  if(max_payload_size) {
-    payload = reinterpret_cast<char *>(malloc(max_payload_size));
-    fbs.reset(payload, max_payload_size);
-  } else {
-    payload = 0;
-  }
+  unsigned short msgid = activemsg_handler_table.lookup_message_id<T>();
+  impl = Network::create_active_message_impl(_targets,
+					     msgid,
+					     sizeof(T),
+					     _max_payload_size,
+					     &inline_capacity,
+					     INLINE_STORAGE);
+  header = new(impl->header_base) T;
+  fbs.reset(impl->payload_base, impl->payload_size);
 }
 
 template <typename T>
 ActiveMessage<T>::~ActiveMessage(void)
 {
-  assert(!valid);
+  assert(impl == 0);
 }
 
 // operator-> gives access to the header structure
 template <typename T>
 T *ActiveMessage<T>::operator->(void)
 {
-  return &(args.header);
+  return header;
 }
 
 // variable payload can be written to in three ways:
@@ -100,85 +99,43 @@ void ActiveMessage<T>::add_payload(const void *data, size_t datalen,
 template <typename T>
 void *ActiveMessage<T>::payload_ptr(size_t datalen)
 {
-  char *eob = payload + max_payload_size;
+  char *eob = reinterpret_cast<char *>(impl->payload_base) + impl->payload_size;
   char *curpos = eob - fbs.bytes_left();
   char *nextpos = curpos + datalen;
   fbs.reset(nextpos, eob - nextpos);
   return curpos;
 }
 
-class ActiveMessageSender {
-public:
-  ActiveMessageSender(const void *_args, size_t _arglen,
-		      const void *_payload, size_t _payload_len)
-    : prev_target(-1)
-    , args(_args)
-    , arglen(_arglen)
-    , payload(_payload)
-    , payload_len(_payload_len)
-  {}
-
-  void apply(NodeID target)
-  {
-    if(prev_target != -1)
-      enqueue_message(prev_target, MSGID_NEW_ACTIVEMSG,
-		      args, arglen,
-		      payload, payload_len, PAYLOAD_COPY);
-    prev_target = target;
-  }
-
-  void finish(int payload_mode)
-  {
-    if(prev_target != -1)
-      enqueue_message(prev_target, MSGID_NEW_ACTIVEMSG,
-		      args, arglen,
-		      payload, payload_len, payload_mode);
-    else
-      if(payload_mode == PAYLOAD_FREE)
-        free(const_cast<void *>(payload));
-  }
-
-  NodeID prev_target;
-  const void *args;
-  size_t arglen;
-  const void *payload;
-  size_t payload_len;
-};
-
 // every active message must eventually be commit()'ed or cancel()'ed
 template <typename T>
 void ActiveMessage<T>::commit(void)
 {
-  assert(valid);
+  assert(impl != 0);
 
-  args.set_magic();
-  args.msgid = activemsg_handler_table.lookup_message_id<T>();
-  args.sender = my_node_id;
-  
-  if(max_payload_size)
-    args.payload_len = max_payload_size - fbs.bytes_left();
+  size_t act_payload_len;
+  if(impl->payload_size)
+    act_payload_len = impl->payload_size - fbs.bytes_left();
   else
-    args.payload_len = 0;
+    act_payload_len = 0;
 
-  if(is_multicast) {
-    ActiveMessageSender ams(&args, sizeof(args), payload, args.payload_len);
-    targets.map(ams);
-    ams.finish(PAYLOAD_FREE);
-  } else {
-    enqueue_message(target, MSGID_NEW_ACTIVEMSG,
-		    &args, sizeof(args),
-		    payload, args.payload_len, PAYLOAD_FREE, dest_payload_addr);
-  }
-  valid = false;
+  impl->commit(act_payload_len);
+
+  // now tear things down
+  header->~T();
+  impl->~ActiveMessageImpl();
+  impl = 0;
 }
 
 template <typename T>
 void ActiveMessage<T>::cancel(void)
 {
-  assert(valid);
-  if(max_payload_size)
-    free(payload);
-  valid = false;
+  assert(impl != 0);
+  impl->cancel();
+  
+  // now tear things down
+  header->~T();
+  impl->~ActiveMessageImpl();
+  impl = 0;
 }
 
 
@@ -261,3 +218,5 @@ template <typename T, typename T2>
   T2::handle_message(sender, *reinterpret_cast<const T *>(header),
 		     payload, payload_size);
 }
+
+};

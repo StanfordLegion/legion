@@ -50,6 +50,9 @@
 #ifdef USE_HDF
 #include "realm/hdf5/hdf5_module.h"
 #endif
+#ifdef USE_GASNET
+#include "realm/gasnet1/gasnet1_module.h"
+#endif
 
 namespace Realm {
 
@@ -113,11 +116,10 @@ namespace Realm {
   // class ModuleRegistrar
   //
 
-  std::vector<const ModuleRegistrar::StaticRegistrationBase *>& static_module_registrations(void)
-  {
-    static std::vector<const ModuleRegistrar::StaticRegistrationBase *> data;
-    return data;
-  }
+  namespace {
+    ModuleRegistrar::StaticRegistrationBase *static_modules_head = 0;
+    ModuleRegistrar::StaticRegistrationBase **static_modules_tail = &static_modules_head;
+  };
 
   ModuleRegistrar::ModuleRegistrar(RuntimeImpl *_runtime)
     : runtime(_runtime)
@@ -128,10 +130,10 @@ namespace Realm {
 					      std::vector<Module *>& modules)
   {
     // just iterate over the static module list, trying to create each module
-    for(std::vector<const StaticRegistrationBase *>::const_iterator it = static_module_registrations().begin();
-	it != static_module_registrations().end();
-	it++) {
-      Module *m = (*it)->create_module(runtime, cmdline);
+    for(const StaticRegistrationBase *sreg = static_modules_head;
+	sreg;
+	sreg = sreg->next) {
+      Module *m = sreg->create_module(runtime, cmdline);
       if(m)
 	modules.push_back(m);
     }
@@ -263,10 +265,11 @@ namespace Realm {
   }
 
   // called by the module registration helpers
-  /*static*/ void ModuleRegistrar::add_static_registration(const StaticRegistrationBase *reg)
+  /*static*/ void ModuleRegistrar::add_static_registration(StaticRegistrationBase *reg)
   {
     // done during init, so single-threaded
-    static_module_registrations().push_back(reg);
+    *static_modules_tail = reg;
+    static_modules_tail = &(reg->next);
   }
   
 }; // namespace Realm

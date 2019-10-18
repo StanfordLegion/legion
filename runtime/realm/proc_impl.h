@@ -21,7 +21,7 @@
 #include "realm/processor.h"
 #include "realm/id.h"
 
-#include "realm/activemsg.h"
+#include "realm/network.h"
 #include "realm/operation.h"
 #include "realm/profiling.h"
 #include "realm/sampling.h"

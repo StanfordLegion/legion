@@ -19,7 +19,8 @@
 #define REALM_MACHINE_IMPL_H
 
 #include "realm/machine.h"
-#include "realm/activemsg.h"
+#include "realm/network.h"
+#include "realm/mutex.h"
 
 #include <vector>
 #include <set>

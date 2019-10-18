@@ -92,7 +92,7 @@ namespace Realm {
 	return Event::NO_EVENT;
 
       // sanity-check - should never be requesting data from ourselves
-      assert(owner != my_node_id);
+      assert(owner != Network::my_node_id);
 
       Event e = Event::NO_EVENT;
       bool issue_request = false;

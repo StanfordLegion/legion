@@ -770,8 +770,8 @@ namespace Realm {
     if(src_is_rdma) {
       if(dst_is_rdma) {
 	// gasnet -> gasnet - blech
-	log_dma.warning("WARNING: gasnet->gasnet copy being serialized on local node (%d)", my_node_id);
-	return my_node_id;
+	log_dma.warning("WARNING: gasnet->gasnet copy being serialized on local node (%d)", Network::my_node_id);
+	return Network::my_node_id;
       } else {
 	// gathers by the receiver
 	return dst_node;
@@ -822,7 +822,7 @@ namespace Realm {
     assert(oas_by_inst != 0);
     oas_by_inst = 0;
 
-    if(dma_node == my_node_id) {
+    if(dma_node == Network::my_node_id) {
       log_dma.debug("performing copy on local node");
 
       get_runtime()->optable.add_local_operation(ev, r);
@@ -884,7 +884,7 @@ namespace Realm {
 					 0 /*priority*/, requests);
 
     NodeID src_node = ID(src.inst).instance_owner_node();
-    if(src_node == my_node_id) {
+    if(src_node == Network::my_node_id) {
       log_dma.debug("performing reduction on local node");
 
       get_runtime()->optable.add_local_operation(ev, r);	  
@@ -939,7 +939,7 @@ namespace Realm {
 				     priority, requests);
 
     NodeID tgt_node = ID(inst).instance_owner_node();
-    if(tgt_node == my_node_id) {
+    if(tgt_node == Network::my_node_id) {
       get_runtime()->optable.add_local_operation(ev, r);
       r->check_readiness(false, dma_queue);
     } else {

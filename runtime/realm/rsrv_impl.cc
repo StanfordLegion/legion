@@ -241,7 +241,7 @@ namespace Realm {
       if(impl) {
 	AutoLock<> al(impl->mutex);
 
-	assert(impl->owner == my_node_id);
+	assert(impl->owner == Network::my_node_id);
 	assert(impl->count == ReservationImpl::ZERO_COUNT);
 	assert(impl->mode == ReservationImpl::MODE_EXCL);
 	assert(impl->local_waiters.size() == 0);
@@ -258,10 +258,10 @@ namespace Realm {
 #if 0
       // TODO: figure out if it's safe to iterate over a vector that is
       //  being resized?
-      AutoLock<> a(get_runtime()->nodes[my_node_id].mutex);
+      AutoLock<> a(get_runtime()->nodes[Network::my_node_id].mutex);
 
       std::vector<ReservationImpl>& locks = 
-        get_runtime()->nodes[my_node_id].locks;
+        get_runtime()->nodes[Network::my_node_id].locks;
 
 #ifdef REUSE_LOCKS
       // try to find an lock we can reuse
@@ -269,11 +269,11 @@ namespace Realm {
 	  it != locks.end();
 	  it++) {
 	// check the owner and in_use without taking the lock - conservative check
-	if((*it).in_use || ((*it).owner != my_node_id)) continue;
+	if((*it).in_use || ((*it).owner != Network::my_node_id)) continue;
 
 	// now take the lock and make sure it really isn't in use
 	AutoLock<> a((*it).mutex);
-	if(!(*it).in_use && ((*it).owner == my_node_id)) {
+	if(!(*it).in_use && ((*it).owner == Network::my_node_id)) {
 	  // now we really have the lock
 	  (*it).in_use = true;
 	  Reservation r = (*it).me;
@@ -287,10 +287,10 @@ namespace Realm {
       unsigned index = locks.size();
       assert((index+1) < MAX_LOCAL_LOCKS);
       locks.resize(index + 1);
-      Reservation r = ID(ID::ID_LOCK, my_node_id, index).convert<Reservation>();
-      locks[index].init(r, my_node_id);
+      Reservation r = ID(ID::ID_LOCK, Network::my_node_id, index).convert<Reservation>();
+      locks[index].init(r, Network::my_node_id);
       locks[index].in_use = true;
-      get_runtime()->nodes[my_node_id].num_locks = index + 1;
+      get_runtime()->nodes[Network::my_node_id].num_locks = index + 1;
       log_reservation.info() << "created new reservation: reservation=" << r;
       return r;
 #endif
@@ -301,7 +301,7 @@ namespace Realm {
       log_reservation.info() << "reservation destroyed: rsrv=" << *this;
 
       // a lock has to be destroyed on the node that created it
-      if(NodeID(ID(*this).rsrv_creator_node()) != my_node_id) {
+      if(NodeID(ID(*this).rsrv_creator_node()) != Network::my_node_id) {
 	ActiveMessage<DestroyLockMessage> amsg(ID(*this).rsrv_creator_node());
 	amsg->actual = *this;
 	amsg->dummy = *this;
@@ -375,7 +375,7 @@ namespace Realm {
 	AutoLock<> a(impl->mutex);
 
 	// make sure we were really waiting for this lock
-	assert(impl->owner != my_node_id);
+	assert(impl->owner != Network::my_node_id);
 	assert(impl->requested);
 
 	// first, update our copy of the protected data (if any)
@@ -392,7 +392,7 @@ namespace Realm {
           memcpy(impl->local_data, pos, impl->local_data_size);
 
 	if(args.mode == 0) // take ownership if given exclusive access
-	  impl->owner = my_node_id;
+	  impl->owner = Network::my_node_id;
 	impl->mode = args.mode;
 	impl->requested = false;
 
@@ -433,7 +433,7 @@ namespace Realm {
 
 	// it'd be bad if somebody tried to take a lock that had been 
 	//   deleted...  (info is only valid on a lock's home node)
-	assert((NodeID(ID(me).rsrv_creator_node()) != my_node_id) ||
+	assert((NodeID(ID(me).rsrv_creator_node()) != Network::my_node_id) ||
 	       in_use);
 
 	// if this is just a placeholder nonblocking acquire, update the retry_count and
@@ -443,12 +443,12 @@ namespace Realm {
 	  return Event::NO_EVENT;
 	}
 
-	if(owner == my_node_id) {
+	if(owner == Network::my_node_id) {
 #ifdef LOCK_TRACING
           {
             LockTraceItem &item = Tracer<LockTraceItem>::trace_item();
             item.lock_id = me.id;
-            item.owner = my_node_id;
+            item.owner = Network::my_node_id;
             item.action = LockTraceItem::ACT_LOCAL_REQUEST;
           }
 #endif
@@ -482,7 +482,7 @@ namespace Realm {
             {
               LockTraceItem &item = Tracer<LockTraceItem>::trace_item();
               item.lock_id = me.id;
-              item.owner = my_node_id;
+              item.owner = Network::my_node_id;
               item.action = LockTraceItem::ACT_LOCAL_GRANT;
             }
 #endif
@@ -588,7 +588,7 @@ namespace Realm {
       if(lock_request_target != -1)
       {
 	ActiveMessage<LockRequestMessage> amsg(lock_request_target);
-	amsg->node = my_node_id;
+	amsg->node = Network::my_node_id;
 	amsg->lock = me;
 	amsg->mode = new_mode;
 	amsg.commit();
@@ -668,7 +668,7 @@ namespace Realm {
       {
         LockTraceItem &item = Tracer<LockTraceItem>::trace_item();
         item.lock_id = me.id;
-        item.owner = my_node_id;
+        item.owner = Network::my_node_id;
         item.action = LockTraceItem::ACT_LOCAL_GRANT;
       }
 #endif
@@ -707,7 +707,7 @@ namespace Realm {
 
 	// case 1: if we were sharing somebody else's lock, tell them we're
 	//  done
-	if(owner != my_node_id) {
+	if(owner != Network::my_node_id) {
 	  assert(mode != MODE_EXCL);
 	  mode = 0;
 
@@ -813,7 +813,7 @@ namespace Realm {
     bool ReservationImpl::is_locked(unsigned check_mode, bool excl_ok)
     {
       // checking the owner can be done atomically, so doesn't need mutex
-      if(owner != my_node_id) return false;
+      if(owner != Network::my_node_id) return false;
 
       // conservative check on lock count also doesn't need mutex
       if(count == ZERO_COUNT) return false;
@@ -837,7 +837,7 @@ namespace Realm {
 	AutoLock<> al(mutex);
 
 	// should only get here if the current node holds an exclusive lock
-	assert(owner == my_node_id);
+	assert(owner == Network::my_node_id);
 	assert(count == 1 + ZERO_COUNT);
 	assert(mode == MODE_EXCL);
 	assert(local_waiters.size() == 0);
@@ -1603,7 +1603,7 @@ namespace Realm {
 
 	// case 1: we don't even own the lock any more - pass the request on
 	//  to whoever we think the owner is
-	if(impl->owner != my_node_id) {
+	if(impl->owner != Network::my_node_id) {
 	  // can reuse the args we were given
 	  log_reservation.debug(              "forwarding reservation request: reservation=" IDFMT ", from=%d, to=%d, mode=%d",
 		   args.lock.id, args.node, impl->owner, args.mode);
@@ -1613,7 +1613,7 @@ namespace Realm {
 
 	// it'd be bad if somebody tried to take a lock that had been
 	//   deleted...  (info is only valid on a lock's home node)
-	assert((NodeID(ID(impl->me).rsrv_creator_node()) != my_node_id) ||
+	assert((NodeID(ID(impl->me).rsrv_creator_node()) != Network::my_node_id) ||
 	       impl->in_use);
 
 	// case 2: we're the owner, and nobody is holding the lock, so grant

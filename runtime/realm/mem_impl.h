@@ -36,6 +36,9 @@
 namespace Realm {
 
   class RegionInstanceImpl;
+  class NetworkModule;
+  class NetworkSegment;
+  class ByteArray;
 
   // manages a basic free list of ranges (using range type RT) and allocated
   //  ranges, which are tagged (tag type TT)
@@ -138,7 +141,8 @@ namespace Realm {
       virtual void *get_direct_ptr(off_t offset, size_t size) = 0;
       virtual int get_home_node(off_t offset, size_t size) = 0;
 
-      virtual void *local_reg_base(void) { return 0; };
+      // gets info related to rdma access from other nodes
+      virtual const ByteArray *get_rdma_info(NetworkModule *network) { return 0; }
 
       Memory::Kind get_kind(void) const;
 
@@ -173,7 +177,8 @@ namespace Realm {
       static const size_t ALIGNMENT = 256;
 
       LocalCPUMemory(Memory _me, size_t _size, int numa_node, Memory::Kind _lowlevel_kind,
-		     void *prealloc_base = 0, bool _registered = false);
+		     void *prealloc_base = 0,
+		     const NetworkSegment *_segment = 0);
 
       virtual ~LocalCPUMemory(void);
 
@@ -183,50 +188,15 @@ namespace Realm {
       virtual void put_bytes(off_t offset, const void *src, size_t size);
       virtual void *get_direct_ptr(off_t offset, size_t size);
       virtual int get_home_node(off_t offset, size_t size);
-      virtual void *local_reg_base(void);
 
+      virtual const ByteArray *get_rdma_info(NetworkModule *network);
+      
     public:
       const int numa_node;
     public: //protected:
       char *base, *base_orig;
-      bool prealloced, registered;
-    };
-
-    class GASNetMemory : public MemoryImpl {
-    public:
-      static const size_t MEMORY_STRIDE = 1024;
-
-      GASNetMemory(Memory _me, size_t size_per_node);
-
-      virtual ~GASNetMemory(void);
-
-      virtual off_t alloc_bytes(size_t size);
-
-      virtual void free_bytes(off_t offset, size_t size);
-
-      virtual void get_bytes(off_t offset, void *dst, size_t size);
-
-      virtual void put_bytes(off_t offset, const void *src, size_t size);
-
-      virtual void apply_reduction_list(off_t offset, const ReductionOpUntyped *redop,
-					size_t count, const void *entry_buffer);
-
-      virtual void *get_direct_ptr(off_t offset, size_t size);
-      virtual int get_home_node(off_t offset, size_t size);
-
-      void get_batch(size_t batch_size,
-		     const off_t *offsets, void * const *dsts, 
-		     const size_t *sizes);
-
-      void put_batch(size_t batch_size,
-		     const off_t *offsets, const void * const *srcs, 
-		     const size_t *sizes);
-
-    protected:
-      int num_nodes;
-      off_t memory_stride;
-      std::vector<char *> segbases;
-      //std::map<off_t, off_t> free_blocks;
+      bool prealloced;
+      const NetworkSegment *segment;
     };
 
     class DiskMemory : public MemoryImpl {
@@ -290,7 +260,8 @@ namespace Realm {
 
     class RemoteMemory : public MemoryImpl {
     public:
-      RemoteMemory(Memory _me, size_t _size, Memory::Kind k, void *_regbase);
+      RemoteMemory(Memory _me, size_t _size, Memory::Kind k,
+		   MemoryKind mk = MKIND_REMOTE);
       virtual ~RemoteMemory(void);
 
       virtual off_t alloc_bytes(size_t size);
@@ -300,8 +271,7 @@ namespace Realm {
       virtual void *get_direct_ptr(off_t offset, size_t size);
       virtual int get_home_node(off_t offset, size_t size);
 
-    public:
-      void *regbase;
+      virtual void *get_remote_addr(off_t offset);
     };
 
 

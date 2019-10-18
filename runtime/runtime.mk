@@ -577,6 +577,10 @@ REALM_SRC 	+= $(LG_RT_DIR)/realm/runtime_impl.cc \
                    $(LG_RT_DIR)/realm/transfer/lowlevel_disk.cc
 REALM_SRC 	+= $(LG_RT_DIR)/realm/numa/numa_module.cc \
 		   $(LG_RT_DIR)/realm/numa/numasysif.cc
+ifeq ($(strip $(USE_GASNET)),1)
+REALM_SRC 	+= $(LG_RT_DIR)/realm/gasnet1/gasnet1_module.cc \
+                   $(LG_RT_DIR)/realm/gasnet1/gasnetmsg.cc
+endif
 ifeq ($(strip $(USE_OPENMP)),1)
 REALM_SRC 	+= $(LG_RT_DIR)/realm/openmp/openmp_module.cc \
 		   $(LG_RT_DIR)/realm/openmp/openmp_threadpool.cc \
@@ -600,7 +604,8 @@ REALM_SRC 	+= $(LG_RT_DIR)/realm/hdf5/hdf5_module.cc \
 		   $(LG_RT_DIR)/realm/hdf5/hdf5_internal.cc \
 		   $(LG_RT_DIR)/realm/hdf5/hdf5_access.cc
 endif
-REALM_SRC 	+= $(LG_RT_DIR)/realm/activemsg.cc
+REALM_SRC 	+= $(LG_RT_DIR)/realm/activemsg.cc \
+                   $(LG_RT_DIR)/realm/network.cc
 GPU_RUNTIME_SRC +=
 
 REALM_SRC 	+= $(LG_RT_DIR)/realm/logging.cc \

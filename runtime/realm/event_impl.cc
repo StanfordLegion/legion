@@ -535,7 +535,7 @@ namespace Realm {
 #endif
     BarrierImpl *impl = get_runtime()->get_barrier_impl(*this);
     impl->adjust_arrival(ID(id).barrier_generation(), delta, timestamp, Event::NO_EVENT,
-			 my_node_id, false /*!forwarded*/,
+			 Network::my_node_id, false /*!forwarded*/,
 			 0, 0);
 
     Barrier with_ts;
@@ -571,7 +571,7 @@ namespace Realm {
     // arrival uses the timestamp stored in this barrier object
     BarrierImpl *impl = get_runtime()->get_barrier_impl(*this);
     impl->adjust_arrival(ID(id).barrier_generation(), -count, timestamp, wait_on,
-			 my_node_id, false /*!forwarded*/,
+			 Network::my_node_id, false /*!forwarded*/,
 			 reduce_value, reduce_value_size);
   }
 
@@ -853,7 +853,7 @@ namespace Realm {
 	  bool first_fault = (__sync_fetch_and_add(&faults_observed, 1) == 0);
 	  if(first_fault && !ignore_faults) {
             log_poison.info() << "event merger early poison: after=" << event_impl->make_event(finish_gen);
-	    event_impl->trigger(finish_gen, my_node_id, true /*poisoned*/);
+	    event_impl->trigger(finish_gen, Network::my_node_id, true /*poisoned*/);
 	  }
 	}
 	// either way we return to the caller without updating the count_needed
@@ -882,7 +882,7 @@ namespace Realm {
 	bool first_fault = (__sync_fetch_and_add(&faults_observed, 1) == 0);
 	if(first_fault && !ignore_faults) {
 	  log_poison.info() << "event merger poisoned: after=" << event_impl->make_event(finish_gen);
-	  event_impl->trigger(finish_gen, my_node_id, true /*poisoned*/);
+	  event_impl->trigger(finish_gen, Network::my_node_id, true /*poisoned*/);
 	}
       }
 
@@ -897,7 +897,7 @@ namespace Realm {
 
       // trigger on the last input event, unless we did an early poison propagation
       if(last_trigger && (ignore_faults || (faults_observed == 0))) {
-	event_impl->trigger(finish_gen, my_node_id, false /*!poisoned*/);
+	event_impl->trigger(finish_gen, Network::my_node_id, false /*!poisoned*/);
       }
 
       // if the event was triggered early due to poison, its insertion on 
@@ -1319,7 +1319,7 @@ namespace Realm {
 	  std::map<gen_t, bool>::const_iterator it = local_triggers.find(needed_gen);
 	  if(it != local_triggers.end()) {
 	    // 2) we're not the owner node, but we've locally triggered this and have correct poison info
-	    assert(owner != my_node_id);
+	    assert(owner != Network::my_node_id);
 	    trigger_now = true;
 	    trigger_poisoned = it->second;
 	  } else {
@@ -1334,12 +1334,12 @@ namespace Realm {
 	      current_local_waiters.push_back(waiter);
 	    } else {
 	      // no, put it in an appropriate future waiter list - only allowed for non-owners
-	      assert(owner != my_node_id);
+	      assert(owner != Network::my_node_id);
 	      future_local_waiters[needed_gen].push_back(waiter);
 	    }
 
 	    // do we need to subscribe to this event?
-	    if((owner != my_node_id) && (gen_subscribed < needed_gen)) {
+	    if((owner != Network::my_node_id) && (gen_subscribed < needed_gen)) {
 	      previous_subscribe_gen = gen_subscribed;
 	      gen_subscribed = needed_gen;
 	      subscribe_owner = owner;
@@ -1510,7 +1510,7 @@ namespace Realm {
 				    int new_poisoned_count)
   {
     // this event had better not belong to us...
-    assert(owner != my_node_id);
+    assert(owner != Network::my_node_id);
 
     // the result of the update may trigger multiple generations worth of waiters - keep their
     //  generation IDs straight (we'll look up the poison bits later)
@@ -1734,7 +1734,7 @@ namespace Realm {
 
       EventWaiter::EventWaiterList to_wake;
 
-      if(my_node_id == owner) {
+      if(Network::my_node_id == owner) {
 	// we own this event
 
 	NodeSet to_update;
@@ -1802,7 +1802,7 @@ namespace Realm {
 	  get_runtime()->local_event_free_list->free_entry(this);
       } else {
 	// we're triggering somebody else's event, so the first thing to do is tell them
-	assert(trigger_node == (int)my_node_id);
+	assert(trigger_node == (int)Network::my_node_id);
 	// once we send this message, it's possible we get an update from the owner before
 	//  we take the lock a few lines below here (assuming somebody on this node had 
 	//  already subscribed), so check here that we're triggering a new generation
@@ -2206,14 +2206,14 @@ static void *bytedup(const void *data, size_t datalen)
 
 	// only forward deferred arrivals if the precondition is not one that looks like it'll
 	//  trigger here first
-        if(owner != my_node_id) {
+        if(owner != Network::my_node_id) {
 	  ID wait_id(wait_on);
 	  int wait_node;
 	  if(wait_id.is_event())
 	    wait_node = wait_id.event_creator_node();
 	  else
 	    wait_node = wait_id.barrier_creator_node();
-	  if(wait_node != (int)my_node_id) {
+	  if(wait_node != (int)Network::my_node_id) {
 	    // let deferral happen on owner node (saves latency if wait_on event
 	    //   gets triggered there)
 	    //printf("sending deferred arrival to %d for " IDFMT "/%d (" IDFMT "/%d)\n",
@@ -2221,7 +2221,7 @@ static void *bytedup(const void *data, size_t datalen)
 	    log_barrier.info() << "forwarding deferred barrier arrival: delta=" << delta
 			       << " in=" << wait_on << " out=" << b << " (" << timestamp << ")";
 	    BarrierAdjustMessage::send_request(owner, b, delta, wait_on,
-					       sender, (sender != my_node_id),
+					       sender, (sender != Network::my_node_id),
 					       reduce_value, reduce_value_size);
 	    return;
 	  }
@@ -2265,13 +2265,13 @@ static void *bytedup(const void *data, size_t datalen)
 	bool generation_updated = false;
 
 	// ownership can change, so check it inside the lock
-	if(owner != my_node_id) {
+	if(owner != Network::my_node_id) {
 	  forward_to_node = owner;
 	  break;
 	} else {
 	  // if this message had to be forwarded to get here, tell the original sender we are the
 	  //  new owner
-	  if(forwarded && (sender != my_node_id))
+	  if(forwarded && (sender != Network::my_node_id))
 	    inform_migration = sender;
 	}
 
@@ -2355,7 +2355,7 @@ static void *bytedup(const void *data, size_t datalen)
 	  if(local_notifications.empty() && (remote_notifications.size() == 1) &&
 	     generations.empty() && (gen_subscribed <= generation) &&
 	     (redop == 0) &&
-             (NodeID(ID(me).barrier_creator_node()) == my_node_id)) {
+             (NodeID(ID(me).barrier_creator_node()) == Network::my_node_id)) {
 	    log_barrier.info() << "barrier migration: " << me << " -> " << remote_notifications[0].node;
 	    migration_target = remote_notifications[0].node;
 	    owner = migration_target;
@@ -2409,14 +2409,14 @@ static void *bytedup(const void *data, size_t datalen)
       if(forward_to_node != (NodeID) -1) {
 	Barrier b = make_barrier(barrier_gen, timestamp);
 	BarrierAdjustMessage::send_request(forward_to_node, b, delta, Event::NO_EVENT,
-					   sender, (sender != my_node_id),
+					   sender, (sender != Network::my_node_id),
 					   reduce_value, reduce_value_size);
 	return;
       }
 
       if(inform_migration != (NodeID) -1) {
 	Barrier b = make_barrier(barrier_gen, timestamp);
-	BarrierMigrationMessage::send_request(inform_migration, b, my_node_id);
+	BarrierMigrationMessage::send_request(inform_migration, b, Network::my_node_id);
       }
 
       if(trigger_gen != 0) {
@@ -2489,7 +2489,7 @@ static void *bytedup(const void *data, size_t datalen)
 	  if(gen_subscribed < needed_gen) {
 	    gen_subscribed = needed_gen;
 	    // test ownership while holding the mutex
-	    if(owner != my_node_id) {
+	    if(owner != Network::my_node_id) {
 	      send_subscription_request = true;
               cur_owner = owner;
             }
@@ -2499,7 +2499,7 @@ static void *bytedup(const void *data, size_t datalen)
 	// if we're not the owner, send subscription if we haven't already
 	if(send_subscription_request) {
 	  log_barrier.info() << "subscribing to barrier " << make_barrier(needed_gen) << " (prev=" << previous_subscription << ")";
-	  BarrierSubscribeMessage::send_request(cur_owner, me.id, needed_gen, my_node_id, false/*!forwarded*/);
+	  BarrierSubscribeMessage::send_request(cur_owner, me.id, needed_gen, Network::my_node_id, false/*!forwarded*/);
 	}
       }
 
@@ -2566,7 +2566,7 @@ static void *bytedup(const void *data, size_t datalen)
 	  g->local_waiters.push_back(waiter);
 
 	  // a call to has_triggered should have already handled the necessary subscription
-	  assert((owner == my_node_id) || (gen_subscribed >= needed_gen));
+	  assert((owner == Network::my_node_id) || (gen_subscribed >= needed_gen));
 	} else {
 	  // needed generation has already occurred - trigger this waiter once we let go of lock
 	  trigger_now = true;
@@ -2601,13 +2601,13 @@ static void *bytedup(const void *data, size_t datalen)
 	AutoLock<> a(impl->mutex);
 
 	// first check - are we even the current owner?
-	if(impl->owner != my_node_id) {
+	if(impl->owner != Network::my_node_id) {
 	  forward_to_node = impl->owner;
 	  break;
 	} else {
 	  if(args.forwarded) {
 	    // our own request wrapped back around can be ignored - we've already added the local waiter
-	    if(args.subscriber == my_node_id) {
+	    if(args.subscriber == Network::my_node_id) {
 	      break;
 	    } else {
 	      inform_migration = args.subscriber;
@@ -2664,11 +2664,11 @@ static void *bytedup(const void *data, size_t datalen)
 
       if(forward_to_node != (NodeID) -1) {
 	BarrierSubscribeMessage::send_request(forward_to_node, args.barrier_id, args.subscribe_gen,
-					      args.subscriber, (args.subscriber != my_node_id));
+					      args.subscriber, (args.subscriber != Network::my_node_id));
       }
 
       if(inform_migration != (NodeID) -1) {
-	BarrierMigrationMessage::send_request(inform_migration, b, my_node_id);
+	BarrierMigrationMessage::send_request(inform_migration, b, Network::my_node_id);
       }
 
       // send trigger message outside of lock, if needed
@@ -2874,7 +2874,7 @@ static void *bytedup(const void *data, size_t datalen)
 
     log_compqueue.info() << "destroying completion queue: cq=" << *this << " wait_on=" << wait_on;
 
-    if(owner == my_node_id) {
+    if(owner == Network::my_node_id) {
       CompQueueImpl *cq = get_runtime()->get_compqueue_impl(*this);
 
       if(wait_on.has_triggered())
@@ -2910,7 +2910,7 @@ static void *bytedup(const void *data, size_t datalen)
 
     log_compqueue.info() << "event registered with completion queue: cq=" << *this << " event=" << event;
 
-    if(owner == my_node_id) {
+    if(owner == Network::my_node_id) {
       CompQueueImpl *cq = get_runtime()->get_compqueue_impl(*this);
 
       cq->add_event(event, false /*!faultaware*/);
@@ -2929,7 +2929,7 @@ static void *bytedup(const void *data, size_t datalen)
 
     log_compqueue.info() << "event registered with completion queue: cq=" << *this << " event=" << event << " (faultaware)";
 
-    if(owner == my_node_id) {
+    if(owner == Network::my_node_id) {
       CompQueueImpl *cq = get_runtime()->get_compqueue_impl(*this);
 
       cq->add_event(event, true /*faultaware*/);
@@ -2964,7 +2964,7 @@ static void *bytedup(const void *data, size_t datalen)
     NodeID owner = ID(*this).compqueue_owner_node();
     size_t count;
 
-    if(owner == my_node_id) {
+    if(owner == Network::my_node_id) {
       CompQueueImpl *cq = get_runtime()->get_compqueue_impl(*this);
 
       count = cq->pop_events(events, max_events);
@@ -3078,7 +3078,7 @@ static void *bytedup(const void *data, size_t datalen)
   {
     NodeID owner = ID(*this).compqueue_owner_node();
 
-    if(owner == my_node_id) {
+    if(owner == Network::my_node_id) {
       CompQueueImpl *cq = get_runtime()->get_compqueue_impl(*this);
 
       Event e = cq->get_local_progress_event();
@@ -3329,7 +3329,7 @@ static void *bytedup(const void *data, size_t datalen)
 
     if(local_trigger) {
       log_compqueue.debug() << "triggering local progress event: cq=" << me << " event=" << local_trigger->current_event();
-      local_trigger->trigger(local_trigger_gen, my_node_id, false /*!poisoned*/);
+      local_trigger->trigger(local_trigger_gen, Network::my_node_id, false /*!poisoned*/);
     }
 
     if(!remote_triggers.empty())

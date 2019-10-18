@@ -23,7 +23,7 @@
 #include "realm/nodeset.h"
 #include "realm/faults.h"
 
-#include "realm/activemsg.h"
+#include "realm/network.h"
 
 #include "realm/lists.h"
 #include "realm/threads.h"

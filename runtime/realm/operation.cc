@@ -255,7 +255,7 @@ namespace Realm {
   void Operation::trigger_finish_event(bool poisoned)
   {
     if(finish_event)
-      finish_event->trigger(finish_gen, my_node_id, poisoned);
+      finish_event->trigger(finish_gen, Network::my_node_id, poisoned);
 #ifndef REALM_USE_OPERATION_TABLE
     // no operation table to decrement the refcount, so do it ourselves
     // SJT: should this always be done for operations without finish events?
@@ -543,7 +543,7 @@ namespace Realm {
       // not found - who owns this event?
       int owner = ID(finish_event).event_creator_node();
 
-      if(owner == my_node_id) {
+      if(owner == Network::my_node_id) {
 	// if we're the owner, it's probably for an event that already completed successfully,
 	//  so ignore the request
 	log_optable.info() << "event " << finish_event << " cancellation ignored - not in table";
@@ -605,7 +605,7 @@ namespace Realm {
       // not found - who owns this event?
       int owner = ID(finish_event).event_creator_node();
 
-      if(owner == my_node_id) {
+      if(owner == Network::my_node_id) {
 	// if we're the owner, it's probably for an event that already completed successfully,
 	//  so ignore the request
 	log_optable.info() << "event " << finish_event << " priority change ignored - not in table";
@@ -637,7 +637,7 @@ namespace Realm {
   void OperationTable::print_operations(std::ostream& os)
   {
 #ifdef REALM_USE_OPERATION_TABLE
-    os << "OperationTable(node=" << my_node_id << ") {\n";
+    os << "OperationTable(node=" << Network::my_node_id << ") {\n";
 
     for(int subtable = 0; subtable < NUM_TABLES; subtable++) {
       Mutex& mutex = mutexes[subtable];

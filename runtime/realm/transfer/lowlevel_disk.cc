@@ -96,7 +96,7 @@ namespace Realm {
 
     int DiskMemory::get_home_node(off_t offset, size_t size)
     {
-      return my_node_id;
+      return Network::my_node_id;
     }
 
     FileMemory::FileMemory(Memory _me)
@@ -191,7 +191,7 @@ namespace Realm {
 
     int FileMemory::get_home_node(off_t offset, size_t size)
     {
-      return my_node_id;
+      return Network::my_node_id;
     }
 
     int FileMemory::get_file_des(ID::IDType inst_id)

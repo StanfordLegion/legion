@@ -208,7 +208,7 @@ namespace Realm {
     // a PreimageMicroOp should always be executed on whichever node the field data lives
     NodeID exec_node = ID(inst).instance_owner_node();
 
-    if(exec_node != my_node_id) {
+    if(exec_node != Network::my_node_id) {
       forward_microop<PreimageMicroOp<N,T,N2,T2> >(exec_node, op, this);
       return;
     }
