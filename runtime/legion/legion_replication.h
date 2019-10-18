@@ -176,8 +176,12 @@ namespace Legion {
      */
     class AllGatherCollective : public ShardCollective {
     public:
-      AllGatherCollective(CollectiveIndexLocation loc, ReplicateContext *ctx);
-      AllGatherCollective(ReplicateContext *ctx, CollectiveID id);
+      // Inorder says whether we need to see messages for stages inorder,
+      // e.g. do we need to see all stage 0 messages before stage 1
+      AllGatherCollective(CollectiveIndexLocation loc, ReplicateContext *ctx,
+                          bool inorder = false);
+      AllGatherCollective(ReplicateContext *ctx, CollectiveID id,
+                          bool inorder = false);
       virtual ~AllGatherCollective(void);
     public:
       // We guarantee that these methods will be called atomically
@@ -205,10 +209,12 @@ namespace Legion {
       const int shard_collective_participating_shards;
       const int shard_collective_last_radix;
       const bool participating; 
+      const bool inorder;
     private:
       RtUserEvent done_event;
       std::vector<int> stage_notifications;
       std::vector<bool> sent_stages;
+      std::map<int,std::vector<std::pair<void*,size_t> > > *reorder_stages;
       // Handle a small race on deciding who gets to
       // trigger the done event, only the last one of these
       // will get to do the trigger to avoid any races
@@ -854,7 +860,6 @@ namespace Legion {
     protected:
       int current_stage;
       std::map<int,unsigned> index_counts;
-      std::map<int,std::map<int,unsigned> > future_index_counts;
     };
 
     /**
@@ -885,13 +890,13 @@ namespace Legion {
       void pack_counts(Serializer &rez, const std::map<T,unsigned> &counts);
       template<typename T>
       void unpack_counts(const int stage, Deserializer &derez, 
-          std::map<int,std::map<T,unsigned> > &future_counts);
+                         std::map<T,unsigned> &future_counts);
       template<typename T, typename OP>
       void initialize_counts(const std::map<T,OP*> &ops,
                              std::map<T,unsigned> &counts);
       template<typename T, typename OP>
       void find_ready_ops(const size_t total_shards,
-          const std::map<int,std::map<T,unsigned> > &final_counts,
+          const std::map<T,unsigned> &final_counts,
           const std::map<T,OP*> &ops, std::vector<Operation*> &ready_ops);
     protected:
       int current_stage;
@@ -905,22 +910,6 @@ namespace Legion {
       std::map<LogicalPartition,unsigned> logical_partition_counts;
       // Use the lowest field ID here as the key
       std::map<std::pair<LogicalRegion,FieldID>,unsigned> detach_counts;
-    protected:
-      // Future counts for handling out-of-order stage arrivals
-      std::map<int,std::map<IndexSpace,unsigned> > 
-        future_index_space_counts;
-      std::map<int,std::map<IndexPartition,unsigned> > 
-        future_index_partition_counts;
-      std::map<int,std::map<FieldSpace,unsigned> >
-        future_field_space_counts;
-      std::map<int,std::map<std::pair<FieldSpace,FieldID>,unsigned> >
-        future_field_counts;
-      std::map<int,std::map<LogicalRegion,unsigned> >
-        future_logical_region_counts;
-      std::map<int,std::map<LogicalPartition,unsigned> >
-        future_logical_partition_counts;
-      std::map<int,std::map<std::pair<LogicalRegion,FieldID>,unsigned> >
-        future_detach_counts;
     protected:
       std::map<IndexSpace,ReplDeletionOp*> index_space_deletions;
       std::map<IndexPartition,ReplDeletionOp*> index_partition_deletions;

@@ -7916,7 +7916,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     AllGatherCollective::AllGatherCollective(CollectiveIndexLocation loc,
-                                             ReplicateContext *ctx)
+                                             ReplicateContext *ctx, bool order)
       : ShardCollective(loc, ctx),
         shard_collective_radix(ctx->get_shard_collective_radix()),
         shard_collective_log_radix(ctx->get_shard_collective_log_radix()),
@@ -7925,7 +7925,7 @@ namespace Legion {
             ctx->get_shard_collective_participating_shards()),
         shard_collective_last_radix(ctx->get_shard_collective_last_radix()),
         participating(int(local_shard) < shard_collective_participating_shards),
-        pending_send_ready_stages(0)
+        inorder(order), reorder_stages(NULL), pending_send_ready_stages(0)
 #ifdef DEBUG_LEGION
         , done_triggered(false)
 #endif
@@ -7936,7 +7936,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     AllGatherCollective::AllGatherCollective(ReplicateContext *ctx,
-                                             CollectiveID id)
+                                             CollectiveID id, bool order)
       : ShardCollective(ctx, id),
         shard_collective_radix(ctx->get_shard_collective_radix()),
         shard_collective_log_radix(ctx->get_shard_collective_log_radix()),
@@ -7945,7 +7945,7 @@ namespace Legion {
             ctx->get_shard_collective_participating_shards()),
         shard_collective_last_radix(ctx->get_shard_collective_last_radix()),
         participating(int(local_shard) < shard_collective_participating_shards),
-        pending_send_ready_stages(0)
+        inorder(order), reorder_stages(NULL), pending_send_ready_stages(0)
 #ifdef DEBUG_LEGION
         , done_triggered(false)
 #endif
@@ -7981,6 +7981,8 @@ namespace Legion {
     AllGatherCollective::~AllGatherCollective(void)
     //--------------------------------------------------------------------------
     {
+      if (reorder_stages != NULL)
+        delete reorder_stages;
 #ifdef DEBUG_LEGION
       if (participating)
       {
@@ -8165,28 +8167,65 @@ namespace Legion {
 #endif
       // Iterate through the stages and send any that are ready
       // Remember that stages have to be done in order
+      bool sent_previous_stage = false;
       for (int stage = start_stage; stage < shard_collective_stages; stage++)
       {
         {
           AutoLock c_lock(collective_lock);
+          if (sent_previous_stage)
+          {
+#ifdef DEBUG_LEGION
+            assert(!sent_stages[stage-1]);
+#endif
+            sent_stages[stage-1] = true;
+            sent_previous_stage = false;
+          }
           // If this stage has already been sent then we can keep going
           if (sent_stages[stage])
             continue;
-          // Check to see if we're sending this stage
-          // We need all the notifications from the previous stage before
-          // we can send this stage
-          if ((stage > 0) && 
-              (stage_notifications[stage-1] < shard_collective_radix))
-          {
-            // Remove our guard before exiting early
 #ifdef DEBUG_LEGION
-            assert(pending_send_ready_stages > 0);
+          assert(pending_send_ready_stages > 0);
 #endif
+          // We can't have multiple threads doing sends at the same time
+          // so make sure that only the last one is going through doing work
+          if (pending_send_ready_stages > 1)
+          {
+            // Remove our guard before exiting early 
             pending_send_ready_stages--;
             return false;
           }
+          // Check to see if we're sending this stage
+          // We need all the notifications from the previous stage before
+          // we can send this stage
+          if (stage > 0)
+          {
+            if (stage_notifications[stage-1] < shard_collective_radix)
+            {
+              // Remove our guard before exiting early
+              pending_send_ready_stages--;
+              return false;
+            }
+            else if (inorder && (reorder_stages != NULL))
+            {
+              // Check to see if we have any unhandled messages for 
+              // the previous stage that we need to handle before sending
+              std::map<int,std::vector<std::pair<void*,size_t> > >::iterator
+                finder = reorder_stages->find(stage-1);
+              if (finder != reorder_stages->end())
+              {
+                // Perform the handling for the buffered messages now
+                for (std::vector<std::pair<void*,size_t> >::const_iterator it =
+                      finder->second.begin(); it != finder->second.end(); it++)
+                {
+                  Deserializer derez(it->first, it->second);
+                  unpack_collective_stage(derez, finder->first);
+                  free(it->first);
+                }
+                reorder_stages->erase(finder);
+              }
+            }
+          }
           // If we get here then we can send the stage
-          sent_stages[stage] = true;
         }
         // Now we can do the send
         if (stage == (shard_collective_stages-1))
@@ -8217,10 +8256,18 @@ namespace Legion {
             manager->send_collective_message(target, rez);
           }
         }
+        sent_previous_stage = true;
       }
       // If we make it here, then we sent the last stage, check to see
       // if we've seen all the notifications for it
       AutoLock c_lock(collective_lock);
+      if (sent_previous_stage)
+      {
+#ifdef DEBUG_LEGION
+        assert(!sent_stages[shard_collective_stages-1]);
+#endif
+        sent_stages[shard_collective_stages-1] = true;
+      }
       // Remove our pending guard and then check to see if we are done
 #ifdef DEBUG_LEGION
       assert(pending_send_ready_stages > 0);
@@ -8244,7 +8291,29 @@ namespace Legion {
     {
       AutoLock c_lock(collective_lock);
       // Do the unpack first while holding the lock
-      unpack_collective_stage(derez, stage);
+      if (inorder && (stage >= 0))
+      {
+        // Check to see if we can handle this message now or whether we
+        // need to buffer it for the future because we have not finished
+        // sending the current stage yet or not
+        if (!sent_stages[stage])
+        {
+          // Buffer this message until the stage is sent as well 
+          const size_t buffer_size = derez.get_remaining_bytes();
+          void *buffer = malloc(buffer_size);
+          memcpy(buffer, derez.get_current_pointer(), buffer_size);
+          derez.advance_pointer(buffer_size);
+          if (reorder_stages == NULL)
+            reorder_stages = 
+              new std::map<int,std::vector<std::pair<void*,size_t> > >();
+          (*reorder_stages)[stage].push_back(
+              std::pair<void*,size_t>(buffer, buffer_size));
+        }
+        else
+          unpack_collective_stage(derez, stage);
+      }
+      else // Just do the unpack here immediately
+        unpack_collective_stage(derez, stage);
       if (stage >= 0)
       {
 #ifdef DEBUG_LEGION
@@ -10545,7 +10614,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     TemplateIndexExchange::TemplateIndexExchange(ReplicateContext *ctx,
                                                  CollectiveID id)
-      : AllGatherCollective(ctx, id), current_stage(-1)
+      : AllGatherCollective(ctx, id, true/*inorder*/), current_stage(-1)
     //--------------------------------------------------------------------------
     {
     }
@@ -10580,32 +10649,6 @@ namespace Legion {
     void TemplateIndexExchange::pack_collective_stage(Serializer &rez,int stage)
     //--------------------------------------------------------------------------
     {
-      // The first time we pack a stage we merge any values that we had
-      // unpacked earlier as they are needed for sending this stage for
-      // the first time.
-      if (stage != current_stage)
-      {
-        if (!future_index_counts.empty())
-        {
-          std::map<int,std::map<int,unsigned> >::iterator next = 
-            future_index_counts.find(stage-1);
-          if (next != future_index_counts.end())
-          {
-            for (std::map<int,unsigned>::const_iterator it = 
-                  next->second.begin(); it != next->second.end(); it++)
-            {
-              std::map<int,unsigned>::iterator finder = 
-                index_counts.find(it->first);
-              if (finder == index_counts.end())
-                index_counts.insert(*it);
-              else
-                finder->second += it->second;
-            }
-            future_index_counts.erase(next);
-          }
-        }
-        current_stage = stage;
-      }
       rez.serialize<size_t>(index_counts.size());
       for (std::map<int,unsigned>::const_iterator it = 
             index_counts.begin(); it != index_counts.end(); it++)
@@ -10620,10 +10663,10 @@ namespace Legion {
                                                         int stage)
     //--------------------------------------------------------------------------
     {
-      // We never eagerly do reductions as they can arrive out of order
-      // and we can't apply them too early or we'll get duplicate 
-      // applications of reductions
-      std::map<int,unsigned> &next = future_index_counts[stage];
+      // If we are not a participating stage then we already contributed our
+      // data into the output so we clear ourself to avoid double counting
+      if ((stage == -1) && !participating)
+        index_counts.clear();
       size_t num_counts;
       derez.deserialize(num_counts);
       for (unsigned idx = 0; idx < num_counts; idx++)
@@ -10632,9 +10675,9 @@ namespace Legion {
         derez.deserialize(index);
         unsigned count;
         derez.deserialize(count);
-        std::map<int,unsigned>::iterator finder = next.find(index);
-        if (finder == next.end())
-          next[index] = count;
+        std::map<int,unsigned>::iterator finder = index_counts.find(index);
+        if (finder == index_counts.end())
+          index_counts[index] = count;
         else
           finder->second += count;
       }
@@ -10657,11 +10700,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       perform_collective_wait(true/*block*/);
-#ifdef DEBUG_LEGION
-      // Should be at most one stage left
-      assert(future_index_counts.size() == 1);
-#endif
-      result_counts = future_index_counts.begin()->second;
+      result_counts.swap(index_counts);
     }
 
     /////////////////////////////////////////////////////////////
@@ -10671,7 +10710,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     UnorderedExchange::UnorderedExchange(ReplicateContext *ctx, 
                                          CollectiveIndexLocation loc)
-      : AllGatherCollective(loc, ctx), current_stage(-1)
+      : AllGatherCollective(loc, ctx, true/*inorder*/), current_stage(-1)
     //--------------------------------------------------------------------------
     {
     }
@@ -10744,23 +10783,22 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<typename T>
     void UnorderedExchange::unpack_counts(const int stage, Deserializer &derez,   
-                             std::map<int,std::map<T,unsigned> > &future_counts)
+                                          std::map<T,unsigned> &counts)
     //--------------------------------------------------------------------------
     {
       size_t num_counts;
       derez.deserialize(num_counts);
       if (num_counts == 0)
         return;
-      std::map<T,unsigned> &next = future_counts[stage];
       for (unsigned idx = 0; idx < num_counts; idx++)
       {
         T key;
         derez.deserialize(key);
         unsigned count;
         derez.deserialize(count);
-        typename std::map<T,unsigned>::iterator finder = next.find(key);
-        if (finder == next.end())
-          next[key] = count;
+        typename std::map<T,unsigned>::iterator finder = counts.find(key);
+        if (finder == counts.end())
+          counts[key] = count;
         else
           finder->second += count;
       }
@@ -10780,16 +10818,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<typename T, typename OP>
     void UnorderedExchange::find_ready_ops(const size_t total_shards,
-        const std::map<int,std::map<T,unsigned> > &final_counts,
-        const std::map<T,OP*> &ops, std::vector<Operation*> &ready_ops)
+                const std::map<T,unsigned> &final_counts,
+                const std::map<T,OP*> &ops, std::vector<Operation*> &ready_ops)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(final_counts.size() == 1);
-#endif
-      const std::map<T,unsigned> &counts = final_counts.begin()->second;
       for (typename std::map<T,unsigned>::const_iterator it = 
-            counts.begin(); it != counts.end(); it++)
+            final_counts.begin(); it != final_counts.end(); it++)
       {
 #ifdef DEBUG_LEGION
         assert(it->second <= total_shards);
@@ -10809,33 +10843,6 @@ namespace Legion {
     void UnorderedExchange::pack_collective_stage(Serializer &rez, int stage)
     //--------------------------------------------------------------------------
     {
-      // The first time we pack a stage we merge any values that we had
-      // unpacked earlier as they are needed for sending this stage for
-      // the first time.
-      if (stage != current_stage)
-      {
-        if (!future_index_space_counts.empty())
-          update_future_counts(stage, future_index_space_counts, 
-                               index_space_counts);
-        if (!future_index_partition_counts.empty())
-          update_future_counts(stage, future_index_partition_counts,
-                               index_partition_counts);
-        if (!future_field_space_counts.empty())
-          update_future_counts(stage, future_field_space_counts, 
-                               field_space_counts);
-        if (!future_field_counts.empty())
-          update_future_counts(stage, future_field_counts, field_counts);
-        if (!future_logical_region_counts.empty())
-          update_future_counts(stage, future_logical_region_counts,
-                               logical_region_counts);
-        if (!future_logical_partition_counts.empty())
-          update_future_counts(stage, future_logical_partition_counts,
-                               logical_partition_counts);
-        if (!future_detach_counts.empty())
-          update_future_counts(stage, future_detach_counts, detach_counts);
-        // Update the current stage
-        current_stage = stage;
-      }
       pack_counts(rez, index_space_counts);
       pack_counts(rez, index_partition_counts);
       pack_counts(rez, field_space_counts);
@@ -10850,16 +10857,25 @@ namespace Legion {
                                                     int stage)
     //--------------------------------------------------------------------------
     {
-      // We never eagerly do reductions as they can arrive out of order
-      // and we can't apply them too early or we'll get duplicate 
-      // applications of reductions
-      unpack_counts(stage, derez, future_index_space_counts);
-      unpack_counts(stage, derez, future_index_partition_counts);
-      unpack_counts(stage, derez, future_field_space_counts);
-      unpack_counts(stage, derez, future_field_counts);
-      unpack_counts(stage, derez, future_logical_region_counts);
-      unpack_counts(stage, derez, future_logical_partition_counts);
-      unpack_counts(stage, derez, future_detach_counts); 
+      // If we are not a participating stage then we already contributed our
+      // data into the output so we clear ourself to avoid double counting
+      if ((stage == -1) && !participating)
+      {
+        index_space_counts.clear();
+        index_partition_counts.clear();
+        field_space_counts.clear();
+        field_counts.clear();
+        logical_region_counts.clear();
+        logical_partition_counts.clear();
+        detach_counts.clear();
+      }
+      unpack_counts(stage, derez, index_space_counts);
+      unpack_counts(stage, derez, index_partition_counts);
+      unpack_counts(stage, derez, field_space_counts);
+      unpack_counts(stage, derez, field_counts);
+      unpack_counts(stage, derez, logical_region_counts);
+      unpack_counts(stage, derez, logical_partition_counts);
+      unpack_counts(stage, derez, detach_counts); 
     }
 
     //--------------------------------------------------------------------------
@@ -10922,19 +10938,19 @@ namespace Legion {
       if (!unordered_ops.empty())
       {
         const size_t total_shards = manager->total_shards;
-        find_ready_ops(total_shards, future_index_space_counts,
+        find_ready_ops(total_shards, index_space_counts,
                        index_space_deletions, ready_ops);
-        find_ready_ops(total_shards, future_index_partition_counts,
+        find_ready_ops(total_shards, index_partition_counts,
                        index_partition_deletions, ready_ops);
-        find_ready_ops(total_shards, future_field_space_counts,
+        find_ready_ops(total_shards, field_space_counts,
                        field_space_deletions, ready_ops);
-        find_ready_ops(total_shards, future_field_counts,
+        find_ready_ops(total_shards, field_counts,
                        field_deletions, ready_ops);
-        find_ready_ops(total_shards, future_logical_region_counts,
+        find_ready_ops(total_shards, logical_region_counts,
                        logical_region_deletions, ready_ops);
-        find_ready_ops(total_shards, future_logical_partition_counts,
+        find_ready_ops(total_shards, logical_partition_counts,
                        logical_partition_deletions, ready_ops);
-        find_ready_ops(total_shards, future_detach_counts,
+        find_ready_ops(total_shards, detach_counts,
                        detachments, ready_ops);
       }
       // Return true if anybody anywhere had a non-zero count

@@ -3316,10 +3316,11 @@ namespace Legion {
     public:
       std::vector<int> outstanding_counts;
 #endif
-    protected:
+    public:
       // Internal runtime state 
       // The local processor managed by this runtime
       const std::set<Processor> local_procs;
+    protected:
       // The local utility processors owned by this runtime
       const std::set<Processor> local_utils;
       // Processor managers for each of the local processors
