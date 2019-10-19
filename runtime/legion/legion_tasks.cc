@@ -7584,6 +7584,7 @@ namespace Legion {
       version_infos.clear();
 #ifdef DEBUG_LEGION
       interfering_requirements.clear();
+      point_requirements.clear();
       assert(acquired_instances.empty());
 #endif
       acquired_instances.clear();
@@ -8834,12 +8835,9 @@ namespace Legion {
       // Nothing to do if there are no interfering requirements
       if (local_interfering.empty())
         return;
-      std::map<DomainPoint,std::vector<LogicalRegion> > point_requirements;
       for (std::map<DomainPoint,std::vector<LogicalRegion> >::const_iterator 
             pit = point_reqs.begin(); pit != point_reqs.end(); pit++)
-      {
-        // Add it to the set of point requirements
-        point_requirements.insert(*pit);
+      { 
         const std::vector<LogicalRegion> &point_reqs = pit->second;
         for (std::map<DomainPoint,std::vector<LogicalRegion> >::const_iterator
               oit = point_requirements.begin(); 
@@ -9047,6 +9045,8 @@ namespace Legion {
             }
           }
         }
+        // Add it to the set of point requirements
+        point_requirements.insert(*pit);
       }
     }
 #endif

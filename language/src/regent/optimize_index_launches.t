@@ -785,6 +785,8 @@ local optimize_index_launches = {}
 local function ignore(...) end
 
 local function optimize_loop_body(cx, node, report_pass, report_fail)
+  local is_demand = node.annotations.index_launch:is(ast.annotation.Demand)
+
   if #node.block.stats == 0 then
     report_fail(node, "loop optimization failed: body is empty")
     return
@@ -1041,7 +1043,7 @@ local function optimize_loop_body(cx, node, report_pass, report_fail)
       end
 
       -- Tests for non-interference.
-      if std.is_region(arg_type) and not skip_interference_check then
+      if std.is_region(arg_type) and (not is_demand or not skip_interference_check) then
         do
           local passed, failure_i = analyze_noninterference_previous(
             loop_cx, task, arg, regions_previously_used, mapping)

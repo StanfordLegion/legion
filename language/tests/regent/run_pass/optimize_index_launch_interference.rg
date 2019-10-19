@@ -43,5 +43,12 @@ task main()
   for i = 1, N do
     g(pr[0], pr[i])
   end
+
+  -- This loop cannot be index launched, it has a true dependence.
+  -- IMPORTANT: Using the flag to override __demand(__index_launch)
+  -- should not cause this to get index launched.
+  for i = 1, N do
+    f(r)
+  end
 end
 regentlib.start(main)

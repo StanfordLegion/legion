@@ -1127,6 +1127,7 @@ namespace Legion {
     protected:
       // For checking aliasing of points in debug mode only
       std::set<std::pair<unsigned,unsigned> > interfering_requirements;
+      std::map<DomainPoint,std::vector<LogicalRegion> > point_requirements;
     public:
       void check_point_requirements(
           const std::map<DomainPoint,std::vector<LogicalRegion> > &point_reqs);
