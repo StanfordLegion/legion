@@ -8186,20 +8186,17 @@ namespace Legion {
 #ifdef DEBUG_LEGION
           assert(pending_send_ready_stages > 0);
 #endif
-          // We can't have multiple threads doing sends at the same time
-          // so make sure that only the last one is going through doing work
-          if (pending_send_ready_stages > 1)
-          {
-            // Remove our guard before exiting early 
-            pending_send_ready_stages--;
-            return false;
-          }
           // Check to see if we're sending this stage
           // We need all the notifications from the previous stage before
           // we can send this stage
           if (stage > 0)
           {
-            if (stage_notifications[stage-1] < shard_collective_radix)
+            // We can't have multiple threads doing sends at the same time
+            // so make sure that only the last one is going through doing work
+            // but stage 0 is because it is always sent by the initiator so
+            // don't check this until we're past the first stage
+            if ((stage_notifications[stage-1] < shard_collective_radix) ||
+                (pending_send_ready_stages > 1))
             {
               // Remove our guard before exiting early
               pending_send_ready_stages--;
