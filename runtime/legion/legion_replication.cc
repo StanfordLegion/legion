@@ -7982,7 +7982,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (reorder_stages != NULL)
+      {
+#ifdef DEBUG_LEGION
+        assert(reorder_stages->empty());
+#endif
         delete reorder_stages;
+      }
 #ifdef DEBUG_LEGION
       if (participating)
       {
@@ -8331,6 +8336,22 @@ namespace Legion {
     void AllGatherCollective::complete_exchange(void)
     //--------------------------------------------------------------------------
     {
+      if ((reorder_stages != NULL) && !reorder_stages->empty())
+      {
+#ifdef DEBUG_LEGION
+        assert(reorder_stages->size() == 1);
+#endif
+        std::map<int,std::vector<std::pair<void*,size_t> > >::iterator 
+          remaining = reorder_stages->begin();
+        for (std::vector<std::pair<void*,size_t> >::const_iterator it = 
+              remaining->second.begin(); it != remaining->second.end(); it++)
+        {
+          Deserializer derez(it->first, it->second);
+          unpack_collective_stage(derez, remaining->first);
+          free(it->first);     
+        }
+        reorder_stages->erase(remaining);
+      }
       // See if we have to send a message back to a non-participating shard 
       if ((int(manager->total_shards) > shard_collective_participating_shards)
           && (int(local_shard) < int(manager->total_shards -
