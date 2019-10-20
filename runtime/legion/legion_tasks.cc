@@ -8835,6 +8835,8 @@ namespace Legion {
       // Nothing to do if there are no interfering requirements
       if (local_interfering.empty())
         return;
+      // Make sure that all the slices coming back here are serialized
+      AutoLock o_lock(op_lock);
       for (std::map<DomainPoint,std::vector<LogicalRegion> >::const_iterator 
             pit = point_reqs.begin(); pit != point_reqs.end(); pit++)
       { 
