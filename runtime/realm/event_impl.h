@@ -197,7 +197,7 @@ namespace Realm {
       EventMerger merger;
 
       // everything below here protected by this mutex
-      GASNetHSL mutex;
+      Mutex mutex;
 
       // local waiters are tracked by generation - an easily-accessed list is used
       //  for the "current" generation, whereas a map-by-generation-id is used for
@@ -208,7 +208,7 @@ namespace Realm {
 
       // external waiters on this node are notifies via a condition variable
       bool has_external_waiters;
-      GASNetCondVar external_waiter_condvar;
+      CondVar external_waiter_condvar;
 
       // remote waiters are kept in a bitmask for the current generation - this is
       //  only maintained on the owner, who never has to worry about more than one
@@ -283,7 +283,7 @@ namespace Realm {
       gen_t first_generation;
       BarrierImpl *next_free;
 
-      GASNetHSL mutex; // controls which local thread has access to internal data (not runtime-visible event)
+      Mutex mutex; // controls which local thread has access to internal data (not runtime-visible event)
 
       // class to track per-generation status
       class Generation {
@@ -308,7 +308,7 @@ namespace Realm {
 
       // external waiters on this node are notifies via a condition variable
       bool has_external_waiters;
-      GASNetCondVar external_waiter_condvar;
+      CondVar external_waiter_condvar;
 
       // a list of remote waiters and the latest generation they're interested in
       // also the latest generation that each node (that has ever subscribed) has been told about
@@ -363,8 +363,8 @@ namespace Realm {
       public:
 	RemotePopRequest(Event *_events, size_t _capacity);
 
-	GASNetHSL mutex;
-	GASNetCondVar condvar;
+	Mutex mutex;
+	CondVar condvar;
 	bool completed;
 	size_t count, capacity;
 	Event *events;
@@ -395,7 +395,7 @@ namespace Realm {
 	CompQueueWaiterBatch *next_batch;
       };
 
-      GASNetHSL mutex; // protects everything below here
+      Mutex mutex; // protects everything below here
 
       size_t wr_ptr, rd_ptr, cur_events, pending_events, max_events;
       bool resizable;

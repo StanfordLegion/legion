@@ -202,7 +202,7 @@ namespace Realm {
       size_t add_span(size_t pos, size_t count);
 
     protected:
-      GASNetHSL mutex;
+      Mutex mutex;
       size_t contig_amount;  // everything from [0, contig_amount) is covered
       size_t first_noncontig; // nothing in [contig_amount, first_noncontig) 
       std::map<size_t, size_t> spans;  // noncontiguous spans
@@ -344,7 +344,7 @@ namespace Realm {
       // xd_lock is designed to provide thread-safety for
       // SIMULTANEOUS invocation to get_requests,
       // notify_request_read_done, and notify_request_write_done
-      GASNetHSL xd_lock, update_read_lock, update_write_lock;
+      Mutex xd_lock, update_read_lock, update_write_lock;
       // default iterators provided to generate requests
       //Layouts::GenericLayoutIterator<DIM>* li;
       unsigned offset_idx;
@@ -763,8 +763,8 @@ namespace Realm {
       bool is_stopped;
     private:
       std::deque<MemcpyRequest*> pending_queue, finished_queue;
-      GASNetHSL pending_lock, finished_lock;
-      GASNetCondVar pending_cond;
+      Mutex pending_lock, finished_lock;
+      CondVar pending_cond;
       long capacity;
       bool sleep_threads;
       //std::vector<MemcpyRequest*> available_cb;
@@ -997,8 +997,8 @@ namespace Realm {
 	enqueue_lock.unlock();
       }
     public:
-      GASNetHSL enqueue_lock;
-      GASNetCondVar enqueue_cond;
+      Mutex enqueue_lock;
+      CondVar enqueue_cond;
       std::map<Channel*, PriorityXferDesQueue*> channel_to_xd_pool;
       bool sleep;
       bool is_stopped;
@@ -1435,10 +1435,10 @@ namespace Realm {
       std::map<Channel*, DMAThread*> channel_to_dma_thread;
       std::map<Channel*, PriorityXferDesQueue*> queues;
       std::map<XferDesID, XferDesWithUpdates> guid_to_xd;
-      GASNetHSL queues_lock;
+      Mutex queues_lock;
 #ifdef REALM_USE_SUBPROCESSES
       // TODO: gasnet-friendly rwlock?
-      GASNetHSL guid_lock;
+      Mutex guid_lock;
 #else
       pthread_rwlock_t guid_lock;
 #endif

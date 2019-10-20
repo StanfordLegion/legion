@@ -74,7 +74,7 @@ namespace Realm {
 
     int sampler_id;
     SamplingProfilerImpl *profiler;
-    GASNetHSL mutex;  // prevents deletion of a gauge during sampling
+    Mutex mutex;  // prevents deletion of a gauge during sampling
     bool gauge_exists;
     GaugeSampler *next;
   };
@@ -145,7 +145,7 @@ namespace Realm {
     bool parse_profile_pattern(const std::string& s);
 
     bool is_default;
-    GASNetHSL mutex;
+    Mutex mutex;
     bool is_configured, is_shut_down;
     bool cfg_enabled;
     size_t cfg_sample_interval;

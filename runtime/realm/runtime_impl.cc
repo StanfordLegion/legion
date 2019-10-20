@@ -197,7 +197,7 @@ namespace Realm {
 	if (!n->events.has_entry(j))
 	  continue;
 	GenEventImpl *e = n->events.lookup_entry(j, i/*node*/);
-	AutoHSLLock a2(e->mutex);
+	AutoLock<> a2(e->mutex);
 	
 	// print anything with either local or remote waiters
 	if(e->current_local_waiters.empty() &&
@@ -248,7 +248,7 @@ namespace Realm {
 	if (!n->barriers.has_entry(j))
 	  continue;
 	BarrierImpl *b = n->barriers.lookup_entry(j, i/*node*/); 
-	AutoHSLLock a2(b->mutex);
+	AutoLock<> a2(b->mutex);
 	// skip any barriers with no waiters
 	if (b->generations.empty())
 	  continue;
@@ -280,7 +280,7 @@ namespace Realm {
     //     if (!n->events.has_entry(j))
     //       continue;
     // 	  EventImpl *e = n->events.lookup_entry(j, i/*node*/);
-    // 	  AutoHSLLock a2(e->mutex);
+    // 	  AutoLock<> a2(e->mutex);
     
     // 	  // print anything with either local or remote waiters
     // 	  if(e->local_waiters.empty() && e->remote_waiters.empty())
@@ -591,7 +591,7 @@ namespace Realm {
 
   void RemoteIDAllocator::make_initial_requests(void)
   {
-    AutoHSLLock al(mutex);
+    AutoLock<> al(mutex);
 
     for(std::map<ID::ID_Types, int>::const_iterator it = batch_sizes.begin();
 	it != batch_sizes.end();
@@ -620,7 +620,7 @@ namespace Realm {
     ID::IDType id;
     bool request_more = false;
     {
-      AutoHSLLock al(mutex);
+      AutoLock<> al(mutex);
       std::vector<std::pair<ID::IDType, ID::IDType> >& tgt_ranges = id_ranges[id_type][target];
       assert(!tgt_ranges.empty());
       id = tgt_ranges[0].first;
@@ -652,7 +652,7 @@ namespace Realm {
 
   void RemoteIDAllocator::add_id_range(NodeID target, ID::ID_Types id_type, ID::IDType first, ID::IDType last)
   {
-    AutoHSLLock al(mutex);
+    AutoLock<> al(mutex);
 
     std::set<NodeID>::iterator it = reqs_in_flight[id_type].find(target);
     assert(it != reqs_in_flight[id_type].end());
@@ -2147,7 +2147,7 @@ namespace Realm {
 
     bool RuntimeImpl::request_shutdown(Event wait_on, int result_code)
     {
-      AutoHSLLock al(shutdown_mutex);
+      AutoLock<> al(shutdown_mutex);
       // if this is a duplicate request, it has to match exactly
       if(shutdown_request_received) {
 	if((wait_on != shutdown_precondition) ||
@@ -2184,7 +2184,7 @@ namespace Realm {
       }
 
       {
-	AutoHSLLock al(shutdown_mutex);
+	AutoLock<> al(shutdown_mutex);
 	assert(shutdown_request_received);
 	shutdown_initiated = true;
 	shutdown_condvar.broadcast();
@@ -2195,7 +2195,7 @@ namespace Realm {
     {
       // sleep until shutdown has been requested by somebody
       {
-	AutoHSLLock al(shutdown_mutex);
+	AutoLock<> al(shutdown_mutex);
 	while(!shutdown_initiated)
 	  shutdown_condvar.wait();
       }
@@ -2540,7 +2540,7 @@ namespace Realm {
 
       return mem->get_instance(id.convert<RegionInstance>());
 #if 0
-      AutoHSLLock al(mem->mutex);
+      AutoLock<> al(mem->mutex);
 
       // TODO: factor creator_node into lookup!
       if(id.instance.inst_idx >= mem->instances.size()) {

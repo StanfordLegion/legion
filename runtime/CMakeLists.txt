@@ -139,6 +139,7 @@ list(APPEND REALM_SRC
   realm/machine.h
   realm/machine.inl
   realm/memory.h
+  realm/mutex.h     realm/mutex.inl     realm/mutex.cc
   realm/pri_queue.h
   realm/pri_queue.inl
   realm/processor.h

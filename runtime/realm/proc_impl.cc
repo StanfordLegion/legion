@@ -497,7 +497,7 @@ namespace Realm {
 	  Task *leader = 0;
 	  Task *evicted = 0;
 	  {
-	    AutoHSLLock al(cache->mutex);
+	    AutoLock<> al(cache->mutex);
 	    size_t i = 0;
 	    while((i < DeferredSpawnCache::MAX_ENTRIES) &&
 		  (cache->events[i] != start_event)) i++;

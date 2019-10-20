@@ -63,7 +63,7 @@ namespace Realm {
       static const size_t INNER_BITS = _INNER_BITS;
       static const size_t LEAF_BITS = _LEAF_BITS;
 
-      typedef GASNetHSL LT;
+      typedef Mutex LT;
       typedef int IT;
       typedef DynamicTableNode<DynamicTableNodeBase<LT, IT> *, 1 << INNER_BITS, LT, IT> INNER_TYPE;
       typedef DynamicTableNode<ET, 1 << LEAF_BITS, LT, IT> LEAF_TYPE;
@@ -147,7 +147,7 @@ namespace Realm {
       void add_id_range(NodeID target, ID::ID_Types id_type, ID::IDType first, ID::IDType last);
 
     protected:
-      GASNetHSL mutex;
+      Mutex mutex;
       std::map<ID::ID_Types, int> batch_sizes, low_water_marks;
       std::map<ID::ID_Types, std::set<NodeID> > reqs_in_flight;
       std::map<ID::ID_Types, std::map<NodeID, std::vector<std::pair<ID::IDType, ID::IDType> > > > id_ranges;
@@ -189,7 +189,7 @@ namespace Realm {
 
     REGISTER_REALM_MODULE(CoreModule);
 
-    template <typename K, typename V, typename LT = GASNetHSL>
+    template <typename K, typename V, typename LT = Mutex>
     class LockedMap {
     public:
       bool exists(const K& key) const
@@ -316,8 +316,8 @@ namespace Realm {
       pthread_t all_threads[MAX_NUM_THREADS];
       unsigned thread_counts[MAX_NUM_THREADS];
 #endif
-      GASNetHSL shutdown_mutex;
-      GASNetCondVar shutdown_condvar;
+      Mutex shutdown_mutex;
+      CondVar shutdown_condvar;
       bool shutdown_request_received;  // has a request for shutdown arrived
       Event shutdown_precondition;
       int shutdown_result_code;

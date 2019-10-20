@@ -244,7 +244,7 @@ namespace Realm {
                                   EventImpl::gen_t _wait_gen)
   {
     {
-      AutoHSLLock al(pending_list_mutex);
+      AutoLock<> al(pending_list_mutex);
       // insert ourselves in the pending list
       pending_list.push_back(task);
     }
@@ -255,7 +255,7 @@ namespace Realm {
   {
     // record the triggering, which closes the pending_list
     {
-      AutoHSLLock al(pending_list_mutex);
+      AutoLock<> al(pending_list_mutex);
       is_poisoned = poisoned;
       is_triggered = true;
     }
@@ -294,7 +294,7 @@ namespace Realm {
     assert(to_add->before_event == wait_on);
     bool ok;
     {
-      AutoHSLLock al(pending_list_mutex);
+      AutoLock<> al(pending_list_mutex);
       if(is_triggered) {
 	ok = false;
 	poisoned = is_poisoned;
@@ -319,7 +319,7 @@ namespace Realm {
   void TaskQueue::add_subscription(NotificationCallback *callback,
 				   priority_t higher_than /*= PRI_NEG_INF*/)
   {
-    AutoHSLLock al(mutex);
+    AutoLock<> al(mutex);
     callbacks.push_back(callback);
     callback_priorities.push_back(higher_than);
   }
@@ -342,7 +342,7 @@ namespace Realm {
 	it++) {
       Task *new_task;
       {
-	AutoHSLLock al((*it)->mutex);
+	AutoLock<> al((*it)->mutex);
 	new_task = (*it)->ready_task_list.pop_front(task_priority+1);
       }
       if(new_task) {
@@ -352,7 +352,7 @@ namespace Realm {
 	// if we got something better, put back the old thing (if any)
 	if(task) {
 	  {
-	    AutoHSLLock al(task_source->mutex);
+	    AutoLock<> al(task_source->mutex);
 	    task_source->ready_task_list.push_front(task);
 	  }
 	  if(task_source->task_count_gauge)
@@ -375,7 +375,7 @@ namespace Realm {
     // just jam it into the task queue
     if(task->mark_ready()) {
       {
-	AutoHSLLock al(mutex);
+	AutoLock<> al(mutex);
 	if(ready_task_list.empty(task->priority))
 	  notify_priority = task->priority;
 	ready_task_list.push_back(task);
@@ -421,7 +421,7 @@ namespace Realm {
     priority_t notify_priority = tasks.front()->priority;
 
     {
-      AutoHSLLock al(mutex);
+      AutoLock<> al(mutex);
       // cancel notification if we already have equal/higher priority tasks
       if(!ready_task_list.empty(notify_priority))
 	notify_priority = PRI_NEG_INF;
@@ -476,7 +476,7 @@ namespace Realm {
     //  the mutex - we'll use that opportunity to retest the wait value and skip the
     //  broadcast (and associated syscall) if it has changed
     {
-      AutoHSLLock al(mutex);
+      AutoLock<> al(mutex);
       long long wv_reread = wait_value.load();
       if(old_value == wv_reread) {
 #ifdef DEBUG_WORK_COUNTER
@@ -510,7 +510,7 @@ namespace Realm {
   {
     // we assume the caller tried check_for_work() before dropping
     //  their locks and calling us, so take and hold the lock the entire time
-    AutoHSLLock al(mutex);
+    AutoLock<> al(mutex);
 
     // an early out is still needed to make sure the counter hasn't moved on and somebody
     //  isn't trying to wait on a later value
@@ -608,7 +608,7 @@ namespace Realm {
 
   void ThreadedTaskScheduler::add_task_queue(TaskQueue *queue)
   {
-    AutoHSLLock al(lock);
+    AutoLock<> al(lock);
 
     task_queues.push_back(queue);
 
@@ -646,7 +646,7 @@ namespace Realm {
   {
     // there's a potential race between a thread blocking and being reawakened,
     //  so take the scheduler lock and THEN try to mark the thread as blocked
-    AutoHSLLock al(lock);
+    AutoLock<> al(lock);
 
     bool really_blocked = try_update_thread_state(thread,
 						  Thread::STATE_BLOCKING,
@@ -793,7 +793,7 @@ namespace Realm {
 
     // TODO: might be nice to do this in a lock-free way, since this is called by
     //  some other thread
-    AutoHSLLock al(lock);
+    AutoLock<> al(lock);
 
     // if this was a spinning thread, remove it from the list and poke the
     //  work counter in cases its execution resource is napping
@@ -838,7 +838,7 @@ namespace Realm {
     int old_priority;
 
     {
-      AutoHSLLock al(lock);
+      AutoLock<> al(lock);
       std::map<Thread *, int>::iterator it = worker_priorities.find(thread);
       assert(it != worker_priorities.end());
       old_priority = it->second;
@@ -854,7 +854,7 @@ namespace Realm {
     // the entire body of this method, except for when running an actual task, is
     //   a critical section - lock should be taken by caller
     {
-      //AutoHSLLock al(lock);
+      //AutoLock<> al(lock);
 
       // we're a new, and initially unassigned, worker - counters have already been updated
 
@@ -1003,7 +1003,7 @@ namespace Realm {
   // an entry point that takes the scheduler lock explicitly
   void ThreadedTaskScheduler::scheduler_loop_wlock(void)
   {
-    AutoHSLLock al(lock);
+    AutoLock<> al(lock);
     scheduler_loop();
   }
 
@@ -1051,7 +1051,7 @@ namespace Realm {
   {
     // fire up the minimum number of workers
     {
-      AutoHSLLock al(lock);
+      AutoLock<> al(lock);
 
       update_worker_count(cfg_min_active_workers, cfg_min_active_workers);
 
@@ -1069,7 +1069,7 @@ namespace Realm {
 
     // wait for all workers to finish
     {
-      AutoHSLLock al(lock);
+      AutoLock<> al(lock);
 
       while(!all_workers.empty() || !terminating_workers.empty())
 	shutdown_condvar.wait();
@@ -1084,11 +1084,11 @@ namespace Realm {
 
     // see if we're supposed to be active yet
     {
-      AutoHSLLock al(lock);
+      AutoLock<> al(lock);
 
       if(active_workers.count(thread) == 0) {
 	// nope, sleep on a CV until we are
-	GASNetCondVar my_cv(lock);
+	CondVar my_cv(lock);
 	sleeping_threads[thread] = &my_cv;
 
 	while(active_workers.count(thread) == 0)
@@ -1103,7 +1103,7 @@ namespace Realm {
   {
     log_sched.info() << "scheduler worker terminating: sched=" << this << " worker=" << thread;
 
-    AutoHSLLock al(lock);
+    AutoLock<> al(lock);
 
     // if the thread is still in our all_workers list, this was unexpected
     if(all_workers.count(thread) > 0) {
@@ -1170,7 +1170,7 @@ namespace Realm {
       active_workers.erase(Thread::self());
     assert(count == 1);
 
-    GASNetCondVar my_cv(lock);
+    CondVar my_cv(lock);
     sleeping_threads[Thread::self()] = &my_cv;
 
     // with kernel threads, sleeping and waking are separable actions
@@ -1192,7 +1192,7 @@ namespace Realm {
     active_workers.insert(to_wake);
 
     // if they have a CV (they might not yet), poke that
-    std::map<Thread *, GASNetCondVar *>::const_iterator it = sleeping_threads.find(to_wake);
+    std::map<Thread *, CondVar *>::const_iterator it = sleeping_threads.find(to_wake);
     if(it != sleeping_threads.end())
       it->second->signal();
   }
@@ -1279,7 +1279,7 @@ namespace Realm {
 
     // fire up the host threads (which will fire up initial workers)
     {
-      AutoHSLLock al(lock);
+      AutoLock<> al(lock);
 
       update_worker_count(cfg_num_host_threads, cfg_num_host_threads);
 
@@ -1303,7 +1303,7 @@ namespace Realm {
   {
     log_sched.info() << "scheduler shutdown requested: sched=" << this;
     // set the shutdown flag and wait for all the host threads to exit
-    AutoHSLLock al(lock);
+    AutoLock<> al(lock);
 
     // make sure everybody actually started before we tell them to shut down
     while(host_startups_remaining > 0) {
@@ -1351,7 +1351,7 @@ namespace Realm {
   void UserThreadTaskScheduler::host_thread_loop(void)
   {
     log_sched.debug() << "host thread started: sched=" << this << " thread=" << Thread::self();
-    AutoHSLLock al(lock);
+    AutoLock<> al(lock);
 
     // create a user worker thread - it won't start right away
     Thread *worker = worker_create(false);

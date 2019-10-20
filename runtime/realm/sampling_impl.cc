@@ -18,6 +18,8 @@
 #include "realm/sampling_impl.h"
 #include "realm/cmdline.h"
 #include "realm/timers.h"
+#include "realm/activemsg.h"
+#include "realm/threads.h"
 
 #include <unistd.h>
 #include <errno.h>
@@ -295,7 +297,7 @@ namespace Realm {
     GaugeSampler *add_gauge_to_default_sampler(T *gauge);
 
   protected:
-    GASNetHSL mutex;
+    Mutex mutex;
     SamplingProfilerImpl *default_sampler;
     DelayedGaugeAddition *delayed_additions;
   };
@@ -312,7 +314,7 @@ namespace Realm {
 
   DelayedGaugeAddition *DefaultSamplerHandler::install_default_sampler(SamplingProfilerImpl *new_default)
   {
-    AutoHSLLock al(mutex);
+    AutoLock<> al(mutex);
     assert(default_sampler == 0);
     default_sampler = new_default;
     DelayedGaugeAddition *to_return = delayed_additions;
@@ -322,7 +324,7 @@ namespace Realm {
 
   void DefaultSamplerHandler::remove_default_sampler(SamplingProfilerImpl *old_default)
   {
-    AutoHSLLock al(mutex);
+    AutoLock<> al(mutex);
     assert(default_sampler == old_default);
     default_sampler = 0;
   }
@@ -330,7 +332,7 @@ namespace Realm {
   template <typename T>
   GaugeSampler *DefaultSamplerHandler::add_gauge_to_default_sampler(T *gauge)
   {
-    AutoHSLLock al(mutex);
+    AutoLock<> al(mutex);
     if(default_sampler) {
       return default_sampler->add_gauge(gauge);
     } else {
@@ -405,7 +407,7 @@ namespace Realm {
 
     // take (and hold) the mutex, mark that we're shutting down, and then flush all
     //  buffers and destroy all samplers
-    AutoHSLLock al(mutex);
+    AutoLock<> al(mutex);
 
     for(std::vector<SampleFile::PacketNewGauge *>::iterator it = new_sampler_infos.begin();
 	it != new_sampler_infos.end();
@@ -487,7 +489,7 @@ namespace Realm {
     // mark that we're configured and processed deferred additions
     DelayedGaugeAddition *dga = 0;
     {
-      AutoHSLLock al(mutex);
+      AutoLock<> al(mutex);
       
       is_configured = true;
       dga = delayed_additions;
@@ -509,7 +511,7 @@ namespace Realm {
 	                            sampler->buffer_swap(cfg_buffer_size);
 	assert(buffer == 0);
 	{
-	  AutoHSLLock al(mutex);
+	  AutoLock<> al(mutex);
 	  new_sampler_infos.push_back(info);
 	  if(sampler_tail)
 	    *sampler_tail = sampler;
@@ -574,7 +576,7 @@ namespace Realm {
       // take the mutex long enough to sample a consistent head and tail - after
       //  that we can release the lock while we traverse our part of the list
       {
-	AutoHSLLock al(mutex);
+	AutoLock<> al(mutex);
 	head = sampler_head;
 	tail = sampler_tail;
 	// grab list of new infos atomically as well
@@ -629,7 +631,7 @@ namespace Realm {
 	bool full = false;
 	bool deleted = false;
 	{
-	  AutoHSLLock al(sampler->mutex);
+	  AutoLock<> al(sampler->mutex);
 	  if(sampler->gauge_exists) {
 	    full = sampler->sample_gauge(current_sample_index);
 	  } else {
@@ -656,7 +658,7 @@ namespace Realm {
 
       // now update head and tail if we changed them
       {
-	AutoHSLLock al(mutex);
+	AutoLock<> al(mutex);
 	sampler_head = new_head;  // always safe to update since we know the list wasn't empty
 	// only update the tail if the list hasn't grown
 	if(sampler_tail == tail) {
@@ -721,7 +723,7 @@ namespace Realm {
   {
     // if we're not configured yes, always defer
     if(!is_configured) {
-      AutoHSLLock al(mutex);
+      AutoLock<> al(mutex);
       // race conditions are annoying - check again
       if(!is_configured) {
 	delayed_additions = new DelayedGaugeAdditionImpl<T>(gauge, delayed_additions);
@@ -747,7 +749,7 @@ namespace Realm {
                                 sampler->buffer_swap(cfg_buffer_size);
     assert(buffer == 0);
     {
-      AutoHSLLock al(mutex);
+      AutoLock<> al(mutex);
       // do shutdown check here to avoid race conditions
       if(is_shut_down) {
 	delete info;
@@ -768,7 +770,7 @@ namespace Realm {
 					  GaugeSampler *sampler)
   {
     // if the shutdown flag is set, the gauge has already been deleted
-    AutoHSLLock al(mutex);
+    AutoLock<> al(mutex);
     if(is_shut_down)
       return;
 
@@ -776,7 +778,7 @@ namespace Realm {
     //  cleaned up later (once all data has been written)
     // mutex prevents the very short conflict of deletion while the gauge is being
     //  sampled
-    AutoHSLLock al2(sampler->mutex);
+    AutoLock<> al2(sampler->mutex);
     sampler->gauge_exists = false;
   }
 

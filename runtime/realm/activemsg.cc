@@ -16,8 +16,26 @@
 #include "realm/realm_config.h"
 #include "realm/atomics.h"
 
-// include gasnet header files before activemsg.h to make sure we have
-//  definitions for gasnet_hsl_t and gasnett_cond_t
+
+#include "realm/activemsg.h"
+#include "realm/mutex.h"
+#include "realm/cmdline.h"
+
+#include <queue>
+#include <assert.h>
+#ifdef REALM_PROFILE_AM_HANDLERS
+#include <math.h>
+#endif
+
+#ifdef DETAILED_MESSAGE_TIMING
+#include <sys/stat.h>
+#include <fcntl.h>
+#endif
+
+#include "realm/threads.h"
+#include "realm/timers.h"
+#include "realm/logging.h"
+
 #ifdef USE_GASNET
 
 // so OpenMPI borrowed gasnet's platform-detection code and didn't change
@@ -39,43 +57,7 @@
 static const void *ignore_gasnet_warning1 __attribute__((unused)) = (void *)_gasneti_threadkey_init;
 static const void *ignore_gasnet_warning2 __attribute__((unused)) = (void *)_gasnett_trace_printf_noop;
 
-// can't use gasnet_hsl_t in debug mode
-// actually, don't use gasnet_hsl_t at all right now...
-//#ifndef GASNET_DEBUG
-#if 0
-#define USE_GASNET_HSL_T
-#define GASNETHSL_IMPL     gasnet_hsl_t mutex
-#define GASNETCONDVAR_IMPL gasnett_cond_t condvar
 #endif
-
-#endif
-
-#ifndef USE_GASNET_HSL_T
-// use pthread mutex/condvar
-#include <pthread.h>
-#include <errno.h>
-
-#define GASNETHSL_IMPL     pthread_mutex_t mutex
-#define GASNETCONDVAR_IMPL pthread_cond_t  condvar
-#endif
-
-#include "realm/activemsg.h"
-#include "realm/cmdline.h"
-
-#include <queue>
-#include <assert.h>
-#ifdef REALM_PROFILE_AM_HANDLERS
-#include <math.h>
-#endif
-
-#ifdef DETAILED_MESSAGE_TIMING
-#include <sys/stat.h>
-#include <fcntl.h>
-#endif
-
-#include "realm/threads.h"
-#include "realm/timers.h"
-#include "realm/logging.h"
 
 #define NO_DEBUG_AMREQUESTS
 
@@ -89,120 +71,6 @@ NodeID my_node_id = 0;
 NodeID max_node_id = 0;
 
 // gasnet_hsl_t in object form for templating goodness
-GASNetHSL::GASNetHSL(void)
-{
-  assert(sizeof(mutex) <= sizeof(placeholder));
-#ifdef USE_GASNET_HSL_T
-  gasnet_hsl_init(&mutex);
-#else
-  pthread_mutex_init(&mutex, 0);
-#endif
-}
-
-GASNetHSL::~GASNetHSL(void)
-{
-#ifdef USE_GASNET_HSL_T
-  gasnet_hsl_destroy(&mutex);
-#else
-  pthread_mutex_destroy(&mutex);
-#endif
-}
-
-void GASNetHSL::lock(void)
-{
-#ifdef USE_GASNET_HSL_T
-  gasnet_hsl_lock(&mutex);
-#else
-  pthread_mutex_lock(&mutex);
-#endif
-}
-
-void GASNetHSL::unlock(void)
-{
-#ifdef USE_GASNET_HSL_T
-  gasnet_hsl_unlock(&mutex);
-#else
-  pthread_mutex_unlock(&mutex);
-#endif
-}
-
-bool GASNetHSL::trylock(void)
-{
-#ifdef USE_GASNET_HSL_T
-  int ret = gasnet_hsl_trylock(&mutex);
-  return (ret == 0);
-#else
-  int ret = pthread_mutex_trylock(&mutex);
-  return (ret == 0);
-#endif
-}
-
-GASNetCondVar::GASNetCondVar(GASNetHSL &_mutex) 
-  : mutex(_mutex)
-{
-  assert(sizeof(condvar) <= sizeof(placeholder));
-#ifdef USE_GASNET_HSL_T
-  gasnett_cond_init(&condvar);
-#else
-  pthread_cond_init(&condvar, 0);
-#endif
-}
-
-GASNetCondVar::~GASNetCondVar(void)
-{
-#ifdef USE_GASNET_HSL_T
-  gasnett_cond_destroy(&condvar);
-#else
-  pthread_cond_destroy(&condvar);
-#endif
-}
-
-// these require that you hold the lock when you call
-void GASNetCondVar::signal(void)
-{
-#ifdef USE_GASNET_HSL_T
-  gasnett_cond_signal(&condvar);
-#else
-  pthread_cond_signal(&condvar);
-#endif
-}
-
-void GASNetCondVar::broadcast(void)
-{
-#ifdef USE_GASNET_HSL_T
-  gasnett_cond_broadcast(&condvar);
-#else
-  pthread_cond_broadcast(&condvar);
-#endif
-}
-
-void GASNetCondVar::wait(void)
-{
-#ifdef USE_GASNET_HSL_T
-  gasnett_cond_wait(&condvar, &(mutex.mutex.lock));
-#else
-  pthread_cond_wait(&condvar, &mutex.mutex);
-#endif
-}
-
-// wait with a timeout - returns true if awakened by a signal and
-//  false if the timeout expires first
-bool GASNetCondVar::timedwait(long long max_nsec)
-{
-#ifdef USE_GASNET_HSL_T
-  assert(0 && "gasnett_cond_t doesn't have timedwait!");
-#else
-  struct timespec ts;
-  clock_gettime(CLOCK_REALTIME, &ts);
-  ts.tv_sec += (ts.tv_nsec + max_nsec) / 1000000000LL;
-  ts.tv_nsec = (ts.tv_nsec + max_nsec) % 1000000000LL;
-  int ret = pthread_cond_timedwait(&condvar, &mutex.mutex, &ts);
-  if(ret == ETIMEDOUT) return false;
-  // TODO: check other error codes?
-  return true;
-#endif
-}
-
 // most of this file assumes the use of gasnet - stubs for a few entry
 //  points are defined at the bottom for the !USE_GASNET case
 #ifdef USE_GASNET
@@ -285,7 +153,7 @@ void record_am_handler(int handler_id, const char *description, bool reply)
 #endif
 
 static const int DEFERRED_FREE_COUNT = 128;
-GASNetHSL deferred_free_mutex;
+Realm::Mutex deferred_free_mutex;
 int deferred_free_pos;
 void *deferred_frees[DEFERRED_FREE_COUNT];
 
@@ -321,8 +189,8 @@ protected:
   IncomingMessage ***tails;
   int *todo_list; // list of nodes with non-empty message lists
   int todo_oldest, todo_newest;
-  GASNetHSL mutex;
-  GASNetCondVar condvar;
+  Realm::Mutex mutex;
+  Realm::CondVar condvar;
   Realm::CoreReservation *core_rsrv;
   std::vector<Realm::Thread *> handler_threads;
 };
@@ -425,8 +293,8 @@ protected:
   size_t round_up_size(size_t size);
 
   friend class SrcDataPool::Lock;
-  GASNetHSL mutex;
-  GASNetCondVar condvar;
+  Realm::Mutex mutex;
+  Realm::CondVar condvar;
   size_t total_size;
   std::map<char *, size_t> free_list;
   std::queue<OutgoingMessage *> pending_allocations;
@@ -2091,8 +1959,8 @@ protected:
 
   gasnet_node_t peer;
   
-  GASNetHSL mutex;
-  GASNetCondVar cond;
+  Realm::Mutex mutex;
+  Realm::CondVar cond;
 public:
   std::queue<OutgoingMessage *> out_short_hdrs;
   std::queue<OutgoingMessage *> out_long_hdrs;
@@ -2488,8 +2356,8 @@ protected:
 private:
   const int total_endpoints;
   ActiveMessageEndpoint **endpoints;
-  GASNetHSL mutex;
-  GASNetCondVar condvar;
+  Realm::Mutex mutex;
+  Realm::CondVar condvar;
   int *todo_list;
   int todo_oldest, todo_newest;
   bool shutdown_flag;

@@ -246,7 +246,7 @@ namespace Realm {
     bool request_precise = false;
     Event e = Event::NO_EVENT;
     {
-      AutoHSLLock al(mutex);
+      AutoLock<> al(mutex);
 
       if(precise) {
 	if(!this->entries_valid) {
@@ -390,7 +390,7 @@ namespace Realm {
 						  size_t count, bool last)
   {
     if(count > 0) {
-      AutoHSLLock al(mutex);
+      AutoLock<> al(mutex);
 
       if(N == 1) {
 	// demand that our input data is sorted
@@ -561,7 +561,7 @@ namespace Realm {
     bool request_approx = false;
     bool request_precise = false;
     {
-      AutoHSLLock al(mutex);
+      AutoLock<> al(mutex);
 
       if(precise) {
 	if(!this->entries_valid) {
@@ -610,7 +610,7 @@ namespace Realm {
     bool reply_precise = false;
     bool reply_approx = false;
     {
-      AutoHSLLock al(mutex);
+      AutoLock<> al(mutex);
 
       // always add the requestor to the sharer list
       remote_sharers.add(requestor);
@@ -820,7 +820,7 @@ namespace Realm {
     Event trigger_approx = Event::NO_EVENT;
     std::vector<PartitioningMicroOp *> precise_waiters_copy, approx_waiters_copy;
     {
-      AutoHSLLock al(mutex);
+      AutoLock<> al(mutex);
 
       assert(!this->entries_valid);
       this->entries_valid = true;
@@ -910,7 +910,7 @@ namespace Realm {
 
     // rest of this has to be protected by a lock
     {
-      AutoHSLLock al(mutex);
+      AutoLock<> al(mutex);
 
       std::map<int, int>& by_sender = fragments[sender];
 

@@ -182,7 +182,7 @@ namespace Realm {
     // try to avoid a serial bottleneck by splitting events over 4 different tables
     static const int NUM_TABLES = 4;
     
-    GASNetHSL mutexes[NUM_TABLES];
+    Mutex mutexes[NUM_TABLES];
     Table tables[NUM_TABLES];
     //TableCleaner cleaner;
 #endif

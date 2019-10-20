@@ -29,6 +29,7 @@
 #include <sys/types.h>
 
 #include "realm/realm_config.h"
+#include "realm/mutex.h"
 
     enum ActiveMessageIDs {
       FIRST_AVAILABLE = 140,
@@ -130,67 +131,6 @@ typedef int NodeID;
 extern NodeID my_node_id, max_node_id;
 
 // gasnet_hsl_t in object form for templating goodness
-class GASNetHSL {
-public:
-  GASNetHSL(void);
-  ~GASNetHSL(void);
-
-private:
-  // Should never be copied
-  GASNetHSL(const GASNetHSL &rhs) { assert(false); }
-  GASNetHSL& operator=(const GASNetHSL &rhs) { assert(false); return *this; }
-
-public:
-  void lock(void);
-  void unlock(void);
-  bool trylock(void);
-
-protected:
-  friend class GASNetCondVar;
-
-  // the actual implementation of the mutex is of interest only to
-  //  activemsg.cc, but if we don't define it here, we run afoul of
-  //  rules type-punning, so use macros to let activemsg.cc's inclusion
-  //  of this file behave a little differently
-  union {
-    uint64_t placeholder[8]; // 64 bytes, at least 8 byte aligned
-#ifdef GASNETHSL_IMPL
-    GASNETHSL_IMPL;
-#endif
-  };
-};
-
-class GASNetCondVar {
-public:
-  GASNetCondVar(GASNetHSL &_mutex);
-  ~GASNetCondVar(void);
-
-  // these require that you hold the lock when you call
-  void signal(void);
-
-  void broadcast(void);
-
-  void wait(void);
-
-  // wait with a timeout - returns true if awakened by a signal and
-  //  false if the timeout expires first
-  bool timedwait(long long max_nsec);
-
-  GASNetHSL &mutex;
-
-protected:
-  // the actual implementation of the mutex is of interest only to
-  //  activemsg.cc, but if we don't define it here, we run afoul of
-  //  rules type-punning, so use macros to let activemsg.cc's inclusion
-  //  of this file behave a little differently
-  union {
-    uint64_t placeholder[8]; // 64 bytes, at least 8 byte aligned
-#ifdef GASNETCONDVAR_IMPL
-    GASNETCONDVAR_IMPL;
-#endif
-  };
-};
-
 extern void init_endpoints(int gasnet_mem_size,
 			   int registered_mem_size,
 			   int registered_ib_mem_size,
@@ -380,8 +320,8 @@ class IncomingMediumMessage : public IncomingMessage {
 };
 
 template <class T> struct HandlerReplyFuture {
-  GASNetHSL mutex;
-  GASNetCondVar condvar;
+  Realm::Mutex mutex;
+  Realm::CondVar condvar;
   bool valid;
   T value;
 
@@ -557,39 +497,6 @@ union AtLeastEightBytes {
   uint64_t padding;
 };
 
-    template <typename LT>
-    class AutoLock {
-    public:
-      AutoLock(LT &mutex) : mutex(mutex), held(true)
-      { 
-	mutex.lock();
-      }
-
-      ~AutoLock(void) 
-      {
-	if(held)
-	  mutex.unlock();
-      }
-
-      void release(void)
-      {
-	assert(held);
-	mutex.unlock();
-	held = false;
-      }
-
-      void reacquire(void)
-      {
-	assert(!held);
-	mutex.lock();
-	held = true;
-      }
-    protected:
-      LT &mutex;
-      bool held;
-    };
-
-    typedef AutoLock<GASNetHSL> AutoHSLLock;
 
 //////////////////////////////////////////////////////////////////////////
 

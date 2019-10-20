@@ -22,7 +22,7 @@
 #include "realm/id.h"
 #include "realm/inst_layout.h"
 
-#include "realm/activemsg.h"
+#include "realm/mutex.h"
 
 #include "realm/rsrv_impl.h"
 #include "realm/metadata.h"
@@ -119,7 +119,7 @@ namespace Realm {
       };
 
       // used for atomic access to metadata
-      GASNetHSL mutex;
+      Mutex mutex;
       Metadata metadata;
 
       // used for serialized application access to contents of instance

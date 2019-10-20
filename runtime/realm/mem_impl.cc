@@ -135,7 +135,7 @@ namespace Realm {
 
     off_t MemoryImpl::alloc_bytes_local(size_t size)
     {
-      AutoHSLLock al(mutex);
+      AutoLock<> al(mutex);
 
       // for zero-length allocations, return a special "offset"
       if(size == 0) {
@@ -195,7 +195,7 @@ namespace Realm {
     void MemoryImpl::free_bytes_local(off_t offset, size_t size)
     {
       log_malloc.info() << "free block: mem=" << me << " size=" << size << " ofs=" << offset;
-      AutoHSLLock al(mutex);
+      AutoLock<> al(mutex);
 
       // frees of zero bytes should have the special offset
       if(size == 0) {
@@ -307,7 +307,7 @@ namespace Realm {
       if(cnode == my_node_id) {
 	// if it was locally created, we can directly access the local_instances list
 	//  and it's a fatal error if it doesn't exist
-	AutoHSLLock al(local_instances.mutex);
+	AutoLock<> al(local_instances.mutex);
 	assert(idx < local_instances.instances.size());
 	assert(local_instances.instances[idx] != 0);
 	return local_instances.instances[idx];
@@ -316,7 +316,7 @@ namespace Realm {
 	//  protected lookup
 	InstanceList *ilist;
 	{
-	  AutoHSLLock al(instance_map_mutex);
+	  AutoLock<> al(instance_map_mutex);
 	  // this creates a new InstanceList if needed
 	  InstanceList *& iref = instances_by_creator[cnode];
 	  if(!iref)
@@ -326,7 +326,7 @@ namespace Realm {
 
 	// now look up (and possibly create) the instance in the right list
 	{
-	  AutoHSLLock al(ilist->mutex);
+	  AutoLock<> al(ilist->mutex);
 
 	  if(idx >= ilist->instances.size())
 	    ilist->instances.resize(idx + 1, 0);
@@ -348,7 +348,7 @@ namespace Realm {
       unsigned inst_idx;
       RegionInstanceImpl *inst_impl;
       {
-	AutoHSLLock al(local_instances.mutex);
+	AutoLock<> al(local_instances.mutex);
 	  
 	if(local_instances.free_list.empty()) {
 	  // need to grow the list - do it in chunks
@@ -386,7 +386,7 @@ namespace Realm {
 	log_inst.info() << "creating new local instance: " << i;
 	inst_impl = new RegionInstanceImpl(i, me);
 	{
-	  AutoHSLLock al(local_instances.mutex);
+	  AutoLock<> al(local_instances.mutex);
 	  local_instances.instances[inst_idx] = inst_impl;
 	}
       } else
@@ -402,7 +402,7 @@ namespace Realm {
 
       log_inst.info() << "releasing local instance: " << inst;
       {
-	AutoHSLLock al(local_instances.mutex);
+	AutoLock<> al(local_instances.mutex);
 	local_instances.free_list.push_back(inst_idx);
       }
     }
@@ -436,7 +436,7 @@ namespace Realm {
 
       bool ok;
       {
-	AutoHSLLock al(allocator_mutex);
+	AutoLock<> al(allocator_mutex);
 	ok = allocator.allocate(i, bytes, alignment, offset);
       }
 
@@ -489,7 +489,7 @@ namespace Realm {
       assert(inst->metadata.inst_offset != size_t(-1));
       // deallocate unless the allocation had failed
       if(inst->metadata.inst_offset != size_t(-2)) {
-	AutoHSLLock al(allocator_mutex);
+	AutoLock<> al(allocator_mutex);
 	allocator.deallocate(inst->me);
       }
 
@@ -1006,7 +1006,7 @@ namespace Realm {
 
   typedef std::map<PartialWriteKey, PartialWriteEntry> PartialWriteMap;
   static PartialWriteMap partial_remote_writes;
-  static GASNetHSL partial_remote_writes_lock;
+  static Mutex partial_remote_writes_lock;
 
   /*static*/ void RemoteWriteMessage::handle_message(NodeID sender, const RemoteWriteMessage &args,
 						     const void *data,

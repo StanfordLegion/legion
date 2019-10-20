@@ -25,7 +25,7 @@
 
 #include "realm/cuda/cudart_hijack.h"
 
-#include "realm/activemsg.h"
+#include "realm/mutex.h"
 #include "realm/utils.h"
 
 #ifdef REALM_USE_VALGRIND_ANNOTATIONS
@@ -83,7 +83,7 @@ namespace Realm {
     {
       bool add_to_worker = false;
       {
-	AutoHSLLock al(mutex);
+	AutoLock<> al(mutex);
 
 	// remember to add ourselves to the worker if we didn't already have work
 	add_to_worker = pending_copies.empty();
@@ -132,7 +132,7 @@ namespace Realm {
     {
       bool add_to_worker = false;
       {
-	AutoHSLLock al(mutex);
+	AutoLock<> al(mutex);
 
 	// remember to add ourselves to the worker if we didn't already have work
 	add_to_worker = pending_events.empty();
@@ -157,7 +157,7 @@ namespace Realm {
       while(true) {
 	GPUMemcpy *copy = 0;
 	{
-	  AutoHSLLock al(mutex);
+	  AutoLock<> al(mutex);
 
 	  if(pending_copies.empty())
 	    return false;  // no work left
@@ -184,7 +184,7 @@ namespace Realm {
       CUevent event;
       bool event_valid = false;
       {
-	AutoHSLLock al(mutex);
+	AutoLock<> al(mutex);
 
 	if(pending_events.empty())
 	  return false;  // no work left
@@ -222,7 +222,7 @@ namespace Realm {
 	GPUCompletionNotification *notification = 0;
 
 	{
-	  AutoHSLLock al(mutex);
+	  AutoLock<> al(mutex);
 
 	  const PendingEvent &e = pending_events.front();
 	  assert(e.event == event);
@@ -1282,7 +1282,7 @@ namespace Realm {
 
     CUevent GPUEventPool::get_event(void)
     {
-      AutoHSLLock al(mutex);
+      AutoLock<> al(mutex);
 
       if(current_size == 0) {
 	// if we need to make an event, make a bunch
@@ -1303,7 +1303,7 @@ namespace Realm {
 
     void GPUEventPool::return_event(CUevent e)
     {
-      AutoHSLLock al(mutex);
+      AutoLock<> al(mutex);
 
       assert(current_size < total_size);
 
@@ -1766,7 +1766,7 @@ namespace Realm {
     void GPUWorker::shutdown_background_thread(void)
     {
       {
-	AutoHSLLock al(lock);
+	AutoLock<> al(lock);
 	worker_shutdown_requested = true;
 	condvar.broadcast();
       }
@@ -1781,7 +1781,7 @@ namespace Realm {
 
     void GPUWorker::add_stream(GPUStream *stream)
     {
-      AutoHSLLock al(lock);
+      AutoLock<> al(lock);
 
       // if the stream is already in the set, nothing to do
       if(active_streams.count(stream) > 0)
@@ -1799,7 +1799,7 @@ namespace Realm {
       // for any stream that we leave work on, we'll add it back in
       std::set<GPUStream *> streams;
       {
-	AutoHSLLock al(lock);
+	AutoLock<> al(lock);
 
 	while(active_streams.empty()) {
 	  if(!sleep_on_empty || worker_shutdown_requested) return false;
@@ -1860,8 +1860,8 @@ namespace Realm {
       virtual void wait(void);
 
     public:
-      GASNetHSL mutex;
-      GASNetCondVar cv;
+      Mutex mutex;
+      CondVar cv;
       bool completed;
     };
 
@@ -1875,7 +1875,7 @@ namespace Realm {
 
     void BlockingCompletionNotification::request_completed(void)
     {
-      AutoHSLLock a(mutex);
+      AutoLock<> a(mutex);
 
       assert(!completed);
       completed = true;
@@ -1884,7 +1884,7 @@ namespace Realm {
 
     void BlockingCompletionNotification::wait(void)
     {
-      AutoHSLLock a(mutex);
+      AutoLock<> a(mutex);
 
       while(!completed)
 	cv.wait();
@@ -3040,7 +3040,7 @@ namespace Realm {
     {
       GlobalRegistrations& g = get_global_registrations();
 
-      AutoHSLLock al(g.mutex);
+      AutoLock<> al(g.mutex);
 
       // add this gpu to the list
       assert(g.active_gpus.count(gpu) == 0);
@@ -3067,7 +3067,7 @@ namespace Realm {
     {
       GlobalRegistrations& g = get_global_registrations();
 
-      AutoHSLLock al(g.mutex);
+      AutoLock<> al(g.mutex);
 
       assert(g.active_gpus.count(gpu) > 0);
       g.active_gpus.erase(gpu);
@@ -3078,7 +3078,7 @@ namespace Realm {
     {
       GlobalRegistrations& g = get_global_registrations();
 
-      AutoHSLLock al(g.mutex);
+      AutoLock<> al(g.mutex);
 
       // add the fat binary to the list and tell any gpus we know of about it
       g.fat_binaries.push_back(fatbin);
@@ -3093,7 +3093,7 @@ namespace Realm {
     {
       GlobalRegistrations& g = get_global_registrations();
 
-      AutoHSLLock al(g.mutex);
+      AutoLock<> al(g.mutex);
 
       // remove the fatbin from the list - don't bother telling gpus
       std::vector<FatBin *>::iterator it = g.fat_binaries.begin();
@@ -3109,7 +3109,7 @@ namespace Realm {
     {
       GlobalRegistrations& g = get_global_registrations();
 
-      AutoHSLLock al(g.mutex);
+      AutoLock<> al(g.mutex);
 
       // add the variable to the list and tell any gpus we know
       g.variables.push_back(var);
@@ -3125,7 +3125,7 @@ namespace Realm {
     {
       GlobalRegistrations& g = get_global_registrations();
 
-      AutoHSLLock al(g.mutex);
+      AutoLock<> al(g.mutex);
 
       // add the function to the list and tell any gpus we know
       g.functions.push_back(func);

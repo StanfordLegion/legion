@@ -28,13 +28,13 @@
 #include "realm/memory.h"
 #include "realm/instance.h"
 #include "realm/faults.h"
-#include "realm/activemsg.h"
 #include "realm/atomics.h"
 
 namespace Realm {
 
   class SamplingProfiler;
   class GaugeSampler;
+  class CoreReservationSet;
 
   namespace ProfilingGauges {
 

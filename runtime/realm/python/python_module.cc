@@ -306,7 +306,7 @@ namespace Realm {
 
   void PythonThreadTaskScheduler::enqueue_taskreg(LocalPythonProcessor::TaskRegistration *treg)
   {
-    AutoHSLLock al(lock);
+    AutoLock<> al(lock);
     taskreg_queue.push_back(treg);
     // we've added work to the system
     work_counter.increment_counter();
@@ -336,7 +336,7 @@ namespace Realm {
 #endif
 
     // now go into main scheduler loop, holding scheduler lock for whole thing
-    AutoHSLLock al(lock);
+    AutoLock<> al(lock);
     while(true) {
       // remember the work counter value before we start so that we don't iterate
       //   unnecessarily
@@ -515,7 +515,7 @@ namespace Realm {
     // if this gets called before we're done initializing the interpreter,
     //  we need a simple blocking wait
     if(!interpreter_ready) {
-      AutoHSLLock al(lock);
+      AutoLock<> al(lock);
 
       log_py.debug() << "waiting during initialization";
       bool really_blocked = try_update_thread_state(thread,
@@ -573,7 +573,7 @@ namespace Realm {
   {
     // handle the wakening of the initialization thread specially
     if(!interpreter_ready) {
-      AutoHSLLock al(lock);
+      AutoLock<> al(lock);
       resumable_workers.put(thread, 0);
     } else {
       KernelThreadTaskScheduler::thread_ready(thread);
@@ -837,7 +837,7 @@ namespace Realm {
     sched->enqueue_taskreg(treg);
 #if 0
     {
-      AutoHSLLock al(mutex);
+      AutoLock<> al(mutex);
       bool was_empty = taskreg_queue.empty() && task_queue.empty();
       taskreg_queue.push_back(treg);
       if(was_empty)

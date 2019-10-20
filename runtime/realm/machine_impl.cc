@@ -427,7 +427,7 @@ namespace Realm {
 					       const void *args, size_t arglen,
 					       bool remote)
     {
-      AutoHSLLock al(mutex);
+      AutoLock<> al(mutex);
 
       assert(node_id <= max_node_id);
       Node& n = get_runtime()->nodes[node_id];
@@ -632,7 +632,7 @@ namespace Realm {
     void MachineImpl::get_all_memories(std::set<Memory>& mset) const
     {
       // TODO: consider using a reader/writer lock here instead
-      AutoHSLLock al(mutex);
+      AutoLock<> al(mutex);
 #ifdef USE_OLD_AFFINITIES
       for(std::vector<Machine::ProcessorMemoryAffinity>::const_iterator it = proc_mem_affinities.begin();
 	  it != proc_mem_affinities.end();
@@ -653,7 +653,7 @@ namespace Realm {
     void MachineImpl::get_all_processors(std::set<Processor>& pset) const
     {
       // TODO: consider using a reader/writer lock here instead
-      AutoHSLLock al(mutex);
+      AutoLock<> al(mutex);
 #ifdef USE_OLD_AFFINITIES
       for(std::vector<Machine::ProcessorMemoryAffinity>::const_iterator it = proc_mem_affinities.begin();
 	  it != proc_mem_affinities.end();
@@ -693,7 +693,7 @@ namespace Realm {
     void MachineImpl::get_local_processors(std::set<Processor>& pset) const
     {
       // TODO: consider using a reader/writer lock here instead
-      AutoHSLLock al(mutex);
+      AutoLock<> al(mutex);
 #ifdef USE_OLD_AFFINITIES
       for(std::vector<Machine::ProcessorMemoryAffinity>::const_iterator it = proc_mem_affinities.begin();
 	  it != proc_mem_affinities.end();
@@ -716,7 +716,7 @@ namespace Realm {
 						   Processor::Kind kind) const
     {
       // TODO: consider using a reader/writer lock here instead
-      AutoHSLLock al(mutex);
+      AutoLock<> al(mutex);
 #ifdef USE_OLD_AFFINITIES
       for(std::vector<Machine::ProcessorMemoryAffinity>::const_iterator it = proc_mem_affinities.begin();
 	  it != proc_mem_affinities.end();
@@ -741,7 +741,7 @@ namespace Realm {
     void MachineImpl::get_visible_memories(Processor p, std::set<Memory>& mset, bool local_only) const
     {
       // TODO: consider using a reader/writer lock here instead
-      AutoHSLLock al(mutex);
+      AutoLock<> al(mutex);
 #ifdef USE_OLD_AFFINITIES
       for(std::vector<Machine::ProcessorMemoryAffinity>::const_iterator it = proc_mem_affinities.begin();
 	  it != proc_mem_affinities.end();
@@ -770,7 +770,7 @@ namespace Realm {
 					   bool local_only) const
     {
       // TODO: consider using a reader/writer lock here instead
-      AutoHSLLock al(mutex);
+      AutoLock<> al(mutex);
 #ifdef USE_OLD_AFFINITIES
       for(std::vector<Machine::MemoryMemoryAffinity>::const_iterator it = mem_mem_affinities.begin();
 	  it != mem_mem_affinities.end();
@@ -815,7 +815,7 @@ namespace Realm {
 					    bool local_only) const
     {
       // TODO: consider using a reader/writer lock here instead
-      AutoHSLLock al(mutex);
+      AutoLock<> al(mutex);
 #ifdef USE_OLD_AFFINITIES
       for(std::vector<Machine::ProcessorMemoryAffinity>::const_iterator it = proc_mem_affinities.begin();
 	  it != proc_mem_affinities.end();
@@ -841,7 +841,7 @@ namespace Realm {
     bool MachineImpl::has_affinity(Processor p, Memory m, Machine::AffinityDetails *details /*= 0*/) const
     {
       // TODO: consider using a reader/writer lock here instead
-      AutoHSLLock al(mutex);
+      AutoLock<> al(mutex);
       for(std::vector<Machine::ProcessorMemoryAffinity>::const_iterator it = proc_mem_affinities.begin();
 	  it != proc_mem_affinities.end();
 	  it++) {
@@ -859,7 +859,7 @@ namespace Realm {
     bool MachineImpl::has_affinity(Memory m1, Memory m2, Machine::AffinityDetails *details /*= 0*/) const
     {
       // TODO: consider using a reader/writer lock here instead
-      AutoHSLLock al(mutex);
+      AutoLock<> al(mutex);
       for(std::vector<Machine::MemoryMemoryAffinity>::const_iterator it = mem_mem_affinities.begin();
 	  it != mem_mem_affinities.end();
 	  it++) {
@@ -883,7 +883,7 @@ namespace Realm {
 
       {
 	// TODO: consider using a reader/writer lock here instead
-	AutoHSLLock al(mutex);
+	AutoLock<> al(mutex);
 #ifdef USE_OLD_AFFINITIES
 	for(std::vector<Machine::ProcessorMemoryAffinity>::const_iterator it = proc_mem_affinities.begin();
 	    it != proc_mem_affinities.end();
@@ -979,7 +979,7 @@ namespace Realm {
 
       {
 	// TODO: consider using a reader/writer lock here instead
-	AutoHSLLock al(mutex);
+	AutoLock<> al(mutex);
 #ifdef USE_OLD_AFFINITIES
 	for(std::vector<Machine::MemoryMemoryAffinity>::const_iterator it = mem_mem_affinities.begin();
 	    it != mem_mem_affinities.end();
@@ -1112,13 +1112,13 @@ namespace Realm {
 
     void MachineImpl::add_subscription(Machine::MachineUpdateSubscriber *subscriber)
     {
-      AutoHSLLock al(mutex);
+      AutoLock<> al(mutex);
       subscribers.insert(subscriber);
     }
 
     void MachineImpl::remove_subscription(Machine::MachineUpdateSubscriber *subscriber)
     {
-      AutoHSLLock al(mutex);
+      AutoLock<> al(mutex);
       subscribers.erase(subscriber);
     }
 
@@ -1851,7 +1851,7 @@ namespace Realm {
     Processor lowest = Processor::NO_PROC;
     {
       // problem with nested locks here...
-      //AutoHSLLock al(machine->mutex);
+      //AutoLock<> al(machine->mutex);
       for(std::vector<Machine::ProcessorMemoryAffinity>::const_iterator it = machine->proc_mem_affinities.begin();
 	  it != machine->proc_mem_affinities.end();
 	  it++) {
@@ -1932,7 +1932,7 @@ namespace Realm {
     Processor lowest = Processor::NO_PROC;
     {
       // problem with nested locks here...
-      //AutoHSLLock al(machine->mutex);
+      //AutoLock<> al(machine->mutex);
       for(std::vector<Machine::ProcessorMemoryAffinity>::const_iterator it = machine->proc_mem_affinities.begin();
 	  it != machine->proc_mem_affinities.end();
 	  it++) {
@@ -2018,7 +2018,7 @@ namespace Realm {
     std::set<Processor> pset;
     {
       // problem with nested locks here...
-      //AutoHSLLock al(machine->mutex);
+      //AutoLock<> al(machine->mutex);
       for(std::vector<Machine::ProcessorMemoryAffinity>::const_iterator it = machine->proc_mem_affinities.begin();
 	  it != machine->proc_mem_affinities.end();
 	  it++) {
@@ -2098,7 +2098,7 @@ namespace Realm {
     int count = 0;
     {
       // problem with nested locks here...
-      //AutoHSLLock al(machine->mutex);
+      //AutoLock<> al(machine->mutex);
       for(std::vector<Machine::ProcessorMemoryAffinity>::const_iterator it = machine->proc_mem_affinities.begin();
 	  it != machine->proc_mem_affinities.end();
 	  it++) {
@@ -2670,7 +2670,7 @@ namespace Realm {
     Memory lowest = Memory::NO_MEMORY;
     {
       // problem with nested locks here...
-      //AutoHSLLock al(machine->mutex);
+      //AutoLock<> al(machine->mutex);
       for(std::vector<Machine::ProcessorMemoryAffinity>::const_iterator it = machine->proc_mem_affinities.begin();
 	  it != machine->proc_mem_affinities.end();
 	  it++) {
@@ -2748,7 +2748,7 @@ namespace Realm {
     Memory lowest = Memory::NO_MEMORY;
     {
       // problem with nested locks here...
-      //AutoHSLLock al(machine->mutex);
+      //AutoLock<> al(machine->mutex);
       for(std::vector<Machine::ProcessorMemoryAffinity>::const_iterator it = machine->proc_mem_affinities.begin();
 	  it != machine->proc_mem_affinities.end();
 	  it++) {
@@ -2844,7 +2844,7 @@ namespace Realm {
     std::set<Memory> pset;
     {
       // problem with nested locks here...
-      //AutoHSLLock al(machine->mutex);
+      //AutoLock<> al(machine->mutex);
       for(std::vector<Machine::ProcessorMemoryAffinity>::const_iterator it = machine->proc_mem_affinities.begin();
 	  it != machine->proc_mem_affinities.end();
 	  it++) {
@@ -2924,7 +2924,7 @@ namespace Realm {
     int count = 0;
     {
       // problem with nested locks here...
-      //AutoHSLLock al(machine->mutex);
+      //AutoLock<> al(machine->mutex);
       for(std::vector<Machine::ProcessorMemoryAffinity>::const_iterator it = machine->proc_mem_affinities.begin();
 	  it != machine->proc_mem_affinities.end();
 	  it++) {

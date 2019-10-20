@@ -239,7 +239,7 @@ namespace Realm {
       assert(impl);
       assert(ID(impl->me).is_reservation());
       if(impl) {
-	AutoHSLLock al(impl->mutex);
+	AutoLock<> al(impl->mutex);
 
 	assert(impl->owner == my_node_id);
 	assert(impl->count == ReservationImpl::ZERO_COUNT);
@@ -258,7 +258,7 @@ namespace Realm {
 #if 0
       // TODO: figure out if it's safe to iterate over a vector that is
       //  being resized?
-      AutoHSLLock a(get_runtime()->nodes[my_node_id].mutex);
+      AutoLock<> a(get_runtime()->nodes[my_node_id].mutex);
 
       std::vector<ReservationImpl>& locks = 
         get_runtime()->nodes[my_node_id].locks;
@@ -272,7 +272,7 @@ namespace Realm {
 	if((*it).in_use || ((*it).owner != my_node_id)) continue;
 
 	// now take the lock and make sure it really isn't in use
-	AutoHSLLock a((*it).mutex);
+	AutoLock<> a((*it).mutex);
 	if(!(*it).in_use && ((*it).owner == my_node_id)) {
 	  // now we really have the lock
 	  (*it).in_use = true;
@@ -372,7 +372,7 @@ namespace Realm {
 
       ReservationImpl *impl = get_runtime()->get_lock_impl(args.lock);
       {
-	AutoHSLLock a(impl->mutex);
+	AutoLock<> a(impl->mutex);
 
 	// make sure we were really waiting for this lock
 	assert(impl->owner != my_node_id);
@@ -429,7 +429,7 @@ namespace Realm {
       WaiterList bonus_grants;
 
       {
-	AutoHSLLock a(mutex); // hold mutex on lock while we check things
+	AutoLock<> a(mutex); // hold mutex on lock while we check things
 
 	// it'd be bad if somebody tried to take a lock that had been 
 	//   deleted...  (info is only valid on a lock's home node)
@@ -691,7 +691,7 @@ namespace Realm {
 	log_reservation.debug(            "release: reservation=" IDFMT " count=%d mode=%d owner=%d", // share=%lx wait=%lx",
 			me.id, count, mode, owner); //, remote_sharer_mask, remote_waiter_mask);
 #endif
-	AutoHSLLock a(mutex); // hold mutex on lock for entire function
+	AutoLock<> a(mutex); // hold mutex on lock for entire function
 
 	assert(count > ZERO_COUNT);
 
@@ -821,7 +821,7 @@ namespace Realm {
       // a careful check of the lock mode and count does require the mutex
       bool held;
       {
-	AutoHSLLock a(mutex);
+	AutoLock<> a(mutex);
 
 	held = ((count > ZERO_COUNT) &&
 		((mode == check_mode) || ((mode == 0) && excl_ok)));
@@ -834,7 +834,7 @@ namespace Realm {
     {
       // take the lock's mutex to sanity check it and clear the in_use field
       {
-	AutoHSLLock al(mutex);
+	AutoLock<> al(mutex);
 
 	// should only get here if the current node holds an exclusive lock
 	assert(owner == my_node_id);
@@ -875,11 +875,11 @@ namespace Realm {
   struct FastRsrvState {
     FastReservation::State state;
     ReservationImpl *rsrv_impl;   // underlying reservation
-    GASNetHSL mutex;              // protects rest of internal state
+    Mutex mutex;              // protects rest of internal state
     Event rsrv_ready;             // ready event for a pending rsrv request
     unsigned sleeper_count;
     Event sleeper_event;
-    GASNetCondVar condvar;        // for external waiters
+    CondVar condvar;        // for external waiters
 
     // must be called while holding mutex
     Event request_base_rsrv(void);
@@ -905,14 +905,14 @@ namespace Realm {
   }
 
 #ifdef REALM_DEBUG_FRSRV_HOLDERS
-  GASNetHSL frsv_debug_mutex;
+  Mutex frsv_debug_mutex;
   std::map<Thread *, FastReservationDebugInfo *> frsv_debug_map;
 
   /*static*/ FastReservationDebugInfo *FastReservationDebugInfo::lookup_debuginfo(void)
   {
     FastReservationDebugInfo **infoptr;
     {
-      AutoHSLLock al(frsv_debug_mutex);
+      AutoLock<> al(frsv_debug_mutex);
       infoptr = &frsv_debug_map[Thread::self()];
     }
     if(!*infoptr) {
@@ -950,8 +950,8 @@ namespace Realm {
       frs.rsrv_impl = 0;
     }
     // mutex, condvar must be manually constructed
-    new(&frs.mutex) GASNetHSL;
-    new(&frs.condvar) GASNetCondVar(frs.mutex);
+    new(&frs.mutex) Mutex;
+    new(&frs.condvar) CondVar(frs.mutex);
     frs.rsrv_ready = Event::NO_EVENT;
     frs.sleeper_count = 0;
     frs.sleeper_event = Event::NO_EVENT;
@@ -979,8 +979,8 @@ namespace Realm {
       }
     }
     // mutex, condvar must be manually destroyed
-    frs.condvar.~GASNetCondVar();
-    frs.mutex.~GASNetHSL();
+    frs.condvar.~CondVar();
+    frs.mutex.~Mutex();
   }
 
   // NOT copyable
@@ -1599,7 +1599,7 @@ namespace Realm {
       NodeSet copy_waiters;
 
       do {
-	AutoHSLLock a(impl->mutex);
+	AutoLock<> a(impl->mutex);
 
 	// case 1: we don't even own the lock any more - pass the request on
 	//  to whoever we think the owner is

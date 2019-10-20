@@ -28,6 +28,7 @@
 #include "realm/pri_queue.h"
 #include "realm/bytearray.h"
 #include "realm/atomics.h"
+#include "realm/mutex.h"
 
 namespace Realm {
 
@@ -96,7 +97,7 @@ namespace Realm {
 	ProcessorImpl *proc;
 	Task *task;
 	Event wait_on;
-	GASNetHSL pending_list_mutex;
+	Mutex pending_list_mutex;
 	TaskList pending_list;
 	bool is_triggered, is_poisoned;
       };
@@ -126,7 +127,7 @@ namespace Realm {
 	virtual void item_available(priority_t item_priority) = 0;
       };
 
-      GASNetHSL mutex;
+      Mutex mutex;
       Task::TaskList ready_task_list;
       std::vector<NotificationCallback *> callbacks;
       std::vector<priority_t> callback_priorities;
@@ -186,7 +187,7 @@ namespace Realm {
       // gets highest priority task available from any task queue
       Task *get_best_ready_task(int& task_priority);
 
-      GASNetHSL lock;
+      Mutex lock;
       std::vector<TaskQueue *> task_queues;
       std::vector<Thread *> idle_workers;
       std::set<Thread *> blocked_workers;
@@ -233,8 +234,8 @@ namespace Realm {
 	// 64-bit counters are used to avoid dealing with wrap-around cases
 	// consider trying to fit in 32 to use futexes?
 	atomic<long long> counter, wait_value;
-	GASNetHSL mutex;
-	GASNetCondVar condvar;
+	Mutex mutex;
+	CondVar condvar;
       };
 	
       WorkCounter work_counter;
@@ -325,8 +326,8 @@ namespace Realm {
       std::set<Thread *> all_workers;
       std::set<Thread *> active_workers;
       std::set<Thread *> terminating_workers;
-      std::map<Thread *, GASNetCondVar *> sleeping_threads;
-      GASNetCondVar shutdown_condvar;
+      std::map<Thread *, CondVar *> sleeping_threads;
+      CondVar shutdown_condvar;
     };
 
 #ifdef REALM_USE_USER_THREADS
@@ -371,7 +372,7 @@ namespace Realm {
       std::set<Thread *> all_workers;
 
       int host_startups_remaining;
-      GASNetCondVar host_startup_condvar;
+      CondVar host_startup_condvar;
 
     public:
       int cfg_num_host_threads;

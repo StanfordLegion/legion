@@ -96,7 +96,7 @@ namespace Realm {
       void dequeue_request(Memory tgt_mem);
 
     protected:
-      GASNetHSL queue_mutex;
+      Mutex queue_mutex;
       std::map<Memory, std::queue<IBAllocRequest*> *> queues;
     };
 
@@ -117,8 +117,8 @@ namespace Realm {
       void worker_thread_loop(void);
 
     protected:
-      GASNetHSL queue_mutex;
-      GASNetCondVar queue_condvar;
+      Mutex queue_mutex;
+      CondVar queue_condvar;
       std::map<int, std::list<DmaRequest *> *> queues;
       int queue_sleepers;
       bool shutdown_flag;
@@ -177,7 +177,7 @@ namespace Realm {
 
     void PendingIBQueue::enqueue_request(Memory tgt_mem, IBAllocRequest* req)
     {
-      AutoHSLLock al(queue_mutex);
+      AutoLock<> al(queue_mutex);
       assert(NodeID(ID(tgt_mem).memory_owner_node()) == my_node_id);
       // If we can allocate in target memory, no need to pend the request
       off_t ib_offset = get_runtime()->get_memory_impl(tgt_mem)->alloc_bytes(req->ib_size);
@@ -223,7 +223,7 @@ namespace Realm {
 
     void PendingIBQueue::dequeue_request(Memory tgt_mem)
     {
-      AutoHSLLock al(queue_mutex);
+      AutoLock<> al(queue_mutex);
       assert(NodeID(ID(tgt_mem).memory_owner_node()) == my_node_id);
       std::map<Memory, std::queue<IBAllocRequest*> *>::iterator it = queues.find(tgt_mem);
       // no pending ib requests
@@ -568,7 +568,7 @@ namespace Realm {
     void free_intermediate_buffer(DmaRequest* req, Memory mem, off_t offset, size_t size)
     {
       //CopyRequest* cr = (CopyRequest*) req;
-      //AutoHSLLock al(cr->ib_mutex);
+      //AutoLock<> al(cr->ib_mutex);
       if(NodeID(ID(mem).memory_owner_node()) == my_node_id) {
         get_runtime()->get_memory_impl(mem)->free_bytes(offset, size);
         ib_req_queue->dequeue_request(mem);
@@ -647,7 +647,7 @@ namespace Realm {
     {
       Event event_to_trigger = Event::NO_EVENT;
       {
-        AutoHSLLock al(ib_mutex);
+        AutoLock<> al(ib_mutex);
         IBByInst::iterator ib_it = ib_by_inst.find(inst_pair);
         assert(ib_it != ib_by_inst.end());
         IBVec& ibvec = ib_it->second;
@@ -736,7 +736,7 @@ namespace Realm {
         find_shortest_path(src_mem, dst_mem, serdez_id, mem_path);
         // Pass 1: create IBInfo blocks
         for (OASByInst::iterator it = oas_by_inst->begin(); it != oas_by_inst->end(); it++) {
-          AutoHSLLock al(ib_mutex);
+          AutoLock<> al(ib_mutex);
           IBVec& ib_vec = ib_by_inst[it->first];
           assert(ib_vec.size() == 0);
           for (size_t i = 1; i < mem_path.size() - 1; i++) {
@@ -1140,7 +1140,7 @@ namespace Realm {
       PosixAIOWrite *op = new PosixAIOWrite(fd, offset, bytes, buffer, req);
 #endif
       {
-	AutoHSLLock al(mutex);
+	AutoLock<> al(mutex);
 	if(launched_operations.size() < (size_t)max_depth) {
 	  op->launch();
 	  launched_operations.push_back(op);
@@ -1161,7 +1161,7 @@ namespace Realm {
       PosixAIORead *op = new PosixAIORead(fd, offset, bytes, buffer, req);
 #endif
       {
-	AutoHSLLock al(mutex);
+	AutoLock<> al(mutex);
 	if(launched_operations.size() < (size_t)max_depth) {
 	  op->launch();
 	  launched_operations.push_back(op);
@@ -1175,7 +1175,7 @@ namespace Realm {
     {
       AIOFenceOp *op = new AIOFenceOp(req);
       {
-	AutoHSLLock al(mutex);
+	AutoLock<> al(mutex);
 	if(launched_operations.size() < (size_t)max_depth) {
 	  op->launch();
 	  launched_operations.push_back(op);
@@ -1187,19 +1187,19 @@ namespace Realm {
 
     bool AsyncFileIOContext::empty(void)
     {
-      AutoHSLLock al(mutex);
+      AutoLock<> al(mutex);
       return launched_operations.empty();
     }
 
     long AsyncFileIOContext::available(void)
     {
-      AutoHSLLock al(mutex);
+      AutoLock<> al(mutex);
       return (max_depth - launched_operations.size());
     }
 
     void AsyncFileIOContext::make_progress(void)
     {
-      AutoHSLLock al(mutex);
+      AutoLock<> al(mutex);
 
       // first, reap as many events as we can - oldest first
 #ifdef REALM_USE_KERNEL_AIO

@@ -42,9 +42,9 @@
 #endif
 
 #if !USE_TLS
-#include "realm/activemsg.h"
+#include "realm/mutex.h"
 
-typedef GASNetHSL ImmovableLock;
+typedef Realm::Mutex ImmovableLock;
 class AutoImmovableLock {
 public:
   AutoImmovableLock(ImmovableLock& _lock)

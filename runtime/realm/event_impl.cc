@@ -610,7 +610,7 @@ namespace Realm {
 	GenEventImpl *impl = get_runtime()->get_genevent_impl(e);
 
 	{
-	  AutoHSLLock al(impl->mutex);
+	  AutoLock<> al(impl->mutex);
 	  gen_t gen = impl->generation.load();
 	  if(gen >= id.event_generation()) {
 	    // already triggered!?
@@ -943,7 +943,7 @@ namespace Realm {
   GenEventImpl::~GenEventImpl(void)
   {
 #ifdef DEBUG_REALM
-    AutoHSLLock a(mutex);
+    AutoLock<> a(mutex);
     if(!current_local_waiters.empty() ||
        !future_local_waiters.empty() ||
        has_external_waiters ||
@@ -1307,7 +1307,7 @@ namespace Realm {
       int subscribe_owner = -1;
       gen_t previous_subscribe_gen = 0;
       {
-	AutoHSLLock a(mutex);
+	AutoLock<> a(mutex);
 
 	// three cases below
 
@@ -1430,7 +1430,7 @@ namespace Realm {
       if(stale_gen >= subscribe_gen) {
 	trigger_gen = stale_gen;
       } else {
-	AutoHSLLock a(impl->mutex);
+	AutoLock<> a(impl->mutex);
 
 	// look at the previously-subscribed generation from the requestor - we'll send
 	//  a trigger message if anything newer has triggered
@@ -1517,7 +1517,7 @@ namespace Realm {
     std::map<gen_t, EventWaiter::EventWaiterList> to_wake;
 
     {
-      AutoHSLLock a(mutex);
+      AutoLock<> a(mutex);
 
 #define CHECK_POISONED_GENS
 #ifdef CHECK_POISONED_GENS
@@ -1668,7 +1668,7 @@ namespace Realm {
       bool locally_triggered = false;
       poisoned = false;
       {
-	AutoHSLLock a(mutex);
+	AutoLock<> a(mutex);
 
 	std::map<gen_t, bool>::const_iterator it = local_triggers.find(needed_gen);
 	if(it != local_triggers.end()) {
@@ -1682,7 +1682,7 @@ namespace Realm {
     void GenEventImpl::external_wait(gen_t gen_needed, bool& poisoned)
     {
       {
-	AutoHSLLock a(mutex);
+	AutoLock<> a(mutex);
 
 	// wait until the generation has advanced far enough
 	while(gen_needed > generation.load_acquire()) {
@@ -1699,7 +1699,7 @@ namespace Realm {
     {
       long long deadline = Clock::current_time_in_nanoseconds() + max_ns;
       {
-	AutoHSLLock a(mutex);
+	AutoLock<> a(mutex);
 
 	// wait until the generation has advanced far enough
 	while(gen_needed > generation.load_acquire()) {
@@ -1742,7 +1742,7 @@ namespace Realm {
 	bool free_event = false;
 
 	{
-	  AutoHSLLock a(mutex);
+	  AutoLock<> a(mutex);
 
 	  // must always be the next generation
 	  assert(gen_triggered == (generation.load() + 1));
@@ -1819,7 +1819,7 @@ namespace Realm {
 
 	// now update our version of the data structure
 	{
-	  AutoHSLLock a(mutex);
+	  AutoLock<> a(mutex);
 
 	  gen_t cur_gen = generation.load();
 	  // is this the "next" version?
@@ -1914,7 +1914,7 @@ namespace Realm {
       bool free_event = false;
 
       {
-	AutoHSLLock a(mutex);
+	AutoLock<> a(mutex);
 	if(free_list_insertion_delayed) {
 	  free_event = true;
 	  free_list_insertion_delayed = false;
@@ -2260,7 +2260,7 @@ static void *bytedup(const void *data, size_t datalen)
       NodeID inform_migration = (NodeID) -1;
 
       do { // so we can use 'break' from the middle
-	AutoHSLLock a(mutex);
+	AutoLock<> a(mutex);
 
 	bool generation_updated = false;
 
@@ -2484,7 +2484,7 @@ static void *bytedup(const void *data, size_t datalen)
 	bool send_subscription_request = false;
         NodeID cur_owner = (NodeID) -1;
 	{
-	  AutoHSLLock a(mutex);
+	  AutoLock<> a(mutex);
 	  previous_subscription = gen_subscribed;
 	  if(gen_subscribed < needed_gen) {
 	    gen_subscribed = needed_gen;
@@ -2512,7 +2512,7 @@ static void *bytedup(const void *data, size_t datalen)
     void BarrierImpl::external_wait(gen_t gen_needed, bool& poisoned)
     {
       {
-	AutoHSLLock a(mutex);
+	AutoLock<> a(mutex);
 
 	// wait until the generation has advanced far enough
 	while(gen_needed > generation) {
@@ -2529,7 +2529,7 @@ static void *bytedup(const void *data, size_t datalen)
     {
       long long deadline = Clock::current_time_in_nanoseconds() + max_ns;
       {
-	AutoHSLLock a(mutex);
+	AutoLock<> a(mutex);
 
 	// wait until the generation has advanced far enough
 	while(gen_needed > generation) {
@@ -2551,7 +2551,7 @@ static void *bytedup(const void *data, size_t datalen)
     {
       bool trigger_now = false;
       {
-	AutoHSLLock a(mutex);
+	AutoLock<> a(mutex);
 
 	if(needed_gen > generation) {
 	  Generation *g;
@@ -2598,7 +2598,7 @@ static void *bytedup(const void *data, size_t datalen)
       NodeID inform_migration = (NodeID) -1;
       
       do {
-	AutoHSLLock a(impl->mutex);
+	AutoLock<> a(impl->mutex);
 
 	// first check - are we even the current owner?
 	if(impl->owner != my_node_id) {
@@ -2701,7 +2701,7 @@ static void *bytedup(const void *data, size_t datalen)
       // we'll probably end up with a list of local waiters to notify
       EventWaiter::EventWaiterList local_notifications;
       {
-	AutoHSLLock a(impl->mutex);
+	AutoLock<> a(impl->mutex);
 
 	bool generation_updated = false;
 
@@ -2811,7 +2811,7 @@ static void *bytedup(const void *data, size_t datalen)
     bool BarrierImpl::get_result(gen_t result_gen, void *value, size_t value_size)
     {
       // take the lock so we can safely see how many results (if any) are on hand
-      AutoHSLLock al(mutex);
+      AutoLock<> al(mutex);
 
       // generation hasn't triggered yet?
       if(result_gen > generation) return false;
@@ -2834,7 +2834,7 @@ static void *bytedup(const void *data, size_t datalen)
       log_barrier.info() << "received barrier migration: barrier=" << args.barrier << " owner=" << args.current_owner;
       BarrierImpl *impl = get_runtime()->get_barrier_impl(args.barrier);
       {
-	AutoHSLLock a(impl->mutex);
+	AutoLock<> a(impl->mutex);
 	impl->owner = args.current_owner;
       }
     }
@@ -2987,7 +2987,7 @@ static void *bytedup(const void *data, size_t datalen)
 
       // now wait for a response - no real alternative to blocking here?
       {
-	AutoHSLLock al(req->mutex);
+	AutoLock<> al(req->mutex);
 	while(!req->completed)
 	  req->condvar.wait();
       }
@@ -3045,7 +3045,7 @@ static void *bytedup(const void *data, size_t datalen)
     CompQueueImpl::RemotePopRequest *req = reinterpret_cast<CompQueueImpl::RemotePopRequest *>(msg.request);
 
     {
-      AutoHSLLock al(req->mutex);
+      AutoLock<> al(req->mutex);
       assert(msg.count <= req->capacity);
       if(req->events) {
 	// data expected
@@ -3126,7 +3126,7 @@ static void *bytedup(const void *data, size_t datalen)
 
   CompQueueImpl::~CompQueueImpl(void)
   {
-    AutoHSLLock al(mutex);
+    AutoLock<> al(mutex);
     assert(pending_events == 0);
     if(batches) {
       delete batches;
@@ -3144,7 +3144,7 @@ static void *bytedup(const void *data, size_t datalen)
 
   void CompQueueImpl::set_capacity(size_t _max_size, bool _resizable)
   {
-    AutoHSLLock al(mutex);
+    AutoLock<> al(mutex);
     assert(completed_events == 0);
     wr_ptr = rd_ptr = cur_events = pending_events = 0;
     max_events = _max_size;
@@ -3155,7 +3155,7 @@ static void *bytedup(const void *data, size_t datalen)
 
   void CompQueueImpl::destroy(void)
   {
-    AutoHSLLock al(mutex);
+    AutoLock<> al(mutex);
     // ok to have completed events leftover, but no pending events
     assert(pending_events == 0);
     max_events = 0;
@@ -3186,7 +3186,7 @@ static void *bytedup(const void *data, size_t datalen)
       // we need a free waiter - make some if needed
       CompQueueWaiter *waiter = 0;
       {
-	AutoHSLLock al(mutex);
+	AutoLock<> al(mutex);
 	pending_events++;
 	if(first_free_waiter != 0) {
 	  waiter = first_free_waiter;
@@ -3212,7 +3212,7 @@ static void *bytedup(const void *data, size_t datalen)
 
   Event CompQueueImpl::get_local_progress_event(void)
   {
-    AutoHSLLock al(mutex);
+    AutoLock<> al(mutex);
     if(cur_events > 0) {
       assert(local_progress_event == 0);
       return Event::NO_EVENT;
@@ -3236,7 +3236,7 @@ static void *bytedup(const void *data, size_t datalen)
   {
     bool immediate_trigger = false;
     {
-      AutoHSLLock al(mutex);
+      AutoLock<> al(mutex);
       if(cur_events > 0)
 	immediate_trigger = true;
       else
@@ -3251,7 +3251,7 @@ static void *bytedup(const void *data, size_t datalen)
 
   size_t CompQueueImpl::pop_events(Event *events, size_t max_to_pop)
   {
-    AutoHSLLock al(mutex);
+    AutoLock<> al(mutex);
     if((cur_events > 0) && (max_to_pop > 0)) {
       size_t count = std::min(cur_events, max_to_pop);
       if(events) {
@@ -3287,7 +3287,7 @@ static void *bytedup(const void *data, size_t datalen)
     std::vector<Event> remote_triggers;
     {
       // TODO: lock-free version for non-resizable case
-      AutoHSLLock al(mutex);
+      AutoLock<> al(mutex);
       cur_events++;
       if(was_pending)
 	pending_events--;

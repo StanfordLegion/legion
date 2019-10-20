@@ -810,7 +810,7 @@ namespace Realm {
 
     op_queue->shutdown_flag.store(true);
     {
-      AutoHSLLock al(op_queue->mutex);
+      AutoLock<> al(op_queue->mutex);
       op_queue->condvar.broadcast();
     }
     for(size_t i = 0; i < op_queue->workers.size(); i++) {
@@ -827,7 +827,7 @@ namespace Realm {
   {
     op->mark_ready();
 
-    AutoHSLLock al(mutex);
+    AutoLock<> al(mutex);
 
     queued_ops.put(op, OPERATION_PRIORITY);
 
@@ -836,7 +836,7 @@ namespace Realm {
 
   void PartitioningOpQueue::enqueue_partitioning_microop(PartitioningMicroOp *uop)
   {
-    AutoHSLLock al(mutex);
+    AutoLock<> al(mutex);
 
     queued_ops.put(uop, MICROOP_PRIORITY);
 
@@ -851,7 +851,7 @@ namespace Realm {
       void *op = 0;
       int priority = -1; /*invalid value*/
       while(!op && !shutdown_flag.load()) {
-	AutoHSLLock al(mutex);
+	AutoLock<> al(mutex);
 	op = queued_ops.get(&priority);
 	if(!op && !shutdown_flag.load()) {
           if(DeppartConfig::cfg_worker_threads_sleep) {

@@ -368,7 +368,7 @@ namespace Realm {
 
       CUstream stream;
 
-      GASNetHSL mutex;
+      Mutex mutex;
 
 #define USE_CQ
 #ifdef USE_CQ
@@ -413,8 +413,8 @@ namespace Realm {
       void thread_main(void);
 
     protected:
-      GASNetHSL lock;
-      GASNetCondVar condvar;
+      Mutex lock;
+      CondVar condvar;
       std::set<GPUStream *> active_streams;
 
       // used by the background thread (if any)
@@ -439,7 +439,7 @@ namespace Realm {
       void return_event(CUevent e);
 
     protected:
-      GASNetHSL mutex;
+      Mutex mutex;
       int batch_size, current_size, total_size;
       std::vector<CUevent> available_events;
     };

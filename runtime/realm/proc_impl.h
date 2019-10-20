@@ -80,7 +80,7 @@ namespace Realm {
 
       struct DeferredSpawnCache {
 	static const size_t MAX_ENTRIES = 4;
-	GASNetHSL mutex;
+	Mutex mutex;
 	Event events[MAX_ENTRIES];
 	Task *tasks[MAX_ENTRIES];
 	int counts[MAX_ENTRIES];

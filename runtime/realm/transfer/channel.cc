@@ -60,8 +60,8 @@ namespace Realm {
     void SequenceAssembler::swap(SequenceAssembler& other)
     {
       // need both locks
-      AutoHSLLock al1(mutex);
-      AutoHSLLock al2(other.mutex);
+      AutoLock<> al1(mutex);
+      AutoLock<> al2(other.mutex);
       std::swap(contig_amount, other.contig_amount);
       std::swap(first_noncontig, other.first_noncontig);
       spans.swap(other.spans);
@@ -88,7 +88,7 @@ namespace Realm {
 
       // general case 3: take the lock and look through spans/etc.
       {
-	AutoHSLLock al(mutex);
+	AutoLock<> al(mutex);
 
 	// first, recheck the contig_amount, in case both it and the noncontig
 	//  counters were bumped in between looking at the two of them
@@ -139,7 +139,7 @@ namespace Realm {
 	// success: check to see if there are any spans we might need to 
 	//  tack on
 	if(span_end == __sync_fetch_and_add(&first_noncontig, 0)) {
-	  AutoHSLLock al(mutex);
+	  AutoLock<> al(mutex);
 	  while(!spans.empty()) {
 	    std::map<size_t, size_t>::iterator it = spans.begin();
 	    if(it->first == span_end) {
@@ -165,7 +165,7 @@ namespace Realm {
 	// failure: have to add ourselves to the span list and possibly update
 	//  the 'first_noncontig', all while holding the lock
 	{
-	  AutoHSLLock al(mutex);
+	  AutoLock<> al(mutex);
 
 	  // the checks above were done without the lock, so it is possible
 	  //  that by the time we've got the lock here, contig_amount has

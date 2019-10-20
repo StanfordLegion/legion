@@ -58,7 +58,7 @@ namespace Realm {
       bool handle_inval_ack(int sender);
 
     protected:
-      GASNetHSL mutex;
+      Mutex mutex;
       State state;  // current state
       Event valid_event;
       NodeSet remote_copies;

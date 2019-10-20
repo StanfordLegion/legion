@@ -201,8 +201,8 @@ namespace Realm {
     atomic<bool> shutdown_flag;
     CoreReservation *rsrv;
     PriorityQueue<void *, DummyLock> queued_ops;
-    GASNetHSL mutex;
-    GASNetCondVar condvar;
+    Mutex mutex;
+    CondVar condvar;
     std::vector<Thread *> workers;
   };
 

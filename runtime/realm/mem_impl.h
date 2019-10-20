@@ -145,7 +145,7 @@ namespace Realm {
       struct InstanceList {
 	std::vector<RegionInstanceImpl *> instances;
 	std::vector<size_t> free_list;
-	GASNetHSL mutex;
+	Mutex mutex;
       };
     public:
       Memory me;
@@ -158,12 +158,12 @@ namespace Realm {
       //  instances, but we use a map indexed by creator node for others,
       //  and protect lookups in it with its own mutex
       std::map<NodeID, InstanceList *> instances_by_creator;
-      GASNetHSL instance_map_mutex;
+      Mutex instance_map_mutex;
       InstanceList local_instances;
 
-      GASNetHSL mutex; // protection for resizing vectors
+      Mutex mutex; // protection for resizing vectors
       std::map<off_t, off_t> free_blocks;
-      GASNetHSL allocator_mutex;
+      Mutex allocator_mutex;
       BasicRangeAllocator<size_t, RegionInstance> allocator;
       ProfilingGauges::AbsoluteGauge<size_t> usage, peak_usage, peak_footprint;
     };
@@ -283,7 +283,7 @@ namespace Realm {
       int get_file_des(ID::IDType inst_id);
     public:
       std::vector<int> file_vec;
-      GASNetHSL vector_lock;
+      Mutex vector_lock;
       off_t next_offset;
       std::map<off_t, int> offset_map;
     };
