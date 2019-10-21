@@ -13990,7 +13990,13 @@ namespace Legion {
       // If we're the top-level context then we're already done
       if (top_level_context)
       {
-        post_task_comp_queue = CompletionQueue::create_completion_queue(1);
+        // We never call configure context on the top-level context but we
+        // still need a completion queue here to handle things correctly
+        // We can actually get as many events in here as there are shards for
+        // a top-level task, so assume that we will never have more shards 
+        // than there are processors on this local node
+        post_task_comp_queue = 
+          CompletionQueue::create_completion_queue(runtime->local_procs.size());
         return;
       }
       WrapperReferenceMutator mutator(preconditions);
