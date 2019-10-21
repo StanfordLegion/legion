@@ -1904,16 +1904,6 @@ namespace Realm {
 
     GPUFBMemory::~GPUFBMemory(void) {}
 
-    off_t GPUFBMemory::alloc_bytes(size_t size)
-    {
-      return alloc_bytes_local(size);
-    }
-
-    void GPUFBMemory::free_bytes(off_t offset, size_t size)
-    {
-      free_bytes_local(offset, size);
-    }
-
     // these work, but they are SLOW
     void GPUFBMemory::get_bytes(off_t offset, void *dst, size_t size)
     {
@@ -1955,16 +1945,6 @@ namespace Realm {
     }
 
     GPUZCMemory::~GPUZCMemory(void) {}
-
-    off_t GPUZCMemory::alloc_bytes(size_t size)
-    {
-      return alloc_bytes_local(size);
-    }
-
-    void GPUZCMemory::free_bytes(off_t offset, size_t size)
-    {
-      free_bytes_local(offset, size);
-    }
 
     void GPUZCMemory::get_bytes(off_t offset, void *dst, size_t size)
     {

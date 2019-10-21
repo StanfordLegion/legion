@@ -206,41 +206,6 @@ protected:
   int mode;
 };
 
-// TODO: nuke this
-template <class T> struct HandlerReplyFuture {
-  Realm::Mutex mutex;
-  Realm::CondVar condvar;
-  bool valid;
-  T value;
-
-  HandlerReplyFuture(void)
-    : condvar(mutex)
-  {
-    valid = false;
-  }
-
-  void set(T newval)
-  {
-    mutex.lock();
-    valid = true;
-    value = newval;
-    condvar.broadcast();
-    mutex.unlock();
-  }
-
-  bool is_set(void) const { return valid; }
-
-  void wait(void)
-  {
-    if(valid) return; // early out
-    mutex.lock();
-    while(!valid) condvar.wait();
-    mutex.unlock();
-  }
-
-  T get(void) const { return value; }
-};
-
 }; // namespace Realm
 
 #include "realm/activemsg.inl"

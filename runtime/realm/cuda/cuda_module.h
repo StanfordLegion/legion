@@ -673,10 +673,6 @@ namespace Realm {
 
       virtual ~GPUFBMemory(void);
 
-      virtual off_t alloc_bytes(size_t size);
-
-      virtual void free_bytes(off_t offset, size_t size);
-
       // these work, but they are SLOW
       virtual void get_bytes(off_t offset, void *dst, size_t size);
       virtual void put_bytes(off_t offset, const void *src, size_t size);
@@ -695,10 +691,6 @@ namespace Realm {
       GPUZCMemory(Memory _me, CUdeviceptr _gpu_base, void *_cpu_base, size_t _size);
 
       virtual ~GPUZCMemory(void);
-
-      virtual off_t alloc_bytes(size_t size);
-
-      virtual void free_bytes(off_t offset, size_t size);
 
       virtual void get_bytes(off_t offset, void *dst, size_t size);
 

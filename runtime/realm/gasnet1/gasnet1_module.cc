@@ -62,10 +62,6 @@ namespace Realm {
 
     virtual ~GASNet1Memory(void);
 
-    virtual off_t alloc_bytes(size_t size);
-
-    virtual void free_bytes(off_t offset, size_t size);
-
     virtual void get_bytes(off_t offset, void *dst, size_t size);
 
     virtual void put_bytes(off_t offset, const void *src, size_t size);
@@ -122,24 +118,6 @@ namespace Realm {
 
   GASNet1Memory::~GASNet1Memory(void)
   {
-  }
-
-  off_t GASNet1Memory::alloc_bytes(size_t size)
-  {
-    if(Network::my_node_id == 0) {
-      return alloc_bytes_local(size);
-    } else {
-      return alloc_bytes_remote(size);
-    }
-  }
-
-  void GASNet1Memory::free_bytes(off_t offset, size_t size)
-  {
-    if(Network::my_node_id == 0) {
-      free_bytes_local(offset, size);
-    } else {
-      free_bytes_remote(offset, size);
-    }
   }
 
   void GASNet1Memory::get_bytes(off_t offset, void *dst, size_t size)

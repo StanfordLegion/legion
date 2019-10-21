@@ -52,16 +52,6 @@ namespace Realm {
       unlink(file.c_str());
     }
 
-    off_t DiskMemory::alloc_bytes(size_t size)
-    {
-      return alloc_bytes_local(size);
-    }
-
-    void DiskMemory::free_bytes(off_t offset, size_t size)
-    {
-      free_bytes_local(offset, size);
-    }
-
     void DiskMemory::get_bytes(off_t offset, void *dst, size_t size)
     {
       // this is a blocking operation
@@ -107,20 +97,6 @@ namespace Realm {
 
     FileMemory::~FileMemory(void)
     {
-    }
-
-    off_t FileMemory::alloc_bytes(size_t size)
-    {
-      // hand out incrementing offsets and never reuse them
-      // fragile, but we need a way to map from offset -> index for remote
-      //  writes at the moment
-      off_t this_offset = __sync_fetch_and_add(&next_offset, size);
-      return this_offset;
-    }
-
-    void FileMemory::free_bytes(off_t offset, size_t size)
-    {
-      // Do nothing in this function.
     }
 
     void FileMemory::get_bytes(off_t offset, void *dst, size_t size)

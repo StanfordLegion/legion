@@ -251,27 +251,6 @@ namespace Realm {
       }
     }
 
-    off_t MemoryImpl::alloc_bytes_remote(size_t size)
-    {
-      // RPC over to owner's node for allocation
-      ActiveMessage<RemoteMemAllocRequest> amsg(ID(me).memory_owner_node());
-      HandlerReplyFuture<off_t> result;
-
-      amsg->resp_ptr = &result;
-      amsg->memory = me;
-      amsg->size = size;
-      amsg.commit();
-      // Request::request(target, args);
-      // wait for result to come back
-      result.wait();
-      return result.get();
-    }
-
-    void MemoryImpl::free_bytes_remote(off_t offset, size_t size)
-    {
-      assert(0);
-    }
-
     Memory::Kind MemoryImpl::get_kind(void) const
     {
       return lowlevel_kind;
@@ -530,16 +509,6 @@ namespace Realm {
       free(base_orig);
   }
 
-  off_t LocalCPUMemory::alloc_bytes(size_t size)
-  {
-    return alloc_bytes_local(size);
-  }
-  
-  void LocalCPUMemory::free_bytes(off_t offset, size_t size)
-  {
-    free_bytes_local(offset, size);
-  }
-
   void LocalCPUMemory::get_bytes(off_t offset, void *dst, size_t size)
   {
     memcpy(dst, base+offset, size);
@@ -580,14 +549,14 @@ namespace Realm {
     RemoteMemory::~RemoteMemory(void)
     {}
 
-    off_t RemoteMemory::alloc_bytes(size_t size)
+    off_t RemoteMemory::alloc_bytes_local(size_t size)
     {
-      return alloc_bytes_remote(size);
+      assert(0);
     }
 
-    void RemoteMemory::free_bytes(off_t offset, size_t size)
+    void RemoteMemory::free_bytes_local(off_t offset, size_t size)
     {
-      free_bytes_remote(offset, size);
+      assert(0);
     }
 
     void RemoteMemory::put_bytes(off_t offset, const void *src, size_t size)
@@ -675,32 +644,6 @@ namespace Realm {
     RegionInstanceImpl *impl = get_runtime()->get_instance_impl(args.inst);
 
     impl->notify_deallocation();
-  }
-
-  ////////////////////////////////////////////////////////////////////////
-  //
-  // class RemoteMemAllocRequest
-  //
-
-  /*static*/ void RemoteMemAllocRequest::handle_message(NodeID sender, const RemoteMemAllocRequest &args,
-							const void *data, size_t datalen)
-  {
-    DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
-    //printf("[%d] handling remote alloc of size %zd\n", Network::my_node_id, args.size);
-    off_t offset = get_runtime()->get_memory_impl(args.memory)->alloc_bytes(args.size);
-    //printf("[%d] remote alloc will return %d\n", Network::my_node_id, offset);
-
-    ActiveMessage<RemoteMemAllocResponse> amsg(sender);
-    amsg->resp_ptr = args.resp_ptr;
-    amsg->offset = offset;
-    amsg.commit();
-  }
-  
-  /*static*/ void RemoteMemAllocResponse::handle_message(NodeID sender, const RemoteMemAllocResponse &args,
-							 const void *data, size_t datalen)
-  {
-    HandlerReplyFuture<off_t> *f = static_cast<HandlerReplyFuture<off_t> *>(args.resp_ptr);
-    f->set(args.offset);
   }
 
 
@@ -1600,8 +1543,6 @@ namespace Realm {
       amsg.commit();
     }
 
-  ActiveMessageHandlerReg<RemoteMemAllocRequest> remote_mem_alloc_request_handler;
-  ActiveMessageHandlerReg<RemoteMemAllocResponse> remote_mem_alloc_response_handler;
   ActiveMessageHandlerReg<RemoteWriteMessage> remote_write_message_handler;
   ActiveMessageHandlerReg<RemoteReduceMessage> remote_reduce_message_handler;
   ActiveMessageHandlerReg<RemoteSerdezMessage> remote_serdez_message_handler;

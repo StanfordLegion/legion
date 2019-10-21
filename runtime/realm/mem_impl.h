@@ -120,14 +120,8 @@ namespace Realm {
       virtual void release_instance_storage(RegionInstanceImpl *inst,
 					    Event precondition);
 
-      off_t alloc_bytes_local(size_t size);
-      void free_bytes_local(off_t offset, size_t size);
-
-      off_t alloc_bytes_remote(size_t size);
-      void free_bytes_remote(off_t offset, size_t size);
-
-      virtual off_t alloc_bytes(size_t size) = 0;
-      virtual void free_bytes(off_t offset, size_t size) = 0;
+      virtual off_t alloc_bytes_local(size_t size);
+      virtual void free_bytes_local(off_t offset, size_t size);
 
       virtual void get_bytes(off_t offset, void *dst, size_t size) = 0;
       virtual void put_bytes(off_t offset, const void *src, size_t size) = 0;
@@ -182,8 +176,6 @@ namespace Realm {
 
       virtual ~LocalCPUMemory(void);
 
-      virtual off_t alloc_bytes(size_t size);
-      virtual void free_bytes(off_t offset, size_t size);
       virtual void get_bytes(off_t offset, void *dst, size_t size);
       virtual void put_bytes(off_t offset, const void *src, size_t size);
       virtual void *get_direct_ptr(off_t offset, size_t size);
@@ -207,10 +199,6 @@ namespace Realm {
 
       virtual ~DiskMemory(void);
 
-      virtual off_t alloc_bytes(size_t size);
-
-      virtual void free_bytes(off_t offset, size_t size);
-
       virtual void get_bytes(off_t offset, void *dst, size_t size);
 
       virtual void put_bytes(off_t offset, const void *src, size_t size);
@@ -233,10 +221,6 @@ namespace Realm {
       FileMemory(Memory _me);
 
       virtual ~FileMemory(void);
-
-      virtual off_t alloc_bytes(size_t size);
-
-      virtual void free_bytes(off_t offset, size_t size);
 
       virtual void get_bytes(off_t offset, void *dst, size_t size);
       void get_bytes(ID::IDType inst_id, off_t offset, void *dst, size_t size);
@@ -264,8 +248,10 @@ namespace Realm {
 		   MemoryKind mk = MKIND_REMOTE);
       virtual ~RemoteMemory(void);
 
-      virtual off_t alloc_bytes(size_t size);
-      virtual void free_bytes(off_t offset, size_t size);
+      // these are disallowed on a remote memory
+      virtual off_t alloc_bytes_local(size_t size);
+      virtual void free_bytes_local(off_t offset, size_t size);
+      
       virtual void get_bytes(off_t offset, void *dst, size_t size);
       virtual void put_bytes(off_t offset, const void *src, size_t size);
       virtual void *get_direct_ptr(off_t offset, size_t size);
@@ -313,23 +299,6 @@ namespace Realm {
       RegionInstance inst;
 
       static void handle_message(NodeID sender, const MemStorageReleaseResponse &msg,
-				 const void *data, size_t datalen);
-    };
-
-    struct RemoteMemAllocRequest {
-      void *resp_ptr;
-      Memory memory;
-      size_t size;
-
-      static void handle_message(NodeID sender, const RemoteMemAllocRequest &msg,
-				 const void *data, size_t datalen);
-    };
-
-    struct RemoteMemAllocResponse {
-      void *resp_ptr;
-      off_t offset;
-
-      static void handle_message(NodeID sender, const RemoteMemAllocResponse &msg,
 				 const void *data, size_t datalen);
     };
 

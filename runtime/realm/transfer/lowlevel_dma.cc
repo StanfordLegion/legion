@@ -180,7 +180,7 @@ namespace Realm {
       AutoLock<> al(queue_mutex);
       assert(NodeID(ID(tgt_mem).memory_owner_node()) == Network::my_node_id);
       // If we can allocate in target memory, no need to pend the request
-      off_t ib_offset = get_runtime()->get_memory_impl(tgt_mem)->alloc_bytes(req->ib_size);
+      off_t ib_offset = get_runtime()->get_memory_impl(tgt_mem)->alloc_bytes_local(req->ib_size);
       if (ib_offset >= 0) {
         if (req->owner == Network::my_node_id) {
           // local ib alloc request
@@ -230,7 +230,7 @@ namespace Realm {
       if (it == queues.end()) return;
       while (!it->second->empty()) {
         IBAllocRequest* req = it->second->front();
-        off_t ib_offset = get_runtime()->get_memory_impl(tgt_mem)->alloc_bytes(req->ib_size);
+        off_t ib_offset = get_runtime()->get_memory_impl(tgt_mem)->alloc_bytes_local(req->ib_size);
         if (ib_offset < 0) break;
         //printf("req: src_inst_id(%llx) dst_inst_id(%llx) ib_size(%lu) idx(%d)\n", req->src_inst_id, req->dst_inst_id, req->ib_size, req->idx);
         // deal with the completed ib alloc request
@@ -559,7 +559,7 @@ namespace Realm {
 							     const void *data, size_t msglen)
     {
       assert(NodeID(ID(args.memory).memory_owner_node()) == Network::my_node_id);
-      get_runtime()->get_memory_impl(args.memory)->free_bytes(args.ib_offset, args.ib_size);
+      get_runtime()->get_memory_impl(args.memory)->free_bytes_local(args.ib_offset, args.ib_size);
       ib_req_queue->dequeue_request(args.memory);
     }
 
@@ -570,7 +570,7 @@ namespace Realm {
       //CopyRequest* cr = (CopyRequest*) req;
       //AutoLock<> al(cr->ib_mutex);
       if(NodeID(ID(mem).memory_owner_node()) == Network::my_node_id) {
-        get_runtime()->get_memory_impl(mem)->free_bytes(offset, size);
+        get_runtime()->get_memory_impl(mem)->free_bytes_local(offset, size);
         ib_req_queue->dequeue_request(mem);
       } else {
 	ActiveMessage<RemoteIBFreeRequestAsync> amsg(ID(mem).memory_owner_node());
