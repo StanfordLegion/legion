@@ -3339,7 +3339,13 @@ namespace Legion {
         rez.serialize(virtual_indexes[idx]);
       rez.serialize(owner_task->get_task_completion());
       rez.serialize(find_parent_context()->get_context_uid());
-      rez.serialize(context_configuration.max_window_size);
+      // If we're doing frames then pack a size of zero which will signal
+      // to the remote context that we could have a potentially unbounded
+      // number of tasks in its completion queue
+      if (context_configuration.min_frames_to_schedule == 0)
+        rez.serialize(context_configuration.max_window_size);
+      else
+        rez.serialize<unsigned>(0);
       // Finally pack the local field infos
       AutoLock local_lock(local_field_lock,1,false/*exclusive*/);
       rez.serialize<size_t>(local_field_infos.size());
@@ -7180,8 +7186,14 @@ namespace Legion {
       assert(!post_task_comp_queue.exists());
 #endif
       // Create the completion queue that we'll use for post task completion
-      post_task_comp_queue = CompletionQueue::create_completion_queue(
-          context_configuration.max_window_size);
+      // If we're using frames we need an unbounded queue (max_size=0) 
+      // otherwise we can tell the completion queue the explicit upper
+      // bound on the size of the queue is the window size
+      if (context_configuration.min_frames_to_schedule == 0)
+        post_task_comp_queue = CompletionQueue::create_completion_queue(
+            context_configuration.max_window_size);
+      else
+        post_task_comp_queue = CompletionQueue::create_completion_queue(0);
     }
 
     //--------------------------------------------------------------------------

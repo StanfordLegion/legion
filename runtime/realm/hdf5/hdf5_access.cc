@@ -18,7 +18,7 @@
 #include "realm/hdf5/hdf5_access.h"
 #include "realm/deppart/inst_helper.h"
 #include "realm/machine.h"
-#include "realm/activemsg.h"
+#include "realm/network.h"
 #include "realm/id.h"
 
 #include <errno.h>
@@ -41,13 +41,13 @@ namespace Realm {
   {
     // TODO: put this somewhere more general so that e.g. POSIX file attach can
     //  use it too
-    NodeID target_node = my_node_id;
+    NodeID target_node = Network::my_node_id;
 
     if(!strncmp(file_name, "rank=", 5)) {
       const char *pos;
       errno = 0;
       long val = strtol(file_name+5, (char **)&pos, 10);
-      if((errno == 0) && (val >= 0) && (val <= max_node_id) && (*pos == ':')) {
+      if((errno == 0) && (val >= 0) && (val <= Network::max_node_id) && (*pos == ':')) {
 	target_node = val;
 	file_name = pos + 1;
       } else {

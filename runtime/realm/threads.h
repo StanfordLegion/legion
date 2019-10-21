@@ -19,7 +19,7 @@
 #define REALM_THREADS_H
 
 #include "realm/realm_config.h"
-#include "realm/activemsg.h"
+#include "realm/mutex.h"
 #include "realm/atomics.h"
 #include "realm/utils.h"
 
@@ -222,7 +222,7 @@ namespace Realm {
     Operation *current_op;
     int exception_handler_count;
     int signal_count;
-    GASNetHSL signal_mutex;
+    Mutex signal_mutex;
     std::deque<Signal> signal_queue;
 
 #ifdef REALM_USE_PAPI

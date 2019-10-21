@@ -368,7 +368,7 @@ namespace Realm {
 
       CUstream stream;
 
-      GASNetHSL mutex;
+      Mutex mutex;
 
 #define USE_CQ
 #ifdef USE_CQ
@@ -413,8 +413,8 @@ namespace Realm {
       void thread_main(void);
 
     protected:
-      GASNetHSL lock;
-      GASNetCondVar condvar;
+      Mutex lock;
+      CondVar condvar;
       std::set<GPUStream *> active_streams;
 
       // used by the background thread (if any)
@@ -439,7 +439,7 @@ namespace Realm {
       void return_event(CUevent e);
 
     protected:
-      GASNetHSL mutex;
+      Mutex mutex;
       int batch_size, current_size, total_size;
       std::vector<CUevent> available_events;
     };
@@ -673,10 +673,6 @@ namespace Realm {
 
       virtual ~GPUFBMemory(void);
 
-      virtual off_t alloc_bytes(size_t size);
-
-      virtual void free_bytes(off_t offset, size_t size);
-
       // these work, but they are SLOW
       virtual void get_bytes(off_t offset, void *dst, size_t size);
       virtual void put_bytes(off_t offset, const void *src, size_t size);
@@ -695,10 +691,6 @@ namespace Realm {
       GPUZCMemory(Memory _me, CUdeviceptr _gpu_base, void *_cpu_base, size_t _size);
 
       virtual ~GPUZCMemory(void);
-
-      virtual off_t alloc_bytes(size_t size);
-
-      virtual void free_bytes(off_t offset, size_t size);
 
       virtual void get_bytes(off_t offset, void *dst, size_t size);
 

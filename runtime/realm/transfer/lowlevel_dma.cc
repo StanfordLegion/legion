@@ -96,7 +96,7 @@ namespace Realm {
       void dequeue_request(Memory tgt_mem);
 
     protected:
-      GASNetHSL queue_mutex;
+      Mutex queue_mutex;
       std::map<Memory, std::queue<IBAllocRequest*> *> queues;
     };
 
@@ -117,8 +117,8 @@ namespace Realm {
       void worker_thread_loop(void);
 
     protected:
-      GASNetHSL queue_mutex;
-      GASNetCondVar queue_condvar;
+      Mutex queue_mutex;
+      CondVar queue_condvar;
       std::map<int, std::list<DmaRequest *> *> queues;
       int queue_sleepers;
       bool shutdown_flag;
@@ -177,12 +177,12 @@ namespace Realm {
 
     void PendingIBQueue::enqueue_request(Memory tgt_mem, IBAllocRequest* req)
     {
-      AutoHSLLock al(queue_mutex);
-      assert(NodeID(ID(tgt_mem).memory_owner_node()) == my_node_id);
+      AutoLock<> al(queue_mutex);
+      assert(NodeID(ID(tgt_mem).memory_owner_node()) == Network::my_node_id);
       // If we can allocate in target memory, no need to pend the request
-      off_t ib_offset = get_runtime()->get_memory_impl(tgt_mem)->alloc_bytes(req->ib_size);
+      off_t ib_offset = get_runtime()->get_memory_impl(tgt_mem)->alloc_bytes_local(req->ib_size);
       if (ib_offset >= 0) {
-        if (req->owner == my_node_id) {
+        if (req->owner == Network::my_node_id) {
           // local ib alloc request
           CopyRequest* cr = (CopyRequest*) req->req;
           RegionInstanceImpl *src_impl = get_runtime()->get_instance_impl(req->src_inst_id);
@@ -223,20 +223,20 @@ namespace Realm {
 
     void PendingIBQueue::dequeue_request(Memory tgt_mem)
     {
-      AutoHSLLock al(queue_mutex);
-      assert(NodeID(ID(tgt_mem).memory_owner_node()) == my_node_id);
+      AutoLock<> al(queue_mutex);
+      assert(NodeID(ID(tgt_mem).memory_owner_node()) == Network::my_node_id);
       std::map<Memory, std::queue<IBAllocRequest*> *>::iterator it = queues.find(tgt_mem);
       // no pending ib requests
       if (it == queues.end()) return;
       while (!it->second->empty()) {
         IBAllocRequest* req = it->second->front();
-        off_t ib_offset = get_runtime()->get_memory_impl(tgt_mem)->alloc_bytes(req->ib_size);
+        off_t ib_offset = get_runtime()->get_memory_impl(tgt_mem)->alloc_bytes_local(req->ib_size);
         if (ib_offset < 0) break;
         //printf("req: src_inst_id(%llx) dst_inst_id(%llx) ib_size(%lu) idx(%d)\n", req->src_inst_id, req->dst_inst_id, req->ib_size, req->idx);
         // deal with the completed ib alloc request
         log_ib_alloc.info() << "IBAllocRequest (" << req->src_inst_id << "," 
           << req->dst_inst_id << "): completed!";
-        if (req->owner == my_node_id) {
+        if (req->owner == Network::my_node_id) {
           // local ib alloc request
           CopyRequest* cr = (CopyRequest*) req->req;
           RegionInstanceImpl *src_impl = get_runtime()->get_instance_impl(req->src_inst_id);
@@ -523,7 +523,7 @@ namespace Realm {
 							    const RemoteIBAllocRequestAsync &args,
 							    const void *data, size_t msglen)
     {
-      assert(NodeID(ID(args.memory).memory_owner_node()) == my_node_id);
+      assert(NodeID(ID(args.memory).memory_owner_node()) == Network::my_node_id);
       size_t size = *((size_t*)data);
       IBAllocRequest* ib_req
 	  = new IBAllocRequest(sender, args.req, args.idx,
@@ -558,8 +558,8 @@ namespace Realm {
 							     const RemoteIBFreeRequestAsync &args,
 							     const void *data, size_t msglen)
     {
-      assert(NodeID(ID(args.memory).memory_owner_node()) == my_node_id);
-      get_runtime()->get_memory_impl(args.memory)->free_bytes(args.ib_offset, args.ib_size);
+      assert(NodeID(ID(args.memory).memory_owner_node()) == Network::my_node_id);
+      get_runtime()->get_memory_impl(args.memory)->free_bytes_local(args.ib_offset, args.ib_size);
       ib_req_queue->dequeue_request(args.memory);
     }
 
@@ -568,9 +568,9 @@ namespace Realm {
     void free_intermediate_buffer(DmaRequest* req, Memory mem, off_t offset, size_t size)
     {
       //CopyRequest* cr = (CopyRequest*) req;
-      //AutoHSLLock al(cr->ib_mutex);
-      if(NodeID(ID(mem).memory_owner_node()) == my_node_id) {
-        get_runtime()->get_memory_impl(mem)->free_bytes(offset, size);
+      //AutoLock<> al(cr->ib_mutex);
+      if(NodeID(ID(mem).memory_owner_node()) == Network::my_node_id) {
+        get_runtime()->get_memory_impl(mem)->free_bytes_local(offset, size);
         ib_req_queue->dequeue_request(mem);
       } else {
 	ActiveMessage<RemoteIBFreeRequestAsync> amsg(ID(mem).memory_owner_node());
@@ -624,10 +624,10 @@ namespace Realm {
 	  ib_size = IB_MAX_SIZE;
       }
       //log_ib_alloc.info("alloc_ib: src_inst_id(%llx) dst_inst_id(%llx) idx(%d) size(%lu) memory(%llx)", inst_pair.first.id, inst_pair.second.id, idx, ib_size, tgt_mem.id);
-      if (NodeID(ID(tgt_mem).memory_owner_node()) == my_node_id) {
+      if (NodeID(ID(tgt_mem).memory_owner_node()) == Network::my_node_id) {
         // create local intermediate buffer
         IBAllocRequest* ib_req
-          = new IBAllocRequest(my_node_id, this, idx, inst_pair.first.id,
+          = new IBAllocRequest(Network::my_node_id, this, idx, inst_pair.first.id,
                                inst_pair.second.id, ib_size);
         ib_req_queue->enqueue_request(tgt_mem, ib_req);
       } else {
@@ -647,7 +647,7 @@ namespace Realm {
     {
       Event event_to_trigger = Event::NO_EVENT;
       {
-        AutoHSLLock al(ib_mutex);
+        AutoLock<> al(ib_mutex);
         IBByInst::iterator ib_it = ib_by_inst.find(inst_pair);
         assert(ib_it != ib_by_inst.end());
         IBVec& ibvec = ib_it->second;
@@ -722,7 +722,7 @@ namespace Realm {
 	// SJT: actually, is this needed any more?
         //Memory tgt_mem = get_runtime()->get_instance_impl(oas_by_inst->begin()->first.second)->memory;
         //NodeID tgt_node = ID(tgt_mem).memory_owner_node();
-	//assert(tgt_node == my_node_id);
+	//assert(tgt_node == Network::my_node_id);
         state = STATE_GEN_PATH;
       }
 
@@ -736,7 +736,7 @@ namespace Realm {
         find_shortest_path(src_mem, dst_mem, serdez_id, mem_path);
         // Pass 1: create IBInfo blocks
         for (OASByInst::iterator it = oas_by_inst->begin(); it != oas_by_inst->end(); it++) {
-          AutoHSLLock al(ib_mutex);
+          AutoLock<> al(ib_mutex);
           IBVec& ib_vec = ib_by_inst[it->first];
           assert(ib_vec.size() == 0);
           for (size_t i = 1; i < mem_path.size() - 1; i++) {
@@ -1140,7 +1140,7 @@ namespace Realm {
       PosixAIOWrite *op = new PosixAIOWrite(fd, offset, bytes, buffer, req);
 #endif
       {
-	AutoHSLLock al(mutex);
+	AutoLock<> al(mutex);
 	if(launched_operations.size() < (size_t)max_depth) {
 	  op->launch();
 	  launched_operations.push_back(op);
@@ -1161,7 +1161,7 @@ namespace Realm {
       PosixAIORead *op = new PosixAIORead(fd, offset, bytes, buffer, req);
 #endif
       {
-	AutoHSLLock al(mutex);
+	AutoLock<> al(mutex);
 	if(launched_operations.size() < (size_t)max_depth) {
 	  op->launch();
 	  launched_operations.push_back(op);
@@ -1175,7 +1175,7 @@ namespace Realm {
     {
       AIOFenceOp *op = new AIOFenceOp(req);
       {
-	AutoHSLLock al(mutex);
+	AutoLock<> al(mutex);
 	if(launched_operations.size() < (size_t)max_depth) {
 	  op->launch();
 	  launched_operations.push_back(op);
@@ -1187,19 +1187,19 @@ namespace Realm {
 
     bool AsyncFileIOContext::empty(void)
     {
-      AutoHSLLock al(mutex);
+      AutoLock<> al(mutex);
       return launched_operations.empty();
     }
 
     long AsyncFileIOContext::available(void)
     {
-      AutoHSLLock al(mutex);
+      AutoLock<> al(mutex);
       return (max_depth - launched_operations.size());
     }
 
     void AsyncFileIOContext::make_progress(void)
     {
-      AutoHSLLock al(mutex);
+      AutoLock<> al(mutex);
 
       // first, reap as many events as we can - oldest first
 #ifdef REALM_USE_KERNEL_AIO
@@ -1468,8 +1468,8 @@ namespace Realm {
       // exceptions:
       //  1) old code didn't allow nodes other than 0 to
       //       directly access GLOBAL_MEM
-      if((src_node == my_node_id) &&
-	 !((my_node_id != 0) && ((src_mem.kind() == Memory::GLOBAL_MEM) ||
+      if((src_node == Network::my_node_id) &&
+	 !((Network::my_node_id != 0) && ((src_mem.kind() == Memory::GLOBAL_MEM) ||
 				 (dst_mem.kind() == Memory::GLOBAL_MEM)))) {
 	XferDes::XferKind old_kind = old_get_xfer_des(src_mem, dst_mem,
 						      src_serdez_id, dst_serdez_id);
@@ -1743,7 +1743,7 @@ namespace Realm {
 	      xd_src_iter = src_iter;
 	      xd_src_serdez_id = serdez_id;
 	      mark_started = (it == oas_by_inst->begin());
-	      xd_target_node = my_node_id;
+	      xd_target_node = Network::my_node_id;
 	    } else {
 	      // reads from intermediate buffer
 	      pre_xd_guid = sub_path[idx - 2];
@@ -1808,7 +1808,7 @@ namespace Realm {
             XferDesFence* complete_fence = new XferDesFence(this);
             add_async_work_item(complete_fence);
 
-	    create_xfer_des(this, my_node_id, xd_target_node,
+	    create_xfer_des(this, Network::my_node_id, xd_target_node,
 			    xd_guid, pre_xd_guid,
 			    next_xd_guid, next_max_rw_gap,
 			    ((idx == 1) ? 0 : ibvec[idx - 2].offset),

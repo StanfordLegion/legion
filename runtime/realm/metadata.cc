@@ -41,7 +41,7 @@ namespace Realm {
     {
       // take lock so we can make sure we get a precise list of early requestors
       {
-	AutoHSLLock a(mutex);
+	AutoLock<> a(mutex);
 	early_reqs = remote_copies;
 	state = STATE_VALID;
       }
@@ -51,7 +51,7 @@ namespace Realm {
     {
       // just add the requestor to the list of remote nodes with copies, can send
       //   response if the data is already valid
-      AutoHSLLock a(mutex);
+      AutoLock<> a(mutex);
 
       assert(!remote_copies.contains(requestor));
       remote_copies.add(requestor);
@@ -65,7 +65,7 @@ namespace Realm {
       // if there was an event, we'll trigger it
       Event to_trigger = Event::NO_EVENT;
       {
-	AutoHSLLock a(mutex);
+	AutoLock<> a(mutex);
 
 	switch(state) {
 	case STATE_REQUESTED:
@@ -92,12 +92,12 @@ namespace Realm {
 	return Event::NO_EVENT;
 
       // sanity-check - should never be requesting data from ourselves
-      assert(owner != my_node_id);
+      assert(owner != Network::my_node_id);
 
       Event e = Event::NO_EVENT;
       bool issue_request = false;
       {
-	AutoHSLLock a(mutex);
+	AutoLock<> a(mutex);
 
 	switch(state) {
 	case STATE_VALID:
@@ -151,7 +151,7 @@ namespace Realm {
       //  information to do that now)
       Event e = Event::NO_EVENT;
       {
-	AutoHSLLock a(mutex);
+	AutoLock<> a(mutex);
 
 	assert(state != STATE_INVALID);
 	e = valid_event;
@@ -165,7 +165,7 @@ namespace Realm {
     {
       NodeSet invals_to_send;
       {
-	AutoHSLLock a(mutex);
+	AutoLock<> a(mutex);
 
 	assert(state == STATE_VALID);
 
@@ -190,7 +190,7 @@ namespace Realm {
 
     void MetadataBase::handle_invalidate(void)
     {
-      AutoHSLLock a(mutex);
+      AutoLock<> a(mutex);
 
       switch(state) {
       case STATE_VALID: 
@@ -216,7 +216,7 @@ namespace Realm {
     {
       bool last_copy;
       {
-	AutoHSLLock a(mutex);
+	AutoLock<> a(mutex);
 
 	assert(remote_copies.contains(sender));
 	remote_copies.remove(sender);

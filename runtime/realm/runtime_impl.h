@@ -21,7 +21,7 @@
 #include "realm/runtime.h"
 #include "realm/id.h"
 
-#include "realm/activemsg.h"
+#include "realm/network.h"
 #include "realm/operation.h"
 #include "realm/profiling.h"
 
@@ -40,6 +40,7 @@
 #include "realm/sampling.h"
 
 #include "realm/module.h"
+#include "realm/network.h"
 
 #if __cplusplus >= 201103L
 #define typeof decltype
@@ -51,7 +52,7 @@ namespace Realm {
   class MemoryImpl;
   class ProcessorImpl;
   class RegionInstanceImpl;
-  class Module;
+  class NetworkSegment;
 
   class Channel; // from transfer/channel.h
   typedef Channel DMAChannel;
@@ -63,7 +64,7 @@ namespace Realm {
       static const size_t INNER_BITS = _INNER_BITS;
       static const size_t LEAF_BITS = _LEAF_BITS;
 
-      typedef GASNetHSL LT;
+      typedef Mutex LT;
       typedef int IT;
       typedef DynamicTableNode<DynamicTableNodeBase<LT, IT> *, 1 << INNER_BITS, LT, IT> INNER_TYPE;
       typedef DynamicTableNode<ET, 1 << LEAF_BITS, LT, IT> LEAF_TYPE;
@@ -147,7 +148,7 @@ namespace Realm {
       void add_id_range(NodeID target, ID::ID_Types id_type, ID::IDType first, ID::IDType last);
 
     protected:
-      GASNetHSL mutex;
+      Mutex mutex;
       std::map<ID::ID_Types, int> batch_sizes, low_water_marks;
       std::map<ID::ID_Types, std::set<NodeID> > reqs_in_flight;
       std::map<ID::ID_Types, std::map<NodeID, std::vector<std::pair<ID::IDType, ID::IDType> > > > id_ranges;
@@ -189,7 +190,7 @@ namespace Realm {
 
     REGISTER_REALM_MODULE(CoreModule);
 
-    template <typename K, typename V, typename LT = GASNetHSL>
+    template <typename K, typename V, typename LT = Mutex>
     class LockedMap {
     public:
       bool exists(const K& key) const
@@ -296,7 +297,6 @@ namespace Realm {
 #endif
 
       Node *nodes;
-      MemoryImpl *global_memory;
       EventTableAllocator::FreeList *local_event_free_list;
       BarrierTableAllocator::FreeList *local_barrier_free_list;
       ReservationTableAllocator::FreeList *local_reservation_free_list;
@@ -316,8 +316,8 @@ namespace Realm {
       pthread_t all_threads[MAX_NUM_THREADS];
       unsigned thread_counts[MAX_NUM_THREADS];
 #endif
-      GASNetHSL shutdown_mutex;
-      GASNetCondVar shutdown_condvar;
+      Mutex shutdown_mutex;
+      CondVar shutdown_condvar;
       bool shutdown_request_received;  // has a request for shutdown arrived
       Event shutdown_precondition;
       int shutdown_result_code;
@@ -364,16 +364,15 @@ namespace Realm {
 
     protected:
       ID::IDType num_local_memories, num_local_ib_memories, num_local_processors;
-
-#ifndef USE_GASNET
-      // without gasnet, we fake registered memory with a normal malloc
-      void *nongasnet_regmem_base;
-      void *nongasnet_reg_ib_mem_base;
-#endif
+      NetworkSegment reg_ib_mem_segment;
+      NetworkSegment reg_mem_segment;
 
       ModuleRegistrar module_registrar;
       std::vector<Module *> modules;
       std::vector<CodeTranslator *> code_translators;
+
+      std::vector<NetworkModule *> network_modules;
+      std::vector<NetworkSegment *> network_segments;
     };
 
     extern RuntimeImpl *runtime_singleton;

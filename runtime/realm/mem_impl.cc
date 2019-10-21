@@ -24,26 +24,6 @@
 #include "realm/utils.h"
 #include "realm/activemsg.h"
 
-#ifdef USE_GASNET
-#ifndef GASNET_PAR
-#define GASNET_PAR
-#endif
-#include <gasnet.h>
-// eliminate GASNet warnings for unused static functions
-static const void *ignore_gasnet_warning1 __attribute__((unused)) = (void *)_gasneti_threadkey_init;
-#ifdef _INCLUDED_GASNET_TOOLS_H
-static const void *ignore_gasnet_warning2 __attribute__((unused)) = (void *)_gasnett_trace_printf_noop;
-#endif
-#endif
-
-#define CHECK_GASNET(cmd) do { \
-  int ret = (cmd); \
-  if(ret != GASNET_OK) { \
-    fprintf(stderr, "GASNET: %s = %d (%s, %s)\n", #cmd, ret, gasnet_ErrorName(ret), gasnet_ErrorDesc(ret)); \
-    exit(1); \
-  } \
-} while(0)
-
 namespace Realm {
 
   Logger log_malloc("malloc");
@@ -135,7 +115,7 @@ namespace Realm {
 
     off_t MemoryImpl::alloc_bytes_local(size_t size)
     {
-      AutoHSLLock al(mutex);
+      AutoLock<> al(mutex);
 
       // for zero-length allocations, return a special "offset"
       if(size == 0) {
@@ -195,7 +175,7 @@ namespace Realm {
     void MemoryImpl::free_bytes_local(off_t offset, size_t size)
     {
       log_malloc.info() << "free block: mem=" << me << " size=" << size << " ofs=" << offset;
-      AutoHSLLock al(mutex);
+      AutoLock<> al(mutex);
 
       // frees of zero bytes should have the special offset
       if(size == 0) {
@@ -271,27 +251,6 @@ namespace Realm {
       }
     }
 
-    off_t MemoryImpl::alloc_bytes_remote(size_t size)
-    {
-      // RPC over to owner's node for allocation
-      ActiveMessage<RemoteMemAllocRequest> amsg(ID(me).memory_owner_node());
-      HandlerReplyFuture<off_t> result;
-
-      amsg->resp_ptr = &result;
-      amsg->memory = me;
-      amsg->size = size;
-      amsg.commit();
-      // Request::request(target, args);
-      // wait for result to come back
-      result.wait();
-      return result.get();
-    }
-
-    void MemoryImpl::free_bytes_remote(off_t offset, size_t size)
-    {
-      assert(0);
-    }
-
     Memory::Kind MemoryImpl::get_kind(void) const
     {
       return lowlevel_kind;
@@ -304,10 +263,10 @@ namespace Realm {
 
       NodeID cnode = id.instance_creator_node();
       unsigned idx = id.instance_inst_idx();
-      if(cnode == my_node_id) {
+      if(cnode == Network::my_node_id) {
 	// if it was locally created, we can directly access the local_instances list
 	//  and it's a fatal error if it doesn't exist
-	AutoHSLLock al(local_instances.mutex);
+	AutoLock<> al(local_instances.mutex);
 	assert(idx < local_instances.instances.size());
 	assert(local_instances.instances[idx] != 0);
 	return local_instances.instances[idx];
@@ -316,7 +275,7 @@ namespace Realm {
 	//  protected lookup
 	InstanceList *ilist;
 	{
-	  AutoHSLLock al(instance_map_mutex);
+	  AutoLock<> al(instance_map_mutex);
 	  // this creates a new InstanceList if needed
 	  InstanceList *& iref = instances_by_creator[cnode];
 	  if(!iref)
@@ -326,7 +285,7 @@ namespace Realm {
 
 	// now look up (and possibly create) the instance in the right list
 	{
-	  AutoHSLLock al(ilist->mutex);
+	  AutoLock<> al(ilist->mutex);
 
 	  if(idx >= ilist->instances.size())
 	    ilist->instances.resize(idx + 1, 0);
@@ -348,7 +307,7 @@ namespace Realm {
       unsigned inst_idx;
       RegionInstanceImpl *inst_impl;
       {
-	AutoHSLLock al(local_instances.mutex);
+	AutoLock<> al(local_instances.mutex);
 	  
 	if(local_instances.free_list.empty()) {
 	  // need to grow the list - do it in chunks
@@ -380,13 +339,13 @@ namespace Realm {
       if(!inst_impl) {
 	ID mem_id(me);
 	RegionInstance i = ID::make_instance(mem_id.memory_owner_node(),
-					     my_node_id /*creator*/,
+					     Network::my_node_id /*creator*/,
 					     mem_id.memory_mem_idx(),
 					     inst_idx).convert<RegionInstance>();
 	log_inst.info() << "creating new local instance: " << i;
 	inst_impl = new RegionInstanceImpl(i, me);
 	{
-	  AutoHSLLock al(local_instances.mutex);
+	  AutoLock<> al(local_instances.mutex);
 	  local_instances.instances[inst_idx] = inst_impl;
 	}
       } else
@@ -402,7 +361,7 @@ namespace Realm {
 
       log_inst.info() << "releasing local instance: " << inst;
       {
-	AutoHSLLock al(local_instances.mutex);
+	AutoLock<> al(local_instances.mutex);
 	local_instances.free_list.push_back(inst_idx);
       }
     }
@@ -417,7 +376,7 @@ namespace Realm {
       // all allocation requests are handled by the memory's owning node for
       //  now - local caching might be possible though
       NodeID target = ID(me).memory_owner_node();
-      if(target != my_node_id) {
+      if(target != Network::my_node_id) {
 	ActiveMessage<MemStorageAllocRequest> amsg(target);
 	amsg->memory = me;
 	amsg->inst = i;
@@ -436,11 +395,11 @@ namespace Realm {
 
       bool ok;
       {
-	AutoHSLLock al(allocator_mutex);
+	AutoLock<> al(allocator_mutex);
 	ok = allocator.allocate(i, bytes, alignment, offset);
       }
 
-      if(NodeID(ID(i).instance_creator_node()) == my_node_id) {
+      if(NodeID(ID(i).instance_creator_node()) == Network::my_node_id) {
 	// local notification of result
 	get_instance(i)->notify_allocation(ok, offset, bytes);
       } else {
@@ -464,7 +423,7 @@ namespace Realm {
       // all allocation requests are handled by the memory's owning node for
       //  now - local caching might be possible though
       NodeID target = ID(me).memory_owner_node();
-      if(target != my_node_id) {
+      if(target != Network::my_node_id) {
 	ActiveMessage<MemStorageReleaseRequest> amsg(target);
 	amsg->memory = me;
 	amsg->inst = inst->me;
@@ -489,12 +448,12 @@ namespace Realm {
       assert(inst->metadata.inst_offset != size_t(-1));
       // deallocate unless the allocation had failed
       if(inst->metadata.inst_offset != size_t(-2)) {
-	AutoHSLLock al(allocator_mutex);
+	AutoLock<> al(allocator_mutex);
 	allocator.deallocate(inst->me);
       }
 
       NodeID creator_node = ID(inst->me).instance_creator_node();
-      if(creator_node == my_node_id) {
+      if(creator_node == Network::my_node_id) {
 	// local notification of result
 	inst->notify_deallocation();
       } else {
@@ -513,14 +472,14 @@ namespace Realm {
 
   LocalCPUMemory::LocalCPUMemory(Memory _me, size_t _size, 
                                  int _numa_node, Memory::Kind _lowlevel_kind,
-				 void *prealloc_base /*= 0*/, bool _registered /*= false*/) 
+				 void *prealloc_base /*= 0*/,
+				 const NetworkSegment *_segment /*= 0*/)
     : MemoryImpl(_me, _size, MKIND_SYSMEM, ALIGNMENT, _lowlevel_kind),
-      numa_node(_numa_node)
+      numa_node(_numa_node), segment(_segment)
   {
     if(prealloc_base) {
       base = (char *)prealloc_base;
       prealloced = true;
-      registered = _registered;
     } else {
       // allocate our own space
       // enforce alignment on the whole memory range
@@ -537,11 +496,10 @@ namespace Realm {
 	base = base_orig;
       }
       prealloced = false;
-      assert(!_registered);
-      registered = false;
     }
     log_malloc.debug("CPU memory at %p, size = %zd%s%s", base, _size, 
-		     prealloced ? " (prealloced)" : "", registered ? " (registered)" : "");
+		     prealloced ? " (prealloced)" : "",
+		     (segment && segment->single_network) ? " (registered)" : "");
     free_blocks[0] = _size;
   }
 
@@ -549,16 +507,6 @@ namespace Realm {
   {
     if(!prealloced)
       free(base_orig);
-  }
-
-  off_t LocalCPUMemory::alloc_bytes(size_t size)
-  {
-    return alloc_bytes_local(size);
-  }
-  
-  void LocalCPUMemory::free_bytes(off_t offset, size_t size)
-  {
-    free_bytes_local(offset, size);
   }
 
   void LocalCPUMemory::get_bytes(off_t offset, void *dst, size_t size)
@@ -579,60 +527,48 @@ namespace Realm {
 
   int LocalCPUMemory::get_home_node(off_t offset, size_t size)
   {
-    return my_node_id;
+    return Network::my_node_id;
   }
 
-  void *LocalCPUMemory::local_reg_base(void)
+  const ByteArray *LocalCPUMemory::get_rdma_info(NetworkModule *network)
   {
-    return registered ? base : 0;
-  };
+    return (segment ? segment->get_rdma_info(network) : 0);
+  }
+
   
   ////////////////////////////////////////////////////////////////////////
   //
   // class RemoteMemory
   //
 
-    RemoteMemory::RemoteMemory(Memory _me, size_t _size, Memory::Kind k, void *_regbase)
-      : MemoryImpl(_me, _size, _regbase ? MKIND_RDMA : MKIND_REMOTE, 0, k), regbase(_regbase)
-    {
-    }
+    RemoteMemory::RemoteMemory(Memory _me, size_t _size, Memory::Kind k,
+			       MemoryKind mk /*= MKIND_REMOTE */)
+      : MemoryImpl(_me, _size, mk, 0, k)
+    {}
 
     RemoteMemory::~RemoteMemory(void)
+    {}
+
+    off_t RemoteMemory::alloc_bytes_local(size_t size)
     {
+      assert(0);
     }
 
-    off_t RemoteMemory::alloc_bytes(size_t size)
+    void RemoteMemory::free_bytes_local(off_t offset, size_t size)
     {
-      return alloc_bytes_remote(size);
-    }
-
-    void RemoteMemory::free_bytes(off_t offset, size_t size)
-    {
-      free_bytes_remote(offset, size);
+      assert(0);
     }
 
     void RemoteMemory::put_bytes(off_t offset, const void *src, size_t size)
     {
       // can't read/write a remote memory
-#define ALLOW_REMOTE_MEMORY_WRITES
-#ifdef ALLOW_REMOTE_MEMORY_WRITES
-      // THIS IS BAD - no fence means no consistency!
-      do_remote_write(me, offset, src, size, 0, true /* make copy! */);
-#else
       assert(0);
-#endif
     }
 
     void RemoteMemory::get_bytes(off_t offset, void *dst, size_t size)
     {
-      // this better be an RDMA-able memory
-#ifdef USE_GASNET
-      assert(kind == MemoryImpl::MKIND_RDMA);
-      void *srcptr = ((char *)regbase) + offset;
-      gasnet_get(dst, ID(me).memory_owner_node(), srcptr, size);
-#else
-      assert(0 && "no remote get_bytes without GASNET");
-#endif
+      // can't read/write a remote memory
+      assert(0);
     }
 
     void *RemoteMemory::get_direct_ptr(off_t offset, size_t size)
@@ -645,255 +581,9 @@ namespace Realm {
       return ID(me).memory_owner_node();
     }
 
-
-  ////////////////////////////////////////////////////////////////////////
-  //
-  // class GASNetMemory
-  //
-
-    GASNetMemory::GASNetMemory(Memory _me, size_t size_per_node)
-      : MemoryImpl(_me, 0 /* we'll calculate it below */, MKIND_GLOBAL,
-		     MEMORY_STRIDE, Memory::GLOBAL_MEM)
+    void *RemoteMemory::get_remote_addr(off_t offset)
     {
-      num_nodes = max_node_id + 1;
-      segbases.resize(num_nodes);
-#ifdef USE_GASNET
-      gasnet_seginfo_t *seginfos = new gasnet_seginfo_t[num_nodes];
-      CHECK_GASNET( gasnet_getSegmentInfo(seginfos, num_nodes) );
-      
-      for(int i = 0; i < num_nodes; i++) {
-	assert(seginfos[i].size >= size_per_node);
-	segbases[i] = (char *)(seginfos[i].addr);
-      }
-      delete[] seginfos;
-#else
-      for(int i = 0; i < num_nodes; i++) {
-	segbases[i] = (char *)(malloc(size_per_node));
-	assert(segbases[i] != 0);
-      }
-#endif
-
-      size = size_per_node * num_nodes;
-      memory_stride = MEMORY_STRIDE;
-      
-      free_blocks[0] = size;
-      // tell new allocator about the available memory too
-      allocator.add_range(0, size);
-    }
-
-    GASNetMemory::~GASNetMemory(void)
-    {
-    }
-
-    off_t GASNetMemory::alloc_bytes(size_t size)
-    {
-      if(my_node_id == 0) {
-	return alloc_bytes_local(size);
-      } else {
-	return alloc_bytes_remote(size);
-      }
-    }
-
-    void GASNetMemory::free_bytes(off_t offset, size_t size)
-    {
-      if(my_node_id == 0) {
-	free_bytes_local(offset, size);
-      } else {
-	free_bytes_remote(offset, size);
-      }
-    }
-
-    void GASNetMemory::get_bytes(off_t offset, void *dst, size_t size)
-    {
-      char *dst_c = (char *)dst;
-      while(size > 0) {
-	off_t blkid = (offset / memory_stride / num_nodes);
-	off_t node = (offset / memory_stride) % num_nodes;
-	off_t blkoffset = offset % memory_stride;
-	size_t chunk_size = memory_stride - blkoffset;
-	if(chunk_size > size) chunk_size = size;
-#ifdef USE_GASNET
-	gasnet_get(dst_c, node, segbases[node]+(blkid * memory_stride)+blkoffset, chunk_size);
-#else
-	memcpy(dst_c, segbases[node]+(blkid * memory_stride)+blkoffset, chunk_size);
-#endif
-	offset += chunk_size;
-	dst_c += chunk_size;
-	size -= chunk_size;
-      }
-    }
-
-    void GASNetMemory::put_bytes(off_t offset, const void *src, size_t size)
-    {
-      char *src_c = (char *)src; // dropping const on purpose...
-      while(size > 0) {
-	off_t blkid = (offset / memory_stride / num_nodes);
-	off_t node = (offset / memory_stride) % num_nodes;
-	off_t blkoffset = offset % memory_stride;
-	size_t chunk_size = memory_stride - blkoffset;
-	if(chunk_size > size) chunk_size = size;
-#ifdef USE_GASNET
-	gasnet_put(node, segbases[node]+(blkid * memory_stride)+blkoffset, src_c, chunk_size);
-#else
-	memcpy(segbases[node]+(blkid * memory_stride)+blkoffset, src_c, chunk_size);
-#endif
-	offset += chunk_size;
-	src_c += chunk_size;
-	size -= chunk_size;
-      }
-    }
-
-    void GASNetMemory::apply_reduction_list(off_t offset, const ReductionOpUntyped *redop,
-					    size_t count, const void *entry_buffer)
-    {
-      assert(0);
-#ifdef NEED_TO_FIX_REDUCTION_LISTS_FOR_DEPPART
-      const char *entry = (const char *)entry_buffer;
-      unsigned ptr;
-
-      for(size_t i = 0; i < count; i++)
-      {
-	redop->get_list_pointers(&ptr, entry, 1);
-	//printf("ptr[%d] = %d\n", i, ptr);
-	off_t elem_offset = offset + ptr * redop->sizeof_lhs;
-	off_t blkid = (elem_offset / memory_stride / num_nodes);
-	off_t node = (elem_offset / memory_stride) % num_nodes;
-	off_t blkoffset = elem_offset % memory_stride;
-	assert(node == my_node_id);
-	char *tgt_ptr = ((char *)seginfos[node].addr)+(blkid * memory_stride)+blkoffset;
-	redop->apply_list_entry(tgt_ptr, entry, 1, ptr);
-	entry += redop->sizeof_list_entry;
-      }
-#endif
-    }
-
-    void *GASNetMemory::get_direct_ptr(off_t offset, size_t size)
-    {
-      return 0;  // can't give a pointer to the caller - have to use RDMA
-    }
-
-    int GASNetMemory::get_home_node(off_t offset, size_t size)
-    {
-      off_t start_blk = offset / memory_stride;
-      off_t end_blk = (offset + size - 1) / memory_stride;
-      if(start_blk != end_blk) return -1;
-
-      return start_blk % num_nodes;
-    }
-
-    void GASNetMemory::get_batch(size_t batch_size,
-				 const off_t *offsets, void * const *dsts, 
-				 const size_t *sizes)
-    {
-#define NO_USE_NBI_ACCESSREGION
-#ifdef USE_GASNET
-#ifdef USE_NBI_ACCESSREGION
-      gasnet_begin_nbi_accessregion();
-#endif
-#endif
-      DetailedTimer::push_timer(10);
-      for(size_t i = 0; i < batch_size; i++) {
-	off_t offset = offsets[i];
-	char *dst_c = (char *)(dsts[i]);
-	size_t size = sizes[i];
-
-	off_t blkid = (offset / memory_stride / num_nodes);
-	off_t node = (offset / memory_stride) % num_nodes;
-	off_t blkoffset = offset % memory_stride;
-
-	while(size > 0) {
-	  size_t chunk_size = memory_stride - blkoffset;
-	  if(chunk_size > size) chunk_size = size;
-
-	  char *src_c = (segbases[node] +
-			 (blkid * memory_stride) + blkoffset);
-#ifdef USE_GASNET
-	  if(node != my_node_id) {
-	    gasnet_get_nbi(dst_c, node, src_c, chunk_size);
-	  } else
-#endif
-	  {
-	    memcpy(dst_c, src_c, chunk_size);
-	  }
-
-	  dst_c += chunk_size;
-	  size -= chunk_size;
-	  blkoffset = 0;
-	  node = (node + 1) % num_nodes;
-	  if(node == 0) blkid++;
-	}
-      }
-      DetailedTimer::pop_timer();
-
-#ifdef USE_GASNET
-#ifdef USE_NBI_ACCESSREGION
-      DetailedTimer::push_timer(11);
-      gasnet_handle_t handle = gasnet_end_nbi_accessregion();
-      DetailedTimer::pop_timer();
-
-      DetailedTimer::push_timer(12);
-      gasnet_wait_syncnb(handle);
-      DetailedTimer::pop_timer();
-#else
-      DetailedTimer::push_timer(13);
-      gasnet_wait_syncnbi_gets();
-      DetailedTimer::pop_timer();
-#endif
-#endif
-    }
-
-    void GASNetMemory::put_batch(size_t batch_size,
-				 const off_t *offsets,
-				 const void * const *srcs, 
-				 const size_t *sizes)
-    {
-#ifdef USE_GASNET
-      gasnet_begin_nbi_accessregion();
-#endif
-
-      DetailedTimer::push_timer(14);
-      for(size_t i = 0; i < batch_size; i++) {
-	off_t offset = offsets[i];
-	const char *src_c = (char *)(srcs[i]);
-	size_t size = sizes[i];
-
-	off_t blkid = (offset / memory_stride / num_nodes);
-	off_t node = (offset / memory_stride) % num_nodes;
-	off_t blkoffset = offset % memory_stride;
-
-	while(size > 0) {
-	  size_t chunk_size = memory_stride - blkoffset;
-	  if(chunk_size > size) chunk_size = size;
-
-	  char *dst_c = (segbases[node] +
-			 (blkid * memory_stride) + blkoffset);
-#ifdef USE_GASNET
-	  if(node != my_node_id) {
-	    gasnet_put_nbi(node, dst_c, (void *)src_c, chunk_size);
-	  } else
-#endif
-	  {
-	    memcpy(dst_c, src_c, chunk_size);
-	  }
-
-	  src_c += chunk_size;
-	  size -= chunk_size;
-	  blkoffset = 0;
-	  node = (node + 1) % num_nodes;
-	  if(node == 0) blkid++;
-	}
-      }
-      DetailedTimer::pop_timer();
-
-#ifdef USE_GASNET
-      DetailedTimer::push_timer(15);
-      gasnet_handle_t handle = gasnet_end_nbi_accessregion();
-      DetailedTimer::pop_timer();
-
-      DetailedTimer::push_timer(16);
-      gasnet_wait_syncnb(handle);
-      DetailedTimer::pop_timer();
-#endif
+      return(0);
     }
 
 
@@ -956,32 +646,6 @@ namespace Realm {
     impl->notify_deallocation();
   }
 
-  ////////////////////////////////////////////////////////////////////////
-  //
-  // class RemoteMemAllocRequest
-  //
-
-  /*static*/ void RemoteMemAllocRequest::handle_message(NodeID sender, const RemoteMemAllocRequest &args,
-							const void *data, size_t datalen)
-  {
-    DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
-    //printf("[%d] handling remote alloc of size %zd\n", my_node_id, args.size);
-    off_t offset = get_runtime()->get_memory_impl(args.memory)->alloc_bytes(args.size);
-    //printf("[%d] remote alloc will return %d\n", my_node_id, offset);
-
-    ActiveMessage<RemoteMemAllocResponse> amsg(sender);
-    amsg->resp_ptr = args.resp_ptr;
-    amsg->offset = offset;
-    amsg.commit();
-  }
-  
-  /*static*/ void RemoteMemAllocResponse::handle_message(NodeID sender, const RemoteMemAllocResponse &args,
-							 const void *data, size_t datalen)
-  {
-    HandlerReplyFuture<off_t> *f = static_cast<HandlerReplyFuture<off_t> *>(args.resp_ptr);
-    f->set(args.offset);
-  }
-
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -1006,7 +670,7 @@ namespace Realm {
 
   typedef std::map<PartialWriteKey, PartialWriteEntry> PartialWriteMap;
   static PartialWriteMap partial_remote_writes;
-  static GASNetHSL partial_remote_writes_lock;
+  static Mutex partial_remote_writes_lock;
 
   /*static*/ void RemoteWriteMessage::handle_message(NodeID sender, const RemoteWriteMessage &args,
 						     const void *data,
@@ -1034,16 +698,19 @@ namespace Realm {
     bool was_written_directly = false;
     if(impl->kind == MemoryImpl::MKIND_SYSMEM) {
       LocalCPUMemory *cpumem = (LocalCPUMemory *)impl;
-      if(cpumem->registered) {
-	if(data == (cpumem->base + args.offset)) {
-	  // copy is in right spot - yay!
-	  was_written_directly = true;
-	} else {
+      if(data == (cpumem->base + args.offset)) {
+	// copy is in right spot - yay!
+	was_written_directly = true;
+      } else {
+#if 0
+	// TODO: restore this error check?
+	if(!cpumem->registered) {
 	  log_copy.error() << "received remote write to registered memory in wrong spot: "
 			   << data << " != "
 			   << ((void *)(cpumem->base)) << "+" << args.offset
 			   << " = " << ((void *)(cpumem->base + args.offset));
 	}
+#endif
       }
     }
 
@@ -1066,7 +733,7 @@ namespace Realm {
 	partial_remote_writes[key] = entry;
 #ifdef DEBUG_PWT
 	printf("PWT: %d: new entry for %d/%d: %p, %d\n",
-	       my_node_id, key.sender, key.sequence_id,
+	       Network::my_node_id, key.sender, key.sequence_id,
 	       entry.fence, entry.remaining_count);
 #endif
       } else {
@@ -1074,7 +741,7 @@ namespace Realm {
 	PartialWriteEntry& entry = it->second;
 #ifdef DEBUG_PWT
 	printf("PWT: %d: have entry for %d/%d: %p, %d -> %d\n",
-	       my_node_id, key.sender, key.sequence_id,
+	       Network::my_node_id, key.sender, key.sequence_id,
 	       entry.fence,
 	       entry.remaining_count, entry.remaining_count - 1);
 #endif
@@ -1134,7 +801,7 @@ namespace Realm {
 	partial_remote_writes[key] = entry;
 #ifdef DEBUG_PWT
 	printf("PWT: %d: new entry for %d/%d: %p, %d\n",
-	       my_node_id, key.sender, key.sequence_id,
+	       Network::my_node_id, key.sender, key.sequence_id,
 	       entry.fence, entry.remaining_count);
 #endif
       } else {
@@ -1142,7 +809,7 @@ namespace Realm {
 	PartialWriteEntry& entry = it->second;
 #ifdef DEBUG_PWT
 	printf("PWT: %d: have entry for %d/%d: %p, %d -> %d\n",
-	       my_node_id, key.sender, key.sequence_id,
+	       Network::my_node_id, key.sender, key.sequence_id,
 	       entry.fence,
 	       entry.remaining_count, entry.remaining_count - 1);
 #endif
@@ -1277,7 +944,7 @@ namespace Realm {
 	partial_remote_writes[key] = entry;
 #ifdef DEBUG_PWT
 	printf("PWT: %d: new entry for %d/%d: %p, %d\n",
-	       my_node_id, key.sender, key.sequence_id,
+	       Network::my_node_id, key.sender, key.sequence_id,
 	       entry.fence, entry.remaining_count);
 #endif
       } else {
@@ -1285,7 +952,7 @@ namespace Realm {
 	PartialWriteEntry& entry = it->second;
 #ifdef DEBUG_PWT
 	printf("PWT: %d: have entry for %d/%d: %p, %d -> %d\n",
-	       my_node_id, key.sender, key.sequence_id,
+	       Network::my_node_id, key.sender, key.sequence_id,
 	       entry.fence,
 	       entry.remaining_count, entry.remaining_count - 1);
 #endif
@@ -1388,7 +1055,7 @@ namespace Realm {
 	partial_remote_writes[key] = entry;
 #ifdef DEBUG_PWT
 	printf("PWT: %d: new entry for %d/%d: %p, %d\n",
-	       my_node_id, key.sender, key.sequence_id,
+	       Network::my_node_id, key.sender, key.sequence_id,
 	       entry.fence, entry.remaining_count);
 #endif
       } else {
@@ -1396,7 +1063,7 @@ namespace Realm {
 	PartialWriteEntry& entry = it->second;
 #ifdef DEBUG_PWT
 	printf("PWT: %d: have entry for %d/%d: %p -> %p, %d -> %d\n",
-	       my_node_id, key.sender, key.sequence_id,
+	       Network::my_node_id, key.sender, key.sequence_id,
 	       entry.fence, args.fence,
 	       entry.remaining_count, entry.remaining_count + args.num_writes);
 #endif
@@ -1439,6 +1106,7 @@ namespace Realm {
   // do_remote_*
   //
 
+#if 0
     unsigned do_remote_write(Memory mem, off_t offset,
 			     const void *data, size_t datalen,
 			     unsigned sequence_id,
@@ -1761,7 +1429,7 @@ namespace Realm {
       free(buffer_start);
       return xfers;
     }
-
+#endif
     unsigned do_remote_reduce(Memory mem, off_t offset,
 			      ReductionOpID redop_id, bool red_fold,
 			      const void *data, size_t count,
@@ -1780,7 +1448,10 @@ namespace Realm {
       // reductions always have to bounce off an intermediate buffer, so are subject to
       //  LMB limits
       {
-	size_t max_xfer_size = get_lmb_size(ID(mem).memory_owner_node());
+	// HACK: we don't expose get_lmb_size any more, but reductions should
+	//  go through dma channels soon anyway
+	size_t max_xfer_size = 16384;
+	//size_t max_xfer_size = get_lmb_size(ID(mem).memory_owner_node());
 	size_t max_elmts_per_xfer = max_xfer_size / rhs_size;
 	assert(max_elmts_per_xfer > 0);
 
@@ -1872,8 +1543,6 @@ namespace Realm {
       amsg.commit();
     }
 
-  ActiveMessageHandlerReg<RemoteMemAllocRequest> remote_mem_alloc_request_handler;
-  ActiveMessageHandlerReg<RemoteMemAllocResponse> remote_mem_alloc_response_handler;
   ActiveMessageHandlerReg<RemoteWriteMessage> remote_write_message_handler;
   ActiveMessageHandlerReg<RemoteReduceMessage> remote_reduce_message_handler;
   ActiveMessageHandlerReg<RemoteSerdezMessage> remote_serdez_message_handler;

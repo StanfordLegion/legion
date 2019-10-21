@@ -16,7 +16,7 @@
 #ifndef LOWLEVEL_DMA_H
 #define LOWLEVEL_DMA_H
 
-#include "realm/activemsg.h"
+#include "realm/network.h"
 #include "realm/id.h"
 #include "realm/memory.h"
 #include "realm/redop.h"
@@ -157,7 +157,7 @@ namespace Realm {
       State state;
       int priority;
       // <NEWDMA>
-      GASNetHSL request_lock;
+      Mutex request_lock;
       std::vector<XferDesID> path;
       std::set<XferDesID> complete_xd;
 
@@ -293,7 +293,7 @@ namespace Realm {
       PriorityIBQueue priority_ib_queue;
       // operations on ib_by_inst are protected by ib_mutex
       IBByInst ib_by_inst;
-      GASNetHSL ib_mutex;
+      Mutex ib_mutex;
       std::vector<Memory> mem_path;
       // </NEW_DMA>
 
@@ -443,7 +443,7 @@ namespace Realm {
 
       int max_depth;
       std::deque<AIOOperation *> launched_operations, pending_operations;
-      GASNetHSL mutex;
+      Mutex mutex;
 #ifdef REALM_USE_KERNEL_AIO
       aio_context_t aio_ctx;
 #endif

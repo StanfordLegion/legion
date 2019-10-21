@@ -97,7 +97,7 @@ namespace Realm {
     static ActiveMessageHandlerReg<SetContribCountMessage> set_contrib_count_msg_reg;
 
     int remaining_contributor_count;
-    GASNetHSL mutex;
+    Mutex mutex;
     std::vector<PartitioningMicroOp *> approx_waiters, precise_waiters;
     bool precise_requested, approx_requested;
     Event precise_ready_event, approx_ready_event;
@@ -147,7 +147,7 @@ namespace Realm {
 
   protected:
     int next_sequence_id;
-    GASNetHSL mutex; // protects the fragments map
+    Mutex mutex; // protects the fragments map
     std::map<NodeID, std::map<int, int> > fragments;
   };
 

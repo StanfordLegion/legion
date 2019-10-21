@@ -60,8 +60,8 @@ namespace Realm {
     void SequenceAssembler::swap(SequenceAssembler& other)
     {
       // need both locks
-      AutoHSLLock al1(mutex);
-      AutoHSLLock al2(other.mutex);
+      AutoLock<> al1(mutex);
+      AutoLock<> al2(other.mutex);
       std::swap(contig_amount, other.contig_amount);
       std::swap(first_noncontig, other.first_noncontig);
       spans.swap(other.spans);
@@ -88,7 +88,7 @@ namespace Realm {
 
       // general case 3: take the lock and look through spans/etc.
       {
-	AutoHSLLock al(mutex);
+	AutoLock<> al(mutex);
 
 	// first, recheck the contig_amount, in case both it and the noncontig
 	//  counters were bumped in between looking at the two of them
@@ -139,7 +139,7 @@ namespace Realm {
 	// success: check to see if there are any spans we might need to 
 	//  tack on
 	if(span_end == __sync_fetch_and_add(&first_noncontig, 0)) {
-	  AutoHSLLock al(mutex);
+	  AutoLock<> al(mutex);
 	  while(!spans.empty()) {
 	    std::map<size_t, size_t>::iterator it = spans.begin();
 	    if(it->first == span_end) {
@@ -165,7 +165,7 @@ namespace Realm {
 	// failure: have to add ourselves to the span list and possibly update
 	//  the 'first_noncontig', all while holding the lock
 	{
-	  AutoHSLLock al(mutex);
+	  AutoLock<> al(mutex);
 
 	  // the checks above were done without the lock, so it is possible
 	  //  that by the time we've got the lock here, contig_amount has
@@ -272,7 +272,7 @@ namespace Realm {
 
         // notify owning DmaRequest upon completion of this XferDes
         //printf("complete XD = %lu\n", guid);
-        if (launch_node == my_node_id) {
+        if (launch_node == Network::my_node_id) {
           complete_fence->mark_finished(true/*successful*/);
         } else {
           NotifyXferDesCompleteMessage::send_request(launch_node, complete_fence);
@@ -1149,7 +1149,7 @@ namespace Realm {
         else {
           bytes_write += size;
         }
-        //printf("[%d] offset(%ld), size(%lu), bytes_writes(%lx): %ld\n", my_node_id, offset, size, guid, bytes_write);
+        //printf("[%d] offset(%ld), size(%lu), bytes_writes(%lx): %ld\n", Network::my_node_id, offset, size, guid, bytes_write);
       }
 #endif
 
@@ -1456,11 +1456,14 @@ namespace Realm {
         channel = channel_manager->get_remote_write_channel();
         //src_buf_base = (const char*) src_mem_impl->get_direct_ptr(_src_buf.alloc_offset, 0);
         // Note that we cannot use get_direct_ptr to get dst_buf_base, since it always returns 0
-        dst_buf_base = ((char *)((Realm::RemoteMemory*)dst_mem)->regbase) /*+ dst_buf.alloc_offset*/;
+	NodeID dst_node = ID(dst_mem->me).memory_owner_node();
+        RemoteMemory *remote = checked_cast<RemoteMemory *>(dst_mem);
+        dst_buf_base = static_cast<char *>(remote->get_remote_addr(0));
+        assert(dst_buf_base != 0);
         requests = (RemoteWriteRequest*) calloc(max_nr, sizeof(RemoteWriteRequest));
         for (int i = 0; i < max_nr; i++) {
           requests[i].xd = this;
-          requests[i].dst_node = ID(dst_mem->me).memory_owner_node();
+          requests[i].dst_node = dst_node;
           enqueue_request(&requests[i]);
         }
       }
@@ -2735,16 +2738,16 @@ namespace Realm {
           switch (kind) {
             case XferDes::XFER_GASNET_READ:
             {
-              get_runtime()->global_memory->get_bytes(req->gas_off,
-                                                      req->mem_base,
-                                                      req->nbytes);
+              req->xd->src_mem->get_bytes(req->gas_off,
+					  req->mem_base,
+					  req->nbytes);
               break;
             }
             case XferDes::XFER_GASNET_WRITE:
             {
-              get_runtime()->global_memory->put_bytes(req->gas_off,
-                                                      req->mem_base,
-                                                      req->nbytes);
+              req->xd->dst_mem->put_bytes(req->gas_off,
+					  req->mem_base,
+					  req->nbytes);
               break;
             }
             default:
@@ -2820,7 +2823,7 @@ namespace Realm {
           args.mem = req->dst_mem;
           args.offset = req->dst_offset;
           args.event = req->complete_event;
-          args.sender = my_node_id;
+          args.sender = Network::my_node_id;
           args.sequence_id = 0;
 
           Realm::RemoteWriteMessage::Message::request(ID(args.mem).node(), args,
@@ -3141,7 +3144,7 @@ namespace Realm {
 
 	DmaRequest* dma_request = reinterpret_cast<DmaRequest *>(dma_req_as_intptr);
 
-	create_xfer_des(dma_request, launch_node, my_node_id,
+	create_xfer_des(dma_request, launch_node, Network::my_node_id,
 			guid, pre_xd_guid, next_xd_guid,
 			next_max_rw_gap, src_ib_offset, src_ib_size,
 			mark_started,
@@ -3578,8 +3581,8 @@ namespace Realm {
                            XferDesFence* _complete_fence,
                            RegionInstance inst)
       {
-	//if (ID(_src_buf.memory).memory_owner_node() == my_node_id) {
-	if(_target_node == my_node_id) {
+	//if (ID(_src_buf.memory).memory_owner_node() == Network::my_node_id) {
+	if(_target_node == Network::my_node_id) {
           // size_t total_field_size = 0;
           // for (unsigned i = 0; i < _oas_vec.size(); i++) {
           //   total_field_size += _oas_vec[i].size;
@@ -3734,7 +3737,7 @@ namespace Realm {
     {
       log_new_dma.info("Destroy XferDes: id(" IDFMT ")", _guid);
       NodeID execution_node = _guid >> (XferDesQueue::NODE_BITS + XferDesQueue::INDEX_BITS);
-      if (execution_node == my_node_id) {
+      if (execution_node == Network::my_node_id) {
         xferDes_queue->destroy_xferDes(_guid);
       }
       else {

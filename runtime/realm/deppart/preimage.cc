@@ -208,7 +208,7 @@ namespace Realm {
     // a PreimageMicroOp should always be executed on whichever node the field data lives
     NodeID exec_node = ID(inst).instance_owner_node();
 
-    if(exec_node != my_node_id) {
+    if(exec_node != Network::my_node_id) {
       forward_microop<PreimageMicroOp<N,T,N2,T2> >(exec_node, op, this);
       return;
     }
@@ -422,7 +422,7 @@ namespace Realm {
     // atomically check the overlap tester's readiness and queue us if not
     bool tester_ready = false;
     {
-      AutoHSLLock al(mutex);
+      AutoLock<> al(mutex);
       if(overlap_tester != 0) {
 	tester_ready = true;
       } else {
@@ -487,7 +487,7 @@ namespace Realm {
     // atomically set the overlap tester and see if there are any pending entries
     std::map<int, std::vector<Rect<N2,T2> > > pending;
     {
-      AutoHSLLock al(mutex);
+      AutoLock<> al(mutex);
       assert(overlap_tester == 0);
       overlap_tester = static_cast<OverlapTester<N2,T2> *>(tester);
       pending.swap(pending_sparse_images);

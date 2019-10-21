@@ -107,7 +107,7 @@ namespace Realm {
     std::vector<FieldDataDescriptor<IndexSpace<N,T>,Rect<N2,T2> > > range_data;
     std::vector<IndexSpace<N2,T2> > targets;
     std::vector<SparsityMap<N,T> > preimages;
-    GASNetHSL mutex;
+    Mutex mutex;
     OverlapTester<N2,T2> *overlap_tester;
     std::map<int, std::vector<Rect<N2,T2> > > pending_sparse_images;
     int remaining_sparse_images;

@@ -311,7 +311,7 @@ namespace Realm {
       else
 	populate_approx_bitmask_ptrs(approx_rects);
 
-      if(requestor == my_node_id) {
+      if(requestor == Network::my_node_id) {
 	PreimageOperation<N2,T2,N,T> *op = reinterpret_cast<PreimageOperation<N2,T2,N,T> *>(approx_output_op);
 	op->provide_sparse_image(approx_output_index, &approx_rects.rects[0], approx_rects.rects.size());
       } else {
@@ -331,7 +331,7 @@ namespace Realm {
     // an ImageMicroOp should always be executed on whichever node the field data lives
     NodeID exec_node = ID(inst).instance_owner_node();
 
-    if(exec_node != my_node_id) {
+    if(exec_node != Network::my_node_id) {
       forward_microop<ImageMicroOp<N,T,N2,T2> >(exec_node, op, this);
       return;
     }

@@ -69,7 +69,7 @@ namespace Realm {
     }
 
     // construct and fill in a sparsity map
-    SparsityMapImplWrapper *wrap = get_runtime()->get_available_sparsity_impl(my_node_id);
+    SparsityMapImplWrapper *wrap = get_runtime()->get_available_sparsity_impl(Network::my_node_id);
     SparsityMap<N,T> sparsity = wrap->me.convert<SparsityMap<N,T> >();
     SparsityMapImpl<N,T> *impl = wrap->get_or_create<N,T>(sparsity);
     impl->set_contributor_count(1);
@@ -96,7 +96,7 @@ namespace Realm {
     }
 
     // construct and fill in a sparsity map
-    SparsityMapImplWrapper *wrap = get_runtime()->get_available_sparsity_impl(my_node_id);
+    SparsityMapImplWrapper *wrap = get_runtime()->get_available_sparsity_impl(Network::my_node_id);
     SparsityMap<N,T> sparsity = wrap->me.convert<SparsityMap<N,T> >();
     SparsityMapImpl<N,T> *impl = wrap->get_or_create<N,T>(sparsity);
     impl->set_contributor_count(1);
@@ -246,12 +246,12 @@ namespace Realm {
     bool request_precise = false;
     Event e = Event::NO_EVENT;
     {
-      AutoHSLLock al(mutex);
+      AutoLock<> al(mutex);
 
       if(precise) {
 	if(!this->entries_valid) {
 	  // do we need to request the data?
-	  if((NodeID(ID(me).sparsity_creator_node()) != my_node_id) && !precise_requested) {
+	  if((NodeID(ID(me).sparsity_creator_node()) != Network::my_node_id) && !precise_requested) {
 	    request_precise = true;
 	    precise_requested = true;
 	    // also get approx while we're at it
@@ -269,7 +269,7 @@ namespace Realm {
       } else {
 	if(!this->approx_valid) {
 	  // do we need to request the data?
-	  if((NodeID(ID(me).sparsity_creator_node()) != my_node_id) && !approx_requested) {
+	  if((NodeID(ID(me).sparsity_creator_node()) != Network::my_node_id) && !approx_requested) {
 	    request_approx = true;
 	    approx_requested = true;
 	  }
@@ -305,7 +305,7 @@ namespace Realm {
   template <int N, typename T>
   void SparsityMapImpl<N,T>::set_contributor_count(int count)
   {
-    if(NodeID(ID(me).sparsity_creator_node()) == my_node_id) {
+    if(NodeID(ID(me).sparsity_creator_node()) == Network::my_node_id) {
       // increment the count atomically - if it brings the total up to 0 (which covers count == 0),
       //  immediately finalize - the contributions happened before we got here
       // just increment the count atomically
@@ -326,7 +326,7 @@ namespace Realm {
   {
     NodeID owner = ID(me).sparsity_creator_node();
 
-    if(owner != my_node_id) {
+    if(owner != Network::my_node_id) {
       // send (the lack of) data to the owner to collect
       ActiveMessage<RemoteSparsityContrib> amsg(owner, 0);
       amsg->sparsity = me;
@@ -348,7 +348,7 @@ namespace Realm {
   {
     NodeID owner = ID(me).sparsity_creator_node();
 
-    if(owner != my_node_id) {
+    if(owner != Network::my_node_id) {
       // send the data to the owner to collect
       int seq_id = fragment_assembler.get_sequence_id();
       const size_t max_to_send = DeppartConfig::cfg_max_bytes_per_packet / sizeof(Rect<N,T>);
@@ -390,7 +390,7 @@ namespace Realm {
 						  size_t count, bool last)
   {
     if(count > 0) {
-      AutoHSLLock al(mutex);
+      AutoLock<> al(mutex);
 
       if(N == 1) {
 	// demand that our input data is sorted
@@ -532,7 +532,7 @@ namespace Realm {
     }
 
     if(last) {
-      if(NodeID(ID(me).sparsity_creator_node()) == my_node_id) {
+      if(NodeID(ID(me).sparsity_creator_node()) == Network::my_node_id) {
 	// we're the owner, so remaining_contributor_count tracks our expected contributions
 	// count is allowed to go negative if we get contributions before we know the total expected
 	int left = __sync_sub_and_fetch(&remaining_contributor_count, 1);
@@ -561,14 +561,14 @@ namespace Realm {
     bool request_approx = false;
     bool request_precise = false;
     {
-      AutoHSLLock al(mutex);
+      AutoLock<> al(mutex);
 
       if(precise) {
 	if(!this->entries_valid) {
 	  precise_waiters.push_back(uop);
 	  registered = true;
 	  // do we need to request the data?
-	  if((NodeID(ID(me).sparsity_creator_node()) != my_node_id) && !precise_requested) {
+	  if((NodeID(ID(me).sparsity_creator_node()) != Network::my_node_id) && !precise_requested) {
 	    request_precise = true;
 	    precise_requested = true;
 	    // also get approx while we're at it
@@ -581,7 +581,7 @@ namespace Realm {
 	  approx_waiters.push_back(uop);
 	  registered = true;
 	  // do we need to request the data?
-	  if((NodeID(ID(me).sparsity_creator_node()) != my_node_id) && !approx_requested) {
+	  if((NodeID(ID(me).sparsity_creator_node()) != Network::my_node_id) && !approx_requested) {
 	    request_approx = true;
 	    approx_requested = true;
 	  }
@@ -604,13 +604,13 @@ namespace Realm {
   void SparsityMapImpl<N,T>::remote_data_request(NodeID requestor, bool send_precise, bool send_approx)
   {
     // first sanity check - we should be the owner of the data
-    assert(NodeID(ID(me).sparsity_creator_node()) == my_node_id);
+    assert(NodeID(ID(me).sparsity_creator_node()) == Network::my_node_id);
 
     // take the long to determine atomically if we can send data or if we need to register as a listener
     bool reply_precise = false;
     bool reply_approx = false;
     {
-      AutoHSLLock al(mutex);
+      AutoLock<> al(mutex);
 
       // always add the requestor to the sharer list
       remote_sharers.add(requestor);
@@ -799,7 +799,7 @@ namespace Realm {
     }
 
     // now that we've got our entries nice and tidy, build a bounded approximation of them
-    if(true /*ID(me).sparsity_creator_node() == my_node_id*/) {
+    if(true /*ID(me).sparsity_creator_node() == Network::my_node_id*/) {
       assert(!this->approx_valid);
       compute_approximation(this->entries, this->approx_rects, DeppartConfig::cfg_max_rects_in_approximation);
       this->approx_valid = true;
@@ -820,7 +820,7 @@ namespace Realm {
     Event trigger_approx = Event::NO_EVENT;
     std::vector<PartitioningMicroOp *> precise_waiters_copy, approx_waiters_copy;
     {
-      AutoHSLLock al(mutex);
+      AutoLock<> al(mutex);
 
       assert(!this->entries_valid);
       this->entries_valid = true;
@@ -848,7 +848,7 @@ namespace Realm {
       (*it)->sparsity_map_ready(this, false);
 
     if(!sendto_approx.empty()) {
-      for(NodeID i = 0; (i <= max_node_id) && !sendto_approx.empty(); i++)
+      for(NodeID i = 0; (i <= Network::max_node_id) && !sendto_approx.empty(); i++)
 	if(sendto_approx.contains(i)) {
 	  bool also_precise = sendto_precise.contains(i);
 	  if(also_precise)
@@ -859,7 +859,7 @@ namespace Realm {
     }
 
     if(!sendto_precise.empty()) {
-      for(NodeID i = 0; (i <= max_node_id) && !sendto_precise.empty(); i++)
+      for(NodeID i = 0; (i <= Network::max_node_id) && !sendto_precise.empty(); i++)
 	if(sendto_precise.contains(i)) {
 	  remote_data_reply(i, true, false);
 	  sendto_precise.remove(i);
@@ -910,7 +910,7 @@ namespace Realm {
 
     // rest of this has to be protected by a lock
     {
-      AutoHSLLock al(mutex);
+      AutoLock<> al(mutex);
 
       std::map<int, int>& by_sender = fragments[sender];
 

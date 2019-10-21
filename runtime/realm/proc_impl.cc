@@ -62,7 +62,7 @@ namespace Realm {
     /*static*/ Processor Processor::create_group(const std::vector<Processor>& members)
     {
       // are we creating a local group?
-      if((members.size() == 0) || (NodeID(ID(members[0]).proc_owner_node()) == my_node_id)) {
+      if((members.size() == 0) || (NodeID(ID(members[0]).proc_owner_node()) == Network::my_node_id)) {
 	ProcessorGroup *grp = get_runtime()->local_proc_group_free_list->alloc_entry();
 	grp->set_group_members(members);
 #ifdef EVENT_GRAPH_TRACE
@@ -228,7 +228,7 @@ namespace Realm {
       ID id(*this);
       if(id.is_processor()) {
 	NodeID n = id.proc_owner_node();
-	if(n == my_node_id)
+	if(n == Network::my_node_id)
 	  local_procs.push_back(*this);
 	else
 	  remote_procs[n].push_back(*this);
@@ -243,7 +243,7 @@ namespace Realm {
 	    it++) {
 	  Processor p = *it;
 	  NodeID n = ID(p).proc_owner_node();
-	  if(n == my_node_id)
+	  if(n == Network::my_node_id)
 	    local_procs.push_back(p);
 	  else
 	    remote_procs[n].push_back(p);
@@ -343,9 +343,9 @@ namespace Realm {
 	  assert(0);
 	}
 
-	for(NodeID target = 0; target <= max_node_id; target++) {
+	for(NodeID target = 0; target <= Network::max_node_id; target++) {
 	  // skip ourselves
-	  if(target == my_node_id)
+	  if(target == Network::my_node_id)
 	    continue;
 
 	  RemoteTaskRegistration *reg_op = new RemoteTaskRegistration(tro, target);
@@ -497,7 +497,7 @@ namespace Realm {
 	  Task *leader = 0;
 	  Task *evicted = 0;
 	  {
-	    AutoHSLLock al(cache->mutex);
+	    AutoLock<> al(cache->mutex);
 	    size_t i = 0;
 	    while((i < DeferredSpawnCache::MAX_ENTRIES) &&
 		  (cache->events[i] != start_event)) i++;
@@ -596,7 +596,7 @@ namespace Realm {
     void ProcessorGroup::set_group_members(const std::vector<Processor>& member_list)
     {
       // can only be performed on owner node
-      assert(NodeID(ID(me).pgroup_owner_node()) == my_node_id);
+      assert(NodeID(ID(me).pgroup_owner_node()) == Network::my_node_id);
       
       // can only be done once
       assert(!members_valid);
@@ -659,7 +659,7 @@ namespace Realm {
     {
       // check for spawn to remote processor group
       NodeID target = ID(me).pgroup_owner_node();
-      if(target != my_node_id) {
+      if(target != Network::my_node_id) {
 	Event e = finish_event->make_event(finish_gen);
 	log_task.debug() << "sending remote spawn request:"
 			 << " func=" << func_id

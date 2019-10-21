@@ -21,7 +21,7 @@
 // so that we get types and stuff right
 #include <cuda_runtime.h>
 
-#include "realm/activemsg.h"
+#include "realm/mutex.h"
 
 #include <set>
 #include <vector>
@@ -93,7 +93,7 @@ namespace Realm {
       static void register_function(RegisteredFunction *func);
 
     protected:
-      GASNetHSL mutex;
+      Mutex mutex;
       std::set<GPU *> active_gpus;
       std::vector<FatBin *> fat_binaries;
       std::vector<RegisteredVariable *> variables;

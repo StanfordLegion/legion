@@ -1030,7 +1030,7 @@ namespace Realm {
     // execute wherever our sparsity output is
     NodeID exec_node = ID(sparsity_output).sparsity_creator_node();
 
-    if(exec_node != my_node_id) {
+    if(exec_node != Network::my_node_id) {
       forward_microop<UnionMicroOp<N,T> >(exec_node, op, this);
       return;
     }
@@ -1192,7 +1192,7 @@ namespace Realm {
     // execute wherever our sparsity output is
     NodeID exec_node = ID(sparsity_output).sparsity_creator_node();
 
-    if(exec_node != my_node_id) {
+    if(exec_node != Network::my_node_id) {
       forward_microop<IntersectionMicroOp<N,T> >(exec_node, op, this);
       return;
     }
@@ -1425,7 +1425,7 @@ namespace Realm {
     // execute wherever our sparsity output is
     NodeID exec_node = ID(sparsity_output).sparsity_creator_node();
 
-    if(exec_node != my_node_id) {
+    if(exec_node != Network::my_node_id) {
       forward_microop<DifferenceMicroOp<N,T> >(exec_node, op, this);
       return;
     }
@@ -1505,7 +1505,7 @@ namespace Realm {
     int target_node;
     if(lhs.dense()) {
       if(rhs.dense()) {
-	target_node = my_node_id;  // operation will be cheap anyway
+	target_node = Network::my_node_id;  // operation will be cheap anyway
       } else {
 	target_node = ID(rhs.sparsity).sparsity_creator_node();
       }
@@ -1518,7 +1518,7 @@ namespace Realm {
 	//if(lhs_node != rhs_node)
 	//  std::cout << "UNION PICK " << lhs_node << " or " << rhs_node << "\n";
 	// if they're different, and lhs is us, choose rhs to load-balance maybe
-	target_node = (lhs_node == my_node_id) ? rhs_node : lhs_node;
+	target_node = (lhs_node == Network::my_node_id) ? rhs_node : lhs_node;
       }
     }
     SparsityMap<N,T> sparsity = get_runtime()->get_available_sparsity_impl(target_node)->me.convert<SparsityMap<N,T> >();
@@ -1545,7 +1545,7 @@ namespace Realm {
       output.bounds = output.bounds.union_bbox(ops[i].bounds);
 
     // try to assign sparsity ID near the input sparsity maps (if present)
-    int target_node = my_node_id;
+    int target_node = Network::my_node_id;
     int node_count = 0;
     for(size_t i = 0; i < ops.size(); i++)
       if(!ops[i].dense()) {
@@ -1555,7 +1555,7 @@ namespace Realm {
 	  target_node = node;
 	} else if((node_count == 1) && (node != target_node)) {
 	  //std::cout << "UNION DIFF " << target_node << " or " << node << "\n";
-	  target_node = my_node_id;
+	  target_node = Network::my_node_id;
 	  break;
 	}
       }
@@ -1622,7 +1622,7 @@ namespace Realm {
     int target_node;
     if(lhs.dense()) {
       if(rhs.dense()) {
-	target_node = my_node_id;  // operation will be cheap anyway
+	target_node = Network::my_node_id;  // operation will be cheap anyway
       } else {
 	target_node = ID(rhs.sparsity).sparsity_creator_node();
       }
@@ -1635,7 +1635,7 @@ namespace Realm {
 	//if(lhs_node != rhs_node)
 	//  std::cout << "ISECT PICK " << lhs_node << " or " << rhs_node << "\n";
 	// if they're different, and lhs is us, choose rhs to load-balance maybe
-	target_node = (lhs_node == my_node_id) ? rhs_node : lhs_node;
+	target_node = (lhs_node == Network::my_node_id) ? rhs_node : lhs_node;
       }
     }
     SparsityMap<N,T> sparsity = get_runtime()->get_available_sparsity_impl(target_node)->me.convert<SparsityMap<N,T> >();
@@ -1665,7 +1665,7 @@ namespace Realm {
     assert(!output.bounds.empty());
 
     // try to assign sparsity ID near the input sparsity maps (if present)
-    int target_node = my_node_id;
+    int target_node = Network::my_node_id;
     int node_count = 0;
     for(size_t i = 0; i < ops.size(); i++)
       if(!ops[i].dense()) {
@@ -1675,7 +1675,7 @@ namespace Realm {
 	  target_node = node;
 	} else if((node_count == 1) && (node != target_node)) {
 	  //std::cout << "ISECT DIFF " << target_node << " or " << node << "\n";
-	  target_node = my_node_id;
+	  target_node = Network::my_node_id;
 	  break;
 	}
       }
@@ -1742,7 +1742,7 @@ namespace Realm {
     int target_node;
     if(lhs.dense()) {
       if(rhs.dense()) {
-	target_node = my_node_id;  // operation will be cheap anyway
+	target_node = Network::my_node_id;  // operation will be cheap anyway
       } else {
 	target_node = ID(rhs.sparsity).sparsity_creator_node();
       }
@@ -1755,7 +1755,7 @@ namespace Realm {
 	//if(lhs_node != rhs_node)
 	//  std::cout << "DIFF PICK " << lhs_node << " or " << rhs_node << "\n";
 	// if they're different, and lhs is us, choose rhs to load-balance maybe
-	target_node = (lhs_node == my_node_id) ? rhs_node : lhs_node;
+	target_node = (lhs_node == Network::my_node_id) ? rhs_node : lhs_node;
       }
     }
     SparsityMap<N,T> sparsity = get_runtime()->get_available_sparsity_impl(target_node)->me.convert<SparsityMap<N,T> >();

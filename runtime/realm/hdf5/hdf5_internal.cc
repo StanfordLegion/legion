@@ -37,19 +37,6 @@ namespace Realm {
       // close all HDF metadata
     }
 
-    off_t HDF5Memory::alloc_bytes(size_t size)
-    {
-      // We don't have to actually allocate bytes
-      // for HDF memory. So we do nothing in this
-      // function
-      return 0;
-    }
-
-    void HDF5Memory::free_bytes(off_t offset, size_t size)
-    {
-      // We don't have to free bytes for HDF memory
-    }
-
     void HDF5Memory::get_bytes(off_t offset, void *dst, size_t size)
     {
       assert(0);
@@ -109,7 +96,7 @@ namespace Realm {
 
     int HDF5Memory::get_home_node(off_t offset, size_t size)
     {
-      return my_node_id;
+      return Network::my_node_id;
     }
 
 

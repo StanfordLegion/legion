@@ -44,10 +44,6 @@ namespace Realm {
 
       virtual ~HDF5Memory(void);
 
-      virtual off_t alloc_bytes(size_t size);
-
-      virtual void free_bytes(off_t offset, size_t size);
-
       virtual void get_bytes(off_t offset, void *dst, size_t size);
 
       virtual void put_bytes(off_t offset, const void *src, size_t size);

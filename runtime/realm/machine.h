@@ -259,7 +259,7 @@ namespace Realm {
       MachineQueryIterator(const QT& _query, RT _result);
 
     protected:
-      const QT& query;
+      QT query;
       RT result;
 
     public:

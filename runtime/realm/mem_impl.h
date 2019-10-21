@@ -36,6 +36,9 @@
 namespace Realm {
 
   class RegionInstanceImpl;
+  class NetworkModule;
+  class NetworkSegment;
+  class ByteArray;
 
   // manages a basic free list of ranges (using range type RT) and allocated
   //  ranges, which are tagged (tag type TT)
@@ -117,14 +120,8 @@ namespace Realm {
       virtual void release_instance_storage(RegionInstanceImpl *inst,
 					    Event precondition);
 
-      off_t alloc_bytes_local(size_t size);
-      void free_bytes_local(off_t offset, size_t size);
-
-      off_t alloc_bytes_remote(size_t size);
-      void free_bytes_remote(off_t offset, size_t size);
-
-      virtual off_t alloc_bytes(size_t size) = 0;
-      virtual void free_bytes(off_t offset, size_t size) = 0;
+      virtual off_t alloc_bytes_local(size_t size);
+      virtual void free_bytes_local(off_t offset, size_t size);
 
       virtual void get_bytes(off_t offset, void *dst, size_t size) = 0;
       virtual void put_bytes(off_t offset, const void *src, size_t size) = 0;
@@ -138,14 +135,15 @@ namespace Realm {
       virtual void *get_direct_ptr(off_t offset, size_t size) = 0;
       virtual int get_home_node(off_t offset, size_t size) = 0;
 
-      virtual void *local_reg_base(void) { return 0; };
+      // gets info related to rdma access from other nodes
+      virtual const ByteArray *get_rdma_info(NetworkModule *network) { return 0; }
 
       Memory::Kind get_kind(void) const;
 
       struct InstanceList {
 	std::vector<RegionInstanceImpl *> instances;
 	std::vector<size_t> free_list;
-	GASNetHSL mutex;
+	Mutex mutex;
       };
     public:
       Memory me;
@@ -158,12 +156,12 @@ namespace Realm {
       //  instances, but we use a map indexed by creator node for others,
       //  and protect lookups in it with its own mutex
       std::map<NodeID, InstanceList *> instances_by_creator;
-      GASNetHSL instance_map_mutex;
+      Mutex instance_map_mutex;
       InstanceList local_instances;
 
-      GASNetHSL mutex; // protection for resizing vectors
+      Mutex mutex; // protection for resizing vectors
       std::map<off_t, off_t> free_blocks;
-      GASNetHSL allocator_mutex;
+      Mutex allocator_mutex;
       BasicRangeAllocator<size_t, RegionInstance> allocator;
       ProfilingGauges::AbsoluteGauge<size_t> usage, peak_usage, peak_footprint;
     };
@@ -173,60 +171,24 @@ namespace Realm {
       static const size_t ALIGNMENT = 256;
 
       LocalCPUMemory(Memory _me, size_t _size, int numa_node, Memory::Kind _lowlevel_kind,
-		     void *prealloc_base = 0, bool _registered = false);
+		     void *prealloc_base = 0,
+		     const NetworkSegment *_segment = 0);
 
       virtual ~LocalCPUMemory(void);
 
-      virtual off_t alloc_bytes(size_t size);
-      virtual void free_bytes(off_t offset, size_t size);
       virtual void get_bytes(off_t offset, void *dst, size_t size);
       virtual void put_bytes(off_t offset, const void *src, size_t size);
       virtual void *get_direct_ptr(off_t offset, size_t size);
       virtual int get_home_node(off_t offset, size_t size);
-      virtual void *local_reg_base(void);
 
+      virtual const ByteArray *get_rdma_info(NetworkModule *network);
+      
     public:
       const int numa_node;
     public: //protected:
       char *base, *base_orig;
-      bool prealloced, registered;
-    };
-
-    class GASNetMemory : public MemoryImpl {
-    public:
-      static const size_t MEMORY_STRIDE = 1024;
-
-      GASNetMemory(Memory _me, size_t size_per_node);
-
-      virtual ~GASNetMemory(void);
-
-      virtual off_t alloc_bytes(size_t size);
-
-      virtual void free_bytes(off_t offset, size_t size);
-
-      virtual void get_bytes(off_t offset, void *dst, size_t size);
-
-      virtual void put_bytes(off_t offset, const void *src, size_t size);
-
-      virtual void apply_reduction_list(off_t offset, const ReductionOpUntyped *redop,
-					size_t count, const void *entry_buffer);
-
-      virtual void *get_direct_ptr(off_t offset, size_t size);
-      virtual int get_home_node(off_t offset, size_t size);
-
-      void get_batch(size_t batch_size,
-		     const off_t *offsets, void * const *dsts, 
-		     const size_t *sizes);
-
-      void put_batch(size_t batch_size,
-		     const off_t *offsets, const void * const *srcs, 
-		     const size_t *sizes);
-
-    protected:
-      int num_nodes;
-      off_t memory_stride;
-      std::vector<char *> segbases;
-      //std::map<off_t, off_t> free_blocks;
+      bool prealloced;
+      const NetworkSegment *segment;
     };
 
     class DiskMemory : public MemoryImpl {
@@ -236,10 +198,6 @@ namespace Realm {
       DiskMemory(Memory _me, size_t _size, std::string _file);
 
       virtual ~DiskMemory(void);
-
-      virtual off_t alloc_bytes(size_t size);
-
-      virtual void free_bytes(off_t offset, size_t size);
 
       virtual void get_bytes(off_t offset, void *dst, size_t size);
 
@@ -264,10 +222,6 @@ namespace Realm {
 
       virtual ~FileMemory(void);
 
-      virtual off_t alloc_bytes(size_t size);
-
-      virtual void free_bytes(off_t offset, size_t size);
-
       virtual void get_bytes(off_t offset, void *dst, size_t size);
       void get_bytes(ID::IDType inst_id, off_t offset, void *dst, size_t size);
 
@@ -283,25 +237,27 @@ namespace Realm {
       int get_file_des(ID::IDType inst_id);
     public:
       std::vector<int> file_vec;
-      GASNetHSL vector_lock;
+      Mutex vector_lock;
       off_t next_offset;
       std::map<off_t, int> offset_map;
     };
 
     class RemoteMemory : public MemoryImpl {
     public:
-      RemoteMemory(Memory _me, size_t _size, Memory::Kind k, void *_regbase);
+      RemoteMemory(Memory _me, size_t _size, Memory::Kind k,
+		   MemoryKind mk = MKIND_REMOTE);
       virtual ~RemoteMemory(void);
 
-      virtual off_t alloc_bytes(size_t size);
-      virtual void free_bytes(off_t offset, size_t size);
+      // these are disallowed on a remote memory
+      virtual off_t alloc_bytes_local(size_t size);
+      virtual void free_bytes_local(off_t offset, size_t size);
+      
       virtual void get_bytes(off_t offset, void *dst, size_t size);
       virtual void put_bytes(off_t offset, const void *src, size_t size);
       virtual void *get_direct_ptr(off_t offset, size_t size);
       virtual int get_home_node(off_t offset, size_t size);
 
-    public:
-      void *regbase;
+      virtual void *get_remote_addr(off_t offset);
     };
 
 
@@ -343,23 +299,6 @@ namespace Realm {
       RegionInstance inst;
 
       static void handle_message(NodeID sender, const MemStorageReleaseResponse &msg,
-				 const void *data, size_t datalen);
-    };
-
-    struct RemoteMemAllocRequest {
-      void *resp_ptr;
-      Memory memory;
-      size_t size;
-
-      static void handle_message(NodeID sender, const RemoteMemAllocRequest &msg,
-				 const void *data, size_t datalen);
-    };
-
-    struct RemoteMemAllocResponse {
-      void *resp_ptr;
-      off_t offset;
-
-      static void handle_message(NodeID sender, const RemoteMemAllocResponse &msg,
 				 const void *data, size_t datalen);
     };
 

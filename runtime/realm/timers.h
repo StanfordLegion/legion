@@ -18,7 +18,7 @@
 #ifndef REALM_TIMERS_H
 #define REALM_TIMERS_H
 #ifdef DETAILED_TIMING
-#include "realm/activemsg.h"
+#include "realm/network.h"
 #endif
 
 #include <stdio.h>

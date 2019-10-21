@@ -59,7 +59,7 @@ namespace Realm {
   inline /*static*/ void GenEventImpl::trigger(Event e, bool poisoned)
   {
     GenEventImpl *impl = get_genevent_impl(e);
-    impl->trigger(ID(e).event_generation(), my_node_id, poisoned);
+    impl->trigger(ID(e).event_generation(), Network::my_node_id, poisoned);
   }
 
 

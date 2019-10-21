@@ -181,7 +181,7 @@ namespace Realm {
 	  bool alloc_done, alloc_successful;
 	  // use mutex to avoid race on allocation callback
 	  {
-	    AutoHSLLock al(impl->mutex);
+	    AutoLock<> al(impl->mutex);
 	    if(impl->metadata.inst_offset != (size_t)-1) {
 	      alloc_done = true;
 	      alloc_successful = (impl->metadata.inst_offset != (size_t)-2);
@@ -473,7 +473,7 @@ namespace Realm {
 	  // poison the completion event, if it exists
 	  Event ready_event = Event::NO_EVENT;
 	  {
-	    AutoHSLLock al(mutex);
+	    AutoLock<> al(mutex);
 	    ready_event = metadata.ready_event;
 	    metadata.ready_event = Event::NO_EVENT;
 	    metadata.inst_offset = (size_t)-2;
@@ -524,7 +524,7 @@ namespace Realm {
       //  are no races between it and getting the ready event 
       Event ready_event;
       {
-	AutoHSLLock al(mutex);
+	AutoLock<> al(mutex);
 	ready_event = metadata.ready_event;
 	metadata.ready_event = Event::NO_EVENT;
 	metadata.inst_offset = offset;

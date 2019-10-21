@@ -575,7 +575,7 @@ namespace Realm {
   {
     log_thread.info() << "sending signal: target=" << (void *)this << " signal=" << sig << " async=" << asynchronous;
     {
-      AutoHSLLock a(signal_mutex);
+      AutoLock<> a(signal_mutex);
       signal_queue.push_back(sig);
     }
     int prev = __sync_fetch_and_add(&signal_count, 1);
@@ -588,7 +588,7 @@ namespace Realm {
     if(signal_count) {
       Signal sig;
       __sync_fetch_and_sub(&signal_count, 1);
-      AutoHSLLock a(signal_mutex);
+      AutoLock<> a(signal_mutex);
       sig = signal_queue.front();
       signal_queue.pop_front();
       return sig;
@@ -605,7 +605,7 @@ namespace Realm {
       Signal sig;
       {
 	__sync_fetch_and_sub(&signal_count, 1);
-	AutoHSLLock a(signal_mutex);
+	AutoLock<> a(signal_mutex);
 	// should never be empty, as there's no race conditions on emptying the queue
 	assert(!signal_queue.empty());
 	sig = signal_queue.front();
