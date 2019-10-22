@@ -3288,11 +3288,8 @@ static void *bytedup(const void *data, size_t datalen)
     {
       // TODO: lock-free version for non-resizable case
       AutoLock<> al(mutex);
-      cur_events++;
-      if(was_pending)
-	pending_events--;
       // check for overflow
-      if(cur_events > max_events) {
+      if(cur_events >= max_events) {
 	if(!resizable) {
 	  log_compqueue.fatal() << "completion queue overflow: cq=" << me << " size=" << max_events;
 	  abort();
@@ -3316,6 +3313,11 @@ static void *bytedup(const void *data, size_t datalen)
 	wr_ptr = cur_events;
 	max_events = new_size;
       }
+
+      cur_events++;
+      if(was_pending)
+	pending_events--;
+
       completed_events[wr_ptr++] = event;
       if(wr_ptr >= max_events)
 	wr_ptr -= max_events;
