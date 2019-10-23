@@ -2218,6 +2218,7 @@ namespace Legion {
       : trace(t), recording(true), replayable(false, "uninitialized"),
         fence_completion_id(0),
         replay_parallelism(t->runtime->max_replay_parallelism),
+        has_virtual_mapping(false),
         recording_done(RtUserEvent::NO_RT_USER_EVENT),
         pre(t->runtime->forest), post(t->runtime->forest),
         pre_reductions(t->runtime->forest), post_reductions(t->runtime->forest),
@@ -2263,7 +2264,12 @@ namespace Legion {
               it->second.physical_instances.begin(); pit !=
               it->second.physical_instances.end(); pit++)
           {
-            pit->remove_valid_references(MAPPING_ACQUIRE_REF);
+            for (unsigned idx = 0; idx < pit->size(); idx++)
+            {
+              const InstanceRef &ref = (*pit)[idx];
+              if (!ref.is_virtual_ref())
+                ref.remove_valid_reference(MAPPING_ACQUIRE_REF);
+            }
             pit->clear();
           }
         }
@@ -2384,7 +2390,7 @@ namespace Legion {
       if (has_blocking_call)
         return Replayable(false, "blocking call");
 
-      if (has_virtual_mapping())
+      if (has_virtual_mapping)
         return Replayable(false, "virtual mapping");
 
       if (!pre_fill_views.empty())
@@ -3452,7 +3458,14 @@ namespace Legion {
            mapping.physical_instances.begin(); it !=
            mapping.physical_instances.end(); ++it)
       {
-        it->add_valid_references(MAPPING_ACQUIRE_REF);
+        for (unsigned idx = 0; idx < it->size(); idx++)
+        {
+          const InstanceRef &ref = (*it)[idx];
+          if (ref.is_virtual_ref())
+            has_virtual_mapping = true;
+          else
+            ref.add_valid_reference(MAPPING_ACQUIRE_REF);
+        }
       }
     }
 
@@ -4286,28 +4299,6 @@ namespace Legion {
             users.insert(finder->second);
           }
         }
-    }
-
-    //--------------------------------------------------------------------------
-    bool PhysicalTemplate::has_virtual_mapping(void) const
-    //--------------------------------------------------------------------------
-    {
-      for (CachedMappings::const_iterator cit = 
-            cached_mappings.begin(); cit != cached_mappings.end(); cit++)
-      {
-        for (std::deque<InstanceSet>::const_iterator it = 
-              cit->second.physical_instances.begin(); it != 
-              cit->second.physical_instances.end(); it++)
-        {
-          for (unsigned idx = 0; idx < it->size(); idx++)
-          {
-            const InstanceRef &ref = (*it)[idx];
-            if (ref.is_virtual_ref())
-              return true;
-          }
-        }
-      }
-      return false;
     }
 
     /////////////////////////////////////////////////////////////

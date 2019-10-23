@@ -113,7 +113,9 @@ void spawner_task(const void *args, size_t arglen,
       w_args.exec_time += PRNG::rand_int(PKEY_DELAY, s_args.index, i,
 					 (s_args.config.max_exec_time -
 					  s_args.config.min_exec_time));
-    Event e = target.spawn(WORK_TASK, &w_args, sizeof(w_args));
+    // work tasks get a higher priority to get ahead of the reaping task
+    Event e = target.spawn(WORK_TASK, &w_args, sizeof(w_args),
+			   ProfilingRequestSet(), Event::NO_EVENT, 1);
     log_app.info() << "added event: " << e;
     cq.add_event(e);
     in_flight++;
@@ -130,23 +132,10 @@ void spawner_task(const void *args, size_t arglen,
 	      s_args.config.max_to_pop);
 }
   
-void top_level_task(const void *args, size_t arglen,
-		    const void *userdata, size_t userlen, Processor p)
-{
-  const TestConfig& config = *reinterpret_cast<const TestConfig *>(args);
 
-  Machine::ProcessorQuery pq(Machine::get_machine());
-  pq.only_kind(p.kind());
-  std::vector<Processor> procs(pq.begin(), pq.end());
-  
-  log_app.print() << "compqueue test: " << procs.size() << " procs, "
-		  << config.tasks_per_proc << " tasks/proc, "
-		  << config.max_in_flight << " in flight, "
-		  << config.max_to_pop << " max pop";
-  
-  // create a completion queue - it should not ever have to hold more
-  //  than #procs * max_in_flight events
-  size_t cq_size = procs.size() * config.max_in_flight;
+void test_cq(const TestConfig& config,
+	     const std::vector<Processor>& procs, size_t cq_size)
+{
   CompletionQueue cq = CompletionQueue::create_completion_queue(cq_size);
 
   // set a timeout to catch hangs
@@ -171,6 +160,29 @@ void top_level_task(const void *args, size_t arglen,
     alarm(0);
   
   cq.destroy();
+}
+
+void top_level_task(const void *args, size_t arglen,
+		    const void *userdata, size_t userlen, Processor p)
+{
+  const TestConfig& config = *reinterpret_cast<const TestConfig *>(args);
+
+  Machine::ProcessorQuery pq(Machine::get_machine());
+  pq.only_kind(p.kind());
+  std::vector<Processor> procs(pq.begin(), pq.end());
+
+  log_app.print() << "compqueue test: " << procs.size() << " procs, "
+		  << config.tasks_per_proc << " tasks/proc, "
+		  << config.max_in_flight << " in flight, "
+		  << config.max_to_pop << " max pop";
+
+  // create a completion queue - it should not ever have to hold more
+  //  than #procs * max_in_flight events
+  size_t cq_size = procs.size() * config.max_in_flight;
+  test_cq(config, procs, cq_size);
+
+  // also test the dynamic completion queue case
+  test_cq(config, procs, 0);
 
   log_app.info() << "completed successfully";
   
