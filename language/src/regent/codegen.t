@@ -2951,6 +2951,9 @@ local function make_partition_projection_functor(cx, expr, loop_index, color_spa
 end
 
 local function is_identity_projection(expr, loop_index)
+  if expr:is(ast.typed.expr.Projection) then
+    expr = expr.region
+  end
   assert(expr:is(ast.typed.expr.IndexAccess))
 
   -- Strip the index for the purpose of checking if this is the
