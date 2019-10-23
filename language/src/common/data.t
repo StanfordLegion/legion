@@ -224,21 +224,22 @@ function data.dict(list)
   return result
 end
 
+function data.find_key(dict, val)
+  -- given a value find the key
+  for k, v in pairs(dict) do
+    if v == val then
+      return k
+    end
+  end
+  return nil
+end
+
 function data.set(list)
   local result = {}
   for _, k in ipairs(list) do
     result[k] = true
   end
   return result
-end
-
-function data.contains(set, elem)
-  for k, _ in pairs(set) do
-    if k == elem then
-      return true
-    end
-  end
-  return false
 end
 
 

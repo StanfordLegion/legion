@@ -31,9 +31,9 @@ end
 
 task my_regent_task(r : region(ispace(int1d), fs), x : int, y : double, z : bool)
 where reads writes(r.{x, y}), reads(r.z) do
-    regentlib.c.printf("Hello from Regent! (values %d %e %d)\n", x, y, z)
-    var p = partition(equal, r, ispace(int1d, 2))
-    unexposed_task(r, p)
+  regentlib.c.printf("Hello from Regent! (values %d %e %d)\n", x, y, z)
+  var p = partition(equal, r, ispace(int1d, 2))
+  unexposed_task(r, p)
 end
 
 
@@ -55,8 +55,8 @@ else
 end
 
 local task_whitelist = {}
-task_whitelist[my_regent_task] = true
-task_whitelist[other_regent_task] = true
+task_whitelist["my_regent_task"] = my_regent_task
+task_whitelist["other_regent_task"] = other_regent_task
 
 local embed_tasks_h = embed_tasks_dir .. "embed_tasks.h"
 local embed_tasks_so = embed_tasks_dir .. "libembed_tasks.so"

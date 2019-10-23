@@ -4438,7 +4438,7 @@ end
 local function generate_task_interfaces(task_whitelist)
   local tasks = {}
   for _, variant in ipairs(variants) do
-    if task_whitelist and data.contains(task_whitelist, variant.task) then
+    if task_whitelist and data.find_key(task_whitelist, variant.task) then
       tasks[variant.task] = true
     elseif not task_whitelist then
       tasks[variant.task] = true
