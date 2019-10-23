@@ -283,13 +283,19 @@ task cholesky(n : int, np : int, verify : bool)
   var ts_start = c.legion_get_current_time_in_micros()
 
   var bn = n / np
+  
   for x = 0, np do
     dpotrf(x, n, bn, pB[f2d { x = x, y = x }])
+    __demand(__index_launch)
     for y = x + 1, np do
       dtrsm(x, y, n, bn, pB[f2d { x = x, y = y }], pB[f2d { x = x, y = x }])
     end
+    __demand(__index_launch)
     for k = x + 1, np do
       dsyrk(x, k, n, bn, pB[f2d { x = k, y = k }], pB[f2d { x = x, y = k }])
+    end
+    for k = x + 1, np do
+      __demand(__index_launch)
       for y = k + 1, np do
         dgemm(x, y, k, n, bn,
               pB[f2d { x = k, y = y }],
@@ -307,8 +313,8 @@ task cholesky(n : int, np : int, verify : bool)
 end
 
 task toplevel()
-  var n = 8
-  var np = 4
+  var n = 80*40
+  var np = 40
   var verify = false
 
   var args = c.legion_runtime_get_input_args()
