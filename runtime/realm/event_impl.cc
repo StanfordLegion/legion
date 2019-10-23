@@ -2858,6 +2858,11 @@ static void *bytedup(const void *data, size_t datalen)
   /*static*/ CompletionQueue CompletionQueue::create_completion_queue(size_t max_size)
   {
     CompQueueImpl *cq = get_runtime()->local_compqueue_free_list->alloc_entry();
+    // sanity-check that we haven't exhausted the space of cq IDs
+    if(get_runtime()->get_compqueue_impl(cq->me) != cq) {
+      log_compqueue.fatal() << "completion queue ID space exhausted!";
+      abort();
+    }
     if(max_size > 0)
       cq->set_capacity(max_size, false /*!resizable*/);
     else
@@ -3161,6 +3166,8 @@ static void *bytedup(const void *data, size_t datalen)
     max_events = 0;
     free(completed_events);
     completed_events = 0;
+
+    get_runtime()->local_compqueue_free_list->free_entry(this);
   }
 
   void CompQueueImpl::add_event(Event event, bool faultaware)
