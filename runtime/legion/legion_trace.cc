@@ -4433,6 +4433,17 @@ namespace Legion {
             memo->get_trace_local_id()));
     }
 
+#ifdef DEBUG_LEGION
+    //--------------------------------------------------------------------------
+    unsigned ShardedPhysicalTemplate::convert_event(const ApEvent &event)
+    //--------------------------------------------------------------------------
+    {
+      // We should only be recording events made on our node
+      assert(find_event_space(event) == repl_ctx->runtime->address_space);
+      return PhysicalTemplate::convert_event(event);
+    }
+#endif
+
     //--------------------------------------------------------------------------
     unsigned ShardedPhysicalTemplate::find_event(const ApEvent &event,
                                                  AutoLock &tpl_lock)

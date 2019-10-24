@@ -815,7 +815,13 @@ namespace Legion {
       unsigned find_memo_entry(Memoizable *memo);
       TraceLocalID record_memo_entry(Memoizable *memo, unsigned entry);
     protected:
+#ifdef DEBUG_LEGION
+      // This is a virtual method in debug mode only since we have an
+      // assertion that we want to check in the ShardedPhysicalTemplate
+      virtual unsigned convert_event(const ApEvent &event);
+#else
       unsigned convert_event(const ApEvent &event);
+#endif
       virtual unsigned find_event(const ApEvent &event, AutoLock &tpl_lock);
       void insert_instruction(Instruction *inst);
     private:
@@ -972,6 +978,9 @@ namespace Legion {
       void record_trace_shard_event(ApEvent event, ApBarrier result);
       void handle_trace_update(Deserializer &derez);
     protected:
+#ifdef DEBUG_LEGION
+      virtual unsigned convert_event(const ApEvent &event);
+#endif
       virtual unsigned find_event(const ApEvent &event, AutoLock &tpl_lock);
       void request_remote_shard_event(ApEvent event, RtUserEvent done_event);
       static AddressSpaceID find_event_space(ApEvent event);
