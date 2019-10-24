@@ -4434,10 +4434,14 @@ function std.saveobj(main_task, filename, filetype, extra_setup_thunk, link_flag
   profile.print_summary()
 end
 
-local function generate_task_interfaces()
+local function generate_task_interfaces(task_whitelist)
   local tasks = {}
   for _, variant in ipairs(variants) do
-    tasks[variant.task] = true
+    if task_whitelist and data.find_key(task_whitelist, variant.task) then
+      tasks[variant.task] = true
+    elseif not task_whitelist then
+      tasks[variant.task] = true
+    end
   end
 
   local task_c_iface = terralib.newlist()
@@ -4503,12 +4507,12 @@ void %s(void);
   header_basename)
 end
 
-local function write_header(header_filename, registration_name)
+local function write_header(header_filename, registration_name, task_whitelist)
   if not registration_name then
     registration_name = header_helper.normalize_name(header_filename) .. "_register"
   end
 
-  local task_c_iface, task_cxx_iface, task_impl = generate_task_interfaces()
+  local task_c_iface, task_cxx_iface, task_impl = generate_task_interfaces(task_whitelist)
 
   local header = io.open(header_filename, "w")
   assert(header)
@@ -4518,10 +4522,10 @@ local function write_header(header_filename, registration_name)
   return registration_name, task_impl
 end
 
-function std.save_tasks(header_filename, filename, filetype, link_flags, registration_name)
+function std.save_tasks(header_filename, filename, filetype, link_flags, registration_name, task_whitelist)
   assert(header_filename and filename)
   local task_wrappers = make_task_wrappers()
-  local registration_name, task_impl = write_header(header_filename, registration_name)
+  local registration_name, task_impl = write_header(header_filename, registration_name, task_whitelist)
   local _, names = std.setup(nil, nil, task_wrappers, registration_name)
   local use_cmake = os.getenv("USE_CMAKE") == "1"
   local lib_dir = os.getenv("LG_RT_DIR") .. "/../bindings/regent"

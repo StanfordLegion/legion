@@ -442,8 +442,11 @@ local function make_add_argument(launcher_name, wrapper_type, state_type,
     local field_paths, _ = base.types.flatten_struct_fields(param_type:fspace())
     arg_setup:insert(
       quote
-          base.assert([field_count] == [#field_paths],
-            ["wrong number of fields for region " .. tostring(arg_value) .. " (argument " .. param_i .. ")"])
+          if [field_count] ~= [#field_paths] then
+            c.printf([launcher_name .. " wrong number of fields for region " .. tostring(arg_value) .. " (argument " .. param_i
+                        .. ") expected: " .. #field_paths .. " got: %d\n"], field_count)
+            c.abort()
+          end
         [launcher_state].task_args.[param_field_id_array] = @[&c.legion_field_id_t[#field_paths]]([field_ids])
       end)
     local field_id_by_path = data.newmap()
@@ -655,8 +658,11 @@ local function OLD_generate_task_implementation(task)
       local field_paths, _ = base.types.flatten_struct_fields(param_type:fspace())
       args_setup:insert(
         quote
-            base.assert([field_count] == [#field_paths],
-              ["wrong number of fields for region " .. tostring(arg_value) .. " (argument " .. i .. ")"])
+            if [field_count] ~= [#field_paths] then
+              c.printf([launcher_name .. " wrong number of fields for region " .. tostring(arg_value) .. " (argument " .. param_i
+                          .. ") expected: " .. #field_paths .. " got: %d\n"], field_count)
+              c.abort()
+            end
         end)
       local field_id_by_path = data.newmap()
       for j, field_path in pairs(field_paths) do

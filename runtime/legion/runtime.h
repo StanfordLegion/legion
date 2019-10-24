@@ -538,6 +538,7 @@ namespace Legion {
       const MappingTagID tag;
       const bool leaf_region;
       const bool virtual_mapped;
+      const bool replaying;
     private:
       // Event for when the instance ref is ready
       ApEvent ready_event;

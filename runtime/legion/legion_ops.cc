@@ -4806,7 +4806,7 @@ namespace Legion {
       if (is_recording())
       {
 #ifdef DEBUG_LEGION
-        assert(tpl != NULL && tpl->is_recording());
+        assert((tpl != NULL) && tpl->is_recording());
 #endif
         tpl->record_trigger_event(local_completion, copy_done);
       }

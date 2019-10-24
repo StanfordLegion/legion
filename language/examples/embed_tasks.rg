@@ -24,9 +24,16 @@ local c = terralib.includec("embed.h", {"-I", root_dir})
 
 local fs = c.fs -- Get the field space from C header
 
+task unexposed_task(r : region(ispace(int1d), fs), p : partition(disjoint, r, ispace(int1d)))
+  regentlib.c.printf("Unexposed task!\n")
+end
+
+
 task my_regent_task(r : region(ispace(int1d), fs), x : int, y : double, z : bool)
 where reads writes(r.{x, y}), reads(r.z) do
   regentlib.c.printf("Hello from Regent! (values %d %e %d)\n", x, y, z)
+  var p = partition(equal, r, ispace(int1d, 2))
+  unexposed_task(r, p)
 end
 
 
@@ -47,7 +54,11 @@ else
   os.remove(tmpfile)  -- remove this now that we have our directory
 end
 
+local task_whitelist = {}
+task_whitelist["my_regent_task"] = my_regent_task
+task_whitelist["other_regent_task"] = other_regent_task
+
 local embed_tasks_h = embed_tasks_dir .. "embed_tasks.h"
 local embed_tasks_so = embed_tasks_dir .. "libembed_tasks.so"
-regentlib.save_tasks(embed_tasks_h, embed_tasks_so, nil, nil, "embed_tasks_register")
+regentlib.save_tasks(embed_tasks_h, embed_tasks_so, nil, nil, "embed_tasks_register", task_whitelist)
 return embed_tasks_dir

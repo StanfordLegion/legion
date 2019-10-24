@@ -2108,13 +2108,13 @@ namespace Legion {
           const void *name = NULL; size_t name_size = 0;
           forest->runtime->retrieve_semantic_information(lr, NAME_SEMANTIC_TAG,
               name, name_size, true, true);
-          std::cerr << "  "
+          log_tracing.info() << "  "
                     <<(view->is_reduction_view() ? "Reduction" : "Materialized")
                     << " view: " << view << ", Inst: " << std::hex
                     << view->get_manager()->get_instance().id << std::dec
                     << ", Index expr: " << eit->first->set_expr->expr_id
                     << ", Name: " << (name_size > 0 ? (const char*)name : "")
-                    << ", Field Mask: " << mask << std::endl;
+                    << ", Field Mask: " << mask;
           free(mask);
         }
       }
@@ -3380,34 +3380,34 @@ namespace Legion {
     void PhysicalTemplate::dump_template(void)
     //--------------------------------------------------------------------------
     {
-      std::cerr << "#### " << replayable << " " << this << " ####" << std::endl;
+      log_tracing.info() << "#### " << replayable << " " << this << " ####";
       for (unsigned sidx = 0; sidx < replay_parallelism; ++sidx)
       {
-        std::cerr << "[Slice " << sidx << "]" << std::endl;
+        log_tracing.info() << "[Slice " << sidx << "]";
         dump_instructions(slices[sidx]);
       }
       for (std::map<unsigned, unsigned>::iterator it = frontiers.begin();
            it != frontiers.end(); ++it)
-        std::cerr << "  events[" << it->second << "] = events["
-                  << it->first << "]" << std::endl;
+        log_tracing.info() << "  events[" << it->second << "] = events["
+                           << it->first << "]";
 
-      std::cerr << "[Precondition]" << std::endl;
+      log_tracing.info() << "[Precondition]";
       pre.dump();
       for (FieldMaskSet<FillView>::const_iterator vit = pre_fill_views.begin();
            vit != pre_fill_views.end(); ++vit)
       {
         char *mask = vit->second.to_string();
-        std::cerr << "  Fill view: " << vit->first
-                  << ", Field Mask: " << mask << std::endl;
+        log_tracing.info() << "  Fill view: " << vit->first
+                           << ", Field Mask: " << mask;
         free(mask);
       }
       pre_reductions.dump();
 
-      std::cerr << "[Postcondition]" << std::endl;
+      log_tracing.info() << "[Postcondition]";
       post.dump();
       post_reductions.dump();
 
-      std::cerr << "[Consumed Reductions]" << std::endl;
+      log_tracing.info() << "[Consumed Reductions]";
       consumed_reductions.dump();
     }
 
@@ -3418,7 +3418,7 @@ namespace Legion {
     {
       for (std::vector<Instruction*>::const_iterator it = instructions.begin();
            it != instructions.end(); ++it)
-        std::cerr << "  " << (*it)->to_string() << std::endl;
+        log_tracing.info() << "  " << (*it)->to_string();
     }
 
     //--------------------------------------------------------------------------

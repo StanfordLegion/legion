@@ -3339,13 +3339,6 @@ namespace Legion {
         rez.serialize(virtual_indexes[idx]);
       rez.serialize(owner_task->get_task_completion());
       rez.serialize(find_parent_context()->get_context_uid());
-      // If we're doing frames then pack a size of zero which will signal
-      // to the remote context that we could have a potentially unbounded
-      // number of tasks in its completion queue
-      if (context_configuration.min_frames_to_schedule == 0)
-        rez.serialize(context_configuration.max_window_size);
-      else
-        rez.serialize<unsigned>(0);
       // Finally pack the local field infos
       AutoLock local_lock(local_field_lock,1,false/*exclusive*/);
       rez.serialize<size_t>(local_field_infos.size());
@@ -7185,15 +7178,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(!post_task_comp_queue.exists());
 #endif
-      // Create the completion queue that we'll use for post task completion
-      // If we're using frames we need an unbounded queue (max_size=0) 
-      // otherwise we can tell the completion queue the explicit upper
-      // bound on the size of the queue is the window size
-      if (context_configuration.min_frames_to_schedule == 0)
-        post_task_comp_queue = CompletionQueue::create_completion_queue(
-            context_configuration.max_window_size);
-      else
-        post_task_comp_queue = CompletionQueue::create_completion_queue(0);
+      post_task_comp_queue = CompletionQueue::create_completion_queue(0);
     }
 
     //--------------------------------------------------------------------------
@@ -8396,11 +8381,7 @@ namespace Legion {
     {
       // We never call configure context on the top-level context but we
       // still need a completion queue here to handle things correctly
-      // We can actually get as many events in here as there are shards for
-      // a top-level task, so assume that we will never have more shards 
-      // than there are processors on this local node
-      post_task_comp_queue = 
-        CompletionQueue::create_completion_queue(rt->local_procs.size());
+      post_task_comp_queue = CompletionQueue::create_completion_queue(0);
     }
 
     //--------------------------------------------------------------------------
@@ -13992,11 +13973,7 @@ namespace Legion {
       {
         // We never call configure context on the top-level context but we
         // still need a completion queue here to handle things correctly
-        // We can actually get as many events in here as there are shards for
-        // a top-level task, so assume that we will never have more shards 
-        // than there are processors on this local node
-        post_task_comp_queue = 
-          CompletionQueue::create_completion_queue(runtime->local_procs.size());
+        post_task_comp_queue = CompletionQueue::create_completion_queue(0);
         return;
       }
       WrapperReferenceMutator mutator(preconditions);
@@ -14015,14 +13992,11 @@ namespace Legion {
       }
       derez.deserialize(remote_completion_event);
       derez.deserialize(parent_context_uid);
-      unsigned max_window_size;
-      derez.deserialize(max_window_size);
       // Make a completion queue for this context
 #ifdef DEBUG_LEGION
       assert(!post_task_comp_queue.exists());
 #endif
-      post_task_comp_queue = 
-        CompletionQueue::create_completion_queue(max_window_size);
+      post_task_comp_queue = CompletionQueue::create_completion_queue(0);
       // Unpack any local fields that we have
       unpack_local_field_update(derez);
       bool replicate;
