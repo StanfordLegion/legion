@@ -3398,17 +3398,13 @@ end
 
 local function project_type(type, fields)
   if not fields then
-    return type, terralib.newlist({
-      {data.newtuple(), data.newtuple()}
-    })
+    return type, nil
   end
 
   if #fields == 1 then
-    local result, mapping =
+    local result, suffix =
       project_type(std.get_field(type, fields[1].field_name), fields[1].fields)
-    return result, mapping:map(function(entry)
-      return { data.newtuple(fields[1].field_name) .. entry[1], entry[2] }
-    end)
+    return result, suffix or fields[1].field_name
 
   else
     assert(type:isstruct())
@@ -3416,16 +3412,10 @@ local function project_type(type, fields)
     local all_mapping = terralib.newlist()
 
     for idx, field in ipairs(fields) do
-      local field_type, mapping =
+      local field_type, suffix =
         project_type(std.get_field(type, field.field_name), field.fields)
-      local field_name = "_" .. tostring(idx - 1)
+      local field_name = suffix or field.field_name
       entries:insert({ field_name, field_type })
-      all_mapping:insertall(mapping:map(function(entry)
-        return {
-          data.newtuple(field.field_name) .. entry[1],
-          data.newtuple(field_name) .. entry[2]
-        }
-      end))
     end
 
     local result = terralib.types.newstruct("{" ..
@@ -3433,7 +3423,7 @@ local function project_type(type, fields)
           return entry[1] .. " : " .. tostring(entry[2])
         end):concat(", ") .."}")
     result.entries:insertall(entries)
-    return result, all_mapping
+    return result, nil
   end
 end
 
@@ -3456,7 +3446,7 @@ function type_check.expr_projection(cx, node)
   end
 
   -- Type check the region fields using a fake RegionRoot node
-  type_check.expr_region_root(cx,
+  local root = type_check.expr_region_root(cx,
     ast.specialized.expr.RegionRoot {
       region = node.region,
       fields = node.fields,
@@ -3464,7 +3454,14 @@ function type_check.expr_projection(cx, node)
       span = node.span,
     })
 
-  local fs_subtype, field_mapping = project_type(fs_type, node.fields)
+  local fs_subtype = project_type(fs_type, node.fields)
+  local field_mapping = nil
+  -- TODO: This flattening should be done only for singleton anonymous projections
+  if #root.fields == 1 then
+    field_mapping = terralib.newlist({ { root.fields[1], data.newtuple() } })
+  else
+    field_mapping = data.zip(root.fields, std.flatten_struct_fields(fs_subtype))
+  end
   local region_subtype = std.region(region_type:ispace(), fs_subtype)
 
   local parent_region_type = region_type

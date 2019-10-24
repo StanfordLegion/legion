@@ -29,18 +29,12 @@ fspace fs
   v : vec2;
 }
 
-struct iface
-{
-  a : double;
-  b : double;
-}
-
-task init_double(x : region(ispace(int1d), iface))
+task init_double(x : region(ispace(int1d), vec2))
 where reads writes(x)
 do
   for e in x do
-    e.a = 12345.0
-    e.b = 54321.0
+    e._x = 12345.0
+    e._y = 54321.0
   end
 end
 

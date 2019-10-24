@@ -31,8 +31,8 @@ fspace fs
 
 struct iface
 {
-  a : double;
-  b : int;
+  _x : double;
+  i : int;
 }
 
 task f(x : region(vec2))
@@ -57,8 +57,8 @@ where reads writes(x)
 do
   var cnt = 1
   for e in x do
-    e.a += double(cnt)
-    e.b += cnt * 2
+    e._x += double(cnt)
+    e.i += cnt * 2
     cnt += 1
   end
 end

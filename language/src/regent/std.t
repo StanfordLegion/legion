@@ -852,7 +852,12 @@ local function type_isomorphic(node, param_type, arg_type, check, mapping, polym
 
     for idx, param_entry in ipairs(param_entries) do
       local arg_entry = arg_entries[idx]
+
       local param_field = param_entry[1] or param_entry.field
+      local arg_field = arg_entry[1] or arg_entry.field
+      if param_field ~= arg_field then
+        report.error(node, "field name mismatch: expected " .. param_field .. " but got " .. arg_field)
+      end
       local param_type = param_entry[2] or param_entry.type
       local arg_type = arg_entry[2] or arg_entry.type
       if not type_isomorphic(node, param_type, arg_type, check, mapping, polymorphic) then
