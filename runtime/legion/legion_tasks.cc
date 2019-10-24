@@ -6867,8 +6867,13 @@ namespace Legion {
           }
         }
       }
-      // Make a new termination event for this point
-      point_termination = Runtime::create_ap_user_event();
+      // Really unusual case here, if we're going to be doing remote tracing
+      // then we need to get an event from the owner node because some kinds
+      // of tracing (e.g. those with control replication) don't work otherwise
+      if ((remote_trace_info != NULL) && (remote_trace_info->recording))
+        remote_trace_info->request_term_event(point_termination);
+      else // Make a new termination event for this point
+        point_termination = Runtime::create_ap_user_event();
     }
 
     //--------------------------------------------------------------------------

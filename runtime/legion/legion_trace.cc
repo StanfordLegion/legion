@@ -3513,6 +3513,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void PhysicalTemplate::request_term_event(ApUserEvent &term_event)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!term_event.exists() || term_event.has_triggered());
+#endif
+      term_event = Runtime::create_ap_user_event();
+    }
+
+    //--------------------------------------------------------------------------
     void PhysicalTemplate::record_create_ap_user_event(
                                               ApUserEvent lhs, Memoizable *memo)
     //--------------------------------------------------------------------------

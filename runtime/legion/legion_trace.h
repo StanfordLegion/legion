@@ -698,6 +698,7 @@ namespace Legion {
                              std::deque<InstanceSet> &physical_instances) const;
     public:
       virtual void record_get_term_event(Memoizable *memo);
+      virtual void request_term_event(ApUserEvent &term_event);
       void record_create_ap_user_event(ApUserEvent lhs, Memoizable *memo);
       void record_trigger_event(ApUserEvent lhs, ApEvent rhs);
     public:

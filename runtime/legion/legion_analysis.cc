@@ -359,6 +359,32 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void RemoteTraceRecorder::request_term_event(ApUserEvent &term_event)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!term_event.exists() || term_event.has_triggered());
+#endif
+      if (local_space != origin_space)
+      {
+        RtUserEvent ready = Runtime::create_rt_user_event();
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(remote_tpl);
+          rez.serialize(REMOTE_TRACE_REQUEST_TERM_EVENT);
+          rez.serialize(&term_event);
+          rez.serialize(ready);
+        }
+        runtime->send_remote_trace_update(origin_space, rez);
+        // Wait for the result to be set
+        ready.wait();
+      }
+      else
+        remote_tpl->request_term_event(term_event);
+    }
+
+    //--------------------------------------------------------------------------
     void RemoteTraceRecorder::record_create_ap_user_event(
                                               ApUserEvent lhs, Memoizable *memo)
     //--------------------------------------------------------------------------
@@ -860,6 +886,28 @@ namespace Legion {
             Runtime::trigger_event(applied);
             break;
           }
+        case REMOTE_TRACE_REQUEST_TERM_EVENT:
+          {
+            ApUserEvent *target;
+            derez.deserialize(target);
+            RtUserEvent ready;
+            derez.deserialize(ready);
+            ApUserEvent result;
+            tpl->request_term_event(result);
+#ifdef DEBUG_LEGION
+            assert(result.exists());
+#endif
+            Serializer rez;
+            {
+              RezCheck z2(rez);
+              rez.serialize(REMOTE_TRACE_REQUEST_TERM_EVENT);
+              rez.serialize(target);
+              rez.serialize(result);
+              rez.serialize(ready);
+            }
+            runtime->send_remote_trace_response(source, rez);
+            break;
+          }
         case REMOTE_TRACE_CREATE_USER_EVENT:
           {
             RtUserEvent applied;
@@ -1299,6 +1347,7 @@ namespace Legion {
       derez.deserialize(kind);
       switch (kind)
       {
+        case REMOTE_TRACE_REQUEST_TERM_EVENT:
         case REMOTE_TRACE_MERGE_EVENTS:
         case REMOTE_TRACE_ISSUE_COPY:
         case REMOTE_TRACE_ISSUE_FILL:

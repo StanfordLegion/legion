@@ -136,6 +136,7 @@ namespace Legion {
           std::set<RtEvent> &applied, const AddressSpaceID target) = 0; 
     public:
       virtual void record_get_term_event(Memoizable *memo) = 0;
+      virtual void request_term_event(ApUserEvent &term_event) = 0;
       virtual void record_create_ap_user_event(ApUserEvent lhs, 
                                                Memoizable *memo) = 0;
       virtual void record_trigger_event(ApUserEvent lhs, ApEvent rhs) = 0;
@@ -216,6 +217,7 @@ namespace Legion {
     public:
       enum RemoteTraceKind {
         REMOTE_TRACE_RECORD_GET_TERM,
+        REMOTE_TRACE_REQUEST_TERM_EVENT,
         REMOTE_TRACE_CREATE_USER_EVENT,
         REMOTE_TRACE_TRIGGER_EVENT,
         REMOTE_TRACE_MERGE_EVENTS,
@@ -242,6 +244,7 @@ namespace Legion {
           std::set<RtEvent> &applied, const AddressSpaceID target);
     public:
       virtual void record_get_term_event(Memoizable *memo);
+      virtual void request_term_event(ApUserEvent &term_event);
       virtual void record_create_ap_user_event(ApUserEvent lhs, 
                                                Memoizable *memo);
       virtual void record_trigger_event(ApUserEvent lhs, ApEvent rhs);
@@ -353,6 +356,11 @@ namespace Legion {
           base_sanity_check();
           rec->record_get_term_event(memo);
         }
+      inline void request_term_event(ApUserEvent &term_event)
+        {
+          base_sanity_check();
+          rec->request_term_event(term_event);
+        }
       inline void record_create_ap_user_event(ApUserEvent result) const
         {
           base_sanity_check();
@@ -398,7 +406,7 @@ namespace Legion {
         {
           base_sanity_check();
           rec->record_complete_replay(local, ready_event);
-        }
+        } 
     protected:
       inline void base_sanity_check(void) const
         {
