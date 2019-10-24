@@ -12153,6 +12153,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (runtime->no_tracing) return;
+      if (runtime->no_physical_tracing) logical_only = true;
 
       AutoRuntimeCall call(this);
 #ifdef DEBUG_LEGION
