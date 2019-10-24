@@ -54,6 +54,7 @@ namespace Legion {
     Realm::Logger log_prof("legion_prof");
     Realm::Logger log_garbage("legion_gc");
     Realm::Logger log_shutdown("shutdown");
+    Realm::Logger log_tracing("tracing");
     namespace LegionSpy {
       Realm::Logger log_spy("legion_spy");
     };
