@@ -2510,7 +2510,8 @@ namespace Legion {
     {
       std::vector<unsigned> gen;
       if (!(trace->runtime->no_trace_optimization ||
-            trace->runtime->no_fence_elision))
+            trace->runtime->no_fence_elision ||
+            is_sharded_template()))
         elide_fences(gen);
       else
       {
@@ -2774,7 +2775,7 @@ namespace Legion {
         if (used[idx])
         {
           Instruction *inst = instructions[idx];
-          if (!trace->runtime->no_fence_elision)
+          if (!(trace->runtime->no_fence_elision || is_sharded_template()))
           {
             if (inst->get_kind() == MERGE_EVENT)
             {
@@ -4681,7 +4682,11 @@ namespace Legion {
 #endif
       if (barrier.exists())
       {
+#ifdef DEBUG_LEGION
+        const unsigned index = convert_event(event, false/*check*/);
+#else
         const unsigned index = convert_event(event);
+#endif
         insert_instruction(new BarrierAdvance(*this, barrier, index)); 
         // Don't remove it, just set it to NO_EVENT so we can tell the names
         // of the remote events that we got from other shards
