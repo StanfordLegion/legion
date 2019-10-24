@@ -1262,8 +1262,10 @@ namespace Legion {
                                    MapperID mid, MappingTagID t, 
                                    bool leaf, bool virt, Runtime *rt)
       : Collectable(), runtime(rt), context(ctx), map_id(mid), tag(t),
-        leaf_region(leaf), virtual_mapped(virt), ready_event(ready), req(r), 
-        mapped(m), valid(false), trigger_on_unmap(false), made_accessor(false)
+        leaf_region(leaf), virtual_mapped(virt), 
+        replaying((ctx != NULL) ? ctx->owner_task->is_replaying() : false),
+        ready_event(ready), req(r), mapped(m), valid(false), 
+        trigger_on_unmap(false), made_accessor(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -1271,7 +1273,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     PhysicalRegionImpl::PhysicalRegionImpl(const PhysicalRegionImpl &rhs)
       : Collectable(), runtime(NULL), context(NULL), map_id(0), tag(0),
-        leaf_region(false), virtual_mapped(false), 
+        leaf_region(false), virtual_mapped(false), replaying(false),
         ready_event(ApEvent::NO_AP_EVENT), mapped(false), valid(false), 
         trigger_on_unmap(false), made_accessor(false)
     //--------------------------------------------------------------------------
@@ -1291,7 +1293,7 @@ namespace Legion {
         trigger_on_unmap = false;
         Runtime::trigger_event(termination_event);
       }
-      if (!references.empty() && !context->owner_task->is_replaying())
+      if (!references.empty() && !replaying)
         references.remove_valid_references(PHYSICAL_REGION_REF);
     }
 
