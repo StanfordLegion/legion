@@ -5966,7 +5966,6 @@ namespace Legion {
           }
 #ifdef DEBUG_LEGION
           assert(next_ctx != NULL);
-          assert(precondition.exists());
 #endif
         }
       }
