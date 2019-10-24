@@ -7129,6 +7129,16 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
     // Overwrite Analysis
     /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    static inline std::set<LogicalView*> overwrite_insert_helper(LogicalView *v)
+    //--------------------------------------------------------------------------
+    {
+      std::set<LogicalView*> result;
+      if (v != NULL)
+        result.insert(v);
+      return result;
+    }
     
     //--------------------------------------------------------------------------
     OverwriteAnalysis::OverwriteAnalysis(Runtime *rt, Operation *o, 
@@ -7139,13 +7149,12 @@ namespace Legion {
                         const PredEvent pred, const bool track, 
                         const bool restriction)
       : PhysicalAnalysis(rt, o, idx, info, true/*on heap*/), usage(use), 
-        trace_info(t_info), precondition(pre), guard_event(guard), 
-        pred_guard(pred), track_effects(track), add_restriction(restriction), 
+        views(overwrite_insert_helper(view)), trace_info(t_info), 
+        precondition(pre), guard_event(guard), pred_guard(pred), 
+        track_effects(track), add_restriction(restriction),
         output_aggregator(NULL)
     //--------------------------------------------------------------------------
     {
-      if (view != NULL)
-        const_cast<std::set<LogicalView*>*>(&views)->insert(view);
     }
 
     //--------------------------------------------------------------------------
