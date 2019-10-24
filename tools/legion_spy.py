@@ -5552,6 +5552,7 @@ class Operation(object):
         assert not self.points
         assert not other.points
         other.merged = True
+        self.replayed = self.replayed or other.replayed
 
     def record_current_version(self, point, field, tree, version_number):
         if not self.version_numbers:
