@@ -8833,11 +8833,19 @@ namespace Legion {
       for (unsigned idx = 0; idx < points.size(); idx++)
       {
         const ApEvent point_completion = points[idx]->get_task_completion();
+        // Always record this for tracing purposes
+        if (((tpl != NULL) && tpl->is_recording()) ||
+            ((remote_trace_info != NULL) && remote_trace_info->recording))
+        {
+          effects_postconditions.insert(point_completion);
+        }
+        else
+        {
 #ifndef LEGION_SPY
-        if (point_completion.has_triggered())
-          continue;
+          if (!point_completion.has_triggered())
 #endif
-        effects_postconditions.insert(point_completion);
+            effects_postconditions.insert(point_completion);
+        }
       }
       if (is_remote())
       {
