@@ -824,7 +824,7 @@ class Ispace(object):
         '__weakref__', # allow weak references
     ]
 
-    def __init__(self, extent, start=None, **kwargs):
+    def __init__(self, extent, start=None, name=None, **kwargs):
         def parse_kwargs(_handle=None, _owned=False):
             return _handle, _owned
         handle, owned = parse_kwargs(**kwargs)
@@ -833,6 +833,8 @@ class Ispace(object):
             assert handle is None
             domain = Domain(extent, start=start).raw_value()
             handle = c.legion_index_space_create_domain(_my.ctx.runtime, _my.ctx.context, domain)
+            if name is not None:
+                c.legion_index_space_attach_name(_my.ctx.runtime, handle, name.encode('utf-8'), False)
             owned = True
 
         # Important: Copy handle. Do NOT assume ownership.
@@ -909,7 +911,7 @@ class Fspace(object):
         '__weakref__', # allow weak references
     ]
 
-    def __init__(self, fields, **kwargs):
+    def __init__(self, fields, name=None, **kwargs):
         def parse_kwargs(_handle=None, _field_ids=None, _field_types=None, _owned=False):
             return _handle, _field_ids, _field_types, _owned
         handle, field_ids, field_types, owned = parse_kwargs(**kwargs)
@@ -917,6 +919,8 @@ class Fspace(object):
         if fields is not None:
             assert handle is None and field_ids is None and field_types is None
             handle = c.legion_field_space_create(_my.ctx.runtime, _my.ctx.context)
+            if name is not None:
+                c.legion_field_space_attach_name(_my.ctx.runtime, handle, name.encode('utf-8'), False)
             alloc = c.legion_field_allocator_create(
                 _my.ctx.runtime, _my.ctx.context, handle)
             field_ids = collections.OrderedDict()
@@ -1004,7 +1008,7 @@ class Region(object):
     cffi_type = 'legion_logical_region_t'
     size = ffi.sizeof(cffi_type)
 
-    def __init__(self, ispace, fspace, **kwargs):
+    def __init__(self, ispace, fspace, name=None, **kwargs):
         def parse_kwargs(_handle=None, _parent=None, _owned=False):
             return _handle, _parent, _owned
         handle, parent, owned = parse_kwargs(**kwargs)
@@ -1015,6 +1019,8 @@ class Region(object):
             fspace = Fspace.coerce(fspace)
             handle = c.legion_logical_region_create(
                 _my.ctx.runtime, _my.ctx.context, ispace.raw_value(), fspace.raw_value(), False)
+            if name is not None:
+                c.legion_logical_region_attach_name(_my.ctx.runtime, handle, name.encode('utf-8'), False)
             owned = True
 
         # Important: Copy handle. Do NOT assume ownership.

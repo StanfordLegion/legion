@@ -178,7 +178,7 @@ local function substitute_stat_var(cx, node)
   local symbol = node.symbols
   -- We should ignore the type of the existing symbol as we want to type check it again.
   local symbol_type = symbol:hastype()
-  if is_singleton_type(symbol_type) then
+  if node.values then
     symbol_type = nil
   else
     symbol_type = std.type_sub(symbol_type, cx.symbol_mapping)

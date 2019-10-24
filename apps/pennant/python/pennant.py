@@ -470,9 +470,13 @@ def main():
         ('cqe2_y', legion.float64),
     ]))
 
-    zones = Region([conf.nz], zone)
-    points = Region([conf.np], point)
-    sides = Region([conf.ns], side)
+    izones = Ispace([conf.nz], name="zones")
+    ipoints = Ispace([conf.np], name="points")
+    isides = Ispace([conf.ns], name="sides")
+
+    zones = Region(izones, zone, name="zones")
+    points = Region(ipoints, point, name="points")
+    sides = Region(isides, side, name="sides")
 
     assert conf.seq_init or conf.par_init, 'enable one of sequential or parallel initialization'
 
@@ -482,7 +486,7 @@ def main():
     assert conf.par_init
     partitions = read_partitions(zones, points, sides, conf).get()
 
-    pieces = Ispace([conf.npieces])
+    pieces = Ispace([conf.npieces], name="pieces")
 
     zones_part = create_partition(True, zones, partitions.rz_all_p, pieces)
 
