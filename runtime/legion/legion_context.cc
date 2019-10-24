@@ -5827,6 +5827,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       bool issue_task = false;
+      RtEvent precondition;
       const size_t task_index = ctx->get_owner_task()->get_context_index();
       {
         AutoLock p_lock(post_task_lock);
@@ -5839,12 +5840,44 @@ namespace Legion {
         }
         post_task_queue.push_back(
             PostTaskArgs(ctx, task_index, result, size, inst, wait_on));
-        post_task_comp_queue.add_event(wait_on);
+        if (post_task_comp_queue.exists())
+        {
+          // If we've already got a completion queue then use it
+          post_task_comp_queue.add_event(wait_on);
+        }
+        else if (post_task_queue.size() >= 
+                  context_configuration.meta_task_vector_width)
+        {
+          // Make a completion queue to use
+          post_task_comp_queue = CompletionQueue::create_completion_queue(0);
+          // Fill in the completion queue with events
+          for (std::list<PostTaskArgs>::const_iterator it = 
+                post_task_queue.begin(); it != post_task_queue.end(); it++)
+            post_task_comp_queue.add_event(it->wait_on);
+        }
+        if (issue_task)
+        {
+          if (!post_task_comp_queue.exists())
+          {
+            // Find the one with the minimum index
+            size_t min_index = 0;
+            for (std::list<PostTaskArgs>::const_iterator it = 
+                  post_task_queue.begin(); it != post_task_queue.end(); it++)
+            {
+              if (!precondition.exists() || (it->index < min_index))
+              {
+                precondition = it->wait_on;
+                min_index = it->index;
+              }
+            }
+          }
+          else
+            precondition = RtEvent(post_task_comp_queue.get_nonempty_event());
+        }
       }
       if (issue_task)
       {
         // Other things could be added to the queue by the time we're here
-        const RtEvent precondition(post_task_comp_queue.get_nonempty_event());
         PostEndArgs args(ctx->owner_task, this);
         runtime->issue_runtime_meta_task(args, 
             LG_THROUGHPUT_WORK_PRIORITY, precondition);
@@ -5855,6 +5888,7 @@ namespace Legion {
     bool InnerContext::process_post_end_tasks(void)
     //--------------------------------------------------------------------------
     {
+      RtEvent precondition;
       TaskContext *next_ctx = NULL;
       std::vector<PostTaskArgs> to_perform;
       to_perform.reserve(context_configuration.meta_task_vector_width);
@@ -5863,7 +5897,23 @@ namespace Legion {
                           context_configuration.meta_task_vector_width);
         AutoLock p_lock(post_task_lock);
         // Ask the completion queue for the ready events
-        const size_t num_ready = post_task_comp_queue.pop_events(
+        size_t num_ready = 0;
+        if (!post_task_comp_queue.exists())
+        {
+          // No completion queue so go through and do this manually
+          for (std::list<PostTaskArgs>::const_iterator it = 
+                post_task_queue.begin(); it != post_task_queue.end(); it++)
+          {
+            if (it->wait_on.has_triggered())
+            {
+              ready_events[num_ready++] = it->wait_on;
+              if (num_ready == ready_events.size())
+                break;
+            }
+          }
+        }
+        else // We can just use the comp queue to get the ready events
+          num_ready = post_task_comp_queue.pop_events(
             &ready_events.front(), ready_events.size());
 #ifdef DEBUG_LEGION
         assert(num_ready > 0);
@@ -5893,13 +5943,36 @@ namespace Legion {
             it++;
         }
         if (!post_task_queue.empty())
-          next_ctx = post_task_queue.front().context;
+        {
+          if (!post_task_comp_queue.exists())
+          {
+            // Find the one with the minimum index
+            size_t min_index = 0;
+            for (std::list<PostTaskArgs>::const_iterator it = 
+                  post_task_queue.begin(); it != post_task_queue.end(); it++)
+            {
+              if (!precondition.exists() || (it->index < min_index))
+              {
+                precondition = it->wait_on;
+                min_index = it->index;
+                next_ctx = it->context;
+              }
+            }
+          }
+          else
+          {
+            precondition = RtEvent(post_task_comp_queue.get_nonempty_event());
+            next_ctx = post_task_queue.front().context;
+          }
+#ifdef DEBUG_LEGION
+          assert(next_ctx != NULL);
+          assert(precondition.exists());
+#endif
+        }
       }
       // Launch this first to get it in flight so it can run when ready
       if (next_ctx != NULL)
       {
-        // Other things could be added to the queue by the time we're here
-        const RtEvent precondition(post_task_comp_queue.get_nonempty_event());
         PostEndArgs args(next_ctx->owner_task, this);
         runtime->issue_runtime_meta_task(args, 
             LG_THROUGHPUT_WORK_PRIORITY, precondition);
@@ -6977,11 +7050,6 @@ namespace Legion {
       // See if we permit priority mutations from child operation mapppers
       mutable_priority = context_configuration.mutable_priority; 
       current_priority = p;
-#ifdef DEBUG_LEGION
-      assert(!post_task_comp_queue.exists());
-#endif
-      // Create the completion queue that we'll use for post task completion
-      post_task_comp_queue = CompletionQueue::create_completion_queue(0);
     }
 
     //--------------------------------------------------------------------------
@@ -8180,9 +8248,6 @@ namespace Legion {
                      dummy_indexes, dummy_mapped, ctx_id)
     //--------------------------------------------------------------------------
     {
-      // We never call configure context on the top-level context but we
-      // still need a completion queue here to handle things correctly
-      post_task_comp_queue = CompletionQueue::create_completion_queue(0); 
     }
 
     //--------------------------------------------------------------------------
@@ -8639,10 +8704,7 @@ namespace Legion {
       top_level_context = (depth < 0);
       // If we're the top-level context then we're already done
       if (top_level_context)
-      {
-        post_task_comp_queue = CompletionQueue::create_completion_queue(0);
         return;
-      }
       WrapperReferenceMutator mutator(preconditions);
       remote_task.unpack_external_task(derez, runtime, &mutator);
       local_parent_req_indexes.resize(remote_task.regions.size()); 
@@ -8659,11 +8721,6 @@ namespace Legion {
       }
       derez.deserialize(remote_completion_event);
       derez.deserialize(parent_context_uid);
-      // Make a completion queue for this context
-#ifdef DEBUG_LEGION
-      assert(!post_task_comp_queue.exists());
-#endif
-      post_task_comp_queue = CompletionQueue::create_completion_queue(0);
       // Unpack any local fields that we have
       unpack_local_field_update(derez);
       
