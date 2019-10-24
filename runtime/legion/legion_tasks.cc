@@ -7595,6 +7595,8 @@ namespace Legion {
           ApUserEvent to_trigger;
           if (request_early_complete_no_trigger(to_trigger))
           {
+            // TODO: Something needs to go here for this to work with tracing
+#if 0
             if (is_recording())
             {
 #ifdef DEBUG_LEGION
@@ -7602,8 +7604,11 @@ namespace Legion {
 #endif
               tpl->record_trigger_event(to_trigger, done);
             }
+#endif
             Runtime::trigger_event(to_trigger, done);
           }
+          else
+            done.wait();
         }
         // Get the mapped precondition note we can now access this
         // without holding the lock because we know we've seen
