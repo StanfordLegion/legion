@@ -944,9 +944,7 @@ namespace Legion {
       void return_slice_mapped(unsigned points,
                                RtEvent applied_condition, 
                                ApEvent restrict_postcondition);
-      void return_slice_complete(unsigned points,
-                                 RtEvent applied_condition,
-                                 ApEvent slice_postcondition);
+      void return_slice_complete(unsigned points, RtEvent applied_condition);
       void return_slice_commit(unsigned points, RtEvent applied_condition);
     public:
       void unpack_slice_mapped(Deserializer &derez, AddressSpaceID source);
@@ -1065,8 +1063,7 @@ namespace Legion {
       void trigger_slice_commit(void);
     protected:
       void pack_remote_mapped(Serializer &rez, RtEvent applied_condition);
-      void pack_remote_complete(Serializer &rez, RtEvent applied_condition,
-                                ApEvent slice_postcondition); 
+      void pack_remote_complete(Serializer &rez, RtEvent applied_condition);
       void pack_remote_commit(Serializer &rez, RtEvent applied_condition);
     public:
       static void handle_slice_return(Runtime *rt, Deserializer &derez);
