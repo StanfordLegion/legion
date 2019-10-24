@@ -819,7 +819,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       // This is a virtual method in debug mode only since we have an
       // assertion that we want to check in the ShardedPhysicalTemplate
-      virtual unsigned convert_event(const ApEvent &event);
+      virtual unsigned convert_event(const ApEvent &event, bool check = true);
 #else
       unsigned convert_event(const ApEvent &event);
 #endif
@@ -980,7 +980,7 @@ namespace Legion {
       void handle_trace_update(Deserializer &derez);
     protected:
 #ifdef DEBUG_LEGION
-      virtual unsigned convert_event(const ApEvent &event);
+      virtual unsigned convert_event(const ApEvent &event, bool check = true);
 #endif
       virtual unsigned find_event(const ApEvent &event, AutoLock &tpl_lock);
       void request_remote_shard_event(ApEvent event, RtUserEvent done_event);

@@ -4233,7 +4233,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+#ifdef DEBUG_LEGION
+    unsigned PhysicalTemplate::convert_event(const ApEvent &event, bool check)
+#else
     inline unsigned PhysicalTemplate::convert_event(const ApEvent &event)
+#endif
     //--------------------------------------------------------------------------
     {
       unsigned event_ = events.size();
@@ -4445,12 +4449,14 @@ namespace Legion {
 
 #ifdef DEBUG_LEGION
     //--------------------------------------------------------------------------
-    unsigned ShardedPhysicalTemplate::convert_event(const ApEvent &event)
+    unsigned ShardedPhysicalTemplate::convert_event(const ApEvent &event, 
+                                                    bool check)
     //--------------------------------------------------------------------------
     {
       // We should only be recording events made on our node
-      assert(find_event_space(event) == repl_ctx->runtime->address_space);
-      return PhysicalTemplate::convert_event(event);
+      assert(!check || 
+          (find_event_space(event) == repl_ctx->runtime->address_space));
+      return PhysicalTemplate::convert_event(event, check);
     }
 #endif
 
@@ -4646,7 +4652,11 @@ namespace Legion {
         // Make a new barrier and record it in the events
         ApBarrier barrier(Realm::Barrier::create_barrier(1/*arrival count*/));
         // Record this in the instruction stream
+#ifdef DEBUG_LEGION
+        const unsigned index = convert_event(barrier, false/*check*/);
+#else
         const unsigned index = convert_event(barrier);
+#endif
         // Then add a new instruction to arrive on the barrier with the
         // event as a precondition
         insert_instruction(

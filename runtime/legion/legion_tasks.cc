@@ -9611,8 +9611,6 @@ namespace Legion {
       result->index_domain = this->index_domain;
       result->tpl = tpl;
       result->memo_state = memo_state;
-      // Now figure out our local point information
-      result->initialize_point(this, point, point_arguments);
       // Grab any remote trace info that we need from the slice
       if (remote_trace_info != NULL)
       {
@@ -9621,6 +9619,8 @@ namespace Legion {
 #endif
         result->remote_trace_info = new TraceInfo(*remote_trace_info, result);
       }
+      // Now figure out our local point information
+      result->initialize_point(this, point, point_arguments);
       if (runtime->legion_spy_enabled)
         LegionSpy::log_slice_point(get_unique_id(), 
                                    result->get_unique_id(),
