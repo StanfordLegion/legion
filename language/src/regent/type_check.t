@@ -3396,35 +3396,108 @@ function type_check.expr_import_partition(cx, node)
   }
 end
 
-local function project_type(type, fields)
+local function gather_field_types(type, fields)
   if not fields then
     return type, nil
   end
 
   if #fields == 1 then
-    local result, suffix =
-      project_type(std.get_field(type, fields[1].field_name), fields[1].fields)
-    return result, suffix or fields[1].field_name
+    local field = fields[1]
+    local subtree, suffix =
+      gather_field_types(std.get_field(type, field.field_name), field.fields)
 
-  else
-    assert(type:isstruct())
-    local entries = terralib.newlist()
-    local all_mapping = terralib.newlist()
+    if field.rename then
+      local entry_tree = data.newmap()
+      entry_tree[field.rename] = subtree
+      return entry_tree, field.rename
 
-    for idx, field in ipairs(fields) do
-      local field_type, suffix =
-        project_type(std.get_field(type, field.field_name), field.fields)
-      local field_name = suffix or field.field_name
-      entries:insert({ field_name, field_type })
+    else
+      return subtree, suffix or field.field_name
     end
 
-    local result = terralib.types.newstruct("{" ..
-        entries:map(function(entry)
-          return entry[1] .. " : " .. tostring(entry[2])
-        end):concat(", ") .."}")
-    result.entries:insertall(entries)
-    return result, nil
+  else -- #fields > 1
+    assert(type:isstruct())
+
+    local entry_tree = data.newmap()
+    for idx, field in ipairs(fields) do
+      local subtree, suffix =
+        gather_field_types(std.get_field(type, field.field_name), field.fields)
+
+      local suffix = suffix or field.field_name
+      if field.rename then
+        entry_tree[field.rename] = subtree
+      else
+        entry_tree[suffix] = subtree
+      end
+    end
+
+    return entry_tree, nil
   end
+end
+
+local function convert_to_struct(entry_tree)
+  local entries = terralib.newlist()
+  local field_paths = terralib.newlist()
+
+  for field, subtree in entry_tree:items() do
+    local type = nil
+    if data.is_map(subtree) then
+      local field_type, suffixes = convert_to_struct(subtree)
+      type = field_type
+      field_paths:insertall(suffixes:map(
+        function(suffix)
+          return data.newtuple(field) .. suffix
+        end))
+    else
+      type = subtree
+      field_paths:insert(data.newtuple(field))
+    end
+    entries:insert({ field, type })
+  end
+
+  local result = terralib.types.newstruct("{" ..
+    entries:map(function(entry)
+      return entry[1] .. " : " .. tostring(entry[2])
+    end):concat(", ") .."}")
+  result.entries:insertall(entries)
+
+  return result, field_paths
+end
+
+local function project_type(type, fields, field_paths)
+  local entry_tree = gather_field_types(type, fields)
+
+  if terralib.types.istype(entry_tree) then
+    return entry_tree, terralib.newlist({ { field_paths[1], data.newtuple() } })
+  else
+    local subtype, subtype_field_paths = convert_to_struct(entry_tree)
+    return subtype, data.zip(field_paths, subtype_field_paths)
+  end
+end
+
+function type_check.project_field(cx, node, region, prefix_path, value_type)
+  local field_path = prefix_path .. data.newtuple(node.field_name)
+  local field_type = std.get_field(value_type, node.field_name)
+  if not field_type then
+    local region = pretty.entry_expr(region)
+    report.error(node, "no field '" .. node.field_name ..
+                "' in region " .. (data.newtuple(region) .. prefix_path):mkstring("."))
+  end
+
+  return type_check.project_fields(
+    cx, node.fields, region, field_path, field_type)
+end
+
+function type_check.project_fields(cx, node, region, prefix_path, value_type)
+  if not node then
+    return terralib.newlist({prefix_path})
+  end
+  local result = terralib.newlist()
+  for _, field in ipairs(node) do
+    result:insertall(
+      type_check.project_field(cx, field, region, prefix_path, value_type))
+  end
+  return result
 end
 
 function type_check.expr_projection(cx, node)
@@ -3445,23 +3518,9 @@ function type_check.expr_projection(cx, node)
     report.error(node, "type mismatch: expected struct or fspace but got " .. tostring(fs_type))
   end
 
-  -- Type check the region fields using a fake RegionRoot node
-  local root = type_check.expr_region_root(cx,
-    ast.specialized.expr.RegionRoot {
-      region = node.region,
-      fields = node.fields,
-      annotations = node.annotations,
-      span = node.span,
-    })
-
-  local fs_subtype = project_type(fs_type, node.fields)
-  local field_mapping = nil
-  -- TODO: This flattening should be done only for singleton anonymous projections
-  if #root.fields == 1 then
-    field_mapping = terralib.newlist({ { root.fields[1], data.newtuple() } })
-  else
-    field_mapping = data.zip(root.fields, std.flatten_struct_fields(fs_subtype))
-  end
+  local fields =
+    type_check.project_fields(cx, node.fields, region, data.newtuple(), fs_type)
+  local fs_subtype, field_mapping = project_type(fs_type, node.fields, fields)
   local region_subtype = std.region(region_type:ispace(), fs_subtype)
 
   local parent_region_type = region_type

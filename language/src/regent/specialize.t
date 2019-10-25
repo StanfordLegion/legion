@@ -545,45 +545,22 @@ function specialize.expr_field_access(cx, node, allow_lists)
       }
     end
   else
-    local is_field_access = nil
-    local is_projection = nil
     local fields = data.flatmap(function(field_name)
-      if field_name:is(ast.unspecialized.FieldNames) then
-        is_field_access = true
-        return specialize.field_names(cx, field_name)
-      elseif field_name:is(ast.unspecialized.region.Field) then
-        is_projection = true
-        return specialize.region_field(cx, field_name)
-      else
-        assert(false)
-      end
+      return specialize.field_names(cx, field_name)
     end, node.field_names)
-    assert(not (is_field_access and is_projection))
 
     if value:is(ast.specialized.expr.LuaTable) then
-      if not is_field_access then
-        report.error(node, "unable to specialize projection")
-      end
       if #fields > 1 then
         report.error(node, "unable to specialize multi-field access")
       end
       return convert_lua_value(cx, node, value.value[fields[1]])
     else
-      if is_field_access then
-        return ast.specialized.expr.FieldAccess {
-          value = value,
-          field_name = fields,
-          annotations = node.annotations,
-          span = node.span,
-        }
-      else
-        return ast.specialized.expr.Projection {
-          region = value,
-          fields = fields,
-          annotations = node.annotations,
-          span = node.span,
-        }
-      end
+      return ast.specialized.expr.FieldAccess {
+        value = value,
+        field_name = fields,
+        annotations = node.annotations,
+        span = node.span,
+      }
     end
   end
 end
@@ -1245,6 +1222,55 @@ function specialize.expr_import_partition(cx, node)
   }
 end
 
+function specialize.projection_field(cx, node)
+  local renames = node.rename and specialize.field_names(cx, node.rename)
+  local field_names = specialize.field_names(cx, node.field_name)
+  if renames and #renames ~= #field_names then
+    report.error(node, "mismatch in specialization: expected " .. tostring(#renames) ..
+        " fields to rename but got " .. tostring(#field_names) .. " fields")
+  end
+  local fields = specialize.projection_fields(cx, node.fields)
+  if renames then
+    return data.zip(renames, field_names):map(
+      function(pair)
+        local rename, field_name = unpack(pair)
+        return ast.specialized.projection.Field {
+          rename = rename,
+          field_name = field_name,
+          fields = fields,
+          span = node.span,
+        }
+      end)
+  else
+    return field_names:map(
+      function(field_name)
+        return ast.specialized.projection.Field {
+          rename = renames,
+          field_name = field_name,
+          fields = fields,
+          span = node.span,
+        }
+      end)
+  end
+end
+
+function specialize.projection_fields(cx, node)
+  return node and data.flatmap(
+    function(field) return specialize.projection_field(cx, field) end,
+    node)
+end
+
+function specialize.expr_projection(cx, node)
+  local region = specialize.expr(cx, node.region)
+  local fields = specialize.projection_fields(cx, node.fields)
+  return ast.specialized.expr.Projection {
+    region = region,
+    fields = fields,
+    span = node.span,
+    annotations = node.annotations,
+  }
+end
+
 function specialize.expr(cx, node, allow_lists)
   if node:is(ast.unspecialized.expr.ID) then
     return specialize.expr_id(cx, node, allow_lists)
@@ -1428,6 +1454,9 @@ function specialize.expr(cx, node, allow_lists)
 
   elseif node:is(ast.unspecialized.expr.ImportPartition) then
     return specialize.expr_import_partition(cx, node)
+
+  elseif node:is(ast.unspecialized.expr.Projection) then
+    return specialize.expr_projection(cx, node)
 
   else
     assert(false, "unexpected node type " .. tostring(node.node_type))

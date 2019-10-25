@@ -201,6 +201,8 @@ local node_alpha_conversion = {
 
   [ast.specialized.region.Field] = pass_through,
 
+  [ast.specialized.projection.Field] = pass_through,
+
   [ast.specialized.expr.ID]      = update_value,
 
   [ast.specialized.expr.Function] = function(cx, node, continuation)

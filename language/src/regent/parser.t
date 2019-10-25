@@ -1342,6 +1342,41 @@ function parser.fnargs(p)
   end
 end
 
+function parser.projection_field(p)
+  local start = ast.save(p)
+  local rename = false
+  local field_name = p:field_names()
+  if p:matches("=") then
+    p:expect("=")
+    rename = field_name
+    field_name = p:field_names()
+  end
+  local fields = false -- sentinel for all fields
+  if p:nextif(".") then
+    fields = p:projection_fields()
+  end
+  return ast.unspecialized.projection.Field {
+    rename = rename,
+    field_name = field_name,
+    fields = fields,
+    span = ast.span(start, p),
+  }
+end
+
+function parser.projection_fields(p)
+  local fields = terralib.newlist()
+  if p:nextif("{") then
+    repeat
+      if p:matches("}") then break end
+      fields:insert(p:projection_field())
+    until not p:sep()
+    p:expect("}")
+  else
+    fields:insert(p:projection_field())
+  end
+  return fields
+end
+
 function parser.expr_primary_continuation(p, expr)
   local start = ast.save(p)
 
@@ -1361,17 +1396,21 @@ function parser.expr_primary_continuation(p, expr)
         end
       else
         if p:matches("{") then
-          field_names = p:region_fields()
+          expr = ast.unspecialized.expr.Projection {
+            region = expr,
+            fields = p:projection_fields(),
+            annotations = ast.default_annotations(),
+            span = ast.span(start, p),
+          }
         else
-          field_names = terralib.newlist({p:field_names()})
+          expr = ast.unspecialized.expr.FieldAccess {
+            value = expr,
+            field_names = terralib.newlist({p:field_names()}),
+            annotations = ast.default_annotations(),
+            span = ast.span(start, p),
+          }
         end
       end
-      expr = ast.unspecialized.expr.FieldAccess {
-        value = expr,
-        field_names = field_names,
-        annotations = ast.default_annotations(),
-        span = ast.span(start, p),
-      }
 
     elseif p:nextif("[") then
       local index = p:expr()

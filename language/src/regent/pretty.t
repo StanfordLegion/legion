@@ -750,7 +750,11 @@ function pretty.expr_projection(cx, node)
     pretty.expr(cx, node.region),
     ".{",
     node.field_mapping:map(function(entry)
-      return entry[1]:mkstring(".")
+      if #entry[2] == 0 or entry[1] == entry[2] then
+        return entry[1]:mkstring(".")
+      else
+        return entry[2]:mkstring(".") .. "=" .. entry[1]:mkstring(".")
+      end
     end):concat(","),
     "}"})
 end
