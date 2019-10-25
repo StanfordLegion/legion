@@ -5952,9 +5952,7 @@ namespace Legion {
         if (!fence_registered)
           execution_precondition =
             parent_ctx->get_current_execution_fence_event();
-        ApEvent fence_completion =
-          recurrent ? physical_trace->get_previous_template_completion()
-                    : get_completion_event();
+        ApEvent fence_completion = get_completion_event();
         physical_trace->initialize_template(fence_completion, recurrent);
         local_trace->set_state_replay();
 #ifdef LEGION_SPY
