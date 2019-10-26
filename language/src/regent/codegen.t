@@ -2690,8 +2690,39 @@ local function expr_call_setup_task_args(
 
     local arg_field_id_array = cx:region_or_list(arg_type).field_id_array
     local param_field_id_array = param_field_ids[i]
-    task_args_setup:insert(
-      quote [fixed_ptr].[param_field_id_array] = [arg_field_id_array] end)
+
+    local arg_fs_type = arg_type:fspace()
+    local param_fs_type = param_type:fspace()
+
+    if std.type_eq(arg_fs_type, param_fs_type) then
+      task_args_setup:insert(
+        quote [fixed_ptr].[param_field_id_array] = [arg_field_id_array] end)
+    else
+      -- If we hit this branch, it means that the region argument was created by
+      -- a projection, so we need to copy field ids individually due to potential
+      -- field reordering.
+
+      local arg_field_paths = std.flatten_struct_fields(arg_fs_type)
+      local field_id_index = data.dict(data.zip(arg_field_paths:map(data.hash),
+                                                data.range(0, #arg_field_paths)))
+      local param_field_paths = std.flatten_struct_fields(param_fs_type)
+      assert(#param_field_paths == #arg_field_paths)
+      local field_id_array_type = std.get_field(params_struct_type, param_field_id_array)
+      assert(field_id_array_type.N == #arg_field_paths)
+      local terra copy_field_ids([fixed_ptr], arg_field_id_array : &field_id_array_type)
+        [data.zip(param_field_paths, data.range(0, #param_field_paths)):map(
+            function(pair)
+              local param_field_path, param_i = unpack(pair)
+              local arg_i = field_id_index[param_field_path:hash()]
+              return
+                quote [fixed_ptr].[param_field_id_array][ [param_i] ] =
+                      (@arg_field_id_array)[ [arg_i] ]
+                end
+            end)]
+      end
+      copy_field_ids:setinlined(false)
+      task_args_setup:insert(quote [copy_field_ids]([fixed_ptr], &[arg_field_id_array]) end)
+    end
   end
 
   -- Check that the final sizes line up.
@@ -3013,15 +3044,8 @@ local function expr_call_setup_region_arg(
     add_flags = c.legion_index_launcher_add_flags
   end
 
-  local param_field_paths = std.flatten_struct_fields(param_type:fspace())
-  local arg_field_paths = std.flatten_struct_fields(arg_type:fspace())
-  local mapping = data.dict(data.zip(param_field_paths:map(data.hash),
-                                     arg_field_paths))
-
   for i, privilege in ipairs(privileges) do
-    local field_paths = privilege_field_paths[i]:map(function(field_path)
-        return mapping[field_path:hash()]
-      end)
+    local field_paths = privilege_field_paths[i]
     local field_types = privilege_field_types[i]
     local privilege_mode = privilege_modes[i]
     local coherence_mode = coherence_modes[i]
@@ -3304,15 +3328,8 @@ local function expr_call_setup_partition_arg(
   local parent_region =
     cx:region(cx:region(arg_type).root_region_type).logical_region
 
-  local param_field_paths = std.flatten_struct_fields(param_type:fspace())
-  local arg_field_paths = std.flatten_struct_fields(arg_type:fspace())
-  local mapping = data.dict(data.zip(param_field_paths:map(data.hash),
-                                     arg_field_paths))
-
   for i, privilege in ipairs(privileges) do
-    local field_paths = privilege_field_paths[i]:map(function(field_path)
-        return mapping[field_path:hash()]
-      end)
+    local field_paths = privilege_field_paths[i]
     local field_types = privilege_field_types[i]
     local privilege_mode = privilege_modes[i]
     local coherence_mode = coherence_modes[i]
