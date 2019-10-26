@@ -1394,6 +1394,12 @@ function parser.expr_primary_continuation(p, expr)
         else
           field_names:insert(p:field_names())
         end
+        expr = ast.unspecialized.expr.FieldAccess {
+          value = expr,
+          field_names = field_names,
+          annotations = ast.default_annotations(),
+          span = ast.span(start, p),
+        }
       else
         if p:matches("{") then
           expr = ast.unspecialized.expr.Projection {
