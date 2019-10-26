@@ -3396,7 +3396,120 @@ function type_check.expr_import_partition(cx, node)
   }
 end
 
-local function gather_field_types(type, fields)
+local entry_tree = {}
+
+function entry_tree.new()
+  local t = {
+    __tree = terralib.newlist(),
+    __indices = data.newmap(),
+    __fields = terralib.newlist(),
+  }
+  return setmetatable(t, entry_tree)
+end
+
+function entry_tree.is_entry_tree(x)
+  return getmetatable(x) == entry_tree
+end
+
+function entry_tree:__index(field)
+  return self.__tree[self.__indices[field]] or entry_tree[field]
+end
+
+function entry_tree:__newindex(field, value)
+  self:put(field, value)
+end
+
+function entry_tree:has(field)
+  return self.__indices:has(field)
+end
+
+function entry_tree:get(field)
+  if self:has(field) then
+    return self.__tree[self.__indices[field]]
+  else
+    return nil
+  end
+end
+
+function entry_tree:put(field, subtree)
+  assert(field ~= nil)
+  assert(not self.__indices:has(field))
+  assert(#self.__tree == #self.__fields)
+  self.__tree:insert(subtree)
+  self.__fields:insert(field)
+  self.__indices[field] = #self.__tree
+end
+
+function entry_tree:replace(field, subtree)
+  assert(field ~= nil)
+  assert(self.__indices:has(field))
+  assert(#self.__tree == #self.__fields)
+  self.__tree[self.__indices[field]] = subtree
+end
+
+function entry_tree:next_item(k)
+  if k == nil then
+    if #self.__fields == 0 then
+      return
+    else
+      return self.__fields[1], self.__tree[1]
+    end
+  end
+  local i = self.__indices[k]
+  if i == nil then
+    return
+  else
+    return self.__fields[i + 1], self.__tree[i + 1]
+  end
+end
+
+function entry_tree:items()
+  if #self.__tree == 0 then
+    return function() return nil, nil end
+  else
+    return entry_tree.next_item, self, nil
+  end
+end
+
+function entry_tree:map_list(fn)
+  local result = terralib.newlist()
+  for k, v in self:items() do
+    result:insert(fn(k, v))
+  end
+  return result
+end
+
+function entry_tree:__tostring()
+  return "{" .. self:map_list(
+    function(k, v)
+      return tostring(k) .. "=" .. tostring(v)
+    end):concat(",") .. "}"
+end
+
+function entry_tree.unify(tree1, tree2)
+  if not entry_tree.is_entry_tree(tree1) or
+     not entry_tree.is_entry_tree(tree2)
+  then
+    return nil
+  end
+
+  local result = entry_tree.new()
+  for field, subtree in tree1:items() do
+    result[field] = subtree
+  end
+  for field, subtree in tree2:items() do
+    if result:has(field) then
+      local u = entry_tree.unify(result[field], subtree)
+      if u == nil then return nil, field end
+      result[field] = u
+    else
+      result[field] = subtree
+    end
+  end
+  return result
+end
+
+local function gather_field_types(node, type, fields)
   if not fields then
     return type, nil
   end
@@ -3404,10 +3517,10 @@ local function gather_field_types(type, fields)
   if #fields == 1 then
     local field = fields[1]
     local subtree, suffix =
-      gather_field_types(std.get_field(type, field.field_name), field.fields)
+      gather_field_types(node, std.get_field(type, field.field_name), field.fields)
 
     if field.rename then
-      local entry_tree = data.newmap()
+      local entry_tree = entry_tree.new()
       entry_tree[field.rename] = subtree
       return entry_tree, field.rename
 
@@ -3418,16 +3531,28 @@ local function gather_field_types(type, fields)
   else -- #fields > 1
     assert(type:isstruct())
 
-    local entry_tree = data.newmap()
+    local entry_tree = entry_tree.new()
     for idx, field in ipairs(fields) do
       local subtree, suffix =
-        gather_field_types(std.get_field(type, field.field_name), field.fields)
+        gather_field_types(node, std.get_field(type, field.field_name), field.fields)
 
-      local suffix = suffix or field.field_name
+      local key = nil
       if field.rename then
-        entry_tree[field.rename] = subtree
+        key = field.rename
       else
-        entry_tree[suffix] = subtree
+        key = suffix or field.field_name
+      end
+
+      if entry_tree:has(key) then
+        local result, colliding_field =
+          entry_tree.unify(entry_tree[key], subtree)
+        if result == nil then
+          report.error(node, "field name " .. tostring(colliding_field) ..
+              " collides in projection")
+        end
+        entry_tree:replace(key, result)
+      else
+        entry_tree[key] = subtree
       end
     end
 
@@ -3441,7 +3566,7 @@ local function convert_to_struct(entry_tree)
 
   for field, subtree in entry_tree:items() do
     local type = nil
-    if data.is_map(subtree) then
+    if entry_tree.is_entry_tree(subtree) then
       local field_type, suffixes = convert_to_struct(subtree)
       type = field_type
       field_paths:insertall(suffixes:map(
@@ -3464,8 +3589,8 @@ local function convert_to_struct(entry_tree)
   return result, field_paths
 end
 
-local function project_type(type, fields, field_paths)
-  local entry_tree = gather_field_types(type, fields)
+local function project_type(node, type, fields, field_paths)
+  local entry_tree = gather_field_types(node, type, fields)
 
   if terralib.types.istype(entry_tree) then
     return entry_tree, terralib.newlist({ { field_paths[1], data.newtuple() } })
@@ -3520,7 +3645,7 @@ function type_check.expr_projection(cx, node)
 
   local fields =
     type_check.project_fields(cx, node.fields, region, data.newtuple(), fs_type)
-  local fs_subtype, field_mapping = project_type(fs_type, node.fields, fields)
+  local fs_subtype, field_mapping = project_type(node, fs_type, node.fields, fields)
   local region_subtype = std.region(region_type:ispace(), fs_subtype)
 
   local parent_region_type = region_type
