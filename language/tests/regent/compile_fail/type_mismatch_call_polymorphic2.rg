@@ -13,9 +13,9 @@
 -- limitations under the License.
 
 -- fails-with:
--- type_mismatch_call_polymorphic2.rg:51: incompatible types: {_0 : double, _1 : int32, _2 : int64} has 3 fields but iface expects 2 fields
---   f(r.{f.v.x, f.i, f.l})
---      ^
+-- type_mismatch_call_polymorphic2.rg:38: type mismatch in argument 1: expected region(int32) but got region(double)
+--   f(r.{v.x})
+--    ^
 
 import "regent"
 
@@ -28,25 +28,12 @@ struct vec2
 struct st
 {
   v : vec2;
-  i : int;
-  l : long;
 }
 
-fspace fs
-{
-  f : st;
-}
-
-struct iface
-{
-  a : double;
-  b : double;
-}
-
-task f(x : region(iface))
-where reads writes(x.a), writes(x.b) do end
+task f(x : region(int))
+where reads writes(x) do end
 
 task g()
-  var r = region(ispace(ptr, 5), fs)
-  f(r.{f.v.x, f.i, f.l})
+  var r = region(ispace(ptr, 5), st)
+  f(r.{v.x})
 end

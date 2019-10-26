@@ -13,8 +13,8 @@
 -- limitations under the License.
 
 -- fails-with:
--- type_mismatch_call_polymorphic6.rg:51: incompatible types: {a : double, b : double} has 2 fields but iface1 expects 3 fields
---   f(r.{d=z.{a=x}, d=w.{b=y}})
+-- type_mismatch_call_polymorphic9.rg:50: field name mismatch: expected b but got c
+--   f(r.{d=z.{a=x}, d=w.{c=y}})
 --    ^
 
 import "regent"
@@ -35,7 +35,6 @@ struct iface1
 {
   a : double;
   b : double;
-  c : double;
 }
 
 struct iface2
@@ -48,5 +47,5 @@ where reads writes(x) do end
 
 task g()
   var r = region(ispace(ptr, 5), fs)
-  f(r.{d=z.{a=x}, d=w.{b=y}})
+  f(r.{d=z.{a=x}, d=w.{c=y}})
 end

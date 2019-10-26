@@ -13,8 +13,8 @@
 -- limitations under the License.
 
 -- fails-with:
--- type_mismatch_call_polymorphic4.rg:56: type mismatch: expected iface1 for field c but got double
---   f(r.{f.v.x, f.i})
+-- type_mismatch_call_polymorphic4.rg:40: incompatible types: {x : double, y : double} has 2 fields but iface expects 3 fields
+--   f(r.{x, y})
 --    ^
 
 import "regent"
@@ -25,33 +25,17 @@ struct vec2
   y : double;
 }
 
-struct st
-{
-  v : vec2;
-  i : int;
-  l : long;
-}
-
-fspace fs
-{
-  f : st;
-}
-
-struct iface1
+struct iface
 {
   a : double;
   b : double;
+  c : double;
 }
 
-struct iface2
-{
-  c : iface1;
-  d : int;
-}
-
-task f(x : region(iface2)) end
+task f(x : region(iface))
+where reads writes(x) do end
 
 task g()
-  var r = region(ispace(ptr, 5), fs)
-  f(r.{f.v.x, f.i})
+  var r = region(ispace(ptr, 5), vec2)
+  f(r.{x, y})
 end

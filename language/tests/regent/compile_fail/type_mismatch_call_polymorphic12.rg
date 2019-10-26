@@ -13,7 +13,7 @@
 -- limitations under the License.
 
 -- fails-with:
--- type_mismatch_call_polymorphic6.rg:51: incompatible types: {a : double, b : double} has 2 fields but iface1 expects 3 fields
+-- type_mismatch_call_polymorphic12.rg:50: type mismatch: expected double for field b but got int32
 --   f(r.{d=z.{a=x}, d=w.{b=y}})
 --    ^
 
@@ -22,7 +22,7 @@ import "regent"
 struct vec2
 {
   x : double;
-  y : double;
+  y : int;
 }
 
 struct fs
@@ -35,7 +35,6 @@ struct iface1
 {
   a : double;
   b : double;
-  c : double;
 }
 
 struct iface2

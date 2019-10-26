@@ -13,8 +13,8 @@
 -- limitations under the License.
 
 -- fails-with:
--- type_mismatch_call_polymorphic1.rg:51: type mismatch in argument 1: expected region(iface) but got region(double)
---   f(r.{f.v.x})
+-- type_mismatch_call_polymorphic1.rg:33: type mismatch in argument 1: expected region(int32) but got region(double)
+--   f(r.{x})
 --    ^
 
 import "regent"
@@ -25,28 +25,10 @@ struct vec2
   y : double;
 }
 
-struct st
-{
-  v : vec2;
-  i : int;
-  l : long;
-}
-
-fspace fs
-{
-  f : st;
-}
-
-struct iface
-{
-  a : double;
-  b : double;
-}
-
-task f(x : region(iface))
-where reads writes(x.a), writes(x.b) do end
+task f(x : region(int))
+where reads writes(x) do end
 
 task g()
-  var r = region(ispace(ptr, 5), fs)
-  f(r.{f.v.x})
+  var r = region(ispace(ptr, 5), vec2)
+  f(r.{x})
 end

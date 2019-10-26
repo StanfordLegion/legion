@@ -29,10 +29,21 @@ fspace fs
   v : vec2;
 }
 
-struct iface
+struct iface1
 {
   _x : double;
   i : int;
+}
+
+struct iface2
+{
+  a : double;
+  b : int;
+}
+
+struct iface3
+{
+  c : vec2;
 }
 
 task f(x : region(vec2))
@@ -52,7 +63,7 @@ do
   end
 end
 
-task h(x : region(iface))
+task h(x : region(iface1))
 where reads writes(x)
 do
   var cnt = 1
@@ -61,6 +72,22 @@ do
     e.i += cnt * 2
     cnt += 1
   end
+end
+
+task t(x : region(iface2))
+where reads writes(x)
+do
+  var cnt = 1
+  for e in x do
+    e.a += double(cnt)
+    e.b += cnt * 3
+    cnt += 1
+  end
+end
+
+task u(x : region(iface3))
+where reads writes(x)
+do
 end
 
 task sum(r : region(fs), p : ptr(fs, r)) : double
@@ -75,7 +102,9 @@ task main()
   f(r.{v})
   g(r.{i})
   h(r.{v._x, i})
-  regentlib.assert(sum(r, x) == 98798.0, "test failed")
+  t(r.{a = v._x, b = i})
+  u(r.{c = v})
+  regentlib.assert(sum(r, x) == 98810.0, "test failed")
 end
 
 regentlib.start(main)
