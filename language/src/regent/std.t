@@ -850,16 +850,21 @@ local function type_isomorphic(node, param_type, arg_type, check, mapping, polym
         tostring(param_type) .. " expects " .. tostring(#param_entries) .. " fields")
     end
 
-    for idx, param_entry in ipairs(param_entries) do
-      local arg_entry = arg_entries[idx]
-
-      local param_field = param_entry[1] or param_entry.field
+    local arg_entry_map = {}
+    for idx, arg_entry in ipairs(arg_entries) do
       local arg_field = arg_entry[1] or arg_entry.field
-      if param_field ~= arg_field then
-        report.error(node, "field name mismatch: expected " .. param_field .. " but got " .. arg_field)
+      local arg_type = arg_entry[2] or arg_entry.type
+      arg_entry_map[arg_field] = arg_type
+    end
+
+    for idx, param_entry in ipairs(param_entries) do
+      local param_field = param_entry[1] or param_entry.field
+      local arg_type = arg_entry_map[param_field]
+      if arg_type == nil then
+        report.error(node, "field name " .. param_field ..  " does not exist in " ..
+            tostring(param_type))
       end
       local param_type = param_entry[2] or param_entry.type
-      local arg_type = arg_entry[2] or arg_entry.type
       if not type_isomorphic(node, param_type, arg_type, check, mapping, polymorphic) then
         report.error(node, "type mismatch: expected " .. tostring(param_type) .. " for field " ..
                      param_field .. " but got " .. tostring(arg_type))
