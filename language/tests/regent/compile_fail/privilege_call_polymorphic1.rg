@@ -13,9 +13,9 @@
 -- limitations under the License.
 
 -- fails-with:
--- privilege_call_polymorphic1.rg:50: invalid privileges in argument 1: reads($r.{f.v}.x)
---   f(r.{f.v})
---    ^
+--privilege_call_polymorphic1.rg:50: invalid privileges in argument 1: reads($r.{b=f.v.y,a=f.v.x}.b)
+--  f(r.{b=f.v.y, a=f.v.x})
+--   ^
 
 import "regent"
 
@@ -47,5 +47,5 @@ task f(s : region(iface))
 where reads writes(s.a), writes(s.b) do end
 
 task g(r : region(fs))
-  f(r.{f.v})
+  f(r.{b=f.v.y, a=f.v.x})
 end

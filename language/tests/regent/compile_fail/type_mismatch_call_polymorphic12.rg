@@ -14,7 +14,7 @@
 
 -- fails-with:
 -- type_mismatch_call_polymorphic12.rg:50: type mismatch: expected double for field b but got int32
---   f(r.{d=z.{a=x}, d=w.{b=y}})
+--   f(r.{d=w.{b=y}, d=z.{a=x}})
 --    ^
 
 import "regent"
@@ -47,5 +47,5 @@ where reads writes(x) do end
 
 task g()
   var r = region(ispace(ptr, 5), fs)
-  f(r.{d=z.{a=x}, d=w.{b=y}})
+  f(r.{d=w.{b=y}, d=z.{a=x}})
 end

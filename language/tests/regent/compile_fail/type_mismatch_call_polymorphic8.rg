@@ -13,7 +13,7 @@
 -- limitations under the License.
 
 -- fails-with:
--- type_mismatch_call_polymorphic8.rg:45: field name mismatch: expected b but got c
+-- type_mismatch_call_polymorphic8.rg:45: field name b does not exist in iface
 --   f(r.{a=z.x, c=w.y})
 --    ^
 

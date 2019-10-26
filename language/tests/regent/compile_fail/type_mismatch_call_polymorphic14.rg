@@ -14,7 +14,7 @@
 
 -- fails-with:
 -- type_mismatch_call_polymorphic14.rg:53: type mismatch: expected double for field b but got int32
---     f(p[c].{d=z.{a=x}, d=w.{b=y}})
+--     f(p[c].{d=w.{b=y}, d=z.{a=x}})
 --      ^
 
 import "regent"
@@ -50,6 +50,6 @@ task g()
   var p = partition(equal, r, ispace(int1d, 5))
   __demand(__index_launch)
   for c in p.colors do
-    f(p[c].{d=z.{a=x}, d=w.{b=y}})
+    f(p[c].{d=w.{b=y}, d=z.{a=x}})
   end
 end

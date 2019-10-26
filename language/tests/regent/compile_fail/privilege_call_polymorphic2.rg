@@ -13,8 +13,8 @@
 -- limitations under the License.
 
 -- fails-with:
--- privilege_call_polymorphic2.rg:57: invalid privileges in argument 1: writes($r.{f.v,f.i}._0.x)
---   f(r.{f.v, f.i})
+-- privilege_call_polymorphic2.rg:57: invalid privileges in argument 1: writes($r.{c.a=f.v.x,c.b=f.v.y,d=f.i}.c.a)
+--   f(r.{c=f.{a=v.x, b=v.y}, d=f.i})
 --    ^
 
 import "regent"
@@ -54,5 +54,5 @@ where writes(x.c) do end
 
 task g(r : region(fs))
 where reads(r) do
-  f(r.{f.v, f.i})
+  f(r.{c=f.{a=v.x, b=v.y}, d=f.i})
 end

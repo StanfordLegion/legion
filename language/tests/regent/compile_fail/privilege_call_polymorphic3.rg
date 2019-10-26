@@ -13,8 +13,8 @@
 -- limitations under the License.
 
 -- fails-with:
--- privilege_call_polymorphic3.rg:55: invalid privileges in argument 1: writes($p[int1d($c)].{v}._x)
---     init_double(p[c].{v})
+-- privilege_call_polymorphic3.rg:55: invalid privileges in argument 1: writes($p[int1d($c)].{b=v._x,a=v._y}.b)
+--     init_double(p[c].{b=v._x, a=v._y})
 --                ^
 
 import "regent"
@@ -52,6 +52,6 @@ where
   reads(r)
 do
   for c in p.colors do
-    init_double(p[c].{v})
+    init_double(p[c].{b=v._x, a=v._y})
   end
 end

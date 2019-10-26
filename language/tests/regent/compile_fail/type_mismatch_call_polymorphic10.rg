@@ -13,8 +13,8 @@
 -- limitations under the License.
 
 -- fails-with:
--- type_mismatch_call_polymorphic10.rg:39: type mismatch: expected double for field a but got int32
---   f(r.{a=x, b=y})
+-- type_mismatch_call_polymorphic10.rg:39: type mismatch: expected double for field b but got int32
+--   f(r.{b=x, a=y})
 --    ^
 
 import "regent"
@@ -36,5 +36,5 @@ where reads writes(x) do end
 
 task g()
   var r = region(ispace(ptr, 5), vec2)
-  f(r.{a=x, b=y})
+  f(r.{b=x, a=y})
 end
