@@ -2,6 +2,7 @@
 #include "realm/id.h"
 
 #include <deque>
+#include <unistd.h>
 
 using namespace Realm;
 
@@ -94,6 +95,9 @@ void top_level_task(const void *args, size_t arglen,
     inst.destroy(e);
     e.wait();
   }
+
+  // HACK: there's a shutdown race condition related to instance destruction
+  usleep(100000);
 }
 
 void worker_task(const void *args, size_t arglen,
