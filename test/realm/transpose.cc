@@ -179,6 +179,7 @@ void do_single_dim(Memory src_mem, Memory dst_mem, int log2_size,
     }
 
   // wait for copies to finish
+  done_events.insert(prev_copy);
   Event::merge_events(done_events).wait();
 
   for(typename std::vector<TransposeExperiment<N> *>::const_iterator it = experiments.begin();
