@@ -53,26 +53,10 @@ override CC_FLAGS := $(filter-out -DBOUNDS_CHECKS, \
                        $(CC_FLAGS))))
 
 TESTS := serializing test_profiling ctxswitch barrier_reduce taskreg memspeed idcheck inst_reuse transpose
-TESTS_SINGLENODE := proc_group
+TESTS += proc_group
 TESTS += deppart
 TESTS += scatter
 TESTS += compqueue
-
-ifeq ($(strip $(USE_GASNET)),1)
-  ifdef NODECOUNT
-    ifeq ($(CONDUIT),ibv)
-      LAUNCHER = mpirun -H localhost -n $(NODECOUNT) $(1)
-    else
-      $(error unsupported conduit $(CONDUIT))
-    endif
-  else
-    LAUNCHER = $(1)
-    TESTS += $(TESTS_SINGLENODE)
-  endif
-else
-  LAUNCHER = $(1)
-  TESTS += $(TESTS_SINGLENODE)
-endif
 
 # can set arguments to be passed to a test when running
 TESTARGS_ctxswitch := -ll:io 1 -t 20 -i 10000
@@ -94,8 +78,8 @@ run_all : $(TESTS:%=run_%)
 
 run_% : %
 	@# this echos exactly once, even if -s was specified
-	@echo $(call LAUNCHER, ./$*) $(TESTARGS_$*)
-	@$(call LAUNCHER, ./$*) $(TESTARGS_$*)
+	@echo $(LAUNCHER) ./$* $(TESTARGS_$*)
+	@$(LAUNCHER) ./$* $(TESTARGS_$*)
 
 build : $(TESTS)
 

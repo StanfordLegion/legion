@@ -183,6 +183,7 @@ def sigalrm_handler(signum, frame):
 
 def cmd(command, env=None, cwd=None, timelimit=None):
     print(' '.join(command))
+    sys.stdout.flush()  # python 2 doesn't have flush option in print
     if timelimit:
         child = subprocess.Popen(command, env=env, cwd=cwd)
         signal.signal(signal.SIGALRM, sigalrm_handler)
@@ -281,7 +282,7 @@ def run_test_fuzzer(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
 def run_test_realm(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit):
     test_dir = os.path.join(root_dir, 'test/realm')
     cmd([make_exe, '-C', test_dir, 'DEBUG=0', 'clean'], env=env)
-    cmd([make_exe, '-C', test_dir, 'DEBUG=0', 'build'], env=env)
+    cmd([make_exe, '-C', test_dir, 'DEBUG=0', '-j', str(thread_count), 'build'], env=env)
     cmd([make_exe, '-C', test_dir, 'DEBUG=0', 'run_all'], env=env, timelimit=timelimit)
 
 def run_test_external(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit):
