@@ -74,6 +74,8 @@ namespace Realm {
       // test whether an event has triggered without waiting
       virtual bool has_triggered(gen_t needed_gen, bool& poisoned) = 0;
 
+      virtual void subscribe(gen_t subscribe_gen) = 0;
+
       // causes calling thread to block until event has occurred
       //void wait(Event::gen_t needed_gen);
 
@@ -153,6 +155,8 @@ namespace Realm {
       // test whether an event has triggered without waiting
       virtual bool has_triggered(gen_t needed_gen, bool& poisoned);
 
+      virtual void subscribe(gen_t subscribe_gen);
+
       virtual void external_wait(gen_t needed_gen, bool& poisoned);
       virtual bool external_timedwait(gen_t needed_gen, bool& poisoned,
 				      long long max_ns);
@@ -184,7 +188,7 @@ namespace Realm {
       // these state variables are monotonic, so can be checked without a lock for
       //  early-out conditions
       atomic<gen_t> generation;
-      gen_t gen_subscribed;
+      atomic<gen_t> gen_subscribed;
       atomic<int> num_poisoned_generations;
       bool has_local_triggers;
 
@@ -262,6 +266,9 @@ namespace Realm {
 
       // test whether an event has triggered without waiting
       virtual bool has_triggered(gen_t needed_gen, bool& poisoned);
+
+      virtual void subscribe(gen_t subscribe_gen);
+
       virtual void external_wait(gen_t needed_gen, bool& poisoned);
       virtual bool external_timedwait(gen_t needed_gen, bool& poisoned,
 				      long long max_ns);

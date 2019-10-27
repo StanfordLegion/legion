@@ -182,7 +182,7 @@ namespace Realm {
 	  clw_size++;
 	EventImpl::gen_t gen = e->generation.load();
 	os << "Event " << e->me <<": gen=" << gen
-	   << " subscr=" << e->gen_subscribed
+	   << " subscr=" << e->gen_subscribed.load()
 	   << " local=" << clw_size //e->current_local_waiters.size()
 	   << "+" << e->future_local_waiters.size()
 	   << " remote=" << e->remote_waiters.size() << "\n";

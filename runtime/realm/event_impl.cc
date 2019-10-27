@@ -131,6 +131,19 @@ namespace Realm {
     return e->has_triggered(ID(id).event_generation(), poisoned);
   }
 
+  void Event::subscribe(void) const
+  {
+    // early out - NO_EVENT and local generational events never require
+    //  subscription
+    if(!id ||
+       (ID(id).is_event() &&
+	(NodeID(ID(id).event_creator_node()) == Network::my_node_id)))
+      return;
+
+    EventImpl *e = get_runtime()->get_event_impl(*this);
+    e->subscribe(ID(id).event_generation());
+  }
+
   // creates an event that won't trigger until all input events have
   /*static*/ Event Event::merge_events(const std::set<Event>& wait_for)
   {
@@ -974,7 +987,7 @@ namespace Realm {
     me = _me;
     owner = _init_owner;
     generation.store(0);
-    gen_subscribed = 0;
+    gen_subscribed.store(0);
     next_free = 0;
     num_poisoned_generations.store(0);
     poisoned_generations = 0;
@@ -1326,7 +1339,7 @@ namespace Realm {
 	    // 3) we don't know of a trigger of this event, so record the waiter and subscribe if needed
 	    gen_t cur_gen = generation.load();
 	    log_event.debug() << "event not ready: event=" << me << "/" << needed_gen
-			      << " owner=" << owner << " gen=" << cur_gen << " subscr=" << gen_subscribed;
+			      << " owner=" << owner << " gen=" << cur_gen << " subscr=" << gen_subscribed.load();
 
 	    // is this for the "current" next generation?
 	    if(needed_gen == (cur_gen + 1)) {
@@ -1339,9 +1352,10 @@ namespace Realm {
 	    }
 
 	    // do we need to subscribe to this event?
-	    if((owner != Network::my_node_id) && (gen_subscribed < needed_gen)) {
-	      previous_subscribe_gen = gen_subscribed;
-	      gen_subscribed = needed_gen;
+	    if((owner != Network::my_node_id) &&
+	       (gen_subscribed.load() < needed_gen)) {
+	      previous_subscribe_gen = gen_subscribed.load();
+	      gen_subscribed.store(needed_gen);
 	      subscribe_owner = owner;
 	    }
 	  }
@@ -1679,6 +1693,47 @@ namespace Realm {
       return locally_triggered;
     }
 
+    void GenEventImpl::subscribe(gen_t subscribe_gen)
+    {
+      // should never be called on a local event
+      assert(owner != Network::my_node_id);
+      
+      // lock-free check on previous subscriptions or known triggers
+      if((subscribe_gen <= gen_subscribed.load_acquire()) ||
+	 (subscribe_gen <= generation.load_acquire()))
+	return;
+
+      bool subscribe_needed = false;
+      gen_t previous_subscribe_gen = 0;
+      {
+	AutoLock<> a(mutex);
+
+	// if the requested generation is already known to be triggered
+	bool already_triggered = false;
+	if(subscribe_gen <= generation.load()) {
+	  already_triggered = true;
+	} else 
+	  if(has_local_triggers) {
+	    // if we have a local trigger (poisoned or not), that counts too
+	    if(local_triggers.count(subscribe_gen))
+	      already_triggered = true;
+	  }
+
+	if(!already_triggered && (subscribe_gen > gen_subscribed.load())) {
+	  subscribe_needed = true;
+	  previous_subscribe_gen = gen_subscribed.load();
+	  gen_subscribed.store(subscribe_gen);
+	}
+      }
+
+      if(subscribe_needed) {
+	ActiveMessage<EventSubscribeMessage> amsg(owner);
+	amsg->event = make_event(subscribe_gen);
+	amsg->previous_subscribe_gen = previous_subscribe_gen;
+	amsg.commit();
+      }
+    }
+  
     void GenEventImpl::external_wait(gen_t gen_needed, bool& poisoned)
     {
       {
@@ -1864,10 +1919,10 @@ namespace Realm {
 
 	      // TODO: this might still cause shutdown races - do we really
 	      //  need to do this at all?
-	      if(gen_triggered > (gen_subscribed + 1)) {
+	      if(gen_triggered > (gen_subscribed.load() + 1)) {
 		subscribe_needed = true;
-		previous_subscribe_gen = gen_subscribed;
-		gen_subscribed = gen_triggered - 1;
+		previous_subscribe_gen = gen_subscribed.load();
+		gen_subscribed.store(gen_triggered);
 	      }
 	    }
 
@@ -2474,6 +2529,7 @@ static void *bytedup(const void *data, size_t datalen)
       // no need to take lock to check current generation
       if(needed_gen <= generation) return true;
 
+#ifdef BARRIER_HAS_TRIGGERED_DOES_SUBSCRIBE
       // update the subscription (even on the local node), but do a
       //  quick test first to avoid taking a lock if the subscription is
       //  clearly already done
@@ -2502,11 +2558,44 @@ static void *bytedup(const void *data, size_t datalen)
 	  BarrierSubscribeMessage::send_request(cur_owner, me.id, needed_gen, Network::my_node_id, false/*!forwarded*/);
 	}
       }
+#endif
 
       // whether or not we subscribed, the answer for now is "no"
       return false;
     }
 
+    void BarrierImpl::subscribe(gen_t subscribe_gen)
+    {
+      // update the subscription (even on the local node), but do a
+      //  quick test first to avoid taking a lock if the subscription is
+      //  clearly already done
+      if(gen_subscribed < subscribe_gen) {
+	// looks like it needs an update - take lock to avoid duplicate
+	//  subscriptions
+	gen_t previous_subscription;
+	bool send_subscription_request = false;
+        NodeID cur_owner = (NodeID) -1;
+	{
+	  AutoLock<> a(mutex);
+	  previous_subscription = gen_subscribed;
+	  if(gen_subscribed < subscribe_gen) {
+	    gen_subscribed = subscribe_gen;
+	    // test ownership while holding the mutex
+	    if(owner != Network::my_node_id) {
+	      send_subscription_request = true;
+              cur_owner = owner;
+            }
+	  }
+	}
+
+	// if we're not the owner, send subscription if we haven't already
+	if(send_subscription_request) {
+	  log_barrier.info() << "subscribing to barrier " << make_barrier(subscribe_gen) << " (prev=" << previous_subscription << ")";
+	  BarrierSubscribeMessage::send_request(cur_owner, me.id, subscribe_gen, Network::my_node_id, false/*!forwarded*/);
+	}
+      }
+    }
+  
     // TODO: this is identical to GenEventImpl versions - lift back up into
     //   EventImpl?
     void BarrierImpl::external_wait(gen_t gen_needed, bool& poisoned)
@@ -2550,6 +2639,9 @@ static void *bytedup(const void *data, size_t datalen)
     bool BarrierImpl::add_waiter(gen_t needed_gen, EventWaiter *waiter/*, bool pre_subscribed = false*/)
     {
       bool trigger_now = false;
+      gen_t previous_subscription;
+      bool send_subscription_request = false;
+      NodeID cur_owner = (NodeID) -1;
       {
 	AutoLock<> a(mutex);
 
@@ -2565,12 +2657,23 @@ static void *bytedup(const void *data, size_t datalen)
 	  }
 	  g->local_waiters.push_back(waiter);
 
-	  // a call to has_triggered should have already handled the necessary subscription
-	  assert((owner == Network::my_node_id) || (gen_subscribed >= needed_gen));
+	  // check to see if we need to subscribe
+	  if((owner != Network::my_node_id) &&
+	     (gen_subscribed < needed_gen)) {
+	    previous_subscription = gen_subscribed;
+	    gen_subscribed = needed_gen;
+	    send_subscription_request = true;
+	    cur_owner = owner;
+	  }
 	} else {
 	  // needed generation has already occurred - trigger this waiter once we let go of lock
 	  trigger_now = true;
 	}
+      }
+
+      if(send_subscription_request) {
+	log_barrier.info() << "subscribing to barrier " << make_barrier(needed_gen) << " (prev=" << previous_subscription << ")";
+	BarrierSubscribeMessage::send_request(cur_owner, me.id, needed_gen, Network::my_node_id, false/*!forwarded*/);
       }
 
       if(trigger_now) {
