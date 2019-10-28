@@ -13,8 +13,8 @@
 -- limitations under the License.
 
 -- fails-with:
--- type_mismatch_call_polymorphic8.rg:45: field name b does not exist in {a : double, c : double}
---   f(r.{a=z.x, c=w.y})
+-- type_mismatch_call_polymorphic18.rg:42: incompatible types: {x : double, y : double} has 2 fields but iface expects 3 fields
+--   f(r.{[fields]})
 --    ^
 
 import "regent"
@@ -25,22 +25,19 @@ struct vec2
   y : double;
 }
 
-struct fs
-{
-  z : vec2;
-  w : vec2;
-}
-
 struct iface
 {
   a : double;
   b : double;
+  c : double;
 }
+
+local fields = terralib.newlist({"x", "y"})
 
 task f(x : region(iface))
 where reads writes(x) do end
 
 task g()
-  var r = region(ispace(ptr, 5), fs)
-  f(r.{a=z.x, c=w.y})
+  var r = region(ispace(ptr, 5), vec2)
+  f(r.{[fields]})
 end

@@ -13,8 +13,8 @@
 -- limitations under the License.
 
 -- fails-with:
--- type_mismatch_call_polymorphic8.rg:45: field name b does not exist in {a : double, c : double}
---   f(r.{a=z.x, c=w.y})
+-- type_mismatch_call_polymorphic16.rg:41: type mismatch in argument 1: expected region(int32) but got region(double)
+--   f(r.{[field1].[field2]})
 --    ^
 
 import "regent"
@@ -25,22 +25,18 @@ struct vec2
   y : double;
 }
 
-struct fs
+struct st
 {
-  z : vec2;
-  w : vec2;
+  v : vec2;
 }
 
-struct iface
-{
-  a : double;
-  b : double;
-}
+local field1 = "v"
+local field2 = "x"
 
-task f(x : region(iface))
+task f(x : region(int))
 where reads writes(x) do end
 
 task g()
-  var r = region(ispace(ptr, 5), fs)
-  f(r.{a=z.x, c=w.y})
+  var r = region(ispace(ptr, 5), st)
+  f(r.{[field1].[field2]})
 end

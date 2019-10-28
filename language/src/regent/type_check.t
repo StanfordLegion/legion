@@ -3547,7 +3547,7 @@ local function gather_field_types(node, type, fields)
         local result, colliding_field =
           entry_tree.unify(entry_tree[key], subtree)
         if result == nil then
-          report.error(node, "field name " .. tostring(colliding_field) ..
+          report.error(node, "field name " .. tostring(colliding_field or key) ..
               " collides in projection")
         end
         entry_tree:replace(key, result)
@@ -3601,6 +3601,18 @@ local function project_type(node, type, fields, field_paths)
 end
 
 function type_check.project_field(cx, node, region, prefix_path, value_type)
+  if node.rename then
+    if type(node.rename) ~= "string" then
+      report.error(node, "type mismatch: expected string for renaming but found " ..
+          type(node.rename))
+    end
+  end
+
+  if type(node.field_name) ~= "string" then
+    report.error(node, "type mismatch: expected string for field name but found " ..
+        type(node.field_name))
+  end
+
   local field_path = prefix_path .. data.newtuple(node.field_name)
   local field_type = std.get_field(value_type, node.field_name)
   if not field_type then

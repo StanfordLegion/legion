@@ -13,34 +13,21 @@
 -- limitations under the License.
 
 -- fails-with:
--- type_mismatch_call_polymorphic8.rg:45: field name b does not exist in {a : double, c : double}
---   f(r.{a=z.x, c=w.y})
---    ^
+-- type_mismatch_projection5.rg:31: type mismatch: expected string for renaming but found number
+--   var s = r.{[field]=[field]}
+--              ^
 
 import "regent"
 
-struct vec2
-{
-  x : double;
-  y : double;
-}
-
 struct fs
 {
-  z : vec2;
-  w : vec2;
+  x : int;
 }
 
-struct iface
-{
-  a : double;
-  b : double;
-}
+local field = terralib.newlist({1})
 
-task f(x : region(iface))
-where reads writes(x) do end
-
-task g()
-  var r = region(ispace(ptr, 5), fs)
-  f(r.{a=z.x, c=w.y})
+task f()
+  var r = region(ispace(int1d, 5), fs)
+  var s = r.{[field]=[field]}
 end
+f:compile()

@@ -13,8 +13,8 @@
 -- limitations under the License.
 
 -- fails-with:
--- type_mismatch_call_polymorphic8.rg:45: field name b does not exist in {a : double, c : double}
---   f(r.{a=z.x, c=w.y})
+-- type_mismatch_call_polymorphic25.rg:51: type mismatch: expected double for field b but got int32
+--   f(r.{[names]=[field_paths]})
 --    ^
 
 import "regent"
@@ -22,7 +22,7 @@ import "regent"
 struct vec2
 {
   x : double;
-  y : double;
+  y : int;
 }
 
 struct fs
@@ -37,10 +37,16 @@ struct iface
   b : double;
 }
 
+local names = terralib.newlist({"b", "a"})
+local field_paths = terralib.newlist({
+  regentlib.field_path("w", "y"),
+  regentlib.field_path("z", "x"),
+})
+
 task f(x : region(iface))
 where reads writes(x) do end
 
 task g()
   var r = region(ispace(ptr, 5), fs)
-  f(r.{a=z.x, c=w.y})
+  f(r.{[names]=[field_paths]})
 end

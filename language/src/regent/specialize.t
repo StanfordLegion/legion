@@ -1233,23 +1233,39 @@ function specialize.projection_field(cx, node)
   if renames then
     return data.zip(renames, field_names):map(
       function(pair)
-        local rename, field_name = unpack(pair)
-        return ast.specialized.projection.Field {
-          rename = rename,
-          field_name = field_name,
-          fields = fields,
-          span = node.span,
-        }
+        local rename, field_path = unpack(pair)
+        if not data.is_tuple(field_path) then
+          field_path = data.newtuple(field_path)
+        end
+        local result = fields
+        for i = #field_path, 1, -1 do
+          result = terralib.newlist({
+            ast.specialized.projection.Field {
+              rename = (i == 1 and rename) or false,
+              field_name = field_path[i],
+              fields = result,
+              span = node.span,
+            }})
+        end
+        return result[1]
       end)
   else
     return field_names:map(
-      function(field_name)
-        return ast.specialized.projection.Field {
-          rename = renames,
-          field_name = field_name,
-          fields = fields,
-          span = node.span,
-        }
+      function(field_path)
+        if not data.is_tuple(field_path) then
+          field_path = data.newtuple(field_path)
+        end
+        local result = fields
+        for i = #field_path, 1, -1 do
+          result = terralib.newlist({
+            ast.specialized.projection.Field {
+              rename = false,
+              field_name = field_path[i],
+              fields = result,
+              span = node.span,
+            }})
+        end
+        return result[1]
       end)
   end
 end
