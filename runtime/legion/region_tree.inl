@@ -1286,8 +1286,8 @@ namespace Legion {
     template<int DIM, typename T>
     IndexSpaceDifference<DIM,T>::IndexSpaceDifference(
                                       const IndexSpaceDifference<DIM,T> &rhs)
-     : IndexSpaceOperationT<DIM,T>(IndexSpaceOperation::DIFFERENCE_OP_KIND,NULL),
-       lhs(NULL), rhs(NULL)
+     : IndexSpaceOperationT<DIM,T>(IndexSpaceOperation::DIFFERENCE_OP_KIND,
+                                   NULL), lhs(NULL), rhs(NULL)
     //--------------------------------------------------------------------------
     {
       // should never be called
