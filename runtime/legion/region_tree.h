@@ -1862,10 +1862,10 @@ namespace Legion {
     public:
       IndexSpaceNodeT& operator=(const IndexSpaceNodeT &rhs);
     public:
-      inline ApEvent get_realm_index_space(Realm::IndexSpace<DIM,T> &result,
-                                           bool need_tight_result);
-      inline void set_realm_index_space(AddressSpaceID source,
-                                        const Realm::IndexSpace<DIM,T> &value);
+      ApEvent get_realm_index_space(Realm::IndexSpace<DIM,T> &result,
+				    bool need_tight_result);
+      void set_realm_index_space(AddressSpaceID source,
+				 const Realm::IndexSpace<DIM,T> &value);
     public:
       // From IndexSpaceExpression
       virtual ApEvent get_expr_index_space(void *result, TypeTag tag,

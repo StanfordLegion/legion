@@ -18,13 +18,14 @@ namespace Legion {
 
     LEGION_EXTERN_LOGGER_DECLARATIONS
 
+#ifdef DEFINE_NT_TEMPLATES
     /////////////////////////////////////////////////////////////
     // Index Space Expression 
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    inline ApEvent IndexSpaceExpression::issue_fill_internal(
+    ApEvent IndexSpaceExpression::issue_fill_internal(
                                  RegionTreeForest *forest,
                                  const Realm::IndexSpace<DIM,T> &space,
                                  const PhysicalTraceInfo &trace_info,
@@ -116,7 +117,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    inline ApEvent IndexSpaceExpression::issue_copy_internal(
+    ApEvent IndexSpaceExpression::issue_copy_internal(
                                  RegionTreeForest *forest,
                                  const Realm::IndexSpace<DIM,T> &space,
                                  const PhysicalTraceInfo &trace_info,
@@ -1285,7 +1286,8 @@ namespace Legion {
     template<int DIM, typename T>
     IndexSpaceDifference<DIM,T>::IndexSpaceDifference(
                                       const IndexSpaceDifference<DIM,T> &rhs)
-     : IndexSpaceOperationT<DIM,T>(IndexSpaceOperation::DIFFERENCE_OP_KIND,NULL)
+     : IndexSpaceOperationT<DIM,T>(IndexSpaceOperation::DIFFERENCE_OP_KIND,NULL),
+       lhs(NULL), rhs(NULL)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -1450,7 +1452,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    inline ApEvent IndexSpaceNodeT<DIM,T>::get_realm_index_space(
+    ApEvent IndexSpaceNodeT<DIM,T>::get_realm_index_space(
                       Realm::IndexSpace<DIM,T> &result, bool need_tight_result)
     //--------------------------------------------------------------------------
     {
@@ -1480,7 +1482,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    inline void IndexSpaceNodeT<DIM,T>::set_realm_index_space(
+    void IndexSpaceNodeT<DIM,T>::set_realm_index_space(
                   AddressSpaceID source, const Realm::IndexSpace<DIM,T> &value)
     //--------------------------------------------------------------------------
     {
@@ -2933,7 +2935,9 @@ namespace Legion {
                    partition->color_space->handle.get_type_tag(), &creator);
       return creator.result;
     }
+#endif // defined(DEFINE_NT_TEMPLATES)
 
+#ifdef DEFINE_NTNT_TEMPLATES
     //--------------------------------------------------------------------------
     template<int DIM, typename T> template<int COLOR_DIM, typename COLOR_T>
     ApEvent IndexSpaceNodeT<DIM,T>::create_by_field_helper(Operation *op,
@@ -3021,7 +3025,9 @@ namespace Legion {
       }
       return result;
     }
+#endif // defined(DEFINE_NTNT_TEMPLATES)
 
+#ifdef DEFINE_NT_TEMPLATES
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     ApEvent IndexSpaceNodeT<DIM,T>::create_by_image(Operation *op,
@@ -3041,7 +3047,9 @@ namespace Legion {
           projection->handle.get_type_tag(), &creator);
       return creator.result;
     }
+#endif // defined(DEFINE_NT_TEMPLATES)
 
+#ifdef DEFINE_NTNT_TEMPLATES    
     //--------------------------------------------------------------------------
     template<int DIM1, typename T1> template<int DIM2, typename T2>
     ApEvent IndexSpaceNodeT<DIM1,T1>::create_by_image_helper(Operation *op,
@@ -3170,7 +3178,9 @@ namespace Legion {
       }
       return result;
     }
+#endif // defined(DEFINE_NTNT_TEMPLATES)
 
+#ifdef DEFINE_NT_TEMPLATES
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     ApEvent IndexSpaceNodeT<DIM,T>::create_by_image_range(Operation *op,
@@ -3190,7 +3200,9 @@ namespace Legion {
           projection->handle.get_type_tag(), &creator);
       return creator.result;
     }
+#endif // defined(DEFINE_NT_TEMPLATES)
 
+#ifdef DEFINE_NTNT_TEMPLATES
     //--------------------------------------------------------------------------
     template<int DIM1, typename T1> template<int DIM2, typename T2>
     ApEvent IndexSpaceNodeT<DIM1,T1>::create_by_image_range_helper(
@@ -3320,7 +3332,9 @@ namespace Legion {
       }
       return result;
     }
+#endif // defined(DEFINE_NTNT_TEMPLATES)
 
+#ifdef DEFINE_NT_TEMPLATES
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     ApEvent IndexSpaceNodeT<DIM,T>::create_by_preimage(Operation *op,
@@ -3340,7 +3354,9 @@ namespace Legion {
           projection->handle.get_type_tag(), &creator);
       return creator.result;
     }
+#endif // defined(DEFINE_NT_TEMPLATES)
 
+#ifdef DEFINE_NTNT_TEMPLATES
     //--------------------------------------------------------------------------
     template<int DIM1, typename T1> template<int DIM2, typename T2>
     ApEvent IndexSpaceNodeT<DIM1,T1>::create_by_preimage_helper(Operation *op,
@@ -3469,7 +3485,9 @@ namespace Legion {
       }
       return result;
     }
+#endif // defined(DEFINE_NTNT_TEMPLATES)
 
+#ifdef DEFINE_NT_TEMPLATES
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     ApEvent IndexSpaceNodeT<DIM,T>::create_by_preimage_range(Operation *op,
@@ -3489,7 +3507,9 @@ namespace Legion {
           projection->handle.get_type_tag(), &creator);
       return creator.result;
     }
+#endif // defined(DEFINE_NT_TEMPLATES)
 
+#ifdef DEFINE_NTNT_TEMPLATES
     //--------------------------------------------------------------------------
     template<int DIM1, typename T1> template<int DIM2, typename T2>
     ApEvent IndexSpaceNodeT<DIM1,T1>::create_by_preimage_range_helper(
@@ -3619,7 +3639,9 @@ namespace Legion {
       }
       return result;
     }
+#endif // defined(DEFINE_NTNT_TEMPLATES)
 
+#ifdef DEFINE_NT_TEMPLATES
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     ApEvent IndexSpaceNodeT<DIM,T>::create_association(Operation *op,
@@ -3635,7 +3657,9 @@ namespace Legion {
           range->handle.get_type_tag(), &creator);
       return creator.result;
     }
+#endif // defined(DEFINE_NT_TEMPLATES)
 
+#ifdef DEFINE_NTNT_TEMPLATES
     //--------------------------------------------------------------------------
     template<int DIM1, typename T1> template<int DIM2, typename T2>
     ApEvent IndexSpaceNodeT<DIM1,T1>::create_association_helper(Operation *op,
@@ -3700,7 +3724,9 @@ namespace Legion {
 #endif
       return result;
     }
+#endif // defined(DEFINE_NTNT_TEMPLATES)
 
+#ifdef DEFINE_NT_TEMPLATES
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     bool IndexSpaceNodeT<DIM,T>::check_field_size(size_t field_size, bool range)
@@ -4176,6 +4202,7 @@ namespace Legion {
         return remove_base_valid_ref(APPLICATION_REF, NULL/*mutator*/);
       }
     } 
+#endif // defined(DEFINE_NT_TEMPLATES)
 
   }; // namespace Internal
 }; // namespace Legion

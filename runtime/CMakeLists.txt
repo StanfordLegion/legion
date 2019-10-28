@@ -303,6 +303,23 @@ list(APPEND LEGION_SRC
   legion/runtime.h                        legion/runtime.cc
 )
 
+# generate per-dimension object files for deppart stuff
+foreach(N1 RANGE 1 ${LEGION_MAX_DIM})
+  add_custom_command(
+    COMMAND /bin/echo -e "\\#define INST_N1 ${N1}\\\\n\\#include \\\"legion/region_tree_tmpl.cc\\\"" > region_tree_${N1}.cc
+    OUTPUT region_tree_${N1}.cc
+    )
+  list(APPEND LEGION_SRC region_tree_${N1}.cc)
+  
+  foreach(N2 RANGE 1 ${LEGION_MAX_DIM})
+    add_custom_command(
+      COMMAND /bin/echo -e "\\#define INST_N1 ${N1}\\\\n\\#define INST_N2 ${N2}\\\\n\\#include \\\"legion/region_tree_tmpl.cc\\\"" > region_tree_${N1}_${N2}.cc
+      OUTPUT region_tree_${N1}_${N2}.cc
+      )
+    list(APPEND LEGION_SRC region_tree_${N1}_${N2}.cc)
+  endforeach()
+endforeach()
+
 add_library(LegionRuntime ${MAPPER_SRC} ${LEGION_SRC})
 target_link_libraries(LegionRuntime PUBLIC RealmRuntime)
 if(Legion_USE_ZLIB)
