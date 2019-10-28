@@ -12770,8 +12770,19 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void ReplicateContext::handle_barrier_refresh(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      ShardedPhysicalTemplate *tpl = find_or_buffer_barrier_refresh(derez);
+      // If the template is NULL then the request was buffered
+      if (tpl == NULL)
+        return;
+      tpl->handle_barrier_refresh(derez);
+    }
+
+    //--------------------------------------------------------------------------
     ApBarrier ReplicateContext::handle_find_trace_shard_event(
-                                           size_t template_index, ApEvent event)
+                     size_t template_index, ApEvent event, ShardID remote_shard)
     //--------------------------------------------------------------------------
     {
       ShardedPhysicalTemplate *physical_template = NULL;
@@ -12789,7 +12800,7 @@ namespace Legion {
           return ApBarrier::NO_AP_BARRIER;
         physical_template = finder->second;
       }
-      return physical_template->find_trace_shard_event(event);
+      return physical_template->find_trace_shard_event(event, remote_shard);
     }
 
     //--------------------------------------------------------------------------
@@ -13500,6 +13511,24 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ShardedPhysicalTemplate* ReplicateContext::find_or_buffer_trace_update(
+                                                            Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      size_t trace_index;
+      derez.deserialize(trace_index);
+      AutoLock r_lock(replication_lock); 
+      std::map<size_t,ShardedPhysicalTemplate*>::const_iterator finder = 
+        physical_templates.find(trace_index);
+      if (finder != physical_templates.end())
+        return finder->second;
+      // I think we don't actually need to buffer right now because traces
+      // should all start together, but we'll find out for sure if we hit this
+      assert(false);
+      return NULL;
+    }
+
+    //--------------------------------------------------------------------------
+    ShardedPhysicalTemplate* ReplicateContext::find_or_buffer_barrier_refresh(
                                                             Deserializer &derez)
     //--------------------------------------------------------------------------
     {

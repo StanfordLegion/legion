@@ -7465,8 +7465,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ApBarrier ShardTask::handle_find_trace_shard_event(size_t template_index,
-                                                       ApEvent event)
+    void ShardTask::handle_barrier_refresh(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -7478,7 +7477,25 @@ namespace Legion {
       ReplicateContext *repl_ctx = 
         static_cast<ReplicateContext*>(execution_context);
 #endif
-      return repl_ctx->handle_find_trace_shard_event(template_index, event);
+      repl_ctx->handle_barrier_refresh(derez);
+    }
+
+    //--------------------------------------------------------------------------
+    ApBarrier ShardTask::handle_find_trace_shard_event(size_t template_index,
+                                            ApEvent event, ShardID remote_shard)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(execution_context != NULL);
+      ReplicateContext *repl_ctx = 
+        dynamic_cast<ReplicateContext*>(execution_context);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = 
+        static_cast<ReplicateContext*>(execution_context);
+#endif
+      return repl_ctx->handle_find_trace_shard_event(template_index, event,
+                                                     remote_shard);
     }
 
     //--------------------------------------------------------------------------

@@ -5934,7 +5934,19 @@ namespace Legion {
           // If we successfully identified a template for all the shards
           // to use then we record that in the trace 
           if (selected_template_index >= 0)
-            physical_trace->select_template(this, selected_template_index);
+          {
+            PhysicalTemplate *t = 
+              physical_trace->select_template(selected_template_index);
+#ifdef DEBUG_LEGION
+            ShardedPhysicalTemplate *tpl = 
+              dynamic_cast<ShardedPhysicalTemplate*>(t);
+            assert(tpl != NULL);
+#else
+            ShardedPhysicalTemplate *tpl = 
+              static_cast<ShardedPhysicalTemplate*>(t);
+#endif
+            tpl->record_replayed();
+          }
         }
 #ifdef DEBUG_LEGION
         assert(physical_trace->get_current_template() == NULL ||
@@ -7125,7 +7137,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ShardManager::send_trace_event_request(
-        ShardedPhysicalTemplate *physical_template, 
+        ShardedPhysicalTemplate *physical_template, ShardID shard_source, 
         AddressSpaceID template_source, size_t template_index, ApEvent event,
         AddressSpaceID event_space, RtUserEvent done_event)
     //--------------------------------------------------------------------------
@@ -7155,6 +7167,7 @@ namespace Legion {
             rez.serialize(repl_id);
             rez.serialize(physical_template);
             rez.serialize(template_index);
+            rez.serialize(shard_source);
             rez.serialize(event);
             rez.serialize(done_event);
           }
@@ -7171,7 +7184,8 @@ namespace Legion {
               local_shards.begin(); it != local_shards.end(); it++)
         {
           const ApBarrier result = 
-            (*it)->handle_find_trace_shard_event(template_index, event);
+            (*it)->handle_find_trace_shard_event(template_index, 
+                                                 event, shard_source);
           // If we found it then we are done
           if (result.exists())
           {
@@ -7198,13 +7212,15 @@ namespace Legion {
       derez.deserialize(physical_template);
       size_t template_index;
       derez.deserialize(template_index);
+      ShardID shard_source;
+      derez.deserialize(shard_source);
       ApEvent event;
       derez.deserialize(event);
       RtUserEvent done_event;
       derez.deserialize(done_event);
 
       ShardManager *manager = runtime->find_shard_manager(repl_id);
-      manager->send_trace_event_request(physical_template, source, 
+      manager->send_trace_event_request(physical_template, shard_source, source,
           template_index, event, runtime->address_space, done_event);
     }
 
@@ -7287,6 +7303,47 @@ namespace Legion {
         if ((*it)->shard_id == target)
         {
           (*it)->handle_trace_update(derez);
+          return;
+        }
+      }
+      // Should never get here
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardManager::send_barrier_refresh(ShardID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(target < address_spaces->size());
+#endif
+      AddressSpaceID target_space = (*address_spaces)[target];
+      // Check to see if this is a local shard
+      if (target_space == runtime->address_space)
+      {
+        Deserializer derez(rez.get_buffer(), rez.get_used_bytes());
+        // Have to unpack the preample we already know
+        ReplicationID local_repl;
+        derez.deserialize(local_repl);     
+        handle_barrier_refresh(derez);
+      }
+      else
+        runtime->send_control_replicate_barrier_refresh(target_space, rez);
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardManager::handle_barrier_refresh(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      // Figure out which shard we are going to
+      ShardID target;
+      derez.deserialize(target);
+      for (std::vector<ShardTask*>::const_iterator it = 
+            local_shards.begin(); it != local_shards.end(); it++)
+      {
+        if ((*it)->shard_id == target)
+        {
+          (*it)->handle_barrier_refresh(derez);
           return;
         }
       }
@@ -7428,6 +7485,17 @@ namespace Legion {
       derez.deserialize(repl_id);
       ShardManager *manager = runtime->find_shard_manager(repl_id);
       manager->handle_trace_update(derez);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void ShardManager::handle_barrier_refresh(Deserializer &derez,
+                                                         Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      ReplicationID repl_id;
+      derez.deserialize(repl_id);
+      ShardManager *manager = runtime->find_shard_manager(repl_id);
+      manager->handle_barrier_refresh(derez);
     }
 
     //--------------------------------------------------------------------------

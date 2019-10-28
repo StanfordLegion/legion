@@ -1687,7 +1687,9 @@ namespace Legion {
       void handle_resource_update(Deserializer &derez,
                                   std::set<RtEvent> &applied);
       void handle_trace_update(Deserializer &derez);
-      ApBarrier handle_find_trace_shard_event(size_t temp_index, ApEvent event);
+      void handle_barrier_refresh(Deserializer &derez);
+      ApBarrier handle_find_trace_shard_event(size_t temp_index, ApEvent event,
+                                              ShardID remote_shard);
     public:
       // Collective methods
       CollectiveID get_next_collective_index(CollectiveIndexLocation loc);
@@ -1705,6 +1707,8 @@ namespace Legion {
       // Physical template methods
       size_t register_trace_template(ShardedPhysicalTemplate *phy_template);
       ShardedPhysicalTemplate* find_or_buffer_trace_update(Deserializer &derez);
+      ShardedPhysicalTemplate* find_or_buffer_barrier_refresh(
+                                                           Deserializer &derez);
       void unregister_trace_template(size_t template_index);
     public:
       // Fence barrier methods

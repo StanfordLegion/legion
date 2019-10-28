@@ -1902,7 +1902,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTrace::select_template(ReplTraceReplayOp *op, unsigned index)
+    PhysicalTemplate* PhysicalTrace::select_template(unsigned index)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -1913,6 +1913,7 @@ namespace Legion {
       // the precondition
       nonreplayable_count = 0;
       current_template = templates[index]; 
+      return current_template;
     }
 
     //--------------------------------------------------------------------------
@@ -4326,7 +4327,8 @@ namespace Legion {
       : PhysicalTemplate(trace, fence_event), repl_ctx(ctx),
         local_shard(repl_ctx->owner_shard->shard_id), 
         total_shards(repl_ctx->shard_manager->total_shards),
-        template_index(repl_ctx->register_trace_template(this))
+        template_index(repl_ctx->register_trace_template(this)),
+        total_replays(0), updated_advances(0)
     //--------------------------------------------------------------------------
     {
     }
@@ -4347,10 +4349,6 @@ namespace Legion {
     ShardedPhysicalTemplate::~ShardedPhysicalTemplate(void)
     //--------------------------------------------------------------------------
     {
-      // Clean up our phase barriers too since we're done with them
-      for (std::map<ApEvent,ApBarrier>::iterator it = 
-            remote_barriers.begin(); it != remote_barriers.end(); it++)
-        it->second.destroy_barrier();
     }
 
     //--------------------------------------------------------------------------
@@ -4635,7 +4633,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ApBarrier ShardedPhysicalTemplate::find_trace_shard_event(ApEvent event)
+    ApBarrier ShardedPhysicalTemplate::find_trace_shard_event(ApEvent event,
+                                                           ShardID remote_shard)
     //--------------------------------------------------------------------------
     {
       AutoLock tpl_lock(template_lock);
@@ -4646,9 +4645,9 @@ namespace Legion {
       if (finder == event_map.end() || (finder->second == NO_INDEX))
         return ApBarrier::NO_AP_BARRIER;
       // If we did make it then see if we have a remote barrier for it yet
-      std::map<ApEvent,ApBarrier>::const_iterator barrier_finder = 
-        remote_barriers.find(event);
-      if (barrier_finder == remote_barriers.end())
+      std::map<ApEvent,BarrierArrival*>::const_iterator barrier_finder = 
+        remote_arrivals.find(event);
+      if (barrier_finder == remote_arrivals.end())
       {
         // Make a new barrier and record it in the events
         ApBarrier barrier(Realm::Barrier::create_barrier(1/*arrival count*/));
@@ -4660,14 +4659,15 @@ namespace Legion {
 #endif
         // Then add a new instruction to arrive on the barrier with the
         // event as a precondition
-        insert_instruction(
-            new BarrierArrival(*this, barrier, index, finder->second));
+        BarrierArrival *arrival_instruction =
+          new BarrierArrival(*this, barrier, index, finder->second);
+        insert_instruction(arrival_instruction);
         // Save this in the remote barriers
-        remote_barriers[event] = barrier;
-        return barrier;
+        remote_arrivals[event] = arrival_instruction;
+        return arrival_instruction->record_subscribed_shard(remote_shard);
       }
       else
-        return barrier_finder->second;
+        return barrier_finder->second->record_subscribed_shard(remote_shard);
     }
 
     //--------------------------------------------------------------------------
@@ -4683,11 +4683,14 @@ namespace Legion {
       if (barrier.exists())
       {
 #ifdef DEBUG_LEGION
+        assert(local_advances.find(event) == local_advances.end());
         const unsigned index = convert_event(event, false/*check*/);
 #else
         const unsigned index = convert_event(event);
 #endif
-        insert_instruction(new BarrierAdvance(*this, barrier, index)); 
+        BarrierAdvance *advance = new BarrierAdvance(*this, barrier, index);
+        insert_instruction(advance); 
+        local_advances[event] = advance;
         // Don't remove it, just set it to NO_EVENT so we can tell the names
         // of the remote events that we got from other shards
         // See get_completion_for_deletion for where we use this
@@ -4800,6 +4803,44 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void ShardedPhysicalTemplate::handle_barrier_refresh(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      ApEvent key;
+      derez.deserialize(key);
+      ApBarrier refresh;
+      derez.deserialize(refresh);
+      RtUserEvent to_trigger;
+      {
+        AutoLock tpl_lock(template_lock);
+        std::map<ApEvent,BarrierAdvance*>::const_iterator finder = 
+          local_advances.find(key);
+#ifdef DEBUG_LEGION
+        assert(finder != local_advances.end());
+#endif
+        finder->second->refresh_barrier(refresh);
+#ifdef DEBUG_LEGION
+        assert(updated_advances < local_advances.size());
+#endif
+        if (++updated_advances == local_advances.size())
+        {
+          // See if the wait has already been done by the local shard
+          // If so, trigger it, otherwise do nothing so it can come
+          // along and see that everything is done
+          if (update_advances_ready.exists())
+          {
+            to_trigger = update_advances_ready;
+            // We're done so reset everything for the next refresh
+            update_advances_ready = RtUserEvent::NO_RT_USER_EVENT;
+            updated_advances = 0;
+          }
+        }
+      }
+      if (to_trigger.exists())
+        Runtime::trigger_event(to_trigger);
+    }
+
+    //--------------------------------------------------------------------------
     void ShardedPhysicalTemplate::request_remote_shard_event(ApEvent event,
                                                          RtUserEvent done_event)
     //--------------------------------------------------------------------------
@@ -4809,8 +4850,8 @@ namespace Legion {
 #endif
       const AddressSpaceID event_space = find_event_space(event);
       repl_ctx->shard_manager->send_trace_event_request(this, 
-          repl_ctx->runtime->address_space, template_index, 
-          event, event_space, done_event);
+          repl_ctx->owner_shard->shard_id, repl_ctx->runtime->address_space, 
+          template_index, event, event_space, done_event);
     }
 
     //--------------------------------------------------------------------------
@@ -4859,15 +4900,44 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void ShardedPhysicalTemplate::record_replayed(void)
+    //--------------------------------------------------------------------------
+    {
+      if (total_replays++ == Realm::Barrier::MAX_PHASES)
+      {
+        // Need to update all our barriers since we're out of generations
+        for (std::map<ApEvent,BarrierArrival*>::const_iterator it = 
+              remote_arrivals.begin(); it != remote_arrivals.end(); it++)
+          it->second->refresh_barrier(it->first, this);
+        // Then wait for all our advances to be updated from other shards
+        RtEvent wait_on;
+        {
+          AutoLock tpl_lock(template_lock);
+          if (updated_advances < local_advances.size())
+          {
+            update_advances_ready = Runtime::create_rt_user_event();
+            wait_on = update_advances_ready;
+          }
+          else // Reset this back to zero for the next round
+            updated_advances = 0;
+        }
+        if (wait_on.exists())
+          wait_on.wait();
+        // Reset it back to zero after updating our barriers
+        total_replays = 0;
+      }
+    }
+
+    //--------------------------------------------------------------------------
     ApEvent ShardedPhysicalTemplate::get_completion_for_deletion(void) const
     //--------------------------------------------------------------------------
     {
       // Skip the any events that are from remote shards since we  
       std::set<ApEvent> all_events;
       std::set<ApEvent> local_barriers;
-      for (std::map<ApEvent,ApBarrier>::const_iterator it = 
-            remote_barriers.begin(); it != remote_barriers.end(); it++)
-        local_barriers.insert(it->second);
+      for (std::map<ApEvent,BarrierArrival*>::const_iterator it = 
+            remote_arrivals.begin(); it != remote_arrivals.end(); it++)
+        local_barriers.insert(it->second->get_current_barrier());
       for (std::map<ApEvent, unsigned>::const_iterator it = event_map.begin();
            it != event_map.end(); ++it)
       {
@@ -5625,6 +5695,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    BarrierArrival::~BarrierArrival(void)
+    //--------------------------------------------------------------------------
+    {
+      // Destroy our barrier
+      barrier.destroy_barrier();
+    }
+
+    //--------------------------------------------------------------------------
     void BarrierArrival::execute(void)
     //--------------------------------------------------------------------------
     {
@@ -5645,6 +5723,37 @@ namespace Legion {
       ss << "events[" << lhs << "] = Runtime::phase_barrier_arrive("
          << barrier.id << ", events[" << rhs << "])";
       return ss.str();
+    }
+
+    //--------------------------------------------------------------------------
+    ApBarrier BarrierArrival::record_subscribed_shard(ShardID remote_shard)
+    //--------------------------------------------------------------------------
+    {
+      subscribed_shards.push_back(remote_shard);
+      return barrier;
+    }
+
+    //--------------------------------------------------------------------------
+    void BarrierArrival::refresh_barrier(ApEvent key, 
+                                         ShardedPhysicalTemplate *tpl)
+    //--------------------------------------------------------------------------
+    {
+      // Destroy the old barrier
+      barrier.destroy_barrier();
+      // Make the new barrier
+      barrier = ApBarrier(Realm::Barrier::create_barrier(1/*arrival count*/)); 
+      ShardManager *manager = tpl->repl_ctx->shard_manager;
+      for (std::vector<ShardID>::const_iterator it = 
+            subscribed_shards.begin(); it != subscribed_shards.end(); it++)
+      {
+        Serializer rez;
+        rez.serialize(manager->repl_id);
+        rez.serialize(*it);
+        rez.serialize(tpl->template_index);
+        rez.serialize(key);
+        rez.serialize(barrier);
+        manager->send_barrier_refresh(*it, rez);
+      }
     }
 
     /////////////////////////////////////////////////////////////

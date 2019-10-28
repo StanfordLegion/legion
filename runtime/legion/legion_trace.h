@@ -467,7 +467,7 @@ namespace Legion {
       bool find_viable_templates(ReplTraceReplayOp *op, 
                                  unsigned templates_to_find,
                                  std::vector<int> &viable_templates);
-      void select_template(ReplTraceReplayOp *op, unsigned template_index);
+      PhysicalTemplate* select_template(unsigned template_index);
     public:
       PhysicalTemplate* get_current_template(void) { return current_template; }
       bool has_any_templates(void) const { return templates.size() > 0; }
@@ -976,9 +976,10 @@ namespace Legion {
       virtual IndexSpace find_local_space(unsigned trace_local_id);
       virtual ShardingFunction* find_sharding_function(unsigned trace_local_id);
     public:
-      ApBarrier find_trace_shard_event(ApEvent event);
+      ApBarrier find_trace_shard_event(ApEvent event, ShardID remote_shard);
       void record_trace_shard_event(ApEvent event, ApBarrier result);
       void handle_trace_update(Deserializer &derez);
+      void handle_barrier_refresh(Deserializer &derez);
     protected:
 #ifdef DEBUG_LEGION
       virtual unsigned convert_event(const ApEvent &event, bool check = true);
@@ -998,6 +999,8 @@ namespace Legion {
                                       std::set<RtEvent> &applied);
       virtual void record_fill_views(const FieldMaskSet<FillView> &views,
                                      std::set<RtEvent> &applied_events);
+    public:
+      void record_replayed(void);
     protected:
       void find_view_shards(AddressSpace owner, std::vector<ShardID> &shards);
     public:
@@ -1012,11 +1015,20 @@ namespace Legion {
       static const unsigned NO_INDEX = UINT_MAX;
     protected:
       std::map<ApEvent,RtEvent> pending_event_requests;
-      std::map<ApEvent,ApBarrier> remote_barriers;
+      std::map<ApEvent,BarrierArrival*> remote_arrivals;
+      std::map<ApEvent,BarrierAdvance*> local_advances;
       std::map<AddressSpaceID,std::vector<ShardID> > view_shard_owners;
       std::map<unsigned/*Trace Local ID*/,ShardID> owner_shards;
       std::map<unsigned/*Trace Local ID*/,IndexSpace> local_spaces;
       std::map<unsigned/*Trace Local ID*/,ShardingFunction*> sharding_functions;
+      // Count how many times we've been replayed so we know when we're going
+      // to run out of phase barrier generations
+      size_t total_replays;
+      // Count how many advance instructions we've seen updated for when
+      // we need to reset the phase barriers for a new round of generations
+      size_t updated_advances;
+      // An event to signal when our advances are ready
+      RtUserEvent update_advances_ready;
     };
 
     enum InstructionKind
@@ -1312,6 +1324,7 @@ namespace Legion {
     public:
       BarrierArrival(PhysicalTemplate &tpl,
                      ApBarrier bar, unsigned lhs, unsigned rhs);  
+      virtual ~BarrierArrival(void);
       virtual void execute(void);
       virtual std::string to_string(void);
 
@@ -1319,10 +1332,14 @@ namespace Legion {
         { return BARRIER_ARRIVAL; }
       virtual BarrierArrival* as_barrier_arrival(void)
         { return this; }
+      ApBarrier record_subscribed_shard(ShardID remote_shard); 
+      inline ApEvent get_current_barrier(void) const { return barrier; }
+      void refresh_barrier(ApEvent key, ShardedPhysicalTemplate *owner);
     private:
       friend class PhysicalTemplate;
       ApBarrier barrier;
       unsigned lhs, rhs;
+      std::vector<ShardID> subscribed_shards;
     };
 
     /**
@@ -1341,6 +1358,7 @@ namespace Legion {
         { return BARRIER_ADVANCE; }
       virtual BarrierAdvance* as_barrier_advance(void)
         { return this; }
+      inline void refresh_barrier(ApBarrier next) { barrier = next; }
     private:
       friend class PhysicalTemplate;
       ApBarrier barrier;
