@@ -5746,6 +5746,10 @@ namespace Legion {
       for (std::vector<ShardID>::const_iterator it = 
             subscribed_shards.begin(); it != subscribed_shards.end(); it++)
       {
+#ifdef DEBUG_LEGION
+        // Should never be sending updates to ourself
+        assert((*it) != tpl->repl_ctx->owner_shard->shard_id);
+#endif
         Serializer rez;
         rez.serialize(manager->repl_id);
         rez.serialize(*it);
