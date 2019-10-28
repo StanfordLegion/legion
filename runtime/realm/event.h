@@ -61,6 +61,10 @@ namespace Realm {
       void external_wait_faultaware(bool& poisoned) const;
       bool external_timedwait_faultaware(bool& poisoned, long long max_ns) const;
 
+      // subscribes to an event, ensuring the triggeredness of it will be
+      //  available as soon as possible (and without having to call wait)
+      void subscribe(void) const;
+
       // attempts to cancel the operation associated with this event
       // "reason_data" will be provided to any profilers of the operation
       void cancel_operation(const void *reason_data, size_t reason_size) const;

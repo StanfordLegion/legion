@@ -104,7 +104,7 @@ void spawner_task(const void *args, size_t arglen,
 
   size_t in_flight = 0;
   for(size_t i = 0; i < s_args.config.tasks_per_proc; i++) {
-    // chose a random processor
+    // choose a random processor
     Processor target = procs[PRNG::rand_int(PKEY_PROCS, s_args.index, i, procs.size())];
     // and choose a random delay
     WorkTaskArgs w_args;
@@ -122,7 +122,7 @@ void spawner_task(const void *args, size_t arglen,
 
     // make sure we limit the number in flight
     reap_events(s_args.cq, in_flight,
-		s_args.config.max_in_flight,
+		s_args.config.max_in_flight - 1,
 		s_args.config.max_to_pop);
   }
 

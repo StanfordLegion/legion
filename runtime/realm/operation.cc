@@ -686,7 +686,8 @@ namespace Realm {
 	  if(it->second.finish_event.has_triggered()) continue;
 
 	  if(it->second.local_op) {
-	    log_optable.error() << "operation pending during shutdown: " << it->second.local_op;
+	    log_optable.error() << "operation pending during shutdown: "
+				<< it->first << " = " << it->second.local_op;
 	    errors++;
 	  } else {
 	    log_optable.info() << "awaiting remote op completion during shutdown: node=" << it->second.remote_node << " event=" << it->second.finish_event;
@@ -732,6 +733,8 @@ namespace Realm {
     get_runtime()->optable.request_cancellation(args.finish_event,
 						data, datalen);
   }
+
+  ActiveMessageHandlerReg<CancelOperationMessage> cancel_operation_message_handler;
 
 
 }; // namespace Realm

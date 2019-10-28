@@ -16,6 +16,7 @@
 // Realm inter-node networking abstractions
 
 #include "realm/network.h"
+#include "realm/cmdline.h"
 
 namespace Realm {
 
@@ -114,6 +115,13 @@ namespace Realm {
 						 std::vector<std::string>& cmdline)
   {
     NetworkModule::parse_command_line(runtime, cmdline);
+
+    size_t global_size = 0;
+    CommandLineParser cp;
+    cp.add_option_int_units("-ll:gsize", global_size, 'm');
+    bool ok = cp.parse_command_line(cmdline);
+    assert(ok);
+    assert((global_size == 0) && "no global mem support in dummy network yet");
   }
 
   // "attaches" to the network, if that is meaningful - attempts to

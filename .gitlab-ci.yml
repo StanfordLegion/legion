@@ -404,6 +404,10 @@ gcc49_cxx98_debug_hdf5_regent:
   variables:
     <<: [*gcc49, *terra38, *debug, *cxx98_normal, *hdf5, *regent]
 #   * GASNet
+gcc49_cxx98_release_gasnet_legion:
+  <<: [*linux_compute, *image, *tests]
+  variables:
+    <<: [*gcc49, *terra38, *release, *cxx98_normal, *gasnet, *legion]
 gcc49_cxx98_debug_gasnet_cmake_legion:
   <<: [*linux_compute, *image, *tests]
   variables:
