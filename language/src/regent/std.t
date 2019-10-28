@@ -110,6 +110,10 @@ std.disjointness = ast.constraint_kind.Disjointness {}
 -- ## Privileges
 -- #################
 
+function std.field_path(...)
+  return data.newtuple(...)
+end
+
 function std.privilege(privilege, region, field_path)
   assert(privilege:is(ast.privilege_kind), "privilege expected argument 1 to be a privilege kind")
   assert(std.is_symbol(region), "privilege expected argument 2 to be a symbol")
@@ -4606,10 +4610,6 @@ do
   end
 end
 std.layout.dimf = ast.layout.Dim { index = c.DIM_F }
-
-function std.layout.field_path(...)
-  return data.newtuple(...)
-end
 
 function std.layout.field_constraint(region_name, field_paths)
   return ast.layout.Field {

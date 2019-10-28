@@ -407,9 +407,10 @@ function specialize.effect_expr(cx, node)
     if i > #field_path then
       return false
     end
+    local fields = make_field(field_path, i + 1)
     return ast.specialized.region.Field {
       field_name = field_path[i],
-      fields = make_field(field_path, i + 1),
+      fields = (fields and terralib.newlist({ fields })) or false,
       span = span,
     }
   end

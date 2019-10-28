@@ -144,8 +144,8 @@ foo_hybrid1:add_layout_constraint(
     regentlib.layout.field_constraint(
       "r",
       terralib.newlist {
-        regentlib.layout.field_path("x"),
-        regentlib.layout.field_path("z"),
+        regentlib.field_path("x"),
+        regentlib.field_path("z"),
       }
     ),
     regentlib.layout.dimy,
@@ -159,8 +159,8 @@ foo_hybrid1:add_layout_constraint(
     regentlib.layout.field_constraint(
       "r",
       terralib.newlist {
-        regentlib.layout.field_path("y"),
-        regentlib.layout.field_path("w"),
+        regentlib.field_path("y"),
+        regentlib.field_path("w"),
       }
     ),
   })
@@ -170,9 +170,9 @@ foo_hybrid1:add_layout_constraint(
     regentlib.layout.field_constraint(
       "s",
       terralib.newlist {
-        regentlib.layout.field_path("x"),
-        regentlib.layout.field_path("y"),
-        regentlib.layout.field_path("z"),
+        regentlib.field_path("x"),
+        regentlib.field_path("y"),
+        regentlib.field_path("z"),
       }
     ),
     regentlib.layout.dimx,
@@ -186,7 +186,7 @@ foo_hybrid1:add_layout_constraint(
     regentlib.layout.field_constraint(
       "s",
       terralib.newlist {
-        regentlib.layout.field_path("w"),
+        regentlib.field_path("w"),
       }
     ),
   })

@@ -140,8 +140,8 @@ foo_primary_variant:add_layout_constraint(
     regentlib.layout.field_constraint(
       "r",
       terralib.newlist {
-        regentlib.layout.field_path("c"),
-        regentlib.layout.field_path("d"),
+        regentlib.field_path("c"),
+        regentlib.field_path("d"),
       }
     ),
     regentlib.layout.dimy,
@@ -153,8 +153,8 @@ foo_primary_variant:add_layout_constraint(
     regentlib.layout.field_constraint(
       "s",
       terralib.newlist {
-        regentlib.layout.field_path("c"),
-        regentlib.layout.field_path("d", "b"),
+        regentlib.field_path("c"),
+        regentlib.field_path("d", "b"),
       }
     ),
     regentlib.layout.dimx,
@@ -168,7 +168,7 @@ foo_primary_variant:add_layout_constraint(
     regentlib.layout.field_constraint(
       "s",
       terralib.newlist {
-        regentlib.layout.field_path("d", "a"),
+        regentlib.field_path("d", "a"),
       }
     ),
   })
