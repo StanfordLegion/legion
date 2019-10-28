@@ -13,3 +13,4 @@ inst_reuse
 transpose
 scatter
 compqueue
+event_subscribe
