@@ -65,7 +65,7 @@ local function uses(cx, region_type, polarity)
   -- We over-approximate projected regions to their sources.
   -- Regions that are projected onto disjoint sets of fields are
   -- in fact independent but will be treated like the same region.
-  if region_type:is_projected() then
+  if std.is_region(region_type) and region_type:is_projected() then
     region_type = region_type:get_projection_source()
   end
   usage[region_type] = polarity
