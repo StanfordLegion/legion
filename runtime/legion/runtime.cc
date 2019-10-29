@@ -6500,10 +6500,10 @@ namespace Legion {
           shutdown_manager->record_recent_message();
         if (ordered_channel)
         {
-          // This is only sound because we know we are on the owner
-          // node for the event, otherwise Realm could lie to us
           if (!last_message_event.has_triggered())
           {
+            // Subscribe to make sure we see this trigger
+            last_message_event.subscribe();
             // A little hack here for slow gasnet conduits
             // If the event didn't trigger yet, make sure its just
             // because we haven't gotten the return message yet
@@ -6522,10 +6522,10 @@ namespace Legion {
           for (std::set<RtEvent>::const_iterator it = 
                 unordered_events.begin(); it != unordered_events.end(); it++)
           {
-            // This is only sound because we know we are on the owner
-            // node for the event, otherwise Realm could lie to us
             if (!it->has_triggered())
             {
+              // Subscribe to make sure we see this trigger
+              it->subscribe();
               // A little hack here for slow gasnet conduits
               // If the event didn't trigger yet, make sure its just
               // because we haven't gotten the return message yet
@@ -6550,6 +6550,8 @@ namespace Legion {
           {
             if (!last_message_event.has_triggered())
             {
+              // Subscribe to make sure we see this trigger
+              last_message_event.subscribe();
               // A little hack here for slow gasnet conduits
               // If the event didn't trigger yet, make sure its just
               // because we haven't gotten the return message yet
@@ -6563,10 +6565,10 @@ namespace Legion {
             for (std::set<RtEvent>::const_iterator it = 
                   unordered_events.begin(); it != unordered_events.end(); it++)
             {
-              // This is only sound because we know we are on the owner
-              // node for the event, otherwise Realm could lie to us
               if (!it->has_triggered())
               {
+                // Subscribe to make sure we see this trigger
+                it->subscribe();
                 // A little hack here for slow gasnet conduits
                 // If the event didn't trigger yet, make sure its just
                 // because we haven't gotten the return message yet

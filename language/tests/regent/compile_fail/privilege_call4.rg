@@ -19,19 +19,19 @@
 
 import "regent"
 
-struct s {
+fspace s {
   a : int,
   b : int,
   c : int,
 }
 
-struct t {
+fspace t {
   d : s,
   e : s,
   f : s,
 }
 
-struct u {
+fspace u {
   g : t,
   h : t,
 }

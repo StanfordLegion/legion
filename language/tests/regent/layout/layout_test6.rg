@@ -99,9 +99,9 @@ colocate:get_primary_variant():add_execution_constraint(
   regentlib.layout.colocation_constraint(
     terralib.newlist({
       regentlib.layout.field_constraint("r",
-        terralib.newlist({regentlib.layout.field_path("input")})),
+        terralib.newlist({regentlib.field_path("input")})),
       regentlib.layout.field_constraint("g",
-        terralib.newlist({regentlib.layout.field_path("input")}))
+        terralib.newlist({regentlib.field_path("input")}))
     })))
 
 task donut(r : region(ispace(int2d), fs),

@@ -586,8 +586,15 @@ function type_check.expr_field_access(cx, node)
   elseif std.is_partition(std.as_read(unpack_type)) and node.field_name == "colors" then
     field_type = std.as_read(unpack_type):colors()
   elseif std.type_is_opaque_to_field_accesses(std.as_read(unpack_type)) then
+    local hint = ""
+    if std.is_region(std.as_read(unpack_type)) and
+       std.get_field(std.as_read(unpack_type):fspace(), node.field_name)
+    then
+      hint = ". If you wanted to project the region, please wrap the field name with braces (i.e., " ..
+        string.gsub((pretty.entry_expr(value) .. ".{" .. node.field_name .. "}"), "[$]", "") .. ")."
+    end
     report.error(node, "no field '" .. node.field_name .. "' in type " ..
-                tostring(std.as_read(value_type)))
+                tostring(std.as_read(value_type)) .. hint)
   else
     field_type = std.get_field(unpack_type, node.field_name)
     if not field_type then
@@ -958,7 +965,7 @@ function type_check.expr_call(cx, node)
     end
   end
   local expr_type, need_cast = std.validate_args(
-    node, param_symbols, arg_symbols, def_type.isvararg, def_type.returntype, {}, false)
+    node, param_symbols, arg_symbols, def_type.isvararg, def_type.returntype, {}, false, true)
 
   if std.is_task(fn.value) then
     if cx.must_epoch then
@@ -982,17 +989,45 @@ function type_check.expr_call(cx, node)
         local field_path = privilege.field_path
         assert(std.type_supports_privileges(region:gettype()))
         local arg_region = mapping[region:gettype()]
-        if not std.check_privilege(cx, privilege_type, arg_region:gettype(), field_path) then
-          for i, arg in ipairs(arg_symbols) do
-            if std.type_eq(arg:gettype(), arg_region:gettype()) then
-              report.error(
-                node, "invalid privileges in argument " .. tostring(i) ..
-                  ": " .. tostring(privilege_type) .. "(" ..
-                  (data.newtuple(arg_region) .. field_path):mkstring(".") ..
-                  ")")
+
+        local fspace = region:gettype():fspace()
+        -- If the field space of the parameter's region type is not a field space instance,
+        -- we individually check privileges for fields because they can be renamed via
+        -- field polymorphism.
+        if not std.is_fspace_instance(fspace) then
+          local field_path_mapping = data.map_from_table(data.dict(data.zip(
+                  std.flatten_struct_fields(fspace),
+                  std.flatten_struct_fields(arg_region:gettype():fspace()))))
+
+          std.get_absolute_field_paths(fspace, field_path):map(function(field_path)
+            local arg_field_path = field_path_mapping[field_path]
+            if not std.check_privilege(cx, privilege_type, arg_region:gettype(), arg_field_path) then
+              for i, arg in ipairs(arg_symbols) do
+                if std.type_eq(arg:gettype(), arg_region:gettype()) then
+                  report.error(
+                    node, "invalid privileges in argument " .. tostring(i) ..
+                      ": " .. tostring(privilege_type) .. "(" ..  pretty.entry_expr(args[i]) ..
+                      (((#arg_field_path > 0) and ("." .. arg_field_path:mkstring("."))) or "") ..  ")")
+                end
+              end
+              assert(false)
             end
+          end)
+
+        -- Otherwise, we perform nominal type checking
+        else
+          if not std.check_privilege(cx, privilege_type, arg_region:gettype(), field_path) then
+            for i, arg in ipairs(arg_symbols) do
+              if std.type_eq(arg:gettype(), arg_region:gettype()) then
+                report.error(
+                  node, "invalid privileges in argument " .. tostring(i) ..
+                    ": " .. tostring(privilege_type) .. "(" ..
+                    (data.newtuple(arg_region) .. field_path):mkstring(".") ..
+                    ")")
+              end
+            end
+            assert(false)
           end
-          assert(false)
         end
       end
     end
@@ -1533,6 +1568,10 @@ function type_check.expr_partition(cx, node)
                 tostring(region_type))
   end
 
+  if region_type:is_projected() then
+    report.error(node, "a projected region cannot be partitioned")
+  end
+
   if colors and not std.is_ispace(colors_type) then
     report.error(node, "type mismatch in argument 4: expected ispace but got " ..
                 tostring(colors_type))
@@ -1621,6 +1660,10 @@ function type_check.expr_partition_equal(cx, node)
                 tostring(region_type))
   end
 
+  if region_type:is_projected() then
+    report.error(node, "a projected region cannot be partitioned")
+  end
+
   if not std.is_ispace(colors_type) then
     report.error(node, "type mismatch in argument 2: expected ispace but got " ..
                 tostring(colors_type))
@@ -1671,6 +1714,10 @@ function type_check.expr_partition_by_field(cx, node)
   if #region.fields ~= 1 then
     report.error(node, "type mismatch in argument 1: expected 1 field but got " ..
                 tostring(#region.fields))
+  end
+
+  if region_type:is_projected() then
+    report.error(node, "a projected region cannot be partitioned")
   end
 
   if not std.is_ispace(colors_type) then
@@ -1740,6 +1787,10 @@ function type_check.expr_partition_by_restriction(cx, node)
   if not std.is_region(region_type) then
     report.error(node, "type mismatch in argument 1: expected region type but got " ..
                  tostring(region_type))
+  end
+
+  if region_type:is_projected() then
+    report.error(node, "a projected region cannot be partitioned")
   end
 
   if not std.is_transform_type(transform_type) then
@@ -1822,6 +1873,10 @@ function type_check.expr_image(cx, node)
   if not std.is_region(parent_type) then
     report.error(node, "type mismatch in argument 1: expected region but got " ..
                 tostring(parent_type))
+  end
+
+  if region_type:is_projected() then
+    report.error(node, "a projected region cannot be partitioned")
   end
 
   if not std.is_partition(partition_type) then
@@ -1960,6 +2015,10 @@ function type_check.expr_image_by_task(cx, node)
                 tostring(parent_type))
   end
 
+  if parent_type:is_projected() then
+    report.error(node, "a projected region cannot be partitioned")
+  end
+
   if not std.is_partition(partition_type) then
     report.error(node, "type mismatch in argument 2: expected partition but got " ..
                 tostring(partition_type))
@@ -2006,6 +2065,10 @@ function type_check.expr_preimage(cx, node)
   if not std.is_region(parent_type) then
     report.error(node, "type mismatch in argument 1: expected region but got " ..
                 tostring(parent_type))
+  end
+
+  if region_type:is_projected() then
+    report.error(node, "a projected region cannot be partitioned")
   end
 
   if not std.is_partition(partition_type) then
@@ -3118,6 +3181,10 @@ function type_check.expr_binary(cx, node)
     expr_type = std.partition(
       disjointness, lhs_type.parent_region_symbol, lhs_type.colors_symbol)
   elseif std.is_region(lhs_type) then
+    if lhs_type:is_projected() then
+      report.error(node, "a projected region cannot be partitioned")
+    end
+
     if not std.is_partition(rhs_type) then
       report.error(node.rhs, "type mismatch: expected a partition but got " .. tostring(rhs_type))
     end
@@ -3361,6 +3428,310 @@ function type_check.expr_import_partition(cx, node)
   }
 end
 
+local entry_tree = {}
+
+function entry_tree.new()
+  local t = {
+    __tree = terralib.newlist(),
+    __indices = data.newmap(),
+    __fields = terralib.newlist(),
+  }
+  return setmetatable(t, entry_tree)
+end
+
+function entry_tree.is_entry_tree(x)
+  return getmetatable(x) == entry_tree
+end
+
+function entry_tree:__index(field)
+  return self.__tree[self.__indices[field]] or entry_tree[field]
+end
+
+function entry_tree:__newindex(field, value)
+  self:put(field, value)
+end
+
+function entry_tree:has(field)
+  return self.__indices:has(field)
+end
+
+function entry_tree:get(field)
+  if self:has(field) then
+    return self.__tree[self.__indices[field]]
+  else
+    return nil
+  end
+end
+
+function entry_tree:put(field, subtree)
+  assert(field ~= nil)
+  assert(not self.__indices:has(field))
+  assert(#self.__tree == #self.__fields)
+  self.__tree:insert(subtree)
+  self.__fields:insert(field)
+  self.__indices[field] = #self.__tree
+end
+
+function entry_tree:replace(field, subtree)
+  assert(field ~= nil)
+  assert(self.__indices:has(field))
+  assert(#self.__tree == #self.__fields)
+  self.__tree[self.__indices[field]] = subtree
+end
+
+function entry_tree:next_item(k)
+  if k == nil then
+    if #self.__fields == 0 then
+      return
+    else
+      return self.__fields[1], self.__tree[1]
+    end
+  end
+  local i = self.__indices[k]
+  if i == nil then
+    return
+  else
+    return self.__fields[i + 1], self.__tree[i + 1]
+  end
+end
+
+function entry_tree:items()
+  if #self.__tree == 0 then
+    return function() return nil, nil end
+  else
+    return entry_tree.next_item, self, nil
+  end
+end
+
+function entry_tree:map_list(fn)
+  local result = terralib.newlist()
+  for k, v in self:items() do
+    result:insert(fn(k, v))
+  end
+  return result
+end
+
+function entry_tree:__tostring()
+  return "{" .. self:map_list(
+    function(k, v)
+      return tostring(k) .. "=" .. tostring(v)
+    end):concat(",") .. "}"
+end
+
+function entry_tree.unify(tree1, tree2)
+  if not entry_tree.is_entry_tree(tree1) or
+     not entry_tree.is_entry_tree(tree2)
+  then
+    return nil
+  end
+
+  local result = entry_tree.new()
+  for field, subtree in tree1:items() do
+    result[field] = subtree
+  end
+  for field, subtree in tree2:items() do
+    if result:has(field) then
+      local u = entry_tree.unify(result[field], subtree)
+      if u == nil then return nil, field end
+      result[field] = u
+    else
+      result[field] = subtree
+    end
+  end
+  return result
+end
+
+local function gather_field_types(node, type, fields)
+  if not fields then
+    return type, nil
+  end
+
+  if #fields == 1 then
+    local field = fields[1]
+    local subtree, suffix =
+      gather_field_types(node, std.get_field(type, field.field_name), field.fields)
+
+    if field.rename then
+      local entry_tree = entry_tree.new()
+      entry_tree[field.rename] = subtree
+      return entry_tree, field.rename
+
+    else
+      return subtree, suffix or field.field_name
+    end
+
+  else -- #fields > 1
+    assert(type:isstruct())
+
+    local entry_tree = entry_tree.new()
+    for idx, field in ipairs(fields) do
+      local subtree, suffix =
+        gather_field_types(node, std.get_field(type, field.field_name), field.fields)
+
+      local key = nil
+      if field.rename then
+        key = field.rename
+      else
+        key = suffix or field.field_name
+      end
+
+      if entry_tree:has(key) then
+        local result, colliding_field =
+          entry_tree.unify(entry_tree[key], subtree)
+        if result == nil then
+          report.error(node, "field name " .. tostring(colliding_field or key) ..
+              " collides in projection")
+        end
+        entry_tree:replace(key, result)
+      else
+        entry_tree[key] = subtree
+      end
+    end
+
+    return entry_tree, nil
+  end
+end
+
+local function convert_to_struct(entry_tree)
+  local entries = terralib.newlist()
+  local field_paths = terralib.newlist()
+
+  for field, subtree in entry_tree:items() do
+    local type = nil
+    if entry_tree.is_entry_tree(subtree) then
+      local field_type, suffixes = convert_to_struct(subtree)
+      type = field_type
+      field_paths:insertall(suffixes:map(
+        function(suffix)
+          return data.newtuple(field) .. suffix
+        end))
+    else
+      type = subtree
+      field_paths:insert(data.newtuple(field))
+    end
+    entries:insert({ field, type })
+  end
+
+  local result = terralib.types.newstruct("{" ..
+    entries:map(function(entry)
+      return entry[1] .. " : " .. tostring(entry[2])
+    end):concat(", ") .."}")
+  result.entries:insertall(entries)
+
+  return result, field_paths
+end
+
+local function project_type(node, type, fields, field_paths)
+  local entry_tree = gather_field_types(node, type, fields)
+
+  if terralib.types.istype(entry_tree) then
+    return entry_tree, terralib.newlist({ { field_paths[1], data.newtuple() } })
+  else
+    local subtype, subtype_field_paths = convert_to_struct(entry_tree)
+    return subtype, data.zip(field_paths, subtype_field_paths)
+  end
+end
+
+function type_check.project_field(cx, node, region, prefix_path, value_type)
+  if node.rename then
+    if type(node.rename) ~= "string" then
+      report.error(node, "type mismatch: expected string for renaming but found " ..
+          type(node.rename))
+    end
+  end
+
+  if type(node.field_name) ~= "string" then
+    report.error(node, "type mismatch: expected string for field name but found " ..
+        type(node.field_name))
+  end
+
+  if value_type.__no_field_slicing then
+    report.error(node, "type mismatch: projection onto " .. node.field_name ..
+        " requires a field space type that permits field slicing but " ..
+        tostring(value_type) .. " disallowed field slicing")
+  end
+
+  local field_path = prefix_path .. data.newtuple(node.field_name)
+  local field_type = std.get_field(value_type, node.field_name)
+  if not field_type then
+    local region = pretty.entry_expr(region)
+    report.error(node, "no field '" .. node.field_name ..
+                "' in region " .. (data.newtuple(region) .. prefix_path):mkstring("."))
+  end
+
+  return type_check.project_fields(
+    cx, node.fields, region, field_path, field_type)
+end
+
+function type_check.project_fields(cx, node, region, prefix_path, value_type)
+  if not node then
+    return terralib.newlist({prefix_path})
+  end
+  local result = terralib.newlist()
+  for _, field in ipairs(node) do
+    result:insertall(
+      type_check.project_field(cx, field, region, prefix_path, value_type))
+  end
+  return result
+end
+
+function type_check.expr_projection(cx, node)
+  if #node.fields == 0 then
+    report.error(node, "projection needs at least one field path")
+  end
+
+  local region = type_check.expr(cx, node.region)
+  local region_type = std.as_read(region.expr_type)
+
+  if not std.is_region(region_type) then
+    report.error(node.region, "type mismatch: expected region but got " .. tostring(region_type))
+  end
+
+  if region_type:is_projected() then
+    report.error(node.region, "nested projection is not allowed")
+  end
+
+  local fs_type = region_type:fspace()
+
+  if not (fs_type:isstruct() or std.is_fspace_instance(fs_type)) then
+    report.error(node, "type mismatch: expected struct or fspace but got " .. tostring(fs_type))
+  end
+
+  local fields =
+    type_check.project_fields(cx, node.fields, region, data.newtuple(), fs_type)
+  local fs_subtype, field_mapping = project_type(node, fs_type, node.fields, fields)
+  local region_subtype = std.region(region_type:ispace(), fs_subtype)
+  region_subtype:set_projection_source(region_type)
+
+  std.add_constraint(cx, region_subtype, region_type, std.subregion, false)
+
+  local parent_region_type = region_type
+  while parent_region_type ~= nil do
+    std.copy_privileges(cx, parent_region_type, region_subtype, field_mapping)
+    local child_region_type = parent_region_type
+    parent_region_type = nil
+    for region_type, _ in cx.region_universe:items() do
+      if not std.type_eq(child_region_type, region_type) and
+         std.check_constraint(cx,
+          std.constraint(child_region_type, region_type, std.subregion))
+      then
+        parent_region_type = region_type
+        -- We assume that there is only a single parent for any given region
+        break
+      end
+    end
+  end
+  cx:intern_region(region_subtype)
+
+  return ast.typed.expr.Projection {
+    region = region,
+    field_mapping = field_mapping,
+    expr_type = region_subtype,
+    annotations = node.annotations,
+    span = node.span,
+  }
+end
+
 function type_check.expr_parallelizer_constraint(cx, node)
   local lhs = type_check.expr(cx, node.lhs)
   local lhs_type = std.as_read(lhs.expr_type)
@@ -3463,6 +3834,7 @@ local type_check_expr_node = {
   [ast.specialized.expr.ImportIspace]               = type_check.expr_import_ispace,
   [ast.specialized.expr.ImportRegion]               = type_check.expr_import_region,
   [ast.specialized.expr.ImportPartition]            = type_check.expr_import_partition,
+  [ast.specialized.expr.Projection]                 = type_check.expr_projection,
 
   [ast.specialized.expr.LuaTable] = function(cx, node)
     report.error(node, "unable to specialize value of type table")

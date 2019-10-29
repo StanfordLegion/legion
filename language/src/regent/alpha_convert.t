@@ -201,6 +201,8 @@ local node_alpha_conversion = {
 
   [ast.specialized.region.Field] = pass_through,
 
+  [ast.specialized.projection.Field] = pass_through,
+
   [ast.specialized.expr.ID]      = update_value,
 
   [ast.specialized.expr.Function] = function(cx, node, continuation)
@@ -279,6 +281,7 @@ local node_alpha_conversion = {
   [ast.specialized.expr.ImportIspace]               = pass_through,
   [ast.specialized.expr.ImportRegion]               = update_fspace_type,
   [ast.specialized.expr.ImportPartition]            = pass_through,
+  [ast.specialized.expr.Projection]                 = pass_through,
 
   [ast.specialized.expr.LuaTable] = function(cx, node, continuation)
     for k, v in pairs(node.value) do print(k, v) end

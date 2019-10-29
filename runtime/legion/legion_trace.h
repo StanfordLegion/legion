@@ -827,8 +827,12 @@ namespace Legion {
       virtual unsigned find_event(const ApEvent &event, AutoLock &tpl_lock);
       void insert_instruction(Instruction *inst);
     private:
+      // Returns the set of last users for all <view,field mask,index expr>
+      // tuples in the view_exprs
       void find_all_last_users(ViewExprs &view_exprs,
                                std::set<unsigned> &users);
+      // Returns the set of last users for a given <view,field mask,index expr>
+      // tuple
       void find_last_users(InstanceView *view,
                            IndexSpaceExpression *expr,
                            const FieldMask &mask,
@@ -863,6 +867,12 @@ namespace Legion {
       std::vector<std::vector<TraceLocalID> > slice_tasks;
     private:
       std::map<unsigned,unsigned> crossing_events;
+      // Frontiers of a template are a set of users whose events must
+      // be carried over to the next replay for eliding the fence at the
+      // beginning. For each user i in frontiers, frontiers[i] points to the
+      // user i's event carried over from the previous replay. This data
+      // structure is constructed by de-duplicating the last users of all
+      // views used in the template, which are stored in view_users.
       std::map<unsigned,unsigned> frontiers;
     private:
       RtUserEvent recording_done;
@@ -878,6 +888,12 @@ namespace Legion {
     private:
       TraceConditionSet   pre, post;
       ViewGroups          view_groups;
+      // This data structure holds a set of last users for each view.
+      // Each user (which is an index in the event table) is associated with
+      // a field mask, an index expression representing the working set within
+      // the view, and privilege. For any given pair of view and index
+      // expression, there can be either multiple readers/reducers or a single
+      // writer.
       ViewUsers           view_users;
       std::set<ViewUser*> all_users;
     private:

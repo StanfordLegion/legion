@@ -407,9 +407,10 @@ function specialize.effect_expr(cx, node)
     if i > #field_path then
       return false
     end
+    local fields = make_field(field_path, i + 1)
     return ast.specialized.region.Field {
       field_name = field_path[i],
-      fields = make_field(field_path, i + 1),
+      fields = (fields and terralib.newlist({ fields })) or false,
       span = span,
     }
   end
@@ -524,29 +525,43 @@ end
 
 -- assumes multi-field accesses have already been flattened by the caller
 function specialize.expr_field_access(cx, node, allow_lists)
-  --if #node.field_names ~= 1 then
-  --  report.error(node, "illegal use of multi-field access")
-  --end
   local value = specialize.expr(cx, node.value)
 
-  local field_names = data.flatmap(
-    function(field_name) return specialize.field_names(cx, field_name) end,
-    node.field_names)
-  --if #field_names ~= 1 then
-  --  report.error(node, "FIXME: handle specialization of multiple fields")
-  --end
-  local field_name = field_names -- this will be flattened in the normalizer
-  if #field_names == 1 then field_name = field_names[1] end
+  if std.config["allow-multi-field-expansion"] then
+    local field_names = data.flatmap(
+      function(field_name) return specialize.field_names(cx, field_name) end,
+      node.field_names)
+    local field_name = field_names -- this will be flattened in the normalizer
+    if #field_names == 1 then field_name = field_names[1] end
 
-  if value:is(ast.specialized.expr.LuaTable) then
-    return convert_lua_value(cx, node, value.value[field_name])
+    if value:is(ast.specialized.expr.LuaTable) then
+      return convert_lua_value(cx, node, value.value[field_name])
+    else
+      return ast.specialized.expr.FieldAccess {
+        value = value,
+        field_name = field_name,
+        annotations = node.annotations,
+        span = node.span,
+      }
+    end
   else
-    return ast.specialized.expr.FieldAccess {
-      value = value,
-      field_name = field_name,
-      annotations = node.annotations,
-      span = node.span,
-    }
+    local fields = data.flatmap(function(field_name)
+      return specialize.field_names(cx, field_name)
+    end, node.field_names)
+
+    if value:is(ast.specialized.expr.LuaTable) then
+      if #fields > 1 then
+        report.error(node, "unable to specialize multi-field access")
+      end
+      return convert_lua_value(cx, node, value.value[fields[1]])
+    else
+      return ast.specialized.expr.FieldAccess {
+        value = value,
+        field_name = fields,
+        annotations = node.annotations,
+        span = node.span,
+      }
+    end
   end
 end
 
@@ -1207,6 +1222,71 @@ function specialize.expr_import_partition(cx, node)
   }
 end
 
+function specialize.projection_field(cx, node)
+  local renames = node.rename and specialize.field_names(cx, node.rename)
+  local field_names = specialize.field_names(cx, node.field_name)
+  if renames and #renames ~= #field_names then
+    report.error(node, "mismatch in specialization: expected " .. tostring(#renames) ..
+        " fields to rename but got " .. tostring(#field_names) .. " fields")
+  end
+  local fields = specialize.projection_fields(cx, node.fields)
+  if renames then
+    return data.zip(renames, field_names):map(
+      function(pair)
+        local rename, field_path = unpack(pair)
+        if not data.is_tuple(field_path) then
+          field_path = data.newtuple(field_path)
+        end
+        local result = fields
+        for i = #field_path, 1, -1 do
+          result = terralib.newlist({
+            ast.specialized.projection.Field {
+              rename = (i == 1 and rename) or false,
+              field_name = field_path[i],
+              fields = result,
+              span = node.span,
+            }})
+        end
+        return result[1]
+      end)
+  else
+    return field_names:map(
+      function(field_path)
+        if not data.is_tuple(field_path) then
+          field_path = data.newtuple(field_path)
+        end
+        local result = fields
+        for i = #field_path, 1, -1 do
+          result = terralib.newlist({
+            ast.specialized.projection.Field {
+              rename = false,
+              field_name = field_path[i],
+              fields = result,
+              span = node.span,
+            }})
+        end
+        return result[1]
+      end)
+  end
+end
+
+function specialize.projection_fields(cx, node)
+  return node and data.flatmap(
+    function(field) return specialize.projection_field(cx, field) end,
+    node)
+end
+
+function specialize.expr_projection(cx, node)
+  local region = specialize.expr(cx, node.region)
+  local fields = specialize.projection_fields(cx, node.fields)
+  return ast.specialized.expr.Projection {
+    region = region,
+    fields = fields,
+    span = node.span,
+    annotations = node.annotations,
+  }
+end
+
 function specialize.expr(cx, node, allow_lists)
   if node:is(ast.unspecialized.expr.ID) then
     return specialize.expr_id(cx, node, allow_lists)
@@ -1390,6 +1470,9 @@ function specialize.expr(cx, node, allow_lists)
 
   elseif node:is(ast.unspecialized.expr.ImportPartition) then
     return specialize.expr_import_partition(cx, node)
+
+  elseif node:is(ast.unspecialized.expr.Projection) then
+    return specialize.expr_projection(cx, node)
 
   else
     assert(false, "unexpected node type " .. tostring(node.node_type))

@@ -210,7 +210,8 @@ function analyze_var_flow.expr(cx, node)
     node:is(ast.typed.expr.WithScratchFields) or
     node:is(ast.typed.expr.ImportIspace) or
     node:is(ast.typed.expr.ImportRegion) or
-    node:is(ast.typed.expr.ImportPartition)
+    node:is(ast.typed.expr.ImportPartition) or
+    node:is(ast.typed.expr.Projection)
   then
     return flow_empty()
 
@@ -985,6 +986,13 @@ function optimize_futures.expr_import_partition(cx, node)
   }
 end
 
+function optimize_futures.expr_projection(cx, node)
+  local region = concretize(optimize_futures.expr(cx, node.region))
+  return node {
+    region = region,
+  }
+end
+
 function optimize_futures.expr(cx, node)
   if node:is(ast.typed.expr.ID) then
     return optimize_futures.expr_id(cx, node)
@@ -1174,6 +1182,9 @@ function optimize_futures.expr(cx, node)
 
   elseif node:is(ast.typed.expr.ImportPartition) then
     return optimize_futures.expr_import_partition(cx, node)
+
+  elseif node:is(ast.typed.expr.Projection) then
+    return optimize_futures.expr_projection(cx, node)
 
   else
     assert(false, "unexpected node type " .. tostring(node.node_type))

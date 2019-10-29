@@ -207,6 +207,9 @@ ast.unspecialized.region:leaf("Bare", {"region_name"})
 ast.unspecialized.region:leaf("Root", {"region_name", "fields"})
 ast.unspecialized.region:leaf("Field", {"field_name", "fields"})
 
+ast.unspecialized:inner("projection")
+ast.unspecialized.projection:leaf("Field", {"rename", "field_name", "fields"})
+
 ast.unspecialized:leaf("Constraint", {"lhs", "op", "rhs"})
 
 ast.unspecialized:leaf("Privilege", {"privileges", "regions"})
@@ -288,6 +291,7 @@ ast.unspecialized.expr:leaf("AddressOf", {"value"})
 ast.unspecialized.expr:leaf("ImportIspace", {"index_type_expr", "value"})
 ast.unspecialized.expr:leaf("ImportRegion", {"ispace", "fspace_type_expr", "value", "field_ids"})
 ast.unspecialized.expr:leaf("ImportPartition", {"disjointness", "region", "colors", "value"})
+ast.unspecialized.expr:leaf("Projection", {"region", "fields"})
 
 ast.unspecialized:leaf("Block", {"stats"})
 
@@ -334,6 +338,9 @@ ast.specialized:inner("region")
 ast.specialized.region:leaf("Bare", {"symbol"})
 ast.specialized.region:leaf("Root", {"symbol", "fields"})
 ast.specialized.region:leaf("Field", {"field_name", "fields"})
+
+ast.specialized:inner("projection")
+ast.specialized.projection:leaf("Field", {"rename", "field_name", "fields"})
 
 ast.specialized:leaf("Constraint", {"lhs", "op", "rhs"})
 
@@ -416,6 +423,7 @@ ast.specialized.expr:leaf("LuaTable", {"value"})
 ast.specialized.expr:leaf("ImportIspace", {"index_type", "value"})
 ast.specialized.expr:leaf("ImportRegion", {"ispace", "fspace_type", "value", "field_ids"})
 ast.specialized.expr:leaf("ImportPartition", {"disjointness", "region", "colors", "value"})
+ast.specialized.expr:leaf("Projection", {"region", "fields"})
 
 ast.specialized:leaf("Block", {"stats"})
 
@@ -531,6 +539,7 @@ ast.typed.expr:leaf("ParallelizerConstraint", {"lhs", "op", "rhs"})
 ast.typed.expr:leaf("ImportIspace", {"value"})
 ast.typed.expr:leaf("ImportRegion", {"ispace", "value", "field_ids"})
 ast.typed.expr:leaf("ImportPartition", {"region", "colors", "value"})
+ast.typed.expr:leaf("Projection", {"region", "field_mapping"})
 
 ast.typed:leaf("Block", {"stats"})
 
