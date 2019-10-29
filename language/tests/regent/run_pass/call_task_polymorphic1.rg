@@ -15,6 +15,9 @@
 -- runs-with:
 -- [ ["-fflow", "0"] ]
 
+-- This test showcases various forms of region projections used for
+-- launching field polymorphic tasks.
+
 import "regent"
 
 struct vec2
@@ -29,13 +32,18 @@ fspace fs
   v : vec2;
 }
 
-struct iface
+struct iface1
+{
+  c : int
+}
+
+struct iface2
 {
   a : double;
   b : int;
 }
 
-task f(x : region(vec2))
+task t1(x : region(vec2))
 where reads writes(x)
 do
   for e in x do
@@ -44,7 +52,7 @@ do
   end
 end
 
-task g(x : region(int))
+task t2(x : region(int))
 where reads writes(x)
 do
   for e in x do
@@ -52,7 +60,15 @@ do
   end
 end
 
-task h(x : region(iface))
+task t3(x : region(iface1))
+where reads writes(x)
+do
+  for e in x do
+    e.c += 12321
+  end
+end
+
+task t4(x : region(iface2))
 where reads writes(x)
 do
   var cnt = 1
@@ -68,15 +84,19 @@ where reads(r) do
   return p.v._x + p.v._y + p.i
 end
 
+local names1 = terralib.newlist({"b", "a"})
+local field_paths1 = terralib.newlist({"i", regentlib.field_path("v", "_y")})
+
 task main()
   var r = region(ispace(ptr, 5), fs)
   var x = dynamic_cast(ptr(fs, r), 2)
 
-  f(r.{v})
-  g(r.{i})
-  h(r.{a=v._x, b=i})
-  h(r.{b=i, a=v._y})
-  regentlib.assert(sum(r, x) == 98807.0, "test failed")
+  t1(r.{v})
+  t2(r.{i})
+  t3(r.{c=i})
+  t4(r.{a=v._x, b=i})
+  t4(r.{[names1]=[field_paths1]})
+  regentlib.assert(sum(r, x) == 111128.0, "test failed")
 end
 
 regentlib.start(main)
