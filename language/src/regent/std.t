@@ -809,13 +809,10 @@ local function type_isomorphic(node, param_type, arg_type, check, mapping, polym
       local arg_fspace = arg_type.fspace_type
       if std.is_fspace_instance(param_fspace) then
         return std.type_eq(param_fspace, arg_fspace, mapping)
-      -- Special case of field polymorphism
-      elseif param_fspace:isprimitive() then
-        return std.type_eq(param_fspace, arg_fspace)
       elseif param_fspace:isstruct() then
         return type_isomorphic(node, param_fspace, arg_fspace, check, mapping, polymorphic)
       else
-        return false
+        return std.type_eq(param_type.fspace_type, arg_type.fspace_type, mapping)
       end
     else
       return std.type_eq(param_type:ispace(), arg_type:ispace(), mapping) and
