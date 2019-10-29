@@ -3645,6 +3645,12 @@ function type_check.project_field(cx, node, region, prefix_path, value_type)
         type(node.field_name))
   end
 
+  if value_type.__no_field_slicing then
+    report.error(node, "type mismatch: projection onto " .. node.field_name ..
+        " requires a field space type that permits field slicing but " ..
+        tostring(value_type) .. " disallowed field slicing")
+  end
+
   local field_path = prefix_path .. data.newtuple(node.field_name)
   local field_type = std.get_field(value_type, node.field_name)
   if not field_type then
