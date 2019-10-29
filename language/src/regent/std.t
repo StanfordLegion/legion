@@ -2492,6 +2492,7 @@ do
     st.ispace_symbol = ispace_symbol
     st.fspace_type = fspace_type
     st.index_expr = false
+    st.projection = false
 
     function st:ispace()
       local ispace = self.ispace_symbol:gettype()
@@ -2522,6 +2523,18 @@ do
       assert(not st.index_expr)
       assert(ast.is_node(expr))
       st.index_expr = expr
+    end
+
+    function st:is_projected()
+      return self.projection ~= false
+    end
+
+    function st:get_projection_source()
+      return self.projection
+    end
+
+    function st:set_projection_source(projection)
+      self.projection = projection
     end
 
     -- For API compatibility with std.list:

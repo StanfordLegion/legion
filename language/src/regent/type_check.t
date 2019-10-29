@@ -1568,6 +1568,10 @@ function type_check.expr_partition(cx, node)
                 tostring(region_type))
   end
 
+  if region_type:is_projected() then
+    report.error(node, "a projected region cannot be partitioned")
+  end
+
   if colors and not std.is_ispace(colors_type) then
     report.error(node, "type mismatch in argument 4: expected ispace but got " ..
                 tostring(colors_type))
@@ -1656,6 +1660,10 @@ function type_check.expr_partition_equal(cx, node)
                 tostring(region_type))
   end
 
+  if region_type:is_projected() then
+    report.error(node, "a projected region cannot be partitioned")
+  end
+
   if not std.is_ispace(colors_type) then
     report.error(node, "type mismatch in argument 2: expected ispace but got " ..
                 tostring(colors_type))
@@ -1706,6 +1714,10 @@ function type_check.expr_partition_by_field(cx, node)
   if #region.fields ~= 1 then
     report.error(node, "type mismatch in argument 1: expected 1 field but got " ..
                 tostring(#region.fields))
+  end
+
+  if region_type:is_projected() then
+    report.error(node, "a projected region cannot be partitioned")
   end
 
   if not std.is_ispace(colors_type) then
@@ -1775,6 +1787,10 @@ function type_check.expr_partition_by_restriction(cx, node)
   if not std.is_region(region_type) then
     report.error(node, "type mismatch in argument 1: expected region type but got " ..
                  tostring(region_type))
+  end
+
+  if region_type:is_projected() then
+    report.error(node, "a projected region cannot be partitioned")
   end
 
   if not std.is_transform_type(transform_type) then
@@ -1857,6 +1873,10 @@ function type_check.expr_image(cx, node)
   if not std.is_region(parent_type) then
     report.error(node, "type mismatch in argument 1: expected region but got " ..
                 tostring(parent_type))
+  end
+
+  if region_type:is_projected() then
+    report.error(node, "a projected region cannot be partitioned")
   end
 
   if not std.is_partition(partition_type) then
@@ -1995,6 +2015,10 @@ function type_check.expr_image_by_task(cx, node)
                 tostring(parent_type))
   end
 
+  if parent_type:is_projected() then
+    report.error(node, "a projected region cannot be partitioned")
+  end
+
   if not std.is_partition(partition_type) then
     report.error(node, "type mismatch in argument 2: expected partition but got " ..
                 tostring(partition_type))
@@ -2041,6 +2065,10 @@ function type_check.expr_preimage(cx, node)
   if not std.is_region(parent_type) then
     report.error(node, "type mismatch in argument 1: expected region but got " ..
                 tostring(parent_type))
+  end
+
+  if region_type:is_projected() then
+    report.error(node, "a projected region cannot be partitioned")
   end
 
   if not std.is_partition(partition_type) then
@@ -3153,6 +3181,10 @@ function type_check.expr_binary(cx, node)
     expr_type = std.partition(
       disjointness, lhs_type.parent_region_symbol, lhs_type.colors_symbol)
   elseif std.is_region(lhs_type) then
+    if lhs_type:is_projected() then
+      report.error(node, "a projected region cannot be partitioned")
+    end
+
     if not std.is_partition(rhs_type) then
       report.error(node.rhs, "type mismatch: expected a partition but got " .. tostring(rhs_type))
     end
@@ -3649,6 +3681,10 @@ function type_check.expr_projection(cx, node)
     report.error(node.region, "type mismatch: expected region but got " .. tostring(region_type))
   end
 
+  if region_type:is_projected() then
+    report.error(node.region, "nested projection is not allowed")
+  end
+
   local fs_type = region_type:fspace()
 
   if not (fs_type:isstruct() or std.is_fspace_instance(fs_type)) then
@@ -3659,6 +3695,9 @@ function type_check.expr_projection(cx, node)
     type_check.project_fields(cx, node.fields, region, data.newtuple(), fs_type)
   local fs_subtype, field_mapping = project_type(node, fs_type, node.fields, fields)
   local region_subtype = std.region(region_type:ispace(), fs_subtype)
+  region_subtype:set_projection_source(region_type)
+
+  std.add_constraint(cx, region_subtype, region_type, std.subregion, false)
 
   local parent_region_type = region_type
   while parent_region_type ~= nil do
@@ -3671,6 +3710,7 @@ function type_check.expr_projection(cx, node)
           std.constraint(child_region_type, region_type, std.subregion))
       then
         parent_region_type = region_type
+        -- We assume that there is only a single parent for any given region
         break
       end
     end

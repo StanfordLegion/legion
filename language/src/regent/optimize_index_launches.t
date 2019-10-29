@@ -157,6 +157,24 @@ function data.newmatrix(rows, cols)
   return setmetatable( {}, data.matrix)
 end
 
+local function get_privileges_before_projection(expr, privileges, coherence_modes)
+  if expr:is(ast.typed.expr.Projection) then
+    local function map_domain(map, tbl)
+      local result = {}
+      for k, v in pairs(tbl) do
+        assert(map[k] ~= nil)
+        result[map[k]] = v
+      end
+      return result
+    end
+    local inv_field_mapping = data.dict(expr.field_mapping:map(
+      function(pair) return { pair[2]:hash(), pair[1]:hash() } end))
+    privileges = map_domain(inv_field_mapping, privileges)
+    coherence_modes = map_domain(inv_field_mapping, coherence_modes)
+  end
+  return privileges, coherence_modes
+end
+
 local function check_privilege_noninterference(cx, task, arg,
                                          other_arg, mapping)
   local region_type = std.as_read(arg.expr_type)
@@ -166,11 +184,13 @@ local function check_privilege_noninterference(cx, task, arg,
   assert(param_region_type and other_param_region_type)
 
   local privileges_by_field_path, coherence_modes_by_field_path =
-    std.group_task_privileges_by_field_path(
-      std.find_task_privileges(param_region_type, task))
+    get_privileges_before_projection(arg,
+      std.group_task_privileges_by_field_path(
+        std.find_task_privileges(param_region_type, task)))
   local other_privileges_by_field_path, other_coherence_modes_by_field_path =
-    std.group_task_privileges_by_field_path(
-      std.find_task_privileges(other_param_region_type, task))
+    get_privileges_before_projection(other_arg,
+      std.group_task_privileges_by_field_path(
+        std.find_task_privileges(other_param_region_type, task)))
 
   for field_path, privilege in pairs(privileges_by_field_path) do
     local other_privilege = other_privileges_by_field_path[field_path]
@@ -199,8 +219,14 @@ end
 local function analyze_noninterference_previous(
     cx, task, arg, regions_previously_used, mapping)
   local region_type = std.as_read(arg.expr_type)
+  if region_type:is_projected() then
+    region_type = region_type:get_projection_source()
+  end
   for i, other_arg in pairs(regions_previously_used) do
     local other_region_type = std.as_read(other_arg.expr_type)
+    if other_region_type:is_projected() then
+      other_region_type = region_type:get_projection_source()
+    end
     local constraint = std.constraint(
       region_type,
       other_region_type,
@@ -992,10 +1018,6 @@ local function optimize_loop_body(cx, node, report_pass, report_fail)
     local free_vars_base = terralib.newlist()
     free_vars_base:insertall(loop_cx.free_variables)
     for i, arg in ipairs(args) do
-      if arg:is(ast.typed.expr.Projection) then
-        arg = arg.region
-      end
-
       if not analyze_is_side_effect_free(loop_cx, arg) then
         report_fail(call, "loop optimization failed: argument " .. tostring(i) .. " is not side-effect free")
         return
@@ -1020,7 +1042,11 @@ local function optimize_loop_body(cx, node, report_pass, report_fail)
       -- Tests for conformance to index launch requirements.
       if std.is_region(arg_type) then
         if analyze_is_projectable(loop_cx, arg) then
-          partition_type = std.as_read(arg.value.expr_type)
+          if arg:is(ast.typed.expr.Projection) then
+            partition_type = std.as_read(arg.region.value.expr_type)
+          else
+            partition_type = std.as_read(arg.value.expr_type)
+          end
           arg_projectable = true
         end
 
@@ -1065,6 +1091,10 @@ local function optimize_loop_body(cx, node, report_pass, report_fail)
         end
 
         do
+          local arg = arg
+          if arg:is(ast.typed.expr.Projection) then
+            arg = arg.region
+          end
           local passed = analyze_noninterference_self(
             loop_cx, task, arg, partition_type, mapping, loop_vars)
           if not passed then
