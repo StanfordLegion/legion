@@ -293,6 +293,7 @@ local rewrite_accesses_expr_table = {
   [ast.typed.expr.ImportIspace]               = unreachable,
   [ast.typed.expr.ImportRegion]               = unreachable,
   [ast.typed.expr.ImportPartition]            = unreachable,
+  [ast.typed.expr.Projection]                 = unreachable,
 }
 
 local rewrite_accesses_expr = ast.make_single_dispatch(
