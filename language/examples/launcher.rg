@@ -1,10 +1,16 @@
 local launcher = {}
 
 local root_dir = arg[0]:match(".*/") or "./"
-local runtime_dir = os.getenv("LG_RT_DIR") or (root_dir .. "../../runtime")
-local legion_dir = runtime_dir .. "/legion"
-local realm_dir = runtime_dir .. "/realm"
-local mapper_dir = runtime_dir .. "/mappers"
+
+local include_path = ""
+local include_dirs = terralib.newlist()
+include_dirs:insert("-I")
+include_dirs:insert(root_dir)
+for path in string.gmatch(os.getenv("INCLUDE_PATH"), "[^;]+") do
+  include_path = include_path .. " -I " .. path
+  include_dirs:insert("-I")
+  include_dirs:insert(path)
+end
 
 function launcher.compile_mapper(saveobj, name)
   local cc_file = root_dir .. name .. ".cc"
@@ -28,12 +34,8 @@ function launcher.compile_mapper(saveobj, name)
   local max_dim = os.getenv('MAX_DIM') or '3'
   cxx_flags = cxx_flags .. " -DLEGION_MAX_DIM=" .. max_dim .. " -DREALM_MAX_DIM=" .. max_dim
 
-  local cmd = (cxx .. " " .. cxx_flags ..
-              " -I " .. runtime_dir ..
-              " -I " .. mapper_dir ..
-              " -I " .. legion_dir ..
-              " -I " .. realm_dir .. " " ..
-              cc_file .. " -o " .. binary_file)
+  local cmd = (cxx .. " " .. cxx_flags .. " " .. include_path .. " " ..
+               cc_file .. " -o " .. binary_file)
   if os.execute(cmd) ~= 0 then
     print("Error: failed to compile " .. cc_file)
     assert(false)
@@ -44,10 +46,7 @@ end
 function launcher.launch(toplevel, name)
   local saveobj = os.getenv('SAVEOBJ') == '1'
   local mapper_binary = launcher.compile_mapper(saveobj, name)
-  local mapper_header = terralib.includec("miniaero_mapper.h",
-                                          { "-I", root_dir,
-                                            "-I", runtime_dir,
-                                            "-I", mapper_dir })
+  local mapper_header = terralib.includec("miniaero_mapper.h", include_dirs)
 
   if not saveobj then
     terralib.linklibrary(mapper_binary)
