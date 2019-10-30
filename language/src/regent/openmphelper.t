@@ -34,7 +34,16 @@ if not std.config["openmp-offline"] then
 end
 
 if not (std.config["openmp"] and has_openmp) then
-  omp.check_openmp_available = function() return false end
+  if not std.config["openmp"] then
+    function omp.check_openmp_available()
+      return false, "OpenMP code generation is turned off (-fopenmp 0)"
+    end
+  else
+    assert(not has_openmp)
+    function omp.check_openmp_available()
+      return false, "Regent is installed without OpenMP support"
+    end
+  end
   terra omp.get_num_threads() return 1 end
   terra omp.get_max_threads() return 1 end
   terra omp.get_thread_num() return 0 end

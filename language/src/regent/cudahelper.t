@@ -18,9 +18,18 @@ local data = require("common/data")
 local report = require("common/report")
 
 local cudahelper = {}
-cudahelper.check_cuda_available = function() return false end
 
-if not config["cuda"] or not terralib.cudacompile then
+if not terralib.cudacompile then
+  function cudahelper.check_cuda_available()
+    return false, "Terra is built without CUDA support"
+  end
+  return cudahelper
+end
+
+if not config["cuda"] then
+  function cudahelper.check_cuda_available()
+    return false, "CUDA code generation is turned off (-fcuda 0)"
+  end
   return cudahelper
 end
 
@@ -83,13 +92,18 @@ do
   if not config["cuda-offline"] then
     if has_symbol("cuInit") then
       local r = DriverAPI.cuInit(0)
-      assert(r == 0)
-      function cudahelper.check_cuda_available()
-        return true
+      if r == 0 then
+        function cudahelper.check_cuda_available()
+          return true
+        end
+      else
+        function cudahelper.check_cuda_available()
+          return false, "calling cuInit(0) failed for some reason (CUDA devices might not exist)"
+        end
       end
     else
       function cudahelper.check_cuda_available()
-        return false
+        return false, "the cuInit function is missing (Regent might have been installed without CUDA support)"
       end
     end
   else
