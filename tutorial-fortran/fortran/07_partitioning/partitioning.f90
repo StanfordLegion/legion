@@ -55,7 +55,7 @@ contains
     call legion_task_get_arglen_f(task, arglen)
     fid = task_arg
     
-    call legion_task_get_region_f(task, 0, rr)
+    call legion_task_get_requirement_f(task, 0, rr)
     call legion_region_requirement_get_privilege_field_f(rr, 0, rrfid)
     
     
@@ -391,7 +391,7 @@ Program daxpy_partition_accessor
   type(legion_execution_constraint_set_f_t) :: execution_constraints
   type(legion_task_layout_constraint_set_f_t) :: layout_constraints
   type(legion_task_config_options_f_t) :: config_options
-  integer(c_int) :: task_id_1, task_id_2, task_id_3, task_id_4
+  integer(c_int) :: task_id_1, task_id_2, task_id_3, task_id_4, variant_id
   integer(c_size_t) :: userlen = 0
   integer(c_int) :: runtime_start_rv
   type(c_funptr) :: c_func_ptr
@@ -407,7 +407,9 @@ Program daxpy_partition_accessor
   
   c_func_ptr = c_funloc(top_level_task)
   
-  call legion_runtime_preregister_task_variant_fnptr_f(TOP_LEVEL_TASK_ID, c_char_"top_level_task"//c_null_char, &
+  variant_id = 1
+  
+  call legion_runtime_preregister_task_variant_fnptr_f(TOP_LEVEL_TASK_ID, variant_id, c_char_"top_level_task"//c_null_char, &
                                                       c_char_"cpu_variant"//c_null_char, &
                                                       execution_constraints, &
                                                       layout_constraints, &
@@ -419,7 +421,7 @@ Program daxpy_partition_accessor
   config_options%leaf = .true.
   c_func_ptr = c_funloc(init_task)
 
-  call legion_runtime_preregister_task_variant_fnptr_f(INIT_TASK_ID, c_char_"init_task"//c_null_char, &
+  call legion_runtime_preregister_task_variant_fnptr_f(INIT_TASK_ID, variant_id, c_char_"init_task"//c_null_char, &
                                                       c_char_"cpu_variant"//c_null_char, &
                                                       execution_constraints, &
                                                       layout_constraints, &
@@ -430,7 +432,7 @@ Program daxpy_partition_accessor
                                                               
   c_func_ptr = c_funloc(daxpy_task)
 
-  call legion_runtime_preregister_task_variant_fnptr_f(DAXPY_TASK_ID, c_char_"daxpy_task"//c_null_char, &
+  call legion_runtime_preregister_task_variant_fnptr_f(DAXPY_TASK_ID, variant_id, c_char_"daxpy_task"//c_null_char, &
                                                       c_char_"cpu_variant"//c_null_char, &
                                                       execution_constraints, &
                                                       layout_constraints, &
@@ -441,7 +443,7 @@ Program daxpy_partition_accessor
   
   c_func_ptr = c_funloc(check_task)
 
-  call legion_runtime_preregister_task_variant_fnptr_f(CHECK_TASK_ID, c_char_"check_task"//c_null_char, &
+  call legion_runtime_preregister_task_variant_fnptr_f(CHECK_TASK_ID, variant_id, c_char_"check_task"//c_null_char, &
                                                       c_char_"cpu_variant"//c_null_char, &
                                                       execution_constraints, &
                                                       layout_constraints, &

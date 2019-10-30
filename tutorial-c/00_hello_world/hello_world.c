@@ -114,7 +114,7 @@ int main(int argc, char **argv)
     legion_execution_constraint_set_add_processor_constraint(execution_constraints, LOC_PROC);
     legion_task_layout_constraint_set_t layout_constraints = legion_task_layout_constraint_set_create();
     legion_task_config_options_t config_options = {.leaf = false, .inner = false, .idempotent = false};
-    legion_runtime_preregister_task_variant_fnptr(TOP_LEVEL_TASK_ID,
+    legion_runtime_preregister_task_variant_fnptr(TOP_LEVEL_TASK_ID, 1,
                                                   "top_leve_task",
                                                   "cpu_variant",
                                                   execution_constraints,
@@ -124,7 +124,7 @@ int main(int argc, char **argv)
                                                   NULL,
                                                   0);
                                                   
-    legion_runtime_preregister_task_variant_fnptr(HELLO_WORLD_TASK_ID,
+    legion_runtime_preregister_task_variant_fnptr(HELLO_WORLD_TASK_ID, 1,
                                                   "hello_world_task",
                                                   "cpu_variant",
                                                   execution_constraints,

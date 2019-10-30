@@ -7237,7 +7237,7 @@ legion_index_space_t
 legion_task_get_index_space_from_logical_region(
     legion_task_t task, unsigned idx)
 {
-  legion_region_requirement_t req = legion_task_get_region(task, idx);
+  legion_region_requirement_t req = legion_task_get_requirement(task, idx);
   legion_logical_region_t lr = legion_region_requirement_get_region(req);
   return legion_logical_region_get_index_space(lr);
 }

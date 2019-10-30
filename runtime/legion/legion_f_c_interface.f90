@@ -48,7 +48,7 @@ module legion_fortran_c_interface
     end function legion_task_layout_constraint_set_create_c
 
     ! Legion::Runtime::preregister_task_variant()
-    function legion_runtime_preregister_task_variant_fnptr_c(id, task_name, &
+    function legion_runtime_preregister_task_variant_fnptr_c(id, variant_id, task_name, &
                                                              variant_name, &
                                                              execution_constraints, &
                                                              layout_constraints, &
@@ -64,9 +64,10 @@ module legion_fortran_c_interface
       implicit none
   
       integer(c_int)                                                  :: legion_runtime_preregister_task_variant_fnptr_c
+      integer(c_int), value, intent(in)                               :: id
+      integer(c_int), value, intent(in)                               :: variant_id
       character(kind=c_char), intent(in)                              :: task_name(*)
       character(kind=c_char), intent(in)                              :: variant_name(*)
-      integer(c_int), value, intent(in)                               :: id
       type(legion_execution_constraint_set_f_t), value, intent(in)    :: execution_constraints
       type(legion_task_layout_constraint_set_f_t), value, intent(in)  :: layout_constraints
       type(legion_task_config_options_f_t), value, intent(in)         :: options
@@ -413,17 +414,17 @@ module legion_fortran_c_interface
     end function legion_task_get_index_domain_c
 
     ! @see Legion::Task::regions
-    function legion_task_get_region_c(task, idx) &
-            bind(C, name="legion_task_get_region")
+    function legion_task_get_requirement_c(task, idx) &
+            bind(C, name="legion_task_get_requirement")
       use iso_c_binding
       import legion_region_requirement_f_t
       import legion_task_f_t
       implicit none
   
-      type(legion_region_requirement_f_t)        :: legion_task_get_region_c
+      type(legion_region_requirement_f_t)        :: legion_task_get_requirement_c
       type(legion_task_f_t), value, intent(in) :: task
       integer(c_int), value, intent(in)        :: idx
-    end function legion_task_get_region_c
+    end function legion_task_get_requirement_c
 
     ! -----------------------------------------------------------------------
     ! Domain Operations

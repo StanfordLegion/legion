@@ -114,7 +114,7 @@ module legion_fortran
   end subroutine legion_task_layout_constraint_set_create_f
 
   ! Legion::Runtime::preregister_task_variant()
-  subroutine legion_runtime_preregister_task_variant_fnptr_f(id, task_name, &
+  subroutine legion_runtime_preregister_task_variant_fnptr_f(id, variant_id, task_name, &
                                                            variant_name, &
                                                            execution_constraints, &
                                                            layout_constraints, &
@@ -123,10 +123,11 @@ module legion_fortran
                                                            userdata, &
                                                            userlen, task_id)
     implicit none
-
+    
+    integer(c_int), value, intent(in)                               :: id
+    integer(c_int), value, intent(in)                               :: variant_id
     character(kind=c_char), intent(in)                              :: task_name(*)
     character(kind=c_char), intent(in)                              :: variant_name(*)
-    integer(c_int), value, intent(in)                               :: id
     type(legion_execution_constraint_set_f_t), value, intent(in)    :: execution_constraints
     type(legion_task_layout_constraint_set_f_t), value, intent(in)  :: layout_constraints
     type(legion_task_config_options_f_t), value, intent(in)         :: options
@@ -135,7 +136,7 @@ module legion_fortran
     integer(c_size_t), value, intent(in)                            :: userlen
     integer(c_int), intent(out)                                     :: task_id
   
-    task_id = legion_runtime_preregister_task_variant_fnptr_c(id, task_name, &
+    task_id = legion_runtime_preregister_task_variant_fnptr_c(id, variant_id, task_name, &
                                                               variant_name, &
                                                               execution_constraints, &
                                                               layout_constraints, &
@@ -440,15 +441,15 @@ module legion_fortran
   end subroutine legion_task_get_index_domain_f
 
   ! @see Legion::Task::regions
-  subroutine legion_task_get_region_f(task, idx, rr)
+  subroutine legion_task_get_requirement_f(task, idx, rr)
     implicit none
   
     type(legion_task_f_t), intent(in)                :: task
     integer(c_int), intent(in)                       :: idx
     type(legion_region_requirement_f_t), intent(out) :: rr
       
-    rr = legion_task_get_region_c(task, idx)
-  end subroutine legion_task_get_region_f
+    rr = legion_task_get_requirement_c(task, idx)
+  end subroutine legion_task_get_requirement_f
 
   ! -----------------------------------------------------------------------
   ! Domain Operations
@@ -1586,7 +1587,7 @@ module legion_fortran
     type(legion_region_requirement_f_t) :: rr
     type(legion_logical_region_f_t)     :: lr
       
-    call legion_task_get_region_f(handle, tid, rr)
+    call legion_task_get_requirement_f(handle, tid, rr)
     call legion_region_requirement_get_region_f(rr, lr)
     call legion_logical_region_get_index_space_f(lr, index_space)
   end subroutine legion_task_get_index_space_from_logical_region_f
