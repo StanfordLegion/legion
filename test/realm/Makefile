@@ -58,14 +58,17 @@ TESTS += deppart
 TESTS += scatter
 TESTS += compqueue
 TESTS += event_subscribe
+TESTS += deferred_allocs
 
 # can set arguments to be passed to a test when running
 TESTARGS_ctxswitch := -ll:io 1 -t 20 -i 10000
 TESTARGS_proc_group := -ll:cpu 4
 TESTARGS_compqueue := -ll:cpu 4
 TESTARGS_event_subscribe := -ll:cpu 4
+TESTARGS_deferred_allocs := -ll:gsize 0 -all
 
 REALM_OBJS := $(patsubst %.cc,%.o,$(notdir $(REALM_SRC))) \
+              $(patsubst %.cc.o,%.o,$(notdir $(REALM_INST_OBJS))) \
               $(patsubst %.S,%.o,$(notdir $(ASM_SRC)))
 EMPTY :=
 SPACE := $(EMPTY) $(EMPTY)
@@ -108,3 +111,14 @@ endif
 
 %.o : %.S
 	$(CXX) -fPIC -o $@ -c $< $(INC_FLAGS) $(CC_FLAGS)
+
+# deppart-related stuff
+image_%.o : image_tmpl.cc $(REALM_DEFINES_HEADER) $(LEGION_DEFINES_HEADER)
+	$(CXX) -fPIC -o $@ -c $< $(INC_FLAGS) $(CC_FLAGS) -DINST_N1=$(word 1,$(subst _, ,$*)) -DINST_N2=$(word 2,$(subst _, ,$*))
+
+preimage_%.o : preimage_tmpl.cc $(REALM_DEFINES_HEADER) $(LEGION_DEFINES_HEADER)
+	$(CXX) -fPIC -o $@ -c $< $(INC_FLAGS) $(CC_FLAGS) -DINST_N1=$(word 1,$(subst _, ,$*)) -DINST_N2=$(word 2,$(subst _, ,$*))
+
+byfield_%.o : byfield_tmpl.cc $(REALM_DEFINES_HEADER) $(LEGION_DEFINES_HEADER)
+	$(CXX) -fPIC -o $@ -c $< $(INC_FLAGS) $(CC_FLAGS) -DINST_N1=$(word 1,$(subst _, ,$*)) -DINST_N2=$(word 2,$(subst _, ,$*))
+

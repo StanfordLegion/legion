@@ -14,3 +14,4 @@ transpose
 scatter
 compqueue
 event_subscribe
+deferred_allocs

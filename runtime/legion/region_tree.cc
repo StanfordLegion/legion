@@ -27,7 +27,7 @@
 #include "legion/legion_trace.h"
 #include "legion/legion_replication.h"
 
-#include "legion/region_tree.inl"
+// templates in legion/region_tree.inl are instantiated by region_tree_tmpl.cc
 
 namespace Legion {
   namespace Internal {

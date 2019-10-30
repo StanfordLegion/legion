@@ -329,13 +329,10 @@ namespace Realm {
 							     std::vector<IndexSpace<N,T> >&, \
 							     const ProfilingRequestSet &, \
 							     Event) const;
+#ifndef REALM_TEMPLATES_ONLY
   FOREACH_NTF(DOIT)
+#endif
 
-#define ZP(N,T) Point<N,T>
-#define ZR(N,T) Rect<N,T>
-#define DOIT2(N1,T1,N2,T2) \
-  DOIT(N1,T1,ZP(N2,T2))
-  //  DOIT(N1,T1,ZR(N2,T2))
+  // instantiations of point/rect-field templates handled in byfield_tmpl.cc
 
-  FOREACH_NTNT(DOIT2)
 };

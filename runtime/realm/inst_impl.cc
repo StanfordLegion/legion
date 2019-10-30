@@ -34,6 +34,43 @@ namespace Realm {
 
   ////////////////////////////////////////////////////////////////////////
   //
+  // class RegionInstanceImpl::DeferredCreate
+  //
+
+  void RegionInstanceImpl::DeferredCreate::defer(RegionInstanceImpl *_inst,
+						 MemoryImpl *_mem,
+						 size_t _bytes,
+						 size_t _align,
+ 						 Event wait_on)
+  {
+    inst = _inst;
+    mem = _mem;
+    bytes = _bytes;
+    align = _align;
+    EventImpl::add_waiter(wait_on, this);
+  }
+
+  void RegionInstanceImpl::DeferredCreate::event_triggered(bool poisoned)
+  {
+    if(poisoned)
+      log_poison.info() << "poisoned deferred instance creation skipped - inst=" << inst;
+    
+    mem->deferred_creation_triggered(inst, bytes, align, poisoned);
+  }
+
+  void RegionInstanceImpl::DeferredCreate::print(std::ostream& os) const
+  {
+    os << "deferred instance creation";
+  }
+
+  Event RegionInstanceImpl::DeferredCreate::get_finish_event(void) const
+  {
+    return Event::NO_EVENT;
+  }
+
+  
+  ////////////////////////////////////////////////////////////////////////
+  //
   // class RegionInstanceImpl::DeferredDestroy
   //
 
@@ -48,14 +85,10 @@ namespace Realm {
 
   void RegionInstanceImpl::DeferredDestroy::event_triggered(bool poisoned)
   {
-    // if input event is poisoned, do not attempt to destroy the lock
-    // we don't have an output event here, so this may result in a leak if nobody is
-    //  paying attention
-    if(poisoned) {
+    if(poisoned)
       log_poison.info() << "poisoned deferred instance destruction skipped - POSSIBLE LEAK - inst=" << inst;
-    } else {
-      mem->release_instance_storage(inst, Event::NO_EVENT);
-    }
+    
+    mem->deferred_destruction_triggered(inst, poisoned);
   }
 
   void RegionInstanceImpl::DeferredDestroy::print(std::ostream& os) const
@@ -152,8 +185,7 @@ namespace Realm {
       case MemoryImpl::ALLOC_INSTANT_SUCCESS:
 	{
 	  // successful allocation
-	  assert(impl->metadata.inst_offset != (size_t)-1);
-	  assert(impl->metadata.inst_offset != (size_t)-2);
+	  assert(impl->metadata.inst_offset <= RegionInstanceImpl::INSTOFFSET_MAXVALID);
 	  ready_event = Event::NO_EVENT;
 	  if(impl->measurements.wants_measurement<ProfilingMeasurements::InstanceTimeline>())
 	    impl->timeline.record_ready_time();
@@ -161,6 +193,7 @@ namespace Realm {
 	}
 
       case MemoryImpl::ALLOC_INSTANT_FAILURE:
+      case MemoryImpl::ALLOC_CANCELLED:
 	{
 	  // generate a poisoned event for completion
 	  // NOTE: it is unsafe to look at the impl->metadata or the 
@@ -182,13 +215,28 @@ namespace Realm {
 	  // use mutex to avoid race on allocation callback
 	  {
 	    AutoLock<> al(impl->mutex);
-	    if(impl->metadata.inst_offset != (size_t)-1) {
-	      alloc_done = true;
-	      alloc_successful = (impl->metadata.inst_offset != (size_t)-2);
-	    } else {
-	      alloc_done = false;
-	      alloc_successful = false;
-	      impl->metadata.ready_event = ready_event;
+	    switch(impl->metadata.inst_offset) {
+	    case RegionInstanceImpl::INSTOFFSET_UNALLOCATED:
+	    case RegionInstanceImpl::INSTOFFSET_DELAYEDALLOC:
+	    case RegionInstanceImpl::INSTOFFSET_DELAYEDDESTROY:
+	      {
+		alloc_done = false;
+		alloc_successful = false;
+		impl->metadata.ready_event = ready_event;
+		break;
+	      }
+	    case RegionInstanceImpl::INSTOFFSET_FAILED:
+	      {
+		alloc_done = true;
+		alloc_successful = false;
+		break;
+	      }
+	    default:
+	      {
+		alloc_done = true;
+		alloc_successful = true;
+		break;
+	      }
 	    }
 	  }
 	  if(alloc_done) {
@@ -445,7 +493,7 @@ namespace Realm {
       lock.init(ID(me).convert<Reservation>(), ID(me).instance_creator_node());
       lock.in_use = true;
 
-      metadata.inst_offset = (size_t)-1;
+      metadata.inst_offset = INSTOFFSET_UNALLOCATED;
       metadata.ready_event = Event::NO_EVENT;
       metadata.layout = 0;
       
@@ -459,59 +507,73 @@ namespace Realm {
 	delete metadata.layout;
     }
 
-    void RegionInstanceImpl::notify_allocation(bool success, size_t offset, size_t footprint)
+  void RegionInstanceImpl::notify_allocation(MemoryImpl::AllocationResult result,
+					     size_t offset)
     {
-      if(!success) {
+      using namespace ProfilingMeasurements;
+      
+      if(result != MemoryImpl::ALLOC_INSTANT_SUCCESS) {
 	// if somebody is listening to profiling measurements, we report
 	//  a failed allocation through that channel - if not, we explode
-	bool report_failure = (measurements.wants_measurement<ProfilingMeasurements::InstanceStatus>() ||
-			       measurements.wants_measurement<ProfilingMeasurements::InstanceAbnormalStatus>() ||
-			       measurements.wants_measurement<ProfilingMeasurements::InstanceAllocResult>());
-	if(report_failure) {
-	  log_inst.info() << "allocation failed: inst=" << me;
-
-	  // poison the completion event, if it exists
-	  Event ready_event = Event::NO_EVENT;
-	  {
-	    AutoLock<> al(mutex);
-	    ready_event = metadata.ready_event;
-	    metadata.ready_event = Event::NO_EVENT;
-	    metadata.inst_offset = (size_t)-2;
+	bool report_failure = (measurements.wants_measurement<InstanceStatus>() ||
+			       measurements.wants_measurement<InstanceAbnormalStatus>() ||
+			       measurements.wants_measurement<InstanceAllocResult>());
+	if(!report_failure) {
+	  if(result == MemoryImpl::ALLOC_INSTANT_FAILURE) {
+	    log_inst.fatal() << "instance allocation failed - out of memory in mem " << memory;
+	    abort();
 	  }
 
-	  if(measurements.wants_measurement<ProfilingMeasurements::InstanceStatus>()) {
-	    ProfilingMeasurements::InstanceStatus stat;
-	    stat.result = ProfilingMeasurements::InstanceStatus::FAILED_ALLOCATION;
-	    stat.error_code = 0;
-	    measurements.add_measurement(stat);
-	  }
-
-	  if(measurements.wants_measurement<ProfilingMeasurements::InstanceAbnormalStatus>()) {
-	    ProfilingMeasurements::InstanceAbnormalStatus stat;
-	    stat.result = ProfilingMeasurements::InstanceStatus::FAILED_ALLOCATION;
-	    stat.error_code = 0;
-	    measurements.add_measurement(stat);
-	  }
-
-	  if(measurements.wants_measurement<ProfilingMeasurements::InstanceAllocResult>()) {
-	    ProfilingMeasurements::InstanceAllocResult result;
-	    result.success = false;
-	    measurements.add_measurement(result);
-	  }
-	  
-	  // send any remaining incomplete profiling responses
-	  measurements.send_responses(requests);
-
-          // clear the measurments after we send the response
-          measurements.clear();
-
-	  if(ready_event.exists())
-	    GenEventImpl::trigger(ready_event, true /*poisoned*/);
-	  return;
-	} else {
-	  log_inst.fatal() << "instance allocation failed - out of memory in mem " << memory;
-	  exit(1);
+	  // exception: allocations that were cancelled would have had some
+	  //  error response reported further up the chain, so let this
+	  //  one slide
+	  assert(result == MemoryImpl::ALLOC_CANCELLED);
 	}
+	
+	log_inst.info() << "allocation failed: inst=" << me;
+
+	// poison the completion event, if it exists
+	Event ready_event = Event::NO_EVENT;
+	{
+	  AutoLock<> al(mutex);
+	  ready_event = metadata.ready_event;
+	  metadata.ready_event = Event::NO_EVENT;
+	  metadata.inst_offset = (size_t)-2;
+	}
+
+	if(measurements.wants_measurement<InstanceStatus>()) {
+	  InstanceStatus stat;
+	  stat.result = ((result == MemoryImpl::ALLOC_INSTANT_FAILURE) ?
+  			   InstanceStatus::FAILED_ALLOCATION :
+			   InstanceStatus::CANCELLED_ALLOCATION);
+	  stat.error_code = 0;
+	  measurements.add_measurement(stat);
+	}
+
+	if(measurements.wants_measurement<InstanceAbnormalStatus>()) {
+	  InstanceAbnormalStatus stat;
+	  stat.result = ((result == MemoryImpl::ALLOC_INSTANT_FAILURE) ?
+  			   InstanceStatus::FAILED_ALLOCATION :
+			   InstanceStatus::CANCELLED_ALLOCATION);
+	  stat.error_code = 0;
+	  measurements.add_measurement(stat);
+	}
+
+	if(measurements.wants_measurement<InstanceAllocResult>()) {
+	  InstanceAllocResult result;
+	  result.success = false;
+	  measurements.add_measurement(result);
+	}
+	  
+	// send any remaining incomplete profiling responses
+	measurements.send_responses(requests);
+
+	// clear the measurments after we send the response
+	measurements.clear();
+
+	if(ready_event.exists())
+	  GenEventImpl::trigger(ready_event, true /*poisoned*/);
+	return;
       }
 
       log_inst.debug() << "allocation completed: inst=" << me << " offset=" << offset;
@@ -568,8 +630,13 @@ namespace Realm {
     {
       log_inst.debug() << "deallocation completed: inst=" << me;
 
+      // our instance better not be in the unallocated state...
+      assert(metadata.inst_offset != INSTOFFSET_UNALLOCATED);
+      assert(metadata.inst_offset != INSTOFFSET_DELAYEDALLOC);
+      assert(metadata.inst_offset != INSTOFFSET_DELAYEDDESTROY);
+
       // was this a successfully allocatated instance?
-      if(metadata.inst_offset != size_t(-2)) {
+      if(metadata.inst_offset != INSTOFFSET_FAILED) {
 	if (measurements.wants_measurement<ProfilingMeasurements::InstanceStatus>()) {
 	  ProfilingMeasurements::InstanceStatus stat;
 	  stat.result = ProfilingMeasurements::InstanceStatus::DESTROYED_SUCCESSFULLY;
@@ -604,7 +671,7 @@ namespace Realm {
       }
 
       // set the offset back to the "unallocated" value
-      metadata.inst_offset = size_t(-1);
+      metadata.inst_offset = INSTOFFSET_UNALLOCATED;
 
       measurements.clear();
 
