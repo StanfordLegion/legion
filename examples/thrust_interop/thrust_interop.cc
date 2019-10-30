@@ -1,4 +1,4 @@
-/* Copyright 2018 Stanford University, NVIDIA Corporation
+/* Copyright 2019 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -220,12 +220,13 @@ void check_task(const Task *task,
   bool all_passed = true;
   for (PointInRectIterator<1> pir(rect); pir(); pir++)
   {
-    double expected = alpha * acc_x[*pir] + acc_y[*pir];
-    double received = acc_z[*pir];
-    // Probably shouldn't check for floating point equivalence but
-    // the order of operations are the same should they should
-    // be bitwise equal.
-    if (expected != received)
+    const double expected = alpha * acc_x[*pir] + acc_y[*pir];
+    const double received = acc_z[*pir];
+    // Can't use floating point equivalence here because the GPU thrust
+    // code will be optimized to FMA instructions which won't be bitwise
+    // equivalent with the CPU code
+    const double relative_error = fabs(expected - received) / expected;
+    if (relative_error > 1e-14)
       all_passed = false;
   }
   if (all_passed)

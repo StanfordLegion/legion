@@ -1,4 +1,4 @@
-/* Copyright 2018 Stanford University, NVIDIA Corporation
+/* Copyright 2019 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -58,34 +58,34 @@ namespace Realm {
     template <typename T>
     AbsoluteGauge<T>& AbsoluteGauge<T>::operator=(const AbsoluteGauge<T>& copy_from)
     {
-      curval = copy_from.curval;
+      curval.store(copy_from.curval.load());
       return *this;
     }
 
     template <typename T>
     inline AbsoluteGauge<T>::operator T(void) const
     {
-      return curval;
+      return curval.load();
     }
 
     template <typename T>
     inline AbsoluteGauge<T>& AbsoluteGauge<T>::operator=(T to_set)
     {
-      curval = to_set;
+      curval.store(to_set);
       return *this;
     }
 
     template <typename T>
     inline AbsoluteGauge<T>& AbsoluteGauge<T>::operator+=(T to_add)
     {
-      curval += to_add;
+      curval.fetch_add(to_add);
       return *this;
     }
 
     template <typename T>
     inline AbsoluteGauge<T>& AbsoluteGauge<T>::operator-=(T to_sub)
     {
-      curval -= to_sub;
+      curval.fetch_sub(to_sub);
       return *this;
     }
 
@@ -109,44 +109,47 @@ namespace Realm {
     template <typename T>
     AbsoluteRangeGauge<T>& AbsoluteRangeGauge<T>::operator=(const AbsoluteRangeGauge<T>& copy_from)
     {
-      (*this) = copy_from.curval;
+      T newval = copy_from.curval.load();
+      curval.store(newval);
+      minval.fetch_min(newval);
+      maxval.fetch_max(newval);
       return *this;
     }
 
     template <typename T>
     inline AbsoluteRangeGauge<T>::operator T(void) const
     {
-      return curval;
+      return curval.load();
     }
 
     template <typename T>
     inline AbsoluteRangeGauge<T>& AbsoluteRangeGauge<T>::operator=(T to_set)
     {
-      curval = to_set;
-      while(true) {
-	T oldmin = minval;
-	if(minval < curval) break;
-	if(__sync_bool_compare_and_swap(&minval, oldmin, curval)) break;
-      }
-      while(true) {
-	T oldmax = maxval;
-	if(maxval > curval) break;
-	if(__sync_bool_compare_and_swap(&maxval, oldmax, curval)) break;
-      }
+      curval.store(to_set);
+      minval.fetch_min(to_set);
+      maxval.fetch_max(to_set);
       return *this;
     }
 
     template <typename T>
     inline AbsoluteRangeGauge<T>& AbsoluteRangeGauge<T>::operator+=(T to_add)
     {
-      (*this) = (curval + to_add);
+      T newval = curval.fetch_add(to_add) + to_add;
+      if(to_add < 0)
+	minval.fetch_min(newval);
+      if(to_add > 0)
+	maxval.fetch_max(newval);
       return *this;
     }
 
     template <typename T>
     inline AbsoluteRangeGauge<T>& AbsoluteRangeGauge<T>::operator-=(T to_sub)
     {
-      *this = (curval - to_sub);
+      T newval = curval.fetch_sub(to_sub) + to_sub;
+      if(to_sub > 0)
+	minval.fetch_min(newval);
+      if(to_sub < 0)
+	maxval.fetch_max(newval);
       return *this;
     }
 
@@ -168,8 +171,7 @@ namespace Realm {
     template <typename T>
     inline EventCounter<T>& EventCounter<T>::operator+=(T to_add)
     {
-      // must be an atomic fetch-and-add
-      __sync_fetch_and_add(&events, to_add);
+      events.fetch_add(to_add);
       return *this;
     }
 

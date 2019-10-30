@@ -1,4 +1,4 @@
-/* Copyright 2018 Stanford University, NVIDIA Corporation
+/* Copyright 2019 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -39,8 +39,9 @@ namespace Realm {
     // output vector should start out empty
     assert(subspaces.empty());
 
-    Event e = GenEventImpl::create_genevent()->current_event();
-    ByFieldOperation<N,T,FT> *op = new ByFieldOperation<N,T,FT>(*this, field_data, reqs, e);
+    GenEventImpl *finish_event = GenEventImpl::create_genevent();
+    Event e = finish_event->current_event();
+    ByFieldOperation<N,T,FT> *op = new ByFieldOperation<N,T,FT>(*this, field_data, reqs, finish_event, ID(e).event_generation());
 
     size_t n = colors.size();
     subspaces.resize(n);
@@ -49,7 +50,7 @@ namespace Realm {
       log_dpops.info() << "byfield: " << *this << ", " << colors[i] << " -> " << subspaces[i] << " (" << e << ")";
     }
 
-    op->deferred_launch(wait_on);
+    op->launch(wait_on);
     return e;
   }
 
@@ -57,12 +58,6 @@ namespace Realm {
   ////////////////////////////////////////////////////////////////////////
   //
   // class ByFieldMicroOp<N,T,FT>
-
-  template <int N, typename T, typename FT>
-  inline /*static*/ DynamicTemplates::TagType ByFieldMicroOp<N,T,FT>::type_tag(void)
-  {
-    return NTF_TemplateHelper::encode_tag<N,T,FT>();
-  }
 
   template <int N, typename T, typename FT>
   ByFieldMicroOp<N,T,FT>::ByFieldMicroOp(IndexSpace<N,T> _parent_space,
@@ -75,7 +70,9 @@ namespace Realm {
     , field_offset(_field_offset)
     , value_range_valid(false)
     , value_set_valid(false)
-  {}
+  {
+    areg.force_instantiation();
+  }
 
   template <int N, typename T, typename FT>
   ByFieldMicroOp<N,T,FT>::~ByFieldMicroOp(void)
@@ -205,16 +202,10 @@ namespace Realm {
   void ByFieldMicroOp<N,T,FT>::dispatch(PartitioningOperation *op, bool inline_ok)
   {
     // a ByFieldMicroOp should always be executed on whichever node the field data lives
-    NodeID exec_node = ID(inst).instance.owner_node;
+    NodeID exec_node = ID(inst).instance_owner_node();
 
-    if(exec_node != my_node_id) {
-      // we're going to ship it elsewhere, which means we always need an AsyncMicroOp to
-      //  track it
-      async_microop = new AsyncMicroOp(op, this);
-      op->add_async_work_item(async_microop);
-
-      RemoteMicroOpMessage::send_request(exec_node, op, *this);
-      delete this;
+    if(exec_node != Network::my_node_id) {
+      forward_microop<ByFieldMicroOp<N,T,FT> >(exec_node, op, this);
       return;
     }
 
@@ -260,6 +251,9 @@ namespace Realm {
     assert(ok);
   }
 
+  template <int N, typename T, typename FT>
+  ActiveMessageHandlerReg<RemoteMicroOpMessage<ByFieldMicroOp<N,T,FT> > > ByFieldMicroOp<N,T,FT>::areg;
+
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -269,8 +263,9 @@ namespace Realm {
   ByFieldOperation<N,T,FT>::ByFieldOperation(const IndexSpace<N,T>& _parent,
 					     const std::vector<FieldDataDescriptor<IndexSpace<N,T>,FT> >& _field_data,
 					     const ProfilingRequestSet &reqs,
-					     Event _finish_event)
-    : PartitioningOperation(reqs, _finish_event)
+					     GenEventImpl *_finish_event,
+					     EventImpl::gen_t _finish_gen)
+    : PartitioningOperation(reqs, _finish_event, _finish_gen)
     , parent(_parent)
     , field_data(_field_data)
   {}
@@ -291,7 +286,7 @@ namespace Realm {
     subspace.bounds = parent.bounds;
 
     // get a sparsity ID by round-robin'ing across the nodes that have field data
-    int target_node = ID(field_data[colors.size() % field_data.size()].inst).instance.owner_node;
+    int target_node = ID(field_data[colors.size() % field_data.size()].inst).instance_owner_node();
     SparsityMap<N,T> sparsity = get_runtime()->get_available_sparsity_impl(target_node)->me.convert<SparsityMap<N,T> >();
     subspace.sparsity = sparsity;
 
@@ -325,7 +320,6 @@ namespace Realm {
     os << "ByFieldOperation(" << parent << ")";
   }
 
-
 #define DOIT(N,T,F) \
   template class ByFieldMicroOp<N,T,F>; \
   template class ByFieldOperation<N,T,F>; \
@@ -335,13 +329,10 @@ namespace Realm {
 							     std::vector<IndexSpace<N,T> >&, \
 							     const ProfilingRequestSet &, \
 							     Event) const;
+#ifndef REALM_TEMPLATES_ONLY
   FOREACH_NTF(DOIT)
+#endif
 
-#define ZP(N,T) Point<N,T>
-#define ZR(N,T) Rect<N,T>
-#define DOIT2(N1,T1,N2,T2) \
-  DOIT(N1,T1,ZP(N2,T2))
-  //  DOIT(N1,T1,ZR(N2,T2))
+  // instantiations of point/rect-field templates handled in byfield_tmpl.cc
 
-  FOREACH_NTNT(DOIT2)
 };

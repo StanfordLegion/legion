@@ -1,4 +1,4 @@
-/* Copyright 2018 Stanford University, NVIDIA Corporation
+/* Copyright 2019 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,7 +25,7 @@
 
 #include "realm/cuda/cudart_hijack.h"
 
-#include "realm/activemsg.h"
+#include "realm/mutex.h"
 #include "realm/utils.h"
 
 #ifdef REALM_USE_VALGRIND_ANNOTATIONS
@@ -34,6 +34,7 @@
 
 #include <stdio.h>
 #include <string.h>
+
 
 namespace Realm {
   namespace Cuda {
@@ -82,7 +83,7 @@ namespace Realm {
     {
       bool add_to_worker = false;
       {
-	AutoHSLLock al(mutex);
+	AutoLock<> al(mutex);
 
 	// remember to add ourselves to the worker if we didn't already have work
 	add_to_worker = pending_copies.empty();
@@ -100,9 +101,21 @@ namespace Realm {
 
       CHECK_CU( cuEventRecord(e, stream) );
 
-      log_stream.debug() << "CUDA event " << e << " recorded on stream " << stream << " (GPU " << gpu << ")";
+      log_stream.debug() << "CUDA fence event " << e << " recorded on stream " << stream << " (GPU " << gpu << ")";
 
       add_event(e, fence, 0);
+    }
+
+    void GPUStream::add_start_event(GPUWorkStart *start)
+    {
+      CUevent e = gpu->event_pool.get_event();
+
+      CHECK_CU( cuEventRecord(e, stream) );
+
+      log_stream.debug() << "CUDA start event " << e << " recorded on stream " << stream << " (GPU " << gpu << ")";
+
+      // record this as a start event
+      add_event(e, 0, 0, start);
     }
 
     void GPUStream::add_notification(GPUCompletionNotification *notification)
@@ -115,11 +128,11 @@ namespace Realm {
     }
 
     void GPUStream::add_event(CUevent event, GPUWorkFence *fence, 
-			      GPUCompletionNotification *notification)
+			      GPUCompletionNotification *notification, GPUWorkStart *start)
     {
       bool add_to_worker = false;
       {
-	AutoHSLLock al(mutex);
+	AutoLock<> al(mutex);
 
 	// remember to add ourselves to the worker if we didn't already have work
 	add_to_worker = pending_events.empty();
@@ -127,6 +140,7 @@ namespace Realm {
 	PendingEvent e;
 	e.event = event;
 	e.fence = fence;
+	e.start = start;
 	e.notification = notification;
 
 	pending_events.push_back(e);
@@ -143,7 +157,7 @@ namespace Realm {
       while(true) {
 	GPUMemcpy *copy = 0;
 	{
-	  AutoHSLLock al(mutex);
+	  AutoLock<> al(mutex);
 
 	  if(pending_copies.empty())
 	    return false;  // no work left
@@ -170,7 +184,7 @@ namespace Realm {
       CUevent event;
       bool event_valid = false;
       {
-	AutoHSLLock al(mutex);
+	AutoLock<> al(mutex);
 
 	if(pending_events.empty())
 	  return false;  // no work left
@@ -204,14 +218,16 @@ namespace Realm {
 	// this event has triggered, so figure out the fence/notification to trigger
 	//  and also peek at the next event
 	GPUWorkFence *fence = 0;
+        GPUWorkStart *start = 0;
 	GPUCompletionNotification *notification = 0;
 
 	{
-	  AutoHSLLock al(mutex);
+	  AutoLock<> al(mutex);
 
 	  const PendingEvent &e = pending_events.front();
 	  assert(e.event == event);
 	  fence = e.fence;
+          start = e.start;
 	  notification = e.notification;
 	  pending_events.pop_front();
 
@@ -221,6 +237,9 @@ namespace Realm {
 	    event = pending_events.front().event;
 	}
 
+        if (start) {
+          start->mark_gpu_task_start();
+        }
 	if(fence)
 	  fence->mark_finished(true /*successful*/);
 
@@ -1164,6 +1183,35 @@ namespace Realm {
       me->mark_finished(true /*succesful*/);
     }
 
+    ////////////////////////////////////////////////////////////////////////
+    //
+    // class GPUWorkStart
+    GPUWorkStart::GPUWorkStart(Realm::Operation *op)
+      : Realm::Operation::AsyncWorkItem(op)
+    {
+    }
+
+    void GPUWorkStart::print(std::ostream& os) const
+    {
+      os << "GPUWorkStart";
+    }
+
+    void GPUWorkStart::enqueue_on_stream(GPUStream *stream)
+    {
+      if(stream->get_gpu()->module->cfg_fences_use_callbacks) {
+	CHECK_CU( cuStreamAddCallback(stream->get_stream(), &cuda_start_callback, (void *)this, 0) );
+      } else {
+	stream->add_start_event(this);
+      }
+    }
+
+    /*static*/ void GPUWorkStart::cuda_start_callback(CUstream stream, CUresult res, void *data)
+    {
+      GPUWorkStart *me = (GPUWorkStart *)data;
+      assert(res == CUDA_SUCCESS);
+      // record the real start time for the operation
+      me->mark_gpu_task_start();
+    }
 
     ////////////////////////////////////////////////////////////////////////
     //
@@ -1234,7 +1282,7 @@ namespace Realm {
 
     CUevent GPUEventPool::get_event(void)
     {
-      AutoHSLLock al(mutex);
+      AutoLock<> al(mutex);
 
       if(current_size == 0) {
 	// if we need to make an event, make a bunch
@@ -1255,7 +1303,7 @@ namespace Realm {
 
     void GPUEventPool::return_event(CUevent e)
     {
-      AutoHSLLock al(mutex);
+      AutoLock<> al(mutex);
 
       assert(current_size < total_size);
 
@@ -1336,6 +1384,12 @@ namespace Realm {
       GPUWorkFence *fence = new GPUWorkFence(task);
       task->add_async_work_item(fence);
 
+      // event to record the GPU start time for the task
+      GPUWorkStart *start = new GPUWorkStart(task);
+      task->add_async_work_item(start);
+      // enqueue start event
+      start->enqueue_on_stream(s);
+
       bool ok = T::execute_task(task);
 
       // now enqueue the fence on the local stream
@@ -1360,7 +1414,6 @@ namespace Realm {
 	}
 	CHECK_CU( cuCtxSynchronize() );
       }
-
       // pop the CUDA context for this GPU back off
       gpu_proc->gpu->pop_context();
 
@@ -1713,7 +1766,7 @@ namespace Realm {
     void GPUWorker::shutdown_background_thread(void)
     {
       {
-	AutoHSLLock al(lock);
+	AutoLock<> al(lock);
 	worker_shutdown_requested = true;
 	condvar.broadcast();
       }
@@ -1728,7 +1781,7 @@ namespace Realm {
 
     void GPUWorker::add_stream(GPUStream *stream)
     {
-      AutoHSLLock al(lock);
+      AutoLock<> al(lock);
 
       // if the stream is already in the set, nothing to do
       if(active_streams.count(stream) > 0)
@@ -1746,7 +1799,7 @@ namespace Realm {
       // for any stream that we leave work on, we'll add it back in
       std::set<GPUStream *> streams;
       {
-	AutoHSLLock al(lock);
+	AutoLock<> al(lock);
 
 	while(active_streams.empty()) {
 	  if(!sleep_on_empty || worker_shutdown_requested) return false;
@@ -1807,8 +1860,8 @@ namespace Realm {
       virtual void wait(void);
 
     public:
-      GASNetHSL mutex;
-      GASNetCondVar cv;
+      Mutex mutex;
+      CondVar cv;
       bool completed;
     };
 
@@ -1822,7 +1875,7 @@ namespace Realm {
 
     void BlockingCompletionNotification::request_completed(void)
     {
-      AutoHSLLock a(mutex);
+      AutoLock<> a(mutex);
 
       assert(!completed);
       completed = true;
@@ -1831,7 +1884,7 @@ namespace Realm {
 
     void BlockingCompletionNotification::wait(void)
     {
-      AutoHSLLock a(mutex);
+      AutoLock<> a(mutex);
 
       while(!completed)
 	cv.wait();
@@ -1850,16 +1903,6 @@ namespace Realm {
     }
 
     GPUFBMemory::~GPUFBMemory(void) {}
-
-    off_t GPUFBMemory::alloc_bytes(size_t size)
-    {
-      return alloc_bytes_local(size);
-    }
-
-    void GPUFBMemory::free_bytes(off_t offset, size_t size)
-    {
-      free_bytes_local(offset, size);
-    }
 
     // these work, but they are SLOW
     void GPUFBMemory::get_bytes(off_t offset, void *dst, size_t size)
@@ -1903,16 +1946,6 @@ namespace Realm {
 
     GPUZCMemory::~GPUZCMemory(void) {}
 
-    off_t GPUZCMemory::alloc_bytes(size_t size)
-    {
-      return alloc_bytes_local(size);
-    }
-
-    void GPUZCMemory::free_bytes(off_t offset, size_t size)
-    {
-      free_bytes_local(offset, size);
-    }
-
     void GPUZCMemory::get_bytes(off_t offset, void *dst, size_t size)
     {
       memcpy(dst, cpu_base+offset, size);
@@ -1930,7 +1963,7 @@ namespace Realm {
 
     int GPUZCMemory::get_home_node(off_t offset, size_t size)
     {
-      return ID(me).memory.owner_node;
+      return ID(me).memory_owner_node();
     }
 
     // Helper methods for emulating the cuda runtime
@@ -2342,7 +2375,25 @@ namespace Realm {
       {
 	AutoGPUContext agc(this);
 
-	CHECK_CU( cuMemAlloc(&fbmem_base, size) );
+	CUresult ret = cuMemAlloc(&fbmem_base, size);
+	if(ret != CUDA_SUCCESS) {
+	  if(ret == CUDA_ERROR_OUT_OF_MEMORY) {
+	    size_t free_bytes, total_bytes;
+	    CHECK_CU( cuMemGetInfo(&free_bytes, &total_bytes) );
+	    log_gpu.fatal() << "insufficient memory on gpu " << info->index
+			    << ": " << size << " bytes needed (from -ll:fsize), "
+			    << free_bytes << " (out of " << total_bytes << ") available";
+	  } else {
+	    const char *errstring = "error message not available";
+#if CUDA_VERSION >= 6050
+	    cuGetErrorName(ret, &errstring);
+#endif
+	    log_gpu.fatal() << "unexpected error from cuMemAlloc on gpu " << info->index
+			    << ": result=" << ret
+			    << " (" << errstring << ")";
+	  }
+	  abort();
+	}
       }
 
       Memory m = runtime->next_local_memory_id();
@@ -2456,26 +2507,28 @@ namespace Realm {
         if (result == CUDA_ERROR_OPERATING_SYSTEM) {
           log_gpu.error("ERROR: Device side asserts are not supported by the "
                               "CUDA driver for MAC OSX, see NVBugs 1628896.");
-        }
+        } else
 #endif
         if (result == CUDA_ERROR_NO_BINARY_FOR_GPU) {
           log_gpu.error("ERROR: The binary was compiled for the wrong GPU "
                               "architecture. Update the 'GPU_ARCH' flag at the top "
-                              "of runtime/runtime.mk to match your current GPU "
-                              "architecture.");
-        }
-        log_gpu.error("Failed to load CUDA module! Error log: %s", 
-                log_error_buffer);
+                              "of runtime/runtime.mk to match/include your current GPU "
+			      "architecture (%d).",
+			(info->compute_major * 10 + info->compute_minor));
+        } else {
+	  log_gpu.error("Failed to load CUDA module! Error log: %s", 
+			log_error_buffer);
 #if CUDA_VERSION >= 6050
-        const char *name, *str;
-        CHECK_CU( cuGetErrorName(result, &name) );
-        CHECK_CU( cuGetErrorString(result, &str) );
-        fprintf(stderr,"CU: cuModuleLoadDataEx = %d (%s): %s\n",
-                result, name, str);
+	  const char *name, *str;
+	  CHECK_CU( cuGetErrorName(result, &name) );
+	  CHECK_CU( cuGetErrorString(result, &str) );
+	  fprintf(stderr,"CU: cuModuleLoadDataEx = %d (%s): %s\n",
+		  result, name, str);
 #else
-        fprintf(stderr,"CU: cuModuleLoadDataEx = %d\n", result);
+	  fprintf(stderr,"CU: cuModuleLoadDataEx = %d\n", result);
 #endif
-        assert(0);
+	}
+	abort();
       }
       else
         log_gpu.info("Loaded CUDA Module. JIT Output: %s", log_info_buffer);
@@ -2514,9 +2567,9 @@ namespace Realm {
 
     CudaModule::CudaModule(void)
       : Module("cuda")
-      , cfg_zc_mem_size_in_mb(64)
-      , cfg_zc_ib_size_in_mb(256)
-      , cfg_fb_mem_size_in_mb(256)
+      , cfg_zc_mem_size(64 << 20)
+      , cfg_zc_ib_size(256 << 20)
+      , cfg_fb_mem_size(256 << 20)
       , cfg_num_gpus(0)
       , cfg_gpu_streams(12)
       , cfg_use_background_workers(true)
@@ -2536,6 +2589,7 @@ namespace Realm {
     /*static*/ Module *CudaModule::create_module(RuntimeImpl *runtime,
 						 std::vector<std::string>& cmdline)
     {
+
       // before we do anything, make sure there's a CUDA driver and GPUs to talk to
       std::vector<GPUInfo *> infos;
       {
@@ -2603,9 +2657,9 @@ namespace Realm {
       {
 	CommandLineParser cp;
 
-	cp.add_option_int("-ll:fsize", m->cfg_fb_mem_size_in_mb)
-	  .add_option_int("-ll:zsize", m->cfg_zc_mem_size_in_mb)
-	  .add_option_int("-ll:ib_zsize", m->cfg_zc_ib_size_in_mb)
+	cp.add_option_int_units("-ll:fsize", m->cfg_fb_mem_size, 'm')
+	  .add_option_int_units("-ll:zsize", m->cfg_zc_mem_size, 'm')
+	  .add_option_int_units("-ll:ib_zsize", m->cfg_zc_ib_size, 'm')
 	  .add_option_int("-ll:gpu", m->cfg_num_gpus)
 	  .add_option_int("-ll:streams", m->cfg_gpu_streams)
 	  .add_option_int("-ll:gpuworker", m->cfg_use_shared_worker)
@@ -2675,22 +2729,36 @@ namespace Realm {
       Module::create_memories(runtime);
 
       // each GPU needs its FB memory
-      if(cfg_fb_mem_size_in_mb > 0)
+      if(cfg_fb_mem_size > 0)
 	for(std::vector<GPU *>::iterator it = gpus.begin();
 	    it != gpus.end();
 	    it++)
-	  (*it)->create_fb_memory(runtime, cfg_fb_mem_size_in_mb << 20);
+	  (*it)->create_fb_memory(runtime, cfg_fb_mem_size);
 
       // a single ZC memory for everybody
-      if((cfg_zc_mem_size_in_mb > 0) && !gpus.empty()) {
+      if((cfg_zc_mem_size > 0) && !gpus.empty()) {
 	CUdeviceptr zcmem_gpu_base;
 	// borrow GPU 0's context for the allocation call
 	{
 	  AutoGPUContext agc(gpus[0]);
 
-	  CHECK_CU( cuMemHostAlloc(&zcmem_cpu_base, 
-				   cfg_zc_mem_size_in_mb << 20,
-				   CU_MEMHOSTALLOC_PORTABLE | CU_MEMHOSTALLOC_DEVICEMAP) );
+	  CUresult ret = cuMemHostAlloc(&zcmem_cpu_base, 
+					cfg_zc_mem_size,
+					CU_MEMHOSTALLOC_PORTABLE | CU_MEMHOSTALLOC_DEVICEMAP);
+	  if(ret != CUDA_SUCCESS) {
+	    if(ret == CUDA_ERROR_OUT_OF_MEMORY) {
+	      log_gpu.fatal() << "insufficient device-mappable host memory: "
+			      << cfg_zc_mem_size << " bytes needed (from -ll:zsize)";
+	    } else {
+	      const char *errstring = "error message not available";
+#if CUDA_VERSION >= 6050
+	      cuGetErrorName(ret, &errstring);
+#endif
+	      log_gpu.fatal() << "unexpected error from cuMemHostAlloc: result=" << ret
+			      << " (" << errstring << ")";
+	    }
+	    abort();
+	  }
 	  CHECK_CU( cuMemHostGetDevicePointer(&zcmem_gpu_base,
 					      zcmem_cpu_base,
 					      0) );
@@ -2701,7 +2769,7 @@ namespace Realm {
 
 	Memory m = runtime->next_local_memory_id();
 	zcmem = new GPUZCMemory(m, zcmem_gpu_base, zcmem_cpu_base, 
-				cfg_zc_mem_size_in_mb << 20);
+				cfg_zc_mem_size);
 	runtime->add_memory(zcmem);
 
 	// add the ZC memory as a pinned memory to all GPUs
@@ -2721,12 +2789,12 @@ namespace Realm {
       }
 
       // allocate intermediate buffers in ZC memory for DMA engine
-      if ((cfg_zc_ib_size_in_mb > 0) && !gpus.empty()) {
+      if ((cfg_zc_ib_size > 0) && !gpus.empty()) {
         CUdeviceptr zcib_gpu_base;
         {
           AutoGPUContext agc(gpus[0]);
           CHECK_CU( cuMemHostAlloc(&zcib_cpu_base,
-                                   cfg_zc_ib_size_in_mb << 20,
+                                   cfg_zc_ib_size,
                                    CU_MEMHOSTALLOC_PORTABLE | CU_MEMHOSTALLOC_DEVICEMAP) );
           CHECK_CU( cuMemHostGetDevicePointer(&zcib_gpu_base,
                                               zcib_cpu_base, 0) );
@@ -2737,7 +2805,7 @@ namespace Realm {
         Memory m = runtime->next_local_ib_memory_id();
         GPUZCMemory* ib_mem;
         ib_mem = new GPUZCMemory(m, zcib_gpu_base, zcib_cpu_base,
-                                 cfg_zc_ib_size_in_mb << 20);
+                                 cfg_zc_ib_size);
         runtime->add_ib_memory(ib_mem);
         // add the ZC memory as a pinned memory to all GPUs
         for (unsigned i = 0; i < gpus.size(); i++) {
@@ -2778,9 +2846,9 @@ namespace Realm {
       // before we create dma channels, see how many of the system memory ranges
       //  we can register with CUDA
       if(cfg_pin_sysmem && !gpus.empty()) {
-	std::vector<MemoryImpl *>& local_mems = runtime->nodes[my_node_id].memories;
+	std::vector<MemoryImpl *>& local_mems = runtime->nodes[Network::my_node_id].memories;
 	// <NEW_DMA> also add intermediate buffers into local_mems
-	std::vector<MemoryImpl *>& local_ib_mems = runtime->nodes[my_node_id].ib_memories;
+	std::vector<MemoryImpl *>& local_ib_mems = runtime->nodes[Network::my_node_id].ib_memories;
 	std::vector<MemoryImpl *> all_local_mems;
 	all_local_mems.insert(all_local_mems.end(), local_mems.begin(), local_mems.end());
 	all_local_mems.insert(all_local_mems.end(), local_ib_mems.begin(), local_ib_mems.end());
@@ -2952,7 +3020,7 @@ namespace Realm {
     {
       GlobalRegistrations& g = get_global_registrations();
 
-      AutoHSLLock al(g.mutex);
+      AutoLock<> al(g.mutex);
 
       // add this gpu to the list
       assert(g.active_gpus.count(gpu) == 0);
@@ -2979,7 +3047,7 @@ namespace Realm {
     {
       GlobalRegistrations& g = get_global_registrations();
 
-      AutoHSLLock al(g.mutex);
+      AutoLock<> al(g.mutex);
 
       assert(g.active_gpus.count(gpu) > 0);
       g.active_gpus.erase(gpu);
@@ -2990,7 +3058,7 @@ namespace Realm {
     {
       GlobalRegistrations& g = get_global_registrations();
 
-      AutoHSLLock al(g.mutex);
+      AutoLock<> al(g.mutex);
 
       // add the fat binary to the list and tell any gpus we know of about it
       g.fat_binaries.push_back(fatbin);
@@ -3005,7 +3073,7 @@ namespace Realm {
     {
       GlobalRegistrations& g = get_global_registrations();
 
-      AutoHSLLock al(g.mutex);
+      AutoLock<> al(g.mutex);
 
       // remove the fatbin from the list - don't bother telling gpus
       std::vector<FatBin *>::iterator it = g.fat_binaries.begin();
@@ -3021,7 +3089,7 @@ namespace Realm {
     {
       GlobalRegistrations& g = get_global_registrations();
 
-      AutoHSLLock al(g.mutex);
+      AutoLock<> al(g.mutex);
 
       // add the variable to the list and tell any gpus we know
       g.variables.push_back(var);
@@ -3037,7 +3105,7 @@ namespace Realm {
     {
       GlobalRegistrations& g = get_global_registrations();
 
-      AutoHSLLock al(g.mutex);
+      AutoLock<> al(g.mutex);
 
       // add the function to the list and tell any gpus we know
       g.functions.push_back(func);

@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-# Copyright 2018 Stanford University, NVIDIA Corporation
+# Copyright 2019 Stanford University, NVIDIA Corporation
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -16,9 +16,10 @@
 #
 
 # TODO LIST
-# Better algorithm for checking for dataflow paths in physical analysis
 # Support predication for physical analysis
 
+from __future__ import absolute_import
+from __future__ import division
 from __future__ import print_function
 
 import argparse
@@ -68,10 +69,10 @@ SINGLE_TASK_KIND = 1
 INDEX_TASK_KIND = 2
 MAP_OP_KIND = 3
 INTER_CLOSE_OP_KIND = 4
-READ_ONLY_CLOSE_OP_KIND = 5
+#READ_ONLY_CLOSE_OP_KIND = 5
 POST_CLOSE_OP_KIND = 6
-OPEN_OP_KIND = 7
-ADVANCE_OP_KIND = 8
+#OPEN_OP_KIND = 7
+#ADVANCE_OP_KIND = 8
 FENCE_OP_KIND = 9
 COPY_OP_KIND = 10 
 FILL_OP_KIND = 11
@@ -87,7 +88,6 @@ TRACE_OP_KIND = 20
 TIMING_OP_KIND = 21
 PREDICATE_OP_KIND = 22
 MUST_EPOCH_OP_KIND = 23
-SUMMARY_OP_KIND = 24
 
 OPEN_NONE = 0
 OPEN_READ_ONLY = 1
@@ -121,6 +121,26 @@ OpNames = [
 "Predicate Op",
 "Must Epoch Op",
 ]
+
+INDEX_SPACE_EXPR = 0
+UNION_EXPR = 1
+INTERSECT_EXPR = 2
+DIFFERENCE_EXPR = 3,
+
+# Helper methods for python 2/3 foolishness
+def iteritems(obj):
+    return obj.items() if sys.version_info > (3,) else obj.viewitems()
+
+def iterkeys(obj):
+    return obj.keys() if sys.version_info > (3,) else obj.viewkeys()
+
+def itervalues(obj):
+    return obj.values() if sys.version_info > (3,) else obj.viewvalues()
+
+try:
+    xrange # Python 2
+except NameError:
+    xrange = range # Python 3
 
 def check_for_anti_dependence(req1, req2, actual):
     if req1.is_read_only():
@@ -162,28 +182,60 @@ def compute_dependence_type(req1, req2):
         assert False
         return NO_DEPENDENCE
 
-def check_preconditions(preconditions, op, check_reorder):
-    assert op.reachable_cache is not None
-    forward_reachable = None
+def check_preconditions(preconditions, op):
+    to_traverse = collections.deque()
+    to_traverse.append(op)
+    backward_reachable = set()
     for pre in preconditions:
-        if pre not in op.reachable_cache:
-            # Special case for handling when read-only operations
-            # are mapped out of order, check to see if the anti-dependence
-            # was serialized in the other order
-            if check_reorder:
-                if not forward_reachable:
-                    forward_reachable = set()
-                    op.get_physical_reachable(forward_reachable, True)
-                if pre in forward_reachable:
-                    continue
+        # If we've already seen it traverse backwards
+        if pre in backward_reachable:
+            continue
+        # Keep BFS-ing until we find the node or run out of
+        # nodes to traverse
+        found = False
+        while to_traverse:
+            node = to_traverse.popleft()
+            for prev in node.physical_incoming:
+                if prev not in backward_reachable:
+                    backward_reachable.add(prev)
+                    to_traverse.append(prev)
+                    # If it's what we're looking for then record that
+                    if not found and pre is prev:
+                        found = True
+                        # Don't break, still need to add the other
+                        # backward reachable nodes from this node
+            if found:
+                break
+        if not found:
             return pre
     return None
+
+# Borrowed from stack overflow 3173320
+def print_progress_bar(iteration, total, prefix = '', suffix = '', decimals = 1, length = 100, fill = '-'):
+    """
+    Call in a loop to create terminal progress bar
+    @params:
+        iteration   - Required  : current iteration (Int)
+        total       - Required  : total iterations (Int)
+        prefix      - Optional  : prefix string (Str)
+        suffix      - Optional  : suffix string (Str)
+        decimals    - Optional  : positive number of decimals in percent complete (Int)
+        length      - Optional  : character length of bar (Int)
+        fill        - Optional  : bar fill character (Str)
+    """
+    percent = ("{0:." + str(decimals) + "f}").format(100 * (iteration / float(total)))
+    filledLength = int(length * iteration // total)
+    bar = fill * filledLength + '-' * (length - filledLength)
+    print('\r%s |%s| %s%% %s' % (prefix, bar, percent, suffix), end = '\r')
+    # Print New Line on Complete
+    if iteration == total:
+        print()
 
 class Point(object):
     __slots__ = ['dim', 'vals', 'shape', 'index_set']
     def __init__(self, dim):
         self.dim = dim
-        self.vals = array.array('i', (0,)*dim)
+        self.vals = array.array('l', (0,)*dim)
         self.shape = None
         self.index_set = None
 
@@ -206,14 +258,14 @@ class Point(object):
 
     def __eq__(self, point):
         assert self.dim == point.dim
-        for i in range(self.dim):
+        for i in xrange(self.dim):
             if self.vals[i] != point.vals[i]:
                 return False
         return True
 
     def copy(self):
         result = Point(self.dim)
-        for i in range(self.dim):
+        for i in xrange(self.dim):
             result.vals[i] = self.vals[i]
         result.shape = self.shape
         result.index_set = self.index_set
@@ -236,7 +288,7 @@ class Rect(object):
         return hash(str(self))
 
     def empty(self):
-        for i in range(self.dim):
+        for i in xrange(self.dim):
             if self.lo.vals[i] > self.hi.vals[i]:
                 return True
         return False
@@ -245,12 +297,12 @@ class Rect(object):
         if self.empty():
             return 0
         result = 1
-        for i in range(self.dim):
+        for i in xrange(self.dim):
             result *= (self.hi.vals[i] - self.lo.vals[i] + 1)
         return result
 
     def dominates(self, rect):
-        for i in range(self.dim):
+        for i in xrange(self.dim):
             if rect.lo.vals[i] < self.lo.vals[i] or self.hi.vals[i] < rect.hi.vals[i]:
                 return False
         return True
@@ -258,7 +310,7 @@ class Rect(object):
     def intersects(self, rect):
         # If they overlap in all dimensions then they intersect
         assert rect.dim == self.dim
-        for i in range(self.dim):
+        for i in xrange(self.dim):
             if rect.hi.vals[i] < self.lo.vals[i] or self.hi.vals[i] < rect.lo.vals[i]:
                 return False
         return True
@@ -266,13 +318,13 @@ class Rect(object):
     def intersection(self, rect):
         lo = Point(self.dim)
         hi = Point(self.dim)
-        for i in range(self.dim):
+        for i in xrange(self.dim):
             lo.vals[i] = max(self.lo.vals[i], rect.lo.vals[i])
             hi.vals[i] = min(self.hi.vals[i], rect.hi.vals[i])
         return Rect(lo, hi)
 
     def contains_point(self, point):
-        for i in range(point.dim):
+        for i in xrange(point.dim):
             x = point.vals[i]
             if x < self.lo.vals[i] or self.hi.vals[i] < x:
                 return False
@@ -280,28 +332,28 @@ class Rect(object):
 
     def iterator(self):
         if self.dim == 1:
-            for x in range(self.lo.vals[0], self.hi.vals[0]+1):
+            for x in xrange(self.lo.vals[0], self.hi.vals[0]+1):
                 point = Point(1)
                 point.vals[0] = x
                 yield point
         elif self.dim == 2:
-            for x in range(self.lo.vals[0], self.hi.vals[0]+1):
-                for y in range(self.lo.vals[1], self.hi.vals[1]+1):
+            for x in xrange(self.lo.vals[0], self.hi.vals[0]+1):
+                for y in xrange(self.lo.vals[1], self.hi.vals[1]+1):
                     point = Point(2)
                     point.vals[0] = x
                     point.vals[1] = y
                     yield point
         elif self.dim == 3:
-            for x in range(self.lo.vals[0], self.hi.vals[0]+1):
-                for y in range(self.lo.vals[1], self.hi.vals[1]+1):
-                    for z in range(self.lo.vals[2], self.hi.vals[2]+1):
+            for x in xrange(self.lo.vals[0], self.hi.vals[0]+1):
+                for y in xrange(self.lo.vals[1], self.hi.vals[1]+1):
+                    for z in xrange(self.lo.vals[2], self.hi.vals[2]+1):
                         point = Point(3)
                         point.vals[0] = x
                         point.vals[1] = y
                         point.vals[2] = z
                         yield point
         else:
-            assert False
+            raise NotImplementedError("Need support for more dimensions")
 
     def copy(self):
         return Rect(self.lo.copy(), self.hi.copy())
@@ -312,6 +364,45 @@ class Shape(object):
     def __init__(self):
         self.points = set()
         self.rects = set()
+
+    @property
+    def dense(self):
+        # pretty sure that realm is making sure these are
+        # not overlapping so as long as we only have one
+        # of either then we're dense, otherwise we're sparse
+        return (len(self.points)+len(self.rects)) == 1
+
+    @property
+    def bounds(self):
+        lo = None
+        hi = None
+        for point in self.points:
+            if lo is None:
+                lo = point.copy()
+            else:
+                for d in xrange(point.dim):
+                    if point.vals[d] < lo.vals[d]:
+                        lo.vals[d] = point.vals[d]
+            if hi is None:
+                hi = point.copy()
+            else:
+                for d in xrange(point.dim):
+                    if point.vals[d] > hi.vals[d]:
+                        hi.vals[d] = point.vals[d]
+        for rect in self.rects:
+            if lo is None:
+                lo = rect.lo.copy()
+            else:
+                for d in xrange(rect.lo.dim):
+                    if rect.lo.vals[d] < lo.vals[d]:
+                        lo.vals[d] = rect.lo.vals[d]
+            if hi is None:
+                hi = rect.hi.copy()
+            else:
+                for d in xrange(rect.hi.dim):
+                    if rect.hi.vals[d] > hi.vals[d]:
+                        hi.vals[d] = rect.hi.vals[d]
+        return (lo,hi)
 
     def get_dim(self):
         if self.points:
@@ -1786,8 +1877,7 @@ class Shape(object):
                         hi.vals[2] = rect.hi.vals[2]
                         to_add.append(Rect(lo,hi))
         else:
-            print('ERROR: Need support for >3 dimensions!')
-            assert False   
+            raise NotImplementedError("Need support for >3 dimensions")
 
     def __isub__(self, other):
         for orect in other.rects:
@@ -1841,9 +1931,10 @@ class Shape(object):
         return self
 
 class PointSet(object):
-    __slots__ = ['points']
+    __slots__ = ['points', 'space_string']
     def __init__(self):
         self.points = set()
+        self.space_string = None
 
     def __str__(self):
         return ' '.join(map(str, self.points))
@@ -1856,9 +1947,6 @@ class PointSet(object):
     def empty(self):
         return not self.points
 
-    def size(self):
-        return len(self.points)
-
     def has_point(self, point):
         for p in self.points:
             if p == point:
@@ -1870,6 +1958,17 @@ class PointSet(object):
         for point in self.points:
             result.points.add(point)
         return result
+
+    def __contains__(self, point):
+        if not self.points:
+            return False
+        return point in self.points
+
+    def __len__(self):
+        return len(self.points)
+
+    def __nonzero__(self):
+        return len(self.points) > 0
 
     # Set intersection
     def __and__(self, other):
@@ -1914,6 +2013,176 @@ class PointSet(object):
         for p in self.points:
             yield p
 
+    def point_space_graphviz_string(self):
+        if self.space_string != None:
+            return self.space_string
+        # Easy case if this empty
+        if len(self) == 0:
+            self.space_string = 'Empty'
+            return self.space_string
+        # Check to see if there are any index spaces which
+        # appear in all the points. If so, check to see if 
+        # our set of points is equivalent to the point set
+        # for any of those index spaces
+        spaces_for_all_points = None
+        for point in self.iterator():
+            if spaces_for_all_points is None:
+                spaces_for_all_points = point.index_set
+            else:
+                # Note that this makes a new set
+                spaces_for_all_points = spaces_for_all_points & point.index_set
+            if not spaces_for_all_points:
+                break
+        if spaces_for_all_points:
+            same_spaces = None
+            for space in spaces_for_all_points:
+                # Check to see if the points are the same
+                other_points = space.get_point_set()
+                if len(self) != len(other_points):
+                    continue
+                same = True
+                for point in self.iterator():
+                    if not other_points.has_point(point):
+                        same = False
+                        break
+                if same:
+                    # It's possible for there to be multiple spaces with 
+                    # the same shape but different names
+                    if same_spaces is None:
+                        same_spaces = list()
+                    same_spaces.append(space)
+            if same_spaces:
+                for space in same_spaces:
+                    if self.space_string is None:
+                        self.space_string = str(space)
+                    else:
+                        self.space_string += ' u ' + str(space)
+        # If we didn't find an index space to represent this
+        # set of points then we express this as a union of intersections
+        if self.space_string is None:
+            for point in self.iterator():
+                point_str = None
+                # Only report the bottom-most index spaces for 
+                # this particular point
+                bottom_spaces = set()
+                parent_spaces = set()
+                for space in point.index_set:
+                    if space in parent_spaces:
+                        continue
+                    bottom_spaces.add(space)
+                    if space.parent:
+                        parent = space.parent.parent
+                        while True:
+                            if parent in parent_spaces:
+                                break
+                            parent_spaces.add(parent)
+                            if parent in bottom_spaces:
+                                bottom_spaces.remove(parent)
+                            if parent.parent:
+                                parent = parent.parent.parent
+                            else:
+                                break
+                # Should have at least one bottom space
+                assert bottom_spaces
+                for space in bottom_spaces:
+                    if point_str is None:
+                        point_str = '(' + str(space)
+                    else:
+                        point_str += ' ^ ' + str(space)
+                point_str += ')'
+                if self.space_string is None:
+                    self.space_string = point_str
+                else:
+                    # Put each point on it's own line
+                    self.space_string += ' u <br/>' + point_str
+        assert self.space_string is not None
+        return self.space_string
+
+class NodeSet(object):
+    __slots__ = ['impl', 'bound', 'sparse']
+    def __init__(self, bound):
+        self.impl = None
+        self.bound = bound + 31 // 32
+        assert self.bound > 0
+        self.sparse = True
+
+    def densify(self):
+        assert self.impl
+        assert self.sparse
+        # Cross-over to dense
+        new_impl = array.array('I', (0,) * self.bound)
+        for node in self.impl:
+            index = node >> 5
+            offset = node & 31
+            mask = 1 << offset
+            new_impl[index] |= mask
+        self.impl = new_impl
+        self.sparse = False
+
+    def add(self, node):
+        assert node < 32 * self.bound
+        if self.impl is None:
+            self.impl = set()
+            self.impl.add(node)
+        elif self.sparse:
+            self.impl.add(node)
+            # Check for cross-over to dense
+            if len(self.impl) > 32:
+                self.densify()
+        else:
+            index = node >> 5
+            offset = node & 31
+            mask = 1 << offset
+            self.impl[index] |= mask
+
+    def union(self, other):
+        assert other.bound == self.bound
+        if other.impl is None:
+            return
+        if self.impl is None:
+            if other.sparse:
+                self.impl = other.impl.copy()
+            else:
+                self.impl = array.array('I', other.impl)
+                self.sparse = False
+        elif self.sparse:
+            if other.sparse:
+                for node in other.impl:
+                    self.impl.add(node)
+                if len(self.impl) > 32:
+                    self.densify()
+            else:
+                new_impl = array.array('I', other.impl)
+                for node in self.impl:
+                    index = node >> 5
+                    offset = node & 31
+                    mask = 1 << offset
+                    new_impl[index] |= mask
+                self.impl = new_impl
+                self.sparse = False
+        else:
+            if other.sparse:
+                for node in other.impl:
+                    index = node >> 5
+                    offset = node & 31
+                    mask = 1 << offset
+                    self.impl[index] |= mask
+            else:
+                for index in xrange(self.bound):
+                    self.impl[index] |= other.impl[index]
+
+    def contains(self, node):
+        assert node < 32 * self.bound
+        if self.impl is None:
+            return False
+        elif self.sparse:
+            return node in self.impl
+        else:
+            index = node >> 5
+            offset = node & 31
+            mask = 1 << offset
+            return self.impl[index] & mask != 0
+
 class Processor(object):
     __slots__ = ['state', 'uid', 'kind_num', 'kind', 'mem_latency', 
                  'mem_bandwidth', 'node_name']
@@ -1944,7 +2213,7 @@ class Processor(object):
             (self.node_name, label))
 
     def print_mem_edges(self, printer):
-        for mem,band in self.mem_bandwidth.iteritems():
+        for mem,band in iteritems(self.mem_bandwidth):
             label = 'bandwidth=%s,latency=%s' % (band, self.mem_latency[mem])
             printer.println(
                 '%s -> %s [label="%s",style=solid,color=black,penwidth=2];' %
@@ -1993,17 +2262,120 @@ class Memory(object):
             (self.node_name, label))
 
     def print_mem_edges(self, printer):
-        for mem,band in self.mem_bandwidth.iteritems():
+        for mem,band in iteritems(self.mem_bandwidth):
             label = 'bandwidth=%s,latency=%s' % (band, self.mem_latency[mem])
             printer.println(
                 '%s -> %s [label="%s",style=solid,color=black,penwidth=2];' %
                 (self.node_name, mem.node_name, label))
 
+class IndexExpr(object):
+    __slot__ = ['state', 'expr_id', 'kind', 'base', 'point_set', 'node_name', 'expr_str']
+    def __init__(self, state, expr_id):
+        self.state = state
+        self.expr_id = expr_id
+        self.kind = None
+        self.base = None
+        self.point_set = None
+        self.node_name = None
+        self.expr_str = None
+
+    def set_index_space(self, index_space):
+        if self.kind is None:
+            self.kind = INDEX_SPACE_EXPR
+            self.base = index_space
+        elif self.kind == INDEX_SPACE_EXPR:
+            assert self.base is index_space
+
+    def add_union_expr(self, union_expr):
+        if self.kind != UNION_EXPR:
+            assert self.kind is None
+            self.kind = UNION_EXPR
+            assert self.base is None
+            self.base = set()
+        self.base.add(union_expr)
+
+    def add_intersect_expr(self, inter_expr):
+        if self.kind != INTERSECT_EXPR:
+            assert self.kind is None
+            self.kind = INTERSECT_EXPR
+            assert self.base is None
+            self.base = set()
+        self.base.add(inter_expr)
+
+    def set_diff_expr(self, left, right):
+        assert self.kind is None
+        self.kind = DIFFERENCE_EXPR
+        self.base = list()
+        self.base.append(left)
+        self.base.append(right)
+
+    def get_point_set(self):
+        if self.point_set is None:
+            assert self.kind is not None
+            if self.kind == INDEX_SPACE_EXPR:
+                self.point_set = self.base.get_point_set().copy()
+            elif self.kind == UNION_EXPR:
+                for expr in self.base:
+                    if self.point_set is None:
+                        self.point_set = expr.get_point_set().copy()
+                    else:
+                        self.point_set |= expr.get_point_set()
+            elif self.kind == INTERSECT_EXPR:
+                for expr in self.base:
+                    if self.point_set is None:
+                        self.point_set = expr.get_point_set().copy()
+                    else:
+                        self.point_set &= expr.get_point_set()
+            else:
+                assert self.kind == DIFFERENCE_EXPR
+                for expr in self.base:
+                    if self.point_set is None:
+                        self.point_set = expr.get_point_set().copy()
+                    else:
+                        self.point_set -= expr.get_point_set()
+        return self.point_set
+
+    def point_space_graphviz_string(self):
+        if self.kind == INDEX_SPACE_EXPR:
+            return str(self)
+        else:
+            point_set = self.get_point_set()
+            assert point_set
+            return point_set.point_space_graphviz_string()
+
+    def __str__(self):
+        if self.expr_str is not None:
+            return self.expr_str
+        assert self.kind is not None
+        if self.kind == INDEX_SPACE_EXPR:
+            self.expr_str = str(self.base)
+        elif self.kind == UNION_EXPR:
+            for expr in self.base:
+                if self.expr_str is None:
+                    self.expr_str = '(' + str(expr)
+                else:
+                    self.expr_str += ' u ' + str(expr)
+            self.expr_str += ')'
+        elif self.kind == INTERSECT_EXPR:
+            for expr in self.base:
+                if self.expr_str is None:
+                    self.expr_str = '(' + str(expr)
+                else:
+                    self.expr_str += ' ^ ' + str(expr)
+            self.expr_str += ')'
+        else:
+            assert self.kind == DIFFERENCE_EXPR
+            self.expr_str = '(' + str(self.base[0]) + ' - ' + str(self.base[1]) + ')'
+        assert self.expr_str
+        return self.expr_str
+
+    __repr__ = __str__
+
 class IndexSpace(object):
     __slots__ = ['state', 'uid', 'parent', 'color', 'children', 
                  'instances', 'name', 'independent_children',
                  'depth', 'shape', 'point_set', 'node_name', 
-                 'intersections', 'dominated']
+                 'intersections', 'dominated', 'expr']
     def __init__(self, state, uid):
         self.state = state
         self.uid = uid
@@ -2018,9 +2390,14 @@ class IndexSpace(object):
         self.node_name = 'index_space_node_%s' % uid
         self.intersections = dict() 
         self.dominated = dict()
+        self.expr = None
 
     def set_name(self, name):
         self.name = name
+
+    def set_expr(self, expr):
+        assert self.expr is None or self.expr is expr
+        self.expr = expr
 
     def set_parent(self, parent, color):
         self.parent = parent
@@ -2029,7 +2406,7 @@ class IndexSpace(object):
 
     def update_depth(self, parent_depth):
         self.depth = parent_depth + 1
-        for child in self.children.itervalues():
+        for child in itervalues(self.children):
             child.update_depth(self.depth)
 
     def add_child(self, child):
@@ -2068,7 +2445,7 @@ class IndexSpace(object):
         local_points = self.shape.copy()
         new_sets = dict()
         del_sets = list()
-        for shape,index_set in index_sets.iteritems():
+        for shape,index_set in iteritems(index_sets):
             intersect = local_points & shape
             # No overlap so keep going
             if intersect.empty():
@@ -2095,7 +2472,7 @@ class IndexSpace(object):
         for key in del_sets:
             del index_sets[key]
         # Add the new entries
-        for shape,index_set in new_sets.iteritems():
+        for shape,index_set in iteritems(new_sets):
             index_sets[shape] = index_set
         # If we had left over points, add them as a new set
         if not local_points.empty():
@@ -2103,7 +2480,7 @@ class IndexSpace(object):
             index_set.add(self)
             index_sets[local_points] = index_set   
         # Traverse the children
-        for child in self.children.itervalues():
+        for child in itervalues(self.children):
             child.update_index_sets(index_sets)                
 
     def add_refined_point(self, point):
@@ -2126,7 +2503,7 @@ class IndexSpace(object):
 
     def check_partition_properties(self):
         # Check all the partitions
-        for child in self.children.itervalues():
+        for child in itervalues(self.children):
             child.check_partition_properties()
 
     def compute_reduced_shapes(self, dim_sets):
@@ -2149,6 +2526,7 @@ class IndexSpace(object):
     def get_shape(self):
         if self.shape is None:
             print("No shape for %s" % self)
+            return
         assert self.shape is not None
         return self.shape
 
@@ -2202,24 +2580,33 @@ class IndexSpace(object):
             label = '%s (ID: %s)' % (self.name, self.uid)
         else:
             if self.parent is None:
-                label = 'index space %s' % hex(self.uid)
+                label = 'index space %s' % self.uid
             else:
                 
                 label = 'subspace %s' % self.uid
         if self.parent is not None:
             color = None
-            for c, child in self.parent.children.iteritems():
+            for c, child in iteritems(self.parent.children):
                 if child == self:
                     color = c
                     break
             assert color is not None
             label += ' (color: %s)' % color
+        if self.shape is None or self.shape.empty():
+            label += '\nEmpty Bounds'
+        else:
+            if self.shape.dense:
+                label += '\nDense Bounds: '
+            else:
+                label += '\nSparse Bounds: '
+            lo,hi = self.shape.bounds
+            label += lo.to_string()+' - '+hi.to_string()
         printer.println('%s [label="%s",shape=plaintext,fontsize=14,fontcolor=black,fontname="Helvetica"];' %
                         (self.node_name, label))
         # print links to children
-        for child in self.children.itervalues():
+        for child in itervalues(self.children):
             child.print_link_to_parent(printer, self.node_name)
-        for child in self.children.itervalues():
+        for child in itervalues(self.children):
             child.print_graph(printer)
 
     def print_tree(self):
@@ -2228,10 +2615,10 @@ class IndexSpace(object):
             print(self)
         else:
             prefix = ''
-            for i in range(self.depth):
+            for i in xrange(self.depth):
                 prefix += '  '
             print('%s%s Color: %s' % (prefix, self, self.color.to_string()))
-        for child in self.children.itervalues():
+        for child in itervalues(self.children):
             child.print_tree()
         if self.depth == 0:
             print("---------------------------------------")
@@ -2264,7 +2651,7 @@ class IndexPartition(object):
 
     def update_depth(self, parent_depth):
         self.depth = parent_depth + 1
-        for child in self.children.itervalues():
+        for child in itervalues(self.children):
             child.update_depth(self.depth)
 
     def set_disjoint(self, disjoint):
@@ -2289,7 +2676,7 @@ class IndexPartition(object):
 
     def check_partition_properties(self):
         # Check for dominance of children by parent
-        for child in self.children.itervalues():
+        for child in itervalues(self.children):
             if not self.parent.dominates(child):
                 print(('WARNING: child %s is not dominated by parent %s in %s. '+
                       'This is definitely an application bug.') %
@@ -2301,7 +2688,7 @@ class IndexPartition(object):
         # Check disjointness
         if self.disjoint:
             previous = PointSet()
-            for child in self.children.itervalues():
+            for child in itervalues(self.children):
                 child_shape = child.get_point_set()
                 if not (child_shape & previous).empty():
                     print(('WARNING: %s was logged disjoint '+
@@ -2313,9 +2700,9 @@ class IndexPartition(object):
                 previous |= child_shape
         if self.complete:
             total = PointSet()
-            for child in self.children.itervalues():
+            for child in itervalues(self.children):
                 total |= child.get_point_set()
-            if total.size() != self.parent.get_point_set().size():
+            if len(total) != len(self.parent.get_point_set()):
                 print(('WARNING: %s was logged complete '+
                         'but there are missing points. This '+
                         'is definitely an application bug.') % self)
@@ -2323,7 +2710,7 @@ class IndexPartition(object):
                     assert False
 
     def update_index_sets(self, index_sets):
-        for child in self.children.itervalues():
+        for child in itervalues(self.children):
             child.update_index_sets(index_sets)
 
     def are_all_children_disjoint(self):
@@ -2338,7 +2725,7 @@ class IndexPartition(object):
 
     def get_shape(self):
         if self.shape is None:
-            for child in self.children.itervalues():
+            for child in itervalues(self.children):
                 if self.shape is None:
                     self.shape = child.get_shape().copy()
                 else:
@@ -2347,11 +2734,13 @@ class IndexPartition(object):
 
     def get_point_set(self):
         if self.point_set is None:
-            for child in self.children.itervalues():
+            for child in itervalues(self.children):
                 if self.point_set is None:
                     self.point_set = child.get_point_set().copy()
                 else:
                     self.point_set |= child.get_point_set()
+            if self.point_set is None:
+                self.point_set = PointSet() 
         return self.point_set
 
     def intersection(self, other):
@@ -2404,7 +2793,7 @@ class IndexPartition(object):
         else:
             label = 'Index Partition '+str(self.uid)
         color = None
-        for c,child in self.parent.children.iteritems():
+        for c,child in iteritems(self.parent.children):
             if child == self:
                 color = c
                 break
@@ -2415,15 +2804,15 @@ class IndexPartition(object):
             '%s [label="%s",shape=plaintext,fontsize=14,fontcolor=black,fontname="times italic"];' %
             (self.node_name, label))
         # print links to children
-        for child in self.children.itervalues():
+        for child in itervalues(self.children):
             child.print_link_to_parent(printer, self.node_name)
-        for child in self.children.itervalues():
+        for child in itervalues(self.children):
             child.print_graph(printer)
 
     def print_tree(self):
         prefix = '  ' * self.depth
         print('%s%s Color: %s' % (prefix, self, self.color.to_string()))
-        for child in self.children.itervalues():
+        for child in itervalues(self.children):
             child.print_tree()
 
 class Field(object):
@@ -2481,7 +2870,7 @@ class FieldSpace(object):
                 '",shape=plaintext,fontsize=14,'+
                 'fontcolor=black,fontname="Helvetica"];')
 
-        for fid,field in self.fields.iteritems():
+        for fid,field in iteritems(self.fields):
             field_id = "field_node_"+str(self.uid)+"_"+str(fid)
             if field.name is not None:
                 field_name = field.name + '(FID: ' + str(fid) + ')'
@@ -2597,20 +2986,21 @@ class LogicalRegion(object):
         path.append(self)
 
     def perform_logical_analysis(self, depth, path, op, req, field, open_local, 
-                                 unopened, advance_op, prev, aliased, checks):
+                                 unopened, advance, closed, prev, aliased, checks):
         assert self is path[depth]
         if field not in self.logical_state:
             self.logical_state[field] = LogicalState(self, field)
         arrived = (depth+1) == len(path)
         next_child = path[depth+1] if not arrived else None
-        result,next_open,next_unopened,next_advance = \
+        result,next_open,next_unopened,next_advance,next_closed = \
             self.logical_state[field].perform_logical_analysis(op, req, next_child, 
-                            open_local, unopened, advance_op, prev, aliased, checks)
+                            open_local, unopened, advance, closed, prev, aliased, checks)
         if not result:
             return False
         if not arrived:
             return path[depth+1].perform_logical_analysis(depth+1, path, op, req, 
-                field, next_open, next_unopened, next_advance, prev, aliased, checks)
+                        field, next_open, next_unopened, next_advance, next_closed, 
+                        prev, aliased, checks)
         return True
 
     def register_logical_user(self, op, req, field):
@@ -2618,19 +3008,20 @@ class LogicalRegion(object):
             self.logical_state[field] = LogicalState(self, field)
         self.logical_state[field].register_logical_user(op, req)
 
-    def perform_logical_deletion(self, depth, path, op, req, field, prev, checks):
+    def perform_logical_deletion(self, depth, path, op, req, field, closed, prev, checks):
         assert self is path[depth]
         if field not in self.logical_state:
             return True
         arrived = (depth+1) == len(path)
         force_close = (depth+1) < len(path)
         next_child = path[depth+1] if not arrived else None
-        if not self.logical_state[field].perform_logical_deletion(op, req, next_child, 
-                                                            prev, checks, force_close):
+        result,next_closed = self.logical_state[field].perform_logical_deletion(op, req, 
+                                            next_child, closed, prev, checks, force_close)
+        if not result:
             return False
         if not arrived:
             return path[depth+1].perform_logical_deletion(depth+1, path, op, req, field,
-                                                          prev, checks)
+                                                          next_closed, prev, checks)
         elif not checks:
             # Do all the invalidations and record any dependences
             self.perform_deletion_invalidation(op, req, field)
@@ -2640,7 +3031,7 @@ class LogicalRegion(object):
         if field not in self.logical_state:
             return
         self.logical_state[field].perform_deletion_invalidation(op, req)
-        for child in self.children.itervalues():
+        for child in itervalues(self.children):
             child.perform_deletion_invalidation(op, req, field)
 
     def close_logical_tree(self, field, closed_users):
@@ -2656,41 +3047,41 @@ class LogicalRegion(object):
         field_point_dict = self.verification_state[depth]
         key = (field,point)
         if key not in field_point_dict:
-            result = VerificationState(self, depth, field, point)
+            result = EquivalenceSet(self, depth, field, point)
             field_point_dict[key] = result
             return result
         return field_point_dict[key]
 
-    def initialize_verification_state(self, depth, field, inst, point_set=None):
-        if not point_set:
+    def initialize_verification_state(self, depth, field, inst, restricted, point_set=None):
+        if point_set is None:
             # First get the point set
-            self.initialize_verification_state(depth, field, inst, self.get_point_set())
+            self.initialize_verification_state(depth, field, inst, restricted, self.get_point_set())
         elif self.parent:
             # Recurse up the tree to the root
-            self.parent.parent.initialize_verification_state(depth, field, inst, point_set)
+            self.parent.parent.initialize_verification_state(depth, field, inst, restricted, point_set)
         else:
             # Then do the actual work 
             for point in point_set.iterator():
                 state = self.get_verification_state(depth, field, point)
-                state.initialize_verification_state(inst)
+                state.initialize_verification_state(inst, restricted)
 
-    def compute_current_version_numbers(self, depth, field, op, index, point_set = None):
-        if not point_set:
+    def compute_current_version_numbers(self, depth, field, op, tree, point_set = None):
+        if point_set is None:
             # First get the point set
-            self.compute_current_version_numbers(depth, field, op, index, 
+            self.compute_current_version_numbers(depth, field, op, tree, 
                                                  self.get_point_set())
         elif self.parent:
             # Recurse up the tree to the root
             self.parent.parent.compute_current_version_numbers(depth, field, op,
-                                                               index, point_set)
+                                                               tree, point_set)
         else:
             # Do the actual work
             for point in point_set.iterator():
                 state = self.get_verification_state(depth, field, point)
-                op.record_current_version(index, field, point, state.version_number)
+                op.record_current_version(point, field, tree, state.version_number)
 
     def perform_fill_verification(self, depth, field, op, req, point_set=None):
-        if not point_set:
+        if point_set is None:
             # First get the point set
             return self.perform_fill_verification(depth, field, op, req,
                                                   self.get_point_set())
@@ -2706,10 +3097,44 @@ class LogicalRegion(object):
                     return False
             return True
 
+    def add_restriction(self, depth, field, op, req, inst, perform_checks, point_set=None):
+        if point_set is None:
+            # First get the point set
+            return self.add_restriction(depth, field, op, req, inst,
+                                        perform_checks, self.get_point_set())
+        elif self.parent:
+            # Recurse up the tree to the root
+            return self.parent.parent.add_restriction(depth, field, op, req, inst,
+                                                      perform_checks, point_set)
+        else:
+            # Do the actual work
+            for point in point_set.iterator():
+                state = self.get_verification_state(depth, field, point)
+                if not state.add_restriction(op, req, inst):
+                    return False
+            return True
+
+    def remove_restriction(self, depth, field, op, req, inst, perform_checks, point_set=None):
+        if point_set is None:
+            # First get the point set
+            return self.remove_restriction(depth, field, op, req, inst, 
+                                           perform_checks, self.get_point_set())
+        elif self.parent:
+            # Recurse up the tree to the root
+            return self.parent.parent.remove_restriction(depth, field, op, req, inst,
+                                                         perform_checks, point_set)
+        else:
+            # Do the actual work
+            for point in point_set.iterator():
+                state = self.get_verification_state(depth, field, point)
+                if not state.remove_restriction(op, req, inst):
+                    return False
+            return True
+
     def perform_physical_verification(self, depth, field, op, req, inst, perform_checks, 
                                       perform_registration, point_set = None,
                                       version_numbers = None):
-        if not point_set:
+        if point_set is None:
             # First get the point set
             return self.perform_physical_verification(depth, field, op, req, inst,
               perform_checks, perform_registration, self.get_point_set(), version_numbers)
@@ -2731,7 +3156,7 @@ class LogicalRegion(object):
 
     def perform_verification_registration(self, depth, field, op, req, inst, 
                                           perform_checks, point_set=None): 
-        if not point_set:
+        if point_set is None:
             # First get the point set
             return self.perform_verification_registration(depth, field, op, req, inst,
                     perform_checks, self.get_point_set())
@@ -2769,7 +3194,7 @@ class LogicalRegion(object):
     def mark_named_children(self):
         if self.name is not None:
             self.has_named_children = True
-        for child in self.children.itervalues():
+        for child in itervalues(self.children):
             has_named_children = child.mark_named_children()
             self.has_named_children = self.has_named_children or has_named_children
         return self.has_named_children
@@ -2791,6 +3216,16 @@ class LogicalRegion(object):
                 label = 'region ('+self.gen_id()+')'
             else:
                 label = 'subregion ('+self.gen_id()+')'
+        shape = self.get_shape()
+        if shape is None or shape.empty():
+            label += '\nEmpty Bounds'
+        else:
+            if shape.dense:
+                label += '\nDense Bounds: '
+            else:
+                label += '\nSparse Bounds: '
+            lo,hi = shape.bounds
+            label += lo.to_string()+' - '+hi.to_string()
 
         printer.println(self.node_name+' [label="'+label+
                 '",shape=plaintext,fontsize=14,'+
@@ -2803,14 +3238,14 @@ class LogicalRegion(object):
         self.print_node(printer)
         # Instantiate the region tree if it isn't full
         if len(self.children) < len(self.index_space.children):
-            for color,child in self.index_space.children.iteritems():
+            for color,child in iteritems(self.index_space.children):
                 if color not in self.children:
                     self.state.get_partition(child.uid, self.field_space.uid, self.tree_id)
         # print links to children
-        for child in self.children.itervalues():
+        for child in itervalues(self.children):
             if not simplify_graph or child.has_named_children:
                 child.print_link_to_parent(printer, self.node_name)
-        for child in self.children.itervalues():
+        for child in itervalues(self.children):
             child.print_graph(printer, simplify_graph)
 
     def print_tree(self):
@@ -2819,10 +3254,10 @@ class LogicalRegion(object):
             print(self)
         else:
             prefix = ''
-            for i in range(self.index_space.depth):
+            for i in xrange(self.index_space.depth):
                 prefix += '  '
             print('%s%s Color: %s' % (prefix, self, self.index_space.color.to_string()))
-        for child in self.children.itervalues():
+        for child in itervalues(self.children):
             child.print_tree()
         if self.index_space.depth == 0:
             print("---------------------------------------")
@@ -2924,20 +3359,21 @@ class LogicalPartition(object):
         path.append(self)
 
     def perform_logical_analysis(self, depth, path, op, req, field, open_local, 
-                                  unopened, advance_op, prev, aliased, checks):
+                                  unopened, advance, closed, prev, aliased, checks):
         assert self is path[depth]
         if field not in self.logical_state:
             self.logical_state[field] = LogicalState(self, field)
         arrived = (depth+1) == len(path)
         next_child = path[depth+1] if not arrived else None
-        result,next_open,next_unopened,next_advance = \
+        result,next_open,next_unopened,next_advance,next_closed = \
           self.logical_state[field].perform_logical_analysis(op, req, next_child, 
-                          open_local, unopened, advance_op, prev, aliased, checks)
+                          open_local, unopened, advance, closed, prev, aliased, checks)
         if not result:
             return False
         if not arrived:
             return path[depth+1].perform_logical_analysis(depth+1, path, op, req, 
-              field, next_open, next_unopened, next_advance, prev, aliased, checks)
+                                    field, next_open, next_unopened, next_advance, 
+                                    next_closed, prev, aliased, checks)
         return True
 
     def register_logical_user(self, op, req, field):
@@ -2945,19 +3381,20 @@ class LogicalPartition(object):
             self.logical_state[field] = LogicalState(self, field)
         self.logical_state[field].register_logical_user(op, req)
 
-    def perform_logical_deletion(self, depth, path, op, req, field, prev, checks):
+    def perform_logical_deletion(self, depth, path, op, req, field, closed, prev, checks):
         assert self is path[depth]
         if field not in self.logical_state:
             return True
         arrived = (depth+1) == len(path)
         force_close = (depth+1) < len(path) 
         next_child = path[depth+1] if not arrived else None
-        if not self.logical_state[field].perform_logical_deletion(op, req, next_child, 
-                                                            prev, checks, force_close):
+        result,next_closed = self.logical_state[field].perform_logical_deletion(op, req, 
+                                            next_child, closed, prev, checks, force_close)
+        if not result:
             return False
         if not arrived:
             return path[depth+1].perform_logical_deletion(depth+1, path, op, req, field,
-                                                          prev, checks)
+                                                          next_closed, prev, checks)
         elif not checks:
             # Do all the invalidations and record and dependences
             self.perform_deletion_invalidation(op, req, field)
@@ -2967,7 +3404,7 @@ class LogicalPartition(object):
         if field not in self.logical_state:
             return
         self.logical_state[field].perform_deletion_invalidation(op, req)
-        for child in self.children.itervalues():
+        for child in itervalues(self.children):
             child.perform_deletion_invalidation(op, req, field)
 
     def close_logical_tree(self, field, closed_users):
@@ -2975,9 +3412,9 @@ class LogicalPartition(object):
             return
         self.logical_state[field].close_logical_tree(closed_users)
 
-    def compute_current_version_numbers(self, depth, field, op, index):
+    def compute_current_version_numbers(self, depth, field, op, tree):
         self.parent.compute_current_version_numbers(depth, field, op, 
-                                                    index, self.get_point_set())
+                                                    tree, self.get_point_set())
 
     def perform_physical_verification(self, depth, field, op, req, inst, perform_checks,
                                       perform_registration):
@@ -2987,7 +3424,7 @@ class LogicalPartition(object):
     def mark_named_children(self):
         if self.name is not None:
             self.has_named_children = True
-        for child in self.children.itervalues():
+        for child in itervalues(self.children):
             has_named_children = child.mark_named_children()
             self.has_named_children = self.has_named_children or has_named_children
         return self.has_named_children
@@ -3019,24 +3456,24 @@ class LogicalPartition(object):
         self.print_node(printer)
         # instantiate the region tree if it isn't full
         if len(self.children) < len(self.index_partition.children):
-            for color,child in self.index_partition.children.iteritems():
+            for color,child in iteritems(self.index_partition.children):
                 if color not in self.children:
                     self.state.get_region(child.uid,
                         self.field_space.uid, self.tree_id)
         # print links to children
-        for child in self.children.itervalues():
+        for child in itervalues(self.children):
             child.print_link_to_parent(printer, self.node_name)
             if simplify_graph and not child.has_named_children:
                 child.print_node(printer)
-        for child in self.children.itervalues():
+        for child in itervalues(self.children):
             child.print_graph(printer, simplify_graph)
 
     def print_tree(self):
         prefix = ''
-        for i in range(self.index_partition.depth):
+        for i in xrange(self.index_partition.depth):
             prefix += '  '
         print('%s%s Color: %s' % (prefix, self, self.index_partition.color.to_string()))
-        for child in self.children.itervalues():
+        for child in itervalues(self.children):
             child.print_tree()
 
 class LogicalState(object):
@@ -3056,80 +3493,70 @@ class LogicalState(object):
         self.projection_mode = OPEN_NONE 
         self.projection_epoch = list()
 
-    def perform_logical_analysis(self, op, req, next_child, open_local, unopened, advance_op, 
-                                 previous_deps, aliased_children, perform_checks):
+    def perform_logical_analysis(self, op, req, next_child, open_local, unopened, advance, 
+                                 closed, previous_deps, aliased_children, perform_checks):
         # At most one of these should be true, they can both be false
         assert not open_local or not unopened
         arrived = next_child is None
-        # If we already did the open operation above there is no need to do it here
-        if open_local:
-            # Find or make our open operation
-            if not self.perform_open_operation(op, req, previous_deps, perform_checks):
-                return (False,None,None,None)
         # Figure out if we need to check close operations or not
         if unopened:
             if arrived and req.is_projection():
-                if not self.siphon_logical_projection(op, req, 
-                                                      previous_deps, perform_checks):
-                    return (False,None,None,None)
+                passed,closed = self.siphon_logical_projection(op, req, closed,
+                                                    previous_deps, perform_checks)
+                if not passed:
+                    return (False,None,None,None,closed)
             else:
-                if not self.siphon_logical_children(op, req, next_child, previous_deps, 
-                                                    aliased_children, perform_checks):
-                    return (False,None,None,None)
+                passed,closed = self.siphon_logical_children(op, req, next_child, 
+                            closed, previous_deps, aliased_children, perform_checks)
+                if not passed:
+                    return (False,None,None,None,closed)
         # Perform any open operations if necessary
         if next_child or req.is_projection():
             next_open = self.open_state(op, req, next_child)
         # If we have an advance op, perform its analysis
         # otherwise see if we need to make one
-        if advance_op:
-            # Register dependences for our advance operation on anything here
-            if not self.perform_epoch_analysis(advance_op, advance_op.reqs[0],
-                                              perform_checks, False, None, op):
-                return (False,None,None,None)
+        if advance:
             # Mark that we are now dirty below
             assert not self.dirty_below
             self.dirty_below = True
-            # TODO: Record dependences on other users in disjoint trees
         elif req.has_write() and not self.dirty_below and \
                           (not arrived or (req.is_projection() and
                             (not req.is_reg or req.projection_function.depth > 0))):
-            result,advance_op = self.perform_advance_operation(op, 
-                                 req, previous_deps, perform_checks) 
-            if not result:
-                return (False,None,None,None)
+            # Mark that we need to record this dirty below from now on
+            advance = True
             # Mark that we are dirty below
             if not arrived or req.is_projection():
                 self.dirty_below = True
-            # TODO: Record dependences on other users in disjoint trees
         # Now do our analysis to figure out who we need to wait on locally
         if not self.perform_epoch_analysis(op, req, perform_checks,
                                            arrived, previous_deps):
-            return (False,None,None,None)
+            return (False,None,None,None,closed)
         if arrived: 
             # Add ourselves as the current user
             self.register_logical_user(op, req)
             # Record if we have outstanding reductions
             if req.redop != 0:
                 self.current_redop = req.redop                
-            return (True,None,None,None)
+            return (True,None,None,None,closed)
         else:
             next_unopened = unopened and not next_open 
-            return (True,next_open and unopened,next_unopened,advance_op)
+            return (True,next_open and unopened,next_unopened,advance,closed)
 
     def register_logical_user(self, op, req):
         self.current_epoch_users.append((op,req))
 
-    def perform_logical_deletion(self, op, req, next_child, 
+    def perform_logical_deletion(self, op, req, next_child, already_closed, 
                                  previous_deps, perform_checks, force_close):
         arrived = next_child is None
         if not arrived:
-            if not self.siphon_logical_deletion(op, req, next_child, previous_deps, 
-                                                perform_checks, force_close): 
-                return False
+            result,already_closed = self.siphon_logical_deletion(op, req, next_child, 
+                            already_closed, previous_deps, perform_checks, force_close)
+            if not result:
+                return False,already_closed
             if not self.perform_epoch_analysis(op, req, perform_checks, 
                                                arrived, previous_deps):  
-                return False
-        return True
+                return False,already_closed
+        return True,already_closed
 
     def perform_deletion_invalidation(self, op, req):
         dummy_previous = list()
@@ -3140,93 +3567,6 @@ class LogicalState(object):
         self.dirty_below = False
         self.projection_mode = OPEN_NONE
         self.projection_epoch = list()
-
-    def perform_open_operation(self, op, req, previous_deps, perform_checks):
-        open_op = self.find_open_operation(op, req, perform_checks)
-        # No need to do anything for the open, just perform the epoch analysis
-        assert 0 in open_op.reqs
-        open_req = open_op.reqs[0]
-        # Check for dependences on things above us in the tree
-        for prev_op,prev_req in previous_deps:
-            # Check for replays
-            if prev_op is op:
-                # If it is a previous registration of ourself, skip it
-                # This will only happen during replays
-                if prev_req.index == req.index:
-                    continue
-                assert False
-            # Check to see if it has the mapping dependence
-            if perform_checks:
-                if not open_op.has_mapping_dependence(open_req, prev_op, prev_req,
-                                      ANTI_DEPENDENCE if prev_req.is_read_only()
-                                      else TRUE_DEPENDENCE, self.field):
-                    print(("ERROR: open operation %s generated by "+
-                          "field %s of region requirement "+
-                          "%s of %s failed to find a "+
-                          "mapping dependence on previous operation "+
-                          "%s from higher in the region tree") %
-                          (open_op, self.field, req.index, op, prev_op))
-                    if self.node.state.assert_on_error:
-                        assert False
-                    return False
-            else:
-                # Not performing checks so record the mapping dependence
-                dep_type = compute_dependence_type(prev_req, open_req) 
-                dep = MappingDependence(prev_op, open_op, prev_req.index,
-                                        open_req.index, dep_type)
-                prev_op.add_outgoing(dep)
-                open_op.add_incoming(dep)
-        # Then check for dependences at this level
-        if not self.perform_epoch_analysis(open_op, open_req,
-                                           perform_checks, False, None, op):
-            return False
-        # Record the open operation in our current epoch
-        self.register_logical_user(open_op, open_req)
-        return True
-
-    def perform_advance_operation(self, op, req, previous_deps, perform_checks):
-        advance = self.find_advance_operation(op, req, perform_checks)
-        # No need to do anything for the advance, just perform the epoch analysis
-        assert 0 in advance.reqs
-        advance_req = advance.reqs[0]
-        # TODO: Need to catch dependences on advances above in the tree
-        # from aliased but non-interfering region requirements
-        # Check for dependences on things above us in the tree
-        for prev_op,prev_req in previous_deps:
-            # Check for replays
-            if prev_op is op:
-                # If it is a previous registration of ourself, skip it
-                # This will only happen during replays
-                if prev_req.index == req.index:
-                    continue
-                assert False
-            if perform_checks:
-                if not advance.has_mapping_dependence(advance_req, prev_op, prev_req,
-                                      ANTI_DEPENDENCE if prev_req.is_read_only()
-                                      else TRUE_DEPENDENCE, self.field):
-                    print(("ERROR: advance operation %s generated by "+
-                          "field %s of region requirement "+
-                          "%s of %s failed to find a "+
-                          "mapping dependence on previous operation "+
-                          "%s from higher in the region tree") %
-                          (advance, self.field, req.index, op, prev_op))
-                    if self.node.state.assert_on_error:
-                        assert False
-                    return (False,None)
-            else:
-                # Not performing checks so record the mapping dependence
-                dep_type = compute_dependence_type(prev_req, advance_req)
-                dep = MappingDependence(prev_op, advance, prev_req.index,
-                                        advance_req.index, dep_type)
-                prev_op.add_outgoing(dep)
-                advance.add_incoming(dep)
-        # Then check for dependences at this level
-        if not self.perform_epoch_analysis(advance, advance_req,
-                                           perform_checks, False, None, op):
-            return (False,None)
-        # Record the open operation in our current epoch
-        self.register_logical_user(advance, advance_req)
-        return (True,advance)
 
     def open_state(self, op, req, next_child):
         # Then figure out how to open our child if necessary  
@@ -3247,7 +3587,7 @@ class LogicalState(object):
             elif req.is_reduce():
                 # See how many interfering children there are in the same mode
                 other_children = set()
-                for child,redop in self.open_redop.iteritems():
+                for child,redop in iteritems(self.open_redop):
                     if redop != req.redop:
                         continue
                     if self.node.are_children_disjoint(child,next_child):
@@ -3290,8 +3630,9 @@ class LogicalState(object):
         return next_open
 
     # Maybe not the most intuitive name for a method but it aligns with the runtime
-    def siphon_logical_children(self, op, req, next_child, previous_deps, 
-                                aliased_children, perform_checks):
+    def siphon_logical_children(self, op, req, next_child, already_closed,
+                                previous_deps, aliased_children, perform_checks):
+        closed = False
         # First see if we have any reductions to flush
         if self.projection_mode != OPEN_NONE:
             assert not self.open_children # shouldn't have any open children
@@ -3299,34 +3640,42 @@ class LogicalState(object):
             if self.projection_mode == OPEN_READ_ONLY:
                 # We need a close if req is not read only or there is a next child
                 if not req.is_read_only() or next_child:
+                    closed = True
                     if not self.perform_close_operation(empty_children_to_close,
-                          True, False, op, req, previous_deps, perform_checks):
-                        return False
+                                            True, False, op, req, already_closed, 
+                                            previous_deps, perform_checks):
+                        return False,closed
                     self.projection_mode = OPEN_NONE
             elif self.projection_mode == OPEN_READ_WRITE:
                 # We close this no matter what
+                closed = True
                 if not self.perform_close_operation(empty_children_to_close,
-                          False, False, op, req, previous_deps, perform_checks):
-                    return False
+                                            False, False, op, req, already_closed,
+                                            previous_deps, perform_checks):
+                    return False,closed
                 self.projection_mode = OPEN_NONE
             else:
                 assert self.projection_mode == OPEN_MULTI_REDUCE
                 assert self.current_redop != 0
                 if not req.is_reduce() or next_child or \
                             req.redop != self.current_redop: 
+                    closed = True
                     if not self.perform_close_operation(empty_children_to_close,
-                          False, False, op, req, previous_deps, perform_checks):
-                        return False
+                                            False, False, op, req, already_closed,
+                                            previous_deps, perform_checks):
+                        return False,closed
                     self.projection_mode = OPEN_NONE
         elif self.current_redop != 0 and self.current_redop != req.redop:
             children_to_close = set()
             # Flushing reductions close all children no matter what
-            for child,open_mode in self.open_children.iteritems():
+            for child,open_mode in iteritems(self.open_children):
                 children_to_close.add(child)
             # If we are flushing reductions we do a close no matter what
+            closed = True
             if not self.perform_close_operation(children_to_close, False, False,
-                                        op, req, previous_deps, perform_checks):
-                return False
+                                                op, req, already_closed,
+                                                previous_deps, perform_checks):
+                return False,closed
         elif next_child is None or not self.node.are_all_children_disjoint():
             # Figure out which children we need to do closes for
             need_close = False
@@ -3334,7 +3683,7 @@ class LogicalState(object):
             upgrade_child = False
             depth = self.node.get_index_node().depth
             # Not flushing reductions so we can take the normal path
-            for child,open_mode in self.open_children.iteritems():
+            for child,open_mode in iteritems(self.open_children):
                 if open_mode == OPEN_READ_ONLY:
                     # Both read-only we can keep going
                     if req.is_read_only():
@@ -3394,7 +3743,7 @@ class LogicalState(object):
                 # the operation is not predicated and it dominates
                 overwrite = req.priv == WRITE_DISCARD and not op.predicate and \
                                req.logical_node.dominates(self.node)
-                for child,open_mode in self.open_children.iteritems():
+                for child,open_mode in iteritems(self.open_children):
                     if open_mode == OPEN_READ_ONLY:                
                         children_to_close[child] = False
                     elif open_mode == OPEN_READ_WRITE:
@@ -3406,15 +3755,17 @@ class LogicalState(object):
                         children_to_close[child] = False
                     else:
                         assert False
+                closed = True
                 if not self.perform_close_operation(children_to_close, False,
-                        overwrite, op, req, previous_deps, perform_checks):
-                    return False
+                                            overwrite, op, req, already_closed,
+                                            previous_deps, perform_checks):
+                    return False,closed
                 # No upgrades if we closed it
                 upgrade_child = False
             elif need_read_only_close:
                 children_to_read_close = dict()
                 # Read only closes can close specific children
-                for child,open_mode in self.open_children.iteritems():
+                for child,open_mode in iteritems(self.open_children):
                     # Only read-only matters for read-only closes
                     if open_mode != OPEN_READ_ONLY:
                         continue
@@ -3425,10 +3776,15 @@ class LogicalState(object):
                           continue   
                         # Otherwise we're going to close it so no more upgrades
                         upgrade_child = False
+                    elif next_child is not None and \
+                            self.node.are_children_disjoint(child, next_child):
+                        continue
                     children_to_read_close[child] = False
+                closed = True
                 if not self.perform_close_operation(children_to_read_close,
-                        True, False, op, req, previous_deps, perform_checks):
-                    return False
+                                        True, False, op, req, already_closed, 
+                                        previous_deps, perform_checks):
+                    return False,closed
             if upgrade_child:
                 assert next_child
                 assert next_child in self.open_children
@@ -3445,10 +3801,12 @@ class LogicalState(object):
                         self.open_children[next_child] = OPEN_READ_WRITE
                 else: # Should be in read-write mode
                     assert self.open_children[next_child] == OPEN_READ_WRITE
-        return True
+        return True,closed
 
-    def siphon_logical_projection(self, op, req, previous_deps, perform_checks):
+    def siphon_logical_projection(self, op, req, already_closed,
+                                  previous_deps, perform_checks):
         assert req.is_projection()
+        closed = False
         if self.projection_mode != OPEN_NONE:
             assert not self.open_children # Should not have any open children
             empty_children_to_close = dict()
@@ -3494,9 +3852,11 @@ class LogicalState(object):
                 # If we can't do either of these then we have to close
                 # Also have to close if this is a reduction and not shallow disjoint
                 if not shallow_disjoint and (not same_func_and_rect or req.is_reduce()):
+                    closed = True
                     if not self.perform_close_operation(empty_children_to_close, False, 
-                            False, op, req, previous_deps, perform_checks, disjoint_close):
-                        return False
+                                        False, op, req, already_closed, previous_deps, 
+                                        perform_checks, disjoint_close):
+                        return False,closed
                     if disjoint_close:
                         self.projection_mode = OPEN_READ_WRITE
                     else:
@@ -3505,48 +3865,54 @@ class LogicalState(object):
                 assert self.projection_mode == OPEN_MULTI_REDUCE
                 assert self.current_redop != 0
                 if self.current_redop != req.redop:
-                    if not self.perform_close_operation(empty_children_to_close, False, 
-                            False, op, req, previous_deps, perform_checks, disjoint_close):
-                        return False
+                    
                     if disjoint_close:
                         self.projection_mode = OPEN_READ_WRITE
                     else:
+                        closed = True
+                        if not self.perform_close_operation(empty_children_to_close, 
+                                        False, False, op, req, already_closed,
+                                        previous_deps, perform_checks, disjoint_close):
+                            return False,closed
                         self.projection_mode = OPEN_NONE
         elif self.current_redop != 0 and self.current_redop != req.redop:
             children_to_close = set()
             # Flushing reductions close all children no matter what
-            for child,open_mode in self.open_children.iteritems():
+            for child,open_mode in iteritems(self.open_children):
                 children_to_close.add(child)
             # If we are flushing reductions we do a close no matter what
+            closed = True
             if not self.perform_close_operation(children_to_close, False, False, 
-                                            op, req, previous_deps, perform_checks):
-                return False
+                        op, req, already_closed, previous_deps, perform_checks):
+                return False,closed
         else:
             # Close all open children
             children_to_close = dict()
             children_to_read_close = dict()
-            for child,open_mode in self.open_children.iteritems():
+            for child,open_mode in iteritems(self.open_children):
                 if open_mode == OPEN_READ_ONLY:
                     children_to_read_close[child] = False
                 else:
                     children_to_close[child] = False
             if children_to_close:
+                closed = True
                 if not self.perform_close_operation(children_to_close, False, False,
-                                            op, req, previous_deps, perform_checks):
-                    return False
+                            op, req, already_closed, previous_deps, perform_checks):
+                    return False,closed
             if children_to_read_close:
+                closed = True
                 if not self.perform_close_operation(children_to_read_close, True, 
-                                    False, op, req, previous_deps, perform_checks):
-                    return False
+                        False, op, req, already_closed, previous_deps, perform_checks):
+                    return False,closed
             # Can now reset this
             self.open_children = dict()
-        return True 
+        return True,closed
 
-    def siphon_logical_deletion(self, op, req, next_child, 
+    def siphon_logical_deletion(self, op, req, next_child, closed, 
                                 previous_deps, perform_checks, force_close):
         # If our child is not open, then we are done
         if next_child not in self.open_children:
-            return True
+            return True,closed
         # See which mode it is open in 
         open_mode = self.open_children[next_child]
         child_to_close = dict()
@@ -3555,58 +3921,28 @@ class LogicalState(object):
             # If it is open read-only, there is nothing to do
             del self.open_children[next_child]
         elif open_mode == OPEN_READ_WRITE:
-            if force_close and not self.perform_close_operation(child_to_close, 
-                            False, False, op, req, previous_deps, perform_checks): 
-                return False
+            if force_close:
+                closed = True
+                if self.perform_close_operation(child_to_close, False, False, op, 
+                                        req, closed, previous_deps, perform_checks):
+                    return False,closed
         elif open_mode == OPEN_SINGLE_REDUCE:
             if force_close: 
-                if not self.perform_close_operation(child_to_close,
-                            False, False, op, req, previous_deps, perform_checks):
-                    return False
+                closed = True
+                if not self.perform_close_operation(child_to_close, False, False, op, 
+                                            req, closed, previous_deps, perform_checks):
+                    return False,closed
             else:
                 # Update the state to read-write
                 self.open_children[next_child] = OPEN_READ_WRITE
         elif open_mode == OPEN_MULTI_REDUCE:
-            if not self.perform_close_operation(child_to_close,
-                          False, False, op, req, previous_deps, perform_checks):
-                return False
+            closed = True
+            if not self.perform_close_operation(child_to_close, False, False, op, req, 
+                                                closed, previous_deps, perform_checks):
+                return False,closed
         else:
             assert False # should never get here
-        return True 
-
-    def find_open_operation(self, op, req, perform_checks):
-        open_op = op.get_open_operation(req, self.node, self.field)
-        if open_op is None:
-            if perform_checks:
-                print(("ERROR: %s (UID=%s) failed to generate "+
-                      "an open operation for field %s of region "+
-                      "requirement %s at %s") %
-                      (op, str(op.uid), self.field, req.index, self.node))
-            else:
-                print(("ERROR: %s (UID=%s) failed to generate "+
-                      "an open operation that we normally would have expected. "+
-                      "This is likely a runtime bug. Re-run with logical checks "+
-                      "to confirm.") % (op, str(op.uid)))
-            if self.node.state.assert_on_error:
-                assert False
-        return open_op
-
-    def find_advance_operation(self, op, req, perform_checks):
-        advance = op.get_advance_operation(req, self.node, self.field)
-        if advance is None:
-            if perform_checks:
-                print(("ERROR: %s (UID=%s) failed to generate "+
-                      "an advance operation for field %s of region "+
-                      "requirement %s at %s") %
-                      (op, str(op.uid), self.field, req.index, self.node))
-            else:
-                print(("ERROR: %s (UID=%s) failed to generate "+
-                      "an advance operation that we normally would have expected. "+
-                      "This is likely a runtime bug. Re-run with logical checks "+
-                      "to confirm.") % (op, str(op.uid)))
-            if self.node.state.assert_on_error:
-                assert False
-        return advance
+        return True,closed
 
     def find_close_operation(self, op, req, read_only, perform_checks, error_str):
         close = op.get_close_operation(req, self.node, self.field, read_only)
@@ -3705,38 +4041,42 @@ class LogicalState(object):
                 prev_op.add_outgoing(dep)
                 close.add_incoming(dep)
 
-    def perform_close_operation(self, children_to_close, read_only_close, overwriting_close, 
-                            op, req, previous_deps, perform_checks, disjoint_close = False):
+    def perform_close_operation(self, children_to_close, read_only_close, 
+                                overwriting_close, op, req, already_closed,
+                                previous_deps, perform_checks, disjoint_close = False):
         error_str = ' for read-only close operation' if read_only_close \
             else ' for normal close operation'
         # Find the close operation first
-        close = self.find_close_operation(op, req, read_only_close or overwriting_close,
-                                          perform_checks, error_str)
-        if not close:
-            return False
+        if not already_closed:
+            close = self.find_close_operation(op, req, 
+                    read_only_close or overwriting_close, perform_checks, error_str)
+            if not close:
+                return False
         for child in children_to_close:
             closed_users = list()
             # Close the child tree
             child.close_logical_tree(self.field, closed_users)
             # Perform any checks
-            if perform_checks:
-                if not self.perform_close_checks(close, closed_users, op, req, 
-                                                 previous_deps, error_str, perform_checks):
-                    return False
-            else:
-                self.record_close_dependences(close, closed_users, op, req,
-                                              previous_deps)
+            if not already_closed:
+                if perform_checks:
+                    if not self.perform_close_checks(close, closed_users, op, req, 
+                                        previous_deps, error_str, perform_checks):
+                        return False
+                else:
+                    self.record_close_dependences(close, closed_users, op, req,
+                                                  previous_deps)
             del self.open_children[child]
             # Remove it from the list of open reductions to if it is there
             if child in self.open_redop:
                 del self.open_redop[child]
         # Perform the epoch analysis for the close operation 
-        assert 0 in close.reqs
-        if not self.perform_epoch_analysis(close, close.reqs[0], 
-                                           perform_checks, True, None, op):
-            return False
-        # Record the close operation in the current epoch
-        self.register_logical_user(close, close.reqs[0])
+        if not already_closed:
+            assert 0 in close.reqs
+            if not self.perform_epoch_analysis(close, close.reqs[0], 
+                                               perform_checks, True, None, op):
+                return False
+            # Record the close operation in the current epoch
+            self.register_logical_user(close, close.reqs[0])
         # See if we still have any dirty children below
         # Read only close operations don't update the dirty fields
         if not read_only_close and self.dirty_below:
@@ -3744,7 +4084,7 @@ class LogicalState(object):
             # leave the dirty fields in place
             still_dirty = disjoint_close 
             if not still_dirty:
-                for privilege in self.open_children.itervalues():
+                for privilege in itervalues(self.open_children):
                     if privilege == READ_WRITE or privilege == REDUCE or \
                         privilege == WRITE_DISCARD:
                           still_dirty = True
@@ -3799,7 +4139,7 @@ class LogicalState(object):
                                         req.index, dep_type)
                 prev_op.add_outgoing(dep)
                 op.add_incoming(dep)
-            if recording_set is not None and prev_op.kind != ADVANCE_OP_KIND:
+            if recording_set is not None:
                 recording_set.append((prev_op,prev_req))
         if not dominates:
             for prev_op,prev_req in self.previous_epoch_users:
@@ -3823,7 +4163,7 @@ class LogicalState(object):
                                             req.index, dep_type)
                     prev_op.add_outgoing(dep)
                     op.add_incoming(dep)   
-                if recording_set is not None and prev_op.kind != ADVANCE_OP_KIND:
+                if recording_set is not None:
                     recording_set.append((prev_op,prev_req))
         if can_dominate and dominates:
             # Filter back the users
@@ -3832,207 +4172,13 @@ class LogicalState(object):
             self.current_redop = 0 # no more reductions in the current list
         return True
 
-class Restriction(object):
-    __slots__ = ['node', 'field', 'inst', 'acquires']
-    def __init__(self, node, field, inst):
-        assert not inst.is_virtual()
-        self.node = node
-        self.field = field 
-        self.inst = inst
-        self.acquires = None
-
-    def find_restrictions(self, node, field, req):
-        # If the tree IDs are different then we are done
-        if self.node.tree_id != node.tree_id:
-            return False
-        # If the fields aren't the same then we are done
-        if field is not self.field:
-            return False
-        # If the two index spaces are not aliased we are done
-        if not self.node.intersects(node):
-            return False
-        # See if we have any acquires that make this alright
-        if self.acquires:
-            for acquire in self.acquires:
-                # See if the acquire has any internal restrictions
-                if acquire.find_restrictions(node, field, req):
-                    return True
-                # Otherwise check to see if the acquire dominates
-                # If it does then there is no restriction here
-                if acquire.node.dominates(node):
-                    return False
-        # If we make it here, then we are restricted
-        if not req.restricted_fields:
-            req.restricted_fields = dict()
-        assert self.field not in req.restricted_fields
-        req.restricted_fields[self.field] = self.inst
-        return True
-
-    def add_acquisition(self, node, field):
-        if self.node.tree_id != node.tree_id:
-            return False
-        if field is not self.field:
-            return False
-        if not self.node.dominates(node):
-            if self.node.intersects(node):
-                print("ERROR: Illegal partial acquire")
-                if self.node.state.assert_on_error:
-                    assert False
-            return False
-        if self.acquires:
-            for acquire in self.acquires:
-                if acquire.add_acquisition(node, field):
-                    return True
-        else:
-            self.acquires = list()
-        self.acquires.append(Acquisition(node, field))
-        return True
-
-    def remove_acquisition(self, node, field):
-        if self.node.tree_id != node.tree_id:
-            return False
-        if field is not self.field:
-            return False
-        if not self.node.intersects(node):
-            return False
-        if self.acquires:
-            for acquire in self.acquires:
-                if acquire.matches(node, field):
-                    self.acquires.remove(acquire)
-                    return True
-                if acquire.remove_acquisition(node, field):
-                    return True
-        return False
-
-    def add_restrict(self, node, field, inst):
-        if self.node.tree_id != node.tree_id:
-            return False
-        if field is not self.field:
-            return False
-        if not self.node.intersects(node):
-            return False
-        if self.acquires:
-            for acquire in self.acquires:
-                if acquire.add_restrict(node, field, inst):
-                    return True
-        # Interference if we get here
-        print("ERROR: Interfering restrictions performed")
-        if self.node.state.assert_on_error:
-            assert False
-        return False
-
-    def remove_restrict(self, node, field):
-        if self.node.tree_id != node.tree_id:
-            return False
-        if field is not self.field:
-            return False
-        if self.acquires:
-            for acquire in self.acquires:
-                if acquire.remove_restrict(node, field):
-                    return True
-        return False
-
-    def matches(self, node, field):
-        if self.node.tree_id != node.tree_id:
-            return False
-        if field is not self.field:
-            return False
-        # If we have any outstanding acquires, we can't match
-        if self.acquires:
-            return False
-        if node is self.node and field is self.field:
-            return True
-        return False
-
-class Acquisition(object):
-    __slots__ = ['node', 'field', 'restrictions'] 
-    def __init__(self, node, field):
-        self.node = node
-        self.field = field
-        self.restrictions = None
-
-    def find_restrictions(self, node, field, req):
-        # Better be the same fields at this point
-        assert field is self.field
-        # Check to see if it is restricted below
-        # If it is then we cannot be acquired
-        if self.restrictions:
-            for restrict in self.restrictions:
-                if restrict.find_restrictions(node, field, req):
-                    return True
-        return False
-
-    def add_acquisition(self, node, field):
-        if self.node.tree_id != node.tree_id:
-            return False
-        if field is not self.field:
-            return False
-        if not self.node.intersects(node):
-            return False
-        if self.restrictions:
-            for restrict in self.restrictions:
-                if restrict.add_acquisition(node, field):
-                    return True
-        # Interference if we get here
-        print("ERROR: Interfering acquires performed")
-        if self.node.state.assert_on_error:
-            assert False
-        return False
-
-    def remove_acquisition(self, node, field):
-        if self.node.tree_id != node.tree_id:
-            return False
-        if field is not self.field:
-            return False
-        if self.restrictions:
-            for restrict in self.restrictions:
-                if restrict.remove_acquisition(node, field):
-                    return True
-        return False
-
-    def add_restrict(self, node, field, inst):
-        if self.node.tree_id != node.tree_id:
-            return False
-        if field is not self.field:
-            return False
-        if not self.node.dominates(node):
-            if self.node.intersects(node):
-                print("ERROR: Illegal partial restriction")
-                if self.node.state.assert_on_error:
-                    assert False
-            return False
-        if self.restrictions:
-            for restrict in self.restrictions:
-                if restrict.add_restrict(node, field, inst):
-                    return True
-        else:
-            self.restrictions = list()
-        self.restrictions.append(Restriction(node, field, inst))
-
-    def remove_restrict(self, node, field):
-        if self.node.tree_id != node.tree_id:
-            return False
-        if field is not self.field:
-            return False
-
-    def matches(self, node, field):
-        if self.node.tree_id != node.tree_id:
-            return False
-        if field is not self.field:
-            return False
-        # If we have any outstanding restrictions, we can't match 
-        if self.restrictions:
-            return False
-        if node is self.node and field is self.field:
-            return True
-        return False
-
-class VerificationTraverser(object):
-    def __init__(self, state, dst_depth, dst_field, dst_req, dst_inst, op, 
-                 src_req, src_version, dst_version, error_str, across = False):
+class DataflowTraverser(object):
+    def __init__(self, state, dst_depth, dst_field, dst_req, dst_inst,
+                 op, src_req, src_version, dst_version, error_str):
         self.state = state
         self.target = dst_inst
-        self.tree = state.tree
+        self.src_tree = state.tree.tree_id
+        self.dst_tree = dst_req.tid
         self.point = state.point
         self.op = op
         self.src_field = state.field
@@ -4044,181 +4190,203 @@ class VerificationTraverser(object):
         self.src_version = src_version
         self.dst_version = dst_version
         self.error_str = error_str
-        self.across = across 
-        self.skipped_nodes = list()
+        # Across is either different fields or same field in different trees
+        self.across = self.src_field.fid != self.dst_field.fid or \
+                        self.src_tree != self.dst_tree
         # There is an implicit assumption here that if we did a close
         # to flush a bunch of reductions then copies will always come
         # from the newly created instance and not from an composite
         # instance that also buffered the reductions
-        if state.pending_reductions and not state.valid_instances:
-            assert state.is_initialized()
-            self.found_dataflow_path = dst_inst in state.previous_instances
+        if state.pending_reductions and state.is_initialized():
+            # If it's already in the set of valid instances we don't need reductions
+            if dst_inst in state.valid_instances:
+                self.found_dataflow_path = True
+                self.needs_reductions = False
+            elif dst_inst in state.previous_instances:
+                self.found_dataflow_path = True
+                self.needs_reductions = True
+            else:
+                self.found_dataflow_path = False
+                self.needs_reductions = True
         else:
             assert dst_inst not in state.valid_instances
             self.found_dataflow_path = not state.is_initialized()
-        if not self.found_dataflow_path:
+            self.needs_reductions = False
+        if not self.found_dataflow_path or self.needs_reductions:
             self.dataflow_stack = list()
-            # If there are reductions we can't add the instance to 
-            # the stack until we've gone through a reduction
-            if not state.pending_reductions or state.valid_instances:
-                self.dataflow_stack.append(dst_inst)    
-        self.observed_reductions = set()
-        self.failed_analysis = False
-        self.generation = None
-
-    def visit_node(self, node):
-        if node.generation == self.generation:
-            return
+            self.dataflow_stack.append(dst_inst)    
+            self.dataflow_copy = list()
         else:
-            assert node.generation < self.generation
+            self.dataflow_stack = None
+        self.observed_reductions = dict()
+        self.reductions_to_perform = dict()
+        self.failed_analysis = False
+
+    def visit_node(self, node, eq_key): 
         if isinstance(node, Operation):
-            if not self.visit_operation(node):
-                return
-            self.traverse_node(node)
+            pass 
         elif isinstance(node, RealmCopy):
-            if not self.visit_copy(node):
-                return
-            self.traverse_node(node)
-            self.post_visit_copy(node)
+            if not self.visit_copy(node, eq_key):
+                return False
         elif isinstance(node, RealmFill):
-            if not self.visit_fill(node):
-                return
-            self.traverse_node(node)
+            if not self.visit_fill(node, eq_key):
+                return False
         elif isinstance(node, RealmDeppart):
-            if not self.visit_deppart(node):
-                return
-            self.traverse_node(node)
+            pass
         else:
             assert False # should never get here
+        return True
 
-    def traverse_node(self, node, first = False):
-        if first:
-            self.generation = node.state.get_next_traversal_generation()
-        node.generation = self.generation
-        if node.physical_incoming:
-            for next_node in node.physical_incoming:
-                self.visit_node(next_node)
-                if self.verified() or self.failed_analysis:
-                    break
+    def post_visit_node(self, node, eq_key):
+        if isinstance(node, RealmCopy):
+            self.post_visit_copy(node, eq_key)
 
-    def visit_operation(self, op):
-        # Can't traverse through if we're doing a copy across
-        if self.src_field is not self.dst_field:
+    def traverse_node(self, node, eq_key, first = True):
+        if node.version_numbers and eq_key in node.version_numbers and \
+                node.version_numbers[eq_key] != self.state.version_number:
+            # We can't traverse this node if it's from a previous version number
+            # because that is not the same value of the equivalence class
+            # Skip this check on the first node though for things like copy across
             return False
-        # See if we can traverse through this operation
-        if op.can_traverse_through(self.tree.tree_id, self.src_field, 
-                                   self.point, self.state.version_number):
-            return True
-        return False
+        if not self.visit_node(node, eq_key):
+            return False
+        eq_privileges = node.get_equivalence_privileges()
+        privilege = eq_privileges[eq_key]
+        # We can't traverse past any operation that writes this field 
+        # unless this is the first operation which we're trying to
+        # traverse backwards from
+        if privilege == READ_ONLY or first:
+            # Check to see if the version number is the same, if this
+            # is an operation from a previous version then we can't traverse it
+            if node.eq_incoming and eq_key in node.eq_incoming:
+                incoming = node.eq_incoming[eq_key]
+                if incoming:
+                    for next_node in incoming:
+                        # Short-circuit if we're done for better or worse
+                        if self.traverse_node(next_node, eq_key, first=False):
+                            # Still need to do the post visit call
+                            self.post_visit_node(node, eq_key)
+                            return True
+        self.post_visit_node(node, eq_key)
+        # See if we are done
+        return self.failed_analysis or self.verified(eq_key)
 
-    def visit_copy(self, copy):
-        # If it's not the same tree, we can't go through it
-        if not self.across and copy.region.tree_id != self.tree.tree_id:
-            return False
-        # Same tree, but doesn't have our point, we can still go through
-        # if we have seen all our reductions (e.g. we have a dataflow stack)
-        # and the copy contains our field and target
-        if not copy.region.get_point_set().has_point(self.point) or \
-            (copy.intersect and
-                not copy.intersect.get_point_set().has_point(self.point)):
-            if not self.found_dataflow_path and self.dataflow_stack and \
-                self.dst_field in copy.dst_fields and \
-                copy.dsts[copy.dst_fields.index(self.dst_field)] is self.dataflow_stack[-1]:
-                self.skipped_nodes.append(copy)
-                return True
-            return False
+    def visit_copy(self, copy, eq_key):
         # Check to see if this is a reduction copy or not
         if 0 in copy.redops:
             # Normal copy
             # See if we need to do the dataflow check
             # and the copy has our field
-            if not self.found_dataflow_path and self.dataflow_stack and \
-                    self.dst_field in copy.dst_fields:
-                if copy.dsts[copy.dst_fields.index(self.dst_field)] is \
-                       self.dataflow_stack[-1] and \
-                    self.src_field is copy.src_fields[copy.dst_fields.index(self.dst_field)]:
-                    # Traverse the dataflow path
-                    src = copy.srcs[copy.dst_fields.index(self.dst_field)]
-                    # See if the source is a valid instance or a
-                    # previous instance in the presence of pending reductions
-                    if not self.state.pending_reductions or self.state.valid_instances:
-                        if src in self.state.valid_instances:
-                            self.found_dataflow_path = True
-                            self.perform_copy_analysis(copy, src, 
-                                          self.dataflow_stack[-1])
-                        else:
-                            # Push it on the stack and continue traversal
-                            self.dataflow_stack.append(src)
-                            return True
-                    else:
-                        if src in self.state.previous_instances:
-                            self.found_dataflow_path = True             
-                            self.perform_copy_analysis(copy, src,
-                                          self.dataflow_stack[-1])
-                        else:
-                            # Push it on the stack and continue traversal
-                            self.dataflow_stack.append(src)
-                            return True
-        else:
-            # Reduction copy
             if self.dst_field in copy.dst_fields and \
-                copy.dsts[copy.dst_fields.index(self.dst_field)] is self.target and \
+                    copy.dsts[copy.dst_fields.index(self.dst_field)] is self.dataflow_stack[-1] and \
+                    self.src_field is copy.src_fields[copy.dst_fields.index(self.dst_field)]:
+                # Traverse the dataflow path
+                src = copy.srcs[copy.dst_fields.index(self.dst_field)]
+                # See if the source is a valid instance or a
+                # previous instance in the presence of pending reductions
+                if self.state.pending_reductions and self.needs_reductions:
+                    # We have pending reductions, see if we went through any to find this
+                    # valid instance. If we did then check in previous instances otherwise
+                    # we can look directly in the valid instances
+                    if src in self.state.valid_instances:
+                        self.found_dataflow_path = True
+                        # No longer need reductions since we found a direct 
+                        # path to a valid instance
+                        self.needs_reductions = False
+                    elif src in self.state.previous_instances:
+                        self.found_dataflow_path = True
+                elif src in self.state.valid_instances:
+                    self.found_dataflow_path = True
+                # Continue the traversal if we're not done
+                if not self.verified(eq_key, last=False):
+                    # Push it on the stack and continue traversal
+                    self.dataflow_stack.append(src)
+                    self.dataflow_copy.append(True)
+                    return True
+                elif self.found_dataflow_path:
+                    # If we just finished finding it do the analysis now
+                    self.perform_copy_analysis(copy, src, self.dataflow_stack[-1], eq_key)
+            else:
+                # Always traverse through non-dataflow copies
+                self.dataflow_copy.append(False)
+                return True
+        elif self.needs_reductions:
+            # Reduction copy
+            red_target = self.dataflow_stack[-1]
+            if self.dst_field in copy.dst_fields and \
+                    copy.dsts[copy.dst_fields.index(self.dst_field)] is red_target and \
                     self.src_field is copy.src_fields[copy.dst_fields.index(self.dst_field)]:
                 src = copy.srcs[copy.dst_fields.index(self.dst_field)]
                 if src.redop != 0:
                     if src not in self.state.pending_reductions:
                         return False
-                    self.observed_reductions.add(src)
-                    # See if we still need the dataflow path
-                    if self.found_dataflow_path:
-                        # Already have the dataflow path, so just analyze the copy
-                        self.perform_copy_analysis(copy, src, self.target)
+                    if src in self.observed_reductions:
+                        assert self.observed_reductions[src] is not copy
+                        print("ERROR: Duplicate application of reductions by copies "+
+                                str(copy)+" and "+str(self.observed_reductions[src])+
+                                " from reduction instance "+str(src)+ " for op "+
+                                self.error_str)
+                        if self.op.state.eq_graph_on_error:
+                            self.op.state.dump_eq_graph(eq_key)
+                        if self.op.state.assert_on_error:
+                            assert False
+                        return False
                     else:
-                        # Otherwise we can now push the target on the stack
-                        self.dataflow_stack.append(self.target)
-                        return True
+                        self.observed_reductions[src] = copy
+                        if not red_target in self.reductions_to_perform:
+                            self.reductions_to_perform[red_target] = list()
+                        self.reductions_to_perform[red_target].append(src)
+                        # Keep going as long as we haven't found the dataflow path
+                        # or there are more reductions to find
+                        return not self.verified(eq_key, last=False)
         return False
 
-    def post_visit_copy(self, copy):
-        # If this was just something we traversed through then 
-        # there is nothing to do on the way back
-        if self.skipped_nodes and copy is self.skipped_nodes[-1]:
-            self.skipped_nodes.pop()
-            return
+    def post_visit_copy(self, copy, eq_key):
         if self.failed_analysis:
-            self.dataflow_stack.pop()
+            if self.dataflow_copy[-1]:
+                self.dataflow_stack.pop()
+            self.dataflow_copy.pop()
             return
         if 0 in copy.redops:
-            # Normal copy, definitely do the analysis if this is part
-            # of the analysis
-            if copy.region.get_point_set().has_point(self.point) and \
-                self.found_dataflow_path and (not copy.intersect or 
-                    copy.intersect.get_point_set().has_point(self.point)): 
+            # Normal copy, definitely do the analysis if we found the path
+            if self.found_dataflow_path and self.dataflow_copy[-1]: 
                 assert len(self.dataflow_stack) > 1
+                src = self.dataflow_stack[-1]
+                dst = self.dataflow_stack[-2]
+                # Check to see if we have any reductions to perform
+                if src in self.reductions_to_perform:
+                    # Do these in the reverse order of how they were added
+                    for red_src in reversed(self.reductions_to_perform[src]):
+                        reduction = self.observed_reductions[red_src]
+                        self.perform_copy_analysis(reduction, red_src, src, eq_key)
+                        if self.failed_analysis and self.op.state.assert_on_error:
+                            assert False
+                    del self.reductions_to_perform[src]
                 # Perform the copy analysis
-                self.perform_copy_analysis(copy, self.dataflow_stack[-1], 
-                                           self.dataflow_stack[-2])
-        else:
-            # Perform the reduction analysis if we found a path
-            if self.found_dataflow_path:
-                src = copy.srcs[copy.dst_fields.index(self.dst_field)]
-                self.perform_copy_analysis(copy, src, self.target)
-        # Always pop our instance off the stack
-        self.dataflow_stack.pop()
+                self.perform_copy_analysis(copy, src, dst, eq_key)
+            # Only pop off our instance if this wasn't a reduction copy
+            if self.dataflow_copy:
+                if self.dataflow_copy[-1]:
+                    self.dataflow_stack.pop()
+                self.dataflow_copy.pop()
 
-    def perform_copy_analysis(self, copy, src, dst):
-        copy.analyzed = True
-        if copy.reachable_cache is None:
-            copy.reachable_cache = set()
-            copy.get_physical_reachable(copy.reachable_cache, False)
+    def perform_copy_analysis(self, copy, src, dst, eq_key):
+        # If we've already traversed this then we can skip the verification
+        if copy.record_version_number(self.state):
+            return
+        if self.across:
+            copy.record_across_version_number(self.point, self.dst_field,
+                                              self.dst_tree, self.dst_version)
         src_preconditions = src.find_verification_copy_dependences(self.src_depth,
                                         self.src_field, self.point, self.op, 
                                         self.src_req.index, True, 0, self.src_version)
-        bad = check_preconditions(src_preconditions, copy, self.src_req.is_read_only())
+        bad = check_preconditions(src_preconditions, copy)
         if bad is not None:
             print("ERROR: Missing source precondition for "+str(copy)+
                 " on field "+str(self.src_field)+" for op "+self.error_str+
                 " on "+str(bad))
+            if self.op.state.eq_graph_on_error:
+                self.op.state.dump_eq_graph(eq_key)
             self.failed_analysis = True
             if self.op.state.assert_on_error:
                 assert False
@@ -4226,11 +4394,13 @@ class VerificationTraverser(object):
         dst_preconditions = dst.find_verification_copy_dependences(self.dst_depth,
                             self.dst_field, self.point, self.op, self.dst_req.index, 
                             False, src.redop, self.dst_version)
-        bad = check_preconditions(dst_preconditions, copy, self.dst_req.is_read_only())
+        bad = check_preconditions(dst_preconditions, copy)
         if bad is not None:
             print("ERROR: Missing destination precondition for "+str(copy)+
                 " on field "+str(self.dst_field)+" for op "+self.error_str+
                 " on "+str(bad))
+            if self.op.state.eq_graph_on_error:
+                self.op.state.dump_eq_graph(eq_key)
             self.failed_analysis = True
             if self.op.state.assert_on_error:
                 assert False
@@ -4240,50 +4410,43 @@ class VerificationTraverser(object):
         dst.add_verification_copy_user(self.dst_depth, self.dst_field, self.point,
                        copy, self.dst_req.index, False, src.redop, self.dst_version)
 
-    def visit_fill(self, fill):
-        # Quick checks to see if we can skip it
-        if not self.across and fill.region.tree_id != self.tree.tree_id:
-            return False
+    def visit_fill(self, fill, eq_key):
         # See if this fill is for the current target
         if not self.found_dataflow_path and self.dataflow_stack and \
               self.dst_field in fill.fields and \
               fill.dsts[fill.fields.index(self.dst_field)] is self.dataflow_stack[-1]:
-            # If we don't have the point we can continue through
-            if not fill.region.get_point_set().has_point(self.point) and \
-                (not fill.intersect or \
-                  not fill.intersect.get_point_set().has_point(self.point)):
-                return True
             # If we don't have a pending fill, then this isn't right
             if not self.state.pending_fill:
                 return False
             self.found_dataflow_path = True
-            fill.analyzed = True
-            # Perform the fill analysis
-            if fill.reachable_cache is None:
-                fill.reachable_cache = set()
-                fill.get_physical_reachable(fill.reachable_cache, False)
+            # If we've already traversed this then we can skip the verification
+            if fill.record_version_number(self.state):
+                return False
+            assert self.state.fill_op is fill.fill_op or fill.fill_op.replayed
+            if self.across:
+                fill.record_across_version_number(self.point, self.dst_field,
+                                                  self.dst_tree, self.dst_version)
             dst = fill.dsts[fill.fields.index(self.dst_field)]
             preconditions = dst.find_verification_copy_dependences(self.dst_depth,
                             self.dst_field, self.point, self.op, self.dst_req.index, 
                             False, 0, self.dst_version)
-            bad = check_preconditions(preconditions, fill, self.dst_req.is_read_only())
+            bad = check_preconditions(preconditions, fill)
             if bad is not None:
                 print("ERROR: Missing destination precondition for "+
                     str(fill)+" on field "+str(self.dst_field)+" for op "+
                     self.error_str+" on "+str(bad))
                 self.failed_analysis = True
+                if self.op.state.eq_graph_on_error:
+                    self.op.state.dump_eq_graph(eq_key)
                 if self.op.state.assert_on_error:
                     assert False
-                return
+                return False
             dst.add_verification_copy_user(self.dst_depth, self.dst_field, self.point,
                                  fill, self.dst_req.index, False, 0, self.dst_version)
+        # We should never traverse backwards through a fill
         return False
 
-    def visit_deppart(self, deppart):
-        # Can always continue through a deppart object
-        return True
-
-    def verified(self, last = False):
+    def verified(self, eq_key, last = False):
         if self.failed_analysis:
             if last and self.op.state.assert_on_error:
                 assert False
@@ -4295,51 +4458,98 @@ class VerificationTraverser(object):
                         str(self.dst_field)+" of instance "+str(self.target)+
                         " of region requirement "+str(self.dst_req.index)+
                         " of "+str(self.op))
+                if self.op.state.eq_graph_on_error:
+                    self.op.state.dump_eq_graph(eq_key)
                 if self.op.state.assert_on_error:
                     assert False
             return False
         # See if we saw all the needed reductions
-        if self.state.pending_reductions and not self.state.valid_instances and \
-            len(self.state.pending_reductions) != len(self.observed_reductions):
-            if last:
-                print("ERROR: Missing reductions to apply to field "+
-                        str(self.dst_field)+" of instance "+str(self.target)+
-                        " of region requirement "+str(self.dst_req.index)+
-                        " of "+str(self.op))
-                if self.op.state.assert_on_error:
-                    assert False
-            return False
+        if self.needs_reductions:
+            if len(self.state.pending_reductions) != len(self.observed_reductions):
+                if last:
+                    print("ERROR: Missing reductions to apply to field "+
+                            str(self.dst_field)+" of instance "+str(self.target)+
+                            " of region requirement "+str(self.dst_req.index)+
+                            " of "+str(self.op))
+                    if self.op.state.eq_graph_on_error:
+                        self.op.state.dump_eq_graph(eq_key)
+                    if self.op.state.assert_on_error:
+                        assert False
+                return False
+            elif last:
+                # If this is the last check, replay any reductions for the target
+                if self.target in self.reductions_to_perform:
+                    # Do these in the reverse order of how they were added
+                    for src in reversed(self.reductions_to_perform[self.target]):
+                        reduction = self.observed_reductions[src]
+                        self.perform_copy_analysis(reduction, src, self.target, eq_key)
+                        if self.failed_analysis:
+                            if self.op.state.assert_on_error:
+                                assert False
+                            return False
         return True
 
     def verify(self, op, restricted = False):
+        src_key = (self.point, self.src_field, self.src_tree)
+        dst_key = (self.point, self.dst_field, self.dst_tree)
+        # The verification key is the src_key unless otherwise specified
+        ver_key = src_key
         # Copies are a little weird in that they don't actually
         # depend on their region requirements so we just need
         # to traverse from their finish event
         if op.kind == COPY_OP_KIND:
             # Find the latest copies that we generated
-            # and start our traversal by skipping those "across" copies
             if op.realm_copies:
-                all_reachable = set()
-                for copy in op.realm_copies:
-                    copy.get_physical_reachable(all_reachable, False, copy, True)
                 # If we are across, we start by visiting the last
                 # copies because they are the across ones, otherwise
                 # we just traverse them
                 if self.across:
+                    ver_key = dst_key
                     for copy in op.realm_copies:
-                        if copy not in all_reachable:
-                            self.generation = op.state.get_next_traversal_generation()
-                            self.visit_node(copy)
+                        # Skip non-across copies
+                        if not copy.is_across():
+                            continue
+                        eq_privileges = copy.get_equivalence_privileges()
+                        if src_key in eq_privileges and dst_key in eq_privileges:
+                            self.traverse_node(copy, dst_key)
                 else:
                     for copy in op.realm_copies:
-                        if copy not in all_reachable:
-                            self.traverse_node(copy, True)
-            elif op.realm_fills:
-                # If there are just fills, we should be able to traverse
-                # them all without any trouble
-                for fill in op.realm_fills:
-                    self.generation = op.state.get_next_traversal_generation()
-                    self.visit_node(fill)
+                        if copy.is_across():
+                            # For across, we still might need to traverse
+                            # their incoming because of how the transitive
+                            # reduction deduplicates dependences
+                            for node in copy.physical_incoming:
+                                # Skip anything we're going to traverse anyway
+                                if node in op.realm_copies or \
+                                        (op.realm_fills and node in op.realm_fills):
+                                    continue
+                                eq_privileges = node.get_equivalence_privileges()
+                                if src_key in eq_privileges:
+                                    self.traverse_node(node, src_key)
+                        else:
+                            eq_privileges = copy.get_equivalence_privileges()
+                            if src_key in eq_privileges:
+                                self.traverse_node(copy, src_key)
+            # Only need to traverse fills directly for across cases as the 
+            # non-accross ones will be traverse by the normal copy traversasl
+            if op.realm_fills:
+                if self.across:
+                    ver_key = dst_key
+                    for fill in op.realm_fills:
+                        # Skip non-across fills
+                        if not fill.is_across():
+                            continue
+                        eq_privileges = fill.get_equivalence_privileges()
+                        if src_key not in eq_privileges and dst_key in eq_privileges:
+                            self.traverse_node(fill, dst_key)
+                else:
+                    for fill in op.realm_fills:
+                        # Skip across fills
+                        if fill.is_across():
+                            continue
+                        eq_privileges = fill.get_equivalence_privileges()
+                        if src_key in eq_privileges:
+                            self.traverse_node(fill, src_key)
         elif op.kind == INTER_CLOSE_OP_KIND or op.kind == POST_CLOSE_OP_KIND:
             # Close operations are similar to copies in that they don't
             # wait for data to be ready before starting, so we can't
@@ -4348,37 +4558,38 @@ class VerificationTraverser(object):
             # just traverse over all their realm events
             if op.realm_copies:
                 for copy in op.realm_copies:
-                    self.generation = op.state.get_next_traversal_generation()
-                    self.visit_node(copy)
+                    eq_privileges = copy.get_equivalence_privileges()
+                    if src_key in eq_privileges:
+                        self.traverse_node(copy, src_key)
             if op.realm_fills:
                 for fill in op.realm_fills:
-                    self.generation = op.state.get_next_traversal_generation()
-                    self.visit_node(fill)
+                    eq_privileges = fill.get_equivalence_privileges()
+                    if src_key in eq_privileges:
+                        self.traverse_node(fill, src_key)
         elif restricted:
+            assert not self.across
             # If this is restricted, do the traversal from the copies
             # themselves since they might have occurred after the op
             if op.realm_copies:
                 for copy in op.realm_copies:
-                    if not copy.reachable_cache:
-                        copy.reachable_cache = set()
-                        copy.get_physical_reachable(copy.reachable_cache, False)
-                    # We only have to do the traversal from copies which
-                    # occurred after the operation
-                    if op not in copy.reachable_cache:
-                        copy.reachable_cache = None
+                    eq_privileges = copy.get_equivalence_privileges()
+                    if src_key not in eq_privileges:
                         continue
-                    self.generation = op.state.get_next_traversal_generation()
-                    self.visit_node(copy)
-                    copy.reachable_cache = None
+                    # Only look at these if the destination is correct
+                    if self.target in copy.dsts and \
+                            self.dst_tree == copy.dst_tree_id and \
+                            self.dst_field in copy.dst_fields:
+                        self.traverse_node(copy, src_key)
         else:
             # Traverse the node and then see if we satisfied everything
-            self.traverse_node(op, True)
-        return self.verified(True)
+            self.traverse_node(op, src_key)
+        return self.verified(ver_key, True)
 
-class VerificationState(object):
+class EquivalenceSet(object):
     __slots__ = ['tree', 'depth', 'field', 'point', 'valid_instances', 
                  'previous_instances', 'pending_reductions', 
-                 'pending_fill', 'version_number']
+                 'pending_fill', 'fill_op', 'version_number',
+                 'restricted_inst']
     def __init__(self, tree, depth, field, point):
         self.tree = tree
         self.depth = depth
@@ -4387,9 +4598,12 @@ class VerificationState(object):
         # State machine is write -> reduce -> read
         self.valid_instances = set()
         self.previous_instances = set()
-        self.pending_reductions = set()
+        # Reductions of different kinds must be kept in order
+        self.pending_reductions = list()
         self.pending_fill = False 
+        self.fill_op = None
         self.version_number = 0
+        self.restricted_inst = None
         
     def is_initialized(self):
         return self.version_number > 0
@@ -4397,18 +4611,37 @@ class VerificationState(object):
     def reset(self):
         self.version_number += 1
         self.pending_fill = False
+        self.fill_op = None
         self.previous_instances = set()
         self.valid_instances = set()
-        self.pending_reductions = set()
+        self.pending_reductions = list()
+        # Doesn't change restricted inst
 
-    def initialize_verification_state(self, inst):
+    def initialize_verification_state(self, inst, restricted):
         self.valid_instances.add(inst)
         self.version_number = 1
+        if restricted:
+            self.restricted_inst = inst
 
     def perform_fill_verification(self, op, req):
         # Fills clear everything out so we are just done
         self.reset()
         self.pending_fill = True
+        assert op.kind == FILL_OP_KIND
+        self.fill_op = op
+        return True
+
+    def add_restriction(self, op, req, inst):
+        assert inst in self.valid_instances
+        self.reset()
+        self.valid_instances.add(inst)
+        self.restricted_inst = inst
+        return True
+
+    def remove_restriction(self, op, req, filter_inst):
+        self.restricted_inst = None
+        if filter_inst is not None and filter_inst in self.valid_instances:
+            self.valid_instances.remove(filter_inst)
         return True
 
     def perform_physical_verification(self, op, req, inst, perform_checks, 
@@ -4420,11 +4653,13 @@ class VerificationState(object):
             # and add ourselves to the reduction instances
             # See if we are the first reduction
             # The first reduction also bumps the version number
-            if not self.pending_reductions:
+            if self.valid_instances:
                 self.previous_instances = self.valid_instances
                 self.valid_instances = set()
                 self.version_number += 1
-            self.pending_reductions.add(inst)
+                # Clear our old stale reductions
+                self.pending_reductions = list()
+            self.pending_reductions.append(inst)
         elif req.is_write_only():
             assert inst.redop == 0
             # We overwrite everything else
@@ -4462,6 +4697,8 @@ class VerificationState(object):
 
     def perform_copy(self, src, dst, op, req):
         copy = op.find_or_create_copy(req, self.field, src, dst)
+        # Record this point for the copy operation so it renders properly
+        copy.record_version_number(self)
         # Update the source instance
         src_preconditions = src.find_verification_copy_dependences(self.depth, 
               self.field, self.point, op, req.index, True, 0, self.version_number)
@@ -4487,7 +4724,7 @@ class VerificationState(object):
             # Special case for the first access with uninitialized state
             if not self.is_initialized():
                 return True
-            traverser = VerificationTraverser(self, self.depth, self.field, req, inst, 
+            traverser = DataflowTraverser(self, self.depth, self.field, req, inst, 
                          op, req, self.version_number, self.version_number, error_str)
             return traverser.verify(op, restricted)
         # First see if we have a valid instance we can copy from  
@@ -4496,7 +4733,9 @@ class VerificationState(object):
             self.perform_copy(src, inst, op, req)
         # If we have a fill operation, we can just do that
         elif self.pending_fill:
-            fill = op.find_or_create_fill(req, self.field, inst)
+            fill = op.find_or_create_fill(req, self.field, inst, self.fill_op)
+            # Record this point for the copy operation so it renders properly
+            fill.record_version_number(self)
             preconditions = inst.find_verification_copy_dependences(self.depth, 
                 self.field, self.point, op, req.index, False, 0, self.version_number)
             for pre in preconditions:
@@ -4518,7 +4757,7 @@ class VerificationState(object):
                                 error_str, restricted = False):
         assert self.pending_reductions
         if perform_checks:
-            traverser = VerificationTraverser(self, self.depth, self.field, req, inst, 
+            traverser = DataflowTraverser(self, self.depth, self.field, req, inst, 
                           op, req, self.version_number, self.version_number, error_str)
             return traverser.verify(op, restricted)
         # Make sure a reduction was issued from each reduction instance
@@ -4530,11 +4769,13 @@ class VerificationState(object):
         preconditions = inst.find_verification_use_dependences(self.depth, 
                                           self.field, self.point, op, req)
         if perform_checks:
-            bad = check_preconditions(preconditions, op, req.is_read_only())
+            bad = check_preconditions(preconditions, op)
             if bad is not None:
                 print("ERROR: Missing use precondition for field "+str(self.field)+
                       " of region requirement "+str(req.index)+" of "+str(op)+
                       " (UID "+str(op.uid)+") on previous "+str(bad))
+                if self.tree.state.eq_graph_on_error:
+                    self.tree.state.dump_eq_graph((self.point, self.field, self.tree))
                 if self.tree.state.assert_on_error:
                     assert False
                 return False
@@ -4545,30 +4786,27 @@ class VerificationState(object):
         # Record ourselves as a user for this instance
         inst.add_verification_user(self.depth, self.field, self.point, 
                                    op, req, self.version_number)
-        restricted = True if req.restricted_fields and \
-            self.field in req.restricted_fields else False
         # If we are restricted and we're not read-only we have to issue
         # copies back to the restricted instance
-        if restricted and req.priv != READ_ONLY:
-            restricted_inst = req.restricted_fields[self.field]
-            if inst is not restricted_inst:
+        if self.restricted_inst is not None:
+            if inst is not self.restricted_inst and req.priv != READ_ONLY:
                 error_str = "restricted region requirement "+\
                         str(req.index)+" of "+str(op)
                 # We need to issue a copy or a reduction back to the 
                 # restricted instance in order to have the proper semantics
                 if inst.redop != 0:
                     # Have to perform a reduction back
-                    if not self.issue_update_reductions(restricted_inst, op, req,
+                    if not self.issue_update_reductions(self.restricted_inst, op, req,
                                                         perform_checks, error_str, True):
                         return False
                 else:
                     # Perform a normal copy back
-                    if not self.issue_update_copies(restricted_inst, op, req, 
+                    if not self.issue_update_copies(self.restricted_inst, op, req, 
                                                     perform_checks, error_str, True):
                         return False
-                # Restrictions always overwrite everything when they are done
-                self.reset()
-                self.valid_instances.add(restricted_inst)
+            # Restrictions always overwrite everything when they are done
+            self.reset()
+            self.valid_instances.add(self.restricted_inst)
         return True
 
     def perform_copy_across_verification(self, op, redop, perform_checks,
@@ -4582,9 +4820,9 @@ class VerificationState(object):
                 assert redop == 0
                 error_str = "copy across from "+str(src_req.index)+" to "+\
                     str(dst_req.index)+" of "+str(op)
-                traverser = VerificationTraverser(self, dst_depth, 
+                traverser = DataflowTraverser(self, dst_depth, 
                     dst_field, dst_req, dst_inst, op, src_req, 
-                    self.version_number, dst_version_number, error_str, True)
+                    self.version_number, dst_version_number, error_str)
                 return traverser.verify(op)
             else:
                 # Just have to find the copy operation and check it
@@ -4596,33 +4834,39 @@ class VerificationState(object):
                         str(src_field)+" to field "+str(dst_field)+" between "+
                         "region requirements "+str(src_req.index)+" and "+
                         str(dst_req.index)+" of "+str(op))
+                    if op.state.eq_graph_on_error:
+                        op.state.dump_eq_graph((self.point, self.field, self.tree))
                     if op.state.assert_on_error:
                         assert False
                     return False
-                copy.analyzed = True
-                # Now check all the preconditions
-                if copy.reachable_cache is None:
-                    copy.reachable_cache = set()
-                    copy.get_physical_reachable(copy.reachable_cache, False)
+                # If we already preformed the verification then we can skip this
+                if copy.record_version_number(self):
+                    return True
+                copy.record_across_version_number(self.point, dst_field, 
+                                                  dst_req.tid, dst_version_number)
                 src_preconditions = src_inst.find_verification_copy_dependences(
                                     src_depth, src_field, self.point, op, 
                                     src_req.index, True, 0, self.version_number)
-                bad = check_preconditions(src_preconditions, copy, src_req.is_read_only())
+                bad = check_preconditions(src_preconditions, copy)
                 if bad is not None:
                     print("ERROR: Missing source precondition for "+str(copy)+
                           " on field "+str(src_field)+" for "+str(op)+
                           " on "+str(bad))
+                    if op.state.eq_graph_on_error:
+                        op.state.dump_eq_graph((self.point, self.field, self.tree))
                     if op.state.assert_on_error:
                         assert False
                     return False
                 dst_preconditions = dst_inst.find_verification_copy_dependences(
                                     dst_depth, dst_field, self.point, op, 
                                     dst_req.index, False, redop, dst_version_number)
-                bad = check_preconditions(dst_preconditions, copy, dst_req.is_read_only())
+                bad = check_preconditions(dst_preconditions, copy)
                 if bad is not None:
                     print("ERROR: Missing destination precondition for "+str(copy)+
                           " on field "+str(dst_field)+" for "+str(op)+
                           " on "+str(bad))
+                    if op.state.eq_graph_on_error:
+                        op.state.dump_eq_graph((self.point, self.field, self.tree))
                     if op.state.assert_on_error:
                         assert False
                     return False
@@ -4646,7 +4890,9 @@ class VerificationState(object):
         elif self.pending_fill:
             # Should be no reductions here
             assert redop == 0
-            fill = op.find_or_create_fill(dst_req, dst_field, dst_inst)
+            fill = op.find_or_create_fill(dst_req, dst_field, dst_inst, self.fill_op)
+            # Record this point for the copy operation so it renders properly
+            fill.record_version_number(self)
             preconditions = dst_inst.find_verification_copy_dependences(
                                 dst_depth, dst_field, self.point, op, 
                                 dst_req.index, False, redop, dst_version_number)
@@ -4674,6 +4920,8 @@ class VerificationState(object):
                             dst_depth, dst_field, dst_req, dst_version):
         copy = op.find_or_create_copy_across(src_inst, src_field, src_req,
                                              dst_inst, dst_field, dst_req, redop)
+        # Record this point for the copy operation so it renders properly
+        copy.record_version_number(self)
         src_preconditions = src_inst.find_verification_copy_dependences(
                             src_depth, src_field, self.point, op, 
                             src_req.index, True, 0, self.version_number)
@@ -4694,7 +4942,7 @@ class VerificationState(object):
 class Requirement(object):
     __slots__ = ['state', 'index', 'is_reg', 'index_node', 'field_space', 'tid',
                  'logical_node', 'priv', 'coher', 'redop', 'fields', 'parent',
-                 'projection_function', 'restricted_fields']
+                 'projection_function']
     def __init__(self, state, index, is_reg, index_node, field_space, 
                  tid, logical_node, priv, coher, redop, parent):
         self.state = state
@@ -4710,8 +4958,6 @@ class Requirement(object):
         self.parent = parent
         self.fields = list()
         self.projection_function = None
-        # Computed during analysis
-        self.restricted_fields = None
 
     def print_requirement(self):
         if self.is_reg:
@@ -4832,13 +5078,6 @@ class MappingDependence(object):
         self.idx2 = idx2
         self.dtype = dtype
 
-    def __eq__(self,other):
-        return (self.op1 is other.op1) and \
-               (self.op2 is other.op2) and \
-               (self.idx1 == other.idx1) and \
-               (self.idx2 == other.idx2) and \
-               (self.dtype == other.dtype)
-
     def __str__(self):
         return "index %d of %s and index %d of %s (type: %s)" % \
                 (self.idx1, str(self.op1),
@@ -4856,15 +5095,16 @@ class MappingDependence(object):
         
 class Operation(object):
     __slots__ = ['state', 'uid', 'kind', 'context', 'name', 'reqs', 'mappings', 
-                 'temporaries', 'incoming', 'outgoing', 'logical_incoming', 
+                 'fully_logged', 'incoming', 'outgoing', 'logical_incoming', 
                  'logical_outgoing', 'physical_incoming', 'physical_outgoing', 
-                 'start_event', 'finish_event', 'inter_close_ops', 'open_ops', 
-                 'advance_ops', 'summary_ops', 'task', 'task_id', 'predicate', 'predicate_result',
+                 'eq_incoming', 'eq_outgoing', 'eq_privileges',
+                 'start_event', 'finish_event', 'inter_close_ops', 
+                 'summary_op', 'task', 'task_id', 'predicate', 'predicate_result',
                  'futures', 'index_owner', 'points', 'launch_rect', 'creator', 
                  'realm_copies', 'realm_fills', 'realm_depparts', 'version_numbers', 
-                 'internal_idx', 'disjoint_close_fields', 'partition_kind', 
-                 'partition_node', 'node_name', 'cluster_name', 'generation', 
-                 'reachable_cache', 'transitive_warning_issued', 'arrival_barriers', 
+                 'internal_idx', 'partition_kind', 'partition_node', 'node_name', 
+                 'cluster_name', 'generation',
+                 'transitive_warning_issued', 'arrival_barriers', 
                  'wait_barriers', 'created_futures', 'used_futures', 'merged', "replayed"]
                   # If you add a field here, you must update the merge method
     def __init__(self, state, uid):
@@ -4875,19 +5115,21 @@ class Operation(object):
         self.name = None
         self.reqs = None
         self.mappings = None
-        self.temporaries = None
+        # If we didn't do detailed logging just assumed we are fully logged
+        self.fully_logged = not self.state.detailed_logging
         self.incoming = None # Mapping dependences
         self.outgoing = None # Mapping dependences
         self.logical_incoming = None # Operation dependences
         self.logical_outgoing = None # Operation dependences
         self.physical_incoming = set() # op/realm
         self.physical_outgoing = set() # op/realm
+        self.eq_incoming = None
+        self.eq_outgoing = None
+        self.eq_privileges = None
         self.start_event = state.get_no_event() 
         self.finish_event = state.get_no_event()
         self.inter_close_ops = None
-        self.open_ops = None
-        self.advance_ops = None
-        self.summary_ops = None
+        self.summary_op = None
         self.realm_copies = None
         self.realm_depparts = None
         self.realm_fills = None
@@ -4905,8 +5147,6 @@ class Operation(object):
         # Only valid for internal operations (e.g. open, close, advance)
         self.creator = None
         self.internal_idx = -1
-        # Only valid for close operations
-        self.disjoint_close_fields = None
         # Only valid for pending partition operations
         self.partition_kind = None
         self.partition_node = None
@@ -4914,7 +5154,6 @@ class Operation(object):
         self.cluster_name = None 
         # For traversals
         self.generation = 0
-        self.reachable_cache = None
         self.transitive_warning_issued = False
         # Phase barrier information
         self.arrival_barriers = None
@@ -4928,16 +5167,15 @@ class Operation(object):
         self.replayed = False
 
     def is_close(self):
-        return self.kind == INTER_CLOSE_OP_KIND or self.kind == POST_CLOSE_OP_KIND or \
-               self.kind == READ_ONLY_CLOSE_OP_KIND
+        return self.kind == INTER_CLOSE_OP_KIND or self.kind == POST_CLOSE_OP_KIND
 
     def is_internal(self):
-        return self.is_close() or self.kind == ADVANCE_OP_KIND or self.kind == OPEN_OP_KIND
+        return self.is_close()
 
     def set_name(self, name):
         self.name = name
         if self.points is not None:
-            for point in self.points.itervalues():
+            for point in itervalues(self.points):
                 point.set_name(name)
 
     def __str__(self):
@@ -4956,12 +5194,11 @@ class Operation(object):
                 close.set_context(context, False)
         # Also recurse for any points we have
         if self.points is not None:
-            for point in self.points.itervalues():
+            for point in itervalues(self.points):
                 point.op.set_context(context, False)
         # Finaly recurse for any summary operations
-        if self.summary_ops:
-            for summary in self.summary_ops:
-                summary.set_context(context, False)
+        if self.summary_op is not None and self.summary_op != self:
+            self.summary_op.set_context(context, False)
         if add:
             self.context.add_operation(self)
 
@@ -4982,6 +5219,9 @@ class Operation(object):
             finish.add_incoming_op(self)
         self.start_event = start
         self.finish_event = finish
+        # We know that once we've seen this then all the logging 
+        # statements for the operation are done being performed
+        self.fully_logged = True
 
     def set_task_id(self, task_id):
         assert self.kind == SINGLE_TASK_KIND or self.kind == INDEX_TASK_KIND
@@ -4993,23 +5233,13 @@ class Operation(object):
     def set_creator(self, creator, idx):
         # Better be an internal op kind
         assert self.kind == INTER_CLOSE_OP_KIND or \
-            self.kind == READ_ONLY_CLOSE_OP_KIND or \
-            self.kind == POST_CLOSE_OP_KIND or \
-            self.kind == OPEN_OP_KIND or \
-            self.kind == ADVANCE_OP_KIND or self.kind == SUMMARY_OP_KIND
+            self.kind == POST_CLOSE_OP_KIND
         self.creator = creator
         self.internal_idx = idx
         # If our parent context created us we don't need to be recorded 
         if creator is not self.context.op:
             assert self.kind != POST_CLOSE_OP_KIND
-            if self.kind == OPEN_OP_KIND:
-                creator.add_open_operation(self)
-            elif self.kind == ADVANCE_OP_KIND:
-                creator.add_advance_operation(self)
-            elif self.kind == SUMMARY_OP_KIND:
-                creator.add_summary_operation(self)
-            else:
-                creator.add_close_operation(self)
+            creator.add_close_operation(self)
         else:
             assert self.kind == POST_CLOSE_OP_KIND
 
@@ -5028,30 +5258,21 @@ class Operation(object):
 
     def set_replayed(self):
         self.replayed = True
+        # Once we see this then we know all the logging operations
+        # for the operation have been performed
+        self.fully_logged = True
 
     def get_index_launch_rect(self):
         assert self.launch_rect
         return self.launch_rect
-
-    def add_open_operation(self, open_op):
-        if self.open_ops is None:
-            self.open_ops = list()
-        self.open_ops.append(open_op);
-
-    def add_advance_operation(self, advance):
-        if self.advance_ops is None:
-            self.advance_ops = list()
-        self.advance_ops.append(advance)
 
     def add_close_operation(self, close):
         if self.inter_close_ops is None:
             self.inter_close_ops = list()
         self.inter_close_ops.append(close)
 
-    def add_summary_operation(self, summary):
-        if self.summary_ops is None:
-            self.summary_ops = list()
-        self.summary_ops.append(summary)
+    def set_summary_operation(self, summary):
+        self.summary_op = summary
 
     def get_depth(self):
         assert self.context is not None
@@ -5059,36 +5280,6 @@ class Operation(object):
 
     def get_logical_op(self):
         return self
-
-    def get_open_operation(self, req, node, field):
-        if self.open_ops is None:
-            return None
-        for open_op in self.open_ops:
-            if open_op.internal_idx != req.index:
-                continue
-            assert len(open_op.reqs) == 1
-            open_req = open_op.reqs[0]
-            if open_req.logical_node is not node:
-                continue
-            if field not in open_req.fields:
-                continue
-            return open_op
-        return None
-
-    def get_advance_operation(self, req, node, field):
-        if self.advance_ops is None:
-            return None
-        for advance in self.advance_ops:
-            if advance.internal_idx != req.index:
-                continue
-            assert len(advance.reqs) == 1
-            advance_req = advance.reqs[0]
-            if advance_req.logical_node is not node:
-                continue
-            if field not in advance_req.fields:
-                continue
-            return advance
-        return None
 
     def get_close_operation(self, req, node, field, read_only):
         if self.inter_close_ops is None:
@@ -5102,13 +5293,6 @@ class Operation(object):
                 continue
             if field not in close_req.fields:
                 continue 
-            if read_only and close.kind != READ_ONLY_CLOSE_OP_KIND:
-                if close.kind == INTER_CLOSE_OP_KIND:
-                    print(("WARNING: Runtime issued a full close operation "
-                          "when it could have only issued a read-only close "
-                          "for requirement %d of %s") % (req.index,str(self)))
-                    return close
-                continue
             if not read_only and close.kind != INTER_CLOSE_OP_KIND:
                 continue
             return close
@@ -5173,13 +5357,6 @@ class Operation(object):
             self.mappings[index] = dict()
         self.mappings[index][fid] = inst
 
-    def add_temporary_instance(self, index, fid, inst):
-        if self.temporaries is None:
-            self.temporaries = dict()
-        if index not in self.temporaries:
-            self.temporaries[index] = dict()
-        self.temporaries[index][fid] = inst
-
     def set_predicate_result(self, result):
         self.predicate_result = result
 
@@ -5190,19 +5367,11 @@ class Operation(object):
 
     def update_instance_uses(self):
         if self.mappings:
-            for mapping in self.mappings.itervalues():
+            for mapping in itervalues(self.mappings):
                 unique_insts = set()
-                for inst in mapping.itervalues():
+                for inst in itervalues(mapping):
                     unique_insts.add(inst) 
                 for inst in unique_insts:
-                    inst.increment_use_count() 
-        if self.temporaries:
-            for index,temporary in self.temporaries.iteritems():
-                unique_pairs = dict()
-                for fid,inst in temporary.iteritems(): 
-                    assert fid in self.mappings[index]
-                    unique_pairs[self.mappings[index][fid]] = inst
-                for inst in unique_pairs.itervalues():
                     inst.increment_use_count() 
 
     def add_incoming(self, dep):
@@ -5222,6 +5391,22 @@ class Operation(object):
         if self.logical_outgoing is None:
             self.logical_outgoing = set()
         self.logical_outgoing.add(dep.op2)
+
+    def add_equivalence_incoming(self, eq, src):
+        assert eq in self.eq_privileges
+        if self.eq_incoming is None:
+            self.eq_incoming = dict()
+        if eq not in self.eq_incoming:
+            self.eq_incoming[eq] = set()
+        self.eq_incoming[eq].add(src)
+
+    def add_equivalence_outgoing(self, eq, dst):
+        assert eq in self.eq_privileges
+        if self.eq_outgoing is None:
+            self.eq_outgoing = dict()
+        if eq not in self.eq_outgoing:
+            self.eq_outgoing[eq] = set()
+        self.eq_outgoing[eq].add(dst)
 
     def add_realm_copy(self, copy):
         if self.realm_copies is None:
@@ -5248,11 +5433,6 @@ class Operation(object):
             self.wait_barriers = list()
         self.wait_barriers.append(bar)
 
-    def add_disjoint_close_field(self, fid):
-        if not self.disjoint_close_fields:
-            self.disjoint_close_fields = list()
-        self.disjoint_close_fields.append(fid)
-
     def add_created_future(self, future):
         if not self.created_futures:
             self.created_futures = set()
@@ -5263,19 +5443,30 @@ class Operation(object):
             self.used_futures = set()
         self.used_futures.add(future)
 
-    def find_temporary_instance(self, index, fid):
-        if not self.temporaries:
-            return None
-        if index not in self.temporaries:
-            return None
-        if fid not in self.temporaries[index]:
-            return None
-        return self.temporaries[index][fid]
-
     def get_point_task(self, point):
         assert self.kind == INDEX_TASK_KIND
         assert point in self.points
         return self.points[point]
+
+    def get_equivalence_privileges(self):
+        if self.eq_privileges is None:
+            self.eq_privileges = dict()
+            if self.reqs is not None:
+                for req in itervalues(self.reqs):
+                    point_set = req.index_node.get_point_set()
+                    for point in point_set.iterator():
+                        for field in req.fields:
+                            # Point,Field,Tree ID
+                            key = (point,field,req.tid)
+                            if key not in self.eq_privileges:
+                                self.eq_privileges[key] = req.priv
+                            elif self.launch_rect is None:
+                                # If we have aliased region requirements
+                                # then they shouldn't interfere with each other
+                                # However, some privileges can appear to interfere
+                                # for projection requirements which ultimately
+                                assert self.eq_privileges[key] >= req.priv 
+        return self.eq_privileges
 
     def get_logical_reachable(self, reachable, forward):
         if self in reachable:
@@ -5292,24 +5483,6 @@ class Operation(object):
             for op in self.logical_incoming:
                 op.get_logical_reachable(reachable, False)
 
-    def get_physical_reachable(self, reachable, forward, 
-                               origin = None, skip_first = False):
-        if self is origin and not skip_first:
-            return True
-        if self in reachable:
-            return False
-        if not skip_first:
-            reachable.add(self)
-        if forward:
-            for op in self.physical_outgoing:
-                if op.get_physical_reachable(reachable, True, origin):
-                    return True
-        else:
-            for op in self.physical_incoming:
-                if op.get_physical_reachable(reachable, False, origin):
-                    return True
-        return False
-
     def merge(self, other):
         if self.kind == NO_OP_KIND:
             self.kind = other.kind
@@ -5321,24 +5494,19 @@ class Operation(object):
             assert self.context == other.context
         if self.name is None:
             self.name = other.name
+        self.fully_logged = self.fully_logged or other.fully_logged
         if not self.reqs:
             self.reqs = other.reqs
         elif other.reqs:
-            for idx,req in other.reqs.iteritems():
+            for idx,req in iteritems(other.reqs):
                 assert idx not in self.reqs
                 self.reqs[idx] = req
         if not self.mappings:
             self.mappings = other.mappings
         elif other.mappings:
-            for idx,mapping in other.mappings.iteritems():
+            for idx,mapping in iteritems(other.mappings):
                 assert idx not in self.mappings
                 self.mappings[idx] = mapping
-        if not self.temporaries:
-            self.temporaries = other.temporaries
-        elif other.temporaries:
-            for idx,temp in other.temporaries.iteritems():
-                assert idx not in self.temporaries
-                self.temporaries[idx] = temp
         if not self.start_event.exists():
             self.start_event = other.start_event
             if self.start_event.exists():
@@ -5384,43 +5552,17 @@ class Operation(object):
         assert not self.points
         assert not other.points
         other.merged = True
+        self.replayed = self.replayed or other.replayed
 
-    def record_current_version(self, index, field, point, version_number):
-        assert index in self.reqs
+    def record_current_version(self, point, field, tree, version_number):
         if not self.version_numbers:
             self.version_numbers = dict()
-        if index not in self.version_numbers:
-            self.version_numbers[index] = dict()
-        if field not in self.version_numbers[index]:
-            self.version_numbers[index][field] = dict()
-        assert point not in self.version_numbers[index][field]
-        self.version_numbers[index][field][point] = version_number
-
-    def can_traverse_through(self, tree_id, field, point, version_number):
-        # We can traverse through this operation if it doesn't
-        # interfere with our point in anyway or if it does, but
-        # we have exactly the same version number
-        if not self.reqs:
-            return False
-        for index,req in self.reqs.iteritems():
-            if req.tid != tree_id:
-                continue
-            if not self.version_numbers or index not in self.version_numbers:
-                continue
-            if field not in req.fields:
-                continue
-            if field not in self.version_numbers[index]:
-                continue
-            # Don't allow these through for now
-            if point not in self.version_numbers[index][field]:
-                return False
-            # At this point, we're interfering so we have to make a choice 
-            # See if the version numbers are the same
-            if self.version_numbers[index][field][point] == version_number:
-                return True
-            else:
-                return False
-        return True
+        eq_key = (point, field, tree)
+        assert eq_key in self.eq_privileges
+        if eq_key in self.version_numbers:
+            assert self.version_numbers[eq_key] == version_number
+        else:
+            self.version_numbers[eq_key] = version_number
 
     def compute_physical_reachable(self):
         # We can skip some of these
@@ -5454,11 +5596,11 @@ class Operation(object):
             for other in self.physical_outgoing:
                 other.physical_incoming.add(self)
 
-    def find_or_create_fill(self, req, field, dst):
+    def find_or_create_fill(self, req, field, dst, fill_op):
         # Run through our copies and see if we can find one that matches
         if self.realm_fills:
             for fill in self.realm_fills:
-                if req.logical_node is not fill.region:
+                if req.tid != fill.dst_tree_id:
                     continue
                 if field not in fill.fields:
                     continue
@@ -5469,9 +5611,10 @@ class Operation(object):
         else:
             self.realm_fills = list()
         fill = self.state.create_fill(self)
-        fill.set_region(req.logical_node)
+        fill.set_tree_properties(None, req.field_space, req.tid)
         fill.add_field(field.fid, dst)
         self.realm_fills.append(fill)
+        fill.set_fill_op(fill_op)
         return fill
 
     def find_verification_copy_across(self, src_field, dst_field, point,
@@ -5479,9 +5622,7 @@ class Operation(object):
         if not self.realm_copies:
             return None
         for copy in self.realm_copies:
-            if not copy.region.get_point_set().has_point(point):
-                continue
-            if copy.intersect and not copy.intersect.get_point_set().has_point(point):
+            if not copy.index_expr.get_point_set().has_point(point):
                 continue
             if src_field not in copy.src_fields:
                 continue
@@ -5501,8 +5642,7 @@ class Operation(object):
         # Run through our copies and see if we can find one that matches
         if self.realm_copies:
             for copy in self.realm_copies:
-                # See if the regions are the same
-                if req.logical_node is not copy.region:
+                if req.tid != copy.src_tree_id or req.tid != copy.dst_tree_id:
                     continue
                 if field not in copy.src_fields:
                     continue
@@ -5518,7 +5658,7 @@ class Operation(object):
             self.realm_copies = list()
         # If we get here we have to make our copy
         copy = self.state.create_copy(self)
-        copy.set_region(req.logical_node)
+        copy.set_tree_properties(None, req.field_space, req.tid, req.tid)
         copy.add_field(field.fid, src, field.fid, dst, src.redop)
         self.realm_copies.append(copy)
         return copy
@@ -5527,8 +5667,7 @@ class Operation(object):
                                    dst_inst, dst_field, dst_req, redop):
         if self.realm_copies:
             for copy in self.realm_copies:
-                # See if the regions are the same 
-                if dst_req.logical_node is not copy.region:
+                if src_req.tid != copy.src_tree_id or dst_req.tid != copy.dst_tree_id:
                     continue
                 if src_field.fid not in copy.src_fields:
                     continue
@@ -5544,49 +5683,22 @@ class Operation(object):
             self.realm_copies = list()
         # If we get here we have to make our own copy
         copy = self.state.create_copy(self)
-        copy.set_region(dst_req.logical_node)
+        copy.set_tree_properties(None, dst_req.field_space,
+                                 src_req.tid, dst_req.tid)
         copy.add_field(src_field.fid, src_inst, dst_field.fid, dst_inst, redop)
         self.realm_copies.append(copy)
         return copy
 
-    def perform_cycle_check(self):
-        def traverse_node(node, traverser):
-            if node is traverser.origin:
-                traverser.cycle = True
-                print("WARNING: CYCLE DETECTED!")
-                for n in traverser.stack:
-                    print(str(n))
-                print(str(node))
-                if self.state.assert_on_warning:
-                    assert False
-                return False
-            if traverser.cycle:
-                return False
-            traverser.stack.append(node)
-            return True
-        def post_traverse(node, traverser):
-            assert traverser.stack
-            traverser.stack.pop()
-        traverser = EventGraphTraverser(forwards=False, use_gen=True,
-            generation=self.state.get_next_traversal_generation(),
-            op_fn=traverse_node, copy_fn=traverse_node, 
-            fill_fn=traverse_node, deppart_fn=traverse_node,
-            post_op_fn=post_traverse, post_copy_fn=post_traverse, 
-            post_fill_fn=post_traverse, post_deppart_fn=post_traverse)
-        traverser.origin = self
-        traverser.cycle = False
-        traverser.stack = list()
-        traverser.visit_event(self.start_event)
-        return traverser.cycle
+    def perform_cycle_check(self, cycle_detector):
+        return cycle_detector.check_for_cycles(self, self.physical_outgoing) 
 
     def is_interfering_index_space_launch(self):
-        assert self.kind == INDEX_TASK_KIND
         if self.reqs is None or self.points is None:
             return False
         all_reqs = list()
         # Find all non-projection requirements, and ensure that they are
         # compatible with themselves (as they will be used by all point tasks)
-        for req in self.reqs.itervalues():
+        for req in itervalues(self.reqs):
             if not req.is_projection():
                 if len(self.points) > 1:
                     dep_type = compute_dependence_type(req, req)
@@ -5595,9 +5707,14 @@ class Operation(object):
                                "operation %s is self interfering in %s") %
                                (req.index,str(self),str(self.context)))
                         return True
-        for point_task in self.points.itervalues():
-            for req in point_task.op.reqs.itervalues():
-                all_reqs.append(req)
+        if self.kind == INDEX_TASK_KIND:
+            for point_task in itervalues(self.points):
+                for req in itervalues(point_task.op.reqs):
+                    all_reqs.append(req)
+        else:
+            for point in itervalues(self.points):
+                for req in itervalues(point.reqs):
+                    all_reqs.append(req)
         # All requirements should be non interfering
         for idx1 in xrange(0, len(all_reqs)):
             req1 = all_reqs[idx1]
@@ -5653,12 +5770,11 @@ class Operation(object):
         assert not not path
         # See if we are restricted in any way
         assert self.context
-        self.context.check_restricted_coherence(self, req)
         # Now do the traversal for each of the fields
         for field in req.fields:
             # See if we have any aliased fields in future region requirements
             aliased_children = set()
-            for idx in range(index+1,len(self.reqs)):
+            for idx in xrange(index+1,len(self.reqs)):
                 other_req = self.reqs[idx]
                 if other_req.priv is NO_ACCESS:
                     continue
@@ -5690,7 +5806,8 @@ class Operation(object):
             # use them for adding/checking dependences on close operations
             previous_deps = list()
             if not req.parent.perform_logical_analysis(0, path, self, req, field,
-                  False, True, None, previous_deps, aliased_children, perform_checks):
+                                        False, True, False, False, previous_deps,
+                                        aliased_children, perform_checks):
                 return False
         # Restore the privileges if necessary
         if copy_reduce:
@@ -5703,7 +5820,7 @@ class Operation(object):
         start_index = 0 if self.context.current_fence is None else \
             self.context.operations.index(self.context.current_fence)
         stop_index = self.context.operations.index(self)
-        for index in range(start_index, stop_index):
+        for index in xrange(start_index, stop_index):
             prev_op = self.context.operations[index]
             if prev_op.replayed:
                 continue
@@ -5731,7 +5848,7 @@ class Operation(object):
             else:
                 dep = MappingDependence(prev_op, self, 0, 0, TRUE_DEPENDENCE)
                 prev_op.add_outgoing(dep)
-                self.add_incoming(prev_op)
+                self.add_incoming(dep)
         return True
 
     def analyze_logical_deletion(self, index, perform_checks):
@@ -5743,15 +5860,12 @@ class Operation(object):
         for field in req.fields:
             previous_deps = list()
             if not req.parent.perform_logical_deletion(0, path, self, req, field, 
-                                                       previous_deps, perform_checks):
+                                            False, previous_deps, perform_checks):
                 return False
         return True
 
     def perform_logical_analysis(self, perform_checks):
         if self.replayed:
-            if self.reqs is not None:
-                for idx in range(0,len(self.reqs)):
-                    self.context.check_restricted_coherence(self, self.reqs[idx])
             return True
         # We need a context to do this
         assert self.context is not None
@@ -5784,39 +5898,12 @@ class Operation(object):
             return True
         if self.kind == DELETION_OP_KIND:
             # Perform dependence analysis on the deletion region requirements
-            for idx in self.reqs.iterkeys():
+            for idx in iterkeys(self.reqs):
                 if not self.analyze_logical_deletion(idx, perform_checks):
                     return False
             return True
-        for idx in range(0,len(self.reqs)):
+        for idx in xrange(0,len(self.reqs)):
             if not self.analyze_logical_requirement(idx, perform_checks):
-                return False
-        # Perform any updates to the restricted state for our context 
-        if not self.update_context_restrictions():
-            return False
-        return True
-
-    def update_context_restrictions(self):
-        assert self.context is not None
-        # See if our operation had any bearing on the restricted
-        # properties of the enclosing context
-        if self.kind == ACQUIRE_OP_KIND:
-            assert 0 in self.reqs
-            if not self.context.add_acquisition(self.reqs[0]):
-                return False
-        elif self.kind == RELEASE_OP_KIND:
-            assert 0 in self.reqs
-            if not self.context.remove_acquisition(self.reqs[0]):
-                return False
-        elif self.kind == ATTACH_OP_KIND:
-            assert 0 in self.reqs
-            assert 0 in self.mappings
-            if not self.context.add_restriction(self.reqs[0],
-                                                self.mappings[0]):
-                return False
-        elif self.kind == DETACH_OP_KIND:
-            assert 0 in self.reqs
-            if not self.context.remove_restriction(self.reqs[0]):
                 return False
         return True
 
@@ -5833,14 +5920,6 @@ class Operation(object):
                     continue
                 # We found a good mapping dependence, so all is good
                 return True
-        # Special case for advance ops and open ops
-        if prev_op.kind == OPEN_OP_KIND and self.advance_ops:
-            for advance in self.advance_ops:
-                if req.index != advance.internal_idx:
-                    continue
-                if advance.has_mapping_dependence(advance.reqs[0], prev_op, 
-                                                  prev_req, TRUE_DEPENDENCE, field):
-                    return True
         # Look for the dependence transitively
         if self.has_transitive_mapping_dependence(prev_op):
             return True
@@ -5894,7 +5973,7 @@ class Operation(object):
                         assert False
                     return False
             return True
-        for req in self.reqs.itervalues():
+        for req in itervalues(self.reqs):
             # Check to see if there is any overlap in fields or regions 
             if len(set(req.fields) & set(next_req.fields)) == 0:
                 continue # No overlapping fields so we can keep going
@@ -5924,62 +6003,49 @@ class Operation(object):
         return True
 
     def analyze_logical_interference(self, prev_op, reachable):
-        for req in self.reqs.itervalues():  
+        for req in itervalues(self.reqs):  
             if not prev_op.analyze_previous_interference(self, req, reachable):
                 return False
         return True
 
     def find_mapping(self, index):
-        assert index in self.mappings
-        # Tell our context that we are using these instances, this is 
-        # necessary for handling virtual mappings correctly
-        result = self.mappings[index]
-        assert self.context is not None
-        for fid,inst in result.iteritems():
-            if inst.is_virtual():
-                continue
-        return result
+        if self.mappings is None or index not in self.mappings:
+            return None
+        return self.mappings[index]
 
-    def check_for_unanalyzed_realm_ops(self, perform_checks):
+    def check_for_spurious_realm_ops(self, perform_checks):
+        if not perform_checks:
+            return True
+        # TODO: We would want Legion Spy to check if reduction instances
+        #       are initialized correctly before they are reused in a replay.
+        if self.replayed:
+            return True
         if self.realm_copies:
-            count = 0
             for copy in self.realm_copies:
-                if not copy.analyzed:
-                    count += 1
-                # Clear out the reachable caches to help the garbage collector
-                copy.reachable_cache = None
-            if perform_checks and count > 0:
-                print("WARNING: "+str(self)+" generated "+str(count)+
-                      " unnecessary Realm copies")
-                for copy in self.realm_copies:
-                    if not copy.analyzed:
-                        print('    '+str(copy)+' was unnecessary')
+                if not copy.check_for_spurious_updates(copy.dst_fields, copy.dst_tree_id,
+                        copy.across_version_numbers if copy.is_across() 
+                        else copy.version_numbers):
+                    return False
         if self.realm_fills:
-            count = 0
             for fill in self.realm_fills:
-                if not fill.analyzed:
-                    count += 1
-                # Clear out the reachable caches to help the garbage collector
-                fill.reachable_cache = None
-            if perform_checks and count > 0:
-                print("WARNING: "+str(self)+" generated "+str(count)+\
-                      " unnecessary Realm fills")
-                for fill in self.realm_fills:
-                    if not fill.analyzed:
-                        print('    '+str(fill)+' was unnecessary')
+                if not fill.check_for_spurious_updates(fill.fields, fill.dst_tree_id,
+                        fill.across_version_numbers if fill.is_across()
+                        else fill.version_numbers):
+                    return False
+        return True
 
     def compute_current_version_numbers(self):
         assert self.context
         # Now do all of our region requirements
         assert not self.version_numbers
-        for index,req in self.reqs.iteritems():
+        for index,req in iteritems(self.reqs):
             if self.mappings and index in self.mappings:
                 mapping = self.mappings[index]
             else:
                 mapping = None
             depth = self.context.find_enclosing_context_depth(req, mapping)
             for field in req.fields:
-                req.logical_node.compute_current_version_numbers(depth, field, self, index)
+                req.logical_node.compute_current_version_numbers(depth, field, self, req.tid)
 
     def verify_copy_requirements(self, src_idx, src_req, dst_idx, dst_req, perform_checks):
         # If this was predicated there might not be any mappings
@@ -5993,12 +6059,10 @@ class Operation(object):
         src_mappings = self.find_mapping(src_req.index)
         dst_mappings = self.find_mapping(dst_req.index)
         assert self.context
-        src_depth = self.context.find_enclosing_context_depth(src_req, 
-                                            src_req.restricted_fields)
-        dst_depth = self.context.find_enclosing_context_depth(dst_req,
-                                            dst_req.restricted_fields)
+        src_depth = self.context.find_enclosing_context_depth(src_req, src_mappings) 
+        dst_depth = self.context.find_enclosing_context_depth(dst_req, dst_mappings)
         assert len(src_req.fields) == len(dst_req.fields)
-        for fidx in range(len(src_req.fields)):
+        for fidx in xrange(len(src_req.fields)):
             src_field = src_req.fields[fidx]
             dst_field = dst_req.fields[fidx]
             assert src_field.fid in src_mappings
@@ -6055,16 +6119,46 @@ class Operation(object):
 
     def verify_fill_requirement(self, index, req, perform_checks):
         assert self.context
-        depth = self.context.find_enclosing_context_depth(req, req.restricted_fields)
+        mappings = self.find_mapping(index)
+        depth = self.context.find_enclosing_context_depth(req, mappings)
         for field in req.fields:
             if not req.logical_node.perform_fill_verification(depth, field, self, req):
                 return False
             # If this field is restricted, we effectively have to fill it
             # now to get the proper semantics of seeing updates right away
-            if req.restricted_fields and field in req.restricted_fields:
+            if mappings is not None and field in mappings:
                 if not req.logical_node.perform_physical_verification(depth, field,
-                        self, req, req.restricted_fields[field], perform_checks, False):
+                        self, req, mappings[field], perform_checks, False):
                     return False
+        return True
+
+    def add_restriction(self, index, req, perform_checks):
+        assert self.context
+        assert index in self.mappings
+        mappings = self.mappings[index]
+        depth = self.context.find_enclosing_context_depth(req, mappings)
+        for field in req.fields:
+            inst = mappings[field.fid]
+            assert not inst.is_virtual()
+            if not req.logical_node.add_restriction(depth, field, self, req, 
+                                                    inst, perform_checks):
+                return False
+        return True
+
+    def remove_restriction(self, index, req, perform_checks):
+        assert self.context
+        assert index in self.mappings
+        mappings = self.mappings[index]
+        depth = self.context.find_enclosing_context_depth(req, mappings)
+        perform_filter = self.kind == DETACH_OP_KIND
+        for field in req.fields:
+            if perform_filter:
+                inst = mappings[field.fid]
+            else:
+                inst = None
+            if not req.logical_node.remove_restriction(depth, field, self, req, 
+                                                       inst, perform_checks):
+                return False
         return True
 
     def verify_physical_requirement(self, index, req, perform_checks):
@@ -6118,90 +6212,67 @@ class Operation(object):
                 return False
         return True
 
-    def perform_op_physical_verification(self, perform_checks, need_restrict_analysis):
+    def perform_op_physical_verification(self, perform_checks):
         # If we were predicated false, then there is nothing to do
         if not self.predicate_result:
             return True
         prefix = ''
         if self.context:
             depth = self.context.get_depth()
-            for idx in range(depth):
+            for idx in xrange(depth):
                 prefix += '  '
-            # Since we have a context, see if we have to do our restriction analysis
-            if need_restrict_analysis:
-                if self.reqs is not None:
-                    for idx in range(0,len(self.reqs)):
-                        self.context.check_restricted_coherence(self, self.reqs[idx])
-                # Do our updates to the restricted set
-                if not self.update_context_restrictions():
-                    return False
-        # If we have any internal operations (e.g. close operations, then
-        # see if they performed any physical analysis
-        if self.inter_close_ops:
-            assert not self.kind == INTER_CLOSE_OP_KIND and \
-                   not self.kind == READ_ONLY_CLOSE_OP_KIND
-            for close in self.inter_close_ops:
-                if close.kind == READ_ONLY_CLOSE_OP_KIND:
-                    continue
-                if not close.perform_op_physical_verification(perform_checks, 
-                                                              need_restrict_analysis):
-                    return False
         # If we are an index space task, only do our points
         if self.kind == INDEX_TASK_KIND:
-            for point in sorted(self.points.itervalues(), key=lambda x: x.op.uid):
-                if not point.op.perform_op_physical_verification(perform_checks,
-                                                                 need_restrict_analysis):
+            for point in sorted(itervalues(self.points), key=lambda x: x.op.uid):
+                if not point.op.perform_op_physical_verification(perform_checks):
                     return False
             return True
         elif self.points: # Handle other index space operations too
-            for point in sorted(self.points.itervalues(), key=lambda x: x.uid):
-                if not point.perform_op_physical_verification(perform_checks,
-                                                              need_restrict_analysis):
+            for point in sorted(itervalues(self.points), key=lambda x: x.uid):
+                if not point.perform_op_physical_verification(perform_checks):
                     return False
             return True
-        print((prefix+"Performing physical verification analysis "+
-                     "for %s (UID %d)...") % (str(self),self.uid))
-        # As a small performance optimization get all our reachable operations
-        # now if we are going to be doing checks so we don't have to repeate BFS
-        assert self.reachable_cache is None
-        self.reachable_cache = set()
-        self.get_physical_reachable(self.reachable_cache, False)
+        if perform_checks:
+            print((prefix+"Performing physical verification analysis "+
+                         "for %s (UID %d)...") % (str(self),self.uid))
+        else:
+            print((prefix+"Performing physical emulation analysis "+
+                         "for %s (UID %d)...") % (str(self),self.uid))
         # Handle special cases
         if self.kind == COPY_OP_KIND:
             # Check to see if this is an index copy
             if self.points:
-                for point in sorted(self.points.itervalues(), key=lambda x: x.uid):
-                    if not point.perform_op_physical_verification(perform_checks, 
-                                                                  need_restrict_analysis):
+                for point in sorted(itervalues(self.points), key=lambda x: x.uid):
+                    if not point.perform_op_physical_verification(perform_checks): 
                         return False
                 return True
             # Compute our version numbers first
-            self.compute_current_version_numbers()
+            if perform_checks:
+                self.compute_current_version_numbers()
             num_reqs = len(self.reqs)
             assert num_reqs % 2 == 0
-            num_copies = num_reqs / 2
-            for idx in range(num_copies):
+            num_copies = num_reqs // 2
+            for idx in xrange(num_copies):
                 if not self.verify_copy_requirements(idx, self.reqs[idx],
                         idx+num_copies, self.reqs[idx+num_copies], perform_checks):
                     return False
         elif self.kind == FILL_OP_KIND:
             # Check to see if this is an index fill
             if self.points:
-                for point in sorted(self.points.itervalues(), key=lambda x: x.uid):
-                    if not point.perform_op_physical_verification(perform_checks,
-                                                                  need_restrict_analysis):
+                for point in sorted(itervalues(self.points), key=lambda x: x.uid):
+                    if not point.perform_op_physical_verification(perform_checks):
                         return False
                 return True
             # Compute our version numbers first
-            self.compute_current_version_numbers()
-            for index,req in self.reqs.iteritems():
+            if perform_checks:
+                self.compute_current_version_numbers()
+            for index,req in iteritems(self.reqs):
                 if not self.verify_fill_requirement(index, req, perform_checks):
                     return False
         elif self.kind == DEP_PART_OP_KIND and self.points:
             # Index partition operation
-            for point in sorted(self.points.itervalues(), key=lambda x: x.uid):
-                if not point.perform_op_physical_verification(perform_checks,
-                                                              need_restrict_analysis):
+            for point in sorted(itervalues(self.points), key=lambda x: x.uid):
+                if not point.perform_op_physical_verification(perform_checks):
                     return False
             return True
         elif self.kind == DELETION_OP_KIND:
@@ -6210,28 +6281,35 @@ class Operation(object):
         else:
             if self.reqs:
                 # Compute our version numbers first
-                self.compute_current_version_numbers()
-                for index,req, in self.reqs.iteritems():
+                if perform_checks:
+                    self.compute_current_version_numbers()
+                for index,req, in iteritems(self.reqs):
                     if not self.verify_physical_requirement(index, req, perform_checks):
                         return False
-            if self.kind == SINGLE_TASK_KIND:
+            # Add any restrictions for different kinds of ops
+            if self.kind == RELEASE_OP_KIND or self.kind == ATTACH_OP_KIND:
+                for index,req in iteritems(self.reqs):
+                    if not self.add_restriction(index, req, perform_checks):
+                        return False
+            elif self.kind == ACQUIRE_OP_KIND or self.kind == DETACH_OP_KIND:
+                for index,req in iteritems(self.reqs):
+                    if not self.remove_restriction(index, req, perform_checks):
+                        return False
+                return True
+            elif self.kind == SINGLE_TASK_KIND:
                 # We now need to do the registration for our region
                 # requirements since we didn't do it as part of the 
                 # normal physical analysis
                 if self.reqs:
-                    for index,req, in self.reqs.iteritems():
+                    for index,req, in iteritems(self.reqs):
                         if not self.perform_verification_registration(index, req, 
                                                                       perform_checks):
                             return False
                 # If we are not a leaf task, go down the task tree
                 if self.task is not None:
-                    if not self.task.perform_task_physical_verification(perform_checks,
-                                                                need_restrict_analysis):
+                    if not self.task.perform_task_physical_verification(perform_checks):
                         return False
-        self.check_for_unanalyzed_realm_ops(perform_checks)
-        # Clean up our reachable cache
-        self.reachable_cache = None
-        return True
+        return self.check_for_spurious_realm_ops(perform_checks)
 
     def print_op_mapping_decisions(self, depth):
         if self.inter_close_ops:
@@ -6241,12 +6319,12 @@ class Operation(object):
         # If we are an index task just do our points and return
         if self.kind == INDEX_TASK_KIND:
             assert self.points is not None
-            for point in self.points.itervalues():
+            for point in itervalues(self.points):
                 point.op.print_op_mapping_decisions(depth)
             return
         # Print our mapping decisions
         prefix = ''
-        for idx in range(depth):
+        for idx in xrange(depth):
             prefix += '  '
         print(prefix+'-------------------------------------------------')
         print(prefix+' Mapping Decisions for '+str(self)+' (depth='+str(depth)+')')
@@ -6258,12 +6336,12 @@ class Operation(object):
                     'Yes' if self.task.variant.inner else 'No',
                     'Yes' if self.task.variant.leaf else 'No'))
         if self.mappings is not None:
-            for index,mappings in self.mappings.iteritems():
+            for index,mappings in iteritems(self.mappings):
                 assert index in self.reqs
                 req = self.reqs[index]
                 print(prefix+'  Region Requirement '+str(index)+' Region=('+
                       str(req.index_node)+','+str(req.field_space)+','+str(req.tid)+')')
-                for fid,inst in mappings.iteritems():
+                for fid,inst in iteritems(mappings):
                     field = req.field_space.get_field(fid)
                     print(prefix+'    '+str(field)+': '+str(inst))
         print(prefix+' End '+str(self)+' (depth='+str(depth)+')')
@@ -6279,10 +6357,10 @@ class Operation(object):
             INDEX_TASK_KIND : "mediumslateblue",
             MAP_OP_KIND : "mediumseagreen",
             INTER_CLOSE_OP_KIND : "orangered", 
-            READ_ONLY_CLOSE_OP_KIND : "darkgreen",
+            #READ_ONLY_CLOSE_OP_KIND : "darkgreen",
             POST_CLOSE_OP_KIND : "darkslateblue",
-            OPEN_OP_KIND : "royalblue",
-            ADVANCE_OP_KIND : "magenta",
+            #OPEN_OP_KIND : "royalblue",
+            #ADVANCE_OP_KIND : "magenta",
             FENCE_OP_KIND : "darkorchid2",
             COPY_OP_KIND : "darkgoldenrod3",
             FILL_OP_KIND : "darkorange1",
@@ -6298,11 +6376,14 @@ class Operation(object):
             TIMING_OP_KIND : "turquoise",
             PREDICATE_OP_KIND : "olivedrab1",
             MUST_EPOCH_OP_KIND : "tomato",
-            SUMMARY_OP_KIND : "darkslategray4",
             }[self.kind]
 
+    @property
+    def html_safe_name(self):
+        return str(self).replace('<','&lt;').replace('>','&gt;')
+
     def print_base_node(self, printer, dataflow):
-        title = str(self)+' (UID: '+str(self.uid)+')'
+        title = self.html_safe_name+' (UID: '+str(self.uid)+')'
         if self.task is not None and self.task.point.dim > 0:
             title += ' Point: ' + self.task.point.to_string()
         if self.replayed:
@@ -6317,24 +6398,12 @@ class Operation(object):
         if self.inter_close_ops:
             for close in self.inter_close_ops:
                 close.print_dataflow_node(printer)
-        if self.open_ops:
-            for open_op in self.open_ops:
-                open_op.print_dataflow_node(printer)
-        if self.advance_ops:
-            for advance in self.advance_ops:
-                advance.print_dataflow_node(printer)
         self.print_base_node(printer, True) 
 
     def print_incoming_dataflow_edges(self, printer, previous):
         if self.inter_close_ops:
             for close in self.inter_close_ops:
                 close.print_incoming_dataflow_edges(printer, previous)
-        if self.open_ops:
-            for open_op in self.open_ops:
-                open_op.print_incoming_dataflow_edges(printer, previous)
-        if self.advance_ops:
-            for advance in self.advance_ops:
-                advance.print_incoming_dataflow_edges(printer, previous)
         if self.incoming:
             for dep in self.incoming:
                 dep.print_dataflow_edge(printer, previous)
@@ -6389,10 +6458,10 @@ class Operation(object):
             # Might have been predicated
             if self.points:
                 if self.kind is INDEX_TASK_KIND:
-                    for point in self.points.itervalues():
+                    for point in itervalues(self.points):
                         point.op.print_event_graph(printer, elevate, all_nodes, False)
                 else:
-                    for point in self.points.itervalues():
+                    for point in itervalues(self.points):
                         point.print_event_graph(printer, elevate, all_nodes, False)
             # Put any operations we generated in the elevate set
             if self.realm_copies:
@@ -6442,10 +6511,6 @@ class Operation(object):
             return False
         if self.kind is DELETION_OP_KIND:
             return False
-        if self.kind is ATTACH_OP_KIND:
-            return False
-        if self.kind is DETACH_OP_KIND:
-            return False
         return True
 
     def print_incoming_event_edges(self, printer):
@@ -6470,11 +6535,38 @@ class Operation(object):
                     printer.println(src.node_name+' -> '+self.node_name+
                             ' [style=solid,color=black,penwidth=2];')
 
+    def print_eq_node(self, printer, eq_key):
+        pass
+
+    def print_incoming_eq_edges(self, printer, eq_key):
+        if self.eq_incoming is None or eq_key not in self.eq_incoming:
+            return
+        if self.cluster_name is not None:
+            for src in self.eq_incoming[eq_key]:
+                if src.cluster_name is not None:
+                    printer.println(src.node_name+' -> '+self.node_name+
+                            ' [ltail='+src.cluster_name+',lhead='+
+                            self.cluster_name+',style=solid,color=black,'+
+                            'penwidth=2];')
+                else:
+                    printer.println(src.node_name+' -> '+self.node_name+
+                            ' [lhead='+self.cluster_name+',style=solid,'+
+                            'color=black,penwidth=2];')
+        else:
+            for src in self.eq_incoming[eq_key]:
+                if src.cluster_name is not None:
+                    printer.println(src.node_name+' -> '+self.node_name+
+                            ' [ltail='+src.cluster_name+',style=solid,'+
+                            'color=black,penwidth=2];')
+                else:
+                    printer.println(src.node_name+' -> '+self.node_name+
+                            ' [style=solid,color=black,penwidth=2];')
+
     def pack_requirement_replay_info(self, replay_file, req, mapping):
         if mapping:
             # Get the unique set of instances
             unique_insts = set()
-            for inst in mapping.itervalues():
+            for inst in itervalues(mapping):
                 if inst.is_virtual():
                     continue
                 unique_insts.add(inst)
@@ -6483,18 +6575,6 @@ class Operation(object):
                 replay_file.write(struct.pack('Q',inst.handle))
         else:
             replay_file.write(struct.pack('I',0))
-
-    def pack_temporary_replay_info(self, replay_file, req, mapping, temporary):
-        assert len(temporary) > 0
-        # Compute the unique set of pairs
-        unique_pairs = dict()
-        for fid,inst in temporary.iteritems():
-            assert fid in mapping
-            unique_pairs[mapping[fid]] = inst
-        replay_file.write(struct.pack('I',len(unique_pairs)))
-        for dst,src in unique_pairs.iteritems():
-            replay_file.write(struct.pack('Q',dst.handle))
-            replay_file.write(struct.pack('Q',src.handle))
 
     def pack_inline_replay_info(self, replay_file):
         assert self.kind == MAP_OP_KIND
@@ -6505,13 +6585,6 @@ class Operation(object):
         replay_file.write(struct.pack('I',1))
         self.pack_requirement_replay_info(replay_file, self.reqs[0], 
                                           self.mappings[0])
-        if self.temporaries:
-            assert 0 in self.temporaries  
-            replay_file.write(struct.pack('I',1))
-            self.pack_temporary_replay_info(replay_file, self.reqs[0], 
-                                self.mappings[0], self.temporaries[0])
-        else:
-            replay_file.write(struct.pack('I',0))
 
     def pack_copy_replay_info(self, replay_file):
         assert self.kind == COPY_OP_KIND
@@ -6519,27 +6592,6 @@ class Operation(object):
         assert len(self.reqs) % 2 == 0
         half = len(self.reqs) / 2
         replay_file.write(struct.pack('I',half))
-        src_temporaries = set()
-        for idx in range(half):
-            self.pack_requirement_replay_info(replay_file, self.reqs[idx],
-              None if idx not in self.mappings[idx] else self.mappings[idx])
-            if self.temporaries and idx in self.temporaries:
-                src_temporaries.add(idx)
-        replay_file.write(struct.pack('I',half))
-        dst_temporaries = set()
-        for idx in range(half,2*half):
-            self.pack_requirement_replay_info(replay_file,self.reqs[idx],
-              None if idx not in self.mappings[idx] else self.mappings[idx])
-            if self.temporaries and idx in self.temporaries:
-                dst_temporaries.add(idx)
-        replay_file.write(struct.pack('I',len(src_temporaries)))
-        for idx in src_temporaries:
-            self.pack_temporary_replay_info(replay_file, self.reqs[idx],
-                              self.mappings[idx], self.temporaries[idx])
-        replay_file.write(struct.pack('I',len(dst_temporaries)))
-        for idx in dst_temporaries:
-            self.pack_temporary_replay_info(replay_file, self.reqs[idx],
-                              self.mappings[idx], self.temporaries[idx])
         
     def pack_close_replay_info(self, replay_file):
         assert self.kind == INTER_CLOSE_OP_KIND
@@ -6552,27 +6604,10 @@ class Operation(object):
                                               self.mappings[0])
         else:
             replay_file.write(struct.pack('I',0))
-        if self.temporaries:
-            assert 0 in self.mappings
-            assert 0 in self.temporaries  
-            replay_file.write(struct.pack('I',1))
-            self.pack_temporary_replay_info(replay_file, self.reqs[0], 
-                                self.mappings[0], self.temporaries[0])
-        else:
-            replay_file.write(struct.pack('I',0))
 
     def pack_release_replay_info(self, replay_file):
         assert self.kind == RELEASE_OP_KIND
         replay_file.write(struct.pack('Q',self.uid))
-        if self.temporaries:
-            assert 0 in self.reqs
-            assert 0 in self.mappings
-            assert 0 in self.temporaries  
-            replay_file.write(struct.pack('I',1))
-            self.pack_temporary_replay_info(replay_file, self.reqs[0], 
-                                self.mappings[0], self.temporaries[0])
-        else:
-            replay_file.write(struct.pack('I',0))
 
 class Variant(object):
     __slots__ = ['state', 'vid', 'inner', 'leaf', 'idempotent', 'name']
@@ -6605,21 +6640,19 @@ class ProjectionFunction(object):
 
 class Task(object):
     __slots__ = ['state', 'op', 'point', 'operations', 'depth', 
-                 'current_fence', 'restrictions', 'dumb_acquisitions', 
-                 'used_instances', 'virtual_indexes', 'processor', 'priority', 
-                 'premappings', 'postmappings', 'tunables',
-                 'operation_indexes', 'close_indexes', 'variant']
+                 'current_fence', 'used_instances', 'virtual_indexes', 
+                 'processor', 'priority', 'premappings', 'postmappings', 
+                 'tunables', 'operation_indexes', 'close_indexes', 'variant']
                   # If you add a field here, you must update the merge method
     def __init__(self, state, op):
         self.state = state
         self.op = op
-        self.op.task = self
+        if op is not None:
+            self.op.task = self
         self.point = Point(0) 
         self.operations = list()
         self.depth = None
         self.current_fence = None
-        self.restrictions = None
-        self.dumb_acquisitions = None
         self.used_instances = None
         self.virtual_indexes = None
         self.processor = None
@@ -6632,7 +6665,10 @@ class Task(object):
         self.variant = None
 
     def __str__(self):
-        return str(self.op)
+        if self.op is None:
+            return "Root context"
+        else:
+            return str(self.op)
 
     __repr__ = __str__
 
@@ -6672,14 +6708,14 @@ class Task(object):
                 assert index in self.op.mappings
                 mapping = self.op.mappings[index]
                 unique_insts = set()
-                for inst in mapping.itervalues():
+                for inst in itervalues(mapping):
                     unique_insts.add(inst)
                 for inst in unique_insts:
                     inst.increment_use_count() 
         if self.postmappings:
-            for mapping in self.postmappings.itervalues():
+            for mapping in itervalues(self.postmappings):
                 unique_insts = set()
-                for inst in mapping.itervalues():
+                for inst in itervalues(mapping):
                     unique_insts.add(inst)
                 for inst in unique_insts:
                     inst.increment_use_count()
@@ -6761,9 +6797,10 @@ class Task(object):
     def flatten_summary_operations(self):
         flattened = list()
         for op in self.operations:
-            if op.summary_ops is not None:
-                for summary in op.summary_ops:
-                    flattened.append(summary)
+            if op.summary_op == op:
+                continue
+            if op.summary_op is not None:
+                flattened.append(op.summary_op)
             flattened.append(op)
         self.operations = flattened
 
@@ -6779,148 +6816,24 @@ class Task(object):
         print('Performing logical dependence analysis for %s...' % str(self))
         if self.op.state.verbose:
             print('  Analyzing %d operations...' % len(self.operations))
-        # See if we have any restrictions that we need to care about
-        if self.op.reqs:
-            for idx,req in self.op.reqs.iteritems():
-                if (req.priv == READ_WRITE or req.priv == READ_ONLY) and \
-                    req.coher == SIMULTANEOUS: 
-                    assert idx in self.op.mappings
-                    mapping = self.op.mappings[idx]
-                    # Add a restriction for all the fields 
-                    if not self.restrictions:
-                        self.restrictions = list()
-                    for field in req.fields:
-                        assert field.fid in mapping 
-                        inst = mapping[field.fid]
-                        self.restrictions.append(
-                            Restriction(req.logical_node, field, inst))
         # Iterate over all the operations in order and
         # have them perform their analysis
         success = True
         for op in self.operations:
+            if not op.fully_logged:
+                print(('Warning: skipping logical analysis of %s because it '+
+                        'was not fully logged...') % str(op))
+                if op.state.assert_on_warning:
+                    assert False
+                continue
             if not op.perform_logical_analysis(perform_checks):
                 success = False
                 break
         # Reset the logical state when we are done
         self.op.state.reset_logical_state()
-        # We can clear this out now since we don't need them anymore
-        self.restrictions = None 
-        self.dumb_acquisitions = None
         print("Pass" if success else "FAIL")
         return success
 
-    def check_restricted_coherence(self, op, req):
-        # If we have no restrictions, nothing to worry about
-        if not self.restrictions: 
-            return
-        # Requirements that are read-only can never be restricted
-        if req.priv == READ_ONLY:
-            return
-        # Otherwise iterate through the restrictions and
-        # find any restrictions we have
-        for restrict in self.restrictions:
-            for field in req.fields:
-                if restrict.find_restrictions(req.logical_node, field, req):
-                    # If we found restrictions then we know we are done
-                    break
-                if restrict.find_restrictions(req.logical_node, field, req):
-                    assert field in req.restricted_fields
-                    # Can break out of the inner loop here
-                    # and go on to the next field
-                    break
-
-    def add_acquisition(self, req):
-        if not self.restrictions:
-            print("WARNING: Unnecessary acquire in "+str(self)+
-                  " with no restrictions")
-            if not self.dumb_acquisitions:
-                self.dumb_acquisitions = list()
-            for field in req.fields:
-                self.dumb_acquisitions.append(Acquisition(req.logical_node, field))
-        for field in req.fields:
-            # Try to add it to any of the existing restrictions
-            success = False
-            for restrict in self.restrictions:
-                if restrict.add_acquisition(req.logical_node, field):
-                    success = True
-                    break
-            if not success:
-                print("WARNING: Unnecessary acquire in "+str(self))
-                if not self.dumb_acquisitions:
-                    self.dumb_acquisitions = list()
-                self.dumb_acquisitions.append(Acquisition(req.logical_node, field))
-        return True
-
-    def remove_acquisition(self, req):
-        for field in req.fields:
-            success = False
-            if self.restrictions:
-                for restrict in self.restrictions:
-                    if restrict.remove_acquisition(req.logical_node, field):
-                        success = True
-                        break
-            if not success and self.dumb_acquisitions:
-                for acquire in self.dumb_acquisitions:
-                    if acquire.matches(req.logical_node, field):
-                        success = True
-                        self.dumb_acquisitions.remove(acquire)
-                        break
-                    if acquire.remove_acquisition(req.logical_node, field):
-                        success = True
-                        break
-            if not success:
-                print("ERROR: Invalid release operation")
-                if self.op.state.assert_on_error:
-                    assert False
-                return False
-        return True
-
-    def add_restriction(self, req, mapping):
-        for field in req.fields:
-            assert field.fid in mapping
-            inst = mapping[field.fid]
-            assert not inst.is_virtual()
-            if self.restrictions:
-                # Try to add it to any existing trees
-                success = False
-                if self.restrictions:
-                    for restrict in self.restrictions:
-                        if restrict.add_restrict(req.logical_node, field, inst):
-                            success = True
-                            break
-                if success:
-                    continue
-            else:
-                self.restrictions = list()
-            # If we make it here, add a new restriction
-            self.restrictions.append(
-                Restriction(req.logical_node, field, inst))
-        return True
-
-    def remove_restriction(self, req):
-        for field in req.fields:
-            success = False
-            if self.restrictions:
-                for restrict in self.restrictions:
-                    if restrict.matches(req.logical_node, field):
-                        success = True 
-                        self.restrictions.remove(restrict)
-                        break
-                    if restrict.remove_restrict(req.logical_node, field):
-                        success = True
-                        break
-            if not success and self.dumb_acquisitions:
-                for acquire in self.dumb_acquisitions:
-                    if acquire.remove_restrict(req.logical_node, field):
-                        success = True
-                        break
-            if not success:
-                print("ERROR: Illegal detach with no matching restriction")
-                if self.op.state.assert_on_error:
-                    assert False
-                return False
-        return True
-    
     def perform_logical_sanity_analysis(self):
         # Run the old version of the checks that
         # is more of a sanity check on our algorithm that
@@ -6931,7 +6844,7 @@ class Task(object):
         print('Performing logical sanity analysis for %s...' % str(self))
         # Iterate over all operations from 1 to N and check all their
         # dependences against all the previous operations in the context
-        for idx in range(1, len(self.operations)):
+        for idx in xrange(1, len(self.operations)):
             # Find all the backwards reachable operations
             current_op = self.operations[idx]
             # No need to do anything if there are no region requirements
@@ -6941,7 +6854,7 @@ class Task(object):
             current_op.get_logical_reachable(reachable, False) 
             # Do something special for fence operations
             if current_op.kind == FENCE_OP_KIND: # special path for fences
-                for prev in range(idx):
+                for prev in xrange(idx):
                     if not prev in reachable:
                         print("ERROR: Failed logical sanity check. No mapping "+
                               "dependence between previous "+str(prev)+" and "+
@@ -6950,7 +6863,7 @@ class Task(object):
                             assert False
                         return False
             else: # The normal path
-                for prev in range(idx):
+                for prev in xrange(idx):
                     if not current_op.analyze_logical_interference(
                                   self.operations[prev], reachable):
                         print("FAIL")
@@ -6965,7 +6878,7 @@ class Task(object):
             return depth
         if self.op.reqs:
             # Find which region requirement privileges were derived from
-            for idx,our_req in self.op.reqs.iteritems():
+            for idx,our_req in iteritems(self.op.reqs):
                 if child_req.parent is not our_req.logical_node:
                     continue
                 fields_good = True
@@ -6989,7 +6902,7 @@ class Task(object):
                     return self.op.context.find_enclosing_context_depth(our_req, mappings)
                 else:
                     if mappings:
-                        for fid,inst in mappings.iteritems():
+                        for fid,inst in iteritems(mappings):
                             self.used_instances.add((inst,fid))
                     return depth
         # Trust the runtime privilege checking here
@@ -6997,7 +6910,7 @@ class Task(object):
         # up the task tree so just give it depth zero
         return 0
 
-    def perform_task_physical_verification(self, perform_checks, need_restrict_analysis):
+    def perform_task_physical_verification(self, perform_checks):
         if not self.operations:
             return True
         # Depth is a proxy for context 
@@ -7006,32 +6919,33 @@ class Task(object):
         self.used_instances = set()
         # Initialize any regions that we mapped
         if self.op.reqs:
-            for idx,req in self.op.reqs.iteritems():
+            for idx,req in iteritems(self.op.reqs):
                 # Skip any no access requirements
                 if req.is_no_access() or len(req.fields) == 0:
                     continue
                 assert idx in self.op.mappings
                 mappings = self.op.mappings[idx]
                 # If we are doing restricted analysis then add any restrictions
-                add_restrictions = need_restrict_analysis and \
+                add_restrictions = \
                         (req.priv == READ_WRITE or req.priv == READ_ONLY) and \
                         req.coher == SIMULTANEOUS
-                if add_restrictions and not self.restrictions:
-                    self.restrictions = list()
                 for field in req.fields:
                     assert field.fid in mappings
                     inst = mappings[field.fid]
                     if inst.is_virtual():
                         assert not add_restrictions # Better not be virtual if restricted
                         continue
-                    req.logical_node.initialize_verification_state(depth, field, inst)
-                    if add_restrictions:
-                        self.restrictions.append(
-                                Restriction(req.logical_node, field, inst))
+                    req.logical_node.initialize_verification_state(depth, field, inst, 
+                                                                   add_restrictions)
         success = True
         for op in self.operations:
-            if not op.perform_op_physical_verification(perform_checks, 
-                                                       need_restrict_analysis):
+            if not op.fully_logged:
+                print(('Warning: skipping physical verification of %s '+
+                        'because it was not fully logged...') % str(op))
+                if op.state.assert_on_warning:
+                    assert False
+                continue
+            if not op.perform_op_physical_verification(perform_checks): 
                 success = False
                 break
         # Reset any physical user lists at our depth
@@ -7043,6 +6957,8 @@ class Task(object):
     def print_task_mapping_decisions(self):
         depth = self.get_depth()
         for op in self.operations:
+            if not op.fully_logged:
+                continue
             op.print_op_mapping_decisions(depth)
 
     def print_dataflow_graph(self, path, simplify_graphs, zoom_graphs):
@@ -7050,70 +6966,108 @@ class Task(object):
             return 0
         if len(self.operations) == 1:
             op = self.operations[0]
-            if not op.inter_close_ops and not op.open_ops and not op.advance_ops:
+            if not op.inter_close_ops or not op.fully_logged:
                 return 0
         name = str(self)
         filename = 'dataflow_'+name.replace(' ', '_')+'_'+str(self.op.uid)
         printer = GraphPrinter(path,filename)
         # First emit the nodes
         for op in self.operations:
+            if not op.fully_logged:
+                print(('Warning: skipping dataflow printing of %s because it '+
+                        'was not fully logged...') % str(op))
+                if op.state.assert_on_warning:
+                    assert False
+                continue
             op.print_dataflow_node(printer)
         # Simplify our graph if necessary
         if simplify_graphs:
             print("Simplifying dataflow graph for "+str(self)+"...")
             all_ops = list()
             for op in self.operations:
+                if not op.fully_logged:
+                    continue
                 # Add any close operations first
                 if op.inter_close_ops:
                     for close in op.inter_close_ops:
                         all_ops.append(close)
-                if op.open_ops:
-                    for open_op in op.open_ops:
-                        all_ops.append(open_op)
-                if op.advance_ops:
-                    for advance in op.advance_ops:
-                        all_ops.append(advance)
                 # Then add the operation itself
                 all_ops.append(op)
+                # If this is an index space operation prune any
+                # self-edges which could interfere with the
+                # transitive reduction that we're about to do
+                # These transitive edges occur when we have potentially
+                # interfering and aliased projection region requirements
+                # but the point tasks ultimately do not end up interfering
+                # We know this is safe because it is checked in post_parse
+                # by the is_interfering_index_space_launch method so these
+                # cannot be actually intefering edges.
+                if op.points is not None and op.logical_incoming is not None:
+                    if op in op.logical_incoming:
+                        op.logical_incoming.remove(op)
+                        op.logical_outgoing.remove(op)
                 # Print any phase barier edges now, since
                 # we know they will all be printed
                 if self.state.detailed_graphs:
                     op.print_phase_barrier_edges(printer)
+            index_map = dict()
+            reachable = dict()
+            total_nodes = len(all_ops)
             # Now traverse the list in reverse order
-            while all_ops:
-                src = all_ops.pop()
-                if src.logical_outgoing is None:
+            for src_index in xrange(total_nodes-1,-1,-1):
+                src = all_ops[src_index]
+                index_map[src] = src_index
+                our_reachable = NodeSet(total_nodes)
+                reachable[src] = our_reachable
+                if src.logical_outgoing is None or len(src.logical_outgoing) == 0:
                     continue
-                actual_out = src.logical_outgoing.copy()
-                diff = False
-                for next_vert in src.logical_outgoing:
-                    if not next_vert in actual_out:
+                # Otherwise iterate through our outgoing edges and get the set of 
+                # nodes reachable from all of them
+                for dst in src.logical_outgoing:
+                    # Some nodes won't appear in the list of all operations
+                    # such as must epoch operations which we can safely skip
+                    if dst not in reachable:
+                        assert dst not in all_ops
                         continue
-                    reachable = set()
-                    next_vert.get_logical_reachable(reachable, True)
-                    # See which edges we can remove
-                    to_remove = list()
-                    for other in actual_out:
-                        if other == next_vert:
-                            continue
-                        if other in reachable:
-                            to_remove.append(other)
-                    del reachable
-                    if len(to_remove) > 0:
-                        diff = True
-                        for rem in to_remove:
-                            actual_out.remove(rem)
-                            rem.logical_incoming.remove(src)
-                    del to_remove
-                if diff:
-                    src.logical_outgoing = actual_out
-                for dst in actual_out:
+                    our_reachable.union(reachable[dst])
+                # Now see which of our nodes can be reached indirectly
+                to_remove = None
+                for dst in src.logical_outgoing:
+                    # See comment above for why we can skip some edges
+                    if dst not in index_map:
+                        assert dst not in all_ops
+                        continue
+                    dst_index = index_map[dst]
+                    if our_reachable.contains(dst_index):
+                        if to_remove is None:
+                            to_remove = list()
+                        to_remove.append(dst)
+                    else:
+                        # We need to add it to our reachable set
+                        our_reachable.add(dst_index)
+                if to_remove:
+                    for dst in to_remove:
+                        src.logical_outgoing.remove(dst)
+                        dst.logical_incoming.remove(src)
+                # We should never remove everything
+                assert len(src.logical_outgoing) > 0
+                for dst in src.logical_outgoing:
+                    # Skip any edges to nodes not in the reachable list
+                    # (e.g. must epoch operations)
+                    if dst not in reachable:
+                        continue
                     printer.println(src.node_name+' -> '+dst.node_name+
                                     ' [style=solid,color=black,penwidth=2];')
             print("Done")
         else:
             previous_pairs = set()
             for op in self.operations:
+                if not op.fully_logged:
+                    print(('Warning: skipping dataflow printing of %s because it '+
+                            'was not fully logged...') % str(op))
+                    if op.state.assert_on_warning:
+                        assert False
+                    continue
                 op.print_incoming_dataflow_edges(printer, previous_pairs)
         printer.print_pdf_after_close(False, zoom_graphs)
         # We printed our dataflow graph
@@ -7138,10 +7092,16 @@ class Task(object):
             printer.println(self.op.node_name + ' [shape=point,style=invis];')
         # Generate the sub-graph
         for op in self.operations:
+            if not op.fully_logged:
+                print(('Warning: skipping event graph printing of %s because it '+
+                            'was not fully logged...') % str(op))
+                if op.state.assert_on_warning:
+                    assert False
+                continue
             op.print_event_graph(printer, elevate, all_nodes, False)
         # Find our local nodes
         local_nodes = list()
-        for node,context in elevate.iteritems():
+        for node,context in iteritems(elevate):
             if context is self:
                 local_nodes.append(node)
                 node.print_event_node(printer)
@@ -7158,7 +7118,7 @@ class Task(object):
         # Pack the point
         replay_file.write(struct.pack('Q', op_id))
         replay_file.write(struct.pack('i', self.point.dim))
-        for idx in range(self.point.dim):
+        for idx in xrange(self.point.dim):
             replay_file.write(struct.pack('Q',self.point.vals[idx]))
         # Pack the base data
         replay_file.write(struct.pack('Q', op_id)) 
@@ -7178,7 +7138,7 @@ class Task(object):
         # Pack mappings
         if self.op.reqs:
             replay_file.write(struct.pack('I',len(self.op.reqs)))
-            for index in range(len(self.op.reqs)):
+            for index in xrange(len(self.op.reqs)):
                 self.op.pack_requirement_replay_info(replay_file, self.op.reqs[index], 
                     None if index not in self.op.mappings else self.op.mappings[index])
         else:
@@ -7192,19 +7152,10 @@ class Task(object):
                     self.op.reqs[index], mapping)
         else:
             replay_file.write(struct.pack('I',0))
-        # Pack the temporaries
-        if self.op.temporaries:
-            replay_file.write(struct.pack('I',len(self.op.temporaries)))
-            for index,temp in self.op.temporaries.iteritems():
-                replay_file.write(struct.pack('I',index))
-                self.op.pack_temporary_replay_info(replay_file, 
-                    self.op.reqs[index], self.op.mappings[index], temp)
-        else:
-            replay_file.write(struct.pack('I',0))
         # Pack the tunables
         if self.tunables:
             replay_file.write(struct.pack('I',len(self.tunables)))
-            for index in range(len(self.tunables)):
+            for index in xrange(len(self.tunables)):
                 assert index in self.tunables
                 value,size = self.tunables[index]
                 replay_file.write(struct.pack('I',size))
@@ -7216,7 +7167,7 @@ class Task(object):
         # Pack the operation indexes
         if self.operation_indexes:
             replay_file.write(struct.pack('I',len(self.operation_indexes)))
-            for idx in range(len(self.operation_indexes)):
+            for idx in xrange(len(self.operation_indexes)):
                 assert idx in self.operation_indexes
                 replay_file.write(struct.pack('Q',self.operation_indexes[idx]))
         else:
@@ -7224,7 +7175,7 @@ class Task(object):
         # Pack the close indexes
         if self.close_indexes:
             replay_file.write(struct.pack('I',len(self.close_indexes)))
-            for idx in range(len(self.close_indexes)):
+            for idx in xrange(len(self.close_indexes)):
                 assert idx in self.close_indexes
                 replay_file.write(struct.pack('Q',self.close_indexes[idx]))
         else:
@@ -7274,7 +7225,7 @@ class Future(object):
                         self.physical_creators.add(
                                 self.logical_creator.get_point_task(self.point).op)
                     else:
-                        for point in self.logical_creator.points.itervalues():
+                        for point in itervalues(self.logical_creator.points):
                             self.physical_creators.add(point.op)
             else:
                 self.physical_creators.add(self.logical_creator) 
@@ -7532,8 +7483,8 @@ class InstanceUser(object):
         return self.coher == RELAXED
 
 class Instance(object):
-    __slots__ = ['state', 'use_event', 'handle', 'memory', 'region', 'fields', 
-                 'redop', 'verification_users', 'processor', 
+    __slots__ = ['state', 'use_event', 'handle', 'memory', 'fields', 'redop', 
+                 'index_expr', 'field_space', 'tree_id', 'verification_users', 'processor', 
                  'creator', 'uses', 'creator_regions', 'specialized_constraint',
                  'memory_constraint', 'field_constraint', 'ordering_constraint',
                  'splitting_constraints', 'dimension_constraints',
@@ -7548,7 +7499,9 @@ class Instance(object):
         else:
             self.handle = None 
         self.memory = None
-        self.region = None # Upper bound region
+        self.index_expr = None
+        self.field_space = None
+        self.tree_id = None
         self.creator_regions = None # Regions contributing to upper bound
         self.fields = None
         self.redop = 0
@@ -7580,16 +7533,18 @@ class Instance(object):
     def set_memory(self, memory):
         self.memory = memory
 
-    def set_region(self, region):
-        self.region = region
+    def set_properties(self, index_expr, field_space, tid):
+        self.index_expr = index_expr
+        self.field_space = field_space
+        self.tree_id = tid
 
     def set_redop(self, redop):
         self.redop = redop
 
     def add_field(self, fid):
         # We better have a region at this point
-        assert self.region is not None
-        field = self.region.field_space.get_field(fid)
+        assert self.field_space is not None
+        field = self.field_space.get_field(fid)
         if self.fields is None:
             self.fields = set()
         self.fields.add(field)
@@ -7800,7 +7755,7 @@ class Instance(object):
             replay_file.write(struct.pack('I',len(path)))
             for color in path:
                 replay_file.write(struct.pack('i', color.dim))
-                for idx in range(color.dim):
+                for idx in xrange(color.dim):
                     replay_file.write(struct.pack('Q', color.vals[idx]))
 
 class EventHandle(object):
@@ -7891,7 +7846,7 @@ class Event(object):
         # This is an untriggered user event, report it
         if self.ap_user_event:
             owner = None
-            for op in self.state.ops.itervalues():
+            for op in itervalues(self.state.ops):
                 if op.finish_event is self:
                     owner = op
                     break
@@ -8016,39 +7971,51 @@ class Event(object):
         self.phase_barrier = True
 
 class RealmBase(object):
-    __slots__ = ['state', 'realm_num', 'creator', 'region', 'intersect', 
+    __slots__ = ['state', 'realm_num', 'creator', 'index_expr', 'field_space',
                  'start_event', 'finish_event', 'physical_incoming', 'physical_outgoing', 
-                  'generation', 'event_context', 'analyzed', 'cluster_name', 
-                  'reachable_cache']
+                 'eq_incoming', 'eq_outgoing', 'eq_privileges', 'generation', 
+                 'event_context', 'version_numbers', 'across_version_numbers', 
+                 'cluster_name']
     def __init__(self, state, realm_num):
         self.state = state
         self.realm_num = realm_num
         self.creator = None
-        self.region = None
-        self.intersect = None
+        self.index_expr = None
+        self.field_space = None
         self.physical_incoming = set()
         self.physical_outgoing = set()
+        self.eq_incoming = None
+        self.eq_outgoing = None
+        self.eq_privileges = None
         self.start_event = state.get_no_event()
         self.finish_event = state.get_no_event()
         self.generation = 0
         self.event_context = None
-        self.analyzed = False
+        self.version_numbers = None
+        self.across_version_numbers = None
         self.cluster_name = None # always none
-        self.reachable_cache = None
-
-    def set_region(self, region):
-        self.region = region
-
-    def set_intersect(self, intersect):
-        assert self.region is not None
-        if intersect is not self.region:
-            self.intersect = intersect
 
     def is_realm_operation(self):
         return True
 
     def is_physical_operation(self):
-        return True
+        return True 
+
+    def add_equivalence_incoming(self, eq, src):
+        assert eq in self.eq_privileges
+        if self.eq_incoming is None:
+            self.eq_incoming = dict()
+        if eq not in self.eq_incoming:
+            self.eq_incoming[eq] = set()
+        self.eq_incoming[eq].add(src)
+
+    def add_equivalence_outgoing(self, eq, dst):
+        assert eq in self.eq_privileges
+        if self.eq_outgoing is None:
+            self.eq_outgoing = dict()
+        if eq not in self.eq_outgoing:
+            self.eq_outgoing[eq] = set()
+        self.eq_outgoing[eq].add(dst)
 
     def get_context(self):
         assert self.creator is not None
@@ -8057,6 +8024,52 @@ class RealmBase(object):
     def get_logical_op(self):
         assert self.creator is not None
         return self.creator
+
+    def get_point_set(self):
+        result = PointSet()
+        if self.version_numbers:
+            for eq_key in iterkeys(self.version_numbers):
+                result.add_point(eq_key[0])
+        return result
+
+    def record_version_number(self, eq_set):
+        if self.version_numbers is None:
+            self.version_numbers = dict()
+        eq_key = (eq_set.point, eq_set.field, eq_set.tree.tree_id)
+        if eq_key in self.version_numbers:
+            assert self.version_numbers[eq_key] == eq_set.version_number
+            return True
+        else:
+            self.version_numbers[eq_key] = eq_set.version_number
+            return False 
+
+    def record_across_version_number(self, point, field, tree, version):
+        if self.across_version_numbers is None:
+            self.across_version_numbers = dict()
+        eq_key = (point, field, tree)
+        if eq_key in self.across_version_numbers:
+            assert self.across_version_numbers[eq_key] == version
+        else:
+            self.across_version_numbers[eq_key] = version
+
+    def check_for_spurious_updates(self, fields, tree, versions):
+        if versions is None:
+            print('ERROR: '+str(self.creator)+' generated spurious '+str(self)) 
+            if self.state.assert_on_error:
+                assert False
+            return False
+        point_set = self.index_expr.get_point_set()
+        for point in point_set.iterator():
+            for field in fields:
+                eq_key = (point, field, tree)
+                if eq_key not in versions:
+                    print('ERROR: '+str(self.creator)+' generated spurious '+
+                            str(self)+' for point '+str(point)+' of '+str(field)+
+                            ' in tree '+str(tree))
+                    if self.state.assert_on_error:
+                        assert False
+                    return False
+        return True
 
     def compute_physical_reachable(self):
         # Once we reach something that is not an event
@@ -8087,54 +8100,8 @@ class RealmBase(object):
             for other in self.physical_outgoing:
                 other.physical_incoming.add(self)
 
-    def perform_cycle_check(self):
-        def traverse_node(node, traverser):
-            if node is traverser.origin:
-                traverser.cycle = True
-                print("WARNING: CYCLE DETECTED!")
-                for n in traverser.stack:
-                    print(str(n))
-                print(str(node))
-                if self.state.assert_on_warning:
-                    assert False
-                return False
-            if traverser.cycle:
-                return False
-            traverser.stack.append(node)
-            return True
-        def post_traverse(node, traverser):
-            assert traverser.stack
-            traverser.stack.pop()
-        traverser = EventGraphTraverser(forwards=False, use_gen=True,
-            generation=self.state.get_next_traversal_generation(),
-            op_fn=traverse_node, copy_fn=traverse_node, 
-            fill_fn=traverse_node, deppart_fn=traverse_node,
-            post_op_fn=post_traverse, post_copy_fn=post_traverse, 
-            post_fill_fn=post_traverse, post_deppart_fn=post_traverse)
-        traverser.origin = self
-        traverser.cycle = False
-        traverser.stack = list()
-        traverser.visit_event(self.start_event)
-        return traverser.cycle
-
-    def get_physical_reachable(self, reachable, forward, 
-                               origin = None, skip_first = False):
-        # Check for cycles
-        if self is origin and not skip_first:
-            return True
-        if self in reachable:
-            return False 
-        if not skip_first:
-            reachable.add(self)
-        if forward:
-            for op in self.physical_outgoing:
-                if op.get_physical_reachable(reachable, True, origin):
-                    return True
-        else:
-            for op in self.physical_incoming:
-                if op.get_physical_reachable(reachable, False, origin):
-                    return True
-        return False
+    def perform_cycle_check(self, cycle_detector):
+        return cycle_detector.check_for_cycles(self, self.physical_outgoing)
 
     def print_incoming_event_edges(self, printer):
         for src in self.physical_incoming:
@@ -8146,10 +8113,25 @@ class RealmBase(object):
                 printer.println(src.node_name+' -> '+self.node_name+
                         ' [style=solid,color=black,penwidth=2];')
 
+    def print_eq_node(self, printer, eq_key):
+        pass
+
+    def print_incoming_eq_edges(self, printer, eq_key):
+        if self.eq_incoming is None or eq_key not in self.eq_incoming:
+            return
+        for src in self.eq_incoming[eq_key]:
+            if src.cluster_name is not None:
+                printer.println(src.node_name+' -> '+self.node_name+
+                            ' [ltail='+src.cluster_name+',style=solid,'+
+                            'color=black,penwidth=2];')
+            else:
+                printer.println(src.node_name+' -> '+self.node_name+
+                        ' [style=solid,color=black,penwidth=2];')
 
 class RealmCopy(RealmBase):
     __slots__ = ['start_event', 'finish_event', 'src_fields', 'dst_fields', 
-                 'srcs', 'dsts', 'redops', 'node_name']
+                 'srcs', 'dsts', 'src_tree_id', 'dst_tree_id', 'redops', 
+                 'across', 'node_name']
     def __init__(self, state, finish, realm_num):
         RealmBase.__init__(self, state, realm_num)
         self.finish_event = finish
@@ -8159,7 +8141,10 @@ class RealmCopy(RealmBase):
         self.dst_fields = list()
         self.srcs = list()
         self.dsts = list()
+        self.src_tree_id = None
+        self.dst_tree_id = None
         self.redops = list()
+        self.across = None
         self.node_name = 'realm_copy_'+str(realm_num)
 
     def __str__(self):
@@ -8175,7 +8160,27 @@ class RealmCopy(RealmBase):
     def set_creator(self, creator):
         assert self.creator is None
         self.creator = creator
-        self.creator.add_realm_copy(self)
+        self.creator.add_realm_copy(self) 
+
+    def set_tree_properties(self, index_expr, field_space, src_tid, dst_tid):
+        self.index_expr = index_expr
+        self.field_space = field_space
+        self.src_tree_id = src_tid
+        self.dst_tree_id = dst_tid
+
+    def is_across(self):
+        if self.across is not None:
+            return self.across
+        if self.src_tree_id != self.dst_tree_id:
+            self.across = True
+        else:
+            self.across = False
+            assert len(self.src_fields) == len(self.dst_fields)
+            for idx in xrange(len(self.src_fields)):
+                if self.src_fields[idx] != self.dst_fields[idx]:
+                    self.across = True
+                    break
+        return self.across
 
     def update_creator(self, new_creator):
         assert self.creator
@@ -8183,11 +8188,11 @@ class RealmCopy(RealmBase):
         self.creator = new_creator
 
     def add_field(self, src_fid, src, dst_fid, dst, redop):
-        assert self.region is not None
+        assert self.field_space is not None
         # Always get the fields from the source and destination regions
         # which is especially important for handling cross-region copies
-        src_field = src.region.field_space.get_field(src_fid)
-        dst_field = dst.region.field_space.get_field(dst_fid)
+        src_field = src.field_space.get_field(src_fid)
+        dst_field = dst.field_space.get_field(dst_fid)
         self.src_fields.append(src_field)
         self.dst_fields.append(dst_field)
         self.srcs.append(src)
@@ -8196,27 +8201,36 @@ class RealmCopy(RealmBase):
 
     def find_src_inst(self, src_field):
         assert len(self.src_fields) == len(self.srcs)
-        for idx in range(len(self.src_fields)):
+        for idx in xrange(len(self.src_fields)):
             if src_field == self.src_fields[idx]:
                 return self.srcs[idx]
         assert False
 
     def print_event_node(self, printer):
         if self.state.detailed_graphs:
-            label = "Realm Copy ("+str(self.realm_num)+") of "+str(self.region)
+            if self.index_expr:
+                # This is the case where the runtime told us what
+                # the name of the index space was for the copy
+                label = "Realm Copy ("+str(self.realm_num)+") of "+\
+                            self.index_expr.point_space_graphviz_string()
+            else:
+                # This is the case where we had to generate the 
+                # copy from our own information
+                point_set = self.get_point_set()
+                assert point_set
+                label = "Realm Copy ("+str(self.realm_num)+") of "+\
+                            point_set.point_space_graphviz_string()
         else:
-            label = "Realm Copy of "+str(self.region)
-        if self.intersect is not None:
-            label += " (intersect with "+str(self.intersect)+")"
+            label = "Realm Copy ("+str(self.realm_num)+")"
         if self.creator is not None:
-            label += " generated by "+str(self.creator)
+            label += " generated by "+self.creator.html_safe_name
             if self.creator.kind == SINGLE_TASK_KIND:
                 label += " (UID: " + str(self.creator.uid) + ")"
         lines = [[{ "label" : label, "colspan" : 3 }]]
         if self.state.detailed_graphs:
             num_fields = len(self.src_fields)
             first_field = True
-            for fidx in range(num_fields):
+            for fidx in xrange(num_fields):
                 src_field = self.src_fields[fidx]
                 dst_field = self.dst_fields[fidx]
                 src_inst = self.srcs[fidx]
@@ -8254,14 +8268,30 @@ class RealmCopy(RealmBase):
         field_size = 0
         for field in self.src_fields:
             field_size += field.size
-        shape = self.region.index_space.shape
-        if self.intersect:
-            shape = shape & self.intersect.index_space.shape
-        return (field_size * shape.volume())
+        point_set = self.index_expr.get_point_set()
+        return (field_size * point_set.volume())
 
+    def get_equivalence_privileges(self):
+        if self.eq_privileges is None:
+            self.eq_privileges = dict()
+            point_set = self.index_expr.get_point_set()
+            for point in point_set.iterator():
+                for field in self.src_fields:
+                    key = (point,field,self.src_tree_id)
+                    assert key not in self.eq_privileges
+                    self.eq_privileges[key] = READ_ONLY
+            # If this is a copy across record that we 
+            # are writing to the destination fields
+            if self.is_across():
+                for point in point_set.iterator():
+                    for field in self.dst_fields:
+                        key = (point,field,self.dst_tree_id)
+                        assert key not in self.eq_privileges
+                        self.eq_privileges[key] = WRITE_ONLY
+        return self.eq_privileges 
 
 class RealmFill(RealmBase):
-    __slots__ = ['fields', 'dsts', 'node_name']
+    __slots__ = ['fields', 'dsts', 'dst_tree_id', 'fill_op', 'across', 'node_name']
     def __init__(self, state, finish, realm_num):
         RealmBase.__init__(self, state, realm_num)
         self.finish_event = finish
@@ -8269,6 +8299,9 @@ class RealmFill(RealmBase):
             finish.add_incoming_fill(self)
         self.fields = list()
         self.dsts = list()
+        self.dst_tree_id = None
+        self.fill_op = None  
+        self.across = None
         self.node_name = 'realm_fill_'+str(realm_num)
 
     def __str__(self):
@@ -8286,31 +8319,67 @@ class RealmFill(RealmBase):
         self.creator = creator
         self.creator.add_realm_fill(self)
 
+    def set_fill_op(self, fill_op):
+        assert fill_op is not None
+        if self.fill_op is None:
+            self.fill_op = fill_op
+        else:
+            assert fill_op is self.fill_op
+
+    def set_tree_properties(self, index_expr, field_space, dst_tid):
+        self.index_expr = index_expr
+        self.field_space = field_space
+        self.dst_tree_id = dst_tid
+
+    def is_across(self):
+        if self.across is not None:
+            return self.across
+        assert self.fill_op is not None
+        req = self.fill_op.reqs[0]
+        if req.tid != self.dst_tree_id:
+            self.across = True
+        else:
+            self.across = False
+            for field in self.fields:
+                if field not in req.fields:
+                    self.across = True
+                    break
+        return self.across
+
     def update_creator(self, new_creator):
         assert self.creator
         assert new_creator is not self.creator
         self.creator = new_creator
 
     def add_field(self, fid, dst):
-        assert self.region is not None
-        field = dst.region.field_space.get_field(fid)
+        assert self.field_space is not None
+        field = self.field_space.get_field(fid)
         self.fields.append(field)
         self.dsts.append(dst)
 
     def print_event_node(self, printer):
         if self.state.detailed_graphs:
-            label = "Realm Fill ("+str(self.realm_num)+") of "+str(self.region)
+            if self.index_expr:
+                # This is the case where the runtime told us what
+                # the name of the index space was for the copy
+                label = "Realm Fill ("+str(self.realm_num)+") of "+\
+                            self.index_expr.point_space_graphviz_string()
+            else:
+                # This is the case where we had to generate the 
+                # copy from our own information
+                point_set = self.get_point_set()
+                assert point_set
+                label = "Realm Fill ("+str(self.realm_num)+") of "+\
+                            point_set.point_space_graphviz_string()
         else:
-            label = "Realm Fill of "+str(self.region)
-        if self.intersect is not None:
-            label += " (intersect with "+str(self.intersect)+")"
+            label = "Realm Fill ("+str(self.realm_num)+")"
         if self.creator is not None:
-            label += " generated by "+str(self.creator)
+            label += " generated by "+self.creator.html_safe_name
         lines = [[{ "label" : label, "colspan" : 3 }]]
         if self.state.detailed_graphs:
             num_fields = len(self.fields)
             first_field = True
-            for fidx in range(num_fields):
+            for fidx in xrange(num_fields):
                 dst_field = self.fields[fidx]
                 dst_inst = self.dsts[fidx]
                 line = []
@@ -8336,6 +8405,17 @@ class RealmFill(RealmBase):
         if self.intersect:
             shape = shape & self.intersect.index_space.shape
         return (field_size * shape.volume())
+
+    def get_equivalence_privileges(self):
+        if self.eq_privileges is None:
+            self.eq_privileges = dict()
+            point_set = self.index_expr.get_point_set()
+            for point in point_set.iterator():
+                for field in self.fields:
+                    key = (point,field,self.dst_tree_id)
+                    assert key not in self.eq_privileges
+                    self.eq_privileges[key] = WRITE_ONLY
+        return self.eq_privileges
 
 class RealmDeppart(RealmBase):
     __slots__ = ['index_space', 'node_name']
@@ -8376,7 +8456,7 @@ class RealmDeppart(RealmBase):
         else:
             label = "Realm Deppart of "+str(self.index_space)
         if self.creator is not None:
-            label += " generated by "+str(self.creator)
+            label += " generated by "+self.creator.html_safe_name
         lines = [[{ "label" : label, "colspan" : 3 }]]
         color = 'magenta'
         size = 14
@@ -8384,6 +8464,12 @@ class RealmDeppart(RealmBase):
                 "".join([printer.wrap_with_trtd(line) for line in lines]) + '</table>'
         printer.println(self.node_name+' [label=<'+label+'>,fontsize='+str(size)+\
                 ',fontcolor=black,shape=record,penwidth=0];')
+
+    def get_equivalence_privileges(self):
+        assert self.creator is not None
+        if self.eq_privileges is None:
+            self.eq_privileges = self.creator.get_equivalence_privileges()
+        return self.eq_privileges
 
 class EventGraphTraverser(object):
     def __init__(self, forwards, use_gen, generation,
@@ -8559,7 +8645,6 @@ class PhysicalTraverser(object):
         if self.post_node_fn is not None:
             self.post_node_fn(node, self)
 
-
 class GraphPrinter(object):
     # Static member so we only issue this warning once
     zoom_warning = True
@@ -8605,8 +8690,10 @@ class GraphPrinter(object):
                 subprocess.check_call(['dot', '-Tpdf', '-o', pdf_file, dot_file])
                 #subprocess.check_call(['dot', '-Tsvg', '-o', svg_file, dot_file])
                 #subprocess.check_call(['dot', '-Tpng', '-o', png_file, dot_file])
+        except OSError:
+            print("WARNING: graphviz is not installed, skipping generation of "+str(self.name))
         except:
-            print("WARNING: DOT failure, image for graph "+str(self.name)+" not generated")
+            print("WARNING: 'dot' failure, image for graph "+str(self.name)+" not generated")
             subprocess.call(['rm', '-f', 'core', pdf_file])
         # If we are making a zoom graph, then make a directory with the appropriate name
         if zoom_graph:
@@ -8705,7 +8792,7 @@ class GraphPrinter(object):
         self.println('}')
 
     def println(self,string):
-        for i in range(self.depth):
+        for i in xrange(self.depth):
             self.out.write('  ')
         self.out.write(string)
         self.out.write('\n')
@@ -8729,7 +8816,7 @@ class GraphPrinter(object):
         lines = list()
         lines.append([{"label" : title, "colspan" : 3}])       
         if requirements is not None:
-            for i in range(len(requirements)):
+            for i in xrange(len(requirements)):
                 req = requirements[i]
                 region_name = str(req.logical_node)
                 line = [str(i), region_name, req.get_privilege_and_coherence()]
@@ -8784,8 +8871,7 @@ index_part_pat           = re.compile(
 index_part_name_pat      = re.compile(
     prefix+"Index Partition Name (?P<uid>[0-9a-f]+) (?P<name>[-$()\w. ]+)")
 index_subspace_pat       = re.compile(
-    prefix+"Index Subspace (?P<pid>[0-9a-f]+) (?P<uid>[0-9a-f]+) (?P<dim>[0-9]+) "+
-           "(?P<val1>\-?[0-9]+) (?P<val2>\-?[0-9]+) (?P<val3>\-?[0-9]+)")
+    prefix+"Index Subspace (?P<pid>[0-9a-f]+) (?P<uid>[0-9a-f]+) (?P<dim>[0-9]+) (?P<rem>.*)")
 field_space_pat          = re.compile(
     prefix+"Field Space (?P<uid>[0-9]+)")
 field_space_name_pat     = re.compile(
@@ -8803,39 +8889,40 @@ partition_name_pat       = re.compile(
     prefix+"Logical Partition Name (?P<iid>[0-9a-f]+) (?P<fid>[0-9]+) (?P<tid>[0-9]+) "+
            "(?P<name>[-$()\w. ]+)")
 index_space_point_pat    = re.compile(
-    prefix+"Index Space Point (?P<uid>[0-9a-f]+) (?P<dim>[0-9]+) (?P<p1>\-?[0-9]+) "+
-            "(?P<p2>\-?[0-9]+) (?P<p3>\-?[0-9]+)")
+    prefix+"Index Space Point (?P<uid>[0-9a-f]+) (?P<dim>[0-9]+) (?P<rem>.*)")
 index_space_rect_pat     = re.compile(
-    prefix+"Index Space Rect (?P<uid>[0-9a-f]+) (?P<dim>[0-9]+) (?P<lo1>\-?[0-9]+) "+
-           "(?P<lo2>\-?[0-9]+) (?P<lo3>\-?[0-9]+) (?P<hi1>\-?[0-9]+) "+
-           "(?P<hi2>\-?[0-9]+) (?P<hi3>\-?[0-9]+)")
+    prefix+"Index Space Rect (?P<uid>[0-9a-f]+) (?P<dim>[0-9]+) (?P<rem>.*)")
+decimal_pat              = re.compile("\-?[0-9]+")
 empty_index_space_pat    = re.compile(
     prefix+"Empty Index Space (?P<uid>[0-9a-f]+)")
+index_expr_pat           = re.compile(
+    prefix+"Index Space Expression (?P<uid>[0-9a-f]+) (?P<expr>[0-9]+)")
+union_expr_pat           = re.compile(
+    prefix+"Index Space Union (?P<expr>[0-9]+) (?P<count>[0-9]+)")
+intersect_expr_pat       = re.compile(
+    prefix+"Index Space Intersection (?P<expr>[0-9]+) (?P<count>[0-9]+)")
+diff_expr_pat            = re.compile(
+    prefix+"Index Space Difference (?P<expr>[0-9]+) (?P<left>[0-9]+) (?P<right>[0-9]+)")
 # Patterns for operations
 task_name_pat            = re.compile(
-    prefix+"Task ID Name (?P<tid>[0-9]+) (?P<name>[-$()\w. ]+)")
+    prefix+"Task ID Name (?P<tid>[0-9]+) (?P<name>[-$()<>:\w. ]+)")
 task_variant_pat         = re.compile(
     prefix+"Task Variant (?P<tid>[0-9]+) (?P<vid>[0-9]+) (?P<inner>[0-1]) "+
-    "(?P<leaf>[0-1]) (?P<idem>[0-1]+) (?P<name>[-$()\w. ]+)")
+    "(?P<leaf>[0-1]) (?P<idem>[0-1]+) (?P<name>[-$()<>:\w. ]+)")
 top_task_pat             = re.compile(
-    prefix+"Top Task (?P<tid>[0-9]+) (?P<uid>[0-9]+) (?P<name>[-$()\w. ]+)")
+    prefix+"Top Task (?P<tid>[0-9]+) (?P<ctxuid>[0-9]+) (?P<uid>[0-9]+) (?P<name>[-$()<>:\w. ]+)")
 single_task_pat          = re.compile(
     prefix+"Individual Task (?P<ctx>[0-9]+) (?P<tid>[0-9]+) (?P<uid>[0-9]+) "+
-           "(?P<name>[-$()\w. ]+)")
+            "(?P<name>[-$()<>:\w. ]+)")
 index_task_pat           = re.compile(
     prefix+"Index Task (?P<ctx>[0-9]+) (?P<tid>[0-9]+) (?P<uid>[0-9]+) "+
-           "(?P<name>[-$()\w. ]+)")
+            "(?P<name>[-$()<>:\w. ]+)")
 mapping_pat              = re.compile(
     prefix+"Mapping Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
 close_pat                = re.compile(
-    prefix+"Close Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+) (?P<is_inter>[0-1]) "+
-           "(?P<is_read_only>[0-1])")
+    prefix+"Close Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+) (?P<is_inter>[0-1])")
 internal_creator_pat     = re.compile(
     prefix+"Internal Operation Creator (?P<uid>[0-9]+) (?P<cuid>[0-9]+) (?P<idx>[0-9]+)")
-open_pat                 = re.compile(
-    prefix+"Open Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
-advance_pat              = re.compile(
-    prefix+"Advance Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
 fence_pat                = re.compile(
     prefix+"Fence Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
 trace_pat                = re.compile(
@@ -8878,19 +8965,15 @@ index_slice_pat          = re.compile(
 slice_slice_pat          = re.compile(
     prefix+"Slice Slice (?P<slice1>[0-9]+) (?P<slice2>[0-9]+)")
 slice_point_pat          = re.compile(
-    prefix+"Slice Point (?P<slice>[0-9]+) (?P<point>[0-9]+) (?P<dim>[0-9]+) "+
-           "(?P<val1>\-?[0-9]+) (?P<val2>\-?[0-9]+) (?P<val3>\-?[0-9]+)")
+    prefix+"Slice Point (?P<slice>[0-9]+) (?P<point>[0-9]+) (?P<dim>[0-9]+) (?P<rem>.*)")
 point_point_pat          = re.compile(
     prefix+"Point Point (?P<point1>[0-9]+) (?P<point2>[0-9]+)")
 index_point_pat          = re.compile(
-    prefix+"Index Point (?P<index>[0-9]+) (?P<point>[0-9]+) (?P<dim>[0-9]+) "+
-           "(?P<val1>\-?[0-9]+) (?P<val2>\-?[0-9]+) (?P<val3>\-?[0-9]+)")
+    prefix+"Index Point (?P<index>[0-9]+) (?P<point>[0-9]+) (?P<dim>[0-9]+) (?P<rem>.*)")
 op_index_pat             = re.compile(
     prefix+"Operation Index (?P<parent>[0-9]+) (?P<index>[0-9]+) (?P<child>[0-9]+)")
 close_index_pat          = re.compile(
     prefix+"Close Index (?P<parent>[0-9]+) (?P<index>[0-9]+) (?P<child>[0-9]+)")
-disjoint_close_pat       = re.compile(
-    prefix+"Disjoint Close Field (?P<uid>[0-9]+) (?P<fid>[0-9]+)")
 predicate_false_pat      = re.compile(
     prefix+"Predicate False (?P<uid>[0-9]+)")
 # Patterns for logical analysis and region requirements
@@ -8906,24 +8989,19 @@ req_proj_pat            = re.compile(
     prefix+"Logical Requirement Projection (?P<uid>[0-9]+) (?P<index>[0-9]+) "+
            "(?P<pid>[0-9]+)")
 index_launch_domain_pat = re.compile(
-    prefix+"Index Launch Rect (?P<uid>[0-9]+) (?P<dim>[0-9]+) (?P<lo1>\-?[0-9]+) "+
-           "(?P<lo2>\-?[0-9]+) (?P<lo3>\-?[0-9]+) (?P<hi1>\-?[0-9]+) "+
-           "(?P<hi2>\-?[0-9]+) (?P<hi3>\-?[0-9]+)")
+    prefix+"Index Launch Rect (?P<uid>[0-9]+) (?P<dim>[0-9]+) (?P<rem>.*)")
 mapping_dep_pat         = re.compile(
     prefix+"Mapping Dependence (?P<ctx>[0-9]+) (?P<prev_id>[0-9]+) (?P<pidx>[0-9]+) "+
            "(?P<next_id>[0-9]+) (?P<nidx>[0-9]+) (?P<dtype>[0-9]+)")
 future_create_pat       = re.compile(
-    prefix+"Future Creation (?P<uid>[0-9]+) (?P<iid>[0-9a-f]+) (?P<dim>[0-9]+) (?P<p1>[0-9]+) (?P<p2>[0-9]+) (?P<p3>[0-9]+)")
+    prefix+"Future Creation (?P<uid>[0-9]+) (?P<iid>[0-9a-f]+) (?P<dim>[0-9]+) (?P<rem>.*)")
 future_use_pat          = re.compile(
     prefix+"Future Usage (?P<uid>[0-9]+) (?P<iid>[0-9a-f]+)")
 predicate_use_pat       = re.compile(
     prefix+"Predicate Use (?P<uid>[0-9]+) (?P<pred>[0-9]+)")
 # Physical instance and mapping decision patterns
 instance_pat            = re.compile(
-    prefix+"Physical Instance (?P<eid>[0-9a-f]+) (?P<iid>[0-9a-f]+) (?P<mid>[0-9a-f]+) (?P<redop>[0-9]+)")
-instance_region_pat     = re.compile(
-    prefix+"Physical Instance Region (?P<eid>[0-9a-f]+) (?P<ispace>[0-9]+) "
-           "(?P<fspace>[0-9]+) (?P<tid>[0-9]+)")
+    prefix+"Physical Instance (?P<eid>[0-9a-f]+) (?P<iid>[0-9a-f]+) (?P<mid>[0-9a-f]+) (?P<redop>[0-9]+) (?P<expr>[0-9]+) (?P<space>[0-9]+) (?P<tid>[0-9]+)")
 instance_field_pat      = re.compile(
     prefix+"Physical Instance Field (?P<eid>[0-9a-f]+) (?P<fid>[0-9]+)")
 instance_creator_pat    = re.compile(
@@ -8973,9 +9051,6 @@ task_processor_pat      = re.compile(
     prefix+"Task Processor (?P<uid>[0-9]+) (?P<proc>[0-9a-f]+)")
 task_premapping_pat     = re.compile(
     prefix+"Task Premapping (?P<uid>[0-9]+) (?P<index>[0-9]+)")
-temporary_decision_pat  = re.compile(
-    prefix+"Temporary Instance (?P<uid>[0-9]+) (?P<idx>[0-9]+) (?P<fid>[0-9]+) "
-           "(?P<eid>[0-9a-f]+)")
 tunable_pat             = re.compile(
     prefix+"Task Tunable (?P<uid>[0-9]+) (?P<idx>[0-9]+) (?P<bytes>[0-9]+) "
            "(?P<value>[0-9a-f]+)")
@@ -8998,22 +9073,17 @@ operation_event_pat     = re.compile(
     prefix+"Operation Events (?P<uid>[0-9]+) (?P<id1>[0-9a-f]+) (?P<id2>[0-9a-f]+)")
 realm_copy_pat          = re.compile(
     prefix+"Copy Events (?P<uid>[0-9]+) (?P<ispace>[0-9]+) (?P<fspace>[0-9]+) "+
-           "(?P<tid>[0-9]+) (?P<preid>[0-9a-f]+) (?P<postid>[0-9a-f]+)")
+           "(?P<src_tid>[0-9]+) (?P<dst_tid>[0-9]+) "+
+           "(?P<preid>[0-9a-f]+) (?P<postid>[0-9a-f]+)")
 realm_copy_field_pat    = re.compile(
     prefix+"Copy Field (?P<id>[0-9a-f]+) (?P<srcfid>[0-9]+) "+
            "(?P<srcid>[0-9a-f]+) (?P<dstfid>[0-9]+) (?P<dstid>[0-9a-f]+) (?P<redop>[0-9]+)")
-realm_copy_intersect_pat= re.compile(
-    prefix+"Copy Intersect (?P<id>[0-9a-f]+) (?P<reg>[0-1]+) "+
-           "(?P<index>[0-9a-f]+) (?P<field>[0-9]+) (?P<tid>[0-9]+)")
 realm_fill_pat          = re.compile(
     prefix+"Fill Events (?P<uid>[0-9]+) (?P<ispace>[0-9]+) (?P<fspace>[0-9]+) "+
-           "(?P<tid>[0-9]+) (?P<preid>[0-9a-f]+) (?P<postid>[0-9a-f]+)")
+           "(?P<tid>[0-9]+) (?P<preid>[0-9a-f]+) (?P<postid>[0-9a-f]+) (?P<fill_uid>[0-9]+)")
 realm_fill_field_pat    = re.compile(
     prefix+"Fill Field (?P<id>[0-9a-f]+) (?P<fid>[0-9]+) "+
            "(?P<dstid>[0-9a-f]+)")
-realm_fill_intersect_pat= re.compile(
-    prefix+"Fill Intersect (?P<id>[0-9a-f]+) (?P<reg>[0-1]+) "+
-           "(?P<index>[0-9a-f]+) (?P<field>[0-9]+) (?P<tid>[0-9]+)")
 realm_deppart_pat       = re.compile(
     prefix+"Deppart Events (?P<uid>[0-9]+) (?P<ispace>[0-9]+) "+
            "(?P<preid>[0-9a-f]+) (?P<postid>[0-9a-f]+)")
@@ -9021,7 +9091,7 @@ barrier_arrive_pat      = re.compile(
     prefix+"Phase Barrier Arrive (?P<uid>[0-9]+) (?P<iid>[0-9a-f]+)")
 barrier_wait_pat        = re.compile(
     prefix+"Phase Barrier Wait (?P<uid>[0-9]+) (?P<iid>[0-9a-f]+)")
-replay_op_pat    = re.compile(
+replay_op_pat           = re.compile(
     prefix+"Replay Operation (?P<uid>[0-9]+)")
 
 def parse_legion_spy_line(line, state):
@@ -9086,9 +9156,11 @@ def parse_legion_spy_line(line, state):
         copy.set_start(e1)
         op = state.get_operation(int(m.group('uid')))
         copy.set_creator(op)
-        region = state.get_region(int(m.group('ispace')), 
-            int(m.group('fspace')), int(m.group('tid')))
-        copy.set_region(region)
+        index_expr = state.get_index_expr(int(m.group('ispace')))
+        field_space = state.get_field_space(int(m.group('fspace')))
+        src_tree_id = int(m.group('src_tid'))
+        dst_tree_id = int(m.group('dst_tid'))
+        copy.set_tree_properties(index_expr, field_space, src_tree_id, dst_tree_id)
         return True
     m = realm_copy_field_pat.match(line)
     if m is not None:
@@ -9099,18 +9171,6 @@ def parse_legion_spy_line(line, state):
         copy.add_field(int(m.group('srcfid')), src, 
                        int(m.group('dstfid')), dst, int(m.group('redop')))
         return True
-    m = realm_copy_intersect_pat.match(line)
-    if m is not None:
-        e = state.get_event(int(m.group('id'),16))
-        copy = state.get_realm_copy(e)
-        is_region = True if int(m.group('reg')) == 1 else False
-        if is_region:
-            copy.set_intersect(state.get_region(int(m.group('index'),16),
-              int(m.group('field')), int(m.group('tid'))))
-        else:
-            copy.set_intersect(state.get_partition(int(m.group('index'),16),
-              int(m.group('field')), int(m.group('tid'))))
-        return True
     m = realm_fill_pat.match(line)
     if m is not None:
         e1 = state.get_event(int(m.group('preid'),16))
@@ -9119,9 +9179,12 @@ def parse_legion_spy_line(line, state):
         fill.set_start(e1)
         op = state.get_operation(int(m.group('uid')))
         fill.set_creator(op)
-        region = state.get_region(int(m.group('ispace')), 
-            int(m.group('fspace')), int(m.group('tid')))
-        fill.set_region(region)
+        index_expr = state.get_index_expr(int(m.group('ispace')))
+        field_space = state.get_field_space(int(m.group('fspace')))
+        tree_id = int(m.group('tid'))
+        fill.set_tree_properties(index_expr, field_space, tree_id)
+        fill_op = state.get_operation(int(m.group('fill_uid')))
+        fill.set_fill_op(fill_op)
         return True
     m = realm_fill_field_pat.match(line)
     if m is not None:
@@ -9129,18 +9192,6 @@ def parse_legion_spy_line(line, state):
         fill = state.get_realm_fill(e)
         dst = state.get_instance(int(m.group('dstid'),16))
         fill.add_field(int(m.group('fid')), dst)
-        return True
-    m = realm_fill_intersect_pat.match(line)
-    if m is not None:
-        e = state.get_event(int(m.group('id'),16))
-        fill = state.get_realm_fill(e)
-        is_region = True if int(m.group('reg')) == 1 else False
-        if is_region:
-            fill.set_intersect(state.get_region(int(m.group('index'),16),
-              int(m.group('field')), int(m.group('tid'))))
-        else:
-            fill.set_intersect(state.get_partition(int(m.group('index'),16),
-              int(m.group('field')), int(m.group('tid'))))
         return True
     m = realm_deppart_pat.match(line)
     if m is not None:
@@ -9219,14 +9270,11 @@ def parse_legion_spy_line(line, state):
         dim = int(m.group('dim'))
         lo = Point(dim)
         hi = Point(dim)
-        lo.vals[0] = int(m.group('lo1'))
-        hi.vals[0] = int(m.group('hi1'))
-        if dim >= 2:
-            lo.vals[1] = int(m.group('lo2'))
-            hi.vals[1] = int(m.group('hi2'))
-            if dim >= 3:
-                lo.vals[2] = int(m.group('lo3'))
-                hi.vals[2] = int(m.group('hi3'))
+        # Get the remainder of the points
+        values = decimal_pat.findall(m.group('rem'))
+        for index in xrange(dim):
+            lo.vals[index] = int(values[2*index])
+            hi.vals[index] = int(values[2*index+1])
         op.set_launch_rect(Rect(lo, hi)) 
         return True
     m = mapping_dep_pat.match(line)
@@ -9244,13 +9292,11 @@ def parse_legion_spy_line(line, state):
     if m is not None:
         future = state.get_future(int(m.group('iid'),16))
         future.set_creator(int(m.group('uid')))
-        point = Point(int(m.group('dim')))
-        if point.dim > 0:
-            point.vals[0] = int(m.group('p1'))
-            if point.dim > 1:
-                point.vals[1] = int(m.group('p2'))
-                if point.dim > 2:
-                    point.vals[2] = int(m.group('p3'))
+        dim = int(m.group('dim'))
+        point = Point(dim)
+        values = decimal_pat.findall(m.group('rem'))
+        for index in xrange(dim):
+            point.vals[index] = int(values[index])
         future.set_point(point)
         return True 
     m = future_use_pat.match(line)
@@ -9272,13 +9318,9 @@ def parse_legion_spy_line(line, state):
         inst.set_handle(int(m.group('iid'),16))
         inst.set_memory(mem)
         inst.set_redop(int(m.group('redop')))
-        return True
-    m = instance_region_pat.match(line)
-    if m is not None:
-        inst = state.get_instance(int(m.group('eid'),16))
-        region = state.get_region(int(m.group('ispace')), 
-            int(m.group('fspace')), int(m.group('tid')))
-        inst.set_region(region)
+        inst_expr = state.get_index_expr(int(m.group('expr')))
+        space = state.get_field_space(int(m.group('space')))
+        inst.set_properties(inst_expr, space, int(m.group('tid')))
         return True
     m = instance_field_pat.match(line)
     if m is not None:
@@ -9391,13 +9433,6 @@ def parse_legion_spy_line(line, state):
         task = state.get_task(int(m.group('uid')))
         task.add_premapping(int(m.group('index')))
         return True
-    m = temporary_decision_pat.match(line)
-    if m is not None:
-        op = state.get_operation(int(m.group('uid')))
-        inst = state.get_instance(int(m.group('eid'),16))
-        op.add_temporary_instance(int(m.group('idx')),
-            int(m.group('fid')), inst)
-        return True
     m = tunable_pat.match(line)
     if m is not None:
         task = state.get_task(int(m.group('uid')))
@@ -9422,6 +9457,7 @@ def parse_legion_spy_line(line, state):
         op.set_task_id(int(m.group('tid')))
         # Save the top-level uid
         state.top_level_uid = int(m.group('uid'))
+        state.top_level_ctx_uid = int(m.group('ctxuid'))
         return True
     m = single_task_pat.match(line)
     if m is not None:
@@ -9454,13 +9490,8 @@ def parse_legion_spy_line(line, state):
         op = state.get_operation(int(m.group('uid')))
         inter = True if int(m.group('is_inter')) == 1 else False
         if inter:
-            read_only = True if int(m.group('is_read_only')) == 1 else False
-            if read_only:
-                op.set_op_kind(READ_ONLY_CLOSE_OP_KIND)
-                op.set_name("Read Only Close Op "+m.group('uid'))
-            else:
-                op.set_op_kind(INTER_CLOSE_OP_KIND)
-                op.set_name("Inter Close Op "+m.group('uid'))
+            op.set_op_kind(INTER_CLOSE_OP_KIND)
+            op.set_name("Inter Close Op "+m.group('uid'))
         else:
             op.set_op_kind(POST_CLOSE_OP_KIND)
             op.set_name("Post Close Op "+m.group('uid'))
@@ -9476,22 +9507,6 @@ def parse_legion_spy_line(line, state):
         op = state.get_operation(int(m.group('uid')))
         creator = state.get_operation(int(m.group('cuid')))
         op.set_creator(creator, int(m.group('idx')))
-        return True
-    m = open_pat.match(line)
-    if m is not None:
-        op = state.get_operation(int(m.group('uid')))
-        op.set_op_kind(OPEN_OP_KIND)
-        op.set_name("Open Op "+m.group('uid'))
-        context = state.get_task(int(m.group('ctx')))
-        op.set_context(context, False)
-        return True
-    m = advance_pat.match(line)
-    if m is not None:
-        op = state.get_operation(int(m.group('uid')))
-        op.set_op_kind(ADVANCE_OP_KIND)
-        op.set_name("Advance Op "+m.group('uid'))
-        context = state.get_task(int(m.group('ctx')))
-        op.set_context(context, False)
         return True
     m = fence_pat.match(line)
     if m is not None:
@@ -9592,19 +9607,12 @@ def parse_legion_spy_line(line, state):
         op.set_op_kind(MUST_EPOCH_OP_KIND)
         # Don't add it to the context for now
         return True
-    m = summary_op_pat.match(line)
-    if m is not None:
-        op = state.get_operation(int(m.group('uid')))
-        op.set_op_kind(SUMMARY_OP_KIND)
-        op.set_name("Trace Summary Op "+m.group('uid'))
-        context = state.get_task(int(m.group('ctx')))
-        op.set_context(context, False)
-        return True
     m = summary_op_creator_pat.match(line)
     if m is not None:
         op = state.get_operation(int(m.group('uid')))
         creator = state.get_operation(int(m.group('cuid')))
-        op.set_creator(creator, None)
+        creator.set_summary_operation(op)
+        op.set_summary_operation(op)
         return True
     m = dep_partition_op_pat.match(line)
     if m is not None:
@@ -9642,11 +9650,9 @@ def parse_legion_spy_line(line, state):
         point = state.get_task(int(m.group('point')))
         dim = int(m.group('dim'))
         index_point = Point(dim)
-        index_point.vals[0] = int(m.group('val1'))
-        if dim > 1:
-            index_point.vals[1] = int(m.group('val2'))
-            if dim > 2:
-                index_point.vals[2] = int(m.group('val3'))
+        values = decimal_pat.findall(m.group('rem'))
+        for index in xrange(dim):
+            index_point.vals[index] = int(values[index])
         point.set_point(index_point)
         state.point_slice[point] = int(m.group('slice'))
         return True
@@ -9664,11 +9670,9 @@ def parse_legion_spy_line(line, state):
         point = state.get_operation(int(m.group('point')))
         dim = int(m.group('dim'))
         index_point = Point(dim)
-        index_point.vals[0] = int(m.group('val1'))
-        if dim > 1:
-            index_point.vals[1] = int(m.group('val2'))
-            if dim > 2:
-                index_point.vals[2] = int(m.group('val3'))
+        values = decimal_pat.findall(m.group('rem'))
+        for index in xrange(dim):
+            index_point.vals[index] = int(values[index])
         index = state.get_operation(int(m.group('index')))
         index.add_point_op(point, index_point) 
         return True
@@ -9683,11 +9687,6 @@ def parse_legion_spy_line(line, state):
         task = state.get_task(int(m.group('parent')))
         task.add_close_index(int(m.group('index')),
                              int(m.group('child')))
-        return True
-    m = disjoint_close_pat.match(line)
-    if m is not None:
-        op = state.get_operation(int(m.group('uid')))
-        op.add_disjoint_close_field(int(m.group('fid')))     
         return True
     m = predicate_false_pat.match(line)
     if m is not None:
@@ -9724,11 +9723,9 @@ def parse_legion_spy_line(line, state):
         parent = state.get_index_partition(int(m.group('pid'),16))
         dim = int(m.group('dim'))
         color= Point(dim)
-        color.vals[0] = int(m.group('val1'))
-        if dim > 1:
-            color.vals[1] = int(m.group('val2'))
-            if dim > 2:
-                color.vals[2] = int(m.group('val3'))
+        values = decimal_pat.findall(m.group('rem'))
+        for index in xrange(dim):
+            color.vals[index] = int(values[index])
         ispace.set_parent(parent, color)
         return True
     m = field_space_pat.match(line)
@@ -9774,11 +9771,9 @@ def parse_legion_spy_line(line, state):
         index_space = state.get_index_space(int(m.group('uid'),16)) 
         dim = int(m.group('dim'))
         point = Point(dim)
-        point.vals[0] = int(m.group('p1'))
-        if dim >= 2:
-            point.vals[1] = int(m.group('p2'))
-            if dim >= 3:
-                point.vals[2] = int(m.group('p3'))
+        values = decimal_pat.findall(m.group('rem'))
+        for index in xrange(dim):
+            point.vals[index] = int(values[index])
         index_space.add_point(point)
         return True
     m = index_space_rect_pat.match(line)
@@ -9787,20 +9782,58 @@ def parse_legion_spy_line(line, state):
         dim = int(m.group('dim'))
         lo = Point(dim)
         hi = Point(dim)
-        lo.vals[0] = int(m.group('lo1'))
-        hi.vals[0] = int(m.group('hi1'))
-        if dim >= 2:
-            lo.vals[1] = int(m.group('lo2'))
-            hi.vals[1] = int(m.group('hi2'))
-            if dim >= 3:
-                lo.vals[2] = int(m.group('lo3'))
-                hi.vals[2] = int(m.group('hi3'))
-        index_space.add_rect(Rect(lo, hi))
+        values = decimal_pat.findall(m.group('rem'))
+        for index in xrange(dim):
+            lo.vals[index] = int(values[2*index])
+            hi.vals[index] = int(values[2*index+1])
+        if lo == hi:
+            index_space.add_point(lo)
+        else:
+            index_space.add_rect(Rect(lo, hi))
         return True
     m = empty_index_space_pat.match(line)
     if m is not None:
         index_space = state.get_index_space(int(m.group('uid'),16))
         index_space.set_empty()
+        return True
+    m = index_expr_pat.match(line)
+    if m is not None:
+        index_space = state.get_index_space(int(m.group('uid'),16))
+        expr_id = int(m.group('expr'))
+        index_space.set_expr(expr_id)
+        index_expr = state.get_index_expr(expr_id)
+        index_expr.set_index_space(index_space)
+        return True
+    m = union_expr_pat.match(line)
+    if m is not None:
+        index_expr = state.get_index_expr(int(m.group('expr')))
+        remainder = line[m.end()+1:]
+        expr_ids = list(filter(None, re.split('\W+', remainder)))
+        count = int(m.group('count'))
+        # Don't handle end-of-line characters well
+        assert len(expr_ids) == count
+        for expr_id in expr_ids[:count]:
+            sub_expr = state.get_index_expr(int(expr_id))
+            index_expr.add_union_expr(sub_expr)
+        return True
+    m = intersect_expr_pat.match(line)
+    if m is not None:
+        index_expr = state.get_index_expr(int(m.group('expr')))
+        remainder = line[m.end()+1:]
+        expr_ids = list(filter(None, re.split('\W+', remainder)))
+        count = int(m.group('count'))
+        # Don't handle end-of-line characters well
+        assert len(expr_ids) == count
+        for expr_id in expr_ids[:count]:
+            sub_expr = state.get_index_expr(int(expr_id))
+            index_expr.add_intersect_expr(sub_expr)
+        return True
+    m = diff_expr_pat.match(line)
+    if m is not None:
+        index_expr = state.get_index_expr(int(m.group('expr')))
+        left_expr = state.get_index_expr(int(m.group('left')))
+        right_expr = state.get_index_expr(int(m.group('right')))
+        index_expr.set_diff_expr(left_expr, right_expr)
         return True
     # Machine kinds (at the bottom cause they are least likely)
     m = proc_kind_pat.match(line)
@@ -9858,22 +9891,28 @@ def parse_legion_spy_line(line, state):
     return False
 
 class State(object):
-    __slots__ = ['verbose', 'top_level_uid', 'traverser_gen', 'processors', 'memories',
-                 'processor_kinds', 'memory_kinds', 'index_spaces', 'index_partitions',
-                 'field_spaces', 'regions', 'partitions', 'top_spaces', 'trees',
-                 'ops', 'tasks', 'task_names', 'variants', 'projection_functions',
-                 'has_mapping_deps', 'instances', 'events', 'copies', 'fills', 'depparts',
-                 'no_event', 'slice_index', 'slice_slice', 'point_slice', 'point_point',
-                 'futures', 'next_generation', 'next_realm_num', 'detailed_graphs', 
-                 'assert_on_error', 'assert_on_warning', 'config', 'detailed_logging']
-    def __init__(self, verbose, details, assert_on_error, assert_on_warning):
+    __slots__ = ['temp_dir', 'verbose', 'top_level_uid', 'top_level_ctx_uid', 
+                 'traverser_gen', 'processors', 'memories',
+                 'processor_kinds', 'memory_kinds', 'index_exprs', 'index_spaces', 
+                 'index_partitions', 'field_spaces', 'regions', 'partitions', 'top_spaces',
+                 'trees', 'ops', 'unique_ops', 'tasks', 'task_names', 'variants', 
+                 'projection_functions', 'has_mapping_deps', 'instances', 'events', 
+                 'copies', 'fills', 'depparts', 'no_event', 'slice_index', 'slice_slice', 
+                 'point_slice', 'point_point', 'futures', 'next_generation', 
+                 'next_realm_num', 'detailed_graphs', 'assert_on_error', 
+                 'assert_on_warning', 'eq_graph_on_error', 'config', 'detailed_logging']
+    def __init__(self, temp_dir, verbose, details, assert_on_error, 
+                 assert_on_warning, eq_graph_on_error):
+        self.temp_dir = temp_dir
         self.config = False
         self.detailed_logging = True
         self.verbose = verbose
         self.detailed_graphs = details
         self.assert_on_error = assert_on_error
         self.assert_on_warning = assert_on_warning
+        self.eq_graph_on_error = eq_graph_on_error
         self.top_level_uid = None
+        self.top_level_ctx_uid = None
         self.traverser_gen = 1
         # Machine things
         self.processors = dict()
@@ -9881,6 +9920,7 @@ class State(object):
         self.processor_kinds = dict()
         self.memory_kinds = dict()
         # Region tree things
+        self.index_exprs = dict()
         self.index_spaces = dict()
         self.index_partitions = dict()
         self.field_spaces = dict()
@@ -9889,7 +9929,8 @@ class State(object):
         self.top_spaces = dict()
         self.trees = dict()
         # Logical things 
-        self.ops = dict()
+        self.ops = dict() # Operations can be duplicated from different nodes
+        self.unique_ops = None # Filled in by post_parse to deduplicate
         self.tasks = dict()
         self.task_names = dict()
         self.variants = dict()
@@ -9952,61 +9993,65 @@ class State(object):
         return matches
 
     def post_parse(self, simplify_graphs, need_physical):
-        for space in self.index_spaces.itervalues():
+        for space in itervalues(self.index_spaces):
             if space.parent is None:
                 space.update_depth(-1)
         print('Reducing top-level index space shapes...')
         # Have to do the same sets across all index spaces
         # with the same dimensions in case of copy across
         dim_sets = dict()
-        for space in self.index_spaces.itervalues():
+        for space in itervalues(self.index_spaces):
             if space.parent is None:
                 space.compute_reduced_shapes(dim_sets)            
-        for index_sets in dim_sets.itervalues():
+        for dim,index_sets in iteritems(dim_sets):
             point_value = 0
-            for shape,index_set in index_sets.iteritems():
+            total_sets = len(index_sets)
+            for shape,index_set in iteritems(index_sets):
                 point = Point(1)
                 point.vals[0] = point_value
                 point.shape = shape
                 point.index_set = index_set
                 point_value += 1
+                print_progress_bar(point_value, total_sets, prefix='Dim '+str(dim)+':',length=50)
                 for index in index_set:
                     index.add_refined_point(point)
         print('Done')
         # Find the top-level index spaces
         num_index_trees = 0
-        for space in self.index_spaces.itervalues():
+        for space in itervalues(self.index_spaces):
             if space.parent is None:
                 self.top_spaces[num_index_trees] = space
                 num_index_trees += 1
                 # Check for the dominance property
                 space.check_partition_properties()
         # Fill in the parents for all the regions and partitions
-        # No iterators in case things change size
-        for region in self.regions.values():
+        # Make a copy in case things change size
+        for region in itervalues(self.regions.copy()):
             region.update_parent()
-        for partition in self.partitions.values():
+        for partition in itervalues(self.partitions.copy()):
             partition.update_parent()
         # Find the top-level regions
-        for region in self.regions.itervalues():
+        for region in itervalues(self.regions):
             if region.parent is None:
                 self.trees[region.tree_id] = region
         # Merge the individual tasks
-        for p1,p2 in self.point_point.iteritems():
+        for p1,p2 in iteritems(self.point_point):
             self.alias_individual_points(p1, p2)
         # Merge the points and slices
-        for point,slice_ in self.point_slice.iteritems():
+        for point,slice_ in iteritems(self.point_slice):
             while slice_ in self.slice_slice:
                 slice_ = self.slice_slice[slice_]
             assert slice_ in self.slice_index
             self.slice_index[slice_].add_point_task(point)
         # Flatten summary operations in each context
-        for task in self.tasks.itervalues():
+        for task in itervalues(self.tasks):
             task.flatten_summary_operations()
+        # Create the unique set of operations
+        self.unique_ops = set(itervalues(self.ops))
         # Add implicit dependencies between point and index operations
         if self.detailed_logging:
             index_owners = set()
-            for op in self.ops.itervalues():
+            for op in self.unique_ops:
                 if op.index_owner:
                     # Skip close operations for transitive dependences
                     if op.kind == INTER_CLOSE_OP_KIND:
@@ -10014,47 +10059,43 @@ class State(object):
                     index_owners.add(op.index_owner)
                     point_termination = op.finish_event
                     index_termination = op.index_owner.finish_event
-                    assert point_termination.exists()
-                    assert index_termination.exists()
-                    index_termination.add_incoming(point_termination)
-                    point_termination.add_outgoing(index_termination)
+                    if point_termination.exists() and index_termination.exists():
+                        index_termination.add_incoming(point_termination)
+                        point_termination.add_outgoing(index_termination)
             # Remove index operations from the event graph
             for op in index_owners:
-                op.finish_event.incoming_ops.remove(op)
+                if op.finish_event.incoming_ops:
+                    op.finish_event.incoming_ops.remove(op)
         # Check for any interfering index space launches
-        for op in self.ops.itervalues():
-            if op.kind == INDEX_TASK_KIND and op.is_interfering_index_space_launch():
+        for op in self.unique_ops:
+            if op.is_interfering_index_space_launch():
                 print("ERROR: Found interfering index space launch: %s!" % str(op))
                 if self.assert_on_error:
                     assert False
         # Fill in any task names
-        for task in self.tasks.itervalues():
-            if task.op.task_id in self.task_names:
+        for task in itervalues(self.tasks):
+            if task.op is not None and task.op.task_id in self.task_names:
                 task.op.set_name(self.task_names[task.op.task_id])
         # Assign the depth of the top context
         op = self.get_operation(self.top_level_uid)
         assert op.context is not None
         op.context.depth = 0
         # Check to see if we have any unknown operations
-        unknown = None
-        for op in self.ops.itervalues():
+        for op in self.unique_ops:
             if op.kind is NO_OP_KIND:
-                unknown = op
-                break
-        if unknown is not None:
-            print('WARNING: operation %d has unknown operation kind!' % op.uid)
-            if self.assert_on_warning:
-                assert False
+                print('WARNING: operation %d has unknown operation kind!' % op.uid)
+                if self.assert_on_warning:
+                    assert False
         # Update the instance 
-        for inst in self.instances.itervalues():
+        for inst in itervalues(self.instances):
             inst.update_creator()
         # Update the instance users
-        for op in self.ops.itervalues():
+        for op in self.unique_ops:
             op.update_instance_uses() 
-        for task in self.tasks.itervalues():
+        for task in itervalues(self.tasks):
             task.update_instance_uses()
         # Update the futures
-        for future in self.futures.itervalues():
+        for future in itervalues(self.futures):
             future.update_creator_and_users()     
         # We can delete some of these data structures now that we
         # no longer need them, go go garbage collection
@@ -10063,16 +10104,14 @@ class State(object):
         self.point_slice = None
         if self.detailed_logging:
             # Compute the physical reachable
-            for op in self.ops.itervalues():
+            for op in self.unique_ops:
                 op.compute_physical_reachable()
-            for copy in self.copies.itervalues():
+            for copy in itervalues(self.copies):
                 copy.compute_physical_reachable()
-            for fill in self.fills.itervalues():
+            for fill in itervalues(self.fills):
                 fill.compute_physical_reachable()
-            for deppart in self.depparts.itervalues():
+            for deppart in itervalues(self.depparts):
                 deppart.compute_physical_reachable()
-            if need_physical and simplify_graphs:
-                self.simplify_physical_graph()
         if self.verbose:
             print("Found %d processors" % len(self.processors))
             print("Found %d memories" % len(self.memories))
@@ -10089,20 +10128,18 @@ class State(object):
             print("Found %d copies" % len(self.copies))
             print("Found %d fills" % len(self.fills))
 
-    def simplify_physical_graph(self, need_cycle_check=True):
-        print("Simplifying event graph...")
+    def simplify_physical_graph(self, need_cycle_check=True, 
+                                make_equivalence_graphs=False):
         # Check for cycles first, if there are any, then we disable
         # the transitive reduction and print a warning
-        #
-        # This cycle check is slow so we're doing an improvised version that
-        # below that checks for cycles on individual operations instead
-        # of the full event graph
-        #
-        #if need_cycle_check and self.perform_cycle_checks(print_result=False):
-        #    print("WARNING: CYCLE DETECTED IN PHYSICAL EVENT GRAPH!!!")
-        #    print("  This usually indicates a runtime bug and should be reported.")
-        #    print("WARNING: DISABLING TRANSITIVE REDUCTION!!!")
-        #    return
+        if need_cycle_check:
+            print("Checking for cycles...")
+            if self.perform_cycle_checks(print_result=True):
+                print("WARNING: CYCLE DETECTED IN PHYSICAL EVENT GRAPH!!!")
+                print("  This usually indicates a runtime bug and should be reported.")
+                print("WARNING: DISABLING TRANSITIVE REDUCTION!!!")
+                return
+        print("Simplifying event graph...")
         def post_traverse_node(node, traverser):
             traverser.postorder.append(node)
         # Build a topological order of everything 
@@ -10110,61 +10147,260 @@ class State(object):
             self.get_next_traversal_generation(), None, post_traverse_node)
         topological_sorter.postorder = list()
         # Traverse all the sources 
-        for op in self.ops.itervalues():
+        for op in self.unique_ops:
             if not op.physical_incoming:
                 topological_sorter.visit_node(op)
-        for copy in self.copies.itervalues():
+        for copy in itervalues(self.copies):
             if not copy.physical_incoming:
                 topological_sorter.visit_node(copy)
-        for fill in self.fills.itervalues():
+        for fill in itervalues(self.fills):
             if not fill.physical_incoming:
                 topological_sorter.visit_node(fill)
-        for deppart in self.depparts.itervalues():
+        for deppart in itervalues(self.depparts):
             if not deppart.physical_incoming:
                 topological_sorter.visit_node(deppart)
         # Now that we have everything sorted based on topology
         # Do the simplification in postorder so we simplify
         # the smallest subgraphs first and only do the largest
         # subgraphs later after the smallest ones are already simplified
-        count = 0;
+        count = 0
+        # Mapping from node to index
+        index_map = dict()
+        # Maintain a map of reachable sets for each of the nodes that
+        # we have traversed so far, we represent these as bit arrays
+        # so that they are easy to combine without using a full python
+        # set data structure
+        reachable = dict()
+        total_nodes = len(topological_sorter.postorder)
         for src in topological_sorter.postorder:
             if self.verbose:
-                print('Simplifying node %s %d of %d' % (str(src), count, 
-                                          len(topological_sorter.postorder)))
-                count += 1
-            if src.physical_outgoing is None:
+                print('Simplifying node %s %d of %d' % (str(src), count, total_nodes)) 
+            index_map[src] = count
+            count += 1
+            print_progress_bar(count, total_nodes, length=50)
+            # Create our reachability set and store it
+            our_reachable = NodeSet(total_nodes)
+            reachable[src] = our_reachable
+            if src.physical_outgoing is None or len(src.physical_outgoing) == 0:
                 continue
-            actual_out = src.physical_outgoing.copy()
-            diff = False
-            for next_vert in src.physical_outgoing:
-                if not next_vert in actual_out:
-                    continue
-                reachable = set()
-                if next_vert.get_physical_reachable(reachable, True, next_vert, True):
-                    print("WARNING: CYCLE DETECTED IN PHYSICAL EVENT GRAPH!!!")
-                    print("  This usually indicates a runtime bug and should be reported.")
-                    print("WARNING: DISABLING TRANSITIVE REDUCTION!!!")
-                    if self.assert_on_warning:
-                        assert False
-                    return
-                # See which edges we can remove
-                to_remove = list()
-                for other in actual_out:
-                    if other == next_vert:
-                        continue
-                    if other in reachable:
-                        to_remove.append(other)
-                del reachable
-                if len(to_remove) > 0:
-                    diff = True
-                    for rem in to_remove:
-                        actual_out.remove(rem)
-                        rem.physical_incoming.remove(src)
-                del to_remove
-            if diff:
-                src.physical_outgoing = actual_out
+            # Otherwise iterate through our outgoing edges and get the set of 
+            # nodes reachable from all of them
+            for dst in src.physical_outgoing:
+                assert dst in reachable
+                our_reachable.union(reachable[dst])
+            # Now see which of our nodes can be reached indirectly
+            to_remove = None
+            for dst in src.physical_outgoing:
+                assert dst in index_map
+                dst_index = index_map[dst]
+                if our_reachable.contains(dst_index):
+                    if to_remove is None:
+                        to_remove = list()
+                    to_remove.append(dst)
+                else:
+                    # We need to add it to our reachable set
+                    our_reachable.add(dst_index)
+            if to_remove:
+                for dst in to_remove:
+                    src.physical_outgoing.remove(dst)
+                    dst.physical_incoming.remove(src)
+            # We should never remove everything
+            assert len(src.physical_outgoing) > 0
         print("Done")
+        if make_equivalence_graphs:
+            self.compute_equivalence_graphs(topological_sorter.postorder, False)
 
+    def compute_equivalence_graphs(self, postorder=None, need_cycle_check=True):
+        if need_cycle_check:
+            print("Checking for cycles...")
+            if self.perform_cycle_checks(print_result=True):
+                print("WARNING: CYCLE DETECTED IN PHYSICAL EVENT GRAPH!!!")
+                print("  This usually indicates a runtime bug and should be reported.")
+                print("WARNING: DISABLING TRANSITIVE REDUCTION!!!")
+                return
+        print('Computing equivalence set graphs for verification...')
+        # The first thing we're going to do is BFS-like traversal of the
+        # graph to propagate reachability values for each equivalence set
+        # The main difference to BFS is that we can only traverse a node
+        # after we have traversed all the edges leading to that node so 
+        # we know we have a complete summary of the propagation of reachability
+        # information flowing into the node
+        incoming_sets = dict()
+        ready_nodes = collections.deque()
+        pending_nodes = dict()
+        # This is the function for processing a node during the traversal
+        def process_node(node):
+            if self.verbose:
+                print('Processing node '+str(node))
+            if node in incoming_sets:
+                local_sets = incoming_sets[node]
+                del incoming_sets[node]
+                for eq in iterkeys(node.get_equivalence_privileges()):
+                    if eq in local_sets:
+                        # Add the incoming equivalence edges and update
+                        eq_incoming = local_sets[eq]
+                        assert len(eq_incoming) > 0
+                        for src in eq_incoming:
+                            node.add_equivalence_incoming(eq, src)
+                            src.add_equivalence_outgoing(eq, node)
+                        # Who knows why list doesn't have a clear method
+                        del eq_incoming[:]
+                        eq_incoming.append(node)
+                    else:
+                        # Update with ourself
+                        eq_incoming = list()
+                        eq_incoming.append(node)
+                        local_sets[eq] = eq_incoming
+            elif node.physical_outgoing:
+                local_sets = dict()
+                for eq in node.get_equivalence_privileges():
+                    # Update with ourself
+                    eq_incoming = list()
+                    eq_incoming.append(node)
+                    local_sets[eq] = eq_incoming
+            if not node.physical_outgoing:
+                return
+            for dst in node.physical_outgoing:
+                if not dst in incoming_sets:
+                    dst_sets = dict()
+                    incoming_sets[dst] = dst_sets
+                else:
+                    dst_sets = incoming_sets[dst]
+                for eq,eq_outgoing in iteritems(local_sets):
+                    assert len(eq_outgoing) > 0
+                    if eq in dst_sets:
+                        eq_target = dst_sets[eq]
+                        # Merge the two lists together
+                        for src in eq_outgoing:
+                            if src not in eq_target:
+                                eq_target.append(src)
+                    else:
+                        # Just assign, make sure that we make a copy of it
+                        # to prevent aliasing between destination nodes
+                        # if there is more than one of them
+                        if len(local_sets) > 1 or len(node.physical_outgoing) > 1:
+                            dst_sets[eq] = list(eq_outgoing)
+                        else: # Only one outgoing so can just move it over
+                            dst_sets[eq] = eq_outgoing
+                # See if this destination node is ready or not
+                if len(dst.physical_incoming) > 1:
+                    if dst in pending_nodes:
+                        # Increment the number of received incoming edges
+                        pending_nodes[dst] += 1
+                        # Check to see if it is ready or not yet
+                        if pending_nodes[dst] == len(dst.physical_incoming):
+                            del pending_nodes[dst]
+                            ready_nodes.append(dst)
+                    else:
+                        # We've seen one edge so far
+                        pending_nodes[dst] = 1
+                else:
+                    # Only one incoming edge so we know it's ready
+                    assert len(dst.physical_incoming) == 1
+                    ready_nodes.append(dst)
+        # Seed the incoming sets with the roots
+        for op in self.unique_ops:
+            if not op.physical_incoming:
+                process_node(op)
+        for copy in itervalues(self.copies):
+            if not copy.physical_incoming:
+                process_node(copy)
+        for fill in itervalues(self.fills):
+            if not fill.physical_incoming:
+                process_node(fill)
+        for deppart in itervalues(self.depparts):
+            if not deppart.physical_incoming:
+                process_node(deppart)
+        # Iterate until we've walked the whole graph O(V + E)
+        while ready_nodes:
+            node = ready_nodes.popleft()
+            process_node(node)
+        # The pending nodes should be empty by the time we are done with this
+        print('Done')
+        print('Simplifying equivalence event graphs...')
+        # Now we need to transitively reduce each of the equivalence set graphs
+        # Do this in postorder for the same reason we transitively reduce
+        # the physical graph in post order
+        if postorder is None:
+            def post_traverse_node(node, traverser):
+                traverser.postorder.append(node)
+            # Build a topological order of everything 
+            topological_sorter = PhysicalTraverser(True, True,
+                self.get_next_traversal_generation(), None, post_traverse_node)
+            topological_sorter.postorder = list()
+            # Traverse all the sources 
+            for op in self.unique_ops:
+                if not op.physical_incoming:
+                    topological_sorter.visit_node(op)
+            for copy in itervalues(self.copies):
+                if not copy.physical_incoming:
+                    topological_sorter.visit_node(copy)
+            for fill in itervalues(self.fills):
+                if not fill.physical_incoming:
+                    topological_sorter.visit_node(fill)
+            for deppart in itervalues(self.depparts):
+                if not deppart.physical_incoming:
+                    topological_sorter.visit_node(deppart)
+            postorder = topological_sorter.postorder
+        # Transitively reduce the equivalence set graphs 
+        # We do this in one pass to avoid try and maximize efficiency
+        # and locality at the cost of a little bit of memory pressure
+        count = 0
+        index_map = dict()
+        # This will actually be a dict of dicts with one reachable set
+        # for each of the different equivalence sets
+        reachable = dict()
+        total_nodes = len(postorder)
+        for src in postorder:
+            if self.verbose:
+                print('Simplifying equivalence node %s %d of %d' % 
+                        (str(src), count, total_nodes)) 
+            index_map[src] = count
+            count += 1
+            print_progress_bar(count, total_nodes, length=50)
+            # Create our reachability dict
+            our_reachable = dict()
+            reachable[src] = our_reachable
+            # if we have no outgoing equivalence edges then there is nothing to do
+            if src.eq_outgoing is None or len(src.eq_outgoing) == 0:
+                # Still need to populate it
+                for eq in iterkeys(src.get_equivalence_privileges()):
+                    our_reachable[eq] = NodeSet(total_nodes)
+                continue
+            # Iterate over all the equivalence classes for this node
+            for eq in iterkeys(src.get_equivalence_privileges()):
+                # No outgoing equivalence classes for this node so nothing to do
+                eq_reachable = NodeSet(total_nodes) 
+                our_reachable[eq] = eq_reachable
+                if eq not in src.eq_outgoing:
+                    continue
+                # Iterate through our outgoing edges and get the set of nodes
+                # reachable from all of them
+                outgoing_edges = src.eq_outgoing[eq]
+                for dst in outgoing_edges:
+                    assert dst in reachable
+                    assert eq in reachable[dst]
+                    eq_reachable.union(reachable[dst][eq])
+                # Now see which of our nodes can be reached directly
+                to_remove = None
+                for dst in outgoing_edges:
+                    assert dst in index_map
+                    dst_index = index_map[dst]
+                    if eq_reachable.contains(dst_index):
+                        if to_remove is None:
+                            to_remove = list()
+                        to_remove.append(dst)
+                    else:
+                        # We need to add it to our reachable set
+                        eq_reachable.add(dst_index)
+                if to_remove:
+                    for dst in to_remove:
+                        src.eq_outgoing[eq].remove(dst)
+                        dst.eq_incoming[eq].remove(src)
+                # We should never remove everything
+                assert len(src.eq_outgoing[eq]) > 0
+        print('Done')
+            
     def alias_individual_points(self, p1, p2):
         # These are two copies of the same individual
         # task from different nodes, merge them into
@@ -10240,7 +10476,7 @@ class State(object):
     def perform_logical_analysis(self, perform_checks, sanity_checks):
         # Run the full analysis first, this will confirm that
         # the runtime did what we thought it should do
-        for task in self.tasks.itervalues():
+        for task in itervalues(self.tasks):
             # If we're only performing checks then we might break out early
             if not task.perform_logical_dependence_analysis(perform_checks):
                 return False
@@ -10250,47 +10486,102 @@ class State(object):
                     return False 
         return True
 
-    def perform_physical_analysis(self, perform_checks, sanity_checks, need_restrict_analysis):
+    def perform_physical_analysis(self, perform_checks, sanity_checks):
         assert self.top_level_uid is not None
         top_task = self.get_task(self.top_level_uid)
+        if perform_checks:
+            print(("Performing physical verification analysis "+
+                   "for %s (UID %d)...") % (str(top_task),top_task.op.uid))
+        else:
+            print(("Performing physical emulation analysis "+
+                   "for %s (UID %d)...") % (str(top_task),top_task.op.uid))
         # Perform the physical analysis on all the operations in program order
-        if not top_task.perform_task_physical_verification(perform_checks, need_restrict_analysis):
+        if not top_task.perform_task_physical_verification(perform_checks):
             print("FAIL")
             return
         print("Pass")
 
     def perform_cycle_checks(self, print_result=True):
-        for op in self.ops.itervalues(): 
-            if op.perform_cycle_check():
+        # To perform our cycle checks we run a modified version of
+        # Tarjan's algorithm for strongly connected components since
+        # it runs in O(V + E) time. If we find a SCC that is larger
+        # than size 1 then that is a cycle.
+        class CycleDetector(object):
+            def __init__(self):
+                self.indexes = dict()
+                self.lowlink = dict()
+                self.index = 0
+                self.stack = list()
+
+            def check_for_cycles(self, node, edges):
+                # First see if we've already traversed this node before
+                if node in self.indexes:
+                    return False
+                # Check for self cycles
+                if node in edges:
+                    print('SELF CYCLE DETECTED! '+str(node))
+                    return True
+                # Now run Tarjan's algorithm
+                self.indexes[node] = self.index
+                self.lowlink[node] = self.index
+                self.index += 1
+                self.stack.append(node)
+                for next_node in edges:
+                    if next_node not in self.indexes:
+                        if next_node.perform_cycle_check(self):
+                            # Short circuit
+                            return True
+                        self.lowlink[node] = min(self.lowlink[node], 
+                                                 self.lowlink[next_node])
+                    elif next_node in self.stack:
+                        self.lowlink[node] = min(self.lowlink[node],
+                                                 self.indexes[next_node])
+                # If this node is the root of an SCC then we need to
+                # pop it off the stack. For an acyclic graph every node
+                # should be its own strongly connected component of size 1
+                if self.indexes[node] == self.lowlink[node]:
+                    last = self.stack.pop()
+                    if last is not node:
+                        print('CYCLE DETECTED!')
+                        print(str(last))
+                        while last is not node:
+                            last = self.stack.pop()
+                            print(str(last))
+                        return True
+                return False
+
+        cycle_detector = CycleDetector()
+        for op in self.unique_ops: 
+            if op.perform_cycle_check(cycle_detector):
                 return True
-        for copy in self.copies.itervalues():
-            if copy.perform_cycle_check():
+        for copy in itervalues(self.copies):
+            if copy.perform_cycle_check(cycle_detector):
                 return True
-        for fill in self.fills.itervalues():
-            if fill.perform_cycle_check():
+        for fill in itervalues(self.fills):
+            if fill.perform_cycle_check(cycle_detector):
                 return True
         if print_result:
             print("No cycles detected")
         return False 
 
     def perform_user_event_leak_checks(self):
-        for event in self.events.itervalues():
+        for event in itervalues(self.events):
             event.check_for_user_event_leak()
 
     def make_region_tree_graphs(self, path, simplify_graphs):
         index_space_printer = GraphPrinter(path, 'index_space_graph', 'TB')
-        for node in self.index_spaces.itervalues():
+        for node in itervalues(self.index_spaces):
             if node.parent is None:
                 node.print_graph(index_space_printer)
         index_space_printer.print_pdf_after_close(simplify_graphs)
 
         field_space_printer = GraphPrinter(path, 'field_space_graph', 'TB')
-        for node in self.field_spaces.itervalues():
+        for node in itervalues(self.field_spaces):
             node.print_graph(field_space_printer)
         field_space_printer.print_pdf_after_close(simplify_graphs)
 
         region_graph_printer = GraphPrinter(path, 'region_graph', 'TB')
-        for node in self.trees.itervalues():
+        for node in itervalues(self.trees):
             if simplify_graphs:
                 node.mark_named_children()
             node.print_graph(region_graph_printer, simplify_graphs)
@@ -10298,19 +10589,19 @@ class State(object):
 
     def make_machine_graphs(self, path):
         machine_printer = GraphPrinter(path, 'machine_graph', 'TB')
-        for proc in self.processors.itervalues():
+        for proc in itervalues(self.processors):
             proc.print_node(machine_printer)
-        for mem in self.memories.itervalues():
+        for mem in itervalues(self.memories):
             mem.print_node(machine_printer)
-        for proc in self.processors.itervalues():
+        for proc in itervalues(self.processors):
             proc.print_mem_edges(machine_printer)
-        for mem in self.memories.itervalues():
+        for mem in itervalues(self.memories):
             mem.print_mem_edges(machine_printer)
         machine_printer.print_pdf_after_close(False)
 
     def make_dataflow_graphs(self, path, simplify_graphs, zoom_graphs):
         total_dataflow_graphs = 0
-        for task in self.tasks.itervalues():
+        for task in itervalues(self.tasks):
             total_dataflow_graphs += task.print_dataflow_graph(path, simplify_graphs, zoom_graphs)
         if self.verbose:
             print("Made "+str(total_dataflow_graphs)+" dataflow graphs")
@@ -10329,16 +10620,48 @@ class State(object):
             node.print_incoming_event_edges(printer) 
         printer.print_pdf_after_close(False, zoom_graphs)
 
+    def dump_eq_graph(self, eq_key):
+        print('Dumping equivalence set graph for eq set (point='+str(eq_key[0])+
+                ', field='+str(eq_key[1])+', tree='+str(eq_key[2])+')')
+        nodes = set()
+        # Find all the nodes with this eq_key
+        def has_eq_key(node):
+            if node.eq_incoming and eq_key in node.eq_incoming:
+                return True
+            if node.eq_outgoing and eq_key in node.eq_outgoing:
+                return True
+            return False
+        for op in self.unique_ops:
+            if has_eq_key(op):
+                nodes.add(op)
+        for copy in itervalues(self.copies):
+            if has_eq_key(copy):
+                nodes.add(copy)
+        for fill in itervalues(self.fills):
+            if has_eq_key(fill):
+                nodes.add(fill)
+        for deppart in itervalues(self.depparts):
+            if has_eq_key(deppart):
+                nodes.add(deppart)
+        # Now that we've got all the nodes we can print them with a graph printer
+        file_name = 'bad_eq_graph'
+        printer = GraphPrinter(self.temp_dir, file_name)
+        for node in nodes:
+            node.print_event_node(printer)
+        for node in nodes:
+            node.print_incoming_eq_edges(printer, eq_key)
+        printer.print_pdf_after_close(False)
+
     def print_realm_statistics(self):
         print('Total events: '+str(len(self.events)))
         print('Total copies: '+str(len(self.copies)))
         total_copy_bytes = 0
-        for copy in self.copies.itervalues():
+        for copy in itervalues(self.copies):
             total_copy_bytes += copy.compute_copy_size()
         print('  Total bytes moved: '+str(total_copy_bytes))
         print('Total fills:  '+str(len(self.fills)))
         total_fill_bytes = 0
-        for fill in self.fills.itervalues():
+        for fill in itervalues(self.fills):
             total_fill_bytes += fill.compute_fill_size()
         print('  Total bytes filled: '+str(total_fill_bytes))
 
@@ -10348,19 +10671,19 @@ class State(object):
         with open(file_name,'wb') as replay_file:
             # Write out processors
             replay_file.write(struct.pack('I',len(self.processors)))
-            for proc in self.processors.itervalues():
+            for proc in itervalues(self.processors):
                 replay_file.write(struct.pack('Q', proc.uid))    
                 replay_file.write(struct.pack('I', proc.kind_num))
             # Write out memories
             replay_file.write(struct.pack('I',len(self.memories)))
-            for mem in self.memories.itervalues():
+            for mem in itervalues(self.memories):
                 replay_file.write(struct.pack('Q', mem.uid))
                 replay_file.write(struct.pack('I', mem.kind_num))
             # Write out the instances
             assert len(self.instances) > 0
             # Skip the virtual instance
             replay_file.write(struct.pack('I',len(self.instances)-1))
-            for inst in self.instances.itervalues():
+            for inst in itervalues(self.instances):
                 if inst.is_virtual():
                     continue
                 inst.pack_inst_replay_info(replay_file)
@@ -10372,7 +10695,7 @@ class State(object):
             copies = set()
             closes = set()
             releases = set()
-            for op in self.ops.itervalues():
+            for op in self.unique_ops:
                 if op.kind == SINGLE_TASK_KIND:
                     # If it doesn't have a task and a processor, then it's not real
                     if not op.task or op.task.processor is None:
@@ -10404,7 +10727,7 @@ class State(object):
                 op.task.pack_task_replay_info(replay_file, op.uid)
             actual_index_tasks = 0
             for task in index_tasks:
-                for point in task.points.itervalues():
+                for point in itervalues(task.points):
                     point.pack_task_replay_info(replay_file, task.uid)
                     actual_index_tasks += 1
             assert actual_index_tasks == total_index
@@ -10426,7 +10749,7 @@ class State(object):
                 op.pack_release_replay_info(replay_file)
 
     def print_instance_descriptions(self):
-        for inst in self.instances.itervalues():
+        for inst in itervalues(self.instances):
             # Skip the virtual instance
             if inst.is_virtual():
                 continue
@@ -10446,10 +10769,10 @@ class State(object):
         top_task.print_task_mapping_decisions()
 
     def print_trees(self):
-        for node in self.index_spaces.itervalues():
+        for node in itervalues(self.index_spaces):
             if node.parent is None:
                 node.print_tree()
-        for node in self.trees.itervalues():
+        for node in itervalues(self.trees):
             node.print_tree()
 
     def get_processor(self, proc_id):
@@ -10465,6 +10788,13 @@ class State(object):
         mem = Memory(self, mem_id)
         self.memories[mem_id] = mem
         return mem
+
+    def get_index_expr(self, expr_id):
+        if expr_id in self.index_exprs:
+            return self.index_exprs[expr_id]
+        result = IndexExpr(self, expr_id)
+        self.index_exprs[expr_id] = result
+        return result
 
     def get_index_space(self, iid):
         if iid in self.index_spaces:
@@ -10522,10 +10852,14 @@ class State(object):
         return result
 
     def get_task(self, uid):
-        op = self.get_operation(uid)
-        if op in self.tasks:
-            return self.tasks[op]
-        op.set_op_kind(SINGLE_TASK_KIND)
+        assert self.top_level_ctx_uid is not None
+        if uid != self.top_level_ctx_uid:
+            op = self.get_operation(uid)
+            if op in self.tasks:
+                return self.tasks[op]
+            op.set_op_kind(SINGLE_TASK_KIND)
+        else:
+            op = None
         result = Task(self, op)
         self.tasks[op] = result
         return result
@@ -10598,12 +10932,14 @@ class State(object):
 
     def create_copy(self, creator):
         result = RealmCopy(self, self.no_event, self.next_realm_num)
+        self.copies[self.next_realm_num] = result
         self.next_realm_num += 1
         result.set_creator(creator)
         return result
 
     def create_fill(self, creator):
         result = RealmFill(self, self.no_event, self.next_realm_num)
+        self.fills[self.next_realm_num] = result
         self.next_realm_num += 1
         result.set_creator(creator)
         return result
@@ -10623,23 +10959,23 @@ class State(object):
         return self.memory_kinds[kind]
 
     def reset_logical_state(self):
-        for region in self.regions.itervalues():
+        for region in itervalues(self.regions):
             region.reset_logical_state()
-        for partition in self.partitions.itervalues():
+        for partition in itervalues(self.partitions):
             partition.reset_logical_state()
         # Definitely run the garbage collector here
         gc.collect()
 
     def reset_physical_state(self, depth):
-        for region in self.regions.itervalues():
+        for region in itervalues(self.regions):
             region.reset_physical_state(depth)
-        for partition in self.partitions.itervalues():
+        for partition in itervalues(self.partitions):
             partition.reset_physical_state(depth)
         # Definitely run the garbage collector here
         gc.collect()
 
     def reset_verification_state(self, depth):
-        for region in self.trees.itervalues():
+        for region in itervalues(self.trees):
             region.reset_verification_state(depth)
         # Definitely run the garbage collector here
         gc.collect()
@@ -10649,7 +10985,7 @@ def generate_random_intersecting_rects(dim, max_size):
     hi1 = Point(dim)
     lo2 = Point(dim)
     hi2 = Point(dim)
-    for d in range(dim):
+    for d in xrange(dim):
         lo1.vals[d] = random.randint(0,max_size)
         hi1.vals[d] = random.randint(lo1.vals[d],max_size)
         lo2.vals[d] = random.randint(0,hi1.vals[d])
@@ -10710,9 +11046,9 @@ def perform_geometry_test(dim, max_size=100):
 
 def run_geometry_tests(num_tests=10000):
     success = True
-    for dim in range(1,4):
+    for dim in xrange(1,4):
         print("Testing dimension... "+str(dim))
-        for i in range(num_tests):
+        for i in xrange(num_tests):
             print('  Running test '+str(i))
             success = perform_geometry_test(dim)
             if not success:
@@ -10771,7 +11107,7 @@ def main(temp_dir):
         '-i', '--instance', dest='instance_descriptions', action='store_true',
         help='print instance descriptions')
     parser.add_argument(
-        '-q', '--mapping', dest='mapping_decisions', action='store_true',
+        '-x', '--mapping', dest='mapping_decisions', action='store_true',
         help='print mapping decisions')
     parser.add_argument(
         '-t', '--trees', dest='print_trees', action='store_true',
@@ -10797,6 +11133,9 @@ def main(temp_dir):
     parser.add_argument(
         '--zoom', dest='zoom_graphs', action='store_true',
         help='enable generation of "zoom" graphs for all emitted graphs')
+    parser.add_argument(
+        '-q', '--eq_graph', dest='eq_graph_on_error', action='store_true',
+        help='dump equivalence set graph on failure')
     parser.add_argument(
         dest='filenames', nargs='+',
         help='input legion spy log filenames')
@@ -10826,11 +11165,13 @@ def main(temp_dir):
     assert_on_warning = args.assert_on_warning
     test_geometry = args.test_geometry
     zoom_graphs = args.zoom_graphs
+    eq_graph_on_error = args.eq_graph_on_error
 
     if test_geometry:
         run_geometry_tests()
 
-    state = State(verbose, detailed_graphs, assert_on_error, assert_on_warning)
+    state = State(temp_dir, verbose, detailed_graphs, assert_on_error, 
+                  assert_on_warning, eq_graph_on_error)
     total_matches = 0 
     for file_name in file_names:
         total_matches += state.parse_log_file(file_name)
@@ -10884,10 +11225,12 @@ def main(temp_dir):
         if state.assert_on_warning:
             assert False
         user_event_leaks = False
+    if cycle_checks:
+        print("Performing cycle checks...")
+        state.perform_cycle_checks()
     # If we are doing logical checks or the user asked for the dataflow
     # graph but we don't have any logical data then perform the logical analysis
     need_logical = dataflow_graphs and not state.detailed_logging 
-    need_restrict_analysis = True 
     if logical_checks or need_logical:
         if need_logical:
             print("INFO: No logical dependence data was found so we are running "+
@@ -10895,8 +11238,6 @@ def main(temp_dir):
                   "should compute. These are not the actual dataflow graphs computed.")
         print("Performing logical analysis...")
         state.perform_logical_analysis(logical_checks, sanity_checks)
-        # No longer need to do restriction analysis if we do it during logical
-        need_restrict_analysis = False
     # If we are doing physical checks or the user asked for the event
     # graph but we don't have any logical data then perform the physical analysis
     need_physical = event_graphs and not state.detailed_logging 
@@ -10905,14 +11246,20 @@ def main(temp_dir):
             print("INFO: No physical dependence data was found so we are running "+
                   "physical analysis to show the event graph that the runtime "+
                   "should compute. This is not the actual event graph computed.")
-        print("Performing physical analysis...")
-        state.perform_physical_analysis(physical_checks, sanity_checks, need_restrict_analysis)
+        elif (simplify_graphs):
+            # Simplify the graph before checking it, we need cycle checks
+            # if we didn't do them before
+            state.simplify_physical_graph(need_cycle_check=not cycle_checks,
+                                          make_equivalence_graphs=True)
+        else:
+            # Doing verification so we still need the equivalence class graphs
+            state.compute_equivalence_graphs()
+        state.perform_physical_analysis(physical_checks, sanity_checks) 
         # If we generated the graph for printing, then simplify it 
-        if need_physical:
+        if need_physical and simplify_graphs:
             state.simplify_physical_graph(need_cycle_check=False)
-    if cycle_checks:
-        print("Performing cycle checks...")
-        state.perform_cycle_checks()
+    elif event_graphs and simplify_graphs:
+        state.simplify_physical_graph(need_cycle_check=not cycle_checks)
     if user_event_leaks:
         print("Performing user event leak checks...")
         state.perform_user_event_leak_checks()

@@ -1,4 +1,4 @@
-/* Copyright 2018 Stanford University, NVIDIA Corporation
+/* Copyright 2019 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,6 +15,7 @@
 
 #include "legion.h"
 #include "legion/legion_ops.h"
+#include "legion/region_tree.h"
 #include "legion/legion_tasks.h"
 #include "legion/mapper_manager.h"
 #include "legion/legion_instances.h"
@@ -47,7 +48,8 @@ namespace Legion {
     MapperManager::MapperManager(Runtime *rt, Mapping::Mapper *mp, 
                                  MapperID mid, Processor p)
       : runtime(rt), mapper(mp), mapper_id(mid), processor(p),
-        profile_mapper(runtime->profiler != NULL)
+        profile_mapper(runtime->profiler != NULL),
+        request_valid_instances(mp->request_valid_instances())
     //--------------------------------------------------------------------------
     {
     }
@@ -255,28 +257,28 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MapperManager::invoke_task_create_temporary(TaskOp *task,
-                                      Mapper::CreateTaskTemporaryInput *input,
-                                      Mapper::CreateTaskTemporaryOutput *output,
-                                      MappingCallInfo *info)
+    void MapperManager::invoke_select_task_sources(RemoteTaskOp *task, 
+                                    Mapper::SelectTaskSrcInput *input,
+                                    Mapper::SelectTaskSrcOutput *output,
+                                    MappingCallInfo *info)
     //--------------------------------------------------------------------------
     {
       if (info == NULL)
       {
         RtEvent continuation_precondition;
-        info = begin_mapper_call(TASK_CREATE_TEMPORARY_CALL,
+        info = begin_mapper_call(TASK_SELECT_SOURCES_CALL,
                                  task, continuation_precondition);
         if (continuation_precondition.exists())
         {
-          MapperContinuation3<TaskOp, Mapper::CreateTaskTemporaryInput,
-            Mapper::CreateTaskTemporaryOutput, 
-            &MapperManager::invoke_task_create_temporary>
+          MapperContinuation3<RemoteTaskOp, Mapper::SelectTaskSrcInput,
+            Mapper::SelectTaskSrcOutput, 
+            &MapperManager::invoke_select_task_sources>
               continuation(this, task, input, output, info);
           continuation.defer(runtime, continuation_precondition, task);
           return;
         }
       }
-      mapper->create_task_temporary_instance(info, *task, *input, *output);
+      mapper->select_task_sources(info, *task, *input, *output);
       finish_mapper_call(info);
     }
 
@@ -381,28 +383,28 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MapperManager::invoke_inline_create_temporary(MapOp *op,
-                                    Mapper::CreateInlineTemporaryInput *input,
-                                    Mapper::CreateInlineTemporaryOutput *output,
-                                    MappingCallInfo *info)
+    void MapperManager::invoke_select_inline_sources(RemoteMapOp *op, 
+                                      Mapper::SelectInlineSrcInput *input,
+                                      Mapper::SelectInlineSrcOutput *output,
+                                      MappingCallInfo *info)
     //--------------------------------------------------------------------------
     {
       if (info == NULL)
       {
         RtEvent continuation_precondition;
-        info = begin_mapper_call(INLINE_CREATE_TEMPORARY_CALL,
+        info = begin_mapper_call(INLINE_SELECT_SOURCES_CALL,
                                  op, continuation_precondition);
         if (continuation_precondition.exists())
         {
-          MapperContinuation3<MapOp, Mapper::CreateInlineTemporaryInput,
-                              Mapper::CreateInlineTemporaryOutput, 
-                              &MapperManager::invoke_inline_create_temporary>
+          MapperContinuation3<RemoteMapOp, Mapper::SelectInlineSrcInput,
+                              Mapper::SelectInlineSrcOutput, 
+                              &MapperManager::invoke_select_inline_sources>
                                 continuation(this, op, input, output, info);
           continuation.defer(runtime, continuation_precondition, op);
           return;
         }
       }
-      mapper->create_inline_temporary_instance(info, *op, *input, *output);
+      mapper->select_inline_sources(info, *op, *input, *output);
       finish_mapper_call(info);
     }
 
@@ -482,28 +484,28 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MapperManager::invoke_copy_create_temporary(CopyOp *op,
-                                    Mapper::CreateCopyTemporaryInput *input,
-                                    Mapper::CreateCopyTemporaryOutput *output,
+    void MapperManager::invoke_select_copy_sources(RemoteCopyOp *op,
+                                    Mapper::SelectCopySrcInput *input,
+                                    Mapper::SelectCopySrcOutput *output,
                                     MappingCallInfo *info)
     //--------------------------------------------------------------------------
     {
       if (info == NULL)
       {
         RtEvent continuation_precondition;
-        info = begin_mapper_call(COPY_CREATE_TEMPORARY_CALL,
+        info = begin_mapper_call(COPY_SELECT_SOURCES_CALL,
                                  op, continuation_precondition);
         if (continuation_precondition.exists())
         {
-          MapperContinuation3<CopyOp, Mapper::CreateCopyTemporaryInput,
-            Mapper::CreateCopyTemporaryOutput, 
-            &MapperManager::invoke_copy_create_temporary>
+          MapperContinuation3<RemoteCopyOp, Mapper::SelectCopySrcInput,
+            Mapper::SelectCopySrcOutput, 
+            &MapperManager::invoke_select_copy_sources>
               continuation(this, op, input, output, info);
           continuation.defer(runtime, continuation_precondition, op);
           return;
         }
       }
-      mapper->create_copy_temporary_instance(info, *op, *input, *output);
+      mapper->select_copy_sources(info, *op, *input, *output);
       finish_mapper_call(info);
     }
 
@@ -556,31 +558,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MapperManager::invoke_map_close(CloseOp *op,
-                                         Mapper::MapCloseInput *input,
-                                         Mapper::MapCloseOutput *output,
-                                         MappingCallInfo *info)
-    //--------------------------------------------------------------------------
-    {
-      if (info == NULL)
-      {
-        RtEvent continuation_precondition;
-        info = begin_mapper_call(MAP_CLOSE_CALL,
-                                 op, continuation_precondition);
-        if (continuation_precondition.exists())
-        {
-          MapperContinuation3<CloseOp, Mapper::MapCloseInput, 
-                  Mapper::MapCloseOutput, &MapperManager::invoke_map_close>
-                    continuation(this, op, input, output, info);
-          continuation.defer(runtime, continuation_precondition, op);
-          return;
-        }
-      }
-      mapper->map_close(info, *op, *input, *output);
-      finish_mapper_call(info);
-    }
-
-    //--------------------------------------------------------------------------
     void MapperManager::invoke_select_close_sources(CloseOp *op,
                                          Mapper::SelectCloseSrcInput *input,
                                          Mapper::SelectCloseSrcOutput *output,
@@ -607,28 +584,28 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MapperManager::invoke_close_create_temporary(CloseOp *op,
-                                    Mapper::CreateCloseTemporaryInput *input,
-                                    Mapper::CreateCloseTemporaryOutput *output,
-                                    MappingCallInfo *info)
+    void MapperManager::invoke_select_close_sources(RemoteCloseOp *op,
+                                         Mapper::SelectCloseSrcInput *input,
+                                         Mapper::SelectCloseSrcOutput *output,
+                                         MappingCallInfo *info)
     //--------------------------------------------------------------------------
     {
       if (info == NULL)
       {
         RtEvent continuation_precondition;
-        info = begin_mapper_call(CLOSE_CREATE_TEMPORARY_CALL,
+        info = begin_mapper_call(CLOSE_SELECT_SOURCES_CALL,
                                  op, continuation_precondition);
         if (continuation_precondition.exists())
         {
-          MapperContinuation3<CloseOp, Mapper::CreateCloseTemporaryInput,
-            Mapper::CreateCloseTemporaryOutput, 
-            &MapperManager::invoke_close_create_temporary>
+          MapperContinuation3<RemoteCloseOp, Mapper::SelectCloseSrcInput,
+            Mapper::SelectCloseSrcOutput, 
+            &MapperManager::invoke_select_close_sources>
               continuation(this, op, input, output, info);
           continuation.defer(runtime, continuation_precondition, op);
           return;
         }
       }
-      mapper->create_close_temporary_instance(info, *op, *input, *output);
+      mapper->select_close_sources(info, *op, *input, *output);
       finish_mapper_call(info);
     }
 
@@ -781,28 +758,28 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MapperManager::invoke_release_create_temporary(ReleaseOp *op,
-                                  Mapper::CreateReleaseTemporaryInput *input,
-                                  Mapper::CreateReleaseTemporaryOutput *output,
-                                  MappingCallInfo *info)
+    void MapperManager::invoke_select_release_sources(RemoteReleaseOp *op,
+                                       Mapper::SelectReleaseSrcInput *input,
+                                       Mapper::SelectReleaseSrcOutput *output,
+                                       MappingCallInfo *info)
     //--------------------------------------------------------------------------
     {
       if (info == NULL)
       {
         RtEvent continuation_precondition;
-        info = begin_mapper_call(RELEASE_CREATE_TEMPORARY_CALL,
+        info = begin_mapper_call(RELEASE_SELECT_SOURCES_CALL,
                                  op, continuation_precondition);
         if (continuation_precondition.exists())
         {
-          MapperContinuation3<ReleaseOp, Mapper::CreateReleaseTemporaryInput,
-                              Mapper::CreateReleaseTemporaryOutput, 
-                              &MapperManager::invoke_release_create_temporary>
+          MapperContinuation3<RemoteReleaseOp, Mapper::SelectReleaseSrcInput,
+                              Mapper::SelectReleaseSrcOutput, 
+                              &MapperManager::invoke_select_release_sources>
                                 continuation(this, op, input, output, info);
           continuation.defer(runtime, continuation_precondition, op);
           return;
         }
       }
-      mapper->create_release_temporary_instance(info, *op, *input, *output);
+      mapper->select_release_sources(info, *op, *input, *output);
       finish_mapper_call(info);
     }
 
@@ -938,30 +915,29 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MapperManager::invoke_partition_create_temporary(
-                                DependentPartitionOp *op,
-                                Mapper::CreatePartitionTemporaryInput *input,
-                                Mapper::CreatePartitionTemporaryOutput *output,
-                                MappingCallInfo *info)
+    void MapperManager::invoke_select_partition_sources(RemotePartitionOp *op,
+                                  Mapper::SelectPartitionSrcInput *input,
+                                  Mapper::SelectPartitionSrcOutput *output,
+                                  MappingCallInfo *info)
     //--------------------------------------------------------------------------
     {
       if (info == NULL)
       {
         RtEvent continuation_precondition;
-        info = begin_mapper_call(PARTITION_CREATE_TEMPORARY_CALL,
+        info = begin_mapper_call(PARTITION_SELECT_SOURCES_CALL,
                                  op, continuation_precondition);
         if (continuation_precondition.exists())
         {
-          MapperContinuation3<DependentPartitionOp, 
-                            Mapper::CreatePartitionTemporaryInput,
-                            Mapper::CreatePartitionTemporaryOutput, 
-                            &MapperManager::invoke_partition_create_temporary>
+          MapperContinuation3<RemotePartitionOp, 
+                            Mapper::SelectPartitionSrcInput,
+                            Mapper::SelectPartitionSrcOutput, 
+                            &MapperManager::invoke_select_partition_sources>
                               continuation(this, op, input, output, info);
           continuation.defer(runtime, continuation_precondition, op);
           return;
         }
       }
-      mapper->create_partition_temporary_instance(info, *op, *input, *output);
+      mapper->select_partition_sources(info, *op, *input, *output);
       finish_mapper_call(info);
     }
 
@@ -1390,7 +1366,7 @@ namespace Legion {
       if (impl == NULL)
         REPORT_LEGION_ERROR(ERROR_INVALID_ARGUMENTS_TO_MAPPER_RUNTIME,
                       "Invalid mapper request: mapper %s requested execution "
-                      "constraints for variant %ld in mapper call %s, but "
+                      "constraints for variant %d in mapper call %s, but "
                       "that variant does not exist.", mapper->get_mapper_name(),
                       vid, get_mapper_call_name(ctx->kind))
       const ExecutionConstraintSet &result = impl->get_execution_constraints();
@@ -1409,7 +1385,7 @@ namespace Legion {
       if (impl == NULL)
         REPORT_LEGION_ERROR(ERROR_INVALID_ARGUMENTS_TO_MAPPER_RUNTIME,
                       "Invalid mapper request: mapper %s requested task layout "
-                      "constraints for variant %ld in mapper call %s, but "
+                      "constraints for variant %d in mapper call %s, but "
                       "that variant does not exist.", mapper->get_mapper_name(),
                       vid, get_mapper_call_name(ctx->kind))
       const TaskLayoutConstraintSet& result = impl->get_layout_constraints();
@@ -1461,7 +1437,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool MapperManager::do_constraints_conflict(MappingCallInfo *ctx,
-                               LayoutConstraintID set1, LayoutConstraintID set2)
+                               LayoutConstraintID set1, LayoutConstraintID set2,
+                               const LayoutConstraint **conflict_constraint)
     //--------------------------------------------------------------------------
     {
       pause_mapper_call(ctx);
@@ -1476,14 +1453,16 @@ namespace Legion {
                       "is invalid.", mapper->get_mapper_name(), 
                       (c1 == NULL) ? set1 : set2, 
                       get_mapper_call_name(ctx->kind))
-      bool result = c1->conflicts(c2, 0/*dont care about dimensions*/);
+      const bool result = 
+        c1->conflicts(c2, 0/*dont care about dimensions*/, conflict_constraint);
       resume_mapper_call(ctx);
       return result;
     }
 
     //--------------------------------------------------------------------------
     bool MapperManager::do_constraints_entail(MappingCallInfo *ctx,
-                           LayoutConstraintID source, LayoutConstraintID target)
+                           LayoutConstraintID source, LayoutConstraintID target,
+                           const LayoutConstraint **failed_constraint)
     //--------------------------------------------------------------------------
     {
       pause_mapper_call(ctx);
@@ -1498,7 +1477,8 @@ namespace Legion {
                       "ID is invalid.", mapper->get_mapper_name(), 
                       (c1 == NULL) ? source : target, 
                       get_mapper_call_name(ctx->kind))
-      bool result = c1->entails(c2, 0/*don't care about dimensions*/);
+      const bool result = 
+        c1->entails(c2, 0/*don't care about dimensions*/, failed_constraint);
       resume_mapper_call(ctx);
       return result;
     }
@@ -1564,6 +1544,22 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    VariantID MapperManager::register_task_variant(MappingCallInfo *ctx,
+                                      const TaskVariantRegistrar &registrar,
+				      const CodeDescriptor &codedesc,
+				      const void *user_data, size_t user_len,
+                                      bool has_return_type)
+    //--------------------------------------------------------------------------
+    {
+      pause_mapper_call(ctx);
+      CodeDescriptor *realm_desc = new CodeDescriptor(codedesc);
+      VariantID result = runtime->register_variant(registrar, user_data,
+                                    user_len, realm_desc, has_return_type);
+      resume_mapper_call(ctx);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
     void MapperManager::filter_variants(MappingCallInfo *ctx, const Task &task,
             const std::vector<std::vector<MappingInstance> > &chosen_instances,
                                         std::vector<VariantID> &variants)
@@ -1604,7 +1600,7 @@ namespace Legion {
           for (unsigned idx = 0; idx < instances.size(); idx++)
           {
             PhysicalManager *manager = instances[idx].impl;
-            if (manager->conflicts(constraints))
+            if (manager->conflicts(constraints, NULL))
             {
               conflicts = true;
               break;
@@ -1652,7 +1648,7 @@ namespace Legion {
                 instances.begin(); it != instances.end(); /*nothing*/)
           {
             PhysicalManager *manager = it->impl;
-            if (manager->conflicts(constraints))
+            if (manager->conflicts(constraints, NULL))
               it = instances.erase(it);
             else
               it++;
@@ -1700,7 +1696,7 @@ namespace Legion {
               instances.begin(); it != instances.end(); /*nothing*/)
         {
           PhysicalManager *manager = it->impl;
-          if (manager->conflicts(constraints))
+          if (manager->conflicts(constraints, NULL))
             it = instances.erase(it);
           else
             it++;
@@ -1727,7 +1723,8 @@ namespace Legion {
                                     const LayoutConstraintSet &constraints, 
                                     const std::vector<LogicalRegion> &regions,
                                     MappingInstance &result, 
-                                    bool acquire, GCPriority priority)
+                                    bool acquire, GCPriority priority,
+                                    bool tight_region_bounds, size_t *footprint)
     //--------------------------------------------------------------------------
     {
       if (!target_memory.exists())
@@ -1747,7 +1744,8 @@ namespace Legion {
       pause_mapper_call(ctx);
       bool success = runtime->create_physical_instance(target_memory, 
         constraints, regions, result, mapper_id, processor, acquire, priority,
-        (ctx->operation == NULL) ? 0 : ctx->operation->get_unique_op_id());
+        tight_region_bounds, footprint, (ctx->operation == NULL) ? 
+          0 : ctx->operation->get_unique_op_id());
       if (success && acquire)
         record_acquired_instance(ctx, result.impl, true/*created*/);
       resume_mapper_call(ctx);
@@ -1760,7 +1758,8 @@ namespace Legion {
                                     LayoutConstraintID layout_id,
                                     const std::vector<LogicalRegion> &regions,
                                     MappingInstance &result,
-                                    bool acquire, GCPriority priority)
+                                    bool acquire, GCPriority priority,
+                                    bool tight_region_bounds, size_t *footprint)
     //--------------------------------------------------------------------------
     {
       if (!target_memory.exists())
@@ -1780,7 +1779,8 @@ namespace Legion {
       pause_mapper_call(ctx);
       bool success = runtime->create_physical_instance(target_memory, layout_id,
                       regions, result, mapper_id, processor, acquire, priority,
-             (ctx->operation == NULL) ? 0 : ctx->operation->get_unique_op_id());
+                      tight_region_bounds, footprint, (ctx->operation == NULL) ? 
+                        0 : ctx->operation->get_unique_op_id());
       if (success && acquire)
         record_acquired_instance(ctx, result.impl, true/*created*/);
       resume_mapper_call(ctx);
@@ -1794,7 +1794,7 @@ namespace Legion {
                                     const std::vector<LogicalRegion> &regions,
                                     MappingInstance &result, bool &created, 
                                     bool acquire, GCPriority priority,
-                                    bool tight_region_bounds)
+                                    bool tight_region_bounds, size_t *footprint)
     //--------------------------------------------------------------------------
     {
       if (!target_memory.exists())
@@ -1815,7 +1815,7 @@ namespace Legion {
       pause_mapper_call(ctx);
       bool success = runtime->find_or_create_physical_instance(target_memory,
                   constraints, regions, result, created, mapper_id, processor, 
-                  acquire, priority, tight_region_bounds,
+                  acquire, priority, tight_region_bounds, footprint,
                   (ctx->operation == NULL) ? 0 :
                    ctx->operation->get_unique_op_id());
       if (success && acquire)
@@ -1831,7 +1831,7 @@ namespace Legion {
                                     const std::vector<LogicalRegion> &regions,
                                     MappingInstance &result, bool &created, 
                                     bool acquire, GCPriority priority,
-                                    bool tight_region_bounds)
+                                    bool tight_region_bounds, size_t *footprint)
     //--------------------------------------------------------------------------
     {
       if (!target_memory.exists())
@@ -1852,7 +1852,7 @@ namespace Legion {
       pause_mapper_call(ctx);
       bool success = runtime->find_or_create_physical_instance(target_memory,
                    layout_id, regions, result, created, mapper_id, processor, 
-                   acquire, priority, tight_region_bounds,
+                   acquire, priority, tight_region_bounds, footprint,
                    (ctx->operation == NULL) ? 0 : 
                     ctx->operation->get_unique_op_id());
       if (success && acquire)
@@ -1973,7 +1973,7 @@ namespace Legion {
       }
       std::set<PhysicalManager*> instances; 
       instances.insert(manager);
-      std::vector<bool> results(1,true);
+      std::vector<bool> results;
       RtEvent wait_on = 
         manager->memory_manager->acquire_instances(instances, results);
       if (wait_on.exists())
@@ -2397,9 +2397,98 @@ namespace Legion {
     {
       pause_mapper_call(ctx);
       IndexSpace result = 
-        runtime->find_or_create_index_launch_space(domain, realm_is, type_tag);
+        runtime->find_or_create_index_slice_space(domain, realm_is, type_tag);
       resume_mapper_call(ctx);
       return result; 
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace MapperManager::union_index_spaces(MappingCallInfo *ctx,
+                                         const std::vector<IndexSpace> &sources)
+    //--------------------------------------------------------------------------
+    {
+      pause_mapper_call(ctx);
+      IndexSpace result = 
+        runtime->forest->find_or_create_union_space(NULL, sources);
+      resume_mapper_call(ctx);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace MapperManager::intersect_index_spaces(MappingCallInfo *ctx,
+                                         const std::vector<IndexSpace> &sources)
+    //--------------------------------------------------------------------------
+    {
+      pause_mapper_call(ctx);
+      IndexSpace result = 
+        runtime->forest->find_or_create_intersection_space(NULL, sources);
+      resume_mapper_call(ctx);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace MapperManager::subtract_index_spaces(MappingCallInfo *ctx,
+                                              IndexSpace left, IndexSpace right)
+    //--------------------------------------------------------------------------
+    {
+      pause_mapper_call(ctx);
+      IndexSpace result = 
+        runtime->forest->find_or_create_difference_space(NULL, left, right);
+      resume_mapper_call(ctx);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    bool MapperManager::is_index_space_empty(MappingCallInfo *ctx,
+                                             IndexSpace handle)
+    //--------------------------------------------------------------------------
+    {
+      if (!handle.exists())
+        return true;
+      pause_mapper_call(ctx);
+      IndexSpaceNode *node = runtime->forest->get_node(handle);
+      bool result = node->is_empty();
+      resume_mapper_call(ctx);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    bool MapperManager::index_spaces_overlap(MappingCallInfo *ctx,
+                                             IndexSpace one, IndexSpace two)
+    //--------------------------------------------------------------------------
+    {
+      pause_mapper_call(ctx);
+      std::vector<IndexSpace> spaces(2);
+      spaces[0] = one;
+      spaces[1] = two;
+      IndexSpace intersection = 
+        runtime->forest->find_or_create_intersection_space(NULL, spaces);
+      bool result = false;
+      if (intersection.exists())
+      {
+        IndexSpaceNode *node = runtime->forest->get_node(intersection);
+        result = !node->is_empty();
+      }
+      resume_mapper_call(ctx);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    bool MapperManager::index_space_dominates(MappingCallInfo *ctx,
+                                              IndexSpace left, IndexSpace right)
+    //--------------------------------------------------------------------------
+    {
+      pause_mapper_call(ctx);
+      IndexSpace diff = 
+        runtime->forest->find_or_create_difference_space(NULL, left, right);
+      bool result = true;
+      if (diff.exists())
+      {
+        IndexSpaceNode *node = runtime->forest->get_node(diff);
+        result = node->is_empty();
+      }
+      resume_mapper_call(ctx);
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -2448,27 +2537,16 @@ namespace Legion {
       IndexSpace result = IndexSpace::NO_SPACE;
       switch (color.get_dim())
       {
-        case 1:
-          {
-            Point<1,coord_t> point(color);
-            result = runtime->get_index_subspace(p, &point,
-                NT_TemplateHelper::encode_tag<1,coord_t>());
-            break;
+#define DIMFUNC(DIM) \
+        case DIM: \
+          { \
+            Point<DIM,coord_t> point(color); \
+            result = runtime->get_index_subspace(p, &point, \
+                NT_TemplateHelper::encode_tag<DIM,coord_t>()); \
+            break; \
           }
-        case 2:
-          {
-            Point<2,coord_t> point(color);
-            result = runtime->get_index_subspace(p, &point,
-                NT_TemplateHelper::encode_tag<2,coord_t>());
-            break;
-          }
-        case 3:
-          {
-            Point<3,coord_t> point(color);
-            result = runtime->get_index_subspace(p, &point,
-                NT_TemplateHelper::encode_tag<3,coord_t>());
-            break;
-          }
+        LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
         default:
           assert(false);
       }
@@ -2495,27 +2573,16 @@ namespace Legion {
       const TypeTag type_tag = handle.get_type_tag();
       switch (NT_TemplateHelper::get_dim(type_tag))
       {
-        case 1:
-          {
-            DomainT<1,coord_t> realm_is;
-            runtime->get_index_space_domain(handle, &realm_is, type_tag);
-            result = realm_is;
-            break;
+#define DIMFUNC(DIM) \
+        case DIM: \
+          { \
+            DomainT<DIM,coord_t> realm_is; \
+            runtime->get_index_space_domain(handle, &realm_is, type_tag); \
+            result = realm_is; \
+            break; \
           }
-        case 2:
-          {
-            DomainT<2,coord_t> realm_is;
-            runtime->get_index_space_domain(handle, &realm_is, type_tag);
-            result = realm_is;
-            break;
-          }
-        case 3:
-          {
-            DomainT<3,coord_t> realm_is;
-            runtime->get_index_space_domain(handle, &realm_is, type_tag);
-            result = realm_is;
-            break;
-          }
+        LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
         default:
           assert(false);
       }
@@ -2774,27 +2841,16 @@ namespace Legion {
       LogicalRegion result = LogicalRegion::NO_REGION;
       switch (color.get_dim())
       {
-        case 1:
-          {
-            Point<1,coord_t> point(color);
-            result = runtime->get_logical_subregion_by_color(par, &point,
-                              NT_TemplateHelper::encode_tag<1,coord_t>());
-            break;
+#define DIMFUNC(DIM) \
+        case DIM: \
+          { \
+            Point<DIM,coord_t> point(color); \
+            result = runtime->get_logical_subregion_by_color(par, &point, \
+                              NT_TemplateHelper::encode_tag<DIM,coord_t>()); \
+            break; \
           }
-        case 2:
-          {
-            Point<2,coord_t> point(color);
-            result = runtime->get_logical_subregion_by_color(par, &point,
-                              NT_TemplateHelper::encode_tag<2,coord_t>());
-            break;
-          }
-        case 3:
-          {
-            Point<3,coord_t> point(color);
-            result = runtime->get_logical_subregion_by_color(par, &point,
-                              NT_TemplateHelper::encode_tag<3,coord_t>());
-            break;
-          }
+        LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
         default:
           assert(false);
       }

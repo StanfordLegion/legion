@@ -1,4 +1,4 @@
--- Copyright 2018 Stanford University
+-- Copyright 2019 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -38,7 +38,7 @@ where reads writes(r1, r2)
 do
   for e in r1 do e.f = c.drand48() end
   for e in r2 do
-    e.p = unsafe_cast(ptr(fs1, r1), [ptr](size - __raw(e).value - 1))
+    e.p = unsafe_cast(ptr(fs1, r1), ptr(size - __raw(e).value - 1))
     e.g = 0
     e.h = 0
   end

@@ -1,4 +1,4 @@
--- Copyright 2018 Stanford University
+-- Copyright 2019 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -13,9 +13,9 @@
 -- limitations under the License.
 
 -- fails-with:
--- vectorize_loops20.rg:51: vectorization failed: loop body has a scattered read from a structured region
---    e.g = 0.5 * e.p.f
---                 ^
+-- vectorize_loops20.rg:51: vectorization failed: loop body has an expression of an inadmissible type
+--     e.g = 0.5 * e.p.f
+--                  ^
 
 import "regent"
 

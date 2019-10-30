@@ -1,4 +1,4 @@
-# Copyright 2018 Stanford University
+# Copyright 2019 Stanford University
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -21,6 +21,7 @@ endif
 # Flags for directing the runtime makefile what to include
 # FIXME: DEBUG=1 causes a crash because the postamble attempts to take a lock and causes the task to block
 DEBUG           ?= 1		# Include debugging symbols
+MAX_DIM         ?= 3		# Maximum number of dimensions
 OUTPUT_LEVEL    ?= LEVEL_DEBUG	# Compile time logging level
 USE_CUDA        ?= 0		# Include CUDA support (requires CUDA)
 USE_GASNET      ?= 0		# Include GASNet support (requires GASNet)
@@ -48,6 +49,13 @@ else
 	LD_FLAGS += -Wl,--whole-archive -llegion -Wl,--no-whole-archive
 endif
 
+# Use reduction operators for complex types by default
+CC_FLAGS += -DLEGION_REDOP_COMPLEX
+
+NO_BUILD_ALL=1
+.PHONY: all
+all: $(OUTFILE) cached_legion.h
+
 ###########################################################################
 #
 #   Don't change anything below here
@@ -56,3 +64,8 @@ endif
 
 include $(LG_RT_DIR)/runtime.mk
 
+cached_legion.h: $(LG_RT_DIR)/legion.h $(LEGION_DEFINES_HEADER) $(REALM_DEFINES_HEADER)
+	gcc -DLEGION_USE_PYTHON_CFFI $(CC_FLAGS) $(INC_FLAGS) -E -P $< > $@
+
+clean::
+	$(RM) -f $(OUTFILE) $(SLIB_LEGION) $(SLIB_REALM) $(GEN_OBJS) $(GEN_GPU_OBJS) $(REALM_OBJS) $(LEGION_OBJS) $(GPU_RUNTIME_OBJS) $(MAPPER_OBJS) $(ASM_OBJS) legion_defines.h realm_defines.h cached_legion.h

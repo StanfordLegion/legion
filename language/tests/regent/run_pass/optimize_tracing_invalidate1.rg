@@ -1,4 +1,4 @@
--- Copyright 2018 Stanford University
+-- Copyright 2019 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -20,9 +20,47 @@
 -- ]
 
 import "regent"
-import "bishop"
 
-mapper
+do
+  local root_dir = arg[0]:match(".*/") or "./"
+
+  local include_path = ""
+  local include_dirs = terralib.newlist()
+  include_dirs:insert("-I")
+  include_dirs:insert(root_dir)
+  for path in string.gmatch(os.getenv("INCLUDE_PATH"), "[^;]+") do
+    include_path = include_path .. " -I " .. path
+    include_dirs:insert("-I")
+    include_dirs:insert(path)
+  end
+
+  local mapper_cc = root_dir .. "optimize_tracing_invalidate1.cc"
+  if os.getenv('SAVEOBJ') == '1' then
+    mapper_so = root_dir .. "liboptimize_tracing_invalidate1.so"
+  else
+    mapper_so = os.tmpname() .. ".so" -- root_dir .. "optimize_tracing_invalidate1.so"
+  end
+  local cxx = os.getenv('CXX') or 'c++'
+
+  local cxx_flags = os.getenv('CC_FLAGS') or ''
+  cxx_flags = cxx_flags .. " -O2 -Wall -Werror"
+  if os.execute('test "$(uname)" = Darwin') == 0 then
+    cxx_flags =
+      (cxx_flags ..
+         " -dynamiclib -single_module -undefined dynamic_lookup -fPIC")
+  else
+    cxx_flags = cxx_flags .. " -shared -fPIC"
+  end
+
+  local cmd = (cxx .. " " .. cxx_flags .. " " .. include_path .. " " ..
+                 mapper_cc .. " -o " .. mapper_so)
+  if os.execute(cmd) ~= 0 then
+    print(cmd)
+    print("Error: failed to compile " .. mapper_cc)
+    assert(false)
+  end
+  terralib.linklibrary(mapper_so)
+  cmapper = terralib.includec("optimize_tracing_invalidate1.h", include_dirs)
 end
 
 fspace fs
@@ -57,7 +95,7 @@ do
 end
 
 task check(r : region(ispace(int1d), fs), n : int)
-where reads writes(r)
+where reads(r)
 do
   for e in r do
     regentlib.assert(e.input % 3 == n, "test, failed")
@@ -72,25 +110,27 @@ task main()
   var q = partition(equal, r, cs)
 
   for color in cs do init(p[color]) end
-  for k = 0, 20 do
+  for k = 0, 3 do
     __demand(__trace)
-    for i = 0, 3 do
+    for i = 0, 2 do
       for color in cs do inc(p[color]) end
       for color in cs do step(p[color]) end
     end
-    for color in cs do check(q[color], 0) end
+    for color in cs do check(q[color], 2 * (k + 1) % 3) end
   end
+  for color in cs do init(p[color]) end
   for k = 0, 3 do
     __demand(__trace)
-    for i = 0, 3 do
+    for i = 0, 2 do
       for color in cs do inc(p[color]) end
       for color in cs do step(p[color]) end
       for color in cs do inc(q[color]) end
       for color in cs do step(q[color]) end
     end
-    for color in cs do check(q[color], 0) end
+    for color in cs do check(q[color], 4 * (k + 1) % 3) end
   end
-  for k = 0, 3 do
+  for color in cs do init(p[color]) end
+  for k = 0, 2 do
     __demand(__trace)
     do
       for color in cs do inc(p[color]) end
@@ -102,6 +142,6 @@ task main()
       for color in cs do step(q[color]) end
     end
   end
-  for color in cs do check(p[color], 0) end
+  for color in cs do check(p[color], 1) end
 end
-regentlib.start(main, bishoplib.make_entry())
+regentlib.start(main, cmapper.register_mappers)

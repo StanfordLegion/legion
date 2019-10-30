@@ -1,4 +1,4 @@
--- Copyright 2018 Stanford University
+-- Copyright 2019 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -23,13 +23,7 @@ import "regent"
 
 -- This code has not been optimized and is not high performance.
 
-terra abs(a : double) : double
-  if a < 0 then
-    return -a
-  else
-    return a
-  end
-end
+local abs = regentlib.fabs(double)
 
 __demand(__parallel)
 task saxpy(x : region(ispace(int1d), float), y : region(ispace(int1d), float), a : float)

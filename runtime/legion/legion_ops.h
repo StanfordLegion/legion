@@ -1,4 +1,4 @@
-/* Copyright 2018 Stanford University, NVIDIA Corporation
+/* Copyright 2019 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -30,7 +30,7 @@ namespace Legion {
   namespace Internal {
 
     // Special typedef for predicates
-    typedef PredicateImpl PredicateOp; 
+    typedef PredicateImpl PredicateOp;  
 
     /**
      * \class Operation
@@ -46,10 +46,7 @@ namespace Legion {
         FENCE_OP_KIND,
         FRAME_OP_KIND,
         DELETION_OP_KIND,
-        OPEN_OP_KIND,
-        ADVANCE_OP_KIND,
-        INTER_CLOSE_OP_KIND,
-        READ_CLOSE_OP_KIND,
+        MERGE_CLOSE_OP_KIND,
         POST_CLOSE_OP_KIND,
         VIRTUAL_CLOSE_OP_KIND,
         RETURN_CLOSE_OP_KIND,
@@ -82,10 +79,7 @@ namespace Legion {
         "Fence",                    \
         "Frame",                    \
         "Deletion",                 \
-        "Open",                     \
-        "Advance",                  \
-        "Inter Close",              \
-        "Read Close",               \
+        "Merge Close",              \
         "Post Close",               \
         "Virtual Close",            \
         "Return Close",             \
@@ -109,7 +103,7 @@ namespace Legion {
         "Trace Begin",              \
         "Trace Summary",            \
         "Task",                     \
-      }
+      } 
     public:
       struct TriggerOpArgs : public LgTaskArgs<TriggerOpArgs> {
       public:
@@ -265,7 +259,7 @@ namespace Legion {
         { return execution_fence_event.exists(); }
       inline void set_execution_fence_event(ApEvent fence_event)
         { execution_fence_event = fence_event; }
-      inline TaskContext* get_context(void) const { return parent_ctx; }
+      inline InnerContext* get_context(void) const { return parent_ctx; }
       inline UniqueID get_unique_op_id(void) const { return unique_op_id; } 
       virtual bool is_memoizing(void) const { return false; }
       inline bool is_tracing(void) const { return tracing; }
@@ -273,7 +267,7 @@ namespace Legion {
       inline bool already_traced(void) const 
         { return ((trace != NULL) && !tracing); }
       inline LegionTrace* get_trace(void) const { return trace; }
-      inline unsigned get_ctx_index(void) const { return context_index; }
+      inline size_t get_ctx_index(void) const { return context_index; }
     public:
       // Be careful using this call as it is only valid when the operation
       // actually has a parent task.  Right now the only place it is used
@@ -290,6 +284,7 @@ namespace Legion {
       void initialize_mapping_path(RegionTreePath &path,
                                    const RegionRequirement &req,
                                    LogicalPartition start_node);
+      void set_tracking_parent(size_t index);
       void set_trace(LegionTrace *trace, bool is_tracing,
                      const std::vector<StaticDependence> *dependences);
       void set_trace_local_id(unsigned id);
@@ -304,7 +299,7 @@ namespace Legion {
     public:
       // Initialize this operation in a new parent context
       // along with the number of regions this task has
-      void initialize_operation(TaskContext *ctx, bool track,
+      void initialize_operation(InnerContext *ctx, bool track,
                                 unsigned num_regions = 0,
           const std::vector<StaticDependence> *dependences = NULL);
     public:
@@ -370,45 +365,37 @@ namespace Legion {
       virtual bool is_predicated_op(void) const { return false; }
     public: // virtual methods for mapping
       // Pick the sources for a copy operations
-      virtual void select_sources(const InstanceRef &target,
+      virtual void select_sources(const unsigned index,
+                                  const InstanceRef &target,
                                   const InstanceSet &sources,
                                   std::vector<unsigned> &ranking);
+      virtual void report_uninitialized_usage(const unsigned index,
+                                              LogicalRegion handle,
+                                              const RegionUsage usage,
+                                              const char *field_string,
+                                              RtUserEvent reported);
       // Get a reference to our data structure for tracking acquired instances
       virtual std::map<PhysicalManager*,std::pair<unsigned,bool> >*
                                        get_acquired_instances_ref(void);
       // Update the set of atomic locks for this operation
-      virtual void update_atomic_locks(Reservation lock, bool exclusive);
+      virtual void update_atomic_locks(const unsigned index, 
+                                       Reservation lock, bool exclusive);
       // Get the restrict precondition for this operation
-      virtual ApEvent get_restrict_precondition(void) const;
-      static ApEvent merge_restrict_preconditions(
-          const std::vector<Grant> &grants,
-          const std::vector<PhaseBarrier> &wait_barriers);
-      // Record the restrict postcondition
-      virtual void record_restrict_postcondition(ApEvent postcondition);
+      static ApEvent merge_sync_preconditions(const TraceInfo &info,
+                                const std::vector<Grant> &grants,
+                                const std::vector<PhaseBarrier> &wait_barriers);
       virtual void add_copy_profiling_request(
                                         Realm::ProfilingRequestSet &reqeusts);
       // Report a profiling result for this operation
       virtual void handle_profiling_response(
                                   const Realm::ProfilingResponse &result);
+      virtual void handle_profiling_update(int count);
+      // Compute the initial precondition for this operation
+      virtual ApEvent compute_init_precondition(const TraceInfo &info);
     protected:
       void filter_copy_request_kinds(MapperManager *mapper,
           const std::set<ProfilingMeasurementID> &requests,
           std::vector<ProfilingMeasurementID> &results, bool warn_if_not_copy);
-    public:
-      // Help for creating temporary instances
-      MaterializedView* create_temporary_instance(PhysicalManager *dst,
-                              unsigned index, const FieldMask &needed_fields);
-      virtual PhysicalManager* select_temporary_instance(PhysicalManager* dst,
-                              unsigned index, const FieldMask &needed_fields);
-      void validate_temporary_instance(PhysicalManager *result,
-                              std::set<PhysicalManager*> &previous_managers,
-         const std::map<PhysicalManager*,std::pair<unsigned,bool> > &acquired,
-                              const FieldMask &needed_fields, 
-                              LogicalRegion needed_region,
-                              MapperManager *mapper,
-                              const char *mapper_call_name) const;
-      void log_temporary_instance(PhysicalManager *result, unsigned index,
-                                  const FieldMask &needed_fields) const;
     public:
       // The following are sets of calls that we can use to 
       // indicate mapping, execution, resolution, completion, and commit
@@ -520,8 +507,6 @@ namespace Legion {
       void record_logical_dependence(const LogicalUser &user);
       inline LegionList<LogicalUser,LOGICAL_REC_ALLOC>::track_aligned&
           get_logical_records(void) { return logical_records; }
-      inline LegionList<LogicalUser,LOGICAL_REC_ALLOC>::track_aligned&
-          get_logical_advances(void) { return logical_advances; }
       void clear_logical_records(void);
     public:
       // Notify when a region from a dependent task has 
@@ -531,7 +516,8 @@ namespace Legion {
     public:
       // Help for finding the contexts for an operation
       InnerContext* find_logical_context(unsigned index);
-      InnerContext* find_physical_context(unsigned index);
+      InnerContext* find_physical_context(unsigned index,
+                                          const RegionRequirement &req);
     public: // Support for mapping operations
       static void prepare_for_mapping(const InstanceRef &ref,
                                       MappingInstance &instance);
@@ -544,15 +530,6 @@ namespace Legion {
           const std::deque<MappingInstance>         &output,
           const InstanceSet                         &sources,
           std::vector<unsigned>                     &ranking) const;
-    public:
-      // Perform the versioning analysis for a projection requirement
-      void perform_projection_version_analysis(const ProjectionInfo &proj_info,
-                                      const RegionRequirement &owner_req,
-                                      const RegionRequirement &local_req,
-                                      const unsigned idx,
-                                      const UniqueID logical_context_uid,
-                                      VersionInfo &version_info,
-                                      std::set<RtEvent> &ready_events);
 #ifdef DEBUG_LEGION
     protected:
       virtual void dump_physical_state(RegionRequirement *req, unsigned idx,
@@ -560,13 +537,30 @@ namespace Legion {
                                        bool closing = false);
 #endif
     public:
+      // Pack the needed parts of this operation for a remote operation
+      virtual void pack_remote_operation(Serializer &rez,
+                                         AddressSpaceID target) const;
+      void pack_local_remote_operation(Serializer &rez) const;
+    protected:
+      static inline void add_launch_space_reference(IndexSpaceNode *node)
+      {
+        LocalReferenceMutator mutator;
+        node->add_base_valid_ref(CONTEXT_REF, &mutator);
+      }
+      static inline bool remove_launch_space_reference(IndexSpaceNode *node)
+      {
+        if (node == NULL)
+          return false;
+        return node->remove_base_valid_ref(CONTEXT_REF);
+      }
+    public:
       Runtime *const runtime;
     protected:
       mutable LocalLock op_lock;
       GenerationID gen;
       UniqueID unique_op_id;
       // The issue index of this operation in the context
-      unsigned context_index;
+      size_t context_index;
       // Operations on which this operation depends
       std::map<Operation*,GenerationID> incoming;
       // Operations which depend on this operation
@@ -581,7 +575,6 @@ namespace Legion {
       std::map<Operation*,std::set<unsigned> > verify_regions;
       // Whether this operation has executed its prepipeline stage yet
       bool prepipelined;
-#ifdef DEBUG_LEGION
       // Whether this operation has mapped, once it has mapped then
       // the set of incoming dependences is fixed
       bool mapped;
@@ -589,7 +582,6 @@ namespace Legion {
       bool executed;
       // Whether speculation for this operation has been resolved
       bool resolved;
-#endif
       // Whether this operation has completed, cannot commit until
       // both completed is set, and outstanding mapping references
       // has been gone to zero.
@@ -611,7 +603,7 @@ namespace Legion {
       // Are we tracking this operation in the parent's context
       bool track_parent;
       // The enclosing context for this operation
-      TaskContext *parent_ctx;
+      InnerContext *parent_ctx;
       // The prepipeline event for this operation
       RtUserEvent prepipelined_event;
       // The mapped event for this operation
@@ -634,11 +626,40 @@ namespace Legion {
       MustEpochOp *must_epoch;
       // A set list or recorded dependences during logical traversal
       LegionList<LogicalUser,LOGICAL_REC_ALLOC>::track_aligned logical_records;
-      // A set of advance operations recorded during logical traversal
-      LegionList<LogicalUser,LOGICAL_REC_ALLOC>::track_aligned logical_advances;
       // Dependence trackers for detecting when it is safe to map and commit
       MappingDependenceTracker *mapping_tracker;
       CommitDependenceTracker  *commit_tracker;
+    };
+
+    /**
+     * \class ExternalMappable
+     * This is class that provides some basic functionality for
+     * packing and unpacking the data structures used by 
+     * external facing operations
+     */
+    class ExternalMappable {
+    public:
+      virtual void set_context_index(size_t index) = 0;
+    public:
+      static void pack_mappable(const Mappable &mappable, Serializer &rez);
+      static void pack_index_space_requirement(
+          const IndexSpaceRequirement &req, Serializer &rez);
+      static void pack_region_requirement(
+          const RegionRequirement &req, Serializer &rez);
+      static void pack_grant(
+          const Grant &grant, Serializer &rez);
+      static void pack_phase_barrier(
+          const PhaseBarrier &barrier, Serializer &rez);
+    public:
+      static void unpack_mappable(Mappable &mappable, Deserializer &derez);
+      static void unpack_index_space_requirement(
+          IndexSpaceRequirement &req, Deserializer &derez);
+      static void unpack_region_requirement(
+          RegionRequirement &req, Deserializer &derez);
+      static void unpack_grant(
+          Grant &grant, Deserializer &derez);
+      static void unpack_phase_barrier(
+          PhaseBarrier &barrier, Deserializer &derez);
     };
 
     /**
@@ -718,7 +739,7 @@ namespace Legion {
       void activate_speculative(void);
       void deactivate_speculative(void);
     public:
-      void initialize_speculation(TaskContext *ctx, bool track,unsigned regions,
+      void initialize_speculation(InnerContext *ctx,bool track,unsigned regions,
           const std::vector<StaticDependence> *dependences, const Predicate &p);
       void register_predicate_dependence(void);
       virtual bool is_predicated_op(void) const;
@@ -757,6 +778,81 @@ namespace Legion {
     };
 
     /**
+     * \class Memoizable
+     * An abstract class for retrieving trace local ids in physical tracing.
+     */
+    class Memoizable {
+    public:
+      virtual ~Memoizable(void) { }
+      virtual bool is_memoizable_task(void) const = 0;
+      virtual bool is_recording(void) const = 0;
+      virtual bool is_memoizing(void) const = 0;
+      virtual AddressSpaceID get_origin_space(void) const = 0;
+      virtual PhysicalTemplate* get_template(void) const = 0;
+      virtual ApEvent get_memo_completion(void) const = 0;
+      virtual void replay_mapping_output(void) = 0;
+      virtual Operation* get_operation(void) const = 0;
+      virtual Operation::OpKind get_memoizable_kind(void) const = 0;
+      // Return a trace local unique ID for this operation
+      typedef std::pair<unsigned, DomainPoint> TraceLocalID;
+      virtual TraceLocalID get_trace_local_id(void) const = 0;
+      virtual ApEvent compute_sync_precondition(const TraceInfo *in) const = 0;
+      virtual void complete_replay(ApEvent complete_event) = 0;
+      virtual void find_equivalence_sets(Runtime *runtime, unsigned idx,
+        const FieldMask &mask, FieldMaskSet<EquivalenceSet> &target) const = 0;
+    protected:
+      virtual const VersionInfo& get_version_info(unsigned idx) const = 0;
+    public:
+      virtual void pack_remote_memoizable(Serializer &rez, 
+                                          AddressSpaceID target) const;
+    };
+
+    class RemoteMemoizable : public Memoizable {
+    public:
+      RemoteMemoizable(Operation *op, Memoizable *original, 
+                       AddressSpaceID origin, Operation::OpKind kind,
+                       TraceLocalID tid, ApEvent completion_event,
+                       bool is_memoizable_task, bool is_memoizing);
+      virtual ~RemoteMemoizable(void);
+    public:
+      virtual bool is_memoizable_task(void) const;
+      virtual bool is_recording(void) const;
+      virtual bool is_memoizing(void) const;
+      virtual AddressSpaceID get_origin_space(void) const;
+      virtual PhysicalTemplate* get_template(void) const;
+      virtual ApEvent get_memo_completion(void) const;
+      virtual void replay_mapping_output(void);
+      virtual Operation* get_operation(void) const;
+      virtual Operation::OpKind get_memoizable_kind(void) const;
+      // Return a trace local unique ID for this operation
+      typedef std::pair<unsigned, DomainPoint> TraceLocalID;
+      virtual TraceLocalID get_trace_local_id(void) const;
+      virtual ApEvent compute_sync_precondition(const TraceInfo *info) const;
+      virtual void complete_replay(ApEvent complete_event);
+      virtual void find_equivalence_sets(Runtime *runtime, unsigned idx,
+          const FieldMask &mask, FieldMaskSet<EquivalenceSet> &target) const;
+    protected:
+      virtual const VersionInfo& get_version_info(unsigned idx) const;
+    public:
+      virtual void pack_remote_memoizable(Serializer &rez, 
+                                          AddressSpaceID target) const;
+      static Memoizable* unpack_remote_memoizable(Deserializer &derez,
+                                      Operation *op, Runtime *runtime);
+      static void handle_eq_request(Deserializer &derez, Runtime *runtime,
+                                    AddressSpaceID source);
+      static void handle_eq_response(Deserializer &derez, Runtime *runtime);
+    public:
+      Operation *const op;
+      Memoizable *const original; // not a valid pointer on remote nodes
+      const AddressSpaceID origin;
+      const Operation::OpKind kind;
+      const TraceLocalID trace_local_id;
+      const ApEvent completion_event;
+      const bool is_mem_task;
+      const bool is_memo;
+    };
+
+    /**
      * \class MemoizableOp
      * A memoizable operation is an abstract class
      * that serves as the basis for operation whose
@@ -765,8 +861,7 @@ namespace Legion {
      * to determine whether to memoize their physical analysis.
      */
     template<typename OP>
-    class MemoizableOp : public OP, public Memoizable
-    {
+    class MemoizableOp : public OP, public Memoizable {
     public:
       enum MemoizableState {
         NO_MEMO,   // The operation is not subject to memoization
@@ -777,6 +872,8 @@ namespace Legion {
     public:
       MemoizableOp(Runtime *rt);
       void initialize_memoizable(void);
+      virtual Operation* get_operation(void) const 
+        { return const_cast<MemoizableOp<OP>*>(this); }
       virtual Memoizable* get_memoizable(void) { return this; }
     protected:
       void pack_memoizable(Serializer &rez);
@@ -788,24 +885,52 @@ namespace Legion {
       virtual void replay_analysis(void) = 0;
     public:
       // From Memoizable
-      virtual TraceLocalID get_trace_local_id() const;
-      virtual ApEvent compute_sync_precondition(void) const
+      virtual TraceLocalID get_trace_local_id(void) const;
+      virtual PhysicalTemplate* get_template(void) const;
+      virtual ApEvent compute_sync_precondition(const TraceInfo *info) const
         { assert(false); return ApEvent::NO_AP_EVENT; }
       virtual void complete_replay(ApEvent complete_event)
         { assert(false); }
+      virtual ApEvent get_memo_completion(void) const
+        { return this->get_completion_event(); }
+      virtual void replay_mapping_output(void) { /*do nothing*/ }
+      virtual Operation::OpKind get_memoizable_kind(void) const
+        { return this->get_operation_kind(); }
+      virtual ApEvent compute_init_precondition(const TraceInfo &info);
+      virtual RtEvent complete_memoizable(
+                                 RtEvent complete_event = RtEvent::NO_RT_EVENT);
+      virtual void find_equivalence_sets(Runtime *runtime, unsigned idx, 
+          const FieldMask &mask, FieldMaskSet<EquivalenceSet> &eqs) const;
     protected:
       void invoke_memoize_operation(MapperID mapper_id);
-      void set_memoize(bool memoize);
     public:
       virtual bool is_memoizing(void) const { return memo_state != NO_MEMO; }
-      bool is_replaying(void) const { return memo_state == REPLAY; }
-      bool is_recording(void) const { return memo_state == RECORD; }
+      virtual bool is_recording(void) const { return memo_state == RECORD; }
+      inline bool is_replaying(void) const { return memo_state == REPLAY; }
+      virtual bool is_memoizable_task(void) const { return false; }
+      virtual AddressSpaceID get_origin_space(void) const 
+        { return this->runtime->address_space; }
     protected:
       // The physical trace for this operation if any
       PhysicalTemplate *tpl;
       // Track whether we are memoizing physical analysis for this operation
       MemoizableState memo_state;
       bool need_prepipeline_stage;
+    };
+
+    /**
+     * \class ExternalMapping
+     * An extension of the external-facing InlineMapping to help 
+     * with packing and unpacking them
+     */
+    class ExternalMapping : public InlineMapping, public ExternalMappable {
+    public:
+      ExternalMapping(void);
+    public:
+      virtual void set_context_index(size_t index) = 0;
+    public:
+      void pack_external_mapping(Serializer &rez, AddressSpaceID target) const;
+      void unpack_external_mapping(Deserializer &derez, Runtime *runtime);
     };
 
     /**
@@ -823,7 +948,7 @@ namespace Legion {
      * will result in the entire enclosing task context
      * being restarted.
      */
-    class MapOp : public InlineMapping, public Operation,
+    class MapOp : public ExternalMapping, public Operation,
                   public LegionHeapify<MapOp> {
     public:
       static const AllocationType alloc_type = MAP_OP_ALLOC;
@@ -834,10 +959,9 @@ namespace Legion {
     public:
       MapOp& operator=(const MapOp &rhs);
     public:
-      PhysicalRegion initialize(TaskContext *ctx,
-                                const InlineLauncher &launcher,
-                                bool check_privileges);
-      void initialize(TaskContext *ctx, const PhysicalRegion &region);
+      PhysicalRegion initialize(InnerContext *ctx,
+                                const InlineLauncher &launcher);
+      void initialize(InnerContext *ctx, const PhysicalRegion &region);
       inline const RegionRequirement& get_requirement(void) const
         { return requirement; }
     public:
@@ -856,29 +980,31 @@ namespace Legion {
       virtual void deferred_execute(void);
       virtual void trigger_commit(void);
       virtual unsigned find_parent_index(unsigned idx);
-      virtual void select_sources(const InstanceRef &target,
+      virtual void select_sources(const unsigned index,
+                                  const InstanceRef &target,
                                   const InstanceSet &sources,
                                   std::vector<unsigned> &ranking);
       virtual std::map<PhysicalManager*,std::pair<unsigned,bool> >*
                    get_acquired_instances_ref(void);
-      virtual void update_atomic_locks(Reservation lock, bool exclusive);
+      virtual void update_atomic_locks(const unsigned index,
+                                       Reservation lock, bool exclusive);
       virtual void record_reference_mutation_effect(RtEvent event);
-      virtual PhysicalManager* select_temporary_instance(PhysicalManager *dst,
-                              unsigned index, const FieldMask &needed_fields);
-      virtual void record_restrict_postcondition(ApEvent postcondition);
     public:
       virtual UniqueID get_unique_id(void) const;
-      virtual unsigned get_context_index(void) const;
+      virtual size_t get_context_index(void) const;
+      virtual void set_context_index(size_t index);
       virtual int get_depth(void) const;
     protected:
       void check_privilege(void);
       void compute_parent_index(void);
-      void invoke_mapper(const InstanceSet &valid_instances,
-                               InstanceSet &mapped_instances);
+      bool invoke_mapper(InstanceSet &mapped_instances);
       virtual void add_copy_profiling_request(
                             Realm::ProfilingRequestSet &reqeusts);
       virtual void handle_profiling_response(
                       const Realm::ProfilingResponse &response);
+      virtual void handle_profiling_update(int count);
+      virtual void pack_remote_operation(Serializer &rez,
+                                         AddressSpaceID target) const;
     protected:
       bool remap_region;
       ApUserEvent termination_event;
@@ -886,18 +1012,31 @@ namespace Legion {
       RegionTreePath privilege_path;
       unsigned parent_req_index;
       VersionInfo version_info;
-      RestrictInfo restrict_info;
       std::map<PhysicalManager*,std::pair<unsigned,bool> > acquired_instances;
       std::map<Reservation,bool> atomic_locks;
       std::set<RtEvent> map_applied_conditions;
-      std::set<ApEvent> mapped_preconditions;
     protected:
       MapperManager *mapper;
     protected:
       std::vector<ProfilingMeasurementID> profiling_requests;
       int                                 profiling_priority;
-      int                     outstanding_profiling_requests;
-      RtUserEvent                         profiling_reported;
+      mutable int             outstanding_profiling_requests;
+      mutable RtUserEvent                 profiling_reported;
+    };
+
+    /**
+     * \class ExternalCopy
+     * An extension of the external-facing Copy to help 
+     * with packing and unpacking them
+     */
+    class ExternalCopy : public Copy, public ExternalMappable {
+    public:
+      ExternalCopy(void);
+    public:
+      virtual void set_context_index(size_t index) = 0;
+    public:
+      void pack_external_copy(Serializer &rez, AddressSpaceID target) const;
+      void unpack_external_copy(Deserializer &derez, Runtime *runtime);
     };
 
     /**
@@ -907,10 +1046,53 @@ namespace Legion {
      * from different region trees in an efficient way by
      * using the low-level runtime copy facilities. 
      */
-    class CopyOp : public Copy, public MemoizableOp<SpeculativeOp>,
+    class CopyOp : public ExternalCopy, public MemoizableOp<SpeculativeOp>,
                    public LegionHeapify<CopyOp> {
     public:
       static const AllocationType alloc_type = COPY_OP_ALLOC;
+    public:
+      enum ReqType {
+        SRC_REQ = 0,
+        DST_REQ = 1,
+        GATHER_REQ = 2,
+        SCATTER_REQ = 3,
+      };
+    public:
+      struct DeferredCopyAcross : public LgTaskArgs<DeferredCopyAcross>,
+                                  public PhysicalTraceInfo {
+      public:
+        static const LgTaskID TASK_ID = LG_DEFERRED_COPY_ACROSS_TASK_ID;
+      public:
+        DeferredCopyAcross(CopyOp *op, const PhysicalTraceInfo &info,
+                           unsigned idx, ApEvent pre, ApUserEvent d,
+                           PredEvent g, RtUserEvent a, 
+                           InstanceSet *src, InstanceSet *dst,
+                           InstanceSet *gather, InstanceSet *scatter)
+          : LgTaskArgs<DeferredCopyAcross>(op->get_unique_op_id()), 
+            PhysicalTraceInfo(info), copy(op),
+            index(idx), precondition(pre), done(d), guard(g), applied(a),
+            src_targets(src), dst_targets(dst), gather_targets(gather),
+            scatter_targets(scatter) 
+          // This is kind of scary, Realm is about to make a copy of this
+          // without our knowledge, but we need to preserve the correctness
+          // of reference counting on PhysicalTraceRecorders, so just add
+          // an extra reference here that we will remove when we're handled.
+          { if (rec != NULL) rec->add_recorder_reference(); }
+      public:
+        inline void remove_recorder_reference(void) const
+          { if ((rec != NULL) && rec->remove_recorder_reference()) delete rec; }
+      public:
+        CopyOp *const copy;
+        const unsigned index;
+        const ApEvent precondition;
+        const ApUserEvent done;
+        const PredEvent guard;
+        const RtUserEvent applied;
+        InstanceSet *const src_targets;
+        InstanceSet *const dst_targets;
+        InstanceSet *const gather_targets;
+        InstanceSet *const scatter_targets;
+      };
     public:
       CopyOp(Runtime *rt);
       CopyOp(const CopyOp &rhs);
@@ -918,9 +1100,8 @@ namespace Legion {
     public:
       CopyOp& operator=(const CopyOp &rhs);
     public:
-      void initialize(TaskContext *ctx,
-                      const CopyLauncher &launcher,
-                      bool check_privileges);
+      void initialize(InnerContext *ctx,
+                      const CopyLauncher &launcher);
       void activate_copy(void);
       void deactivate_copy(void);
       void log_copy_requirements(void) const;
@@ -940,83 +1121,98 @@ namespace Legion {
       virtual void trigger_mapping(void);
       virtual void trigger_commit(void);
       virtual void report_interfering_requirements(unsigned idx1,unsigned idx2);
+      virtual ApEvent exchange_indirect_records(const unsigned index,
+          const ApEvent local_done, const PhysicalTraceInfo &trace_info,
+          const InstanceSet &instances, const IndexSpace space,
+          LegionVector<IndirectRecord>::aligned &records, const bool sources);
     public:
       virtual bool query_speculate(bool &value, bool &mapping_only);
       virtual void resolve_true(bool speculated, bool launched);
       virtual void resolve_false(bool speculated, bool launched);
     public:
       virtual unsigned find_parent_index(unsigned idx);
-      virtual void select_sources(const InstanceRef &target,
+      virtual void select_sources(const unsigned index,
+                                  const InstanceRef &target,
                                   const InstanceSet &sources,
                                   std::vector<unsigned> &ranking);
       virtual std::map<PhysicalManager*,std::pair<unsigned,bool> >*
                    get_acquired_instances_ref(void);
-      virtual void update_atomic_locks(Reservation lock, bool exclusive);
+      virtual void update_atomic_locks(const unsigned index,
+                                       Reservation lock, bool exclusive);
       virtual void record_reference_mutation_effect(RtEvent event);
-      virtual PhysicalManager* select_temporary_instance(PhysicalManager *dst,
-                              unsigned index, const FieldMask &needed_fields);
-      virtual ApEvent get_restrict_precondition(void) const;
-      virtual void record_restrict_postcondition(ApEvent postcondition);
     public:
       virtual UniqueID get_unique_id(void) const;
-      virtual unsigned get_context_index(void) const;
+      virtual size_t get_context_index(void) const;
+      virtual void set_context_index(size_t index);
       virtual int get_depth(void) const;
-      virtual const ProjectionInfo* get_projection_info(unsigned idx);
     protected:
+      void check_copy_privileges(const bool permit_projection);
       void check_copy_privilege(const RegionRequirement &req, unsigned idx,
-                                bool permit_projection = false);
+                                const bool permit_projection);
+      void check_compatibility_properties(void) const;
       void compute_parent_indexes(void);
+      void perform_copy_across(const unsigned index, 
+                               const ApEvent local_init_precondition,
+                               const ApUserEvent local_completion,
+                               const PredEvent predication_guard,
+                               const InstanceSet &src_targets,
+                               const InstanceSet &dst_targets,
+                               const InstanceSet *gather_targets,
+                               const InstanceSet *scatter_targets,
+                               const PhysicalTraceInfo &trace_info,
+                               std::set<RtEvent> &applied_conditions);
+    public:
+      static void handle_deferred_across(const void *args);
     public:
       // From MemoizableOp
       virtual void replay_analysis(void);
     public:
       // From Memoizable
-      virtual ApEvent compute_sync_precondition(void) const;
+      virtual ApEvent compute_sync_precondition(const TraceInfo *info) const;
       virtual void complete_replay(ApEvent copy_complete_event);
+      virtual const VersionInfo& get_version_info(unsigned idx) const;
+      virtual const RegionRequirement& get_requirement(unsigned idx) const;
     protected:
-      template<bool IS_SRC>
+      template<ReqType REQ_TYPE>
+      static const char* get_req_type_name(void);
+      template<ReqType REQ_TYPE>
       int perform_conversion(unsigned idx, const RegionRequirement &req,
                              std::vector<MappingInstance> &output,
                              InstanceSet &targets, bool is_reduce = false);
-      inline void set_mapping_state(unsigned idx) 
-        { current_index = idx; }
       virtual void add_copy_profiling_request(
                                       Realm::ProfilingRequestSet &reqeusts);
       virtual void handle_profiling_response(
                                 const Realm::ProfilingResponse &response);
+      virtual void handle_profiling_update(int count);
+      virtual void pack_remote_operation(Serializer &rez,
+                                         AddressSpaceID target) const;
     public:
-      std::vector<RegionTreePath> src_privilege_paths;
-      std::vector<RegionTreePath> dst_privilege_paths;
-      std::vector<unsigned>       src_parent_indexes;
-      std::vector<unsigned>       dst_parent_indexes;
-      std::vector<VersionInfo>    src_versions;
-      std::vector<VersionInfo>    dst_versions;
-      std::vector<RestrictInfo>   src_restrict_infos;
-      std::vector<RestrictInfo>   dst_restrict_infos;
+      std::vector<RegionTreePath>           src_privilege_paths;
+      std::vector<RegionTreePath>           dst_privilege_paths;
+      std::vector<unsigned>                 src_parent_indexes;
+      std::vector<unsigned>                 dst_parent_indexes;
+      LegionVector<VersionInfo>::aligned    src_versions;
+      LegionVector<VersionInfo>::aligned    dst_versions;
     public: // These are only used for indirect copies
-      std::vector<RegionTreePath> gather_privilege_paths;
-      std::vector<RegionTreePath> scatter_privilege_paths;
-      std::vector<unsigned>       gather_parent_indexes;
-      std::vector<unsigned>       scatter_parent_indexes;
-      std::vector<VersionInfo>    gather_versions;
-      std::vector<VersionInfo>    scatter_versions;
-      std::vector<RestrictInfo>   gather_restrict_infos;
-      std::vector<RestrictInfo>   scatter_restrict_infos;
+      std::vector<RegionTreePath>           gather_privilege_paths;
+      std::vector<RegionTreePath>           scatter_privilege_paths;
+      std::vector<unsigned>                 gather_parent_indexes;
+      std::vector<unsigned>                 scatter_parent_indexes;
+      LegionVector<VersionInfo>::aligned    gather_versions;
+      LegionVector<VersionInfo>::aligned    scatter_versions;
     protected: // for support with mapping
       MapperManager*              mapper;
-      unsigned                    current_index;
     protected:
       std::map<PhysicalManager*,std::pair<unsigned,bool> > acquired_instances;
       std::vector<std::map<Reservation,bool> > atomic_locks;
       std::set<RtEvent> map_applied_conditions;
-      std::set<ApEvent> restrict_postconditions;
     public:
       PredEvent                   predication_guard;
     protected:
       std::vector<ProfilingMeasurementID> profiling_requests;
       int                                 profiling_priority;
-      int                     outstanding_profiling_requests;
-      RtUserEvent                         profiling_reported;
+      mutable int             outstanding_profiling_requests;
+      mutable RtUserEvent                 profiling_reported;
     };
 
     /**
@@ -1033,10 +1229,9 @@ namespace Legion {
     public:
       IndexCopyOp& operator=(const IndexCopyOp &rhs);
     public:
-      void initialize(TaskContext *ctx,
+      void initialize(InnerContext *ctx,
                       const IndexCopyLauncher &launcher,
-                      IndexSpace launch_space,
-                      bool check_privileges);
+                      IndexSpace launch_space);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -1047,30 +1242,35 @@ namespace Legion {
       virtual void trigger_mapping(void);
       virtual void trigger_commit(void);
       virtual void report_interfering_requirements(unsigned idx1,unsigned idx2);
+      virtual ApEvent exchange_indirect_records(const unsigned index,
+          const ApEvent local_done, const PhysicalTraceInfo &trace_info,
+          const InstanceSet &instances, const IndexSpace space,
+          LegionVector<IndirectRecord>::aligned &records, const bool sources);
     public:
+      // From MemoizableOp
+      virtual void replay_analysis(void);
+    public:
+      void enumerate_points(void);
       void handle_point_commit(RtEvent point_committed);
-#ifdef DEBUG_LEGION
       void check_point_requirements(void);
-#endif
     public:
-      virtual const ProjectionInfo* get_projection_info(unsigned idx);
-    public:
-      IndexSpace                    launch_space;
-    public:
-      std::vector<ProjectionInfo>   src_projection_infos;
-      std::vector<ProjectionInfo>   dst_projection_infos;
-      std::vector<ProjectionInfo>   gather_projection_infos;
-      std::vector<ProjectionInfo>   scatter_projection_infos;
+      IndexSpaceNode*                                    launch_space;
     protected:
-      std::vector<PointCopyOp*>     points;
-      unsigned                      points_committed;
-      bool                          commit_request;
-      std::set<RtEvent>             commit_preconditions;
-#ifdef DEBUG_LEGION
+      std::vector<PointCopyOp*>                          points;
+      std::vector<LegionVector<IndirectRecord>::aligned> src_records;
+      std::vector<LegionVector<IndirectRecord>::aligned> dst_records;
+      std::vector<std::set<ApEvent> >                    src_exchange_events;
+      std::vector<std::set<ApEvent> >                    dst_exchange_events;
+      std::vector<ApEvent>                               src_merged;
+      std::vector<ApEvent>                               dst_merged;
+      std::vector<RtUserEvent>                           src_exchanged;
+      std::vector<RtUserEvent>                           dst_exchanged;
+      unsigned                                           points_committed;
+      bool                                               commit_request;
+      std::set<RtEvent>                                  commit_preconditions;
     protected:
       // For checking aliasing of points in debug mode only
       std::set<std::pair<unsigned,unsigned> > interfering_requirements;
-#endif
     };
 
     /**
@@ -1081,6 +1281,7 @@ namespace Legion {
      */
     class PointCopyOp : public CopyOp, public ProjectionPoint {
     public:
+      friend class IndexCopyOp;
       PointCopyOp(Runtime *rt);
       PointCopyOp(const PointCopyOp &rhs);
       virtual ~PointCopyOp(void);
@@ -1088,10 +1289,7 @@ namespace Legion {
       PointCopyOp& operator=(const PointCopyOp &rhs);
     public:
       void initialize(IndexCopyOp *owner, const DomainPoint &point);
-#ifdef DEBUG_LEGION
-      void check_domination(void) const;
-#endif
-      void launch(const std::set<RtEvent> &preconditions);
+      void launch(void);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -1100,12 +1298,17 @@ namespace Legion {
       virtual void trigger_ready(void);
       // trigger_mapping same as base class
       virtual void trigger_commit(void);
+      virtual ApEvent exchange_indirect_records(const unsigned index,
+          const ApEvent local_done, const PhysicalTraceInfo &trace_info,
+          const InstanceSet &instances, const IndexSpace space,
+          LegionVector<IndirectRecord>::aligned &records, const bool sources);
     public:
       // From ProjectionPoint
       virtual const DomainPoint& get_domain_point(void) const;
       virtual void set_projection_result(unsigned idx,LogicalRegion result);
     public:
-      virtual const ProjectionInfo* get_projection_info(unsigned idx);
+      // From Memoizable
+      virtual TraceLocalID get_trace_local_id(void) const;
     protected:
       IndexCopyOp*              owner;
     };
@@ -1117,15 +1320,15 @@ namespace Legion {
      * in the same context which may become important when
      * certain updates to the region tree are desired to be
      * observed before a later operation either maps or 
-     * runs.  To support these two kinds of guarantees, we
-     * provide both mapping and executing fences.
+     * runs. All fences are mapping fences for correctness.
+     * Fences all support the optional ability to be an 
+     * execution fence.
      */
     class FenceOp : public Operation, public LegionHeapify<FenceOp> {
     public:
       enum FenceKind {
         MAPPING_FENCE,
         EXECUTION_FENCE,
-        MIXED_FENCE,
       };
     public:
       static const AllocationType alloc_type = FENCE_OP_ALLOC;
@@ -1136,7 +1339,7 @@ namespace Legion {
     public:
       FenceOp& operator=(const FenceOp &rhs);
     public:
-      void initialize(TaskContext *ctx, FenceKind kind);
+      void initialize(InnerContext *ctx, FenceKind kind);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -1145,6 +1348,9 @@ namespace Legion {
     public:
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_mapping(void);
+#ifdef LEGION_SPY
+      virtual void trigger_complete(void);
+#endif
     protected:
       void perform_fence_analysis(bool update_fence = false);
       void update_current_fence(void);
@@ -1171,7 +1377,7 @@ namespace Legion {
     public:
       FrameOp& operator=(const FrameOp &rhs);
     public:
-      void initialize(TaskContext *ctx);
+      void initialize(InnerContext *ctx);
       void set_previous(ApEvent previous);
     public:
       virtual void activate(void);
@@ -1180,7 +1386,7 @@ namespace Legion {
       virtual OpKind get_operation_kind(void) const;
     public:
       virtual void trigger_mapping(void);
-      virtual void deferred_execute(void); 
+      virtual void trigger_complete(void);
     protected:
       ApEvent previous_completion;
     };
@@ -1212,19 +1418,26 @@ namespace Legion {
     public:
       DeletionOp& operator=(const DeletionOp &rhs);
     public:
-      void initialize_index_space_deletion(TaskContext *ctx, IndexSpace handle);
-      void initialize_index_part_deletion(TaskContext *ctx,
-                                          IndexPartition handle);
-      void initialize_field_space_deletion(TaskContext *ctx,
-                                           FieldSpace handle);
-      void initialize_field_deletion(TaskContext *ctx, FieldSpace handle,
-                                      FieldID fid);
-      void initialize_field_deletions(TaskContext *ctx, FieldSpace handle,
-                                      const std::set<FieldID> &to_free);
-      void initialize_logical_region_deletion(TaskContext *ctx, 
-                                              LogicalRegion handle);
-      void initialize_logical_partition_deletion(TaskContext *ctx, 
-                                                 LogicalPartition handle);
+      void initialize_index_space_deletion(InnerContext *ctx, IndexSpace handle,
+                                   std::vector<IndexPartition> &sub_partitions,
+                                   const bool unordered);
+      void initialize_index_part_deletion(InnerContext *ctx,IndexPartition part,
+                                   std::vector<IndexPartition> &sub_partitions,
+                                   const bool unordered);
+      void initialize_field_space_deletion(InnerContext *ctx,
+                                           FieldSpace handle,
+                                           const bool unordered);
+      void initialize_field_deletion(InnerContext *ctx, FieldSpace handle,
+                                     FieldID fid, const bool unordered);
+      void initialize_field_deletions(InnerContext *ctx, FieldSpace handle,
+                                      const std::set<FieldID> &to_free,
+                                      const bool unordered);
+      void initialize_logical_region_deletion(InnerContext *ctx, 
+                                              LogicalRegion handle,
+                                              const bool unordered);
+      void initialize_logical_partition_deletion(InnerContext *ctx, 
+                                                 LogicalPartition handle,
+                                                 const bool unordered);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -1232,19 +1445,29 @@ namespace Legion {
       virtual OpKind get_operation_kind(void) const;
     public:
       virtual void trigger_dependence_analysis(void);
+      virtual void trigger_ready(void);
       virtual void trigger_mapping(void); 
       virtual void trigger_complete(void);
       virtual unsigned find_parent_index(unsigned idx);
+      virtual void pack_remote_operation(Serializer &rez,
+                                         AddressSpaceID target) const;
     protected:
       DeletionKind kind;
       IndexSpace index_space;
       IndexPartition index_part;
+      std::vector<IndexPartition> sub_partitions;
       FieldSpace field_space;
       LogicalRegion logical_region;
       LogicalPartition logical_part;
       std::set<FieldID> free_fields;
+      std::vector<FieldID> local_fields;
+      std::vector<FieldID> global_fields;
+      std::vector<unsigned> local_field_indexes;
       std::vector<unsigned> parent_req_indexes;
-      ApEvent completion_precondition;
+      std::vector<unsigned> deletion_req_indexes;
+      std::vector<bool> returnable_privileges;
+      std::vector<RegionRequirement> deletion_requirements;
+      LegionVector<VersionInfo>::aligned version_infos;
     }; 
 
     /**
@@ -1288,80 +1511,18 @@ namespace Legion {
     };
 
     /**
-     * \class OpenOp
-     * Open operatoins are only visible internally inside
-     * the runtime and are issued to open a region tree
-     * down to the level immediately above the one being
-     * accessed by a given operation. Open operations
-     * record whether they are advancing the version
-     * number information at a given level or not.
+     * \class ExternalClose
+     * An extension of the external-facing Close to help 
+     * with packing and unpacking them
      */
-    class OpenOp : public InternalOp, public LegionHeapify<OpenOp> {
+    class ExternalClose : public Close, public ExternalMappable {
     public:
-      static const AllocationType alloc_type = OPEN_OP_ALLOC;
+      ExternalClose(void);
     public:
-      OpenOp(Runtime *rt);
-      OpenOp(const OpenOp &rhs);
-      virtual ~OpenOp(void);
+      virtual void set_context_index(size_t index) = 0;
     public:
-      OpenOp& operator=(const OpenOp &rhs);
-    public:
-      void initialize(const FieldMask &open_mask, RegionTreeNode *start, 
-                      const RegionTreePath &path, 
-                      const LogicalTraceInfo &trace_info,
-                      Operation *creator, int req_idx);
-    public:
-      virtual void activate(void);
-      virtual void deactivate(void);
-      virtual const char* get_logging_name(void) const;
-      virtual OpKind get_operation_kind(void) const;
-      virtual const FieldMask& get_internal_mask(void) const;
-    public:
-      virtual void trigger_ready(void);
-    protected:
-      RegionTreeNode *start_node;
-      RegionTreePath  open_path;
-      FieldMask       open_mask;
-    };
-
-    /**
-     * \class AdvanceOp
-     * Advance operations are only visible internally inside
-     * the runtime and are issued to advance version numbers
-     * on intermediate nodes in the region tree when data
-     * is being written to a subregion.
-     */
-    class AdvanceOp : public InternalOp, public LegionHeapify<AdvanceOp> {
-    public:
-      static const AllocationType alloc_type = ADVANCE_OP_ALLOC;
-    public:
-      AdvanceOp(Runtime *rt);
-      AdvanceOp(const AdvanceOp &rhs);
-      virtual ~AdvanceOp(void);
-    public:
-      AdvanceOp& operator=(const AdvanceOp &rhs);
-    public:
-      void initialize(RegionTreeNode *parent, const FieldMask &advance,
-                      const LogicalTraceInfo &trace_info, Operation *creator, 
-                      int req_idx, bool parent_is_upper_bound);
-      void set_child_node(RegionTreeNode *child);
-      void set_split_child_mask(const FieldMask &split_mask);
-      void record_dirty_previous(unsigned depth, const FieldMask &dirty_mask);
-    public:
-      virtual void activate(void);
-      virtual void deactivate(void);
-      virtual const char* get_logging_name(void) const;
-      virtual OpKind get_operation_kind(void) const;
-      virtual const FieldMask& get_internal_mask(void) const;
-    public:
-      virtual void trigger_ready(void);
-    protected:
-      RegionTreeNode *parent_node;
-      RegionTreeNode *child_node; // inclusive
-      FieldMask       advance_mask;
-      FieldMask       split_child_mask; // only for partial reductions
-      LegionMap<unsigned,FieldMask>::aligned dirty_previous;
-      bool parent_is_upper_bound;
+      void pack_external_close(Serializer &rez, AddressSpaceID target) const;
+      void unpack_external_close(Deserializer &derez, Runtime *runtime);
     };
 
     /**
@@ -1372,7 +1533,7 @@ namespace Legion {
      * operations that both inherit from this class:
      * InterCloseOp and PostCloseOp.
      */
-    class CloseOp : public Close, public InternalOp {
+    class CloseOp : public ExternalClose, public InternalOp {
     public:
       static const AllocationType alloc_type = CLOSE_OP_ALLOC;
     public:
@@ -1383,14 +1544,15 @@ namespace Legion {
       CloseOp& operator=(const CloseOp &rhs);
     public:
       virtual UniqueID get_unique_id(void) const;
-      virtual unsigned get_context_index(void) const;
+      virtual size_t get_context_index(void) const;
+      virtual void set_context_index(size_t index);
       virtual int get_depth(void) const;
       virtual Mappable* get_mappable(void);
     public:
       void activate_close(void);
       void deactivate_close(void);
       // This is for post and virtual close ops
-      void initialize_close(TaskContext *ctx,
+      void initialize_close(InnerContext *ctx,
                             const RegionRequirement &req, bool track);
       // These is for internal close ops
       void initialize_close(Operation *creator, unsigned idx,
@@ -1410,126 +1572,23 @@ namespace Legion {
     protected:
       RegionTreePath privilege_path;
       VersionInfo    version_info;
-      RestrictInfo   restrict_info;
     };
 
     /**
-     * \class InterCloseOp
-     * Intermediate close operations are issued by the runtime
+     * \class MergeCloseOp
+     * merge close operations are issued by the runtime
      * for closing up region trees as part of the normal execution
      * of an application.
      */
-    class InterCloseOp : public CloseOp, public LegionHeapify<InterCloseOp> {
+    class MergeCloseOp : public CloseOp, public LegionHeapify<MergeCloseOp> {
     public:
-      struct DisjointCloseInfo {
-      public:
-        FieldMask close_mask;
-        VersionInfo version_info;
-        ClosedNode *close_node;
-        std::set<RtEvent> ready_events;
-      };
-      struct DisjointCloseArgs : public LgTaskArgs<DisjointCloseArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_DISJOINT_CLOSE_TASK_ID;
-      public:
-        DisjointCloseArgs(InterCloseOp *op, 
-                          RegionTreeNode *child, InnerContext *ctx)
-          : LgTaskArgs<DisjointCloseArgs>(op->get_unique_op_id()),
-            proxy_this(op), child_node(child), context(ctx) { }
-      public:
-        InterCloseOp *const proxy_this;
-        RegionTreeNode *const child_node;
-        InnerContext *const context;
-      };
+      MergeCloseOp(Runtime *runtime);
+      MergeCloseOp(const MergeCloseOp &rhs);
+      virtual ~MergeCloseOp(void);
     public:
-      InterCloseOp(Runtime *runtime);
-      InterCloseOp(const InterCloseOp &rhs);
-      virtual ~InterCloseOp(void);
+      MergeCloseOp& operator=(const MergeCloseOp &rhs);
     public:
-      InterCloseOp& operator=(const InterCloseOp &rhs);
-    public:
-      void initialize(TaskContext *ctx, const RegionRequirement &req,
-                      ClosedNode *closed_tree, 
-                      const LogicalTraceInfo &trace_info,
-                      int close_idx, const VersionInfo &version_info,
-                      const FieldMask &close_mask, Operation *create_op);
-      ProjectionInfo& initialize_disjoint_close(const FieldMask &disjoint_mask,
-                                                IndexSpace launch_space);
-      DisjointCloseInfo* find_disjoint_close_child(unsigned index,
-                                                   RegionTreeNode *child);
-      void perform_disjoint_close(RegionTreeNode *child_to_close, 
-                                  DisjointCloseInfo &close_info,
-                                  InnerContext *context,
-                                  std::set<RtEvent> &ready_events);
-    public:
-      virtual void activate(void);
-      virtual void deactivate(void);
-      virtual const char* get_logging_name(void) const;
-      virtual OpKind get_operation_kind(void) const;
-      virtual const FieldMask& get_internal_mask(void) const;
-    public:
-      virtual void trigger_ready(void);
-      virtual void trigger_mapping(void);
-      virtual void trigger_commit(void);
-      virtual unsigned find_parent_index(unsigned idx);
-      virtual void select_sources(const InstanceRef &target,
-                                  const InstanceSet &sources,
-                                  std::vector<unsigned> &ranking);
-      virtual std::map<PhysicalManager*,std::pair<unsigned,bool> >*
-                   get_acquired_instances_ref(void);
-      virtual void record_reference_mutation_effect(RtEvent event);
-      virtual PhysicalManager* select_temporary_instance(PhysicalManager *dst,
-                              unsigned index, const FieldMask &needed_fields);
-    protected:
-      void invoke_mapper(const InstanceSet &valid_instances);
-      virtual void add_copy_profiling_request(
-                                          Realm::ProfilingRequestSet &reqeusts);
-      virtual void handle_profiling_response(
-                                    const Realm::ProfilingResponse &response);
-    public:
-      static void handle_disjoint_close(const void *args);
-    protected:
-      FieldMask close_mask;
-      ClosedNode *closed_tree;
-      InstanceSet chosen_instances;
-    protected:
-      // For disjoint partition closes with projections
-      FieldMask disjoint_close_mask;
-      ProjectionInfo projection_info;
-      LegionMap<RegionTreeNode*,DisjointCloseInfo>::aligned children_to_close;
-    protected:
-      unsigned parent_req_index;
-      std::map<PhysicalManager*,std::pair<unsigned,bool> > acquired_instances;
-      std::set<RtEvent> map_applied_conditions;
-    protected:
-      MapperManager *mapper;
-    protected:
-      std::vector<ProfilingMeasurementID> profiling_requests;
-      int                                 profiling_priority;
-      int                     outstanding_profiling_requests;
-      RtUserEvent                         profiling_reported;
-    };
-    
-    /**
-     * \class ReadCloseOp
-     * Read close operations are close ops that act as 
-     * place holders for closing up read-only partitions.
-     * Closing a read-only partition doesn't actually involve
-     * any work, but we do need something to ensure that all
-     * the mapping dependences are satisfied for later operations
-     * that traverse different subtrees. Read close operations
-     * are summaries for all those dependences to reduce the
-     * overhead of testing against everything in a subtree.
-     */
-    class ReadCloseOp : public CloseOp, public LegionHeapify<ReadCloseOp> {
-    public:
-      ReadCloseOp(Runtime *runtime);
-      ReadCloseOp(const ReadCloseOp &rhs);
-      virtual ~ReadCloseOp(void);
-    public:
-      ReadCloseOp& operator=(const ReadCloseOp &rhs);
-    public:
-      void initialize(TaskContext *ctx, const RegionRequirement &req,
+      void initialize(InnerContext *ctx, const RegionRequirement &req,
                       const LogicalTraceInfo &trace_info, int close_idx,
                       const FieldMask &close_mask, Operation *create_op);
     public:
@@ -1540,6 +1599,9 @@ namespace Legion {
       virtual const FieldMask& get_internal_mask(void) const;
     public:
       virtual unsigned find_parent_index(unsigned idx);
+#ifdef LEGION_SPY
+      virtual void trigger_complete(void);
+#endif
     protected:
       unsigned parent_req_index; 
     protected:
@@ -1553,7 +1615,7 @@ namespace Legion {
      * need to be closed up to the original physical instance
      * that was mapped by the parent task.
      */
-    class PostCloseOp : public CloseOp {
+    class PostCloseOp : public CloseOp, public LegionHeapify<PostCloseOp> {
     public:
       PostCloseOp(Runtime *runtime);
       PostCloseOp(const PostCloseOp &rhs);
@@ -1561,7 +1623,7 @@ namespace Legion {
     public:
       PostCloseOp& operator=(const PostCloseOp &rhs);
     public:
-      void initialize(TaskContext *ctx, unsigned index, 
+      void initialize(InnerContext *ctx, unsigned index, 
                       const InstanceSet &target_instances); 
     public:
       virtual void activate(void);
@@ -1574,19 +1636,21 @@ namespace Legion {
       virtual void trigger_mapping(void);
       virtual void trigger_commit(void);
       virtual unsigned find_parent_index(unsigned idx);
-      virtual void select_sources(const InstanceRef &target,
+      virtual void select_sources(const unsigned index,
+                                  const InstanceRef &target,
                                   const InstanceSet &sources,
                                   std::vector<unsigned> &ranking);
       virtual std::map<PhysicalManager*,std::pair<unsigned,bool> >*
                    get_acquired_instances_ref(void);
       virtual void record_reference_mutation_effect(RtEvent event);
-      virtual PhysicalManager* select_temporary_instance(PhysicalManager *dst,
-                              unsigned index, const FieldMask &needed_fields);
     protected:
       virtual void add_copy_profiling_request(
                                           Realm::ProfilingRequestSet &reqeusts);
       virtual void handle_profiling_response(
                                     const Realm::ProfilingResponse &response);
+      virtual void handle_profiling_update(int count);
+      virtual void pack_remote_operation(Serializer &rez,
+                                         AddressSpaceID target) const;
     protected:
       unsigned parent_idx;
       InstanceSet target_instances;
@@ -1597,8 +1661,8 @@ namespace Legion {
     protected:
       std::vector<ProfilingMeasurementID> profiling_requests;
       int                                 profiling_priority;
-      int                     outstanding_profiling_requests;
-      RtUserEvent                         profiling_reported;
+      mutable int             outstanding_profiling_requests;
+      mutable RtUserEvent                 profiling_reported;
     };
 
     /**
@@ -1608,7 +1672,8 @@ namespace Legion {
      * that can then be propagated back to the enclosing
      * parent task.
      */
-    class VirtualCloseOp : public CloseOp {
+    class VirtualCloseOp : public CloseOp, 
+                           public LegionHeapify<VirtualCloseOp> {
     public:
       VirtualCloseOp(Runtime *runtime);
       VirtualCloseOp(const VirtualCloseOp &rhs);
@@ -1616,7 +1681,7 @@ namespace Legion {
     public:
       VirtualCloseOp& operator=(const VirtualCloseOp &rhs);
     public:
-      void initialize(TaskContext *ctx, unsigned index,
+      void initialize(InnerContext *ctx, unsigned index,
                       const RegionRequirement &req);
     public:
       virtual void activate(void);
@@ -1626,8 +1691,26 @@ namespace Legion {
     public:
       virtual void trigger_dependence_analysis(void);
       virtual unsigned find_parent_index(unsigned idx);
+#ifdef LEGION_SPY
+      virtual void trigger_complete(void);
+#endif
     protected:
       unsigned parent_idx;
+    };
+
+    /**
+     * \class ExternalAcquire
+     * An extension of the external-facing Acquire to help 
+     * with packing and unpacking them
+     */
+    class ExternalAcquire : public Acquire, public ExternalMappable {
+    public:
+      ExternalAcquire(void);
+    public:
+      virtual void set_context_index(size_t index) = 0;
+    public:
+      void pack_external_acquire(Serializer &rez, AddressSpaceID target) const;
+      void unpack_external_acquire(Deserializer &derez, Runtime *runtime);
     };
 
     /**
@@ -1636,7 +1719,7 @@ namespace Legion {
      * user-level software coherence when tasks own
      * regions with simultaneous coherence.
      */
-    class AcquireOp : public Acquire, public MemoizableOp<SpeculativeOp>,
+    class AcquireOp : public ExternalAcquire,public MemoizableOp<SpeculativeOp>,
                       public LegionHeapify<AcquireOp> {
     public:
       static const AllocationType alloc_type = ACQUIRE_OP_ALLOC;
@@ -1647,8 +1730,7 @@ namespace Legion {
     public:
       AcquireOp& operator=(const AcquireOp &rhs);
     public:
-      void initialize(TaskContext *ctx, const AcquireLauncher &launcher,
-                      bool check_privileges);
+      void initialize(InnerContext *ctx, const AcquireLauncher &launcher);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -1672,10 +1754,10 @@ namespace Legion {
       virtual std::map<PhysicalManager*,std::pair<unsigned,bool> >*
                    get_acquired_instances_ref(void);
       virtual void record_reference_mutation_effect(RtEvent event);
-      virtual ApEvent get_restrict_precondition(void) const;
     public: 
       virtual UniqueID get_unique_id(void) const;
-      virtual unsigned get_context_index(void) const;
+      virtual size_t get_context_index(void) const;
+      virtual void set_context_index(size_t index);
       virtual int get_depth(void) const;
     public:
       const RegionRequirement& get_requirement(void) const;
@@ -1684,8 +1766,10 @@ namespace Legion {
       virtual void replay_analysis(void);
     public:
       // From Memoizable
-      virtual ApEvent compute_sync_precondition(void) const;
+      virtual ApEvent compute_sync_precondition(const TraceInfo *info) const;
       virtual void complete_replay(ApEvent acquire_complete_event);
+      virtual const VersionInfo& get_version_info(unsigned idx) const;
+      virtual const RegionRequirement& get_requirement(unsigned idx) const;
     protected:
       void check_acquire_privilege(void);
       void compute_parent_index(void);
@@ -1694,11 +1778,13 @@ namespace Legion {
                                           Realm::ProfilingRequestSet &reqeusts);
       virtual void handle_profiling_response(
                                     const Realm::ProfilingResponse &response);
+      virtual void handle_profiling_update(int count);
+      virtual void pack_remote_operation(Serializer &rez,
+                                         AddressSpaceID target) const;
     protected:
       RegionRequirement requirement;
       RegionTreePath    privilege_path;
       VersionInfo       version_info;
-      RestrictInfo      restrict_info;
       unsigned          parent_req_index;
       std::map<PhysicalManager*,std::pair<unsigned,bool> > acquired_instances;
       std::set<RtEvent> map_applied_conditions;
@@ -1707,8 +1793,23 @@ namespace Legion {
     protected:
       std::vector<ProfilingMeasurementID> profiling_requests;
       int                                 profiling_priority;
-      int                     outstanding_profiling_requests;
-      RtUserEvent                         profiling_reported;
+      mutable int             outstanding_profiling_requests;
+      mutable RtUserEvent                 profiling_reported;
+    };
+
+    /**
+     * \class ExternalRelease
+     * An extension of the external-facing Release to help 
+     * with packing and unpacking them
+     */
+    class ExternalRelease: public Release, public ExternalMappable {
+    public:
+      ExternalRelease(void);
+    public:
+      virtual void set_context_index(size_t index) = 0;
+    public:
+      void pack_external_release(Serializer &rez, AddressSpaceID target) const;
+      void unpack_external_release(Deserializer &derez, Runtime *runtime);
     };
 
     /**
@@ -1717,7 +1818,7 @@ namespace Legion {
      * user-level software coherence when tasks own
      * regions with simultaneous coherence.
      */
-    class ReleaseOp : public Release, public MemoizableOp<SpeculativeOp>,
+    class ReleaseOp : public ExternalRelease,public MemoizableOp<SpeculativeOp>,
                       public LegionHeapify<ReleaseOp> {
     public:
       static const AllocationType alloc_type = RELEASE_OP_ALLOC;
@@ -1728,8 +1829,7 @@ namespace Legion {
     public:
       ReleaseOp& operator=(const ReleaseOp &rhs);
     public:
-      void initialize(TaskContext *ctx, const ReleaseLauncher &launcher,
-                      bool check_privileges);
+      void initialize(InnerContext *ctx, const ReleaseLauncher &launcher);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -1750,18 +1850,17 @@ namespace Legion {
     public:
       virtual void trigger_commit(void);
       virtual unsigned find_parent_index(unsigned idx);
-      virtual void select_sources(const InstanceRef &target,
+      virtual void select_sources(const unsigned index,
+                                  const InstanceRef &target,
                                   const InstanceSet &sources,
                                   std::vector<unsigned> &ranking);
       virtual std::map<PhysicalManager*,std::pair<unsigned,bool> >*
                    get_acquired_instances_ref(void);
       virtual void record_reference_mutation_effect(RtEvent event);
-      virtual PhysicalManager* select_temporary_instance(PhysicalManager *dst,
-                              unsigned index, const FieldMask &needed_fields);
-      virtual ApEvent get_restrict_precondition(void) const;
     public:
       virtual UniqueID get_unique_id(void) const;
-      virtual unsigned get_context_index(void) const;
+      virtual size_t get_context_index(void) const;
+      virtual void set_context_index(size_t index);
       virtual int get_depth(void) const;
     public:
       const RegionRequirement& get_requirement(void) const;
@@ -1770,8 +1869,10 @@ namespace Legion {
       virtual void replay_analysis(void);
     public:
       // From Memoizable
-      virtual ApEvent compute_sync_precondition(void) const;
+      virtual ApEvent compute_sync_precondition(const TraceInfo *info) const;
       virtual void complete_replay(ApEvent release_complete_event);
+      virtual const VersionInfo& get_version_info(unsigned idx) const;
+      virtual const RegionRequirement& get_requirement(unsigned idx) const;
     protected:
       void check_release_privilege(void);
       void compute_parent_index(void);
@@ -1780,11 +1881,13 @@ namespace Legion {
                                           Realm::ProfilingRequestSet &reqeusts);
       virtual void handle_profiling_response(
                                     const Realm::ProfilingResponse &response);
+      virtual void handle_profiling_update(int count);
+      virtual void pack_remote_operation(Serializer &rez,
+                                         AddressSpaceID target) const;
     protected:
       RegionRequirement requirement;
       RegionTreePath    privilege_path;
       VersionInfo       version_info;
-      RestrictInfo      restrict_info;
       unsigned          parent_req_index;
       std::map<PhysicalManager*,std::pair<unsigned,bool> > acquired_instances;
       std::set<RtEvent> map_applied_conditions;
@@ -1793,8 +1896,8 @@ namespace Legion {
     protected:
       std::vector<ProfilingMeasurementID> profiling_requests;
       int                                 profiling_priority;
-      int                     outstanding_profiling_requests;
-      RtUserEvent                         profiling_reported;
+      mutable int             outstanding_profiling_requests;
+      mutable RtUserEvent                 profiling_reported;
     };
 
     /**
@@ -1816,11 +1919,11 @@ namespace Legion {
     public:
       DynamicCollectiveOp& operator=(const DynamicCollectiveOp &rhs);
     public:
-      Future initialize(TaskContext *ctx, const DynamicCollective &dc);
+      Future initialize(InnerContext *ctx, const DynamicCollective &dc);
     public:
       // From Mappable
       virtual UniqueID get_unique_id(void) const { return unique_op_id; }
-      virtual unsigned get_context_index(void) const;
+      virtual size_t get_context_index(void) const;
       virtual int get_depth(void) const;
       virtual MappableType get_mappable_type(void) const
         { return DYNAMIC_COLLECTIVE_MAPPABLE; }
@@ -1835,6 +1938,10 @@ namespace Legion {
       virtual const DynamicCollective* as_dynamic_collective(void) const
         { return &collective; }
       virtual const MustEpoch* as_must_epoch(void) const { return NULL; }
+      virtual const VersionInfo& get_version_info(unsigned idx) const
+        { assert(false); return *(new VersionInfo()); }
+      virtual const RegionRequirement& get_requirement(unsigned idx) const
+        { assert(false); return *(new RegionRequirement()); }
     public:
       // From MemoizableOp
       virtual void replay_analysis(void);
@@ -1879,7 +1986,7 @@ namespace Legion {
     public:
       FuturePredOp& operator=(const FuturePredOp &rhs);
     public:
-      void initialize(TaskContext *ctx, Future f);
+      void initialize(InnerContext *ctx, Future f);
       void resolve_future_predicate(void);
     public:
       virtual void activate(void);
@@ -1908,7 +2015,7 @@ namespace Legion {
     public:
       NotPredOp& operator=(const NotPredOp &rhs);
     public:
-      void initialize(TaskContext *task, const Predicate &p);
+      void initialize(InnerContext *task, const Predicate &p);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -1937,7 +2044,7 @@ namespace Legion {
     public:
       AndPredOp& operator=(const AndPredOp &rhs);
     public:
-      void initialize(TaskContext *task, 
+      void initialize(InnerContext *task, 
                       const std::vector<Predicate> &predicates);
     public:
       virtual void activate(void);
@@ -1969,7 +2076,7 @@ namespace Legion {
     public:
       OrPredOp& operator=(const OrPredOp &rhs);
     public:
-      void initialize(TaskContext *task, 
+      void initialize(InnerContext *task, 
                       const std::vector<Predicate> &predicates);
     public:
       virtual void activate(void);
@@ -2014,9 +2121,8 @@ namespace Legion {
     public:
       MustEpochOp& operator=(const MustEpochOp &rhs);
     public:
-      FutureMap initialize(TaskContext *ctx,
-                           const MustEpochLauncher &launcher,
-                           bool check_privileges);
+      FutureMap initialize(InnerContext *ctx,
+                           const MustEpochLauncher &launcher);
       void find_conflicted_regions(
           std::vector<PhysicalRegion> &unmapped); 
     public:
@@ -2241,6 +2347,7 @@ namespace Legion {
         EQUAL_PARTITION = 0,
         UNION_PARTITION,
         INTERSECTION_PARTITION,
+        INTERSECTION_WITH_REGION,
         DIFFERENCE_PARTITION,
         RESTRICTED_PARTITION,
       };
@@ -2299,6 +2406,22 @@ namespace Legion {
         IndexPartition pid;
         IndexPartition handle1;
         IndexPartition handle2;
+      };
+      class IntersectionWithRegionThunk: public PendingPartitionThunk {
+      public:
+        IntersectionWithRegionThunk(IndexPartition id, IndexPartition p, bool d)
+          : pid(id), part(p), dominates(d) { }
+        virtual ~IntersectionWithRegionThunk(void) { }
+      public:
+        virtual ApEvent perform(PendingPartitionOp *op,
+                                RegionTreeForest *forest)
+        { return forest->create_partition_by_intersection(op, pid, 
+                                                          part, dominates); }
+        virtual void perform_logging(PendingPartitionOp* op);
+      protected:
+        IndexPartition pid;
+        IndexPartition part;
+        const bool dominates;
       };
       class DifferencePartitionThunk : public PendingPartitionThunk {
       public:
@@ -2397,39 +2520,43 @@ namespace Legion {
     public:
       PendingPartitionOp& operator=(const PendingPartitionOp &rhs);
     public:
-      void initialize_equal_partition(TaskContext *ctx,
+      void initialize_equal_partition(InnerContext *ctx,
                                       IndexPartition pid, size_t granularity);
-      void initialize_union_partition(TaskContext *ctx,
+      void initialize_union_partition(InnerContext *ctx,
                                       IndexPartition pid, 
                                       IndexPartition handle1,
                                       IndexPartition handle2);
-      void initialize_intersection_partition(TaskContext *ctx,
+      void initialize_intersection_partition(InnerContext *ctx,
                                              IndexPartition pid, 
                                              IndexPartition handle1,
                                              IndexPartition handle2);
-      void initialize_difference_partition(TaskContext *ctx,
+      void initialize_intersection_partition(InnerContext *ctx,
+                                             IndexPartition pid, 
+                                             IndexPartition part,
+                                             const bool dominates);
+      void initialize_difference_partition(InnerContext *ctx,
                                            IndexPartition pid, 
                                            IndexPartition handle1,
                                            IndexPartition handle2);
-      void initialize_restricted_partition(TaskContext *ctx,
+      void initialize_restricted_partition(InnerContext *ctx,
                                            IndexPartition pid,
                                            const void *transform,
                                            size_t transform_size,
                                            const void *extent,
                                            size_t extent_size);
-      void initialize_cross_product(TaskContext *ctx, IndexPartition base, 
+      void initialize_cross_product(InnerContext *ctx, IndexPartition base, 
                                     IndexPartition source, LegionColor color);
-      void initialize_index_space_union(TaskContext *ctx, IndexSpace target, 
+      void initialize_index_space_union(InnerContext *ctx, IndexSpace target, 
                                         const std::vector<IndexSpace> &handles);
-      void initialize_index_space_union(TaskContext *ctx, IndexSpace target, 
+      void initialize_index_space_union(InnerContext *ctx, IndexSpace target, 
                                         IndexPartition handle);
-      void initialize_index_space_intersection(TaskContext *ctx, 
+      void initialize_index_space_intersection(InnerContext *ctx, 
                                                IndexSpace target,
                                         const std::vector<IndexSpace> &handles);
-      void initialize_index_space_intersection(TaskContext *ctx,
+      void initialize_index_space_intersection(InnerContext *ctx,
                                               IndexSpace target,
                                               IndexPartition handle);
-      void initialize_index_space_difference(TaskContext *ctx, 
+      void initialize_index_space_difference(InnerContext *ctx, 
                                              IndexSpace target, 
                                              IndexSpace initial,
                                         const std::vector<IndexSpace> &handles);
@@ -2448,12 +2575,27 @@ namespace Legion {
     };
 
     /**
+     * \class ExternalPartition
+     * An extension of the external-facing Partition to help 
+     * with packing and unpacking them
+     */
+    class ExternalPartition: public Partition, public ExternalMappable {
+    public:
+      ExternalPartition(void);
+    public:
+      virtual void set_context_index(size_t index) = 0;
+    public:
+      void pack_external_partition(Serializer &rez,AddressSpaceID target) const;
+      void unpack_external_partition(Deserializer &derez, Runtime *runtime);
+    };
+
+    /**
      * \class DependentPartitionOp
      * An operation for creating different kinds of partitions
      * which are dependent on mapping a region in order to compute
      * the resulting partition.
      */
-    class DependentPartitionOp : public Partition, public Operation,
+    class DependentPartitionOp : public ExternalPartition, public Operation,
                                  public LegionHeapify<DependentPartitionOp> {
     public:
       static const AllocationType alloc_type = DEPENDENT_PARTITION_OP_ALLOC;
@@ -2560,26 +2702,26 @@ namespace Legion {
     public:
       DependentPartitionOp& operator=(const DependentPartitionOp &rhs);
     public:
-      void initialize_by_field(TaskContext *ctx, IndexPartition pid,
+      void initialize_by_field(InnerContext *ctx, IndexPartition pid,
                                LogicalRegion handle, LogicalRegion parent,
                                FieldID fid, MapperID id, MappingTagID tag); 
-      void initialize_by_image(TaskContext *ctx, IndexPartition pid,
+      void initialize_by_image(InnerContext *ctx, IndexPartition pid,
                                LogicalPartition projection,
                                LogicalRegion parent, FieldID fid,
                                MapperID id, MappingTagID tag);
-      void initialize_by_image_range(TaskContext *ctx, IndexPartition pid,
+      void initialize_by_image_range(InnerContext *ctx, IndexPartition pid,
                                LogicalPartition projection,
                                LogicalRegion parent, FieldID fid,
                                MapperID id, MappingTagID tag);
-      void initialize_by_preimage(TaskContext *ctx, IndexPartition pid,
+      void initialize_by_preimage(InnerContext *ctx, IndexPartition pid,
                                IndexPartition projection, LogicalRegion handle,
                                LogicalRegion parent, FieldID fid,
                                MapperID id, MappingTagID tag);
-      void initialize_by_preimage_range(TaskContext *ctx, IndexPartition pid,
+      void initialize_by_preimage_range(InnerContext *ctx, IndexPartition pid,
                                IndexPartition projection, LogicalRegion handle,
                                LogicalRegion parent, FieldID fid,
                                MapperID id, MappingTagID tag);
-      void initialize_by_association(TaskContext *ctx, LogicalRegion domain,
+      void initialize_by_association(InnerContext *ctx, LogicalRegion domain,
                                LogicalRegion domain_parent, FieldID fid,
                                IndexSpace range, MapperID id, MappingTagID tag);
       void perform_logging(void) const;
@@ -2592,14 +2734,17 @@ namespace Legion {
       virtual void trigger_ready(void);
       virtual void trigger_mapping(void);
       virtual ApEvent trigger_thunk(IndexSpace handle,
-                                    const InstanceSet &mapped_instances);
+                                    const InstanceSet &mapped_instances,
+                                    const PhysicalTraceInfo &info);
       virtual unsigned find_parent_index(unsigned idx);
       virtual bool is_partition_op(void) const { return true; }
     public:
       virtual PartitionKind get_partition_kind(void) const;
       virtual UniqueID get_unique_id(void) const;
-      virtual unsigned get_context_index(void) const;
+      virtual size_t get_context_index(void) const;
+      virtual void set_context_index(size_t index);
       virtual int get_depth(void) const;
+      virtual Mappable* get_mappable(void);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -2608,44 +2753,42 @@ namespace Legion {
       virtual size_t get_region_count(void) const;
       virtual void trigger_commit(void);
     public:
-      virtual void select_sources(const InstanceRef &target,
+      virtual void select_sources(const unsigned index,
+                                  const InstanceRef &target,
                                   const InstanceSet &sources,
                                   std::vector<unsigned> &ranking);
       virtual std::map<PhysicalManager*,std::pair<unsigned,bool> >*
                    get_acquired_instances_ref(void);
       virtual void record_reference_mutation_effect(RtEvent event);
-      virtual PhysicalManager* select_temporary_instance(PhysicalManager *dst,
-                              unsigned index, const FieldMask &needed_fields);
-      virtual void record_restrict_postcondition(ApEvent postcondition);
       virtual void add_copy_profiling_request(
                                         Realm::ProfilingRequestSet &reqeusts);
       // Report a profiling result for this operation
       virtual void handle_profiling_response(
                                   const Realm::ProfilingResponse &result);
+      virtual void handle_profiling_update(int count);
+      virtual void pack_remote_operation(Serializer &rez,
+                                         AddressSpaceID target) const;
     protected:
+      void check_privilege(void);
       void compute_parent_index(void);
       void select_partition_projection(void);
-      void invoke_mapper(const InstanceSet &valid_instances,
-                               InstanceSet &mapped_instances);
+      bool invoke_mapper(InstanceSet &mapped_instances);
       void activate_dependent_op(void);
       void deactivate_dependent_op(void);
     public:
       void handle_point_commit(RtEvent point_committed);
     public:
-      ProjectionInfo projection_info;
       VersionInfo version_info;
-      RestrictInfo restrict_info;
       RegionTreePath privilege_path;
       unsigned parent_req_index;
       std::map<PhysicalManager*,std::pair<unsigned,bool> > acquired_instances;
       std::set<RtEvent> map_applied_conditions;
-      std::set<ApEvent> restricted_postconditions;
       DepPartThunk *thunk;
     protected:
       MapperManager *mapper;
     protected:
       // For index versions of this operation
-      IndexSpace                        launch_space;
+      IndexSpaceNode*                   launch_space;
       std::vector<FieldDataDescriptor>  instances;
       std::set<ApEvent>                 index_preconditions;
       std::vector<PointDepPartOp*>      points; 
@@ -2658,8 +2801,9 @@ namespace Legion {
 #endif
     protected:
       std::vector<ProfilingMeasurementID> profiling_requests;
-      int                     outstanding_profiling_requests;
-      RtUserEvent                         profiling_reported;
+      int                                 profiling_priority;
+      mutable int             outstanding_profiling_requests;
+      mutable RtUserEvent                 profiling_reported;
     };
 
     /**
@@ -2677,15 +2821,17 @@ namespace Legion {
       PointDepPartOp& operator=(const PointDepPartOp &rhs);
     public:
       void initialize(DependentPartitionOp *owner, const DomainPoint &point);
-      void launch(const std::set<RtEvent> &preconditions);
+      void launch(void);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
       virtual void trigger_prepipeline_stage(void);
       virtual void trigger_dependence_analysis(void);
       virtual ApEvent trigger_thunk(IndexSpace handle,
-                                    const InstanceSet &mapped_instances);
+                                    const InstanceSet &mapped_instances,
+                                    const PhysicalTraceInfo &trace_info);
       virtual void trigger_commit(void);
+      virtual PartitionKind get_partition_kind(void) const;
     public:
       // From ProjectionPoint
       virtual const DomainPoint& get_domain_point(void) const;
@@ -2695,11 +2841,26 @@ namespace Legion {
     };
 
     /**
+     * \class ExternalFill
+     * An extension of the external-facing Fill to help 
+     * with packing and unpacking them
+     */
+    class ExternalFill : public Fill, public ExternalMappable {
+    public:
+      ExternalFill(void);
+    public:
+      virtual void set_context_index(size_t index) = 0;
+    public:
+      void pack_external_fill(Serializer &rez, AddressSpaceID target) const;
+      void unpack_external_fill(Deserializer &derez, Runtime *runtime);
+    };
+
+    /**
      * \class FillOp
      * Fill operations are used to initialize a field to a
      * specific value for a particular logical region.
      */
-    class FillOp : public MemoizableOp<SpeculativeOp>, public Fill,
+    class FillOp : public MemoizableOp<SpeculativeOp>, public ExternalFill,
                    public LegionHeapify<FillOp> {
     public:
       static const AllocationType alloc_type = FILL_OP_ALLOC;
@@ -2710,8 +2871,7 @@ namespace Legion {
     public:
       FillOp& operator=(const FillOp &rhs);
     public:
-      void initialize(TaskContext *ctx, const FillLauncher &launcher,
-                      bool check_privileges);
+      void initialize(InnerContext *ctx, const FillLauncher &launcher);
       inline const RegionRequirement& get_requirement(void) const 
         { return requirement; }
       void activate_fill(void);
@@ -2724,8 +2884,13 @@ namespace Legion {
       virtual OpKind get_operation_kind(void) const;
       virtual Mappable* get_mappable(void);
       virtual UniqueID get_unique_id(void) const;
-      virtual unsigned get_context_index(void) const;
+      virtual size_t get_context_index(void) const;
+      virtual void set_context_index(size_t index);
       virtual int get_depth(void) const;
+      virtual std::map<PhysicalManager*,std::pair<unsigned,bool> >*
+                                       get_acquired_instances_ref(void);
+      virtual void add_copy_profiling_request(
+                                        Realm::ProfilingRequestSet &reqeusts);
     public:
       virtual bool has_prepipeline_stage(void) const
         { return need_prepipeline_stage; }
@@ -2740,25 +2905,33 @@ namespace Legion {
       virtual void resolve_false(bool speculated, bool launched);
     public:
       virtual unsigned find_parent_index(unsigned idx);
+      virtual void trigger_complete(void);
       virtual void trigger_commit(void);
-      virtual ApEvent get_restrict_precondition(void) const;
-      virtual const ProjectionInfo* get_projection_info(void);
     public:
       void check_fill_privilege(void);
       void compute_parent_index(void);
-      ApEvent compute_sync_precondition(void) const;
+      ApEvent compute_sync_precondition(const TraceInfo *info) const;
       void log_fill_requirement(void) const;
+    public:
+      // From Memoizable
+      virtual const VersionInfo& get_version_info(unsigned idx) const
+        { return version_info; }
+      virtual const RegionRequirement& get_requirement(unsigned idx) const
+        { return get_requirement(); }
     public:
       // From MemoizableOp
       virtual void replay_analysis(void);
     public:
+      virtual void pack_remote_operation(Serializer &rez,
+                                         AddressSpaceID target) const;
+    public:
       RegionTreePath privilege_path;
       VersionInfo version_info;
-      RestrictInfo restrict_info;
       unsigned parent_req_index;
       void *value;
       size_t value_size;
       Future future;
+      FillView *fill_view;
       std::set<RtEvent> map_applied_conditions;
       PredEvent true_guard, false_guard;
     };
@@ -2777,10 +2950,9 @@ namespace Legion {
     public:
       IndexFillOp& operator=(const IndexFillOp &rhs);
     public:
-      void initialize(TaskContext *ctx,
+      void initialize(InnerContext *ctx,
                       const IndexFillLauncher &launcher,
-                      IndexSpace launch_space,
-                      bool check_privileges);
+                      IndexSpace launch_space);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -2791,15 +2963,14 @@ namespace Legion {
       virtual void trigger_mapping(void);
       virtual void trigger_commit(void);
     public:
+      // From MemoizableOp
+      virtual void replay_analysis(void);
+    public:
+      void enumerate_points(void);
       void handle_point_commit(void);
-#ifdef DEBUG_LEGION
       void check_point_requirements(void);
-#endif
     public:
-      virtual const ProjectionInfo* get_projection_info(void);
-    public:
-      ProjectionInfo                projection_info;
-      IndexSpace                    launch_space;
+      IndexSpaceNode*               launch_space;
     protected:
       std::vector<PointFillOp*>     points;
       unsigned                      points_committed;
@@ -2821,7 +2992,7 @@ namespace Legion {
       PointFillOp& operator=(const PointFillOp &rhs);
     public:
       void initialize(IndexFillOp *owner, const DomainPoint &point);
-      void launch(const std::set<RtEvent> &preconditions);
+      void launch(void);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -2835,7 +3006,8 @@ namespace Legion {
       virtual const DomainPoint& get_domain_point(void) const;
       virtual void set_projection_result(unsigned idx,LogicalRegion result);
     public:
-      virtual const ProjectionInfo* get_projection_info(void);
+      // From Memoizable
+      virtual TraceLocalID get_trace_local_id(void) const;
     protected:
       IndexFillOp*              owner;
     };
@@ -2854,9 +3026,8 @@ namespace Legion {
     public:
       AttachOp& operator=(const AttachOp &rhs);
     public:
-      PhysicalRegion initialize(TaskContext *ctx,
-                                const AttachLauncher &launcher,
-                                bool check_privileges);
+      PhysicalRegion initialize(InnerContext *ctx,
+                                const AttachLauncher &launcher);
       inline const RegionRequirement& get_requirement(void) const 
         { return requirement; }
     public:
@@ -2874,12 +3045,15 @@ namespace Legion {
       virtual unsigned find_parent_index(unsigned idx);
       virtual void trigger_commit(void);
       virtual void record_reference_mutation_effect(RtEvent event);
+      virtual void pack_remote_operation(Serializer &rez,
+                                         AddressSpaceID target) const;
     public:
       PhysicalInstance create_instance(IndexSpaceNode *node,
                                        const std::vector<FieldID> &field_set,
                                        const std::vector<size_t> &field_sizes,
                                              LayoutConstraintSet &cons,
-                                             ApEvent &ready_event);
+                                             ApEvent &ready_event,
+                                             size_t &instance_footprint);
     protected:
       void check_privilege(void);
       void compute_parent_index(void);
@@ -2888,7 +3062,6 @@ namespace Legion {
       RegionRequirement requirement;
       RegionTreePath privilege_path;
       VersionInfo version_info;
-      RestrictInfo restrict_info;
       const char *file_name;
       std::map<FieldID,const char*> field_map;
       std::map<FieldID,void*> field_pointers_map;
@@ -2896,8 +3069,10 @@ namespace Legion {
       PhysicalRegion region;
       unsigned parent_req_index;
       std::set<RtEvent> map_applied_conditions;
-      InstanceManager *external_instance;
       LayoutConstraintSet layout_constraint_set;
+      size_t footprint;
+      bool restricted;
+      bool mapping;
     };
 
     /**
@@ -2914,7 +3089,8 @@ namespace Legion {
     public:
       DetachOp& operator=(const DetachOp &rhs);
     public:
-      Future initialize_detach(TaskContext *ctx, PhysicalRegion region);
+      Future initialize_detach(InnerContext *ctx, PhysicalRegion region,
+                               const bool flush, const bool unordered);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -2930,6 +3106,14 @@ namespace Legion {
       virtual unsigned find_parent_index(unsigned idx);
       virtual void trigger_complete(void);
       virtual void trigger_commit(void);
+      virtual void select_sources(const unsigned index,
+                                  const InstanceRef &target,
+                                  const InstanceSet &sources,
+                                  std::vector<unsigned> &ranking);
+      virtual void add_copy_profiling_request(
+                                        Realm::ProfilingRequestSet &reqeusts);
+      virtual void pack_remote_operation(Serializer &rez,
+                                         AddressSpaceID target) const;
     protected:
       void compute_parent_index(void);
     public:
@@ -2937,9 +3121,10 @@ namespace Legion {
       RegionRequirement requirement;
       RegionTreePath privilege_path;
       VersionInfo version_info;
-      RestrictInfo restrict_info;
       unsigned parent_req_index;
+      std::set<RtEvent> map_applied_conditions;
       Future result;
+      bool flush;
     };
 
     /**
@@ -2954,7 +3139,7 @@ namespace Legion {
     public:
       TimingOp& operator=(const TimingOp &rhs);
     public:
-      Future initialize(TaskContext *ctx, const TimingLauncher &launcher);
+      Future initialize(InnerContext *ctx, const TimingLauncher &launcher);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -2969,6 +3154,444 @@ namespace Legion {
       TimingMeasurement measurement;
       std::set<Future> preconditions;
       Future result;
+    };
+
+    /**
+     * \class RemoteOp
+     * This operation is a shim for operations on remote nodes
+     * and is used by remote physical analysis traversals to handle
+     * any requests they might have of the original operation.
+     */
+    class RemoteOp : public Operation {
+    public:
+      // If we have to create a remote operation for something that wants
+      // profiling responses we use this as an upper bound on how many
+      // profiling requests will be issued on the remote node to avoid
+      // the count going back to zero too early
+      static const int REMOTE_PROFILING_MAX_COUNT = 10000;
+    public:
+      struct DeferRemoteOpDeletionArgs : 
+        public LgTaskArgs<DeferRemoteOpDeletionArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_DEFER_REMOTE_OP_DELETION_TASK_ID;
+      public:
+        DeferRemoteOpDeletionArgs(Operation *o)
+          : LgTaskArgs<DeferRemoteOpDeletionArgs>(o->get_unique_op_id()), 
+            op(o) { }
+      public:
+        Operation *const op;
+      };
+    public:
+      RemoteOp(Runtime *rt, Operation *ptr, AddressSpaceID src);
+      RemoteOp(const RemoteOp &rhs);
+      virtual ~RemoteOp(void);
+    public:
+      RemoteOp& operator=(const RemoteOp &rhs);
+    public:
+      virtual void unpack(Deserializer &derez,
+                          ReferenceMutator &mutator) = 0;
+    public:
+      virtual void activate(void);
+      virtual void deactivate(void);
+      virtual const char* get_logging_name(void) const = 0;
+      virtual OpKind get_operation_kind(void) const = 0;
+      virtual std::map<PhysicalManager*,std::pair<unsigned,bool> >*
+                                       get_acquired_instances_ref(void);
+      // This should be the only mapper call that we need to handle
+      virtual void select_sources(const unsigned index,
+                                  const InstanceRef &target,
+                                  const InstanceSet &sources,
+                                  std::vector<unsigned> &ranking) = 0;
+
+      virtual void add_copy_profiling_request(
+                            Realm::ProfilingRequestSet &reqeusts);
+      virtual void report_uninitialized_usage(const unsigned index,
+                                              LogicalRegion handle,
+                                              const RegionUsage usage,
+                                              const char *field_string,
+                                              RtUserEvent reported);
+      virtual void pack_remote_operation(Serializer &rez,
+                                         AddressSpaceID target) const = 0;
+    public:
+      void defer_deletion(RtEvent precondition);
+      void pack_remote_base(Serializer &rez) const;
+      void unpack_remote_base(Deserializer &derez, Runtime *runtime,
+                              std::set<RtEvent> &ready_events);
+      void pack_profiling_requests(Serializer &rez) const;
+      void unpack_profiling_requests(Deserializer &derez);
+      static void handle_deferred_deletion(const void *args);
+      // Caller takes ownership of this object and must delete it when done
+      static RemoteOp* unpack_remote_operation(Deserializer &derez,
+                         Runtime *runtime, std::set<RtEvent> &ready_events);
+      static void handle_report_uninitialized(Deserializer &derez);
+      static void handle_report_profiling_count_update(Deserializer &derez);
+    public:
+      // This is a pointer to an operation on a remote node
+      // it should never be dereferenced
+      Operation *const remote_ptr;
+      const AddressSpaceID source;
+    protected:
+      MapperManager *mapper;
+    protected:
+      std::vector<ProfilingMeasurementID> profiling_requests;
+      int                                 profiling_priority;
+      mutable int               available_profiling_requests;
+      Processor                           profiling_target;
+    };
+
+    /**
+     * \class RemoteMapOp
+     * This is a remote copy of a MapOp to be used
+     * for mapper calls and other operations
+     */
+    class RemoteMapOp : public ExternalMapping, public RemoteOp {
+    public:
+      RemoteMapOp(Runtime *rt, Operation *ptr, AddressSpaceID src);
+      RemoteMapOp(const RemoteMapOp &rhs);
+      virtual ~RemoteMapOp(void);
+    public:
+      RemoteMapOp& operator=(const RemoteMapOp &rhs); 
+    public:
+      virtual UniqueID get_unique_id(void) const;
+      virtual size_t get_context_index(void) const;
+      virtual void set_context_index(size_t index);
+      virtual int get_depth(void) const;
+    public:
+      virtual const char* get_logging_name(void) const;
+      virtual OpKind get_operation_kind(void) const;
+      virtual void select_sources(const unsigned index,
+                                  const InstanceRef &target,
+                                  const InstanceSet &sources,
+                                  std::vector<unsigned> &ranking); 
+      virtual void pack_remote_operation(Serializer &rez,
+                                         AddressSpaceID target) const;
+      virtual void unpack(Deserializer &derez, ReferenceMutator &mutator);
+    };
+
+    /**
+     * \class RemoteCopyOp
+     * This is a remote copy of a CopyOp to be used
+     * for mapper calls and other operations
+     */
+    class RemoteCopyOp : public ExternalCopy, public RemoteOp {
+    public:
+      RemoteCopyOp(Runtime *rt, Operation *ptr, AddressSpaceID src);
+      RemoteCopyOp(const RemoteCopyOp &rhs);
+      virtual ~RemoteCopyOp(void);
+    public:
+      RemoteCopyOp& operator=(const RemoteCopyOp &rhs);
+    public:
+      virtual UniqueID get_unique_id(void) const;
+      virtual size_t get_context_index(void) const;
+      virtual void set_context_index(size_t index);
+      virtual int get_depth(void) const;
+    public:
+      virtual const char* get_logging_name(void) const;
+      virtual OpKind get_operation_kind(void) const;
+      virtual void select_sources(const unsigned index,
+                                  const InstanceRef &target,
+                                  const InstanceSet &sources,
+                                  std::vector<unsigned> &ranking);
+      virtual void pack_remote_operation(Serializer &rez,
+                                         AddressSpaceID target) const;
+      virtual void unpack(Deserializer &derez, ReferenceMutator &mutator);
+    };
+
+    /**
+     * \class RemoteCloseOp
+     * This is a remote copy of a CloseOp to be used
+     * for mapper calls and other operations
+     */
+    class RemoteCloseOp : public ExternalClose, public RemoteOp {
+    public:
+      RemoteCloseOp(Runtime *rt, Operation *ptr, AddressSpaceID src);
+      RemoteCloseOp(const RemoteCloseOp &rhs);
+      virtual ~RemoteCloseOp(void);
+    public:
+      RemoteCloseOp& operator=(const RemoteCloseOp &rhs);
+    public:
+      virtual UniqueID get_unique_id(void) const;
+      virtual size_t get_context_index(void) const;
+      virtual void set_context_index(size_t index);
+      virtual int get_depth(void) const;
+    public:
+      virtual const char* get_logging_name(void) const;
+      virtual OpKind get_operation_kind(void) const;
+      virtual void select_sources(const unsigned index,
+                                  const InstanceRef &target,
+                                  const InstanceSet &sources,
+                                  std::vector<unsigned> &ranking);
+      virtual void pack_remote_operation(Serializer &rez,
+                                         AddressSpaceID target) const;
+      virtual void unpack(Deserializer &derez, ReferenceMutator &mutator);
+    };
+
+    /**
+     * \class RemoteAcquireOp
+     * This is a remote copy of a AcquireOp to be used
+     * for mapper calls and other operations
+     */
+    class RemoteAcquireOp : public ExternalAcquire, public RemoteOp {
+    public:
+      RemoteAcquireOp(Runtime *rt, Operation *ptr, AddressSpaceID src);
+      RemoteAcquireOp(const RemoteAcquireOp &rhs);
+      virtual ~RemoteAcquireOp(void);
+    public:
+      RemoteAcquireOp& operator=(const RemoteAcquireOp &rhs);
+    public:
+      virtual UniqueID get_unique_id(void) const;
+      virtual size_t get_context_index(void) const;
+      virtual void set_context_index(size_t index);
+      virtual int get_depth(void) const;
+    public:
+      virtual const char* get_logging_name(void) const;
+      virtual OpKind get_operation_kind(void) const;
+      virtual void select_sources(const unsigned index,
+                                  const InstanceRef &target,
+                                  const InstanceSet &sources,
+                                  std::vector<unsigned> &ranking);
+      virtual void pack_remote_operation(Serializer &rez,
+                                         AddressSpaceID target) const;
+      virtual void unpack(Deserializer &derez, ReferenceMutator &mutator);
+    };
+
+    /**
+     * \class RemoteReleaseOp
+     * This is a remote copy of a ReleaseOp to be used
+     * for mapper calls and other operations
+     */
+    class RemoteReleaseOp : public ExternalRelease, public RemoteOp {
+    public:
+      RemoteReleaseOp(Runtime *rt, Operation *ptr, AddressSpaceID src);
+      RemoteReleaseOp(const RemoteReleaseOp &rhs);
+      virtual ~RemoteReleaseOp(void);
+    public:
+      RemoteReleaseOp& operator=(const RemoteReleaseOp &rhs);
+    public:
+      virtual UniqueID get_unique_id(void) const;
+      virtual size_t get_context_index(void) const;
+      virtual void set_context_index(size_t index);
+      virtual int get_depth(void) const;
+    public:
+      virtual const char* get_logging_name(void) const;
+      virtual OpKind get_operation_kind(void) const;
+      virtual void select_sources(const unsigned index,
+                                  const InstanceRef &target,
+                                  const InstanceSet &sources,
+                                  std::vector<unsigned> &ranking);
+      virtual void pack_remote_operation(Serializer &rez,
+                                         AddressSpaceID target) const;
+      virtual void unpack(Deserializer &derez, ReferenceMutator &mutator);
+    };
+
+    /**
+     * \class RemoteFillOp
+     * This is a remote copy of a FillOp to be used
+     * for mapper calls and other operations
+     */
+    class RemoteFillOp : public ExternalFill, public RemoteOp {
+    public:
+      RemoteFillOp(Runtime *rt, Operation *ptr, AddressSpaceID src);
+      RemoteFillOp(const RemoteFillOp &rhs);
+      virtual ~RemoteFillOp(void);
+    public:
+      RemoteFillOp& operator=(const RemoteFillOp &rhs);
+    public:
+      virtual UniqueID get_unique_id(void) const;
+      virtual size_t get_context_index(void) const;
+      virtual void set_context_index(size_t index);
+      virtual int get_depth(void) const;
+    public:
+      virtual const char* get_logging_name(void) const;
+      virtual OpKind get_operation_kind(void) const;
+      virtual void select_sources(const unsigned index,
+                                  const InstanceRef &target,
+                                  const InstanceSet &sources,
+                                  std::vector<unsigned> &ranking);
+      virtual void pack_remote_operation(Serializer &rez,
+                                         AddressSpaceID target) const;
+      virtual void unpack(Deserializer &derez, ReferenceMutator &mutator);
+    };
+
+    /**
+     * \class RemotePartitionOp
+     * This is a remote copy of a DependentPartitionOp to be
+     * used for mapper calls and other operations
+     */
+    class RemotePartitionOp : public ExternalPartition, public RemoteOp {
+    public:
+      RemotePartitionOp(Runtime *rt, Operation *ptr, AddressSpaceID src);
+      RemotePartitionOp(const RemotePartitionOp &rhs);
+      virtual ~RemotePartitionOp(void);
+    public:
+      RemotePartitionOp& operator=(const RemotePartitionOp &rhs);
+    public:
+      virtual UniqueID get_unique_id(void) const;
+      virtual size_t get_context_index(void) const;
+      virtual void set_context_index(size_t index);
+      virtual int get_depth(void) const;
+      virtual PartitionKind get_partition_kind(void) const;
+    public:
+      virtual const char* get_logging_name(void) const;
+      virtual OpKind get_operation_kind(void) const;
+      virtual void select_sources(const unsigned index,
+                                  const InstanceRef &target,
+                                  const InstanceSet &sources,
+                                  std::vector<unsigned> &ranking);
+      virtual void pack_remote_operation(Serializer &rez,
+                                         AddressSpaceID target) const;
+      virtual void unpack(Deserializer &derez, ReferenceMutator &mutator);
+    protected:
+      PartitionKind part_kind;
+    };
+
+    /**
+     * \class RemoteAttachOp
+     * This is a remote copy of a DetachOp to be used for 
+     * mapper calls and other operations
+     */
+    class RemoteAttachOp : public RemoteOp {
+    public:
+      RemoteAttachOp(Runtime *rt, Operation *ptr, AddressSpaceID src);
+      RemoteAttachOp(const RemoteAttachOp &rhs);
+      virtual ~RemoteAttachOp(void);
+    public:
+      RemoteAttachOp& operator=(const RemoteAttachOp &rhs);
+    public:
+      virtual UniqueID get_unique_id(void) const;
+      virtual size_t get_context_index(void) const;
+      virtual void set_context_index(size_t index);
+      virtual int get_depth(void) const;
+    public:
+      virtual const char* get_logging_name(void) const;
+      virtual OpKind get_operation_kind(void) const;
+      virtual void select_sources(const unsigned index,
+                                  const InstanceRef &target,
+                                  const InstanceSet &sources,
+                                  std::vector<unsigned> &ranking);
+      virtual void pack_remote_operation(Serializer &rez,
+                                         AddressSpaceID target) const;
+      virtual void unpack(Deserializer &derez, ReferenceMutator &mutator);
+    };
+
+    /**
+     * \class RemoteDetachOp
+     * This is a remote copy of a DetachOp to be used for 
+     * mapper calls and other operations
+     */
+    class RemoteDetachOp : public RemoteOp {
+    public:
+      RemoteDetachOp(Runtime *rt, Operation *ptr, AddressSpaceID src);
+      RemoteDetachOp(const RemoteDetachOp &rhs);
+      virtual ~RemoteDetachOp(void);
+    public:
+      RemoteDetachOp& operator=(const RemoteDetachOp &rhs);
+    public:
+      virtual UniqueID get_unique_id(void) const;
+      virtual size_t get_context_index(void) const;
+      virtual void set_context_index(size_t index);
+      virtual int get_depth(void) const;
+    public:
+      virtual const char* get_logging_name(void) const;
+      virtual OpKind get_operation_kind(void) const;
+      virtual void select_sources(const unsigned index,
+                                  const InstanceRef &target,
+                                  const InstanceSet &sources,
+                                  std::vector<unsigned> &ranking);
+      virtual void pack_remote_operation(Serializer &rez,
+                                         AddressSpaceID target) const;
+      virtual void unpack(Deserializer &derez, ReferenceMutator &mutator);
+    };
+
+    /**
+     * \class RemoteDeletionOp
+     * This is a remote copy of a DeletionOp to be used for 
+     * mapper calls and other operations
+     */
+    class RemoteDeletionOp : public RemoteOp {
+    public:
+      RemoteDeletionOp(Runtime *rt, Operation *ptr, AddressSpaceID src);
+      RemoteDeletionOp(const RemoteDeletionOp &rhs);
+      virtual ~RemoteDeletionOp(void);
+    public:
+      RemoteDeletionOp& operator=(const RemoteDeletionOp &rhs);
+    public:
+      virtual UniqueID get_unique_id(void) const;
+      virtual size_t get_context_index(void) const;
+      virtual void set_context_index(size_t index);
+      virtual int get_depth(void) const;
+    public:
+      virtual const char* get_logging_name(void) const;
+      virtual OpKind get_operation_kind(void) const;
+      virtual void select_sources(const unsigned index,
+                                  const InstanceRef &target,
+                                  const InstanceSet &sources,
+                                  std::vector<unsigned> &ranking);
+      virtual void pack_remote_operation(Serializer &rez,
+                                         AddressSpaceID target) const;
+      virtual void unpack(Deserializer &derez, ReferenceMutator &mutator);
+    };
+
+    /**
+     * \class RemoteReplayOp
+     * This is a remote copy of a trace replay op, it really doesn't
+     * have to do very much at all other than implement the interface
+     * for remote ops as it will only be used for checking equivalence
+     * sets for valid physical template replay conditions
+     */
+    class RemoteReplayOp : public RemoteOp {
+    public:
+      RemoteReplayOp(Runtime *rt, Operation *ptr, AddressSpaceID src);
+      RemoteReplayOp(const RemoteReplayOp &rhs);
+      virtual ~RemoteReplayOp(void);
+    public:
+      RemoteReplayOp& operator=(const RemoteReplayOp &rhs);
+    public:
+      virtual UniqueID get_unique_id(void) const;
+      virtual size_t get_context_index(void) const;
+      virtual void set_context_index(size_t index);
+      virtual int get_depth(void) const;
+    public:
+      virtual const char* get_logging_name(void) const;
+      virtual OpKind get_operation_kind(void) const;
+      virtual void select_sources(const unsigned index,
+                                  const InstanceRef &target,
+                                  const InstanceSet &sources,
+                                  std::vector<unsigned> &ranking);
+      virtual void pack_remote_operation(Serializer &rez,
+                                         AddressSpaceID target) const;
+      virtual void unpack(Deserializer &derez, ReferenceMutator &mutator);
+    };
+
+    /**
+     * \class RemoteSummaryOp
+     * This is a remote copy of a trace summary op, it really doesn't
+     * have to do very much at all other than implement the interface
+     * for remote ops as it will only be used for updating state for
+     * physical template replays
+     */
+    class RemoteSummaryOp : public RemoteOp {
+    public:
+      RemoteSummaryOp(Runtime *rt, Operation *ptr, AddressSpaceID src);
+      RemoteSummaryOp(const RemoteSummaryOp &rhs);
+      virtual ~RemoteSummaryOp(void);
+    public:
+      RemoteSummaryOp& operator=(const RemoteSummaryOp &rhs);
+    public:
+      virtual UniqueID get_unique_id(void) const;
+      virtual size_t get_context_index(void) const;
+      virtual void set_context_index(size_t index);
+      virtual int get_depth(void) const;
+    public:
+      virtual const char* get_logging_name(void) const;
+      virtual OpKind get_operation_kind(void) const;
+      virtual void select_sources(const unsigned index,
+                                  const InstanceRef &target,
+                                  const InstanceSet &sources,
+                                  std::vector<unsigned> &ranking);
+      virtual void pack_remote_operation(Serializer &rez,
+                                         AddressSpaceID target) const;
+      virtual void unpack(Deserializer &derez, ReferenceMutator &mutator);
     };
 
   }; //namespace Internal 

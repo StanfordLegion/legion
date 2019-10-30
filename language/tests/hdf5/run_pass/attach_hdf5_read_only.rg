@@ -1,4 +1,4 @@
--- Copyright 2018 Stanford University
+-- Copyright 2019 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -100,7 +100,11 @@ task main()
   if true then
     regentlib.c.printf("test 1\n")
     fill_region(r1, 2)
-    for x in r2 do x.{a, b, c} = 1 end -- force an inline mapping
+    for x in r2 do
+      x.a = 1
+      x.b = 1
+      x.c = 1
+    end -- force an inline mapping
     attach(hdf5, r2.{a, b, c}, filename, regentlib.file_read_only)
     acquire(r2)
     copy(r2.a, r1.a)

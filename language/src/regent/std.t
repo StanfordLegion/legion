@@ -1,4 +1,4 @@
--- Copyright 2018 Stanford University, NVIDIA Corporation
+-- Copyright 2019 Stanford University, NVIDIA Corporation
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -30,9 +30,13 @@ local report = require("common/report")
 local std = {}
 
 std.config, std.args = base.config, base.args
+std.binding_library = base.binding_library
 
 local c = base.c
 std.c = c
+
+local max_dim = base.max_dim
+std.max_dim = max_dim
 
 std.replicable_whitelist = base.replicable_whitelist
 
@@ -47,9 +51,9 @@ std.check_cuda_available = cudahelper.check_cuda_available
 
 std.assert_error = base.assert_error
 std.assert = base.assert
-std.domain_from_bounds_1d = base.domain_from_bounds_1d
-std.domain_from_bounds_2d = base.domain_from_bounds_2d
-std.domain_from_bounds_3d = base.domain_from_bounds_3d
+for i = 1, max_dim do
+  std["domain_from_bounds_" .. tostring(i) .. "d"] = base["domain_from_bounds_" .. tostring(i) .. "d"]
+end
 
 -- #####################################
 -- ## Math functions
@@ -77,7 +81,8 @@ function std.reduces(op)
 end
 
 function std.is_reduce(privilege)
-  return privilege:is(ast.privilege_kind.Reduces)
+  return privilege ~= nil and privilege ~= "reads_writes" and
+         privilege:is(ast.privilege_kind.Reduces)
 end
 
 -- Coherence Modes
@@ -104,6 +109,10 @@ std.disjointness = ast.constraint_kind.Disjointness {}
 -- #####################################
 -- ## Privileges
 -- #################
+
+function std.field_path(...)
+  return data.newtuple(...)
+end
 
 function std.privilege(privilege, region, field_path)
   assert(privilege:is(ast.privilege_kind), "privilege expected argument 1 to be a privilege kind")
@@ -172,15 +181,27 @@ function std.add_privilege(cx, privilege, region, field_path)
   cx.privileges[privilege][region][field_path] = true
 end
 
-function std.copy_privileges(cx, from_region, to_region)
+function std.copy_privileges(cx, from_region, to_region, field_mapping)
   assert(std.type_supports_privileges(from_region))
   assert(std.type_supports_privileges(to_region))
   local privileges_to_copy = terralib.newlist()
   for privilege, privilege_regions in cx.privileges:items() do
     local privilege_fields = privilege_regions[from_region]
     if privilege_fields then
-      for _, field_path in privilege_fields:keys() do
-        privileges_to_copy:insert({privilege, to_region, field_path})
+      if field_mapping == nil then
+        for _, field_path in privilege_fields:keys() do
+          privileges_to_copy:insert({privilege, to_region, field_path})
+        end
+      else
+        field_mapping:map(function(pair)
+          local from_path, to_path = unpack(pair)
+          for _, field_path in privilege_fields:keys() do
+            if from_path:starts_with(field_path) then
+              privileges_to_copy:insert({privilege, to_region, to_path})
+              break
+            end
+          end
+        end)
       end
     end
   end
@@ -462,13 +483,94 @@ function std.check_constraints(cx, constraints, mapping)
 end
 
 -- #####################################
+-- ## Complex types
+-- #################
+
+std.complex = base.complex
+std.complex32 = base.complex32
+std.complex64 = base.complex64
+
+do
+  local st = std.complex32
+
+  st.__no_field_slicing = true
+  st.__supported_reduction_ops =
+    { ["+"] = true, ["-"] = true, ["*"] = true, ["/"] = true }
+
+  function st:support_reduction(op)
+    return self.__supported_reduction_ops[op] or false
+  end
+
+  terra st.metamethods.__add(a : st, b : st)
+    return st { real = a.real + b.real, imag = a.imag + b.imag }
+  end
+  terra st.metamethods.__sub(a : st, b : st)
+    return st { real = a.real - b.real, imag = a.imag - b.imag }
+  end
+  terra st.metamethods.__mul(a : st, b : st)
+    return st { real = a.real*b.real - a.imag*b.imag, imag = a.real*b.imag + a.imag*b.real }
+  end
+  terra st.metamethods.__div(a : st, b : st)
+    var denom = b.real * b.real + b.imag * b.imag
+    return st {
+      real = (a.real * b.real + a.imag * b.imag) / denom,
+      imag = (a.imag * b.real - a.real * b.imag) / denom
+    }
+  end
+
+  st.metamethods.__cast = function(from, to, expr)
+    if to == st and std.validate_implicit_cast(from, float) then
+      return `(st { real = [float](expr), imag = [float](0.0) })
+    end
+    assert(false)
+  end
+end
+
+do
+  local st = std.complex64
+
+  st.__no_field_slicing = true
+  st.__supported_reduction_ops = { ["+"] = true, ["-"] = true }
+
+  function st:support_reduction(op)
+    return self.__supported_reduction_ops[op] or false
+  end
+
+  terra st.metamethods.__add(a : st, b : st)
+    return st { real = a.real + b.real, imag = a.imag + b.imag }
+  end
+  terra st.metamethods.__sub(a : st, b : st)
+    return st { real = a.real - b.real, imag = a.imag - b.imag }
+  end
+  terra st.metamethods.__mul(a : st, b : st)
+    return st { real = a.real*b.real - a.imag*b.imag, imag = a.real*b.imag + a.imag*b.real }
+  end
+  terra st.metamethods.__div(a : st, b : st)
+    var denom = b.real * b.real + b.imag * b.imag
+    return st {
+      real = (a.real * b.real + a.imag * b.imag) / denom,
+      imag = (a.imag * b.real - a.real * b.imag) / denom
+    }
+  end
+
+  st.metamethods.__cast = function(from, to, expr)
+    if to == st and std.validate_implicit_cast(from, double) then
+      return `(st { real = [double](expr), imag = 0.0 })
+    end
+    assert(false)
+  end
+end
+
+-- #####################################
 -- ## Physical Privilege Helpers
 -- #################
 
 std.reduction_op_init = base.reduction_op_init
 std.reduction_op_ids = base.reduction_op_ids
+std.update_reduction_op = base.update_reduction_op
 std.is_reduction_op = base.is_reduction_op
 std.get_reduction_op = base.get_reduction_op
+std.get_reduction_op_name = base.get_reduction_op_name
 std.meet_privilege = base.meet_privilege
 std.meet_coherence = base.meet_coherence
 std.meet_flag = base.meet_flag
@@ -694,12 +796,28 @@ local function type_compatible(a, b)
     (std.is_list_of_regions(a) and std.is_list_of_regions(b))
 end
 
-local function type_isomorphic(param_type, arg_type, check, mapping)
+local function type_isomorphic(node, param_type, arg_type, check, mapping, polymorphic)
   if std.is_ispace(param_type) and std.is_ispace(arg_type) then
     return std.type_eq(param_type.index_type, arg_type.index_type, mapping)
   elseif std.is_region(param_type) and std.is_region(arg_type) then
-    return std.type_eq(param_type:ispace(), arg_type:ispace(), mapping) and
-      std.type_eq(param_type.fspace_type, arg_type.fspace_type, mapping)
+    if polymorphic then
+      if not std.type_eq(param_type:ispace(), arg_type:ispace(), mapping) then
+        return false
+      end
+
+      local param_fspace = param_type.fspace_type
+      local arg_fspace = arg_type.fspace_type
+      if std.is_fspace_instance(param_fspace) then
+        return std.type_eq(param_fspace, arg_fspace, mapping)
+      elseif param_fspace:isstruct() then
+        return type_isomorphic(node, param_fspace, arg_fspace, check, mapping, polymorphic)
+      else
+        return std.type_eq(param_type.fspace_type, arg_type.fspace_type, mapping)
+      end
+    else
+      return std.type_eq(param_type:ispace(), arg_type:ispace(), mapping) and
+             std.type_eq(param_type.fspace_type, arg_type.fspace_type, mapping)
+    end
   elseif std.is_partition(param_type) and std.is_partition(arg_type) then
     return param_type:is_disjoint() == arg_type:is_disjoint() and
       check(param_type:parent_region(), arg_type:parent_region(), mapping) and
@@ -718,22 +836,58 @@ local function type_isomorphic(param_type, arg_type, check, mapping)
   then
     return std.type_eq(
       param_type.element_type:fspace(), arg_type.element_type:fspace())
+  elseif param_type:isstruct() and arg_type:isstruct() then
+    local param_entries = param_type:getentries()
+    local arg_entries = arg_type:getentries()
+
+    if #param_entries ~= #arg_entries then
+      report.error(
+        node, "incompatible types: " ..
+        tostring(arg_type) .. " has " .. tostring(#arg_entries) .. " fields but " ..
+        tostring(param_type) .. " expects " .. tostring(#param_entries) .. " fields")
+    end
+
+    local arg_entry_map = {}
+    for idx, arg_entry in ipairs(arg_entries) do
+      local arg_field = arg_entry[1] or arg_entry.field
+      local arg_type = arg_entry[2] or arg_entry.type
+      arg_entry_map[arg_field] = arg_type
+    end
+
+    for idx, param_entry in ipairs(param_entries) do
+      local param_field = param_entry[1] or param_entry.field
+      local arg_field_type = arg_entry_map[param_field]
+      if arg_field_type == nil then
+        report.error(node, "field name " .. param_field ..  " does not exist in " ..
+            tostring(arg_type))
+      end
+      local param_field_type = param_entry[2] or param_entry.type
+      if not type_isomorphic(node, param_field_type, arg_field_type, check, mapping, polymorphic) then
+        report.error(node, "type mismatch: expected " .. tostring(param_field_type) .. " for field " ..
+                     param_field .. " but got " .. tostring(arg_field_type))
+      end
+    end
+    return true
+  elseif param_type:isprimitive() and arg_type:isprimitive() then
+    return std.type_eq(param_type, arg_type)
+  elseif param_type:isarray() and arg_type:isarray() then
+    return std.type_eq(param_type, arg_type)
   else
     return false
   end
 end
 
-local function unify_param_type_args(param, param_type, arg_type, mapping)
+local function unify_param_type_args(node, param, param_type, arg_type, mapping)
   if std.is_region(param_type) and
     type_compatible(param_type:ispace(), arg_type:ispace()) and
     not (mapping[param] or mapping[param_type] or mapping[param_type:ispace()]) and
-    type_isomorphic(param_type:ispace(), arg_type:ispace(), mapping)
+    type_isomorphic(node, param_type:ispace(), arg_type:ispace(), mapping)
   then
     mapping[param_type:ispace()] = arg_type:ispace()
   elseif std.is_partition(param_type) and
     type_compatible(param_type:colors(), arg_type:colors()) and
     not (mapping[param] or mapping[param_type] or mapping[param_type:colors()]) and
-    type_isomorphic(param_type:colors(), arg_type:colors(), mapping)
+    type_isomorphic(node, param_type:colors(), arg_type:colors(), mapping)
   then
     mapping[param_type:colors()] = arg_type:colors()
   end
@@ -794,7 +948,7 @@ local function reconstruct_return_as_arg_type(return_type, mapping)
   return std.type_sub(return_type, mapping)
 end
 
-function std.validate_args(node, params, args, isvararg, return_type, mapping, strict)
+function std.validate_args(node, params, args, isvararg, return_type, mapping, strict, polymorphic)
   if (#args < #params) or (#args > #params and not isvararg) then
     report.error(node, "expected " .. tostring(#params) .. " arguments but got " .. tostring(#args))
   end
@@ -850,11 +1004,11 @@ function std.validate_args(node, params, args, isvararg, return_type, mapping, s
       end
 
       -- Allow type arguments to unify (if any).
-      unify_param_type_args(param, param_type, arg_type, mapping)
+      unify_param_type_args(node, param, param_type, arg_type, mapping)
 
       mapping[param] = arg
       mapping[param_type] = arg_type
-      if not type_isomorphic(param_type, arg_type, check, mapping) then
+      if not type_isomorphic(node, param_type, arg_type, check, mapping, polymorphic) then
         local param_as_arg_type = reconstruct_param_as_arg_type(param_type, mapping)
         report.error(node, "type mismatch in argument " .. tostring(i) ..
                     ": expected " .. tostring(param_as_arg_type) ..
@@ -1204,12 +1358,26 @@ function std.get_field_path(value_type, field_path)
 end
 
 function std.get_absolute_field_paths(fspace_type, prefixes)
+  if not terralib.islist(prefixes) then
+    prefixes = terralib.newlist({prefixes})
+  end
   return data.flatmap(function(prefix)
     local field_type = std.get_field_path(fspace_type, prefix)
     return std.flatten_struct_fields(field_type):map(function(suffix)
         return prefix .. suffix
       end)
     end, prefixes)
+end
+
+function std.check_field_sliced(value_type, field_path)
+  local field_type = value_type
+  for idx = 1, #field_path do
+    if field_type:isstruct() and field_type.__no_field_slicing then
+      return false, field_type
+    end
+    field_type = std.get_field(field_type, field_path[idx])
+  end
+  return true
 end
 
 local function type_requires_force_cast(a, b)
@@ -1259,6 +1427,10 @@ end
 -- ## Serialization Helpers
 -- #################
 
+local function need_dynamic_serialization(value_type)
+  return std.is_list(value_type) or std.is_string(value_type)
+end
+
 local function compute_serialized_size_inner(value_type, value)
   if std.is_list(value_type) then
     local result = terralib.newsymbol(c.size_t, "result")
@@ -1286,15 +1458,21 @@ end
 local compute_serialized_size_helper = terralib.memoize(function(value_type)
   local value = terralib.newsymbol(value_type, "value")
   local actions, result = compute_serialized_size_inner(value_type, value)
-  local terra compute_serialized_size([value]) : c.size_t
-    [actions];
-    return [result]
+  if actions then
+    local terra compute_serialized_size([value]) : c.size_t
+      [actions];
+      return [result]
+    end
+    compute_serialized_size:setinlined(false)
+    return compute_serialized_size
   end
-  compute_serialized_size:setinlined(false)
-  return compute_serialized_size
 end)
 
 function std.compute_serialized_size(value_type, value)
+  if not need_dynamic_serialization(value_type) then
+    return
+  end
+
   local helper = compute_serialized_size_helper(value_type)
   local result = terralib.newsymbol(c.size_t, "result")
   local actions = quote
@@ -1353,6 +1531,10 @@ local serialize_helper = terralib.memoize(function(value_type)
 end)
 
 function std.serialize(value_type, value, fixed_ptr, data_ptr)
+  if not need_dynamic_serialization(value_type) then
+    return serialize_inner(value_type, value, fixed_ptr, data_ptr)
+  end
+
   local helper = serialize_helper(value_type)
   local actions = quote
     helper([value], [fixed_ptr], [data_ptr])
@@ -1360,15 +1542,19 @@ function std.serialize(value_type, value, fixed_ptr, data_ptr)
   return actions
 end
 
-local function deserialize_inner(value_type, fixed_ptr, data_ptr)
+local function deserialize_simple(value_type, fixed_ptr, data_ptr)
   -- Force unaligned access because malloc does not provide
   -- blocks aligned for all purposes (e.g. SSE vectors).
   local value_type_alignment = 1 -- data.min(terralib.sizeof(value_type), 8)
+  return `terralib.attrload(
+    [&value_type]([fixed_ptr]),
+    { align = [value_type_alignment] })
+end
+
+local function deserialize_inner(value_type, fixed_ptr, data_ptr)
   local result = terralib.newsymbol(value_type, "result")
   local actions = quote
-    var [result] = terralib.attrload(
-      [&value_type]([fixed_ptr]),
-      { align = [value_type_alignment] })
+    var [result] = [deserialize_simple(value_type, fixed_ptr, data_ptr)]
   end
 
   if std.is_list(value_type) then
@@ -1421,6 +1607,10 @@ local deserialize_helper = terralib.memoize(function(value_type)
 end)
 
 function std.deserialize(value_type, fixed_ptr, data_ptr)
+  if not need_dynamic_serialization(value_type) then
+    return quote end, deserialize_simple(value_type, fixed_ptr, data_ptr)
+  end
+
   local helper = deserialize_helper(value_type)
   local result = terralib.newsymbol(value_type, "result")
   -- Force unaligned access because malloc does not provide
@@ -1434,21 +1624,7 @@ function std.deserialize(value_type, fixed_ptr, data_ptr)
   return actions, result
 end
 
--- This is a type representing a buffer containing a serialized value.
--- The value owns the buffer.
-struct std.serialized_value {
-  value: &opaque,
-  size: uint64,
-}
-
-function std.type_size_bucket_type(value_type)
-  if value_type == terralib.types.unit then
-    return terralib.types.unit
-  else
-    return std.serialized_value
-  end
-end
-
+std.serialized_value = base.serialized_value
 
 -- #####################################
 -- ## Symbols
@@ -1501,6 +1677,15 @@ std.fmax = base.fmax
 std.fmin = base.fmin
 std.quote_unary_op = base.quote_unary_op
 std.quote_binary_op = base.quote_binary_op
+
+-- #####################################
+-- ## Inline Task Helpers
+-- #################
+
+function std.is_inline_task(node)
+  return (node:is(ast.specialized.top.Task) or node:is(ast.typed.top.Task)) and
+         node.annotations.inline:is(ast.annotation.Demand)
+end
 
 -- #####################################
 -- ## Types
@@ -1727,19 +1912,17 @@ local bounded_type = terralib.memoize(function(index_type, ...)
     -- TODO: Would be nice to compress smaller than one byte.
     local bitmask_type
     if terralib.llvmversion >= 38 then
-      if #bounds <= bit.lshift(1, 8) then
+      if #bounds <= 2 ^ 8 then
         bitmask_type = uint8
-      elseif #bounds <= bit.lshift(1, 16) then
+      elseif #bounds <= 2 ^ 16 then
         bitmask_type = uint16
-      -- XXX: What we really want here is bit.lshift(1ULL, 32),
-      --      which is supported only in LuaJIT 2.1 or higher
-      elseif #bounds <= bit.lshift(1, 30) then
+      elseif #bounds <= 2 ^ 32 then
         bitmask_type = uint32
       else
         assert(false) -- really?
       end
     else
-      assert(#bounds <= bit.lshift(1, 30))
+      assert(#bounds <= 2 ^ 32)
       bitmask_type = uint32
     end
     st.entries:insert({ "__index", bitmask_type })
@@ -1881,8 +2064,8 @@ local function validate_index_base_type(base_type)
     return base_type, 1, false, terralib.sizeof(base_type) * 8
   elseif base_type:isstruct() then
     local entries = base_type:getentries()
-    assert(#entries >= 1 and #entries <= 3,
-           "Multi-dimensional index type expected 1 to 3 fields, got " ..
+    assert(#entries >= 1 and #entries <= max_dim,
+           "Multi-dimensional index type expected 1 to " .. tostring(max_dim) .. " fields, got " ..
              tostring(#entries))
     local num_bits = nil
     for _, entry in ipairs(entries) do
@@ -1904,6 +2087,17 @@ local function validate_index_base_type(base_type)
   end
 end
 
+local function validate_transform_type(M, N)
+  assert(0 < M, "Row count for a transform type must be greater than 0")
+  assert(M <= max_dim, "Transform types having more than " .. tostring(max_dim) .. " rows are not supported yet.")
+  assert(0 < N, "Column count for a transform type must be greater than 0")
+  assert(N <= max_dim, "Transform types having more than " .. tostring(max_dim) .. " columns are not supported yet.")
+  local impl_type_name = "legion_transform_".. tostring(M) .. "x" .. tostring(N) .. "_t"
+  local impl_type = c[impl_type_name]
+  assert(impl_type ~= nil, impl_type_name .. " does not exist")
+  return impl_type
+end
+
 -- Hack: Terra uses getmetatable() in terralib.types.istype(), so
 -- setting a custom metatable on a type requires some trickery. The
 -- approach used here is to define __metatable() to return the
@@ -1919,6 +2113,36 @@ do
   index_type.__metatable = getmetatable(st)
 end
 
+std.transform = terralib.memoize(function(M, N)
+  local st = terralib.types.newstruct("transform(" .. tostring(M) .. "," ..tostring(N) .. ")")
+  local impl_type = validate_transform_type(M, N)
+  st.entries = terralib.newlist({
+      { "impl", impl_type },
+  })
+
+  st.is_transform_type = true
+  st.M = M
+  st.N = N
+  st.impl_type = impl_type
+
+  function st.metamethods.__cast(from, to, expr)
+    if std.is_transform_type(from) then
+      if std.type_eq(to, st.impl_type) then
+        return `([expr].impl)
+      elseif std.type_eq(to, c.legion_domain_transform_t) then
+        return `([expr]:to_domain_transform())
+      end
+    end
+    assert(false)
+  end
+
+  terra st:to_domain_transform()
+    return [c["legion_domain_transform_from_" .. tostring(st.M) ..
+              "x" .. tostring(st.N)]](@self)
+  end
+
+  return st
+end)
 std.rect_type = terralib.memoize(function(index_type)
   local st = terralib.types.newstruct("rect" .. tostring(index_type.dim) .. "d")
   assert(not index_type:is_opaque())
@@ -1930,6 +2154,7 @@ std.rect_type = terralib.memoize(function(index_type)
   st.is_rect_type = true
   st.index_type = index_type
   st.dim = index_type.dim
+  st.__no_field_slicing = true
 
   st.metamethods.__eq = macro(function(a, b)
     return `([a].lo == [b].lo and [a].hi == [b].hi)
@@ -1950,6 +2175,12 @@ std.rect_type = terralib.memoize(function(index_type)
       end
     end
     assert(false)
+  end
+
+  for method, combinator in pairs(arithmetic_combinators) do
+    st.metamethods[method] = terra(a : st, b : st.index_type)
+      return [st]{ lo = [combinator(`(a.lo), b)], hi = [combinator(`(a.hi), b)] }
+    end
   end
 
   terra st:to_domain()
@@ -1988,6 +2219,7 @@ function std.index_type(base_type, displayname)
   st.impl_type = impl_type
   st.dim = dim
   st.fields = fields
+  st.__no_field_slicing = true
 
   function st:is_opaque()
     return std.type_eq(self.base_type, opaque)
@@ -2001,23 +2233,21 @@ function std.index_type(base_type, displayname)
         return `([to]{ __ptr = c.legion_ptr_t { value = [expr] } })
       elseif not to:is_opaque() and std.validate_implicit_cast(from, to.base_type) then
         return `([to]{ __ptr = [expr] })
+      elseif not to:is_opaque() and std.type_eq(from, c["legion_point_" .. tostring(st.dim) .. "d_t"]) then
+        local from_point = c["legion_domain_point_from_point_" .. tostring(st.dim) .. "d"]
+        return `([to](from_point([expr])))
       elseif to:is_opaque() and std.type_eq(from, c.legion_ptr_t) then
         return `([to]{ __ptr = expr })
       end
     elseif std.is_index_type(from) then
       if std.type_eq(to, c.legion_domain_point_t) then
         return `([expr]:to_domain_point())
-      elseif from:is_opaque() then
-        if std.validate_implicit_cast(int, to) then
-          return `([to]([expr].__ptr.value))
-        end
-      else
-        assert(not from:is_opaque())
-        if std.type_eq(to, c["legion_point_" .. tostring(st.dim) .. "d_t"]) then
-          return `([expr]:to_point())
-        elseif std.validate_implicit_cast(from.base_type, to) then
-          return `([to]([expr].__ptr))
-        end
+      elseif from:is_opaque() and std.validate_implicit_cast(int, to) then
+        return `([to]([expr].__ptr.value))
+      elseif not from:is_opaque() and std.type_eq(to, c["legion_point_" .. tostring(st.dim) .. "d_t"]) then
+        return `([expr]:to_point())
+      elseif not from:is_opaque() and std.validate_implicit_cast(from.base_type, to) then
+        return `([to]([expr].__ptr))
       end
     end
     assert(false)
@@ -2072,7 +2302,7 @@ function std.index_type(base_type, displayname)
     else
       values = terralib.newlist({index})
     end
-    for _ = #values + 1, 3 do
+    for _ = #values + 1, max_dim do
       values:insert(0)
     end
 
@@ -2166,16 +2396,24 @@ function std.index_type(base_type, displayname)
   return setmetatable(st, index_type)
 end
 
-struct std.__int2d { x : int64, y : int64 }
-struct std.__int3d { x : int64, y : int64, z : int64 }
 std.ptr = std.index_type(opaque, "ptr")
-std.int1d = std.index_type(int64, "int1d")
-std.int2d = std.index_type(std.__int2d, "int2d")
-std.int3d = std.index_type(std.__int3d, "int3d")
-
-std.rect1d = std.rect_type(std.int1d)
-std.rect2d = std.rect_type(std.int2d)
-std.rect3d = std.rect_type(std.int3d)
+if max_dim >= 1 then
+  std.int1d = std.index_type(int64, "int1d")
+  std.rect1d = std.rect_type(std.int1d)
+end
+do
+  std.dim_names = {"x", "y", "z", "w", "v", "u", "t", "s", "r"}
+  for dim = 2, max_dim do
+    local st = terralib.types.newstruct("__int" .. dim .. "d")
+    st.entries = data.take(dim, std.dim_names):map(
+      function(name)
+        return { name, int64 }
+      end)
+    std["__int" .. dim .. "d"] = st
+    std["int" .. dim .. "d"] = std.index_type(st, "int" .. dim .. "d")
+    std["rect" .. dim .. "d"] = std.rect_type(std["int" .. dim .. "d"])
+  end
+end
 
 do
   local next_ispace_id = 1
@@ -2253,6 +2491,7 @@ do
     st.ispace_symbol = ispace_symbol
     st.fspace_type = fspace_type
     st.index_expr = false
+    st.projection = false
 
     function st:ispace()
       local ispace = self.ispace_symbol:gettype()
@@ -2283,6 +2522,18 @@ do
       assert(not st.index_expr)
       assert(ast.is_node(expr))
       st.index_expr = expr
+    end
+
+    function st:is_projected()
+      return self.projection ~= false
+    end
+
+    function st:get_projection_source()
+      return self.projection
+    end
+
+    function st:set_projection_source(projection)
+      self.projection = projection
     end
 
     -- For API compatibility with std.list:
@@ -2601,32 +2852,6 @@ function std.cross_product(...)
 end
 end
 
-do
-  local st = terralib.types.newstruct("complex")
-  st.entries = terralib.newlist({
-      { "real", double },
-      { "imag", double },
-  })
-  std.complex = st
-
-  terra st.metamethods.__add(a : st, b : st)
-    return st { real = a.real + b.real, imag = a.imag + b.imag }
-  end
-  terra st.metamethods.__sub(a : st, b : st)
-    return st { real = a.real - b.real, imag = a.imag - b.imag }
-  end
-  terra st.metamethods.__mul(a : st, b : st)
-    return st { real = a.real*b.real - a.imag*b.imag, imag = a.real*b.imag + a.imag*b.real }
-  end
-
-  st.metamethods.__cast = function(from, to, expr)
-    if to == st and std.validate_implicit_cast(from, double) then
-      return `(complex { real = [double](expr), imag = 0.0 })
-    end
-    assert(false)
-  end
-end
-
 
 std.vptr = terralib.memoize(function(width, points_to_type, ...)
   local bounds = data.newtuple(...)
@@ -2645,19 +2870,17 @@ std.vptr = terralib.memoize(function(width, points_to_type, ...)
     -- Find the smallest bitmask that will fit.
     -- TODO: Would be nice to compress smaller than one byte.
     if terralib.llvmversion >= 38 then
-      if #bounds <= bit.lshift(1, 8) then
+      if #bounds <= 1 ^ 8 then
         bitmask_type = vector(uint8, width)
-      elseif #bounds <= bit.lshift(1, 16) then
+      elseif #bounds <= 2 ^ 16 then
         bitmask_type = vector(uint16, width)
-      -- XXX: What we really want here is bit.lshift(1ULL, 32),
-      --      which is supported only in LuaJIT 2.1 or higher
-      elseif #bounds <= bit.lshift(1, 30) then
+      elseif #bounds <= 2 ^ 32 then
         bitmask_type = vector(uint32, width)
       else
         assert(false) -- really?
       end
     else
-      assert(#bounds <= bit.lshift(1, 30))
+      assert(#bounds <= 2 ^ 32)
       bitmask_type = vector(uint32, width)
     end
     st.entries:insert({ "__index", bitmask_type })
@@ -2669,6 +2892,7 @@ std.vptr = terralib.memoize(function(width, points_to_type, ...)
   st.N = width
   st.type = ptr(points_to_type, ...)
   st.impl_type = legion_vptr_t
+  st.vec_type = vec
 
   function st:bounds()
     local bounds = terralib.newlist()
@@ -3362,12 +3586,7 @@ function std.register_variant(variant)
   variants:insert(variant)
 end
 
-local max_dim = 3 -- Maximum dimension of an index space supported in Regent
-
 local function make_ordering_constraint(layout, dim)
-  -- This code would need to be taught about higher dimensions if the
-  -- maximum dimension were ever increased.
-  assert(max_dim == 3)
   assert(dim >= 1 and dim <= max_dim)
 
   local result = terralib.newlist()
@@ -3375,9 +3594,9 @@ local function make_ordering_constraint(layout, dim)
   -- SOA, Fortran array order
   local dims = terralib.newsymbol(c.legion_dimension_kind_t[dim+1], "dims")
   result:insert(quote var [dims] end)
-  result:insert(quote dims[0] = c.DIM_X end)
-  if dim >= 2 then result:insert(quote dims[1] = c.DIM_Y end) end
-  if dim >= 3 then result:insert(quote dims[2] = c.DIM_Z end) end
+  for k, dim in pairs(data.take(dim, std.layout.spatial_dims)) do
+    result:insert(quote dims[ [k-1] ] = [dim.index] end)
+  end
   result:insert(quote dims[ [dim] ] = c.DIM_F end)
   result:insert(quote c.legion_layout_constraint_set_add_ordering_constraint([layout], [dims], [dim+1], true) end)
 
@@ -3563,6 +3782,77 @@ local function make_layout_constraints_from_annotations(variant)
   return layouts, layout_registrations
 end
 
+local function make_execution_constraints_from_annotations(variant, execution_constraints)
+  local actions = quote end
+  if variant:has_execution_constraints() then
+    local task = variant.task
+    local all_region_types = data.newmap()
+    local all_req_indices = data.new_recursive_map(1)
+    local fn_type = task:get_type()
+    local param_types = fn_type.parameters
+    local param_symbols = task:get_param_symbols()
+    local region_i = 0
+    for _, param_i in ipairs(std.fn_param_regions_by_index(fn_type)) do
+      local param_type = param_types[param_i]
+      local param_symbol = param_symbols[param_i]
+      all_region_types[param_symbol:getname()] = param_type
+      local privileges, privilege_field_paths, privilege_field_types, coherences, flags =
+        std.find_task_privileges(param_type, task)
+      for i, privilege in ipairs(privileges) do
+        privilege_field_paths[i]:map(function(field_path)
+          all_req_indices[param_symbol:getname()][field_path] = region_i
+        end)
+        region_i = region_i + 1
+      end
+    end
+
+    local colocations = data.filter(function(constraint)
+        return constraint:is(ast.layout.Colocation)
+      end, variant:get_execution_constraints())
+    colocations:map(function(colocation)
+      local req_indices = data.newmap()
+      local field_ids = data.newmap()
+      colocation.fields:map(function(field)
+        field.field_paths:map(function(field_path)
+          local req_idx = all_req_indices[field.region_name][field_path]
+          local all_field_ids =
+            generate_static_field_ids(all_region_types[field.region_name])
+          assert(req_idx ~= nil)
+          assert(all_field_ids ~= nil)
+          req_indices[req_idx] = true
+          field_ids[all_field_ids[field_path]] = true
+        end)
+      end)
+      local req_index_list = terralib.newlist()
+      for index, _ in req_indices:items() do req_index_list:insert(index) end
+      local field_id_list = terralib.newlist()
+      for id, _ in field_ids:items() do field_id_list:insert(id) end
+
+      local indices = terralib.newsymbol(uint[#req_index_list], "indices")
+      local fields = terralib.newsymbol(c.legion_field_id_t[#field_id_list], "fields")
+      actions = quote
+        [actions]
+        do
+          var [indices], [fields]
+          [data.zip(data.range(0, #req_index_list), req_index_list):map(function(pair)
+              local i, req_index = unpack(pair)
+              return quote [indices][ [i] ] = [req_index] end
+            end)];
+          [data.zip(data.range(0, #field_id_list), field_id_list):map(function(pair)
+              local i, field_id = unpack(pair)
+              return quote [fields][ [i] ] = [field_id] end
+            end)];
+          c.legion_execution_constraint_set_add_colocation_constraint(
+            [execution_constraints],
+            [&uint]([indices]), [#req_index_list],
+            [&c.legion_field_id_t]([fields]), [#field_id_list])
+        end
+      end
+    end)
+  end
+  return actions
+end
+
 function std.setup(main_task, extra_setup_thunk, task_wrappers, registration_name)
   assert(not main_task or std.is_task(main_task))
 
@@ -3571,14 +3861,22 @@ function std.setup(main_task, extra_setup_thunk, task_wrappers, registration_nam
   end
 
   local reduction_registrations = terralib.newlist()
-  for _, op in ipairs(base.reduction_ops) do
-    for _, op_type in ipairs(base.reduction_types) do
-      local register = c["register_reduction_" .. op.name .. "_" .. tostring(op_type)]
-      local op_id = std.reduction_op_ids[op.op][op_type]
-      reduction_registrations:insert(
-        quote
-          [register](op_id)
-        end)
+  for _, pair in ipairs(base.registered_reduction_ops) do
+    local op, op_type = unpack(pair)
+    local op_name = base.reduction_ops[op].name
+    local register = nil
+    if op_type:isprimitive() then
+      register = c["register_reduction_" .. op_name .. "_" .. tostring(op_type)]
+      reduction_registrations:insert(quote
+        [register]([ base.reduction_op_ids[op][op_type] ], true --[[ permit duplicates ]])
+      end)
+    elseif op_type:isarray() then
+      register = c["register_array_reduction_" .. op_name .. "_" .. tostring(op_type.type)]
+      reduction_registrations:insert(quote
+        [register]([ base.reduction_op_ids[op][op_type] ], [op_type.N], true --[[ permit duplicates ]])
+      end)
+    else
+      assert(false)
     end
   end
 
@@ -3608,13 +3906,12 @@ function std.setup(main_task, extra_setup_thunk, task_wrappers, registration_nam
 
   local layout_reduction = data.new_recursive_map(2)
   for dim = 1, max_dim do
-    for _, op in ipairs(base.reduction_ops) do
-      for _, op_type in ipairs(base.reduction_types) do
-        local op_id = std.reduction_op_ids[op.op][op_type]
-        local layout_id, layout_actions = make_reduction_layout(dim, op_id)
-        layout_registrations:insert(layout_actions)
-        layout_reduction[dim][op.op][op_type] = layout_id
-      end
+    for _, pair in ipairs(base.all_reduction_ops) do
+      local op, op_type = unpack(pair)
+      local op_id = std.reduction_op_ids[op][op_type]
+      local layout_id, layout_actions = make_reduction_layout(dim, op_id)
+      layout_registrations:insert(layout_actions)
+      layout_reduction[dim][op][op_type] = layout_id
     end
   end
 
@@ -3641,6 +3938,11 @@ function std.setup(main_task, extra_setup_thunk, task_wrappers, registration_nam
       end
     end)
 
+  -- We don't need to register tasks that are only inlined
+  local variants = data.filter(function(variant)
+    return not variant.task.is_inline
+  end, variants)
+
   local task_registrations = variants:map(
     function(variant)
       local task = variant.task
@@ -3649,18 +3951,7 @@ function std.setup(main_task, extra_setup_thunk, task_wrappers, registration_nam
 
       local proc_types = {c.LOC_PROC, c.IO_PROC}
 
-      -- Check if this is an OpenMP task.
-      local openmp = false
-      ast.traverse_node_postorder(
-        function(node)
-          if node:is(ast.typed.stat) and
-            node.annotations.openmp:is(ast.annotation.Demand)
-          then
-            openmp = true
-          end
-        end,
-        variant:has_ast() and variant:get_ast())
-      if openmp then
+      if variant:is_openmp() then
         if std.config["openmp-strict"] then
           proc_types = {c.OMP_PROC}
         else
@@ -3714,11 +4005,16 @@ function std.setup(main_task, extra_setup_thunk, task_wrappers, registration_nam
         end
       end
 
+      local execution_constraints = terralib.newsymbol(
+        c.legion_execution_constraint_set_t, "execution_constraints")
+      local execution_constraint_actions =
+        make_execution_constraints_from_annotations(variant, execution_constraints)
       local registration_actions = terralib.newlist()
-      for _, proc_type in ipairs(proc_types) do
+      for i, proc_type in ipairs(proc_types) do
         registration_actions:insert(quote
-          var execution_constraints = c.legion_execution_constraint_set_create()
-          c.legion_execution_constraint_set_add_processor_constraint(execution_constraints, proc_type)
+          var [execution_constraints] = c.legion_execution_constraint_set_create()
+          c.legion_execution_constraint_set_add_processor_constraint([execution_constraints], proc_type)
+          [execution_constraint_actions]
           var [layout_constraints] = c.legion_task_layout_constraint_set_create()
           [layout_constraint_actions]
           var options = c.legion_task_config_options_t {
@@ -3730,12 +4026,18 @@ function std.setup(main_task, extra_setup_thunk, task_wrappers, registration_nam
 
           c.legion_runtime_preregister_task_variant_fnptr(
             [task:get_task_id()],
+            -- Hack: Only set a user-specified variant ID on the first
+            -- variant, otherwise there will be duplicate
+            -- registrations. In the future it would be better to have
+            -- explicit variant objects for the different processor
+            -- kinds.
+            [(i <= 1 and variant:get_variant_id()) or -1 --[[ AUTO_GENERATE_ID ]] ],
             [task:get_name():concat(".")],
             [variant:get_name()],
-            execution_constraints, layout_constraints, options,
+            [execution_constraints], [layout_constraints], options,
             [task_wrappers[variant:wrapper_name()]], nil, 0)
-          c.legion_execution_constraint_set_destroy(execution_constraints)
-          c.legion_task_layout_constraint_set_destroy(layout_constraints)
+          c.legion_execution_constraint_set_destroy([execution_constraints])
+          c.legion_task_layout_constraint_set_destroy([layout_constraints])
         end)
       end
 
@@ -3745,7 +4047,9 @@ function std.setup(main_task, extra_setup_thunk, task_wrappers, registration_nam
     end)
   local cuda_setup = quote end
   if std.config["cuda"] and cudahelper.check_cuda_available() then
-    cudahelper.link_driver_library()
+    if data.is_luajit() then
+      cudahelper.link_driver_library()
+    end
     local all_kernels = {}
     variants:map(function(variant)
       if variant:is_cuda() then
@@ -3757,6 +4061,10 @@ function std.setup(main_task, extra_setup_thunk, task_wrappers, registration_nam
         end
       end
     end)
+    for k, v in pairs(cudahelper.get_internal_kernels()) do
+      assert(all_kernels[k] == nil)
+      all_kernels[k] = v
+    end
     cuda_setup = cudahelper.jit_compile_kernels_and_register(all_kernels)
   end
 
@@ -3798,7 +4106,9 @@ end
 local function make_task_wrappers()
   local task_wrappers = {}
   for _,variant in ipairs(variants) do
-    task_wrappers[variant:wrapper_name()] = variant:make_wrapper()
+    if not variant.task.is_inline then
+      task_wrappers[variant:wrapper_name()] = variant:make_wrapper()
+    end
   end
   return task_wrappers
 end
@@ -4175,6 +4485,10 @@ function std.saveobj(main_task, filename, filetype, extra_setup_thunk, link_flag
       flags:insert(flag)
     end
     flags:insert("-ludreg")
+    for flag in os.getenv('CRAY_XPMEM_POST_LINK_OPTS'):gmatch("%S+") do
+      flags:insert(flag)
+    end
+    flags:insert("-lxpmem")
   end
   flags:insertall({"-L" .. lib_dir, "-lregent"})
   if use_cmake then
@@ -4204,10 +4518,14 @@ function std.saveobj(main_task, filename, filetype, extra_setup_thunk, link_flag
   profile.print_summary()
 end
 
-local function generate_task_interfaces()
+local function generate_task_interfaces(task_whitelist)
   local tasks = {}
   for _, variant in ipairs(variants) do
-    tasks[variant.task] = true
+    if task_whitelist and data.find_key(task_whitelist, variant.task) then
+      tasks[variant.task] = true
+    elseif not task_whitelist then
+      tasks[variant.task] = true
+    end
   end
 
   local task_c_iface = terralib.newlist()
@@ -4273,10 +4591,12 @@ void %s(void);
   header_basename)
 end
 
-local function write_header(header_filename)
-  local registration_name = header_helper.normalize_name(header_filename) .. "_register"
+local function write_header(header_filename, registration_name, task_whitelist)
+  if not registration_name then
+    registration_name = header_helper.normalize_name(header_filename) .. "_register"
+  end
 
-  local task_c_iface, task_cxx_iface, task_impl = generate_task_interfaces()
+  local task_c_iface, task_cxx_iface, task_impl = generate_task_interfaces(task_whitelist)
 
   local header = io.open(header_filename, "w")
   assert(header)
@@ -4286,10 +4606,10 @@ local function write_header(header_filename)
   return registration_name, task_impl
 end
 
-function std.save_tasks(header_filename, filename, filetype, link_flags)
+function std.save_tasks(header_filename, filename, filetype, link_flags, registration_name, task_whitelist)
   assert(header_filename and filename)
   local task_wrappers = make_task_wrappers()
-  local registration_name, task_impl = write_header(header_filename)
+  local registration_name, task_impl = write_header(header_filename, registration_name, task_whitelist)
   local _, names = std.setup(nil, nil, task_wrappers, registration_name)
   local use_cmake = os.getenv("USE_CMAKE") == "1"
   local lib_dir = os.getenv("LG_RT_DIR") .. "/../bindings/regent"
@@ -4358,14 +4678,18 @@ end
 -- #################
 
 std.layout = {}
-std.layout.dimx = ast.layout.Dim { index = c.DIM_X }
-std.layout.dimy = ast.layout.Dim { index = c.DIM_Y }
-std.layout.dimz = ast.layout.Dim { index = c.DIM_Z }
-std.layout.dimf = ast.layout.Dim { index = c.DIM_F }
-
-function std.layout.field_path(...)
-  return data.newtuple(...)
+std.layout.spatial_dims = terralib.newlist()
+std.layout.spatial_dims_map = {}
+do
+  for k, name in ipairs(data.take(max_dim, std.dim_names)) do
+    local regent_name = "dim" .. name
+    local legion_name = "DIM_" .. string.upper(name)
+    std.layout[regent_name] = ast.layout.Dim { index = c[legion_name] }
+    std.layout.spatial_dims:insert(std.layout[regent_name])
+    std.layout.spatial_dims_map[std.layout[regent_name]] = k
+  end
 end
+std.layout.dimf = ast.layout.Dim { index = c.DIM_F }
 
 function std.layout.field_constraint(region_name, field_paths)
   return ast.layout.Field {
@@ -4380,30 +4704,23 @@ end
 
 function std.layout.make_index_ordering_from_constraint(constraint)
   assert(constraint:is(ast.layout.Ordering))
-  local ordering = terralib.newlist()
-  constraint.dimensions:map(function(dimension)
-      if dimension == std.layout.dimx then
-        ordering:insert(1)
-      elseif dimension == std.layout.dimy then
-        ordering:insert(2)
-      elseif dimension == std.layout.dimz then
-        ordering:insert(3)
-      end
-    end)
+  local ordering = data.filter(function(dimension)
+    return std.layout.spatial_dims_map[dimension]
+  end, constraint.dimensions):map(function(dimension)
+    return std.layout.spatial_dims_map[dimension]
+  end)
   assert(#ordering == #constraint.dimensions - 1)
   return ordering
 end
 
 std.layout.default_layout = terralib.memoize(function(index_type)
-  local dimensions = terralib.newlist { std.layout.dimx }
-  if index_type.dim > 1 then
-    dimensions:insert(std.layout.dimy)
-  end
-  if index_type.dim > 2 then
-    dimensions:insert(std.layout.dimz)
-  end
+  local dimensions = data.take(index_type.dim, std.layout.spatial_dims)
   dimensions:insert(std.layout.dimf)
   return std.layout.ordering_constraint(dimensions)
 end)
+
+function std.layout.colocation_constraint(fields)
+  return ast.layout.Colocation { fields = fields }
+end
 
 return std

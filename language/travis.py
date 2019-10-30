@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-# Copyright 2018 Stanford University
+# Copyright 2019 Stanford University
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -16,15 +16,16 @@
 #
 
 from __future__ import print_function
-import argparse, os, platform, subprocess
+import argparse, os, platform, subprocess, sys
 
-def test(root_dir, install_only, debug, short, spy, prof, gcov, hdf5, cuda, openmp, python, jobs, env):
+def test(root_dir, install_only, debug, max_dim, short, spy, prof, gcov, hdf5, cuda, openmp, python, jobs, env):
     threads = ['-j', '2'] if 'TRAVIS' in env else []
     terra = ['--with-terra', env['TERRA_DIR']] if 'TERRA_DIR' in env else []
     build = (['--with-cmake-build', env['CMAKE_BUILD_DIR']]
              if env.get('USE_CMAKE') == '1' and 'CMAKE_BUILD_DIR' in env
              else [])
     debug_flag = ['--debug'] if debug else []
+    max_dim_flag = ['--max-dim=%s' % max_dim]
     short_flag = ['--short'] if short else []
     inner_flag = ['--extra=-flegion-inner', '--extra=0'] if 'DISABLE_INNER' in env else []
     if 'USE_RDIR' in env:
@@ -38,7 +39,7 @@ def test(root_dir, install_only, debug, short, spy, prof, gcov, hdf5, cuda, open
         rdir = 'auto'
 
     subprocess.check_call(
-        ['./install.py', '--rdir=%s' % rdir] + threads + terra + build + debug_flag,
+        [sys.executable, './install.py', '--rdir=%s' % rdir] + threads + terra + build + debug_flag,
         env = env,
         cwd = root_dir)
     if not install_only:
@@ -47,14 +48,16 @@ def test(root_dir, install_only, debug, short, spy, prof, gcov, hdf5, cuda, open
         if prof: extra_flags.append('--prof')
         if gcov: extra_flags.append('--run')
         if hdf5: extra_flags.append('--hdf5')
-        if cuda: extra_flags.extend(['--extra=-ll:gpu', '--extra=1'])
+        if cuda:
+            extra_flags.append('--cuda')
+            threads = ['-j', '1']  # do not oversubscribe GPU
         if openmp: extra_flags.append('--openmp')
         if python: extra_flags.append('--python')
         extra_flags.extend(['--extra=-fjobs', '--extra=%s' % jobs])
         if not spy and not prof and not gcov and not hdf5 and not openmp: extra_flags.append('--debug')
 
         subprocess.check_call(
-            ['./test.py', '-q'] + threads + short_flag + extra_flags + inner_flag,
+            [sys.executable, './test.py', '-q'] + threads + max_dim_flag + short_flag + extra_flags + inner_flag,
             env = env,
             cwd = root_dir)
 
@@ -70,13 +73,14 @@ if __name__ == '__main__':
     legion_dir = os.path.dirname(root_dir)
     runtime_dir = os.path.join(legion_dir, 'runtime')
 
-    env = dict(os.environ.iteritems())
+    env = dict(os.environ.items())
     env.update({
         'LG_RT_DIR': runtime_dir,
         # 'LUAJIT_URL': 'http://legion.stanford.edu/~eslaught/mirror/LuaJIT-2.0.4.tar.gz',
     })
 
     debug = env['DEBUG'] == '1'
+    max_dim = int(env.get('MAX_DIM', 3))
     short = env.get('SHORT') == '1'
     spy = env.get('TEST_SPY') == '1'
     prof = env.get('TEST_PROF') == '1'
@@ -86,4 +90,4 @@ if __name__ == '__main__':
     openmp = env.get('TEST_OPENMP') == '1'
     python = env.get('TEST_PYTHON') == '1'
     jobs = int(env['REGENT_JOBS']) if 'REGENT_JOBS' in env else 1
-    test(root_dir, args.install_only, debug, short, spy, prof, gcov, hdf5, cuda, openmp, python, jobs, env)
+    test(root_dir, args.install_only, debug, max_dim, short, spy, prof, gcov, hdf5, cuda, openmp, python, jobs, env)

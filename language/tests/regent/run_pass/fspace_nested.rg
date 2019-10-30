@@ -1,4 +1,4 @@
--- Copyright 2018 Stanford University
+-- Copyright 2019 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -35,14 +35,46 @@ fspace outer {
 task f(x : outer)
   var y = x
   y.g.d = { a = 1, b = 2, c = 3 }
-  y.h.{d, e, f}.c = 12
+  y.h.d.c = 12
+  y.h.e.c = 12
+  y.h.f.c = 12
   y.i = y.g
   return y
 end
 
 task main()
   var z : outer
-  z.{g, h, i}.{d, e, f}.{a, b, c} = 0
+
+  z.g.d.a = 0
+  z.g.d.b = 0
+  z.g.d.c = 0
+  z.g.e.a = 0
+  z.g.e.b = 0
+  z.g.e.c = 0
+  z.g.f.a = 0
+  z.g.f.b = 0
+  z.g.f.c = 0
+
+  z.h.d.a = 0
+  z.h.d.b = 0
+  z.h.d.c = 0
+  z.h.e.a = 0
+  z.h.e.b = 0
+  z.h.e.c = 0
+  z.h.f.a = 0
+  z.h.f.b = 0
+  z.h.f.c = 0
+
+  z.i.d.a = 0
+  z.i.d.b = 0
+  z.i.d.c = 0
+  z.i.e.a = 0
+  z.i.e.b = 0
+  z.i.e.c = 0
+  z.i.f.a = 0
+  z.i.f.b = 0
+  z.i.f.c = 0
+
   var w = f(z)
 
   regentlib.assert(w.g.d.a == 1 and w.g.d.b == 2 and w.g.d.c == 3, "test failed")

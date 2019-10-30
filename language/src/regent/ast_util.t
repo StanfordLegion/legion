@@ -1,4 +1,4 @@
--- Copyright 2018 Stanford University
+-- Copyright 2019 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -307,6 +307,7 @@ function ast_util.mk_stat_assignment(lhs, rhs)
   return ast.typed.stat.Assignment {
     lhs = lhs,
     rhs = rhs,
+    metadata = false,
     span = ast.trivial_span(),
     annotations = ast.default_annotations(),
   }
@@ -317,6 +318,7 @@ function ast_util.mk_stat_reduce(op, lhs, rhs)
     op = op,
     lhs = lhs,
     rhs = rhs,
+    metadata = false,
     span = ast.trivial_span(),
     annotations = ast.default_annotations(),
   }
@@ -327,6 +329,7 @@ function ast_util.mk_stat_for_list(symbol, value, block)
     symbol = symbol,
     value = value,
     block = block,
+    metadata = false,
     span = ast.trivial_span(),
     annotations = ast.default_annotations(),
   }

@@ -1,4 +1,4 @@
--- Copyright 2018 Stanford University
+-- Copyright 2019 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -19,11 +19,11 @@
 
 import "regent"
 
-task toplevel()
-  var is = ispace(int1d, 5)
-  var r = region(is, int)
+task f(r : region(ispace(int1d), int))
+where reads writes(r)
+do
   __demand(__vectorize)
-  for p in is do
+  for p in r.ispace do
     r[p] = [int](p)
   end
   var sum = 0
@@ -32,5 +32,3 @@ task toplevel()
   end
   regentlib.assert(sum == 10, "test failed")
 end
-
-regentlib.start(toplevel)

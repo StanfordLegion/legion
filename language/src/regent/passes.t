@@ -1,4 +1,4 @@
--- Copyright 2018 Stanford University
+-- Copyright 2019 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -25,6 +25,7 @@ local specialize = require("regent/specialize")
 local normalize = require("regent/normalize")
 local inline_tasks = require("regent/inline_tasks")
 local eliminate_dead_code = require("regent/eliminate_dead_code")
+local desugar = require("regent/desugar")
 local std = require("regent/std")
 local type_check = require("regent/type_check")
 local validate = require("regent/validate")
@@ -44,23 +45,34 @@ function passes.codegen(node, allow_pretty)
   return profile("codegen", node, codegen.entry)(node)
 end
 
+local function optimize_and_codegen(node, allow_pretty)
+  node = profile("eliminate_dead_code", node, eliminate_dead_code.entry)(node)
+  node = profile("desugar", node, desugar.entry)(node)
+  node = profile("check_annotations", node, check_annotations.entry)(node)
+  node = passes.optimize(node)
+  return passes.codegen(node, allow_pretty)
+end
+
 function passes.compile(node, allow_pretty)
   local function ctor(environment_function)
     local env = environment_function()
     local node = profile("specialize", node, specialize.entry)(env, node)
-    node = profile("normalize_after_specialize", node, normalize.entry)(node)
+    if std.is_rquote(node) then return node end
+    node = profile("normalize", node, normalize.entry)(node)
     if std.config["inline"] then
       node = profile("inline_tasks", node, inline_tasks.entry)(node)
     end
-    profile("alpha_convert", node, alpha_convert.entry)(node) -- Run this here to avoid bitrot (discard result).
-    node = profile("type_check", node, type_check.entry)(node)
-    if std.config["inline"] then
-      node = profile("eliminate_dead_code", node, eliminate_dead_code.entry)(node)
+    if not (std.config["inline"] and std.is_inline_task(node)) then
+      profile("alpha_convert", node, alpha_convert.entry)(node) -- Run this here to avoid bitrot (discard result).
     end
-    node = profile("normalize_after_type_check", node, normalize.entry)(node)
-    node = profile("check_annotations", node, check_annotations.entry)(node)
-    node = passes.optimize(node)
-    return passes.codegen(node, allow_pretty)
+    -- Inline tasks need a full type check because their types are used to type check the caller
+    node = profile("type_check", node, type_check.entry)(node)
+    if std.config["inline"] and std.is_inline_task(node) then
+      local task = node.prototype
+      task:set_optimization_thunk(function() optimize_and_codegen(node, allow_pretty) end)
+      return task
+    end
+    return optimize_and_codegen(node, allow_pretty)
   end
   return ctor
 end

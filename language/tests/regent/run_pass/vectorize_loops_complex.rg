@@ -1,4 +1,4 @@
--- Copyright 2018 Stanford University
+-- Copyright 2019 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -17,8 +17,7 @@ import "regent"
 task main()
   var r = region(ispace(int1d, 32), complex)
 
-  fill(r.real, 1.0)
-  fill(r.imag, 2.0)
+  fill(r, complex {1.0, 2.0})
 
   -- __demand(__vectorize)
   for x in r do

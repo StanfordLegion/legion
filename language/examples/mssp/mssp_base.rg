@@ -1,4 +1,4 @@
--- Copyright 2018 Stanford University
+-- Copyright 2019 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -157,7 +157,7 @@ task toplevel()
     fill(rn.distance, INFINITY)
 
     var root_id = graph.sources[s]
-    var root : ptr(Node, rn) = dynamic_cast(ptr(Node, rn), [ptr](root_id))
+    var root : ptr(Node, rn) = dynamic_cast(ptr(Node, rn), ptr(root_id))
     var ts_start = c.legion_get_current_time_in_micros()
     wait_for(sssp(graph, rn, re, root))
     var ts_end = c.legion_get_current_time_in_micros()

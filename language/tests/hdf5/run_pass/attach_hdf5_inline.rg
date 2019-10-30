@@ -1,4 +1,4 @@
--- Copyright 2018 Stanford University, Los Alamos National Laboratory
+-- Copyright 2019 Stanford University, Los Alamos National Laboratory
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -68,6 +68,7 @@ end
 
 task main()
   var grid = region(ispace(int1d, NX + 2 * HALO_WIDTH), GridData)
+  fill(grid.x, 4.0)
 
   var coloring = c.legion_domain_point_coloring_create()
   c.legion_domain_point_coloring_color_domain(coloring, [int1d](LEFT_HALO), rect1d { 0, HALO_WIDTH - 1 })

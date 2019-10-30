@@ -1,4 +1,4 @@
--- Copyright 2018 Stanford University
+-- Copyright 2019 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -65,7 +65,7 @@ task main()
   c.legion_coloring_destroy(rc)
 
   -- not optimized: function is not a task
-  __demand(__parallel)
+  __demand(__index_launch)
   for i in cs do
     e(i)
   end

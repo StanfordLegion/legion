@@ -1,4 +1,4 @@
-/* Copyright 2018 Stanford University, NVIDIA Corporation
+/* Copyright 2019 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -105,12 +105,32 @@ namespace Realm {
       }
     }
 
-    // TODO: merge identical piece lists
-    layout->piece_lists.resize(ilc.field_groups.size());
-    for(size_t li = 0; li < ilc.field_groups.size(); li++) {
-      const InstanceLayoutConstraints::FieldGroup& fg = ilc.field_groups[li];
-      InstancePieceList<N,T>& pl = layout->piece_lists[li];
-      pl.pieces.reserve(piece_bounds.size());
+    // if the index space is empty, all fields can use the same empty
+    //  piece list
+    if(piece_bounds.empty()) {
+      layout->piece_lists.resize(1);
+      for(std::vector<InstanceLayoutConstraints::FieldGroup>::const_iterator it = ilc.field_groups.begin();
+	  it != ilc.field_groups.end();
+	  ++it)
+	for(std::vector<InstanceLayoutConstraints::FieldInfo>::const_iterator it2 = it->begin();
+	    it2 != it->end();
+	    ++it2) {
+	  InstanceLayoutGeneric::FieldLayout& fl = layout->fields[it2->field_id];
+	  fl.list_idx = 0;
+	  fl.rel_offset = 0;
+	  fl.size_in_bytes = it2->size;
+	}
+      return layout;
+    }
+    
+    // we'll merge piece lists that have the same gsize/galign values, so
+    //  track that
+    std::map<std::pair<size_t, size_t>, size_t> pl_indexes, pl_starts, pl_sizes;
+
+    // reserve space so that we don't have to copy piece lists as we grow
+    layout->piece_lists.reserve(ilc.field_groups.size());
+    for(size_t i = 0; i < ilc.field_groups.size(); i++) {
+      const InstanceLayoutConstraints::FieldGroup& fg = ilc.field_groups[i];
 
       // figure out layout of fields in group - this is constant across the
       //  pieces
@@ -118,7 +138,7 @@ namespace Realm {
       size_t galign = 1;
       // we can't set field offsets in a single pass because we don't know
       //  the whole group's alignment until we look at every field
-      std::map<FieldID, int> field_offsets;
+      std::map<FieldID, size_t> field_offsets;
       std::map<FieldID, int> field_sizes;
       for(std::vector<InstanceLayoutConstraints::FieldInfo>::const_iterator it2 = fg.begin();
 	  it2 != fg.end();
@@ -147,49 +167,77 @@ namespace Realm {
 	// overall instance alignment layout must be compatible with group
 	layout->alignment_reqd = lcm(layout->alignment_reqd, galign);
       }
-      // now that the group offset is properly aligned, we can set the
+
+      std::pair<size_t, size_t> pl_key(gsize, galign);
+      std::map<std::pair<size_t, size_t>, size_t>::const_iterator it = pl_indexes.find(pl_key);
+      size_t li;
+      size_t reuse_offset;
+      if(it != pl_indexes.end()) {
+	li = it->second;
+	size_t piece_start = round_up(layout->bytes_used, galign);
+	reuse_offset = piece_start - pl_starts[pl_key];
+
+	// we're not going to create piece lists, but we still have to update
+	//  the overall size
+	layout->bytes_used = piece_start + pl_sizes[pl_key];
+      } else {
+	li = layout->piece_lists.size();
+	layout->piece_lists.resize(li + 1);
+	reuse_offset = 0;
+	pl_indexes[pl_key] = li;
+
+	// create the piece list
+	InstancePieceList<N,T>& pl = layout->piece_lists[li];
+	pl.pieces.reserve(piece_bounds.size());
+
+	size_t pl_start = round_up(layout->bytes_used, galign);
+	for(typename std::vector<Rect<N,T> >::const_iterator it = piece_bounds.begin();
+	    it != piece_bounds.end();
+	    ++it) {
+	  Rect<N,T> bbox = *it;
+	  // TODO: bloat bbox for block size if desired
+	  Rect<N,T> bloated = bbox;
+
+	  // always create an affine piece for now
+	  AffineLayoutPiece<N,T> *piece = new AffineLayoutPiece<N,T>;
+	  piece->bounds = bbox;
+
+	  // starting point for piece is first galign-aligned location above
+	  //  existing pieces
+	  size_t piece_start = round_up(layout->bytes_used, galign);
+	  piece->offset = piece_start;
+	  size_t stride = gsize;
+	  for(int i = 0; i < N; i++) {
+	    const int dim = dim_order[i];
+	    assert((0 <= dim) && (dim < N));
+	    piece->strides[dim] = stride;
+	    piece->offset -= bloated.lo[dim] * stride;
+	    stride *= (bloated.hi[dim] - bloated.lo[dim] + 1);
+	  }
+
+	  // final value of stride is total bytes used by piece - use that
+	  //  to set new instance footprint
+	  layout->bytes_used = piece_start + stride;
+	  
+	  pl.pieces.push_back(piece);
+	}
+	pl_starts[pl_key] = pl_start;
+	pl_sizes[pl_key] = layout->bytes_used - pl_start;
+      }
+      
+      // now that the we know which piece list we are using, we can set the
       //  actual field offsets
-      for(std::map<FieldID, int>::const_iterator it2 = field_offsets.begin();
+      for(std::map<FieldID, size_t>::const_iterator it2 = field_offsets.begin();
 	  it2 != field_offsets.end();
 	  ++it2) {
 	// should not have seen this field before
 	assert(layout->fields.count(it2->first) == 0);
 	InstanceLayoutGeneric::FieldLayout& fl = layout->fields[it2->first];
 	fl.list_idx = li;
-	fl.rel_offset = /*group_offset +*/ it2->second;
+	fl.rel_offset = /*group_offset +*/ it2->second + reuse_offset;
 	fl.size_in_bytes = field_sizes[it2->first];
       }
 
-      for(typename std::vector<Rect<N,T> >::const_iterator it = piece_bounds.begin();
-	  it != piece_bounds.end();
-	  ++it) {
-	Rect<N,T> bbox = *it;
-	// TODO: bloat bbox for block size if desired
-	Rect<N,T> bloated = bbox;
-
-	// always create an affine piece for now
-	AffineLayoutPiece<N,T> *piece = new AffineLayoutPiece<N,T>;
-	piece->bounds = bbox;
-
-	// starting point for piece is first galign-aligned location above
-	//  existing pieces
-	size_t piece_start = round_up(layout->bytes_used, galign);
-	piece->offset = piece_start;
-	size_t stride = gsize;
-	for(int i = 0; i < N; i++) {
-          const int dim = dim_order[i];
-          assert((0 <= dim) && (dim < N));
-	  piece->strides[dim] = stride;
-	  piece->offset -= bloated.lo[dim] * stride;
-	  stride *= (bloated.hi[dim] - bloated.lo[dim] + 1);
-	}
-
-	// final value of stride is total bytes used by piece - use that
-	//  to set new instance footprint
-	layout->bytes_used = piece_start + stride;
-
-	pl.pieces.push_back(piece);
-      }
     }
 
     return layout;
@@ -524,6 +572,15 @@ namespace Realm {
     return *this;
   }
 
+  template <typename FT>
+  inline std::ostream& operator<<(std::ostream& os, const AccessorRefHelper<FT>& arh)
+  {
+    FT val;
+    arh.inst.read_untyped(arh.offset, &val, sizeof(FT));
+    os << val;
+    return os;
+  }
+
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -669,8 +726,14 @@ namespace Realm {
   template <typename FT, int N, typename T>
   __CUDA_HD__
   inline AffineAccessor<FT,N,T>::AffineAccessor(void)
-    : base(0)
   {}  
+
+  template <typename FT, int N, typename T>
+  __CUDA_HD__
+  inline void AffineAccessor<FT,N,T>::reset()
+  {
+    base = 0;
+  }
 
   // NOTE: these constructors will die horribly if the conversion is not
   //  allowed - call is_compatible(...) first if you're not sure
@@ -680,6 +743,14 @@ namespace Realm {
   inline AffineAccessor<FT,N,T>::AffineAccessor(RegionInstance inst,
 						FieldID field_id,
 						size_t subfield_offset /*= 0*/)
+  {
+    reset(inst, field_id, subfield_offset);
+  }
+    
+  template <typename FT, int N, typename T>
+  inline void AffineAccessor<FT,N,T>::reset(RegionInstance inst,
+					    FieldID field_id,
+					    size_t subfield_offset /*= 0*/)
   {
     const InstanceLayout<N,T> *layout = checked_cast<const InstanceLayout<N,T> *>(inst.get_layout());
     std::map<FieldID, InstanceLayoutGeneric::FieldLayout>::const_iterator it = layout->fields.find(field_id);
@@ -714,6 +785,14 @@ namespace Realm {
   AffineAccessor<FT,N,T>::AffineAccessor(RegionInstance inst,
 					 FieldID field_id, const Rect<N,T>& subrect,
 					 size_t subfield_offset /*= 0*/)
+  {
+    reset(inst, field_id, subrect, subfield_offset);
+  }
+  
+  template <typename FT, int N, typename T>
+  void AffineAccessor<FT,N,T>::reset(RegionInstance inst,
+				     FieldID field_id, const Rect<N,T>& subrect,
+				     size_t subfield_offset /*= 0*/)
   {
     const InstanceLayout<N,T> *layout = checked_cast<const InstanceLayout<N,T> *>(inst.get_layout());
     std::map<FieldID, InstanceLayoutGeneric::FieldLayout>::const_iterator it = layout->fields.find(field_id);
@@ -752,6 +831,17 @@ namespace Realm {
 						const Point<N2, T2>& offset,
 						FieldID field_id,
 						size_t subfield_offset /*= 0*/)
+  {
+    reset(inst, transform, offset, field_id, subfield_offset);
+  }
+  
+  template <typename FT, int N, typename T>
+  template <int N2, typename T2>
+  inline void AffineAccessor<FT,N,T>::reset(RegionInstance inst,
+					    const Matrix<N2, N, T2>& transform,
+					    const Point<N2, T2>& offset,
+					    FieldID field_id,
+					    size_t subfield_offset /*= 0*/)
   {
     // instance's dimensionality should be <N2,T2>
     const InstanceLayout<N2,T2> *layout = checked_cast<const InstanceLayout<N2,T2> *>(inst.get_layout());
@@ -803,6 +893,18 @@ namespace Realm {
 						FieldID field_id,
 						const Rect<N,T>& subrect,
 						size_t subfield_offset /*= 0*/)
+  {
+    reset(inst, transform, offset, field_id, subrect, subfield_offset);
+  }
+  
+  template <typename FT, int N, typename T>
+  template <int N2, typename T2>
+  inline void AffineAccessor<FT,N,T>::reset(RegionInstance inst,
+					    const Matrix<N2, N, T2>& transform,
+					    const Point<N2, T2>& offset,
+					    FieldID field_id,
+					    const Rect<N,T>& subrect,
+					    size_t subfield_offset /*= 0*/)
   {
     // instance's dimensionality should be <N2,T2>
     const InstanceLayout<N2,T2> *layout = checked_cast<const InstanceLayout<N2,T2> *>(inst.get_layout());
@@ -994,7 +1096,7 @@ namespace Realm {
     return true;
   }
 
-  template <typename FT, int N, typename T>
+  template <typename FT, int N, typename T> __CUDA_HD__
   inline FT *AffineAccessor<FT,N,T>::ptr(const Point<N,T>& p) const
   {
     return this->get_ptr(p);

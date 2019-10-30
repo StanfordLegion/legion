@@ -1,4 +1,4 @@
-/* Copyright 2018 Stanford University, NVIDIA Corporation
+/* Copyright 2019 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,6 +23,8 @@
 #ifdef USE_HDF
 #include "realm/hdf5/hdf5_access.h"
 #endif
+// For backwards compatability accessors
+#include "legion/accessor.h"
 
 TYPE_IS_SERIALIZABLE(Realm::InstanceLayoutGeneric::FieldLayout);
 
@@ -32,41 +34,39 @@ namespace Realm {
 
   ////////////////////////////////////////////////////////////////////////
   //
-  // class DeferredInstDestroy
+  // class RegionInstanceImpl::DeferredDestroy
   //
 
-    class DeferredInstDestroy : public EventWaiter {
-    public:
-      DeferredInstDestroy(RegionInstance _inst) : inst(_inst) { }
-      virtual ~DeferredInstDestroy(void) { }
-    public:
-      virtual bool event_triggered(Event e, bool poisoned)
-      {
-	// if input event is poisoned, do not attempt to destroy the lock
-	// we don't have an output event here, so this may result in a leak if nobody is
-	//  paying attention
-	if(poisoned) {
-	  log_poison.info() << "poisoned deferred instance destruction skipped - POSSIBLE LEAK - inst=" << inst;
-	} else {
-	  inst.destroy();
-	  //get_runtime()->get_memory_impl(impl->memory)->destroy_instance(impl->me, true); 
-	}
-        return true;
-      }
+  void RegionInstanceImpl::DeferredDestroy::defer(RegionInstanceImpl *_inst,
+						  MemoryImpl *_mem,
+						  Event wait_on)
+  {
+    inst = _inst;
+    mem = _mem;
+    EventImpl::add_waiter(wait_on, this);
+  }
 
-      virtual void print(std::ostream& os) const
-      {
-        os << "deferred instance destruction";
-      }
+  void RegionInstanceImpl::DeferredDestroy::event_triggered(bool poisoned)
+  {
+    // if input event is poisoned, do not attempt to destroy the lock
+    // we don't have an output event here, so this may result in a leak if nobody is
+    //  paying attention
+    if(poisoned) {
+      log_poison.info() << "poisoned deferred instance destruction skipped - POSSIBLE LEAK - inst=" << inst;
+    } else {
+      mem->release_instance_storage(inst, Event::NO_EVENT);
+    }
+  }
 
-      virtual Event get_finish_event(void) const
-      {
-	return Event::NO_EVENT;
-      }
+  void RegionInstanceImpl::DeferredDestroy::print(std::ostream& os) const
+  {
+    os << "deferred instance destruction";
+  }
 
-    protected:
-      RegionInstance inst;
-    };
+  Event RegionInstanceImpl::DeferredDestroy::get_finish_event(void) const
+  {
+    return Event::NO_EVENT;
+  }
 
   
   ////////////////////////////////////////////////////////////////////////
@@ -76,13 +76,13 @@ namespace Realm {
 
     AddressSpace RegionInstance::address_space(void) const
     {
-      return ID(id).instance.owner_node;
+      return ID(id).instance_owner_node();
     }
 
     Memory RegionInstance::get_location(void) const
     {
-      return ID::make_memory(ID(id).instance.owner_node,
-			     ID(id).instance.mem_idx).convert<Memory>();
+      return ID::make_memory(ID(id).instance_owner_node(),
+			     ID(id).instance_mem_idx()).convert<Memory>();
     }
 
     /*static*/ Event RegionInstance::create_instance(RegionInstance& inst,
@@ -100,12 +100,22 @@ namespace Realm {
 	//  failure
 	ProfilingMeasurementCollection pmc;
 	pmc.import_requests(prs);
+	bool reported = false;
 	if(pmc.wants_measurement<ProfilingMeasurements::InstanceStatus>()) {
 	  ProfilingMeasurements::InstanceStatus stat;
 	  stat.result = ProfilingMeasurements::InstanceStatus::INSTANCE_COUNT_EXCEEDED;
 	  stat.error_code = 0;
 	  pmc.add_measurement(stat);
-	} else {
+	  reported = true;
+	}
+	if(pmc.wants_measurement<ProfilingMeasurements::InstanceAbnormalStatus>()) {
+	  ProfilingMeasurements::InstanceAbnormalStatus stat;
+	  stat.result = ProfilingMeasurements::InstanceStatus::INSTANCE_COUNT_EXCEEDED;
+	  stat.error_code = 0;
+	  pmc.add_measurement(stat);
+	  reported = true;
+	}
+	if(!reported) {
 	  // fatal error
 	  log_inst.fatal() << "FATAL: instance count exceeded for memory " << memory;
 	  assert(0);
@@ -130,59 +140,74 @@ namespace Realm {
           impl->timeline.record_create_time();
       }
 
+      log_inst.debug() << "instance layout: inst=" << inst << " layout=" << *ilg;
+
       // request allocation of storage - a true response means it was serviced right
       //  away
       Event ready_event;
-      if(m_impl->allocate_instance_storage(impl->me,
-					   ilg->bytes_used,
-					   ilg->alignment_reqd,
-					   wait_on)) {
-	assert(impl->metadata.inst_offset != (size_t)-1);
-	if(impl->metadata.inst_offset != (size_t)-2) {
+      switch(m_impl->allocate_instance_storage(impl->me,
+					       ilg->bytes_used,
+					       ilg->alignment_reqd,
+					       wait_on)) {
+      case MemoryImpl::ALLOC_INSTANT_SUCCESS:
+	{
 	  // successful allocation
+	  assert(impl->metadata.inst_offset != (size_t)-1);
+	  assert(impl->metadata.inst_offset != (size_t)-2);
 	  ready_event = Event::NO_EVENT;
 	  if(impl->measurements.wants_measurement<ProfilingMeasurements::InstanceTimeline>())
 	    impl->timeline.record_ready_time();
-	} else {
+	  break;
+	}
+
+      case MemoryImpl::ALLOC_INSTANT_FAILURE:
+	{
 	  // generate a poisoned event for completion
+	  // NOTE: it is unsafe to look at the impl->metadata or the 
+	  //  passed-in instance layout at this point due to the possibility
+	  //  of an asynchronous destruction of the instance in a profiling
+	  //  handler
 	  GenEventImpl *ev = GenEventImpl::create_genevent();
 	  ready_event = ev->current_event();
 	  GenEventImpl::trigger(ready_event, true /*poisoned*/);
+	  break;
 	}
-      } else {
-	// we will probably need an event to track when it is ready
-	GenEventImpl *ev = GenEventImpl::create_genevent();
-	ready_event = ev->current_event();
-	bool alloc_done, alloc_successful;
-	// use mutex to avoid race on allocation callback
+
+      case MemoryImpl::ALLOC_DEFERRED:
 	{
-	  AutoHSLLock al(impl->mutex);
-	  if(impl->metadata.inst_offset != (size_t)-1) {
-	    alloc_done = true;
-	    alloc_successful = (impl->metadata.inst_offset != (size_t)-2);
-	  } else {
-	    alloc_done = false;
-	    alloc_successful = false;
-	    impl->metadata.ready_event = ready_event;
+	  // we will probably need an event to track when it is ready
+	  GenEventImpl *ev = GenEventImpl::create_genevent();
+	  ready_event = ev->current_event();
+	  bool alloc_done, alloc_successful;
+	  // use mutex to avoid race on allocation callback
+	  {
+	    AutoLock<> al(impl->mutex);
+	    if(impl->metadata.inst_offset != (size_t)-1) {
+	      alloc_done = true;
+	      alloc_successful = (impl->metadata.inst_offset != (size_t)-2);
+	    } else {
+	      alloc_done = false;
+	      alloc_successful = false;
+	      impl->metadata.ready_event = ready_event;
+	    }
 	  }
-	}
-	if(alloc_done) {
-	  // lost the race to the notification callback, so we trigger the
-	  //  ready event ourselves
-	  if(alloc_successful) {
-	    if(impl->measurements.wants_measurement<ProfilingMeasurements::InstanceTimeline>())
-	      impl->timeline.record_ready_time();
-	    GenEventImpl::trigger(ready_event, false /*!poisoned*/);
-	    ready_event = Event::NO_EVENT;
-	  } else {
-	    // poison the ready event and still return it
-	    GenEventImpl::trigger(ready_event, true /*poisoned*/);
+	  if(alloc_done) {
+	    // lost the race to the notification callback, so we trigger the
+	    //  ready event ourselves
+	    if(alloc_successful) {
+	      if(impl->measurements.wants_measurement<ProfilingMeasurements::InstanceTimeline>())
+		impl->timeline.record_ready_time();
+	      GenEventImpl::trigger(ready_event, false /*!poisoned*/);
+	      ready_event = Event::NO_EVENT;
+	    } else {
+	      // poison the ready event and still return it
+	      GenEventImpl::trigger(ready_event, true /*poisoned*/);
+	    }
 	  }
 	}
       }
 
       log_inst.info() << "instance created: inst=" << inst << " bytes=" << ilg->bytes_used << " ready=" << ready_event;
-      log_inst.debug() << "instance layout: inst=" << inst << " layout=" << *ilg;
       return ready_event;
     }
 
@@ -213,14 +238,14 @@ namespace Realm {
         (unsigned char*)m_impl->get_direct_ptr(0/*offset*/, 0/*size*/);
       size_t inst_offset = (size_t)(((unsigned char*)base) - impl_base);
 #ifndef NDEBUG
-      bool ok = 
+      MemoryImpl::AllocationResult result =
 #endif
         m_impl->allocate_instance_storage(impl->me,
 					  ilg->bytes_used,
 					  ilg->alignment_reqd,
 					  wait_on, 
                                           inst_offset);
-      assert(ok);
+      assert(result == MemoryImpl::ALLOC_INSTANT_SUCCESS);
 
       inst = impl->me;
       log_inst.info() << "external instance created: inst=" << inst;
@@ -234,24 +259,12 @@ namespace Realm {
       //  deallocate the instance's storage - the eventual callback from that
       //  will be what actually destroys the instance
       DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
-      // TODO: send destruction request through so memory can see it, even
-      //  if it's not ready
-      bool poisoned = false;
-      if(!wait_on.has_triggered_faultaware(poisoned)) {
-	EventImpl::add_waiter(wait_on, new DeferredInstDestroy(*this));
-        return;
-      }
-      // a poisoned precondition silently cancels the deletion - up to
-      //  requestor to realize this has occurred since the deletion does
-      //  not have its own completion event
-      if(poisoned)
-	return;
 
-      log_inst.info() << "instance destroyed: inst=" << *this;
+      log_inst.info() << "instance destroyed: inst=" << *this << " wait_on=" << wait_on;
 
-      // this does the right thing even though we're using an instance ID
       MemoryImpl *mem_impl = get_runtime()->get_memory_impl(*this);
-      mem_impl->release_instance_storage(*this, wait_on);
+      RegionInstanceImpl *inst_impl = mem_impl->get_instance(*this);
+      mem_impl->release_instance_storage(inst_impl, wait_on);
     }
 
     void RegionInstance::destroy(const std::vector<DestroyedField>& destroyed_fields,
@@ -322,8 +335,11 @@ namespace Realm {
 	r_impl->request_metadata().wait();
       assert(r_impl->metadata.layout);
       MemoryImpl *mem = get_runtime()->get_memory_impl(r_impl->memory);
-      const ReductionOpUntyped *redop = get_runtime()->reduce_op_table[redop_id];
-      assert(redop);
+      const ReductionOpUntyped *redop = get_runtime()->reduce_op_table.get(redop_id, 0);
+      if(redop == 0) {
+	log_inst.fatal() << "no reduction op registered for ID " << redop_id;
+	abort();
+      }
       // data should match RHS size
       assert(datalen == redop->sizeof_rhs);
       // can we run the reduction op directly on the memory location?
@@ -354,8 +370,11 @@ namespace Realm {
 	r_impl->request_metadata().wait();
       assert(r_impl->metadata.layout);
       MemoryImpl *mem = get_runtime()->get_memory_impl(r_impl->memory);
-      const ReductionOpUntyped *redop = get_runtime()->reduce_op_table[redop_id];
-      assert(redop);
+      const ReductionOpUntyped *redop = get_runtime()->reduce_op_table.get(redop_id, 0);
+      if(redop == 0) {
+	log_inst.fatal() << "no reduction op registered for ID " << redop_id;
+	abort();
+      }
       // data should match RHS size
       assert(datalen == redop->sizeof_rhs);
       // can we run the reduction op directly on the memory location?
@@ -423,7 +442,7 @@ namespace Realm {
     RegionInstanceImpl::RegionInstanceImpl(RegionInstance _me, Memory _memory)
       : me(_me), memory(_memory) //, lis(0)
     {
-      lock.init(ID(me).convert<Reservation>(), ID(me).instance.creator_node);
+      lock.init(ID(me).convert<Reservation>(), ID(me).instance_creator_node());
       lock.in_use = true;
 
       metadata.inst_offset = (size_t)-1;
@@ -440,12 +459,13 @@ namespace Realm {
 	delete metadata.layout;
     }
 
-    void RegionInstanceImpl::notify_allocation(bool success, size_t offset)
+    void RegionInstanceImpl::notify_allocation(bool success, size_t offset, size_t footprint)
     {
       if(!success) {
 	// if somebody is listening to profiling measurements, we report
 	//  a failed allocation through that channel - if not, we explode
 	bool report_failure = (measurements.wants_measurement<ProfilingMeasurements::InstanceStatus>() ||
+			       measurements.wants_measurement<ProfilingMeasurements::InstanceAbnormalStatus>() ||
 			       measurements.wants_measurement<ProfilingMeasurements::InstanceAllocResult>());
 	if(report_failure) {
 	  log_inst.info() << "allocation failed: inst=" << me;
@@ -453,7 +473,7 @@ namespace Realm {
 	  // poison the completion event, if it exists
 	  Event ready_event = Event::NO_EVENT;
 	  {
-	    AutoHSLLock al(mutex);
+	    AutoLock<> al(mutex);
 	    ready_event = metadata.ready_event;
 	    metadata.ready_event = Event::NO_EVENT;
 	    metadata.inst_offset = (size_t)-2;
@@ -461,6 +481,13 @@ namespace Realm {
 
 	  if(measurements.wants_measurement<ProfilingMeasurements::InstanceStatus>()) {
 	    ProfilingMeasurements::InstanceStatus stat;
+	    stat.result = ProfilingMeasurements::InstanceStatus::FAILED_ALLOCATION;
+	    stat.error_code = 0;
+	    measurements.add_measurement(stat);
+	  }
+
+	  if(measurements.wants_measurement<ProfilingMeasurements::InstanceAbnormalStatus>()) {
+	    ProfilingMeasurements::InstanceAbnormalStatus stat;
 	    stat.result = ProfilingMeasurements::InstanceStatus::FAILED_ALLOCATION;
 	    stat.error_code = 0;
 	    measurements.add_measurement(stat);
@@ -497,7 +524,7 @@ namespace Realm {
       //  are no races between it and getting the ready event 
       Event ready_event;
       {
-	AutoHSLLock al(mutex);
+	AutoLock<> al(mutex);
 	ready_event = metadata.ready_event;
 	metadata.ready_event = Event::NO_EVENT;
 	metadata.inst_offset = offset;
@@ -510,10 +537,10 @@ namespace Realm {
       metadata.mark_valid(early_reqs);
       if(!early_reqs.empty()) {
 	log_inst.debug() << "sending instance metadata to early requestors: isnt=" << me;
-	size_t datalen = 0;
-	void *data = metadata.serialize(datalen);
-	MetadataResponseMessage::broadcast_request(early_reqs, ID(me).id, data, datalen);
-	free(data);
+	ActiveMessage<MetadataResponseMessage> amsg(early_reqs,65536);
+	metadata.serialize_msg(amsg);
+	amsg->id = ID(me).id;
+	amsg.commit();
       }
 
       if(measurements.wants_measurement<ProfilingMeasurements::InstanceAllocResult>()) {
@@ -687,6 +714,24 @@ namespace Realm {
 
       out_size = dbs.bytes_used();
       return dbs.detach_buffer(0 /*trim*/);
+    }
+
+  template <typename T>
+  void RegionInstanceImpl::Metadata::serialize_msg(T& fbs) const
+    {
+      bool ok = ((fbs << alloc_offset) &&
+		 (fbs << size) &&
+		 (fbs << redopid) &&
+		 (fbs << count_offset) &&
+		 (fbs << red_list_size) &&
+		 (fbs << block_size) &&
+		 (fbs << elmt_size) &&
+		 (fbs << field_sizes) &&
+		 (fbs << parent_inst) &&
+		 (fbs << inst_offset) &&
+		 (fbs << filename) &&
+		 (fbs << *layout));
+      assert(ok);
     }
 
     void RegionInstanceImpl::Metadata::deserialize(const void *in_data, size_t in_size)

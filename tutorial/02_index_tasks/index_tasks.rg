@@ -1,4 +1,4 @@
--- Copyright 2018 Stanford University
+-- Copyright 2019 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -30,7 +30,7 @@ task main()
   -- ensures that the compiler will throw an error if the optimization
   -- fails.
   var total = 0
-  __demand(__parallel)
+  __demand(__index_launch)
   for i = 0, num_points do
     total += double_of(i, i + 10)
   end

@@ -1,5 +1,5 @@
-/* Copyright 2018 Stanford University, NVIDIA Corporation
- * Copyright 2018 Los Alamos National Laboratory
+/* Copyright 2019 Stanford University, NVIDIA Corporation
+ * Copyright 2019 Los Alamos National Laboratory
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -52,16 +52,6 @@ namespace Realm {
       unlink(file.c_str());
     }
 
-    off_t DiskMemory::alloc_bytes(size_t size)
-    {
-      return alloc_bytes_local(size);
-    }
-
-    void DiskMemory::free_bytes(off_t offset, size_t size)
-    {
-      free_bytes_local(offset, size);
-    }
-
     void DiskMemory::get_bytes(off_t offset, void *dst, size_t size)
     {
       // this is a blocking operation
@@ -96,40 +86,24 @@ namespace Realm {
 
     int DiskMemory::get_home_node(off_t offset, size_t size)
     {
-      return my_node_id;
+      return Network::my_node_id;
     }
 
     FileMemory::FileMemory(Memory _me)
       : MemoryImpl(_me, 0 /*no memory space*/, MKIND_FILE, ALIGNMENT, Memory::FILE_MEM)
       , next_offset(0x12340000LL)  // something not zero for debugging
     {
-      pthread_mutex_init(&vector_lock, NULL);
     }
 
     FileMemory::~FileMemory(void)
     {
-      pthread_mutex_destroy(&vector_lock);
-    }
-
-    off_t FileMemory::alloc_bytes(size_t size)
-    {
-      // hand out incrementing offsets and never reuse them
-      // fragile, but we need a way to map from offset -> index for remote
-      //  writes at the moment
-      off_t this_offset = __sync_fetch_and_add(&next_offset, size);
-      return this_offset;
-    }
-
-    void FileMemory::free_bytes(off_t offset, size_t size)
-    {
-      // Do nothing in this function.
     }
 
     void FileMemory::get_bytes(off_t offset, void *dst, size_t size)
     {
       // map from the offset back to the instance index
       assert(offset < next_offset);
-      pthread_mutex_lock(&vector_lock);
+      vector_lock.lock();
       // this finds the first entry _AFTER_ the one we want
       std::map<off_t, int>::const_iterator it = offset_map.upper_bound(offset);
       assert(it != offset_map.begin());
@@ -137,15 +111,15 @@ namespace Realm {
       --it;
       ID::IDType index = it->second;
       off_t rel_offset = offset - it->first;
-      pthread_mutex_unlock(&vector_lock);
+      vector_lock.unlock();
       get_bytes(index, rel_offset, dst, size);
     }
 
     void FileMemory::get_bytes(ID::IDType inst_id, off_t offset, void *dst, size_t size)
     {
-      pthread_mutex_lock(&vector_lock);
+      vector_lock.lock();
       int fd = file_vec[inst_id];
-      pthread_mutex_unlock(&vector_lock);
+      vector_lock.unlock();
       size_t ret = pread(fd, dst, size, offset);
 #ifdef NDEBUG
       (void)ret;
@@ -158,7 +132,7 @@ namespace Realm {
     {
       // map from the offset back to the instance index
       assert(offset < next_offset);
-      pthread_mutex_lock(&vector_lock);
+      vector_lock.lock();
       // this finds the first entry _AFTER_ the one we want
       std::map<off_t, int>::const_iterator it = offset_map.upper_bound(offset);
       assert(it != offset_map.begin());
@@ -166,15 +140,15 @@ namespace Realm {
       --it;
       ID::IDType index = it->second;
       off_t rel_offset = offset - it->first;
-      pthread_mutex_unlock(&vector_lock);
+      vector_lock.unlock();
       put_bytes(index, rel_offset, src, size);
     }
 
     void FileMemory::put_bytes(ID::IDType inst_id, off_t offset, const void *src, size_t size)
     {
-      pthread_mutex_lock(&vector_lock);
+      vector_lock.lock();
       int fd = file_vec[inst_id];
-      pthread_mutex_unlock(&vector_lock);
+      vector_lock.unlock();
       size_t ret = pwrite(fd, src, size, offset);
 #ifdef NDEBUG
       (void)ret;
@@ -193,14 +167,14 @@ namespace Realm {
 
     int FileMemory::get_home_node(off_t offset, size_t size)
     {
-      return my_node_id;
+      return Network::my_node_id;
     }
 
     int FileMemory::get_file_des(ID::IDType inst_id)
     {
-      pthread_mutex_lock(&vector_lock);
+      vector_lock.lock();
       int fd = file_vec[inst_id];
-      pthread_mutex_unlock(&vector_lock);
+      vector_lock.unlock();
       return fd;
     }
 

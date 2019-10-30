@@ -1,4 +1,4 @@
--- Copyright 2018 Stanford University
+-- Copyright 2019 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -13,22 +13,19 @@
 -- limitations under the License.
 
 -- fails-with:
--- vectorize_loops4.rg:30: vectorization failed: loop body has a corner case statement not supported for the moment
---    r[i] = i
---    ^
+-- vectorize_loops4.rg:29: vectorization failed: loop body has a corner case statement not supported for the moment
+--     r[i] = i
+--            ^
 
 import "regent"
 
 local i1d = index_type(int, "i1d")
 
-task toplevel()
-  var n = 8
-  var is = ispace(i1d, n)
-  var r = region(is, int)
+task f(r : region(ispace(i1d), int))
+where reads writes(r)
+do
   __demand(__vectorize)
-  for i in is do
+  for i in r.ispace do
     r[i] = i
   end
 end
-
-regentlib.start(toplevel)

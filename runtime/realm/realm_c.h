@@ -1,4 +1,4 @@
-/* Copyright 2018 Stanford University, NVIDIA Corporation
+/* Copyright 2019 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,8 +21,10 @@
 
 #include "realm/realm_config.h"
 
+#ifndef LEGION_USE_PYTHON_CFFI
 // for size_t
 #include <stddef.h>
+#endif // LEGION_USE_PYTHON_CFFI
 
 #ifdef __cplusplus
 extern "C" {
@@ -36,6 +38,7 @@ typedef unsigned realm_task_func_id_t;
 typedef int realm_reduction_op_id_t;
 typedef int realm_custom_serdez_id_t;
 typedef unsigned realm_event_gen_t;
+#define REALM_EVENT_GENERATION_BITS  20
 typedef unsigned long long realm_barrier_timestamp_t;
 
 // Different Processor types

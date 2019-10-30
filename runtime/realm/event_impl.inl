@@ -1,4 +1,4 @@
-/* Copyright 2018 Stanford University, NVIDIA Corporation
+/* Copyright 2019 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -32,9 +32,16 @@ namespace Realm {
   //
   // class EventImpl
 
+  inline Event EventImpl::make_event(gen_t gen) const
+  {
+    ID id(me);
+    id.event_generation() = gen;
+    return id.convert<Event>();
+  }
+
   inline /*static*/ bool EventImpl::add_waiter(Event needed, EventWaiter *waiter)
   {
-    return get_event_impl(needed)->add_waiter(ID(needed).event.generation, waiter);
+    return get_event_impl(needed)->add_waiter(ID(needed).event_generation(), waiter);
   }
 
 
@@ -45,21 +52,14 @@ namespace Realm {
   inline Event GenEventImpl::current_event(void) const
   {
     ID id(me);
-    id.event.generation = this->generation + 1;
-    return id.convert<Event>();
-  }
-
-  inline Event GenEventImpl::make_event(gen_t gen) const
-  {
-    ID id(me);
-    id.event.generation = gen;
+    id.event_generation() = this->generation.load() + 1;
     return id.convert<Event>();
   }
 
   inline /*static*/ void GenEventImpl::trigger(Event e, bool poisoned)
   {
     GenEventImpl *impl = get_genevent_impl(e);
-    impl->trigger(ID(e).event.generation, my_node_id, poisoned);
+    impl->trigger(ID(e).event_generation(), Network::my_node_id, poisoned);
   }
 
 
@@ -70,7 +70,10 @@ namespace Realm {
   inline Barrier BarrierImpl::current_barrier(Barrier::timestamp_t timestamp /*= 0*/) const
   {
     ID id(me);
-    id.barrier.generation = this->generation + 1;
+    gen_t gen = this->generation + 1;
+    if(gen > id.barrier_generation().MAXVAL)
+      return Barrier::NO_BARRIER;
+    id.barrier_generation() = gen;
     Barrier b = id.convert<Barrier>();
     b.timestamp = timestamp;
     return b;
@@ -80,10 +83,23 @@ namespace Realm {
 					   Barrier::timestamp_t timestamp /*= 0*/) const
   {
     ID id(me);
-    id.barrier.generation = gen;
+    if(gen > id.barrier_generation().MAXVAL)
+      return Barrier::NO_BARRIER;
+    id.barrier_generation() = gen;
     Barrier b = id.convert<Barrier>();
     b.timestamp = timestamp;
     return b;
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class EventWaiter
+
+  inline std::ostream& operator<<(std::ostream& os, const EventWaiter &waiter)
+  {
+    waiter.print(os);
+    return os;
   }
 
 

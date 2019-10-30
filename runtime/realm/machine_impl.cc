@@ -1,4 +1,4 @@
-/* Copyright 2018 Stanford University, NVIDIA Corporation
+/* Copyright 2019 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -46,12 +46,12 @@ namespace Realm {
 
   static inline bool is_local_affinity(const Machine::ProcessorMemoryAffinity& pma)
   {
-    return ID(pma.p).proc.owner_node == ID(pma.m).memory.owner_node;
+    return ID(pma.p).proc_owner_node() == ID(pma.m).memory_owner_node();
   }
 
   static inline bool is_local_affinity(const Machine::MemoryMemoryAffinity& mma)
   {
-    return ID(mma.m1).memory.owner_node == ID(mma.m2).memory.owner_node;
+    return ID(mma.m1).memory_owner_node() == ID(mma.m2).memory_owner_node();
   }
 
 
@@ -189,7 +189,7 @@ namespace Realm {
 
   bool MachineNodeInfo::add_processor(Processor p)
   {
-    assert(node == ID(p).proc.owner_node);
+    assert(node == NodeID(ID(p).proc_owner_node()));
     MachineProcInfo *& ptr = procs[p];
     // TODO: see if anything changed?
     if(ptr != 0)
@@ -204,7 +204,7 @@ namespace Realm {
   
   bool MachineNodeInfo::add_memory(Memory m)
   {
-    assert(node == ID(m).memory.owner_node);
+    assert(node == NodeID(ID(m).memory_owner_node()));
     MachineMemInfo *& ptr = mems[m];
     // TODO: see if anything changed?
     if(ptr != 0)
@@ -221,14 +221,14 @@ namespace Realm {
   {
     bool changed = false;
 
-    if(ID(pma.p).proc.owner_node == node) {
+    if(NodeID(ID(pma.p).proc_owner_node()) == node) {
       MachineProcInfo *mpi = procs[pma.p];
       assert(mpi != 0);
       if(mpi->add_proc_mem_affinity(pma))
 	changed = true;
     }
 
-    if(ID(pma.m).memory.owner_node == node) {
+    if(NodeID(ID(pma.m).memory_owner_node()) == node) {
       MachineMemInfo *mmi = mems[pma.m];
       assert(mmi != 0);
       if(mmi->add_proc_mem_affinity(pma))
@@ -242,14 +242,14 @@ namespace Realm {
   {
     bool changed = false;
 
-    if(ID(mma.m1).memory.owner_node == node) {
+    if(NodeID(ID(mma.m1).memory_owner_node()) == node) {
       MachineMemInfo *mmi = mems[mma.m1];
       assert(mmi != 0);
       if(mmi->add_mem_mem_affinity(mma))
 	changed = true;
     }
 
-    if(ID(mma.m2).memory.owner_node == node) {
+    if(NodeID(ID(mma.m2).memory_owner_node()) == node) {
       MachineMemInfo *mmi = mems[mma.m2];
       assert(mmi != 0);
       if(mmi->add_mem_mem_affinity(mma))
@@ -272,7 +272,7 @@ namespace Realm {
 
     size_t Machine::get_address_space_count(void) const
     {
-      return max_node_id + 1;
+      return Network::max_node_id + 1;
     }
 
     void Machine::get_all_memories(std::set<Memory>& mset) const
@@ -427,9 +427,9 @@ namespace Realm {
 					       const void *args, size_t arglen,
 					       bool remote)
     {
-      AutoHSLLock al(mutex);
+      AutoLock<> al(mutex);
 
-      assert(node_id <= max_node_id);
+      assert(node_id <= Network::max_node_id);
       Node& n = get_runtime()->nodes[node_id];
 
       Serialization::FixedBufferDeserializer fbd(args, arglen);
@@ -455,13 +455,13 @@ namespace Realm {
 		  (fbd >> kind) &&
 		  (fbd >> num_cores));
 	    if(ok) {
-	      assert(ID(p).proc.owner_node == node_id);
-	      assert(ID(p).proc.proc_idx < num_procs);
+	      assert(NodeID(ID(p).proc_owner_node()) == node_id);
+	      assert(ID(p).proc_proc_idx() < num_procs);
 	      log_annc.debug() << "adding proc " << p << " (kind = " << kind
 			       << " num_cores = " << num_cores << ")";
 	      if(remote) {
 		RemoteProcessor *proc = new RemoteProcessor(p, kind, num_cores);
-		n.processors[ID(p).proc.proc_idx] = proc;
+		n.processors[ID(p).proc_proc_idx()] = proc;
 	      }
 	    }
 	  }
@@ -472,21 +472,31 @@ namespace Realm {
 	    Memory m;
 	    Memory::Kind kind;
 	    size_t size;
-	    intptr_t regbase;
+	    bool has_rdma_info = false;
+	    ByteArray rdma_info;
 	    ok = (ok &&
 		  (fbd >> m) &&
 		  (fbd >> kind) &&
 		  (fbd >> size) &&
-		  (fbd >> regbase));
+		  (fbd >> has_rdma_info));
+	    if(has_rdma_info)
+	      ok = ok && (fbd >> rdma_info);
 	    if(ok) {
-	      assert(ID(m).memory.owner_node == node_id);
-	      assert(ID(m).memory.mem_idx < num_memories);
+	      assert(NodeID(ID(m).memory_owner_node()) == node_id);
+	      assert(ID(m).memory_mem_idx() < num_memories);
 	      log_annc.debug() << "adding memory " << m << " (kind = " << kind
-			       << ", size = " << size << ", regbase = " << std::hex << regbase << std::dec << ")";
+			       << ", size = " << size << ", has_rdma = " << has_rdma_info << ")";
 	      if(remote) {
-		RemoteMemory *mem = new RemoteMemory(m, size, kind,
-						     reinterpret_cast<void *>(regbase));
-		n.memories[ID(m).memory.mem_idx] = mem;
+		MemoryImpl *mem;
+		if(has_rdma_info) {
+		  mem = Network::get_network(node_id)->create_remote_memory(m,
+									    size,
+									    kind,
+									    rdma_info);
+		} else {
+		  mem = new RemoteMemory(m, size, kind);
+		}
+		n.memories[ID(m).memory_mem_idx()] = mem;
 
 #ifndef REALM_SKIP_INTERNODE_AFFINITIES
 		{
@@ -501,7 +511,7 @@ namespace Realm {
 		    continue;
 
 		  // iterate over local memories and check their kinds
-		  Node *mynode = &(get_runtime()->nodes[my_node_id]);
+		  Node *mynode = &(get_runtime()->nodes[Network::my_node_id]);
 		  for(std::vector<MemoryImpl *>::const_iterator it = mynode->memories.begin();
 		      it != mynode->memories.end();
 		      ++it) {
@@ -550,21 +560,31 @@ namespace Realm {
 	    Memory m;
 	    Memory::Kind kind;
 	    size_t size;
-	    intptr_t regbase;
+	    bool has_rdma_info = false;
+	    ByteArray rdma_info;
 	    ok = (ok &&
 		  (fbd >> m) &&
 		  (fbd >> kind) &&
 		  (fbd >> size) &&
-		  (fbd >> regbase));
+		  (fbd >> has_rdma_info));
+	    if(has_rdma_info)
+	      ok = ok && (fbd >> rdma_info);
 	    if(ok) {
-	      assert(ID(m).memory.owner_node == node_id);
-	      assert(ID(m).memory.mem_idx < num_ib_memories);
+	      assert(NodeID(ID(m).memory_owner_node()) == node_id);
+	      assert(ID(m).memory_mem_idx() < num_ib_memories);
 	      log_annc.debug() << "adding ib memory " << m << " (kind = " << kind
-			       << ", size = " << size << ", regbase = " << std::hex << regbase << std::dec << ")";
+			       << ", size = " << size << ", has_rdma = " << has_rdma_info << ")";
 	      if(remote) {
-		RemoteMemory *mem = new RemoteMemory(m, size, kind,
-						     reinterpret_cast<void *>(regbase));
-		n.ib_memories[ID(m).memory.mem_idx] = mem;
+		MemoryImpl *mem;
+		if(has_rdma_info) {
+		  mem = Network::get_network(node_id)->create_remote_memory(m,
+									    size,
+									    kind,
+									    rdma_info);
+		} else {
+		  mem = new RemoteMemory(m, size, kind);
+		}
+		n.ib_memories[ID(m).memory_mem_idx()] = mem;
 	      }
 	    }
 	  }
@@ -632,7 +652,7 @@ namespace Realm {
     void MachineImpl::get_all_memories(std::set<Memory>& mset) const
     {
       // TODO: consider using a reader/writer lock here instead
-      AutoHSLLock al(mutex);
+      AutoLock<> al(mutex);
 #ifdef USE_OLD_AFFINITIES
       for(std::vector<Machine::ProcessorMemoryAffinity>::const_iterator it = proc_mem_affinities.begin();
 	  it != proc_mem_affinities.end();
@@ -640,7 +660,7 @@ namespace Realm {
 	mset.insert((*it).m);
       }
 #else
-      for(std::map<int, MachineNodeInfo *>::const_iterator it = nodeinfos.begin();
+      for(std::map<NodeID, MachineNodeInfo *>::const_iterator it = nodeinfos.begin();
 	  it != nodeinfos.end();
 	  ++it)
 	for(std::map<Memory, MachineMemInfo *>::const_iterator it2 = it->second->mems.begin();
@@ -653,7 +673,7 @@ namespace Realm {
     void MachineImpl::get_all_processors(std::set<Processor>& pset) const
     {
       // TODO: consider using a reader/writer lock here instead
-      AutoHSLLock al(mutex);
+      AutoLock<> al(mutex);
 #ifdef USE_OLD_AFFINITIES
       for(std::vector<Machine::ProcessorMemoryAffinity>::const_iterator it = proc_mem_affinities.begin();
 	  it != proc_mem_affinities.end();
@@ -661,7 +681,7 @@ namespace Realm {
 	pset.insert((*it).p);
       }
 #else
-      for(std::map<int, MachineNodeInfo *>::const_iterator it = nodeinfos.begin();
+      for(std::map<NodeID, MachineNodeInfo *>::const_iterator it = nodeinfos.begin();
 	  it != nodeinfos.end();
 	  ++it)
 	for(std::map<Processor, MachineProcInfo *>::const_iterator it2 = it->second->procs.begin();
@@ -673,7 +693,7 @@ namespace Realm {
 
   inline MachineNodeInfo *MachineImpl::get_nodeinfo(int node) const
   {
-    std::map<int, MachineNodeInfo *>::const_iterator it = nodeinfos.find(node);
+    std::map<NodeID, MachineNodeInfo *>::const_iterator it = nodeinfos.find(node);
     if(it != nodeinfos.end())
       return it->second;
     else
@@ -682,28 +702,28 @@ namespace Realm {
 
   inline MachineNodeInfo *MachineImpl::get_nodeinfo(Processor p) const
   {
-    return get_nodeinfo(ID(p).proc.owner_node);
+    return get_nodeinfo(ID(p).proc_owner_node());
   }
 
   inline MachineNodeInfo *MachineImpl::get_nodeinfo(Memory m) const
   {
-    return get_nodeinfo(ID(m).memory.owner_node);
+    return get_nodeinfo(ID(m).memory_owner_node());
   }
 
     void MachineImpl::get_local_processors(std::set<Processor>& pset) const
     {
       // TODO: consider using a reader/writer lock here instead
-      AutoHSLLock al(mutex);
+      AutoLock<> al(mutex);
 #ifdef USE_OLD_AFFINITIES
       for(std::vector<Machine::ProcessorMemoryAffinity>::const_iterator it = proc_mem_affinities.begin();
 	  it != proc_mem_affinities.end();
 	  it++) {
 	Processor p = (*it).p;
-	if(ID(p).proc.owner_node == my_node_id)
+	if(ID(p).proc_owner_node() == Network::my_node_id)
 	  pset.insert(p);
       }
 #else
-      const MachineNodeInfo *mynode = get_nodeinfo(my_node_id);
+      const MachineNodeInfo *mynode = get_nodeinfo(Network::my_node_id);
       assert(mynode != 0);
       for(std::map<Processor, MachineProcInfo *>::const_iterator it = mynode->procs.begin();
 	  it != mynode->procs.end();
@@ -716,17 +736,17 @@ namespace Realm {
 						   Processor::Kind kind) const
     {
       // TODO: consider using a reader/writer lock here instead
-      AutoHSLLock al(mutex);
+      AutoLock<> al(mutex);
 #ifdef USE_OLD_AFFINITIES
       for(std::vector<Machine::ProcessorMemoryAffinity>::const_iterator it = proc_mem_affinities.begin();
 	  it != proc_mem_affinities.end();
 	  it++) {
 	Processor p = (*it).p;
-	if((ID(p).proc.owner_node == my_node_id) && (p.kind() == kind))
+	if((ID(p).proc_owner_node() == Network::my_node_id) && (p.kind() == kind))
 	  pset.insert(p);
       }
 #else
-      const MachineNodeInfo *mynode = get_nodeinfo(my_node_id);
+      const MachineNodeInfo *mynode = get_nodeinfo(Network::my_node_id);
       assert(mynode != 0);
       std::map<Processor::Kind, std::map<Processor, MachineProcInfo *> >::const_iterator it = mynode->proc_by_kind.find(kind);
       if(it != mynode->proc_by_kind.end())
@@ -741,7 +761,7 @@ namespace Realm {
     void MachineImpl::get_visible_memories(Processor p, std::set<Memory>& mset, bool local_only) const
     {
       // TODO: consider using a reader/writer lock here instead
-      AutoHSLLock al(mutex);
+      AutoLock<> al(mutex);
 #ifdef USE_OLD_AFFINITIES
       for(std::vector<Machine::ProcessorMemoryAffinity>::const_iterator it = proc_mem_affinities.begin();
 	  it != proc_mem_affinities.end();
@@ -770,7 +790,7 @@ namespace Realm {
 					   bool local_only) const
     {
       // TODO: consider using a reader/writer lock here instead
-      AutoHSLLock al(mutex);
+      AutoLock<> al(mutex);
 #ifdef USE_OLD_AFFINITIES
       for(std::vector<Machine::MemoryMemoryAffinity>::const_iterator it = mem_mem_affinities.begin();
 	  it != mem_mem_affinities.end();
@@ -815,7 +835,7 @@ namespace Realm {
 					    bool local_only) const
     {
       // TODO: consider using a reader/writer lock here instead
-      AutoHSLLock al(mutex);
+      AutoLock<> al(mutex);
 #ifdef USE_OLD_AFFINITIES
       for(std::vector<Machine::ProcessorMemoryAffinity>::const_iterator it = proc_mem_affinities.begin();
 	  it != proc_mem_affinities.end();
@@ -841,7 +861,7 @@ namespace Realm {
     bool MachineImpl::has_affinity(Processor p, Memory m, Machine::AffinityDetails *details /*= 0*/) const
     {
       // TODO: consider using a reader/writer lock here instead
-      AutoHSLLock al(mutex);
+      AutoLock<> al(mutex);
       for(std::vector<Machine::ProcessorMemoryAffinity>::const_iterator it = proc_mem_affinities.begin();
 	  it != proc_mem_affinities.end();
 	  it++) {
@@ -859,7 +879,7 @@ namespace Realm {
     bool MachineImpl::has_affinity(Memory m1, Memory m2, Machine::AffinityDetails *details /*= 0*/) const
     {
       // TODO: consider using a reader/writer lock here instead
-      AutoHSLLock al(mutex);
+      AutoLock<> al(mutex);
       for(std::vector<Machine::MemoryMemoryAffinity>::const_iterator it = mem_mem_affinities.begin();
 	  it != mem_mem_affinities.end();
 	  it++) {
@@ -883,7 +903,7 @@ namespace Realm {
 
       {
 	// TODO: consider using a reader/writer lock here instead
-	AutoHSLLock al(mutex);
+	AutoLock<> al(mutex);
 #ifdef USE_OLD_AFFINITIES
 	for(std::vector<Machine::ProcessorMemoryAffinity>::const_iterator it = proc_mem_affinities.begin();
 	    it != proc_mem_affinities.end();
@@ -934,7 +954,7 @@ namespace Realm {
 	    }
 	  } else {
 	    // lookup of every single affinity - blech
-	    for(std::map<int, MachineNodeInfo *>::const_iterator it = nodeinfos.begin();
+	    for(std::map<NodeID, MachineNodeInfo *>::const_iterator it = nodeinfos.begin();
 		it != nodeinfos.end();
 		++it)
 	      for(std::map<Processor, MachineProcInfo *>::const_iterator it2 = it->second->procs.begin();
@@ -979,7 +999,7 @@ namespace Realm {
 
       {
 	// TODO: consider using a reader/writer lock here instead
-	AutoHSLLock al(mutex);
+	AutoLock<> al(mutex);
 #ifdef USE_OLD_AFFINITIES
 	for(std::vector<Machine::MemoryMemoryAffinity>::const_iterator it = mem_mem_affinities.begin();
 	    it != mem_mem_affinities.end();
@@ -1032,7 +1052,7 @@ namespace Realm {
 	    }
 	  } else {
 	    // lookup of every single affinity - blech
-	    for(std::map<int, MachineNodeInfo *>::const_iterator it = nodeinfos.begin();
+	    for(std::map<NodeID, MachineNodeInfo *>::const_iterator it = nodeinfos.begin();
 		it != nodeinfos.end();
 		++it)
 	      for(std::map<Memory, MachineMemInfo *>::const_iterator it2 = it->second->mems.begin();
@@ -1063,8 +1083,8 @@ namespace Realm {
 
     proc_mem_affinities.push_back(pma);
 
-    int np = ID(pma.p).proc.owner_node;
-    int mp = ID(pma.m).memory.owner_node;
+    int np = ID(pma.p).proc_owner_node();
+    int mp = ID(pma.m).memory_owner_node();
     {
       MachineNodeInfo *& ptr = nodeinfos[np];
       if(!ptr) ptr = new MachineNodeInfo(np);
@@ -1090,8 +1110,8 @@ namespace Realm {
 
     mem_mem_affinities.push_back(mma);
 
-    int m1p = ID(mma.m1).memory.owner_node;
-    int m2p = ID(mma.m2).memory.owner_node;
+    int m1p = ID(mma.m1).memory_owner_node();
+    int m2p = ID(mma.m2).memory_owner_node();
     {
       MachineNodeInfo *& ptr = nodeinfos[m1p];
       if(!ptr) ptr = new MachineNodeInfo(m1p);
@@ -1112,13 +1132,13 @@ namespace Realm {
 
     void MachineImpl::add_subscription(Machine::MachineUpdateSubscriber *subscriber)
     {
-      AutoHSLLock al(mutex);
+      AutoLock<> al(mutex);
       subscribers.insert(subscriber);
     }
 
     void MachineImpl::remove_subscription(Machine::MachineUpdateSubscriber *subscriber)
     {
-      AutoHSLLock al(mutex);
+      AutoLock<> al(mutex);
       subscribers.erase(subscriber);
     }
 
@@ -1187,21 +1207,21 @@ namespace Realm {
   Machine::ProcessorQuery& Machine::ProcessorQuery::local_address_space(void)
   {
     impl = ((ProcessorQueryImpl *)impl)->writeable_reference();
-    ((ProcessorQueryImpl *)impl)->restrict_to_node(my_node_id);
+    ((ProcessorQueryImpl *)impl)->restrict_to_node(Network::my_node_id);
     return *this;
   }
 
   Machine::ProcessorQuery& Machine::ProcessorQuery::same_address_space_as(Processor p)
   {
     impl = ((ProcessorQueryImpl *)impl)->writeable_reference();
-    ((ProcessorQueryImpl *)impl)->restrict_to_node(ID(p).proc.owner_node);
+    ((ProcessorQueryImpl *)impl)->restrict_to_node(ID(p).proc_owner_node());
     return *this;
   }
 
   Machine::ProcessorQuery& Machine::ProcessorQuery::same_address_space_as(Memory m)
   {
     impl = ((ProcessorQueryImpl *)impl)->writeable_reference();
-    ((ProcessorQueryImpl *)impl)->restrict_to_node(ID(m).proc.owner_node);
+    ((ProcessorQueryImpl *)impl)->restrict_to_node(ID(m).proc_owner_node());
     return *this;
   }
       
@@ -1240,7 +1260,7 @@ namespace Realm {
     return ((ProcessorQueryImpl *)impl)->first_match();
   }
 
-  Processor Machine::ProcessorQuery::next(Processor after)
+  Processor Machine::ProcessorQuery::next(Processor after) const
   {
     if (Config::use_machine_query_cache)
       return ((ProcessorQueryImpl *)impl)->cache_next(after);
@@ -1294,21 +1314,21 @@ namespace Realm {
   Machine::MemoryQuery& Machine::MemoryQuery::local_address_space(void)
   {
     impl = ((MemoryQueryImpl *)impl)->writeable_reference();
-    ((MemoryQueryImpl *)impl)->restrict_to_node(my_node_id);
+    ((MemoryQueryImpl *)impl)->restrict_to_node(Network::my_node_id);
     return *this;
   }
 
   Machine::MemoryQuery& Machine::MemoryQuery::same_address_space_as(Processor p)
   {
     impl = ((MemoryQueryImpl *)impl)->writeable_reference();
-    ((MemoryQueryImpl *)impl)->restrict_to_node(ID(p).proc.owner_node);
+    ((MemoryQueryImpl *)impl)->restrict_to_node(ID(p).proc_owner_node());
     return *this;
   }
 
   Machine::MemoryQuery& Machine::MemoryQuery::same_address_space_as(Memory m)
   {
     impl = ((MemoryQueryImpl *)impl)->writeable_reference();
-    ((MemoryQueryImpl *)impl)->restrict_to_node(ID(m).memory.owner_node);
+    ((MemoryQueryImpl *)impl)->restrict_to_node(ID(m).memory_owner_node());
     return *this;
   }
       
@@ -1663,7 +1683,7 @@ namespace Realm {
           }
         }
         else  {
-          std::map<int, MachineNodeInfo *>::const_iterator it;
+          std::map<NodeID, MachineNodeInfo *>::const_iterator it;
           it = machine->nodeinfos.begin();
           // iterate over all the nodes
           while(it != machine->nodeinfos.end()) {
@@ -1796,9 +1816,9 @@ namespace Realm {
     // enter the first element i.e. after
     cur_cached_list->push_back(after);
     cur_index = 1;
-    std::map<int, MachineNodeInfo *>::const_iterator it;
+    std::map<NodeID, MachineNodeInfo *>::const_iterator it;
     // start where we left off
-    it = machine->nodeinfos.find(ID(after).proc.owner_node);
+    it = machine->nodeinfos.find(ID(after).proc_owner_node());
     while(it != machine->nodeinfos.end()) {
       if(is_restricted_node && (it->first != restricted_node_id))
         break;
@@ -1816,7 +1836,7 @@ namespace Realm {
       if(plist) {
         std::map<Processor, MachineProcInfo *>::const_iterator it2;
         // same node?  if so, skip past ones we've done
-        if(it->first == ID(after).proc.owner_node)
+        if(it->first == NodeID(ID(after).proc_owner_node()))
           it2 = plist->upper_bound(after);
         else
           it2 = plist->begin();
@@ -1851,12 +1871,12 @@ namespace Realm {
     Processor lowest = Processor::NO_PROC;
     {
       // problem with nested locks here...
-      //AutoHSLLock al(machine->mutex);
+      //AutoLock<> al(machine->mutex);
       for(std::vector<Machine::ProcessorMemoryAffinity>::const_iterator it = machine->proc_mem_affinities.begin();
 	  it != machine->proc_mem_affinities.end();
 	  it++) {
 	Processor p =(*it).p;
-	if(is_restricted_node && (ID(p).proc.owner_node != (unsigned)restricted_node_id))
+	if(is_restricted_node && (ID(p).proc_owner_node() != (unsigned)restricted_node_id))
 	  continue;
 	if(is_restricted_kind && (p.kind() != restricted_kind))
 	  continue;
@@ -1878,7 +1898,7 @@ namespace Realm {
       return pval;
 
     // general case where restricted_node_id or predicates are defined
-    std::map<int, MachineNodeInfo *>::const_iterator it;
+    std::map<NodeID, MachineNodeInfo *>::const_iterator it;
     if(is_restricted_node)
       it = machine->nodeinfos.lower_bound(restricted_node_id);
     else
@@ -1932,13 +1952,13 @@ namespace Realm {
     Processor lowest = Processor::NO_PROC;
     {
       // problem with nested locks here...
-      //AutoHSLLock al(machine->mutex);
+      //AutoLock<> al(machine->mutex);
       for(std::vector<Machine::ProcessorMemoryAffinity>::const_iterator it = machine->proc_mem_affinities.begin();
 	  it != machine->proc_mem_affinities.end();
 	  it++) {
 	Processor p =(*it).p;
 	if(p.id <= after.id) continue;
-	if(is_restricted_node && (ID(p).proc.owner_node != (unsigned)restricted_node_id))
+	if(is_restricted_node && (ID(p).proc_owner_node() != (unsigned)restricted_node_id))
 	  continue;
 	if(is_restricted_kind && (p.kind() != restricted_kind))
 	  continue;
@@ -1953,9 +1973,9 @@ namespace Realm {
     }
     return lowest;
 #else
-    std::map<int, MachineNodeInfo *>::const_iterator it;
+    std::map<NodeID, MachineNodeInfo *>::const_iterator it;
     // start where we left off
-    it = machine->nodeinfos.find(ID(after).proc.owner_node);
+    it = machine->nodeinfos.find(ID(after).proc_owner_node());
     while(it != machine->nodeinfos.end()) {
       if(is_restricted_node && (it->first != restricted_node_id))
 	break;
@@ -1973,7 +1993,7 @@ namespace Realm {
       if(plist) {
         std::map<Processor, MachineProcInfo *>::const_iterator it2;
 	// same node?  if so, skip past ones we've done
-	if(it->first == ID(after).proc.owner_node)
+	if(it->first == NodeID(ID(after).proc_owner_node()))
 	  it2 = plist->upper_bound(after);
 	else
 	  it2 = plist->begin();
@@ -2018,12 +2038,12 @@ namespace Realm {
     std::set<Processor> pset;
     {
       // problem with nested locks here...
-      //AutoHSLLock al(machine->mutex);
+      //AutoLock<> al(machine->mutex);
       for(std::vector<Machine::ProcessorMemoryAffinity>::const_iterator it = machine->proc_mem_affinities.begin();
 	  it != machine->proc_mem_affinities.end();
 	  it++) {
 	Processor p =(*it).p;
-	if(is_restricted_node && (ID(p).proc.owner_node != (unsigned)restricted_node_id))
+	if(is_restricted_node && (ID(p).proc_owner_node() != (unsigned)restricted_node_id))
 	  continue;
 	if(is_restricted_kind && (p.kind() != restricted_kind))
 	  continue;
@@ -2042,7 +2062,7 @@ namespace Realm {
     if (cached_query(count))
       return count;
 
-    std::map<int, MachineNodeInfo *>::const_iterator it;
+    std::map<NodeID, MachineNodeInfo *>::const_iterator it;
     if(is_restricted_node)
       it = machine->nodeinfos.lower_bound(restricted_node_id);
     else
@@ -2098,12 +2118,12 @@ namespace Realm {
     int count = 0;
     {
       // problem with nested locks here...
-      //AutoHSLLock al(machine->mutex);
+      //AutoLock<> al(machine->mutex);
       for(std::vector<Machine::ProcessorMemoryAffinity>::const_iterator it = machine->proc_mem_affinities.begin();
 	  it != machine->proc_mem_affinities.end();
 	  it++) {
 	Processor p =(*it).p;
-	if(is_restricted_node && (ID(p).proc.owner_node != (unsigned)restricted_node_id))
+	if(is_restricted_node && (ID(p).proc_owner_node() != (unsigned)restricted_node_id))
 	  continue;
 	if(is_restricted_kind && (p.kind() != restricted_kind))
 	  continue;
@@ -2125,7 +2145,7 @@ namespace Realm {
     if (cached_query(pval, QUERY_RANDOM))
       return pval;
     int count = 0;
-    std::map<int, MachineNodeInfo *>::const_iterator it;
+    std::map<NodeID, MachineNodeInfo *>::const_iterator it;
     if(is_restricted_node)
       it = machine->nodeinfos.lower_bound(restricted_node_id);
     else
@@ -2490,7 +2510,7 @@ namespace Realm {
       // if not found - dynamically create the cache
       // mem_cache may also be cleared/reset when dealing with resilience/elasticity
       if (!found) {
-        std::map<int, MachineNodeInfo *>::const_iterator it;
+        std::map<NodeID, MachineNodeInfo *>::const_iterator it;
         it = machine->nodeinfos.begin();
         // iterate over all the nodes
         while(it != machine->nodeinfos.end()) {
@@ -2617,9 +2637,9 @@ namespace Realm {
     // enter the first element
     cur_cached_list->push_back(after);
     cur_index = 1;
-    std::map<int, MachineNodeInfo *>::const_iterator it;
+    std::map<NodeID, MachineNodeInfo *>::const_iterator it;
     // start where we left off
-    it = machine->nodeinfos.find(ID(after).memory.owner_node);
+    it = machine->nodeinfos.find(ID(after).memory_owner_node());
     while(it != machine->nodeinfos.end()) {
       if(is_restricted_node && (it->first != restricted_node_id))
         break;
@@ -2636,7 +2656,7 @@ namespace Realm {
       if(plist) {
         std::map<Memory, MachineMemInfo *>::const_iterator it2;
         // same node?  if so, skip past ones we've done
-        if(it->first == ID(after).memory.owner_node)
+        if(it->first == NodeID(ID(after).memory_owner_node()))
           it2 = plist->upper_bound(after);
         else
           it2 = plist->begin();
@@ -2670,12 +2690,12 @@ namespace Realm {
     Memory lowest = Memory::NO_MEMORY;
     {
       // problem with nested locks here...
-      //AutoHSLLock al(machine->mutex);
+      //AutoLock<> al(machine->mutex);
       for(std::vector<Machine::ProcessorMemoryAffinity>::const_iterator it = machine->proc_mem_affinities.begin();
 	  it != machine->proc_mem_affinities.end();
 	  it++) {
 	Memory m =(*it).m;
-	if(is_restricted_node && (ID(m).memory.owner_node != (unsigned)restricted_node_id))
+	if(is_restricted_node && (ID(m).memory_owner_node() != (unsigned)restricted_node_id))
 	  continue;
 	if(is_restricted_kind && (m.kind() != restricted_kind))
 	  continue;
@@ -2695,7 +2715,7 @@ namespace Realm {
     if (cached_query(mval, QUERY_FIRST))
       return mval;
 
-    std::map<int, MachineNodeInfo *>::const_iterator it;
+    std::map<NodeID, MachineNodeInfo *>::const_iterator it;
     if(is_restricted_node)
       it = machine->nodeinfos.lower_bound(restricted_node_id);
     else
@@ -2748,13 +2768,13 @@ namespace Realm {
     Memory lowest = Memory::NO_MEMORY;
     {
       // problem with nested locks here...
-      //AutoHSLLock al(machine->mutex);
+      //AutoLock<> al(machine->mutex);
       for(std::vector<Machine::ProcessorMemoryAffinity>::const_iterator it = machine->proc_mem_affinities.begin();
 	  it != machine->proc_mem_affinities.end();
 	  it++) {
 	Memory m =(*it).m;
 	if(m.id <= after.id) continue;
-	if(is_restricted_node && (ID(m).memory.owner_node != (unsigned)restricted_node_id))
+	if(is_restricted_node && (ID(m).memory_owner_node() != (unsigned)restricted_node_id))
 	  continue;
 	if(is_restricted_kind && (m.kind() != restricted_kind))
 	  continue;
@@ -2769,9 +2789,9 @@ namespace Realm {
     }
     return lowest;
 #else
-    std::map<int, MachineNodeInfo *>::const_iterator it;
+    std::map<NodeID, MachineNodeInfo *>::const_iterator it;
     // start where we left off
-    it = machine->nodeinfos.find(ID(after).memory.owner_node);
+    it = machine->nodeinfos.find(ID(after).memory_owner_node());
     while(it != machine->nodeinfos.end()) {
       if(is_restricted_node && (it->first != restricted_node_id))
 	break;
@@ -2789,7 +2809,7 @@ namespace Realm {
       if(plist) {
         std::map<Memory, MachineMemInfo *>::const_iterator it2;
 	// same node?  if so, skip past ones we've done
-	if(it->first == ID(after).memory.owner_node)
+	if(it->first == NodeID(ID(after).memory_owner_node()))
 	  it2 = plist->upper_bound(after);
 	else
 	  it2 = plist->begin();
@@ -2844,12 +2864,12 @@ namespace Realm {
     std::set<Memory> pset;
     {
       // problem with nested locks here...
-      //AutoHSLLock al(machine->mutex);
+      //AutoLock<> al(machine->mutex);
       for(std::vector<Machine::ProcessorMemoryAffinity>::const_iterator it = machine->proc_mem_affinities.begin();
 	  it != machine->proc_mem_affinities.end();
 	  it++) {
 	Memory m =(*it).m;
-	if(is_restricted_node && (ID(m).memory.owner_node != (unsigned)restricted_node_id))
+	if(is_restricted_node && (ID(m).memory_owner_node() != (unsigned)restricted_node_id))
 	  continue;
 	if(is_restricted_kind && (m.kind() != restricted_kind))
 	  continue;
@@ -2867,7 +2887,7 @@ namespace Realm {
     size_t count = 0;
     if (cached_query(count))
       return count;
-    std::map<int, MachineNodeInfo *>::const_iterator it;
+    std::map<NodeID, MachineNodeInfo *>::const_iterator it;
     if(is_restricted_node)
       it = machine->nodeinfos.lower_bound(restricted_node_id);
     else
@@ -2924,12 +2944,12 @@ namespace Realm {
     int count = 0;
     {
       // problem with nested locks here...
-      //AutoHSLLock al(machine->mutex);
+      //AutoLock<> al(machine->mutex);
       for(std::vector<Machine::ProcessorMemoryAffinity>::const_iterator it = machine->proc_mem_affinities.begin();
 	  it != machine->proc_mem_affinities.end();
 	  it++) {
 	Memory m =(*it).m;
-	if(is_restricted_node && (ID(m).memory.owner_node != (unsigned)restricted_node_id))
+	if(is_restricted_node && (ID(m).memory_owner_node() != (unsigned)restricted_node_id))
 	  continue;
 	if(is_restricted_kind && (m.kind() != restricted_kind))
 	  continue;
@@ -2952,7 +2972,7 @@ namespace Realm {
       return mval;
 
     size_t count = 0;
-    std::map<int, MachineNodeInfo *>::const_iterator it;
+    std::map<NodeID, MachineNodeInfo *>::const_iterator it;
     if(is_restricted_node)
       it = machine->nodeinfos.lower_bound(restricted_node_id);
     else
@@ -3006,18 +3026,18 @@ namespace Realm {
 
   static int announcements_received = 0;
 
-  /*static*/ void NodeAnnounceMessage::handle_request(RequestArgs args,
-						      const void *data,
-						      size_t datalen)
+  /*static*/ void NodeAnnounceMessage::handle_message(NodeID sender, const NodeAnnounceMessage &args,
+						      const void *data, size_t datalen)
+
   {
     DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
     log_annc.info("%d: received announce from %d (%d procs, %d memories)\n",
-		  my_node_id,
-		  args.node_id,
+		  Network::my_node_id,
+		  sender,
 		  args.num_procs,
 		  args.num_memories);
     
-    Node *n = &(get_runtime()->nodes[args.node_id]);
+    Node *n = &(get_runtime()->nodes[sender]);
     n->processors.resize(args.num_procs);
     n->memories.resize(args.num_memories);
     n->ib_memories.resize(args.num_ib_memories);
@@ -3025,7 +3045,7 @@ namespace Realm {
     // do the parsing of this data inside a mutex because it touches common
     //  data structures
     {
-      get_machine()->parse_node_announce_data(args.node_id, args.num_procs,
+      get_machine()->parse_node_announce_data(sender, args.num_procs,
 					      args.num_memories, args.num_ib_memories,
 					      data, datalen, true);
 
@@ -3033,30 +3053,22 @@ namespace Realm {
     }
   }
 
-  /*static*/ void NodeAnnounceMessage::send_request(NodeID target,
-						    unsigned num_procs,
-						    unsigned num_memories,
-						    unsigned num_ib_memories,
-						    const void *data,
-						    size_t datalen,
-						    int payload_mode)
-  {
-    RequestArgs args;
-
-    args.node_id = my_node_id;
-    args.num_procs = num_procs;
-    args.num_memories = num_memories;
-    args.num_ib_memories = num_ib_memories;
-    Message::request(target, args, data, datalen, payload_mode);
-  }
-
   /*static*/ void NodeAnnounceMessage::await_all_announcements(void)
   {
     // wait until we hear from everyone else?
-    while((int)announcements_received < max_node_id)
-      do_some_polling();
+    while((int)announcements_received < Network::max_node_id) {
+#ifdef __MACH__
+      sched_yield();
+#else
+      pthread_yield();
+#endif
+      //do_some_polling();
+    }
 
-    log_annc.info("node %d has received all of its announcements", my_node_id);
+    log_annc.info("node %d has received all of its announcements", Network::my_node_id);
   }
+  
+
+  ActiveMessageHandlerReg<NodeAnnounceMessage> node_announce_message;
 
 }; // namespace Realm

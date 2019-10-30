@@ -1,4 +1,4 @@
-/* Copyright 2018 Stanford University, NVIDIA Corporation
+/* Copyright 2019 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -618,11 +618,6 @@ namespace Realm {
     assert(m_type.is<FunctionPointerType>());
     FunctionPointerImplementation *fpi = new FunctionPointerImplementation(reinterpret_cast<void(*)()>(fnptr));
     m_impls.push_back(fpi);
-#if defined(REALM_USE_DLFCN) && defined(REALM_USE_DLADDR)
-    DSOReferenceImplementation *dsoref = DSOReferenceImplementation::cvt_fnptr_to_dsoref(fpi, true /*quiet*/);
-    if(dsoref)
-      m_impls.push_back(dsoref);
-#endif
   }
 
   inline CodeDescriptor& CodeDescriptor::set_type(const Type& _t)

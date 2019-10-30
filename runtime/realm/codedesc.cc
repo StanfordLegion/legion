@@ -1,4 +1,4 @@
-/* Copyright 2018 Stanford University, NVIDIA Corporation
+/* Copyright 2019 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -141,6 +141,24 @@ namespace Realm {
     return false;
   }
 
+  // attempt to make a portable implementation from what we have
+  bool CodeDescriptor::create_portable_implementation(void)
+  {
+    // TODO: actually have translators registered where we can find them
+#if defined(REALM_USE_DLFCN) && defined(REALM_USE_DLADDR)
+    const FunctionPointerImplementation *fpi = find_impl<FunctionPointerImplementation>();
+    if(fpi) {
+      DSOReferenceImplementation *dsoref = DSOReferenceImplementation::cvt_fnptr_to_dsoref(fpi, true /*quiet*/);
+      if(dsoref) {
+	m_impls.push_back(dsoref);
+	return true;
+      }
+    }
+#endif
+
+    return false;
+  }
+
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -244,13 +262,13 @@ namespace Realm {
       return 0;
     }
   };
-#endif
 
   /*static*/ DSOReferenceImplementation *DSOReferenceImplementation::cvt_fnptr_to_dsoref(const FunctionPointerImplementation *fpi,
 											 bool quiet /*= false*/)
   {
     return dladdr_helper((void *)(fpi->fnptr), quiet);
   } 
+#endif
 #endif
 
 

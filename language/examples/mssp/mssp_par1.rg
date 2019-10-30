@@ -1,4 +1,4 @@
--- Copyright 2018 Stanford University
+-- Copyright 2019 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -115,12 +115,12 @@ do
     var count = 0
     fill(rn.dist_next, INFINITY)
 
-    __demand(__parallel)
+    __demand(__index_launch)
     for i = 0, subgraphs do
       sssp_update(g, rn, pe[i])
     end
 
-    __demand(__parallel)
+    __demand(__index_launch)
     for i = 0, subgraphs do
       count += sssp_collect(g, pn[i])
     end
@@ -205,7 +205,7 @@ task toplevel()
   var pe = partition(equal, re, colors)
 
   -- parallel load of edge data
-  __demand(__parallel)
+  __demand(__index_launch)
   for i = 0, subgraphs do
     read_edge_data(graph, rn, pe[i])
   end
@@ -214,7 +214,7 @@ task toplevel()
     fill(rn.distance, INFINITY)
 
     var root_id = graph.sources[s]
-    var root : ptr(Node, rn) = dynamic_cast(ptr(Node, rn), [ptr](root_id))
+    var root : ptr(Node, rn) = dynamic_cast(ptr(Node, rn), ptr(root_id))
     var ts_start = c.legion_get_current_time_in_micros()
     wait_for(sssp(graph, subgraphs, rn, re, pn, pe, root))
     var ts_end = c.legion_get_current_time_in_micros()

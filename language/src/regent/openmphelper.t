@@ -1,4 +1,4 @@
--- Copyright 2018 Stanford University
+-- Copyright 2019 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -12,12 +12,13 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
+local base = require("regent/std_base")
 local std = require("regent/std")
 
 local omp = {}
 
-local has_openmp = false
-do
+local has_openmp = std.config["openmp"] and std.config["openmp-offline"]
+if not std.config["openmp-offline"] then
   local dlfcn = terralib.includec("dlfcn.h")
   local terra find_openmp_symbols()
     var lib = dlfcn.dlopen([&int8](0), dlfcn.RTLD_LAZY)
@@ -60,7 +61,82 @@ end
 -- TODO: This might not be the right size in platforms other than x86
 omp.CACHE_LINE_SIZE = 64
 
-function omp.generate_preamble_structured(rect, idx, start_idx, end_idx)
+local FAST_ATOMICS = {
+  ["+"] = "add",
+  ["-"] = "sub",
+}
+
+omp.generate_atomic_update = terralib.memoize(function(op, typ)
+  -- Build a C wrapper to use atomic intrinsics in LLVM
+  local atomic_update = nil
+  local op_name = base.reduction_ops[op].name
+  assert(op_name ~= nil)
+  -- Integer types
+  if typ:isintegral() then
+    local ctype = typ.cachedcstring or typ:cstring()
+    assert(ctype ~= nil)
+    -- If there is a native support for the operation, use it directly
+    if FAST_ATOMICS[op] ~= nil then
+      local fun_name = string.format("__atomic_update_%s_%s", op_name, ctype)
+      local C = terralib.includecstring(string.format([[
+        #include <stdint.h>
+        void %s(%s *address, %s val) {
+          __sync_fetch_and_%s(address, val);
+        }
+      ]], fun_name, ctype, ctype, FAST_ATOMICS[op]))
+      terra atomic_update(address : &typ, val : typ)
+        [ C[fun_name] ](address, val)
+      end
+    else
+      local fun_name = string.format("__compare_and_swap_%s_%s", op_name, ctype)
+      local C = terralib.includecstring(string.format([[
+        #include <stdint.h>
+        %s %s(%s *address, %s old, %s new) {
+          return __sync_val_compare_and_swap(address, old, new);
+        }
+      ]], ctype, fun_name, ctype, ctype, ctype))
+      terra atomic_update(address : &typ, val : typ)
+        var success = false
+        while not success do
+          var old = @address
+          var new = [std.quote_binary_op(op, old, val)]
+          var res = [ C[fun_name] ](address, old, new)
+          success = res == old
+        end
+      end
+    end
+  else
+    local size = terralib.sizeof(typ) * 8
+    local cas_type = _G["uint" .. tostring(size)]
+    local ctype = typ.cachedcstring or typ:cstring()
+    local cas_ctype = cas_type.cachedcstring or cas_type:cstring()
+    local fun_name = string.format("__compare_and_swap_%s_%s", op_name, ctype)
+    local C = terralib.includecstring(string.format([[
+      #include <stdint.h>
+      %s %s(%s *address, %s old, %s new) {
+        return __sync_val_compare_and_swap(address, old, new);
+      }
+    ]], cas_ctype, fun_name, cas_ctype, cas_ctype, cas_ctype))
+    terra atomic_update(address : &typ, val : typ)
+      var success = false
+      while not success do
+        var old = @address
+        var new = [std.quote_binary_op(op, old, val)]
+
+        var address_b : &cas_type = [&cas_type](address)
+        var old_b : &cas_type = [&cas_type](&old)
+        var new_b : &cas_type = [&cas_type](&new)
+        var res : cas_type = [ C[fun_name] ](address_b, @old_b, @new_b)
+        success = res == @old_b
+      end
+    end
+  end
+  assert(atomic_update ~= nil)
+  atomic_update:setinlined(true)
+  return atomic_update
+end)
+
+function omp.generate_preamble(rect, idx, start_idx, end_idx)
   return quote
     var num_threads = [omp.get_num_threads]()
     var thread_id = [omp.get_thread_num]()
@@ -92,7 +168,7 @@ function omp.generate_argument_type(symbols, reductions)
   return arg_type, mapping
 end
 
-function omp.generate_argument_init(arg, arg_type, mapping, reductions)
+function omp.generate_argument_init(arg, arg_type, mapping, can_change, reductions)
   local worker_init = arg_type.entries:map(function(pair)
     local field_name, field_type = unpack(pair)
     local symbol = mapping[field_name]
@@ -103,34 +179,52 @@ function omp.generate_argument_init(arg, arg_type, mapping, reductions)
       return quote var [symbol] = [arg].[field_name] end
     end
   end)
-  local launch_init = arg_type.entries:map(function(pair)
+
+  local launch_init = terralib.newlist()
+  launch_init:insert(quote
+    var arg_obj : arg_type
+    var [arg] = &arg_obj
+  end)
+  local launch_update = terralib.newlist()
+
+  arg_type.entries:map(function(pair)
     local field_name, field_type = unpack(pair)
     local symbol = mapping[field_name]
     if reductions[symbol] ~= nil then
+      local init = std.reduction_op_init[reductions[symbol]][symbol.type]
       assert(field_type:ispointer())
-      return quote
+      launch_init:insert(quote
+        var num_threads = [omp.get_max_threads]()
         -- We don't like false sharing
-        var size = [omp.get_max_threads]()  * omp.CACHE_LINE_SIZE
+        var size = num_threads  * omp.CACHE_LINE_SIZE
         var data = std.c.malloc(size)
         std.assert(size == 0 or data ~= nil, "malloc failed in generate_argument_init")
         [arg].[field_name] = [field_type](data)
-      end
+        for i = 0, num_threads do
+          @[&symbol.type]([&int8](data) + i * omp.CACHE_LINE_SIZE) = [init]
+        end
+      end)
+    elseif not can_change[symbol] then
+      launch_init:insert(quote [arg].[field_name] = [symbol] end)
     else
-      return quote [arg].[field_name] = [symbol] end
+      launch_update:insert(quote [arg].[field_name] = [symbol] end)
     end
   end)
-  return worker_init, launch_init
+
+  return worker_init, launch_init, launch_update
 end
 
 function omp.generate_worker_cleanup(arg, arg_type, mapping, reductions)
   return arg_type.entries:map(function(pair)
     local field_name, field_type = unpack(pair)
     local symbol = mapping[field_name]
-    if reductions[symbol] ~= nil then
+    local op = reductions[symbol]
+    if op ~= nil then
       return quote
         do
           var idx = [omp.get_thread_num]() * (omp.CACHE_LINE_SIZE / [sizeof(symbol.type)])
-          [arg].[field_name][idx] = [symbol]
+          [arg].[field_name][idx] = [std.quote_binary_op(op, symbol,
+            `([arg].[field_name][idx]))]
         end
       end
     else

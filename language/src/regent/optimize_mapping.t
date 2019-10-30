@@ -1,4 +1,4 @@
--- Copyright 2018 Stanford University, NVIDIA Corporation
+-- Copyright 2019 Stanford University, NVIDIA Corporation
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -62,10 +62,18 @@ local function uses(cx, region_type, polarity)
 
   assert(std.type_supports_privileges(region_type))
   local usage = data.newmap()
+  -- We over-approximate projected regions to their sources.
+  -- Regions that are projected onto disjoint sets of fields are
+  -- in fact independent but will be treated like the same region.
+  if std.is_region(region_type) and region_type:is_projected() then
+    region_type = region_type:get_projection_source()
+  end
   usage[region_type] = polarity
 
   for other_region_type, _ in cx.region_universe:items() do
-    if std.is_region(other_region_type) then -- Skip lists of regions
+    if std.is_region(other_region_type) and -- Skip lists of regions
+       not other_region_type:is_projected() -- Skip projected regions as well
+    then
       local constraint = std.constraint(
         region_type,
         other_region_type,
@@ -623,7 +631,7 @@ end
 
 function optimize_mapping.top(cx, node)
   if node:is(ast.typed.top.Task) and
-     not node.config_options.inner
+     not (node.config_options.inner or node.config_options.leaf)
   then
     return optimize_mapping.top_task(cx, node)
 

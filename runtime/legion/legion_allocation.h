@@ -1,4 +1,4 @@
-/* Copyright 2018 Stanford University, NVIDIA Corporation
+/* Copyright 2019 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -27,9 +27,6 @@
 #include <stddef.h>
 #include <functional>
 #include <stdlib.h>
-#ifndef __MACH__
-#include <malloc.h>
-#endif
 #include "legion/legion_config.h"
 #include "legion/legion_template_help.h" // StaticAssert
 #if __cplusplus >= 201103L
@@ -59,12 +56,10 @@ namespace Legion {
       INSTANCE_MANAGER_ALLOC,
       LIST_MANAGER_ALLOC,
       FOLD_MANAGER_ALLOC,
-      COMPOSITE_NODE_ALLOC,
       TREE_CLOSE_ALLOC,
       TREE_CLOSE_IMPL_ALLOC,
       MATERIALIZED_VIEW_ALLOC,
       REDUCTION_VIEW_ALLOC,
-      COMPOSITE_VIEW_ALLOC,
       FILL_VIEW_ALLOC,
       PHI_VIEW_ALLOC,
       INDIVIDUAL_TASK_ALLOC,
@@ -79,8 +74,6 @@ namespace Legion {
       FENCE_OP_ALLOC,
       FRAME_OP_ALLOC,
       DELETION_OP_ALLOC,
-      OPEN_OP_ALLOC,
-      ADVANCE_OP_ALLOC,
       CLOSE_OP_ALLOC,
       DYNAMIC_COLLECTIVE_OP_ALLOC,
       FUTURE_PRED_OP_ALLOC,
@@ -138,11 +131,12 @@ namespace Legion {
       CURRENT_STATE_ALLOC,
       VERSION_MANAGER_ALLOC,
       PHYSICAL_STATE_ALLOC,
-      VERSION_STATE_ALLOC,
+      EQUIVALENCE_SET_ALLOC,
       AGGREGATE_VERSION_ALLOC,
       TASK_IMPL_ALLOC,
       VARIANT_IMPL_ALLOC,
       LAYOUT_CONSTRAINTS_ALLOC,
+      COPY_FILL_AGGREGATOR_ALLOC,
       LAST_ALLOC, // must be last
     };
 

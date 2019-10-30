@@ -1,4 +1,4 @@
--- Copyright 2018 Stanford University
+-- Copyright 2019 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -143,45 +143,45 @@ task main()
   -- optimized: loop-invariant argument is read-only
   do
     var j = 3
-    __demand(__parallel)
+    __demand(__index_launch)
     for i in cs do
       f(p_disjoint[(j + 1) % n])
     end
   end
 
   -- optimized: loop-variant argument is non-interfering
-  __demand(__parallel)
+  __demand(__index_launch)
   for i in cs do
     f(p_disjoint[i])
   end
 
   -- optimized: loop-variant argument is non-interfering
-  __demand(__parallel)
+  __demand(__index_launch)
   for i in cs do
     f(p_aliased[i])
   end
 
   -- optimized: loop-variant argument is non-interfering
-  __demand(__parallel)
+  __demand(__index_launch)
   for i in cs do
     h(p_aliased[i])
   end
 
   -- optimized: loop-variant argument is non-interfering
-  __demand(__parallel)
+  __demand(__index_launch)
   for i in cs do
     g2(p0_disjoint[i], p1_disjoint[i])
   end
 
   -- optimized: loop-variant argument is non-interfering
-  __demand(__parallel)
+  __demand(__index_launch)
   for i in cs do
     g(p_disjoint[i])
   end
 
   -- optimized: reduction is non-interfering
   var y = 0
-  __demand(__parallel)
+  __demand(__index_launch)
   for i in cs do
     y += f(p_disjoint[i])
   end

@@ -1,4 +1,4 @@
-/* Copyright 2018 Stanford University, NVIDIA Corporation
+/* Copyright 2019 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -41,7 +41,7 @@ namespace Realm {
     {
       // take lock so we can make sure we get a precise list of early requestors
       {
-	AutoHSLLock a(mutex);
+	AutoLock<> a(mutex);
 	early_reqs = remote_copies;
 	state = STATE_VALID;
       }
@@ -51,7 +51,7 @@ namespace Realm {
     {
       // just add the requestor to the list of remote nodes with copies, can send
       //   response if the data is already valid
-      AutoHSLLock a(mutex);
+      AutoLock<> a(mutex);
 
       assert(!remote_copies.contains(requestor));
       remote_copies.add(requestor);
@@ -65,7 +65,7 @@ namespace Realm {
       // if there was an event, we'll trigger it
       Event to_trigger = Event::NO_EVENT;
       {
-	AutoHSLLock a(mutex);
+	AutoLock<> a(mutex);
 
 	switch(state) {
 	case STATE_REQUESTED:
@@ -92,12 +92,12 @@ namespace Realm {
 	return Event::NO_EVENT;
 
       // sanity-check - should never be requesting data from ourselves
-      assert(owner != my_node_id);
+      assert(owner != Network::my_node_id);
 
       Event e = Event::NO_EVENT;
       bool issue_request = false;
       {
-	AutoHSLLock a(mutex);
+	AutoLock<> a(mutex);
 
 	switch(state) {
 	case STATE_VALID:
@@ -133,8 +133,11 @@ namespace Realm {
 	}
       }
 
-      if(issue_request)
-	MetadataRequestMessage::send_request(owner, id);
+      if(issue_request) {
+	ActiveMessage<MetadataRequestMessage> amsg(owner);
+	amsg->id = id;
+	amsg.commit();
+      }
 
       return e;
     }
@@ -148,7 +151,7 @@ namespace Realm {
       //  information to do that now)
       Event e = Event::NO_EVENT;
       {
-	AutoHSLLock a(mutex);
+	AutoLock<> a(mutex);
 
 	assert(state != STATE_INVALID);
 	e = valid_event;
@@ -162,7 +165,7 @@ namespace Realm {
     {
       NodeSet invals_to_send;
       {
-	AutoHSLLock a(mutex);
+	AutoLock<> a(mutex);
 
 	assert(state == STATE_VALID);
 
@@ -178,15 +181,16 @@ namespace Realm {
       if(invals_to_send.empty())
 	return true;
 
-      MetadataInvalidateMessage::broadcast_request(invals_to_send, id);
-
+      ActiveMessage<MetadataInvalidateMessage> amsg(invals_to_send);
+      amsg->id = id;
+      amsg.commit();
       // can't free object until we receive all the acks
       return false;
     }
 
     void MetadataBase::handle_invalidate(void)
     {
-      AutoHSLLock a(mutex);
+      AutoLock<> a(mutex);
 
       switch(state) {
       case STATE_VALID: 
@@ -212,7 +216,7 @@ namespace Realm {
     {
       bool last_copy;
       {
-	AutoHSLLock a(mutex);
+	AutoLock<> a(mutex);
 
 	assert(remote_copies.contains(sender));
 	remote_copies.remove(sender);
@@ -228,47 +232,36 @@ namespace Realm {
   // class MetadataRequestMessage
   //
 
-  /*static*/ void MetadataRequestMessage::handle_request(RequestArgs args)
+  /*static*/ void MetadataRequestMessage::handle_message(NodeID sender, const MetadataRequestMessage &args,
+							 const void *data, size_t datalen)
   {
-    void *data = 0;
-    size_t datalen = 0;
-    
     // switch on different types of objects that can have metadata
     ID id(args.id);
     if(id.is_instance()) {
       RegionInstanceImpl *impl = get_runtime()->get_instance_impl(args.id);
-      bool valid = impl->metadata.handle_request(args.node);
-      if(valid)
-	data = impl->metadata.serialize(datalen);
-    } else {
+      bool valid = impl->metadata.handle_request(sender);
+      if(valid) {
+	ActiveMessage<MetadataResponseMessage> amsg(sender, 65536);
+	impl->metadata.serialize_msg(amsg);
+	amsg->id = args.id;
+	log_metadata.info("metadata for " IDFMT " requested by %d",
+			  args.id, sender);
+	amsg.commit();
+      }
+    }
+    else {
       assert(0);
     }
-
-    if(data) {
-      log_metadata.info("metadata for " IDFMT " requested by %d - %zd bytes",
-			args.id, args.node, datalen);
-      MetadataResponseMessage::send_request(args.node, args.id, data, datalen, PAYLOAD_FREE);
-    }
   }
 
-  /*static*/ void MetadataRequestMessage::send_request(NodeID target, ID::IDType id)
-  {
-    RequestArgs args;
-
-    args.node = my_node_id;
-    args.id = id;
-    Message::request(target, args);
-  }
-
-  
   ////////////////////////////////////////////////////////////////////////
   //
   // class MetadataResponseMessage
   //
 
-  /*static*/ void MetadataResponseMessage::handle_request(RequestArgs args,
-							  const void *data,
-							  size_t datalen)
+  /*static*/ void MetadataResponseMessage::handle_message(NodeID sender,
+							  const MetadataResponseMessage &args,
+							  const void *data, size_t datalen)
   {
     log_metadata.info("metadata for " IDFMT " received - %zd bytes",
 		      args.id, datalen);
@@ -284,57 +277,14 @@ namespace Realm {
     }
   }
 
-  /*static*/ void MetadataResponseMessage::send_request(NodeID target,
-							ID::IDType id, 
-							const void *data,
-							size_t datalen,
-							int payload_mode)
-  {
-    RequestArgs args;
-
-    args.id = id;
-    Message::request(target, args, data, datalen, payload_mode);
-  }
-
-  template <typename T>
-  struct BroadcastWDataHelper : public T::RequestArgs {
-    BroadcastWDataHelper(const void *_data, size_t _datalen, int _payload_mode)
-      : data(_data), datalen(_datalen), payload_mode(_payload_mode)
-    {}
-
-    inline void apply(NodeID target)
-    {
-      T::Message::request(target, *this, data, datalen, payload_mode);
-    }
-
-    void broadcast(const NodeSet& targets)
-    {
-      targets.map(*this);
-    }
-
-    const void *data;
-    size_t datalen;
-    int payload_mode;
-  };
-  
-  /*static*/ void MetadataResponseMessage::broadcast_request(const NodeSet& targets,
-							     ID::IDType id, 
-							     const void *data,
-							     size_t datalen)
-  {
-    BroadcastWDataHelper<MetadataResponseMessage> args(data, datalen, PAYLOAD_COPY);
-
-    args.id = id;
-    args.broadcast(targets);
-  }
-
   
   ////////////////////////////////////////////////////////////////////////
   //
   // class MetadataInvalidateMessage
   //
 
-  /*static*/ void MetadataInvalidateMessage::handle_request(RequestArgs args)
+  /*static*/ void MetadataInvalidateMessage::handle_message(NodeID sender,const MetadataInvalidateMessage &args,
+							    const void *data, size_t datalen)
   {
     log_metadata.info("received invalidate request for " IDFMT, args.id);
 
@@ -349,49 +299,19 @@ namespace Realm {
     }
 
     // ack the request
-    MetadataInvalidateAckMessage::send_request(args.owner, args.id);
+    ActiveMessage<MetadataInvalidateAckMessage> amsg(sender);
+    amsg->id = args.id;
+    amsg.commit();
   }
 
-  /*static*/ void MetadataInvalidateMessage::send_request(NodeID target,
-							  ID::IDType id)
-  {
-    RequestArgs args;
-
-    args.owner = my_node_id;
-    args.id = id;
-    Message::request(target, args);
-  }
-
-  template <typename T>
-  struct BroadcastHelper : public T::RequestArgs {
-    inline void apply(NodeID target)
-    {
-      T::Message::request(target, *this);
-    }
-
-    void broadcast(const NodeSet& targets)
-    {
-      targets.map(*this);
-    }
-  };
-  
-  /*static*/ void MetadataInvalidateMessage::broadcast_request(const NodeSet& targets,
-							       ID::IDType id)
-  {
-    BroadcastHelper<MetadataInvalidateMessage> args;
-
-    args.owner = my_node_id;
-    args.id = id;
-    args.broadcast(targets);
-  }
-
-  
   ////////////////////////////////////////////////////////////////////////
   //
   // class MetadataInvalidateAckMessage
   //
 
-  /*static*/ void MetadataInvalidateAckMessage::handle_request(RequestArgs args)
+  /*static*/ void MetadataInvalidateAckMessage::handle_message(NodeID sender,
+							       const MetadataInvalidateAckMessage &args,
+							       const void *data, size_t datalen)
   {
     log_metadata.info("received invalidate ack for " IDFMT, args.id);
 
@@ -400,7 +320,7 @@ namespace Realm {
     ID id(args.id);
     if(id.is_instance()) {
       RegionInstanceImpl *impl = get_runtime()->get_instance_impl(args.id);
-      last_ack = impl->metadata.handle_inval_ack(args.node);
+      last_ack = impl->metadata.handle_inval_ack(sender);
       if(last_ack)
 	impl->recycle_instance();
     } else {
@@ -411,15 +331,10 @@ namespace Realm {
       log_metadata.info("last inval ack received for " IDFMT, args.id);
     }
   }
-   
-  /*static*/ void MetadataInvalidateAckMessage::send_request(NodeID target, ID::IDType id)
-  {
-    RequestArgs args;
 
-    args.node = my_node_id;
-    args.id = id;
-    Message::request(target, args);
-  }
-  
+  ActiveMessageHandlerReg<MetadataRequestMessage> metadata_request_message_handler;
+  ActiveMessageHandlerReg<MetadataResponseMessage> metadata_response_message_handler;
+  ActiveMessageHandlerReg<MetadataInvalidateMessage> metadata_invalidate_message_handler;
+  ActiveMessageHandlerReg<MetadataInvalidateAckMessage> metadata_invalidate_ack_message_handler;
 
 }; // namespace Realm

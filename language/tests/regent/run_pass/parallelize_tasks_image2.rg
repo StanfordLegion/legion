@@ -1,4 +1,4 @@
--- Copyright 2018 Stanford University
+-- Copyright 2019 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -59,7 +59,6 @@ __demand(__parallel)
 task stencil(r1 : region(ispace(int2d), fs1), r2 : region(fs2(r1)))
 where reads(r1.f, r2.p), reads writes(r2.g)
 do
-  var ts_start = c.legion_get_current_time_in_micros()
   for e in r2 do
     e.g += 0.5 *
            r1[e.p].f *
@@ -67,14 +66,11 @@ do
            r1[(e.p + {2, 0}) % r1.bounds].f *
            r1[(e.p + {1, 1}) % r1.bounds].f
   end
-  var ts_end = c.legion_get_current_time_in_micros()
-  c.printf("parallel version: %lu us\n", ts_end - ts_start)
 end
 
 task stencil_serial(r1 : region(ispace(int2d), fs1), r2 : region(fs2(r1)))
 where reads(r1.f, r2.p), reads writes(r2.h)
 do
-  var ts_start = c.legion_get_current_time_in_micros()
   for e in r2 do
     e.h += 0.5 *
            r1[e.p].f *
@@ -82,8 +78,6 @@ do
            r1[(e.p + {2, 0}) % r1.bounds].f *
            r1[(e.p + {1, 1}) % r1.bounds].f
   end
-  var ts_end = c.legion_get_current_time_in_micros()
-  c.printf("serial version: %lu us\n", ts_end - ts_start)
 end
 
 local cmath = terralib.includec("math.h")

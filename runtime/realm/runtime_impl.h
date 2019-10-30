@@ -1,4 +1,4 @@
-/* Copyright 2018 Stanford University, NVIDIA Corporation
+/* Copyright 2019 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,7 +21,7 @@
 #include "realm/runtime.h"
 #include "realm/id.h"
 
-#include "realm/activemsg.h"
+#include "realm/network.h"
 #include "realm/operation.h"
 #include "realm/profiling.h"
 
@@ -40,6 +40,7 @@
 #include "realm/sampling.h"
 
 #include "realm/module.h"
+#include "realm/network.h"
 
 #if __cplusplus >= 201103L
 #define typeof decltype
@@ -51,7 +52,7 @@ namespace Realm {
   class MemoryImpl;
   class ProcessorImpl;
   class RegionInstanceImpl;
-  class Module;
+  class NetworkSegment;
 
   class Channel; // from transfer/channel.h
   typedef Channel DMAChannel;
@@ -63,7 +64,7 @@ namespace Realm {
       static const size_t INNER_BITS = _INNER_BITS;
       static const size_t LEAF_BITS = _LEAF_BITS;
 
-      typedef GASNetHSL LT;
+      typedef Mutex LT;
       typedef int IT;
       typedef DynamicTableNode<DynamicTableNodeBase<LT, IT> *, 1 << INNER_BITS, LT, IT> INNER_TYPE;
       typedef DynamicTableNode<ET, 1 << LEAF_BITS, LT, IT> LEAF_TYPE;
@@ -75,6 +76,7 @@ namespace Realm {
       static Reservation make_id(const ReservationImpl& dummy, int owner, int index) { return ID::make_reservation(owner, index).convert<Reservation>(); }
       static Processor make_id(const ProcessorGroup& dummy, int owner, int index) { return ID::make_procgroup(owner, 0, index).convert<Processor>(); }
       static ID make_id(const SparsityMapImplWrapper& dummy, int owner, int index) { return ID::make_sparsity(owner, 0, index); }
+      static CompletionQueue make_id(const CompQueueImpl& dummy, int owner, int index) { return ID::make_compqueue(owner, index).convert<CompletionQueue>(); }
       
       static LEAF_TYPE *new_leaf_node(IT first_index, IT last_index, 
 				      int owner, FreeList *free_list)
@@ -103,11 +105,13 @@ namespace Realm {
       }
     };
 
-    typedef DynamicTableAllocator<GenEventImpl, 10, 8> EventTableAllocator;
+    // use a wide tree for events - max depth will be 2
+    typedef DynamicTableAllocator<GenEventImpl, 11, 16> EventTableAllocator;
     typedef DynamicTableAllocator<BarrierImpl, 10, 4> BarrierTableAllocator;
     typedef DynamicTableAllocator<ReservationImpl, 10, 8> ReservationTableAllocator;
     typedef DynamicTableAllocator<ProcessorGroup, 10, 4> ProcessorGroupTableAllocator;
     typedef DynamicTableAllocator<SparsityMapImplWrapper, 10, 4> SparsityMapTableAllocator;
+    typedef DynamicTableAllocator<CompQueueImpl, 10, 4> CompQueueTableAllocator;
 
     // for each of the ID-based runtime objects, we're going to have an
     //  implementation class and a table to look them up in
@@ -124,6 +128,7 @@ namespace Realm {
       DynamicTable<BarrierTableAllocator> barriers;
       DynamicTable<ReservationTableAllocator> reservations;
       DynamicTable<ProcessorGroupTableAllocator> proc_groups;
+      DynamicTable<CompQueueTableAllocator> compqueues;
 
       // sparsity maps can be created by other nodes, so keep a
       //  map per-creator_node
@@ -143,7 +148,7 @@ namespace Realm {
       void add_id_range(NodeID target, ID::ID_Types id_type, ID::IDType first, ID::IDType last);
 
     protected:
-      GASNetHSL mutex;
+      Mutex mutex;
       std::map<ID::ID_Types, int> batch_sizes, low_water_marks;
       std::map<ID::ID_Types, std::set<NodeID> > reqs_in_flight;
       std::map<ID::ID_Types, std::map<NodeID, std::vector<std::pair<ID::IDType, ID::IDType> > > > id_ranges;
@@ -179,11 +184,49 @@ namespace Realm {
     protected:
       int num_cpu_procs, num_util_procs, num_io_procs;
       int concurrent_io_threads;
-      size_t sysmem_size_in_mb, stack_size_in_mb;
+      size_t sysmem_size, stack_size;
       bool pin_util_procs;
     };
 
     REGISTER_REALM_MODULE(CoreModule);
+
+    template <typename K, typename V, typename LT = Mutex>
+    class LockedMap {
+    public:
+      bool exists(const K& key) const
+      {
+	AutoLock<LT> al(mutex);
+	typename std::map<K, V>::const_iterator it = map.find(key);
+	return (it != map.end());
+      }
+
+      bool put(const K& key, const V& value, bool replace = false)
+      {
+	AutoLock<LT> al(mutex);
+	typename std::map<K, V>::iterator it = map.find(key);
+	if(it != map.end()) {
+	  if(replace) it->second = value;
+	  return true;
+	} else {
+	  map.insert(std::make_pair(key, value));
+	  return false;
+	}
+      }
+
+      V get(const K& key, const V& defval) const
+      {
+	AutoLock<LT> al(mutex);
+	typename std::map<K, V>::const_iterator it = map.find(key);
+	if(it != map.end())
+	  return it->second;
+	else
+	  return defval;
+      }
+
+    //protected:
+      mutable LT mutex;
+      std::map<K, V> map;
+    };
 
     class RuntimeImpl {
     public:
@@ -213,8 +256,11 @@ namespace Realm {
 	       Runtime::RunStyle style = Runtime::ONE_TASK_ONLY,
 	       const void *args = 0, size_t arglen = 0, bool background = false);
 
-      // requests a shutdown of the runtime
-      void shutdown(bool local_request, int result_code);
+      // requests a shutdown of the runtime - returns true if request is a duplicate
+      bool request_shutdown(Event wait_on, int result_code);
+
+      // indicates shutdown has been initiated, wakes up a waiter if already present
+      void initiate_shutdown(void);
 
       // returns value of result_code passed to shutdown()
       int wait_for_shutdown(void);
@@ -233,6 +279,7 @@ namespace Realm {
       RegionInstanceImpl *get_instance_impl(ID id);
       SparsityMapImplWrapper *get_sparsity_impl(ID id);
       SparsityMapImplWrapper *get_available_sparsity_impl(NodeID target_node);
+      CompQueueImpl *get_compqueue_impl(ID id);
 
 #ifdef DEADLOCK_TRACE
       void add_thread(const pthread_t *thread);
@@ -242,19 +289,19 @@ namespace Realm {
     public:
       MachineImpl *machine;
 
-      std::map<ReductionOpID, ReductionOpUntyped *> reduce_op_table;
-      std::map<CustomSerdezID, CustomSerdezUntyped *> custom_serdez_table;
+      LockedMap<ReductionOpID, ReductionOpUntyped *> reduce_op_table;
+      LockedMap<CustomSerdezID, CustomSerdezUntyped *> custom_serdez_table;
 
 #ifdef NODE_LOGGING
       std::string prefix;
 #endif
 
       Node *nodes;
-      MemoryImpl *global_memory;
       EventTableAllocator::FreeList *local_event_free_list;
       BarrierTableAllocator::FreeList *local_barrier_free_list;
       ReservationTableAllocator::FreeList *local_reservation_free_list;
       ProcessorGroupTableAllocator::FreeList *local_proc_group_free_list;
+      CompQueueTableAllocator::FreeList *local_compqueue_free_list;
 
       // keep a free list for each node we allocate maps on (i.e. indexed
       //   by owner_node)
@@ -269,10 +316,13 @@ namespace Realm {
       pthread_t all_threads[MAX_NUM_THREADS];
       unsigned thread_counts[MAX_NUM_THREADS];
 #endif
-      volatile bool shutdown_requested;
+      Mutex shutdown_mutex;
+      CondVar shutdown_condvar;
+      bool shutdown_request_received;  // has a request for shutdown arrived
+      Event shutdown_precondition;
       int shutdown_result_code;
-      GASNetHSL shutdown_mutex;
-      GASNetCondVar shutdown_condvar;
+      bool shutdown_initiated;  // is it time to start shutting down
+      atomic<bool> shutdown_in_progress; // are we actively shutting down?
 
       CoreMap *core_map;
       CoreReservationSet *core_reservations;
@@ -281,6 +331,19 @@ namespace Realm {
 
       SamplingProfiler sampling_profiler;
 
+      class DeferredShutdown : public EventWaiter {
+      public:
+	void defer(RuntimeImpl *_runtime, Event wait_on);
+
+	virtual void event_triggered(bool poisoned);
+	virtual void print(std::ostream& os) const;
+	virtual Event get_finish_event(void) const;
+
+      protected:
+	RuntimeImpl *runtime;
+      };
+      DeferredShutdown deferred_shutdown;
+      
     public:
       // used by modules to add processors, memories, etc.
       void add_memory(MemoryImpl *m);
@@ -301,16 +364,15 @@ namespace Realm {
 
     protected:
       ID::IDType num_local_memories, num_local_ib_memories, num_local_processors;
-
-#ifndef USE_GASNET
-      // without gasnet, we fake registered memory with a normal malloc
-      void *nongasnet_regmem_base;
-      void *nongasnet_reg_ib_mem_base;
-#endif
+      NetworkSegment reg_ib_mem_segment;
+      NetworkSegment reg_mem_segment;
 
       ModuleRegistrar module_registrar;
       std::vector<Module *> modules;
       std::vector<CodeTranslator *> code_translators;
+
+      std::vector<NetworkModule *> network_modules;
+      std::vector<NetworkSegment *> network_segments;
     };
 
     extern RuntimeImpl *runtime_singleton;
@@ -325,51 +387,34 @@ namespace Realm {
     // active messages
 
     struct RemoteIDRequestMessage {
-      struct RequestArgs {
-	NodeID sender;
-	ID::ID_Types id_type;
-	int count;
-      };
+      ID::ID_Types id_type;
+      int count;
 
-      static void handle_request(RequestArgs args);
-
-      typedef ActiveMessageShortNoReply<REMOTE_ID_REQUEST_MSGID,
-				        RequestArgs,
-				        handle_request> Message;
-
-      static void send_request(NodeID target, ID::ID_Types id_type, int count);
+      static void handle_message(NodeID sender,const RemoteIDRequestMessage &msg,
+				 const void *data, size_t datalen);
     };
 
     struct RemoteIDResponseMessage {
-      struct RequestArgs {
-	NodeID responder;
-	ID::ID_Types id_type;
-	ID::IDType first_id, last_id;
-      };
+      ID::ID_Types id_type;
+      ID::IDType first_id, last_id;
 
-      static void handle_request(RequestArgs args);
-
-      typedef ActiveMessageShortNoReply<REMOTE_ID_RESPONSE_MSGID,
-				        RequestArgs,
-				        handle_request> Message;
-
-      static void send_request(NodeID target, ID::ID_Types id_type,
-			       ID::IDType first_id, ID::IDType last_id);
+      static void handle_message(NodeID sender,const RemoteIDResponseMessage &msg,
+				 const void *data, size_t datalen);
     };
 
+    struct RuntimeShutdownRequest {
+      Event wait_on;
+      int result_code;
+
+      static void handle_message(NodeID sender,const RuntimeShutdownRequest &msg,
+				 const void *data, size_t datalen);
+    };
+      
     struct RuntimeShutdownMessage {
-      struct RequestArgs {
-	int initiating_node;
-	int result_code;
-      };
+      int result_code;
 
-      static void handle_request(RequestArgs args);
-
-      typedef ActiveMessageShortNoReply<MACHINE_SHUTDOWN_MSGID,
-				        RequestArgs,
-				        handle_request> Message;
-
-      static void send_request(NodeID target, int result_code);
+      static void handle_message(NodeID sender,const RuntimeShutdownMessage &msg,
+				 const void *data, size_t datalen);
     };
       
 }; // namespace Realm

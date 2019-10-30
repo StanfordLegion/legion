@@ -1,4 +1,4 @@
--- Copyright 2018 Stanford University
+-- Copyright 2019 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -66,7 +66,7 @@ task main()
   -- not optimized: loop-invariant argument is interfering
   do
     var j = 3
-    __demand(__parallel)
+    __demand(__index_launch)
     for i = 0, n do
       g(p_disjoint[(j + 1) % n])
     end

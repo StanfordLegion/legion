@@ -1,4 +1,4 @@
-/* Copyright 2018 Stanford University, NVIDIA Corporation
+/* Copyright 2019 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -37,21 +37,17 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     LogicalView::LogicalView(RegionTreeForest *ctx, DistributedID did,
-                             AddressSpaceID own_addr,
-                             RegionTreeNode *node, bool register_now)
+                             AddressSpaceID own_addr, bool register_now)
       : DistributedCollectable(ctx->runtime, did, own_addr, register_now), 
-        context(ctx), logical_node(node)
+        context(ctx)
     //--------------------------------------------------------------------------
     {
-      logical_node->add_base_gc_ref(LOGICAL_VIEW_REF);
     }
 
     //--------------------------------------------------------------------------
     LogicalView::~LogicalView(void)
     //--------------------------------------------------------------------------
     {
-      if (logical_node->remove_base_gc_ref(LOGICAL_VIEW_REF))
-        delete logical_node;
     }
 
     //--------------------------------------------------------------------------
@@ -70,38 +66,18 @@ namespace Legion {
       LogicalView *view = static_cast<LogicalView*>(dc);
 #endif
       view->send_view(source);
-    }
-
-    //--------------------------------------------------------------------------
-    void LogicalView::defer_collect_user(ApEvent term_event,
-                                         ReferenceMutator *mutator) 
-    //--------------------------------------------------------------------------
-    {
-      // The runtime will add the gc reference to this view when necessary
-      runtime->defer_collect_user(this, term_event, mutator);
-    }
- 
-    //--------------------------------------------------------------------------
-    /*static*/ void LogicalView::handle_deferred_collect(LogicalView *view,
-                                           const std::set<ApEvent> &term_events)
-    //--------------------------------------------------------------------------
-    {
-      view->collect_users(term_events);
-      // Then remove the gc reference on the object
-      if (view->remove_base_gc_ref(PENDING_GC_REF))
-        delete view;
-    }
+    } 
 
     /////////////////////////////////////////////////////////////
     // InstanceView 
-    /////////////////////////////////////////////////////////////
+    ///////////////////////////////////////////////////////////// 
 
     //--------------------------------------------------------------------------
     InstanceView::InstanceView(RegionTreeForest *ctx, DistributedID did,
                                AddressSpaceID owner_sp,
-                               AddressSpaceID log_own, RegionTreeNode *node, 
+                               AddressSpaceID log_own,
                                UniqueID own_ctx, bool register_now)
-      : LogicalView(ctx, did, owner_sp, node, register_now), 
+      : LogicalView(ctx, did, owner_sp, register_now), 
         owner_context(own_ctx), logical_owner(log_own)
     //--------------------------------------------------------------------------
     {
@@ -113,50 +89,239 @@ namespace Legion {
     { 
     }
 
+#ifdef ENABLE_VIEW_REPLICATION
     //--------------------------------------------------------------------------
-    /*static*/ void InstanceView::handle_view_update_request(
+    void InstanceView::process_replication_request(AddressSpaceID source,
+                                                  const FieldMask &request_mask,
+                                                  RtUserEvent done_event)
+    //--------------------------------------------------------------------------
+    {
+      // Should only be called by derived classes
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void InstanceView::process_replication_response(RtUserEvent done_event,
+                                                    Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      // Should only be called by derived classes
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void InstanceView::process_replication_removal(AddressSpaceID source,
+                                                  const FieldMask &removal_mask)
+    //--------------------------------------------------------------------------
+    {
+      // Should only be called by derived classes
+      assert(false);
+    }
+#endif // ENABLE_VIEW_REPLICATION
+
+    //--------------------------------------------------------------------------
+    /*static*/ void InstanceView::handle_view_register_user(Deserializer &derez,
+                                        Runtime *runtime, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      DistributedID did;
+      derez.deserialize(did);
+      std::set<RtEvent> ready_events;
+      RtEvent ready;
+      LogicalView *view = runtime->find_or_request_logical_view(did, ready);
+      if (ready.exists())
+        ready_events.insert(ready);
+
+      RegionUsage usage;
+      derez.deserialize(usage);
+      FieldMask user_mask;
+      derez.deserialize(user_mask);
+      IndexSpace handle;
+      derez.deserialize(handle);
+      IndexSpaceNode *user_expr = runtime->forest->get_node(handle);
+      UniqueID op_id;
+      derez.deserialize(op_id);
+      unsigned index;
+      derez.deserialize(index);
+      ApEvent term_event;
+      derez.deserialize(term_event);
+      ApUserEvent ready_event;
+      derez.deserialize(ready_event);
+      RtUserEvent applied_event;
+      derez.deserialize(applied_event);
+      const PhysicalTraceInfo trace_info = 
+        PhysicalTraceInfo::unpack_trace_info(derez, runtime, ready_events);
+
+      if (!ready_events.empty())
+      {
+        const RtEvent wait_on = Runtime::merge_events(ready_events);
+        if (wait_on.exists() && !wait_on.has_triggered())
+          wait_on.wait();
+      }
+#ifdef DEBUG_LEGION
+      assert(view->is_instance_view());
+#endif
+      InstanceView *inst_view = view->as_instance_view();
+      std::set<RtEvent> applied_events;
+      ApEvent pre = inst_view->register_user(usage, user_mask, user_expr,
+                                             op_id, index, term_event,
+                                             applied_events, trace_info,source);
+      if (ready_event.exists())
+        Runtime::trigger_event(ready_event, pre);
+      if (!applied_events.empty())
+      {
+        const RtEvent precondition = Runtime::merge_events(applied_events);
+        Runtime::trigger_event(applied_event, precondition);
+        // Send back a response to the source removing the remote valid ref
+        if (inst_view->is_logical_owner())
+          inst_view->send_remote_valid_decrement(source, precondition);
+      }
+      else
+      {
+        Runtime::trigger_event(applied_event);
+        // Send back a response to the source removing the remote valid ref
+        if (inst_view->is_logical_owner())
+          inst_view->send_remote_valid_decrement(source, RtEvent::NO_RT_EVENT);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void InstanceView::handle_view_find_copy_pre_request(
                    Deserializer &derez, Runtime *runtime, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
       DistributedID did;
       derez.deserialize(did);
-      RtUserEvent done_event;
-      derez.deserialize(done_event);
       RtEvent ready = RtEvent::NO_RT_EVENT;
       LogicalView *view = runtime->find_or_request_logical_view(did, ready);
-      if (ready.exists())
+
+      bool reading;
+      derez.deserialize<bool>(reading);
+      FieldMask copy_mask;
+      derez.deserialize(copy_mask);
+      IndexSpaceExpression *copy_expr = 
+        IndexSpaceExpression::unpack_expression(derez, runtime->forest, source);
+      UniqueID op_id;
+      derez.deserialize(op_id);
+      unsigned index;
+      derez.deserialize(index);
+      CopyFillAggregator *remote_aggregator;
+      derez.deserialize(remote_aggregator);
+      RtUserEvent done_event;
+      derez.deserialize(done_event);
+      bool trace_recording;
+      derez.deserialize(trace_recording);
+
+#ifdef NON_AGGRESSIVE_AGGREGATORS
+      // There are often many parallel copy requests coming from remote nodes
+      // which could be handled in parallel, so if we always launch a meta task 
+      // to handle these since they are often expensive and we don't want to
+      // block the virtual channel. Note that we can't do this with methods
+      // that add users, but only non-modifying calls like this
+      DeferFindCopyPreconditionArgs args(view, reading, trace_recording, 
+                                         copy_mask, copy_expr, op_id, index, 
+                                         source, remote_aggregator, done_event);
+      // One-up the message priority here to keep us ahead of any other
+      // messages which might have been enqueued.
+      runtime->issue_runtime_meta_task(args,LG_LATENCY_RESPONSE_PRIORITY,ready);
+#else
+      // This blocks the virtual channel, but keeps queries in-order 
+      // with respect to updates from the same node which is necessary
+      // for preventing cycles in the realm event graph
+      if (ready.exists() && !ready.has_triggered())
         ready.wait();
-#ifdef DEBUG_LEGION
-      assert(view->is_instance_view());
-#endif
       InstanceView *inst_view = view->as_instance_view();
-      inst_view->process_update_request(source, done_event, derez);
+      EventFieldExprs preconditions;
+      inst_view->find_copy_preconditions_remote(reading, copy_mask, copy_expr,
+                        op_id, index, preconditions, trace_recording, source);
+      // Send back the response unless the preconditions are empty in
+      // which case we can just trigger the done event
+      if (!preconditions.empty())
+      {
+        // Pack up the response and send it back
+        Serializer rez;
+        {
+          RezCheck z2(rez);
+          rez.serialize(inst_view->did);
+          rez.serialize<size_t>(preconditions.size());
+          for (EventFieldExprs::const_iterator eit = preconditions.begin();
+                eit != preconditions.end(); eit++)
+          {
+            rez.serialize(eit->first);
+            const FieldMaskSet<IndexSpaceExpression> &exprs = eit->second;
+            rez.serialize<size_t>(exprs.size());
+            for (FieldMaskSet<IndexSpaceExpression>::const_iterator it = 
+                  exprs.begin(); it != exprs.end(); it++)
+            {
+              it->first->pack_expression(rez, source);
+              rez.serialize(it->second);
+            }
+          }
+          rez.serialize(remote_aggregator);
+          rez.serialize<bool>(reading);
+          rez.serialize(done_event);
+        }
+        runtime->send_view_find_copy_preconditions_response(source, rez);
+      }
+      else
+        Runtime::trigger_event(done_event);
+#endif
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void InstanceView::handle_view_update_response(
-                                          Deserializer &derez, Runtime *runtime)
+    /*static*/ void InstanceView::handle_view_find_copy_pre_request(
+                                             const void *args, Runtime *runtime)
     //--------------------------------------------------------------------------
     {
-      DerezCheck z(derez);
-      DistributedID did;
-      derez.deserialize(did);
-      RtUserEvent done_event;
-      derez.deserialize(done_event);
-      RtEvent ready = RtEvent::NO_RT_EVENT;
-      LogicalView *view = runtime->find_or_request_logical_view(did, ready);
-      if (ready.exists())
-        ready.wait();
+      const DeferFindCopyPreconditionArgs *dargs = 
+        (const DeferFindCopyPreconditionArgs*)args;
 #ifdef DEBUG_LEGION
-      assert(view->is_instance_view());
+      assert(dargs->view->is_instance_view());
 #endif
-      InstanceView *inst_view = view->as_instance_view();
-      inst_view->process_update_response(derez, done_event, runtime->forest);
+      InstanceView *inst_view = dargs->view->as_instance_view();
+      EventFieldExprs preconditions;
+      inst_view->find_copy_preconditions_remote(dargs->reading,
+          *dargs->copy_mask, dargs->copy_expr, dargs->op_id, dargs->index, 
+          preconditions, dargs->trace_recording, dargs->source);
+      // Send back the response unless the preconditions are empty in
+      // which case we can just trigger the done event
+      if (!preconditions.empty())
+      {
+        // Pack up the response and send it back
+        Serializer rez;
+        {
+          RezCheck z2(rez);
+          rez.serialize(inst_view->did);
+          rez.serialize<size_t>(preconditions.size());
+          for (EventFieldExprs::const_iterator eit = preconditions.begin();
+                eit != preconditions.end(); eit++)
+          {
+            rez.serialize(eit->first);
+            const FieldMaskSet<IndexSpaceExpression> &exprs = eit->second;
+            rez.serialize<size_t>(exprs.size());
+            for (FieldMaskSet<IndexSpaceExpression>::const_iterator it = 
+                  exprs.begin(); it != exprs.end(); it++)
+            {
+              it->first->pack_expression(rez, dargs->source);
+              rez.serialize(it->second);
+            }
+          }
+          rez.serialize(dargs->aggregator);
+          rez.serialize<bool>(dargs->reading);
+          rez.serialize(dargs->done_event);
+        }
+        runtime->send_view_find_copy_preconditions_response(dargs->source, rez);
+      }
+      else
+        Runtime::trigger_event(dargs->done_event);
+      // Clean up the mask we allocated
+      delete dargs->copy_mask;
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void InstanceView::handle_view_remote_update(
+    /*static*/ void InstanceView::handle_view_find_copy_pre_response(
                    Deserializer &derez, Runtime *runtime, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
@@ -165,36 +330,1921 @@ namespace Legion {
       derez.deserialize(did);
       RtEvent ready = RtEvent::NO_RT_EVENT;
       LogicalView *view = runtime->find_or_request_logical_view(did, ready);
-      if (ready.exists())
+
+      EventFieldExprs preconditions;
+      size_t num_events;
+      derez.deserialize(num_events);
+      for (unsigned idx1 = 0; idx1 < num_events; idx1++)
+      {
+        ApEvent event;
+        derez.deserialize(event);
+        size_t num_exprs;
+        derez.deserialize(num_exprs);
+        FieldMaskSet<IndexSpaceExpression> &exprs = preconditions[event];
+        for (unsigned idx2 = 0; idx2 < num_exprs; idx2++)
+        {
+          IndexSpaceExpression *expr = IndexSpaceExpression::unpack_expression(
+                                                derez, runtime->forest, source);
+          FieldMask expr_mask;
+          derez.deserialize(expr_mask);
+          exprs.insert(expr, expr_mask);
+        }
+      }
+      CopyFillAggregator *local_aggregator;
+      derez.deserialize(local_aggregator);
+      bool reading;
+      derez.deserialize(reading);
+      RtUserEvent done_event;
+      derez.deserialize(done_event);
+
+      if (ready.exists() && !ready.has_triggered())
         ready.wait();
 #ifdef DEBUG_LEGION
       assert(view->is_instance_view());
 #endif
       InstanceView *inst_view = view->as_instance_view();
-      inst_view->process_remote_update(derez, source, runtime->forest);
+      local_aggregator->record_preconditions(inst_view, reading, preconditions);
+      Runtime::trigger_event(done_event);
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void InstanceView::handle_view_remote_invalidate(
+    /*static*/ void InstanceView::handle_view_add_copy_user(
+                   Deserializer &derez, Runtime *runtime, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      DistributedID did;
+      derez.deserialize(did);
+      RtEvent ready = RtEvent::NO_RT_EVENT;
+      LogicalView *view = runtime->find_or_request_logical_view(did, ready);
+
+      bool reading;
+      derez.deserialize(reading);
+      ApEvent term_event;
+      derez.deserialize(term_event);
+      FieldMask copy_mask;
+      derez.deserialize(copy_mask);
+      IndexSpaceExpression *copy_expr =
+        IndexSpaceExpression::unpack_expression(derez, runtime->forest, source);
+      UniqueID op_id;
+      derez.deserialize(op_id);
+      unsigned index;
+      derez.deserialize(index);
+      RtUserEvent applied_event;
+      derez.deserialize(applied_event);
+      bool trace_recording;
+      derez.deserialize(trace_recording);
+
+      if (ready.exists() && !ready.has_triggered())
+        ready.wait();
+#ifdef DEBUG_LEGION
+      assert(view->is_instance_view());
+#endif
+      InstanceView *inst_view = view->as_instance_view();
+
+      std::set<RtEvent> applied_events;
+      inst_view->add_copy_user(reading, term_event, copy_mask, copy_expr,
+                   op_id, index, applied_events, trace_recording, source);
+      if (!applied_events.empty())
+      {
+        const RtEvent precondition = Runtime::merge_events(applied_events);
+        Runtime::trigger_event(applied_event, precondition);
+        // Send back a response to the source removing the remote valid ref
+        if (inst_view->is_logical_owner())
+          inst_view->send_remote_valid_decrement(source, precondition);
+      }
+      else
+      {
+        Runtime::trigger_event(applied_event);
+        // Send back a response to the source removing the remote valid ref
+        if (inst_view->is_logical_owner())
+          inst_view->send_remote_valid_decrement(source, RtEvent::NO_RT_EVENT);
+      }
+    }
+
+#ifdef ENABLE_VIEW_REPLICATION
+    //--------------------------------------------------------------------------
+    /*static*/ void InstanceView::handle_view_replication_request(
+                   Deserializer &derez, Runtime *runtime, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      DistributedID did;
+      derez.deserialize(did);
+      RtEvent ready = RtEvent::NO_RT_EVENT;
+      LogicalView *view = runtime->find_or_request_logical_view(did, ready);
+
+      FieldMask request_mask;
+      derez.deserialize(request_mask);
+      RtUserEvent done_event;
+      derez.deserialize(done_event);
+      
+      if (ready.exists() && !ready.has_triggered())
+        ready.wait();
+#ifdef DEBUG_LEGION
+      assert(view->is_instance_view());
+#endif
+      InstanceView *inst_view = view->as_instance_view();
+      inst_view->process_replication_request(source, request_mask, done_event);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void InstanceView::handle_view_replication_response(
                                           Deserializer &derez, Runtime *runtime)
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
       DistributedID did;
       derez.deserialize(did);
-      FieldMask invalid_mask;
-      derez.deserialize(invalid_mask);
-      RtUserEvent done_event;
-      derez.deserialize(done_event);
       RtEvent ready = RtEvent::NO_RT_EVENT;
       LogicalView *view = runtime->find_or_request_logical_view(did, ready);
-      if (ready.exists())
+
+      RtUserEvent done_event;
+      derez.deserialize(done_event);
+      
+      if (ready.exists() && !ready.has_triggered())
         ready.wait();
 #ifdef DEBUG_LEGION
       assert(view->is_instance_view());
 #endif
       InstanceView *inst_view = view->as_instance_view();
-      inst_view->process_remote_invalidate(invalid_mask, done_event);
+      inst_view->process_replication_response(done_event, derez);
+      Runtime::trigger_event(done_event);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void InstanceView::handle_view_replication_removal(
+                   Deserializer &derez, Runtime *runtime, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      DistributedID did;
+      derez.deserialize(did);
+      RtEvent ready = RtEvent::NO_RT_EVENT;
+      LogicalView *view = runtime->find_or_request_logical_view(did, ready);
+
+      FieldMask removal_mask;
+      derez.deserialize(removal_mask);
+      RtUserEvent done_event;
+      derez.deserialize(done_event);
+      
+      if (ready.exists() && !ready.has_triggered())
+        ready.wait();
+#ifdef DEBUG_LEGION
+      assert(view->is_instance_view());
+#endif
+      InstanceView *inst_view = view->as_instance_view();
+      inst_view->process_replication_removal(source, removal_mask);
+      // Trigger the done event now that we are done
+      Runtime::trigger_event(done_event);
+    }
+#endif // ENABLE_VIEW_REPLICATION
+
+    /////////////////////////////////////////////////////////////
+    // CollectableView 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    void CollectableView::defer_collect_user(PhysicalManager *manager,
+                                  ApEvent term_event, ReferenceMutator *mutator)
+    //--------------------------------------------------------------------------
+    {
+      // The runtime will add the gc reference to this view when necessary
+      std::set<ApEvent> to_collect;
+      bool add_ref = false;
+      bool remove_ref = false;
+      manager->defer_collect_user(this, term_event, to_collect, 
+                                  add_ref, remove_ref);
+      if (add_ref)
+        add_collectable_reference(mutator);
+      if (!to_collect.empty())
+        collect_users(to_collect); 
+      if (remove_ref && remove_collectable_reference(mutator))
+        delete this;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void CollectableView::handle_deferred_collect(
+                                            CollectableView *view, 
+                                            const std::set<ApEvent> &to_collect)
+    //--------------------------------------------------------------------------
+    {
+      view->collect_users(to_collect);
+      // Then remove the gc reference on the object
+      if (view->remove_collectable_reference(NULL))
+        delete view;
+    }
+
+    /////////////////////////////////////////////////////////////
+    // ExprView
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    ExprView::ExprView(RegionTreeForest *ctx, InstanceManager *man, 
+                       InstanceView *view, IndexSpaceExpression *exp) 
+      : context(ctx), manager(man), inst_view(view),
+        view_expr(exp), view_volume(view_expr->get_volume()),
+        invalid_fields(FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES))
+    //--------------------------------------------------------------------------
+    {
+      view_expr->add_expression_reference();
+    }
+
+    //--------------------------------------------------------------------------
+    ExprView::ExprView(const ExprView &rhs)
+      : context(rhs.context), manager(rhs.manager), inst_view(rhs.inst_view),
+        view_expr(rhs.view_expr), view_volume(rhs.view_volume)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    ExprView::~ExprView(void)
+    //--------------------------------------------------------------------------
+    {
+      if (view_expr->remove_expression_reference())
+        delete view_expr;
+      if (!subviews.empty())
+      {
+        for (FieldMaskSet<ExprView>::iterator it = subviews.begin();
+              it != subviews.end(); it++)
+          if (it->first->remove_reference())
+            delete it->first;
+      }
+      // If we have any current or previous users filter them out now
+      if (!current_epoch_users.empty())
+      {
+        for (EventFieldUsers::const_iterator eit = current_epoch_users.begin();
+              eit != current_epoch_users.end(); eit++)
+        {
+          for (FieldMaskSet<PhysicalUser>::const_iterator it = 
+                eit->second.begin(); it != eit->second.end(); it++)
+            if (it->first->remove_reference())
+              delete it->first;
+        }
+        current_epoch_users.clear();
+      }
+      if (!previous_epoch_users.empty())
+      {
+        for (EventFieldUsers::const_iterator eit = previous_epoch_users.begin();
+              eit != previous_epoch_users.end(); eit++)
+        {
+          for (FieldMaskSet<PhysicalUser>::const_iterator it = 
+                eit->second.begin(); it != eit->second.end(); it++)
+            if (it->first->remove_reference())
+              delete it->first;
+        }
+        previous_epoch_users.clear();
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    ExprView& ExprView::operator=(const ExprView &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void ExprView::find_user_preconditions(const RegionUsage &usage,
+                                           IndexSpaceExpression *user_expr,
+                                           const bool user_dominates,
+                                           const FieldMask &user_mask,
+                                           ApEvent term_event,
+                                           UniqueID op_id, unsigned index,
+                                           std::set<ApEvent> &preconditions,
+                                           const bool trace_recording)
+    //--------------------------------------------------------------------------
+    {
+      DETAILED_PROFILER(runtime, 
+                        MATERIALIZED_VIEW_FIND_LOCAL_PRECONDITIONS_CALL);
+      std::set<ApEvent> dead_events; 
+      EventFieldUsers current_to_filter, previous_to_filter;
+      // Perform the analysis with a read-only lock
+      {
+        AutoLock v_lock(view_lock,1,false/*exclusive*/);
+        // Check to see if we dominate when doing this analysis and
+        // can therefore filter or whether we are just intersecting
+        // Do the local analysis
+        if (user_dominates)
+        {
+          // We dominate in this case so we can do filtering
+          FieldMask observed, non_dominated;
+          if (!current_epoch_users.empty())
+            find_current_preconditions(usage, user_mask, user_expr,
+                                       term_event, op_id, index, 
+                                       user_dominates, preconditions, 
+                                       dead_events, current_to_filter, 
+                                       observed, non_dominated,trace_recording);
+          if (!previous_epoch_users.empty())
+          {
+            const FieldMask dominated = observed - non_dominated;
+            if (!!dominated)
+              find_previous_filter_users(dominated, previous_to_filter);
+            const FieldMask previous_mask = user_mask - dominated;
+            if (!!previous_mask)
+              find_previous_preconditions(usage, previous_mask, user_expr,
+                                          term_event, op_id, index, 
+                                          user_dominates, preconditions,
+                                          dead_events, trace_recording);
+          }
+        }
+        else
+        {
+          FieldMask observed, non_dominated;
+          if (!current_epoch_users.empty())
+          {
+            find_current_preconditions(usage, user_mask, user_expr,
+                                       term_event, op_id, index, 
+                                       user_dominates, preconditions, 
+                                       dead_events, current_to_filter, 
+                                       observed, non_dominated,trace_recording);
+            if (!current_to_filter.empty())
+              current_to_filter.clear();
+          }
+          if (!previous_epoch_users.empty())
+          {
+            const FieldMask dominated = observed - non_dominated;
+            const FieldMask previous_mask = user_mask - dominated;
+            if (!!previous_mask)
+              find_previous_preconditions(usage, previous_mask, user_expr,
+                                          term_event, op_id, index,
+                                          user_dominates, preconditions,
+                                          dead_events, trace_recording);
+          }
+        }
+      } 
+      if (!trace_recording && (!dead_events.empty() || 
+           !previous_to_filter.empty() || !current_to_filter.empty()))
+      {
+        // Need exclusive permissions to modify data structures
+        AutoLock v_lock(view_lock);
+        if (!dead_events.empty())
+          for (std::set<ApEvent>::const_iterator it = dead_events.begin();
+                it != dead_events.end(); it++)
+            filter_local_users(*it); 
+        if (!previous_to_filter.empty())
+          filter_previous_users(previous_to_filter);
+        if (!current_to_filter.empty())
+          filter_current_users(current_to_filter);
+      }
+      // Then see if there are any users below that we need to traverse
+      if (!subviews.empty() && 
+          !(subviews.get_valid_mask() * user_mask))
+      {
+        FieldMaskSet<ExprView> to_traverse;
+        std::map<ExprView*,IndexSpaceExpression*> traverse_exprs;
+        for (FieldMaskSet<ExprView>::const_iterator it = 
+              subviews.begin(); it != subviews.end(); it++)
+        {
+          FieldMask overlap = it->second & user_mask;
+          if (!overlap)
+            continue;
+          // If we've already determined the user dominates
+          // then we don't even have to do this test
+          if (user_dominates)
+          {
+            to_traverse.insert(it->first, overlap);
+            continue;
+          }
+          if (it->first->view_expr == user_expr)
+          {
+            to_traverse.insert(it->first, overlap);
+            traverse_exprs[it->first] = user_expr;
+            continue;
+          }
+          IndexSpaceExpression *expr_overlap = 
+            context->intersect_index_spaces(it->first->view_expr, user_expr);
+          if (!expr_overlap->is_empty())
+          {
+            to_traverse.insert(it->first, overlap);
+            traverse_exprs[it->first] = expr_overlap;
+          }
+        }
+        if (!to_traverse.empty())
+        {
+          if (user_dominates)
+          {
+            for (FieldMaskSet<ExprView>::const_iterator it = 
+                  to_traverse.begin(); it != to_traverse.end(); it++)
+              it->first->find_user_preconditions(usage, it->first->view_expr,
+                                    true/*dominate*/, it->second, term_event,
+                                    op_id, index,preconditions,trace_recording);
+          }
+          else
+          {
+            for (FieldMaskSet<ExprView>::const_iterator it = 
+                  to_traverse.begin(); it != to_traverse.end(); it++)
+            {
+              IndexSpaceExpression *intersect = traverse_exprs[it->first];
+              const bool user_dominates = 
+                (intersect->expr_id == it->first->view_expr->expr_id) ||
+                (intersect->get_volume() == it->first->view_volume);
+              it->first->find_user_preconditions(usage, intersect, 
+                            user_dominates, it->second, term_event, 
+                            op_id, index, preconditions, trace_recording);
+            }
+          }
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void ExprView::find_copy_preconditions(const RegionUsage &usage,
+                                           IndexSpaceExpression *copy_expr,
+                                           const bool copy_dominates,
+                                           const FieldMask &copy_mask,
+                                           UniqueID op_id, unsigned index,
+                                           EventFieldExprs &preconditions,
+                                           const bool trace_recording)
+    //--------------------------------------------------------------------------
+    {
+      DETAILED_PROFILER(runtime, 
+                        MATERIALIZED_VIEW_FIND_LOCAL_COPY_PRECONDITIONS_CALL);
+      std::set<ApEvent> dead_events; 
+      EventFieldUsers current_to_filter, previous_to_filter;
+      // Do the first pass with a read-only lock on the events
+      {
+        AutoLock v_lock(view_lock,1,false/*exclusive*/);
+        // Check to see if we dominate when doing this analysis and
+        // can therefore filter or whether we are just intersecting
+        // Do the local analysis
+        if (copy_dominates)
+        {
+          // We dominate in this case so we can do filtering
+          FieldMask observed, non_dominated;
+          if (!current_epoch_users.empty())
+            find_current_preconditions(usage, copy_mask, copy_expr, 
+                                       op_id, index, copy_dominates,
+                                       preconditions, dead_events, 
+                                       current_to_filter, observed, 
+                                       non_dominated, trace_recording);
+          if (!previous_epoch_users.empty())
+          {
+            const FieldMask dominated = observed - non_dominated;
+            if (!!dominated)
+              find_previous_filter_users(dominated, previous_to_filter);
+            const FieldMask previous_mask = copy_mask - dominated;
+            if (!!previous_mask)
+              find_previous_preconditions(usage, previous_mask, copy_expr,
+                                          op_id, index, copy_dominates,
+                                          preconditions, dead_events,
+                                          trace_recording);
+          }
+        }
+        else
+        {
+          FieldMask observed, non_dominated;
+          if (!current_epoch_users.empty())
+          {
+            find_current_preconditions(usage, copy_mask, copy_expr, 
+                                       op_id, index, copy_dominates,
+                                       preconditions, dead_events, 
+                                       current_to_filter, observed, 
+                                       non_dominated, trace_recording);
+            current_to_filter.clear();
+          }
+          if (!previous_epoch_users.empty())
+          {
+            const FieldMask dominated = observed - non_dominated;
+            const FieldMask previous_mask = copy_mask - dominated;
+            if (!!previous_mask)
+              find_previous_preconditions(usage, previous_mask, copy_expr,
+                                          op_id, index, copy_dominates,
+                                          preconditions, dead_events,
+                                          trace_recording);
+          }
+        }
+      }
+      if (!trace_recording && (!dead_events.empty() || 
+           !previous_to_filter.empty() || !current_to_filter.empty()))
+      {
+        // Need exclusive permissions to modify data structures
+        AutoLock v_lock(view_lock);
+        if (!dead_events.empty())
+          for (std::set<ApEvent>::const_iterator it = dead_events.begin();
+                it != dead_events.end(); it++)
+            filter_local_users(*it); 
+        if (!previous_to_filter.empty())
+          filter_previous_users(previous_to_filter);
+        if (!current_to_filter.empty())
+          filter_current_users(current_to_filter);
+      }
+      // Then see if there are any users below that we need to traverse
+      if (!subviews.empty() && 
+          !(subviews.get_valid_mask() * copy_mask))
+      {
+        FieldMaskSet<ExprView> to_traverse;
+        std::map<ExprView*,IndexSpaceExpression*> traverse_exprs;
+        for (FieldMaskSet<ExprView>::const_iterator it = 
+              subviews.begin(); it != subviews.end(); it++)
+        {
+          FieldMask overlap = it->second & copy_mask;
+          if (!overlap)
+            continue;
+          // If the copy dominates then we don't even have
+          // to do the intersection test
+          if (copy_dominates)
+          {
+            to_traverse.insert(it->first, overlap);
+            continue;
+          }
+          if (it->first->view_expr == copy_expr)
+          {
+            to_traverse.insert(it->first, overlap);
+            traverse_exprs[it->first] = copy_expr;
+            continue;
+          }
+          IndexSpaceExpression *expr_overlap = 
+            context->intersect_index_spaces(it->first->view_expr, copy_expr);
+          if (!expr_overlap->is_empty())
+          {
+            to_traverse.insert(it->first, overlap);
+            traverse_exprs[it->first] = expr_overlap;
+          }
+        }
+        if (!to_traverse.empty())
+        {
+          if (copy_dominates)
+          {
+            for (FieldMaskSet<ExprView>::const_iterator it = 
+                  to_traverse.begin(); it != to_traverse.end(); it++)
+              it->first->find_copy_preconditions(usage, it->first->view_expr,
+                                  true/*dominate*/, it->second, op_id, index,
+                                  preconditions, trace_recording);
+          }
+          else
+          {
+            for (FieldMaskSet<ExprView>::const_iterator it = 
+                  to_traverse.begin(); it != to_traverse.end(); it++)
+            {
+              IndexSpaceExpression *intersect = traverse_exprs[it->first];
+              const bool copy_dominates = 
+                (intersect->expr_id == it->first->view_expr->expr_id) ||
+                (intersect->get_volume() == it->first->view_volume);
+              it->first->find_copy_preconditions(usage, intersect, 
+                                copy_dominates, it->second, op_id, 
+                                index, preconditions, trace_recording);
+            }
+          }
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    ExprView* ExprView::find_congruent_view(IndexSpaceExpression *expr) const
+    //--------------------------------------------------------------------------
+    {
+      // Handle the base case first
+      if ((expr == view_expr) || (expr->get_volume() == view_volume))
+        return const_cast<ExprView*>(this);
+      for (FieldMaskSet<ExprView>::const_iterator it = 
+            subviews.begin(); it != subviews.end(); it++)
+      {
+        if (it->first->view_expr == expr)
+          return it->first;
+        IndexSpaceExpression *overlap =
+          context->intersect_index_spaces(expr, it->first->view_expr);
+        const size_t overlap_volume = overlap->get_volume();
+        if (overlap_volume == 0)
+          continue;
+        // See if we dominate or just intersect
+        if (overlap_volume == expr->get_volume())
+        {
+          // See if we strictly dominate or whether they are equal
+          if (overlap_volume < it->first->view_volume)
+          {
+            ExprView *result = it->first->find_congruent_view(expr);
+            if (result != NULL)
+              return result;
+          }
+          else // Otherwise we're the same 
+            return it->first;
+        }
+      }
+      return NULL;
+    }
+
+    //--------------------------------------------------------------------------
+    void ExprView::insert_subview(ExprView *subview, FieldMask &subview_mask)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(this != subview);
+#endif
+      // Iterate over all subviews and see which ones we dominate and which
+      // ones dominate the subview
+      if (!subviews.empty() && !(subviews.get_valid_mask() * subview_mask))
+      {
+        bool need_tighten = true;
+        std::vector<ExprView*> to_delete;
+        FieldMaskSet<ExprView> dominating_subviews;
+        for (FieldMaskSet<ExprView>::iterator it = 
+              subviews.begin(); it != subviews.end(); it++)
+        {
+          // See if we intersect on fields
+          FieldMask overlap_mask = it->second & subview_mask;
+          if (!overlap_mask)
+            continue;
+          IndexSpaceExpression *overlap =
+            context->intersect_index_spaces(subview->view_expr,
+                                            it->first->view_expr);
+          const size_t overlap_volume = overlap->get_volume();
+          if (overlap_volume == 0)
+            continue;
+          // See if we dominate or just intersect
+          if (overlap_volume == subview->view_volume)
+          {
+#ifdef DEBUG_LEGION
+            // Should only strictly dominate if they were congruent
+            // then we wouldn't be inserting in the first place
+            assert(overlap_volume < it->first->view_volume);
+#endif
+            // Dominator so we can just continue traversing
+            dominating_subviews.insert(it->first, overlap_mask);
+          }
+          else if (overlap_volume == it->first->view_volume)
+          {
+#ifdef DEBUG_LEGION
+            assert(overlap_mask * dominating_subviews.get_valid_mask());
+#endif
+            // We dominate this view so we can just pull it 
+            // in underneath of us now
+            it.filter(overlap_mask);
+            subview->insert_subview(it->first, overlap_mask);
+            need_tighten = true;
+            // See if we need to remove this subview
+            if (!it->second)
+              to_delete.push_back(it->first);
+          }
+          // Otherwise it's just a normal intersection
+        }
+        // See if we had any dominators
+        if (!dominating_subviews.empty())
+        {
+          if (dominating_subviews.size() > 1)
+          {
+            // We need to deduplicate finding or making the new ExprView
+            // First check to see if we have it already in one sub-tree
+            // If not, we'll pick the one with the smallest bounding volume
+            LegionMap<std::pair<size_t/*volume*/,ExprView*>,FieldMask>::aligned
+              sorted_subviews;
+            for (FieldMaskSet<ExprView>::const_iterator it = 
+                  dominating_subviews.begin(); it != 
+                  dominating_subviews.end(); it++)
+            {
+              FieldMask overlap = it->second;
+              // Channeling Tuco here
+              it->first->find_tightest_subviews(subview->view_expr, overlap,
+                                                sorted_subviews);
+            }
+            for (LegionMap<std::pair<size_t,ExprView*>,FieldMask>::aligned::
+                  const_iterator it = sorted_subviews.begin(); it !=
+                  sorted_subviews.end(); it++)
+            {
+              FieldMask overlap = it->second & subview_mask;
+              if (!overlap)
+                continue;
+              subview_mask -= overlap;
+              it->first.second->insert_subview(subview, overlap);
+              if (!subview_mask || 
+                  (subview_mask * dominating_subviews.get_valid_mask()))
+                break;
+            }
+#ifdef DEBUG_LEGION
+            assert(subview_mask * dominating_subviews.get_valid_mask());
+#endif
+          }
+          else
+          {
+            FieldMaskSet<ExprView>::const_iterator first = 
+              dominating_subviews.begin();
+            FieldMask dominated_mask = first->second; 
+            subview_mask -= dominated_mask;
+            first->first->insert_subview(subview, dominated_mask);
+          }
+        }
+        if (!to_delete.empty())
+        {
+          for (std::vector<ExprView*>::const_iterator it = 
+                to_delete.begin(); it != to_delete.end(); it++)
+          {
+            subviews.erase(*it);
+            if ((*it)->remove_reference())
+              delete (*it);
+          }
+        }
+        if (need_tighten)
+          subviews.tighten_valid_mask();
+      }
+      // If we make it here and there are still fields then we need to 
+      // add it locally
+      if (!!subview_mask && subviews.insert(subview, subview_mask))
+        subview->add_reference();
+    }
+
+    //--------------------------------------------------------------------------
+    void ExprView::find_tightest_subviews(IndexSpaceExpression *expr,
+                                          FieldMask &expr_mask,
+                                          LegionMap<std::pair<size_t,ExprView*>,
+                                            FieldMask>::aligned &bounding_views)
+    //--------------------------------------------------------------------------
+    {
+      if (!subviews.empty() && !(expr_mask * subviews.get_valid_mask()))
+      {
+        FieldMask dominated_mask;
+        for (FieldMaskSet<ExprView>::iterator it = subviews.begin();
+              it != subviews.end(); it++)
+        {
+          // See if we intersect on fields
+          FieldMask overlap_mask = it->second & expr_mask;
+          if (!overlap_mask)
+            continue;
+          IndexSpaceExpression *overlap =
+            context->intersect_index_spaces(expr, it->first->view_expr);
+          const size_t overlap_volume = overlap->get_volume();
+          if (overlap_volume == 0)
+            continue;
+          // See if we dominate or just intersect
+          if (overlap_volume == expr->get_volume())
+          {
+#ifdef DEBUG_LEGION
+            // Should strictly dominate otherwise we'd be congruent
+            assert(overlap_volume < it->first->view_volume);
+#endif
+            dominated_mask |= overlap_mask;
+            // Continute the traversal
+            it->first->find_tightest_subviews(expr,overlap_mask,bounding_views);
+          }
+        }
+        // Remove any dominated fields from below
+        if (!!dominated_mask)
+          expr_mask -= dominated_mask;
+      }
+      // If we still have fields then record ourself
+      if (!!expr_mask)
+      {
+        std::pair<size_t,ExprView*> key(view_volume, this);
+        bounding_views[key] |= expr_mask;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void ExprView::add_partial_user(const RegionUsage &usage,
+                                    UniqueID op_id, unsigned index,
+                                    FieldMask user_mask,
+                                    const ApEvent term_event,
+                                    IndexSpaceExpression *user_expr,
+                                    const size_t user_volume,
+                                    const bool trace_recording)
+    //--------------------------------------------------------------------------
+    {
+      // We're going to try to put this user as far down the ExprView tree
+      // as we can in order to avoid doing unnecessary intersection tests later
+      FieldMaskSet<ExprView> to_traverse;
+      std::map<ExprView*,IndexSpaceExpression*> to_traverse_exprs;
+      FieldMaskSet<IndexSpaceExpression> intersect_exprs;
+      {
+        // Find all the intersecting subviews to see if we can 
+        // continue the traversal
+        // No need for the view lock anymore since we're protected
+        // by the expr_lock at the top of the tree
+        //AutoLock v_lock(view_lock,1,false/*exclusive*/); 
+        for (FieldMaskSet<ExprView>::const_iterator it = 
+              subviews.begin(); it != subviews.end(); it++)
+        {
+          // If the fields don't overlap then we don't care
+          const FieldMask overlap_mask = it->second & user_mask;
+          if (!overlap_mask)
+            continue;
+          IndexSpaceExpression *overlap =
+            context->intersect_index_spaces(user_expr, it->first->view_expr);
+          const size_t overlap_volume = overlap->get_volume();
+          if (overlap_volume == 0)
+            continue;
+          to_traverse.insert(it->first, overlap_mask);
+          if (overlap_volume == it->first->view_volume)
+          {
+            // User dominates the subview
+            intersect_exprs.insert(it->first->view_expr, overlap_mask);
+            to_traverse_exprs[it->first] = it->first->view_expr;
+          }
+          else if (overlap_volume == user_volume)
+          {
+            // Subview dominates the user
+            intersect_exprs.insert(user_expr, overlap_mask);
+            to_traverse_exprs[it->first] = user_expr;
+          }
+          else
+          {
+            // Intersect only case
+            intersect_exprs.insert(overlap, overlap_mask);
+            to_traverse_exprs[it->first] = overlap;
+          }
+        }
+      }
+      // Now we need to sort these into field sets and see if any of
+      // them dominate the user expression
+      bool need_below = false;
+      if (!intersect_exprs.empty())
+      {
+        LegionList<FieldSet<IndexSpaceExpression*> >::aligned field_sets;
+        intersect_exprs.compute_field_sets(FieldMask(), field_sets);
+        std::vector<IndexSpaceExpression*> remainders(field_sets.size());
+        unsigned index = 0;
+        // Compute all the remainders, avoid blocking until we've
+        // computed all of them
+        for (LegionList<FieldSet<IndexSpaceExpression*> >::aligned::
+              const_iterator it = field_sets.begin(); 
+              it != field_sets.end(); it++, index++)
+        {
+          IndexSpaceExpression *union_expr = 
+            context->union_index_spaces(it->elements);
+          remainders[index] = 
+            context->subtract_index_spaces(user_expr, union_expr);
+        }
+        index = 0;
+        for (LegionList<FieldSet<IndexSpaceExpression*> >::aligned::
+              const_iterator it = field_sets.begin(); 
+              it != field_sets.end(); it++, index++)
+        {
+          // Skip any that aren't empty since we might as well 
+          // register them here since we're going to have to 
+          // register part of it here anyway
+          if (!remainders[index]->is_empty())
+            continue;
+          // We're going to handle these fields below
+          user_mask -= it->set_mask;
+          need_below = true;
+        }
+      }
+      // If we still have local fields, make a user and record it here
+      if (!!user_mask)
+      {
+        PhysicalUser *user = new PhysicalUser(usage, user_expr, op_id, index,
+                                              true/*copy*/, false/*covers*/);
+        add_current_user(user, term_event, user_mask, trace_recording);
+      }
+      if (need_below)
+      {
+        PhysicalUser *cover_user = NULL;
+        // Traverse down any subviews that we need to
+        for (FieldMaskSet<ExprView>::iterator it = 
+              to_traverse.begin(); it != to_traverse.end(); it++)
+        {
+          // Skip any local fields that we already handled
+          if (!!user_mask)
+          {
+            it.filter(user_mask);
+            if (!it->second)
+              continue;
+          }
+          std::map<ExprView*,IndexSpaceExpression*>::const_iterator
+            finder = to_traverse_exprs.find(it->first); 
+#ifdef DEBUG_LEGION
+          assert(finder != to_traverse_exprs.end());
+#endif
+          // Check for the cases where we dominated perfectly
+          if (finder->second == it->first->view_expr)
+          {
+            if (cover_user == NULL)
+            {
+              cover_user = new PhysicalUser(usage, it->first->view_expr,
+                              op_id, index, true/*copy*/, true/*covers*/);
+              cover_user->add_reference();
+            }
+            it->first->add_current_user(cover_user, term_event,
+                                        it->second, trace_recording);
+          }
+          else
+          {
+            // Continue the traversal on this node
+            it->first->add_partial_user(usage, op_id, index,
+                it->second, term_event, finder->second, 
+                finder->second->get_volume(), trace_recording);
+          }
+        }
+        if ((cover_user != NULL) && cover_user->remove_reference())
+          delete cover_user; 
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void ExprView::add_current_user(PhysicalUser *user,const ApEvent term_event,
+                         const FieldMask &user_mask, const bool trace_recording)
+    //--------------------------------------------------------------------------
+    {
+      bool issue_collect = true;
+      {
+        AutoLock v_lock(view_lock);
+        EventUsers &event_users = current_epoch_users[term_event];
+        if (event_users.insert(user, user_mask))
+          user->add_reference();
+        else
+          issue_collect = false;
+      }
+      if (issue_collect)
+      {
+        defer_collect_user(manager, term_event);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void ExprView::clean_views(FieldMask &valid_mask, 
+                               FieldMaskSet<ExprView> &clean_set)
+    //--------------------------------------------------------------------------
+    {
+      // Handle the base case if we already did it
+      FieldMaskSet<ExprView>::const_iterator finder = clean_set.find(this);
+      if (finder != clean_set.end())
+      {
+        valid_mask = finder->second;
+        return;
+      }
+      // No need to hold the lock for this part we know that no one
+      // is going to be modifying this data structure at the same time
+      FieldMaskSet<ExprView> new_subviews;
+      std::vector<ExprView*> to_delete;
+      for (FieldMaskSet<ExprView>::iterator it = subviews.begin();
+            it != subviews.end(); it++)
+      {
+        FieldMask new_mask;
+        it->first->clean_views(new_mask, clean_set);
+        // Save this as part of the valid mask without filtering
+        valid_mask |= new_mask;
+        // Have to make sure to filter this by the previous set of fields 
+        // since we could get more than we initially had
+        // We also need update the invalid fields if we remove a path
+        // to the subview
+        if (!!new_mask)
+        {
+          new_mask &= it->second;
+          const FieldMask new_invalid = it->second - new_mask;
+          if (!!new_invalid)
+          {
+#ifdef DEBUG_LEGION
+            // Should only have been one path here
+            assert(it->first->invalid_fields * new_invalid);
+#endif
+            it->first->invalid_fields |= new_invalid;
+          }
+        }
+        else
+        {
+#ifdef DEBUG_LEGION
+          // Should only have been one path here
+          assert(it->first->invalid_fields * it->second);
+#endif
+          it->first->invalid_fields |= it->second;
+        }
+        if (!!new_mask)
+          new_subviews.insert(it->first, new_mask);
+        else
+          to_delete.push_back(it->first);
+      }
+      subviews.swap(new_subviews);
+      if (!to_delete.empty())
+      {
+        for (std::vector<ExprView*>::const_iterator it = 
+              to_delete.begin(); it != to_delete.end(); it++)
+          if ((*it)->remove_reference())
+            delete (*it);
+      }
+      AutoLock v_lock(view_lock);
+      if (!current_epoch_users.empty())
+      {
+        for (EventFieldUsers::const_iterator it = 
+              current_epoch_users.begin(); it != 
+              current_epoch_users.end(); it++)
+          valid_mask |= it->second.get_valid_mask();
+      }
+      if (!previous_epoch_users.empty())
+      {
+        for (EventFieldUsers::const_iterator it = 
+              previous_epoch_users.begin(); it != 
+              previous_epoch_users.end(); it++)
+          valid_mask |= it->second.get_valid_mask();
+      }
+      // Save this for the future so we don't need to compute it again
+      if (clean_set.insert(this, valid_mask))
+        add_reference();
+    }
+
+    //--------------------------------------------------------------------------
+    void ExprView::pack_replication(Serializer &rez,
+                                    std::map<PhysicalUser*,unsigned> &indexes,
+                                    const FieldMask &pack_mask,
+                                    const AddressSpaceID target) const
+    //--------------------------------------------------------------------------
+    {
+      RezCheck z(rez);
+      {
+        // Need a read-only lock here to protect against garbage collection
+        // tasks coming back through and pruning out current epoch users
+        // but we know there are no other modifications happening in parallel
+        // because the replicated lock at the top prevents any new users
+        // from being added while we're doing this pack
+        AutoLock v_lock(view_lock,1,false/*exclusive*/);
+        // Pack the current users
+        EventFieldUsers needed_current; 
+        for (EventFieldUsers::const_iterator eit = current_epoch_users.begin();
+              eit != current_epoch_users.end(); eit++)
+        {
+          if (eit->second.get_valid_mask() * pack_mask)
+            continue;
+          FieldMaskSet<PhysicalUser> &needed = needed_current[eit->first];
+          for (FieldMaskSet<PhysicalUser>::const_iterator it = 
+                eit->second.begin(); it != eit->second.end(); it++)
+          {
+            const FieldMask overlap = it->second & pack_mask;
+            if (!overlap)
+              continue;
+            needed.insert(it->first, overlap);
+          }
+        }
+        rez.serialize<size_t>(needed_current.size());
+        for (EventFieldUsers::const_iterator eit = needed_current.begin();
+              eit != needed_current.end(); eit++)
+        {
+          rez.serialize(eit->first);
+          rez.serialize<size_t>(eit->second.size());
+          for (FieldMaskSet<PhysicalUser>::const_iterator it = 
+                eit->second.begin(); it != eit->second.end(); it++)
+          {
+            // See if we already packed this before or not
+            std::map<PhysicalUser*,unsigned>::const_iterator finder = 
+              indexes.find(it->first);
+            if (finder == indexes.end())
+            {
+              const unsigned index = indexes.size();
+              rez.serialize(index);
+              it->first->pack_user(rez, target);
+              indexes[it->first] = index;
+            }
+            else
+              rez.serialize(finder->second);
+            rez.serialize(it->second);
+          }
+        }
+        // Pack the previous users
+        EventFieldUsers needed_previous; 
+        for (EventFieldUsers::const_iterator eit = previous_epoch_users.begin();
+              eit != previous_epoch_users.end(); eit++)
+        {
+          if (eit->second.get_valid_mask() * pack_mask)
+            continue;
+          FieldMaskSet<PhysicalUser> &needed = needed_previous[eit->first];
+          for (FieldMaskSet<PhysicalUser>::const_iterator it = 
+                eit->second.begin(); it != eit->second.end(); it++)
+          {
+            const FieldMask overlap = it->second & pack_mask;
+            if (!overlap)
+              continue;
+            needed.insert(it->first, overlap);
+          }
+        }
+        rez.serialize<size_t>(needed_previous.size());
+        for (EventFieldUsers::const_iterator eit = needed_previous.begin();
+              eit != needed_previous.end(); eit++)
+        {
+          rez.serialize(eit->first);
+          rez.serialize<size_t>(eit->second.size());
+          for (FieldMaskSet<PhysicalUser>::const_iterator it = 
+                eit->second.begin(); it != eit->second.end(); it++)
+          {
+            // See if we already packed this before or not
+            std::map<PhysicalUser*,unsigned>::const_iterator finder = 
+              indexes.find(it->first);
+            if (finder == indexes.end())
+            {
+              const unsigned index = indexes.size();
+              rez.serialize(index);
+              it->first->pack_user(rez, target);
+              indexes[it->first] = index;
+            }
+            else
+              rez.serialize(finder->second);
+            rez.serialize(it->second);
+          }
+        }
+      }
+      // Pack the needed subviews no need for a lock here
+      // since we know that we're protected by the expr_lock
+      // at the top of the tree
+      FieldMaskSet<ExprView> needed_subviews;
+      for (FieldMaskSet<ExprView>::const_iterator it = 
+            subviews.begin(); it != subviews.end(); it++)
+      {
+        const FieldMask overlap = it->second & pack_mask;
+        if (!overlap)
+          continue;
+        needed_subviews.insert(it->first, overlap);
+      }
+      rez.serialize<size_t>(needed_subviews.size());
+      for (FieldMaskSet<ExprView>::const_iterator it = 
+            needed_subviews.begin(); it != needed_subviews.end(); it++)
+      {
+        it->first->view_expr->pack_expression(rez, target);
+        rez.serialize(it->second);
+        it->first->pack_replication(rez, indexes, it->second, target);
+      }
+    }
+    
+    //--------------------------------------------------------------------------
+    void ExprView::unpack_replication(Deserializer &derez, ExprView *root,
+                              const AddressSpaceID source,
+                              std::map<IndexSpaceExprID,ExprView*> &expr_cache,
+                              std::vector<PhysicalUser*> &users)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      std::set<ApEvent> to_collect;
+      // Need a read-write lock since we're going to be mutating the structures
+      {
+        AutoLock v_lock(view_lock);
+        size_t num_current;
+        derez.deserialize(num_current);
+        for (unsigned idx1 = 0; idx1 < num_current; idx1++)
+        {
+          ApEvent user_event;
+          derez.deserialize(user_event);
+          FieldMaskSet<PhysicalUser> &current_users = 
+            current_epoch_users[user_event];
+          if (current_users.empty())
+            to_collect.insert(user_event);
+          size_t num_users;
+          derez.deserialize(num_users);
+          for (unsigned idx2 = 0; idx2 < num_users; idx2++)
+          {
+            unsigned user_index;
+            derez.deserialize(user_index);
+            if (user_index >= users.size())
+            {
+#ifdef DEBUG_LEGION
+              assert(user_index == users.size());
+#endif
+              users.push_back(PhysicalUser::unpack_user(derez, context,source));
+              // Add a reference to prevent this being deleted
+              // before we're done unpacking
+              users.back()->add_reference();
+            }
+            FieldMask user_mask;
+            derez.deserialize(user_mask);
+            if (current_users.insert(users[user_index], user_mask))
+              users[user_index]->add_reference();
+          }
+        }
+        size_t num_previous;
+        derez.deserialize(num_previous);
+        for (unsigned idx1 = 0; idx1 < num_previous; idx1++)
+        {
+          ApEvent user_event;
+          derez.deserialize(user_event);
+          FieldMaskSet<PhysicalUser> &previous_users = 
+            previous_epoch_users[user_event];
+          if (previous_users.empty())
+            to_collect.insert(user_event);
+          size_t num_users;
+          derez.deserialize(num_users);
+          for (unsigned idx2 = 0; idx2 < num_users; idx2++)
+          {
+            unsigned user_index;
+            derez.deserialize(user_index);
+            if (user_index >= users.size())
+            {
+#ifdef DEBUG_LEGION
+              assert(user_index == users.size());
+#endif
+              users.push_back(PhysicalUser::unpack_user(derez, context,source));
+              // Add a reference to prevent this being deleted
+              // before we're done unpacking
+              users.back()->add_reference();
+            }
+            FieldMask user_mask;
+            derez.deserialize(user_mask);
+            if (previous_users.insert(users[user_index], user_mask))
+              users[user_index]->add_reference();
+          }
+        }
+      }
+      size_t num_subviews;
+      derez.deserialize(num_subviews);
+      if (num_subviews > 0)
+      {
+        for (unsigned idx = 0; idx < num_subviews; idx++)
+        {
+          IndexSpaceExpression *subview_expr = 
+            IndexSpaceExpression::unpack_expression(derez, context, source);
+          FieldMask subview_mask;
+          derez.deserialize(subview_mask);
+          // See if we already have it in the cache
+          std::map<IndexSpaceExprID,ExprView*>::const_iterator finder = 
+            expr_cache.find(subview_expr->expr_id);
+          ExprView *subview = NULL;
+          if (finder == expr_cache.end())
+          {
+            // See if we can find this view in the tree before we make it
+            subview = root->find_congruent_view(subview_expr);
+            // If it's still NULL then we can make it
+            if (subview == NULL)
+              subview = new ExprView(context, manager, inst_view, subview_expr);
+            expr_cache[subview_expr->expr_id] = subview;
+          }
+          else
+            subview = finder->second;
+#ifdef DEBUG_LEGION
+          assert(subview != NULL);
+#endif
+          // Check to see if it needs to be inserted
+          if (subview != root)
+          {
+            FieldMask insert_mask = subview->invalid_fields & subview_mask;
+            if (!!insert_mask)
+            {
+              subview->invalid_fields -= insert_mask;
+              root->insert_subview(subview, insert_mask);
+            }
+          }
+          // Continue the unpacking
+          subview->unpack_replication(derez, root, source, expr_cache, users);
+        }
+      }
+      if (!to_collect.empty())
+      {
+        for (std::set<ApEvent>::const_iterator it = 
+              to_collect.begin(); it != to_collect.end(); it++)
+          defer_collect_user(manager, *it);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void ExprView::deactivate_replication(const FieldMask &deactivate_mask)
+    //--------------------------------------------------------------------------
+    {
+      // Traverse any subviews and do the deactivates in those nodes first
+      // No need to get the lock here since we're protected by the 
+      // exclusive expr_lock at the top of the tree
+      // Don't worry about pruning, when we clean the cache after doing
+      // this pass then that will also go through and prune out any 
+      // expr views which no longer have users in any subtrees
+      for (FieldMaskSet<ExprView>::const_iterator it = 
+            subviews.begin(); it != subviews.end(); it++)
+      {
+        const FieldMask overlap = it->second & deactivate_mask;
+        if (!overlap)
+          continue;
+        it->first->deactivate_replication(overlap);
+      }
+      // Need a read-write lock since we're going to be mutating the structures
+      AutoLock v_lock(view_lock);
+      // Prune out the current epoch users
+      if (!current_epoch_users.empty())
+      {
+        std::vector<ApEvent> events_to_delete;
+        for (EventFieldUsers::iterator eit = current_epoch_users.begin();
+              eit != current_epoch_users.end(); eit++)
+        {
+          if (eit->second.get_valid_mask() * deactivate_mask)
+            continue;
+          bool need_tighten = false;
+          std::vector<PhysicalUser*> to_delete;
+          for (FieldMaskSet<PhysicalUser>::iterator it = 
+                eit->second.begin(); it != eit->second.end(); it++)
+          {
+            if (it->second * deactivate_mask)
+              continue;
+            need_tighten = true;
+            it.filter(deactivate_mask);
+            if (!it->second)
+              to_delete.push_back(it->first);
+          }
+          if (!to_delete.empty())
+          {
+            for (std::vector<PhysicalUser*>::const_iterator it = 
+                  to_delete.begin(); it != to_delete.end(); it++)
+            {
+              eit->second.erase(*it);
+              if ((*it)->remove_reference())
+                delete (*it);
+            }
+            if (eit->second.empty())
+            {
+              events_to_delete.push_back(eit->first);
+              continue;
+            }
+          }
+          if (need_tighten)
+            eit->second.tighten_valid_mask();
+        }
+        if (!events_to_delete.empty())
+        {
+          for (std::vector<ApEvent>::const_iterator it = 
+                events_to_delete.begin(); it != events_to_delete.end(); it++)
+            current_epoch_users.erase(*it);
+        }
+      }
+      // Prune out the previous epoch users
+      if (!previous_epoch_users.empty())
+      {
+        std::vector<ApEvent> events_to_delete;
+        for (EventFieldUsers::iterator eit = previous_epoch_users.begin();
+              eit != previous_epoch_users.end(); eit++)
+        {
+          if (eit->second.get_valid_mask() * deactivate_mask)
+            continue;
+          bool need_tighten = false;
+          std::vector<PhysicalUser*> to_delete;
+          for (FieldMaskSet<PhysicalUser>::iterator it = 
+                eit->second.begin(); it != eit->second.end(); it++)
+          {
+            if (it->second * deactivate_mask)
+              continue;
+            need_tighten = true;
+            it.filter(deactivate_mask);
+            if (!it->second)
+              to_delete.push_back(it->first);
+          }
+          if (!to_delete.empty())
+          {
+            for (std::vector<PhysicalUser*>::const_iterator it = 
+                  to_delete.begin(); it != to_delete.end(); it++)
+            {
+              eit->second.erase(*it);
+              if ((*it)->remove_reference())
+                delete (*it);
+            }
+            if (eit->second.empty())
+            {
+              events_to_delete.push_back(eit->first);
+              continue;
+            }
+          }
+          if (need_tighten)
+            eit->second.tighten_valid_mask();
+        }
+        if (!events_to_delete.empty())
+        {
+          for (std::vector<ApEvent>::const_iterator it = 
+                events_to_delete.begin(); it != events_to_delete.end(); it++)
+            previous_epoch_users.erase(*it);
+        }
+      } 
+    }
+
+    //--------------------------------------------------------------------------
+    void ExprView::add_collectable_reference(ReferenceMutator *mutator)
+    //--------------------------------------------------------------------------
+    {
+      add_reference();
+      // Only the logical owner adds the full GC reference as this is where
+      // the actual garbage collection algorithm will take place and we know
+      // that we have all the valid gc event users
+      if (inst_view->is_logical_owner())
+        inst_view->add_base_gc_ref(PENDING_GC_REF, mutator);
+      else
+        inst_view->add_base_resource_ref(PENDING_GC_REF);
+    }
+
+    //--------------------------------------------------------------------------
+    bool ExprView::remove_collectable_reference(ReferenceMutator *mutator)
+    //--------------------------------------------------------------------------
+    {
+      if (inst_view->is_logical_owner())
+      {
+        if (inst_view->remove_base_gc_ref(PENDING_GC_REF, mutator))
+          delete inst_view;
+      }
+      else
+      {
+        if (inst_view->remove_base_resource_ref(PENDING_GC_REF))
+          delete inst_view;
+      }
+      return remove_reference();
+    }
+
+    //--------------------------------------------------------------------------
+    void ExprView::collect_users(const std::set<ApEvent> &to_collect)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock v_lock(view_lock);
+      for (std::set<ApEvent>::const_iterator it = 
+            to_collect.begin(); it != to_collect.end(); it++)
+        filter_local_users(*it);
+    }
+
+    //--------------------------------------------------------------------------
+    void ExprView::filter_local_users(ApEvent term_event) 
+    //--------------------------------------------------------------------------
+    {
+      // Caller must be holding the lock
+      DETAILED_PROFILER(context->runtime, 
+                        MATERIALIZED_VIEW_FILTER_LOCAL_USERS_CALL);
+      // Don't do this if we are in Legion Spy since we want to see
+      // all of the dependences on an instance
+#ifndef LEGION_DISABLE_EVENT_PRUNING
+      EventFieldUsers::iterator current_finder = 
+        current_epoch_users.find(term_event);
+      if (current_finder != current_epoch_users.end())
+      {
+        for (EventUsers::const_iterator it = current_finder->second.begin();
+              it != current_finder->second.end(); it++)
+          if (it->first->remove_reference())
+            delete it->first;
+        current_epoch_users.erase(current_finder);
+      }
+      LegionMap<ApEvent,EventUsers>::aligned::iterator previous_finder = 
+        previous_epoch_users.find(term_event);
+      if (previous_finder != previous_epoch_users.end())
+      {
+        for (EventUsers::const_iterator it = previous_finder->second.begin();
+              it != previous_finder->second.end(); it++)
+          if (it->first->remove_reference())
+            delete it->first;
+        previous_epoch_users.erase(previous_finder);
+      }
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    void ExprView::filter_current_users(const EventFieldUsers &to_filter)
+    //--------------------------------------------------------------------------
+    {
+      // Lock needs to be held by caller 
+      for (EventFieldUsers::const_iterator fit = to_filter.begin();
+            fit != to_filter.end(); fit++)
+      {
+        EventFieldUsers::iterator event_finder = 
+          current_epoch_users.find(fit->first);
+        // If it's already been pruned out then either it was filtered
+        // because it finished or someone else moved it already, either
+        // way we don't need to do anything about it
+        if (event_finder == current_epoch_users.end())
+          continue;
+        EventFieldUsers::iterator target_finder = 
+          previous_epoch_users.find(fit->first);
+        for (EventUsers::const_iterator it = fit->second.begin();
+              it != fit->second.end(); it++)
+        {
+          EventUsers::iterator finder = event_finder->second.find(it->first);
+          // Might already have been pruned out again, either way there is
+          // nothing for us to do here if it was already moved
+          if (finder == event_finder->second.end())
+            continue;
+          const FieldMask overlap = finder->second & it->second;
+          if (!overlap)
+            continue;
+          finder.filter(overlap);
+          bool needs_reference = true;
+          if (!finder->second)
+          {
+            // Have the reference flow back with the user
+            needs_reference = false;
+            event_finder->second.erase(finder);
+          }
+          // Now add the user to the previous set
+          if (target_finder == previous_epoch_users.end())
+          {
+            if (needs_reference)
+              it->first->add_reference();
+            previous_epoch_users[fit->first].insert(it->first, overlap);
+            target_finder = previous_epoch_users.find(fit->first);
+          }
+          else
+          {
+            if (target_finder->second.insert(it->first, overlap))
+            {
+              // Added a new user to the previous users
+              if (needs_reference)
+                it->first->add_reference();
+            }
+            else
+            {
+              // Remove any extra references we might be trying to send back
+              if (!needs_reference && it->first->remove_reference())
+                delete it->first;
+            }
+          }
+        }
+        if (event_finder->second.empty())
+          current_epoch_users.erase(event_finder);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void ExprView::filter_previous_users(const EventFieldUsers &to_filter)
+    //--------------------------------------------------------------------------
+    {
+      // Lock needs to be held by caller
+      for (EventFieldUsers::const_iterator fit = to_filter.begin();
+            fit != to_filter.end(); fit++)
+      {
+        EventFieldUsers::iterator event_finder = 
+          previous_epoch_users.find(fit->first);
+        // Might already have been pruned out
+        if (event_finder == previous_epoch_users.end())
+          continue;
+        for (EventUsers::const_iterator it = fit->second.begin();
+              it != fit->second.end(); it++)
+        {
+          EventUsers::iterator finder = event_finder->second.find(it->first);
+          // Might already have been pruned out again
+          if (finder == event_finder->second.end())
+            continue;
+          finder.filter(it->second);
+          if (!finder->second)
+          {
+            if (finder->first->remove_reference())
+              delete finder->first;
+            event_finder->second.erase(finder);
+          }
+        }
+        if (event_finder->second.empty())
+          previous_epoch_users.erase(event_finder);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void ExprView::find_current_preconditions(const RegionUsage &usage,
+                                              const FieldMask &user_mask,
+                                              IndexSpaceExpression *user_expr,
+                                              ApEvent term_event,
+                                              const UniqueID op_id,
+                                              const unsigned index,
+                                              const bool user_covers,
+                                              std::set<ApEvent> &preconditions,
+                                              std::set<ApEvent> &dead_events,
+                                              EventFieldUsers &filter_users,
+                                              FieldMask &observed,
+                                              FieldMask &non_dominated,
+                                              const bool trace_recording)
+    //--------------------------------------------------------------------------
+    {
+      // Caller must be holding the lock
+      for (EventFieldUsers::const_iterator cit = current_epoch_users.begin(); 
+            cit != current_epoch_users.end(); cit++)
+      {
+        if (cit->first == term_event)
+          continue;
+#ifndef LEGION_DISABLE_EVENT_PRUNING
+        // We're about to do a bunch of expensive tests, 
+        // so first do something cheap to see if we can 
+        // skip all the tests.
+        if (!trace_recording && cit->first.has_triggered_faultignorant())
+        {
+          dead_events.insert(cit->first);
+          continue;
+        }
+#if 0
+        // You might think you can optimize things like this, but you can't
+        // because we still need the correct epoch users for every ExprView
+        // when we go to add our user later
+        if (!trace_recording &&
+            preconditions.find(cit->first) != preconditions.end())
+          continue;
+#endif
+#endif
+        const EventUsers &event_users = cit->second;
+        const FieldMask overlap = event_users.get_valid_mask() & user_mask;
+        if (!overlap)
+          continue;
+        EventFieldUsers::iterator to_filter = filter_users.find(cit->first);
+        for (EventUsers::const_iterator it = event_users.begin();
+              it != event_users.end(); it++)
+        {
+          const FieldMask user_overlap = user_mask & it->second;
+          if (!user_overlap)
+            continue;
+          bool dominates = true;
+          if (has_local_precondition<false>(it->first, usage, user_expr, 
+                                  op_id, index, user_covers, dominates))
+          {
+            preconditions.insert(cit->first);
+            if (dominates)
+            {
+              observed |= user_overlap;
+              if (to_filter == filter_users.end())
+              {
+                filter_users[cit->first].insert(it->first, user_overlap);
+                to_filter = filter_users.find(cit->first);
+              }
+              else
+              {
+#ifdef DEBUG_LEGION
+                assert(to_filter->second.find(it->first) == 
+                        to_filter->second.end());
+#endif
+                to_filter->second.insert(it->first, user_overlap);
+              }
+            }
+            else
+              non_dominated |= user_overlap;
+          }
+          else
+            non_dominated |= user_overlap;
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void ExprView::find_previous_preconditions(const RegionUsage &usage,
+                                               const FieldMask &user_mask,
+                                               IndexSpaceExpression *user_expr,
+                                               ApEvent term_event,
+                                               const UniqueID op_id,
+                                               const unsigned index,
+                                               const bool user_covers,
+                                               std::set<ApEvent> &preconditions,
+                                               std::set<ApEvent> &dead_events,
+                                               const bool trace_recording)
+    //--------------------------------------------------------------------------
+    {
+      // Caller must be holding the lock
+      for (EventFieldUsers::const_iterator pit = previous_epoch_users.begin(); 
+            pit != previous_epoch_users.end(); pit++)
+      {
+        if (pit->first == term_event)
+          continue;
+#ifndef LEGION_DISABLE_EVENT_PRUNING
+        // We're about to do a bunch of expensive tests, 
+        // so first do something cheap to see if we can 
+        // skip all the tests.
+        if (!trace_recording && pit->first.has_triggered_faultignorant())
+        {
+          dead_events.insert(pit->first);
+          continue;
+        }
+#if 0
+        // You might think you can optimize things like this, but you can't
+        // because we still need the correct epoch users for every ExprView
+        // when we go to add our user later
+        if (!trace_recording &&
+            preconditions.find(pit->first) != preconditions.end())
+          continue;
+#endif
+#endif
+        const EventUsers &event_users = pit->second;
+        if (user_mask * event_users.get_valid_mask())
+          continue;
+        for (EventUsers::const_iterator it = event_users.begin();
+              it != event_users.end(); it++)
+        {
+          if (user_mask * it->second)
+            continue;
+          if (has_local_precondition<false>(it->first, usage, user_expr, 
+                                            op_id, index, user_covers))
+            preconditions.insert(pit->first);
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void ExprView::find_current_preconditions(const RegionUsage &usage,
+                                              const FieldMask &user_mask,
+                                              IndexSpaceExpression *user_expr,
+                                              const UniqueID op_id,
+                                              const unsigned index,
+                                              const bool user_covers,
+                                              EventFieldExprs &preconditions,
+                                              std::set<ApEvent> &dead_events,
+                                              EventFieldUsers &filter_events,
+                                              FieldMask &observed,
+                                              FieldMask &non_dominated,
+                                              const bool trace_recording)
+    //--------------------------------------------------------------------------
+    {
+      // Caller must be holding the lock
+      for (EventFieldUsers::const_iterator cit = current_epoch_users.begin(); 
+            cit != current_epoch_users.end(); cit++)
+      {
+#ifndef LEGION_DISABLE_EVENT_PRUNING
+        // We're about to do a bunch of expensive tests, 
+        // so first do something cheap to see if we can 
+        // skip all the tests.
+        if (!trace_recording && cit->first.has_triggered_faultignorant())
+        {
+          dead_events.insert(cit->first);
+          continue;
+        }
+#endif
+        const EventUsers &event_users = cit->second;
+        FieldMask overlap = event_users.get_valid_mask() & user_mask;
+        if (!overlap)
+          continue;
+        EventFieldExprs::iterator finder = preconditions.find(cit->first);
+#if 0
+        // You might think you can optimize things like this, but you can't
+        // because we still need the correct epoch users for every ExprView
+        // when we go to add our user later
+        if (!trace_recording && finder != preconditions.end())
+        {
+          overlap -= finder->second.get_valid_mask();
+          if (!overlap)
+            continue;
+        }
+#endif
+        EventFieldUsers::iterator to_filter = filter_events.find(cit->first);
+        for (EventUsers::const_iterator it = event_users.begin();
+              it != event_users.end(); it++)
+        {
+          const FieldMask user_overlap = user_mask & it->second;
+          if (!user_overlap)
+            continue;
+          bool dominated = true;
+          if (has_local_precondition<true>(it->first, usage, user_expr,
+                                 op_id, index, user_covers, dominated)) 
+          {
+            if (finder == preconditions.end())
+            {
+              preconditions[cit->first].insert(user_expr, user_overlap);
+              finder = preconditions.find(cit->first);
+            }
+            else
+              finder->second.insert(user_expr, user_overlap);
+            if (dominated)
+            {
+              observed |= user_overlap;
+              
+              if (to_filter == filter_events.end())
+              {
+                filter_events[cit->first].insert(it->first, user_overlap);
+                to_filter = filter_events.find(cit->first);
+              }
+              else
+                to_filter->second.insert(it->first, user_overlap);
+            }
+            else
+              non_dominated |= user_overlap;
+          }
+          else
+            non_dominated |= user_overlap;
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void ExprView::find_previous_preconditions(const RegionUsage &usage,
+                                               const FieldMask &user_mask,
+                                               IndexSpaceExpression *user_expr,
+                                               const UniqueID op_id,
+                                               const unsigned index,
+                                               const bool user_covers,
+                                               EventFieldExprs &preconditions,
+                                               std::set<ApEvent> &dead_events,
+                                               const bool trace_recording)
+    //--------------------------------------------------------------------------
+    {
+      // Caller must be holding the lock
+      for (LegionMap<ApEvent,EventUsers>::aligned::const_iterator pit = 
+            previous_epoch_users.begin(); pit != 
+            previous_epoch_users.end(); pit++)
+      {
+#ifndef LEGION_DISABLE_EVENT_PRUNING
+        // We're about to do a bunch of expensive tests, 
+        // so first do something cheap to see if we can 
+        // skip all the tests.
+        if (!trace_recording && pit->first.has_triggered_faultignorant())
+        {
+          dead_events.insert(pit->first);
+          continue;
+        }
+#endif
+        const EventUsers &event_users = pit->second;
+        FieldMask overlap = user_mask & event_users.get_valid_mask();
+        if (!overlap)
+          continue;
+        EventFieldExprs::iterator finder = preconditions.find(pit->first);
+#if 0
+        // You might think you can optimize things like this, but you can't
+        // because we still need the correct epoch users for every ExprView
+        // when we go to add our user later
+        if (!trace_recording && finder != preconditions.end())
+        {
+          overlap -= finder->second.get_valid_mask();
+          if (!overlap)
+            continue;
+        }
+#endif
+        for (EventUsers::const_iterator it = event_users.begin();
+              it != event_users.end(); it++)
+        {
+          const FieldMask user_overlap = overlap & it->second;
+          if (!user_overlap)
+            continue;
+          if (has_local_precondition<true>(it->first, usage, user_expr, 
+                                           op_id, index, user_covers))
+          {
+            if (finder == preconditions.end())
+            {
+              preconditions[pit->first].insert(user_expr, user_overlap);
+              // Needed for when we go around the loop again
+              finder = preconditions.find(pit->first);
+            }
+            else
+              finder->second.insert(user_expr, user_overlap);
+          }
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void ExprView::find_previous_filter_users(const FieldMask &dom_mask,
+                                            EventFieldUsers &filter_users)
+    //--------------------------------------------------------------------------
+    {
+      // Lock better be held by caller
+      for (EventFieldUsers::const_iterator pit = previous_epoch_users.begin(); 
+            pit != previous_epoch_users.end(); pit++)
+      {
+        FieldMask event_overlap = pit->second.get_valid_mask() & dom_mask;
+        if (!event_overlap)
+          continue;
+        EventFieldUsers::iterator to_filter = filter_users.find(pit->first);
+        for (EventUsers::const_iterator it = pit->second.begin();
+              it != pit->second.end(); it++)
+        {
+          const FieldMask user_overlap = it->second & event_overlap;
+          if (!user_overlap)
+            continue;
+          if (to_filter == filter_users.end())
+          {
+            filter_users[pit->first].insert(it->first, user_overlap);
+            to_filter = filter_users.find(pit->first);
+          }
+          else
+            to_filter->second.insert(it->first, user_overlap);
+        }
+      }
+    }
+
+    /////////////////////////////////////////////////////////////
+    // PendingTaskUser
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    PendingTaskUser::PendingTaskUser(const RegionUsage &u, const FieldMask &m,
+                                     IndexSpaceNode *expr, const UniqueID id,
+                                     const unsigned idx, const ApEvent term)
+      : usage(u), user_mask(m), user_expr(expr), op_id(id), 
+        index(idx), term_event(term)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    PendingTaskUser::~PendingTaskUser(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    bool PendingTaskUser::apply(MaterializedView *view, const FieldMask &mask)
+    //--------------------------------------------------------------------------
+    {
+      const FieldMask overlap = user_mask & mask;
+      if (!overlap)
+        return false;
+      view->add_internal_task_user(usage, user_expr, overlap, term_event, 
+                                   op_id, index, false/*tracing*/);
+      user_mask -= overlap;
+      return !user_mask;
+    }
+
+    /////////////////////////////////////////////////////////////
+    // PendingCopyUser
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    PendingCopyUser::PendingCopyUser(const bool read, const FieldMask &mask,
+                                     IndexSpaceExpression *e, const UniqueID id,
+                                     const unsigned idx, const ApEvent term)
+      : reading(read), copy_mask(mask), copy_expr(e), op_id(id), 
+        index(idx), term_event(term)
+    //--------------------------------------------------------------------------
+    {
+    }
+    
+    //--------------------------------------------------------------------------
+    PendingCopyUser::~PendingCopyUser(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    bool PendingCopyUser::apply(MaterializedView *view, const FieldMask &mask)
+    //--------------------------------------------------------------------------
+    {
+      const FieldMask overlap = copy_mask & mask;
+      if (!overlap)
+        return false;
+      const RegionUsage usage(reading ? READ_ONLY : READ_WRITE, EXCLUSIVE, 0);
+      view->add_internal_copy_user(usage, copy_expr, overlap, term_event,
+                                   op_id, index, false/*trace recording*/);
+      copy_mask -= overlap;
+      return !copy_mask;
     }
 
     /////////////////////////////////////////////////////////////
@@ -205,26 +2255,32 @@ namespace Legion {
     MaterializedView::MaterializedView(
                                RegionTreeForest *ctx, DistributedID did,
                                AddressSpaceID own_addr,
-                               AddressSpaceID log_own, RegionTreeNode *node, 
-                               InstanceManager *man, MaterializedView *par, 
+                               AddressSpaceID log_own, InstanceManager *man,
                                UniqueID own_ctx, bool register_now)
-      : InstanceView(ctx, encode_materialized_did(did, par == NULL), own_addr, 
-                     log_own, node, own_ctx, register_now), 
-        manager(man), parent(par), 
-        disjoint_children(node->are_all_children_disjoint())
+      : InstanceView(ctx, encode_materialized_did(did), own_addr,
+                     log_own, own_ctx, register_now), 
+        manager(man), expr_cache_uses(0), outstanding_additions(0)
+#ifdef ENABLE_VIEW_REPLICATION
+        , remote_added_users(0), remote_pending_users(NULL)
+#endif
     //--------------------------------------------------------------------------
     {
       // Otherwise the instance lock will get filled in when we are unpacked
 #ifdef DEBUG_LEGION
       assert(manager != NULL);
 #endif
-      logical_node->register_instance_view(manager, owner_context, this);
-      // If we are either not a parent or we are a remote parent add 
-      // a resource reference to avoid being collected
-      if (parent != NULL)
-        add_nested_resource_ref(parent->did);
-      else 
-        manager->add_nested_resource_ref(did);
+#ifdef ENABLE_VIEW_REPLICATION
+      repl_ptr.replicated_copies = NULL;
+#endif
+      // Keep the manager from being collected
+      manager->add_nested_resource_ref(did);
+      if (is_logical_owner())
+      {
+        current_users = new ExprView(ctx,manager,this,manager->instance_domain);
+        current_users->add_reference();
+      }
+      else
+        current_users = NULL;
 #ifdef LEGION_GC
       log_garbage.info("GC Materialized View %lld %d %lld", 
           LEGION_DISTRIBUTED_ID_FILTER(did), local_space, 
@@ -234,8 +2290,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     MaterializedView::MaterializedView(const MaterializedView &rhs)
-      : InstanceView(NULL, 0, 0, 0, NULL, 0, false),
-        manager(NULL), parent(NULL), disjoint_children(false)
+      : InstanceView(NULL, 0, 0, 0, 0, false), manager(NULL)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -246,15 +2301,7 @@ namespace Legion {
     MaterializedView::~MaterializedView(void)
     //--------------------------------------------------------------------------
     {
-      // Always unregister ourselves with the region tree node
-      logical_node->unregister_instance_view(manager, owner_context);
-      for (std::map<LegionColor,MaterializedView*>::const_iterator it = 
-            children.begin(); it != children.end(); it++)
-      {
-        if (it->second->remove_nested_resource_ref(did))
-          delete it->second;
-      }
-      if ((parent == NULL) && manager->remove_nested_resource_ref(did))
+      if (manager->remove_nested_resource_ref(did))
         delete manager;
       if (!atomic_reservations.empty())
       {
@@ -270,19 +2317,21 @@ namespace Legion {
         }
         atomic_reservations.clear();
       }
-      if (!initial_user_events.empty())
+      if ((current_users != NULL) && current_users->remove_reference())
+        delete current_users;
+#ifdef ENABLE_VIEW_REPLICATION
+      if (repl_ptr.replicated_copies != NULL)
       {
-        for (std::set<ApEvent>::const_iterator it = initial_user_events.begin();
-              it != initial_user_events.end(); it++)
-          filter_local_users(*it);
+#ifdef DEBUG_LEGION
+        assert(is_logical_owner());
+#endif
+        // We should only have replicated copies here
+        // If there are replicated requests that is very bad
+        delete repl_ptr.replicated_copies;
       }
-#if !defined(LEGION_SPY) && !defined(EVENT_GRAPH_TRACE) && \
-      defined(DEBUG_LEGION)
-      // Don't forget to remove the initial user if there was one
-      // before running these checks
-      assert(current_epoch_users.empty());
-      assert(previous_epoch_users.empty());
-      assert(outstanding_gc_events.empty());
+#ifdef DEBUG_LEGION
+      assert(remote_pending_users == NULL);
+#endif
 #endif
     }
 
@@ -293,18 +2342,6 @@ namespace Legion {
       // should never be called
       assert(false);
       return *this;
-    }
-
-    //--------------------------------------------------------------------------
-    void MaterializedView::add_remote_child(MaterializedView *child)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(manager == child->manager);
-#endif
-      LegionColor c = child->logical_node->get_color();
-      AutoLock v_lock(view_lock);
-      children[c] = child;
     }
 
     //--------------------------------------------------------------------------
@@ -326,144 +2363,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return !(space_mask - manager->layout->allocated_fields);
-    }
-
-    //--------------------------------------------------------------------------
-    LogicalView* MaterializedView::get_subview(const LegionColor c)
-    //--------------------------------------------------------------------------
-    {
-      return get_materialized_subview(c);
-    }
-
-    //--------------------------------------------------------------------------
-    MaterializedView* MaterializedView::get_materialized_subview(
-                                                            const LegionColor c)
-    //--------------------------------------------------------------------------
-    {
-      // This is the common case we should already have it
-      {
-        AutoLock v_lock(view_lock, 1, false/*exclusive*/);
-        std::map<LegionColor,MaterializedView*>::const_iterator finder = 
-                                                            children.find(c);
-        if (finder != children.end())
-          return finder->second;
-      }
-      // If we don't have it, we have to make it
-      if (is_owner())
-      {
-        RegionTreeNode *child_node = logical_node->get_tree_child(c);
-        // Allocate the DID eagerly
-        DistributedID child_did = 
-          context->runtime->get_available_distributed_id();
-        bool free_child_did = false;
-        MaterializedView *child_view = NULL;
-        {
-          // Retake the lock and see if we lost the race
-          AutoLock v_lock(view_lock);
-          std::map<LegionColor,MaterializedView*>::const_iterator finder = 
-                                                              children.find(c);
-          if (finder != children.end())
-          {
-            child_view = finder->second;
-            free_child_did = true;
-          }
-          else
-          {
-            // Otherwise we get to make it
-            child_view = new MaterializedView(context, child_did, 
-                                              owner_space, logical_owner, 
-                                              child_node, manager, this, 
-                                              owner_context, true/*reg now*/);
-            children[c] = child_view;
-          }
-          if (free_child_did)
-            context->runtime->recycle_distributed_id(child_did,
-                                                     RtEvent::NO_RT_EVENT);
-          return child_view;
-        }
-      }
-      else
-      {
-        // Find the distributed ID for this child view
-        volatile DistributedID child_did;
-        RtUserEvent wait_on = Runtime::create_rt_user_event();
-        Serializer rez;
-        {
-          RezCheck z(rez);
-          rez.serialize(did);
-          rez.serialize(c);
-          rez.serialize(&child_did);
-          rez.serialize(wait_on);
-        }
-        runtime->send_subview_did_request(owner_space, rez); 
-        wait_on.wait();
-        RtEvent ready;
-        LogicalView *child_view = 
-          context->runtime->find_or_request_logical_view(child_did, ready);
-        if (ready.exists())
-          ready.wait();
-#ifdef DEBUG_LEGION
-        assert(child_view->is_materialized_view());
-#endif
-        return child_view->as_materialized_view();
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void MaterializedView::handle_subview_did_request(
-                   Deserializer &derez, Runtime *runtime, AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      DerezCheck z(derez);
-      DistributedID parent_did;
-      derez.deserialize(parent_did);
-      LegionColor color;
-      derez.deserialize(color);
-      DistributedID *target;
-      derez.deserialize(target);
-      RtUserEvent to_trigger;
-      derez.deserialize(to_trigger);
-      DistributedCollectable *dc = 
-        runtime->find_distributed_collectable(parent_did);
-#ifdef DEBUG_LEGION
-      MaterializedView *parent_view = dynamic_cast<MaterializedView*>(dc);
-      assert(parent_view != NULL);
-#else
-      MaterializedView *parent_view = static_cast<MaterializedView*>(dc);
-#endif
-      MaterializedView *child_view = 
-        parent_view->get_materialized_subview(color);
-      Serializer rez;
-      {
-        RezCheck z(rez);
-        rez.serialize(child_view->did);
-        rez.serialize(target);
-        rez.serialize(to_trigger);
-      }
-      runtime->send_subview_did_response(source, rez);
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void MaterializedView::handle_subview_did_response(
-                                                            Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      DerezCheck z(derez);
-      DistributedID result;
-      derez.deserialize(result);
-      DistributedID *target;
-      derez.deserialize(target);
-      RtUserEvent to_trigger;
-      derez.deserialize(to_trigger);
-      (*target) = result;
-      Runtime::trigger_event(to_trigger);
-    }
-
-    //--------------------------------------------------------------------------
-    MaterializedView* MaterializedView::get_materialized_parent_view(void) const
-    //--------------------------------------------------------------------------
-    {
-      return parent;
     }
 
     //--------------------------------------------------------------------------
@@ -496,1142 +2395,1182 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool MaterializedView::reduce_to(ReductionOpID redop, 
-                                     const FieldMask &copy_mask,
-                                     std::vector<CopySrcDstField> &dst_fields,
-                                     CopyAcrossHelper *across_helper)
-    //--------------------------------------------------------------------------
-    {
-      if (across_helper == NULL)
-        manager->compute_copy_offsets(copy_mask, dst_fields);
-      else
-        across_helper->compute_across_offsets(copy_mask, dst_fields);
-      return false; // not a fold
-    }
-
-    //--------------------------------------------------------------------------
-    void MaterializedView::reduce_from(ReductionOpID redop,
-                                       const FieldMask &reduce_mask, 
-                                       std::vector<CopySrcDstField> &src_fields)
-    //--------------------------------------------------------------------------
-    {
-      manager->compute_copy_offsets(reduce_mask, src_fields);
-    }
-
-    //--------------------------------------------------------------------------
-    void MaterializedView::accumulate_events(std::set<ApEvent> &all_events)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock v_lock(view_lock,1,false/*exclusive*/);
-      all_events.insert(outstanding_gc_events.begin(),
-                        outstanding_gc_events.end());
-    } 
-
-    //--------------------------------------------------------------------------
-    void MaterializedView::find_copy_preconditions(ReductionOpID redop, 
-                                                   bool reading, 
-                                                   bool single_copy,
-                                                   bool restrict_out,
-                                                   const FieldMask &copy_mask,
-                                                   VersionTracker *versions,
-                                                   const UniqueID creator_op_id,
-                                                   const unsigned index,
-                                                   const AddressSpaceID source,
-                           LegionMap<ApEvent,FieldMask>::aligned &preconditions,
-                                              std::set<RtEvent> &applied_events,
-                                                  PhysicalTraceInfo &trace_info,
-                                                   bool can_filter)
-    //--------------------------------------------------------------------------
-    {
-      ApEvent start_use_event = manager->get_use_event();
-      if (start_use_event.exists())
-      {
-        LegionMap<ApEvent,FieldMask>::aligned::iterator finder = 
-          preconditions.find(start_use_event);
-        if (finder == preconditions.end())
-          preconditions[start_use_event] = copy_mask;
-        else
-          finder->second |= copy_mask;
-      }
-      RegionNode *origin_node = logical_node->is_region() ? 
-        logical_node->as_region_node() : 
-        logical_node->as_partition_node()->parent;
-      // If we can filter we can do the normal case, otherwise
-      // we do the above case where we don't filter
-      if (can_filter)
-        find_local_copy_preconditions(redop, reading, single_copy, restrict_out,
-                                      copy_mask, INVALID_COLOR, origin_node, 
-                                      versions, creator_op_id, index, source, 
-                                      preconditions, applied_events,
-                                      trace_info);
-      else
-        find_local_copy_preconditions_above(redop, reading, single_copy, 
-                                      restrict_out, copy_mask, INVALID_COLOR, 
-                                      origin_node, versions,creator_op_id,index,
-                                      source, preconditions, applied_events,
-                                      trace_info, false/*actually above*/);
-      if ((parent != NULL) && !versions->is_upper_bound_node(logical_node))
-      {
-        const LegionColor local_point = logical_node->get_color();
-        parent->find_copy_preconditions_above(redop, reading, single_copy,
-                   restrict_out, copy_mask, local_point, origin_node, versions, 
-                   creator_op_id, index, source, preconditions, applied_events,
-                   trace_info);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void MaterializedView::find_copy_preconditions_above(ReductionOpID redop,
-                                                         bool reading,
-                                                         bool single_copy,
-                                                         bool restrict_out,
-                                                     const FieldMask &copy_mask,
-                                                  const LegionColor child_color,
-                                                  RegionNode *origin_node,
-                                                  VersionTracker *versions,
-                                                  const UniqueID creator_op_id,
-                                                  const unsigned index,
-                                                  const AddressSpaceID source,
-                           LegionMap<ApEvent,FieldMask>::aligned &preconditions,
-                                              std::set<RtEvent> &applied_events,
-                                                  PhysicalTraceInfo &trace_info)
-    //--------------------------------------------------------------------------
-    {
-      find_local_copy_preconditions_above(redop, reading, single_copy, 
-                  restrict_out, copy_mask, child_color, origin_node, versions, 
-                  creator_op_id, index, source, preconditions, applied_events,
-                  trace_info);
-      if ((parent != NULL) && !versions->is_upper_bound_node(logical_node))
-      {
-        const LegionColor local_point = logical_node->get_color();
-        parent->find_copy_preconditions_above(redop, reading, single_copy, 
-                  restrict_out, copy_mask, local_point, origin_node, versions, 
-                  creator_op_id, index, source, preconditions, applied_events,
-                  trace_info);
-      }
-    }
-    
-    //--------------------------------------------------------------------------
-    void MaterializedView::find_local_copy_preconditions(ReductionOpID redop,
-                                                         bool reading,
-                                                         bool single_copy,
-                                                         bool restrict_out,
-                                                     const FieldMask &copy_mask,
-                                                  const LegionColor child_color,
-                                                  RegionNode *origin_node,
-                                                  VersionTracker *versions,
-                                                  const UniqueID creator_op_id,
-                                                  const unsigned index,
-                                                  const AddressSpaceID source,
-                           LegionMap<ApEvent,FieldMask>::aligned &preconditions,
-                                              std::set<RtEvent> &applied_events,
-                                                  PhysicalTraceInfo &trace_info)
-    //--------------------------------------------------------------------------
-    {
-      DETAILED_PROFILER(context->runtime, 
-                        MATERIALIZED_VIEW_FIND_LOCAL_COPY_PRECONDITIONS_CALL);
-      // If we are not the logical owner, we need to see if we are up to date 
-      if (!is_logical_owner())
-      {
-        // We are also reading if we are doing a reductions
-        perform_remote_valid_check(copy_mask, versions,reading || (redop != 0));
-      }
-      FieldMask filter_mask;
-      std::set<ApEvent> dead_events;
-      LegionMap<ApEvent,FieldMask>::aligned filter_current_users, 
-                                           filter_previous_users;
-      LegionMap<VersionID,FieldMask>::aligned advance_versions, add_versions;
-      if (reading)
-      {
-        RegionUsage usage(READ_ONLY, EXCLUSIVE, 0);
-        FieldMask observed, non_dominated;
-        AutoLock v_lock(view_lock,1,false/*exclusive*/);
-        find_current_preconditions<true/*track*/>(copy_mask, usage, child_color,
-                               origin_node, creator_op_id, index, preconditions,
-                               dead_events, filter_current_users,
-                               observed, non_dominated, trace_info);
-        const FieldMask dominated = observed - non_dominated;
-        if (!!dominated)
-          find_previous_filter_users(dominated, filter_previous_users);
-        const FieldMask previous_mask = copy_mask - dominated;
-        if (!!previous_mask)
-          find_previous_preconditions(previous_mask, usage, child_color,
-                                      origin_node, creator_op_id, index, 
-                                      preconditions, dead_events, trace_info);
-      }
-      else
-      {
-        RegionUsage usage((redop > 0) ? REDUCE : WRITE_DISCARD,EXCLUSIVE,redop);
-        FieldMask observed, non_dominated, write_skip_mask;
-        AutoLock v_lock(view_lock,1,false/*exclusive*/);
-        // Find any version updates as well our write skip mask
-        find_copy_version_updates(copy_mask, versions, write_skip_mask, 
-            filter_mask, advance_versions, add_versions, redop > 0,
-            restrict_out, true/*base*/);
-        // Can only do the write-skip optimization if this is a single copy
-        if (single_copy && !!write_skip_mask)
-        {
-          // If we have a write skip mask we know we won't interfere with
-          // any users in the list of current users so we can skip them
-          const FieldMask current_mask = copy_mask - write_skip_mask;
-          if (!!current_mask)
-            find_current_preconditions<true/*track*/>(current_mask, usage, 
-                                       child_color, origin_node, creator_op_id,
-                                       index, preconditions, dead_events, 
-                                       filter_current_users,
-                                       observed, non_dominated, trace_info);
-        }
-        else // the normal case with no write-skip
-          find_current_preconditions<true/*track*/>(copy_mask, usage, 
-                                     child_color, origin_node, creator_op_id,
-                                     index, preconditions, dead_events, 
-                                     filter_current_users, 
-                                     observed, non_dominated, trace_info);
-        const FieldMask dominated = observed - non_dominated;
-        if (!!dominated)
-          find_previous_filter_users(dominated, filter_previous_users);
-        const FieldMask previous_mask = copy_mask - dominated;
-        if (!!previous_mask)
-          find_previous_preconditions(previous_mask, usage, child_color,
-                                      origin_node, creator_op_id, index, 
-                                      preconditions, dead_events, trace_info);
-      }
-      if ((!dead_events.empty() || 
-           !filter_previous_users.empty() || !filter_current_users.empty() ||
-           !advance_versions.empty() || !add_versions.empty()) &&
-          !trace_info.recording)
-      {
-        // Need exclusive permissions to modify data structures
-        AutoLock v_lock(view_lock);
-        if (!dead_events.empty())
-          for (std::set<ApEvent>::const_iterator it = dead_events.begin();
-                it != dead_events.end(); it++)
-            filter_local_users(*it); 
-        if (!filter_previous_users.empty())
-          for (LegionMap<ApEvent,FieldMask>::aligned::const_iterator it = 
-                filter_previous_users.begin(); it != 
-                filter_previous_users.end(); it++)
-            filter_previous_user(it->first, it->second);
-        if (!filter_current_users.empty())
-          for (LegionMap<ApEvent,FieldMask>::aligned::const_iterator it = 
-                filter_current_users.begin(); it !=
-                filter_current_users.end(); it++)
-            filter_current_user(it->first, it->second);
-        if (!advance_versions.empty() || !add_versions.empty())
-          apply_version_updates(filter_mask, advance_versions, 
-                                add_versions, source, applied_events);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void MaterializedView::find_local_copy_preconditions_above(
-                                                  ReductionOpID redop, 
-                                                  bool reading,
-                                                  bool single_copy,
-                                                  bool restrict_out,
-                                                  const FieldMask &copy_mask,
-                                                  const LegionColor child_color,
-                                                  RegionNode *origin_node,
-                                                  VersionTracker *versions,
-                                                  const UniqueID creator_op_id,
-                                                  const unsigned index,
-                                                  const AddressSpaceID source,
-                           LegionMap<ApEvent,FieldMask>::aligned &preconditions,
-                                              std::set<RtEvent> &applied_events,
-                                                  PhysicalTraceInfo &trace_info,
-                                                  const bool actually_above)
-    //--------------------------------------------------------------------------
-    {
-      DETAILED_PROFILER(context->runtime, 
-                        MATERIALIZED_VIEW_FIND_LOCAL_COPY_PRECONDITIONS_CALL);
-      // If we are not the logical owner and we're not actually already above
-      // the base level, then we need to see if we are up to date 
-      // Otherwise we did this check at the base level and it went all
-      // the way up the tree so we are already good
-      if (!is_logical_owner() && !actually_above)
-      {
-        // We are also reading if we are doing reductions
-        perform_remote_valid_check(copy_mask, versions,reading || (redop != 0));
-      }
-      FieldMask filter_mask;
-      std::set<ApEvent> dead_events;
-      LegionMap<ApEvent,FieldMask>::aligned filter_current_users; 
-      LegionMap<VersionID,FieldMask>::aligned advance_versions, add_versions;
-      if (reading)
-      {
-        RegionUsage usage(READ_ONLY, EXCLUSIVE, 0);
-        FieldMask observed, non_dominated;
-        AutoLock v_lock(view_lock,1,false/*exclusive*/);
-        find_current_preconditions<false/*track*/>(copy_mask, usage, 
-                                   child_color, origin_node, creator_op_id, 
-                                   index, preconditions, dead_events, 
-                                   filter_current_users,observed,non_dominated,
-                                   trace_info);
-        // No domination above
-        find_previous_preconditions(copy_mask, usage, child_color,
-                                    origin_node, creator_op_id, index, 
-                                    preconditions, dead_events, trace_info);
-      }
-      else
-      {
-        RegionUsage usage((redop > 0) ? REDUCE : WRITE_DISCARD,EXCLUSIVE,redop);
-        FieldMask observed, non_dominated, write_skip_mask;
-        AutoLock v_lock(view_lock,1,false/*exclusive*/);
-        // Find any version updates as well our write skip mask
-        find_copy_version_updates(copy_mask, versions, write_skip_mask, 
-            filter_mask, advance_versions, add_versions, redop > 0,
-            restrict_out, false/*base*/);
-        // Can only do the write skip optimization if this is a single copy
-        if (single_copy && !!write_skip_mask)
-        {
-          // If we have a write skip mask we know we won't interfere with
-          // any users in the list of current users so we can skip them
-          const FieldMask current_mask = copy_mask - write_skip_mask;
-          if (!!current_mask)
-            find_current_preconditions<false/*track*/>(current_mask, usage, 
-                                       child_color, origin_node, creator_op_id,
-                                       index, preconditions, dead_events, 
-                                       filter_current_users,
-                                       observed, non_dominated, trace_info);
-        }
-        else // the normal case with no write-skip
-          find_current_preconditions<false/*track*/>(copy_mask, usage, 
-                                     child_color, origin_node, creator_op_id,
-                                     index, preconditions, dead_events, 
-                                     filter_current_users, 
-                                     observed, non_dominated, trace_info);
-        // No domination above
-        find_previous_preconditions(copy_mask, usage, child_color,
-                                    origin_node, creator_op_id, index, 
-                                    preconditions, dead_events, trace_info);
-      }
-#ifdef DEBUG_LEGION
-      assert(filter_current_users.empty());
-#endif
-      if (!dead_events.empty() || 
-          !advance_versions.empty() || !add_versions.empty())
-      {
-        // Need exclusive permissions to modify data structures
-        AutoLock v_lock(view_lock);
-        if (!dead_events.empty())
-          for (std::set<ApEvent>::const_iterator it = dead_events.begin();
-                it != dead_events.end(); it++)
-            filter_local_users(*it); 
-        if (!advance_versions.empty() || !add_versions.empty())
-          apply_version_updates(filter_mask, advance_versions, 
-                                add_versions, source, applied_events);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void MaterializedView::add_copy_user(ReductionOpID redop, ApEvent copy_term,
-                                         VersionTracker *versions,
-                                         const UniqueID creator_op_id,
-                                         const unsigned index,
-                                         const FieldMask &copy_mask, 
-                                         bool reading, bool restrict_out,
-                                         const AddressSpaceID source,
-                                         std::set<RtEvent> &applied_events,
-                                         PhysicalTraceInfo &trace_info)
-    //--------------------------------------------------------------------------
-    {
-      RegionUsage usage;
-      usage.redop = redop;
-      usage.prop = EXCLUSIVE;
-      if (reading)
-        usage.privilege = READ_ONLY;
-      else if (redop > 0)
-        usage.privilege = REDUCE;
-      else
-        usage.privilege = READ_WRITE;
-      RegionNode *origin_node = logical_node->is_region() ? 
-        logical_node->as_region_node() : 
-        logical_node->as_partition_node()->parent;
-      if ((parent != NULL) && !versions->is_upper_bound_node(logical_node))
-      {
-        const LegionColor local_color = logical_node->get_color();
-        parent->add_copy_user_above(usage, copy_term, local_color,
-                               origin_node, versions, creator_op_id, index,
-                               restrict_out, copy_mask, source, applied_events,
-                               trace_info);
-      }
-      add_local_copy_user(usage, copy_term, true/*base*/, restrict_out,
-          INVALID_COLOR, origin_node, versions, creator_op_id, index, 
-          copy_mask, source, applied_events, trace_info);
-    }
-
-    //--------------------------------------------------------------------------
-    void MaterializedView::add_copy_user_above(const RegionUsage &usage, 
-                                               ApEvent copy_term, 
-                                               const LegionColor child_color,
-                                               RegionNode *origin_node,
-                                               VersionTracker *versions,
-                                               const UniqueID creator_op_id,
-                                               const unsigned index,
-                                               const bool restrict_out,
-                                               const FieldMask &copy_mask,
-                                               const AddressSpaceID source,
-                                              std::set<RtEvent> &applied_events,
-                                               PhysicalTraceInfo &trace_info)
-    //--------------------------------------------------------------------------
-    {
-      if ((parent != NULL) && !versions->is_upper_bound_node(logical_node))
-      {
-        const LegionColor local_color = logical_node->get_color();
-        parent->add_copy_user_above(usage, copy_term, local_color, origin_node,
-                                  versions, creator_op_id, index, restrict_out, 
-                                  copy_mask, source, applied_events, trace_info);
-      }
-      add_local_copy_user(usage, copy_term, false/*base*/, restrict_out,
-                      child_color, origin_node, versions, creator_op_id, 
-                      index, copy_mask, source, applied_events, trace_info);
-    }
-
-    //--------------------------------------------------------------------------
-    void MaterializedView::add_local_copy_user(const RegionUsage &usage, 
-                                               ApEvent copy_term,
-                                               bool base_user,bool restrict_out,
-                                               const LegionColor child_color,
-                                               RegionNode *origin_node,
-                                               VersionTracker *versions,
-                                               const UniqueID creator_op_id,
-                                               const unsigned index,
-                                               const FieldMask &copy_mask,
-                                               const AddressSpaceID source,
-                                              std::set<RtEvent> &applied_events,
-                                               PhysicalTraceInfo &trace_info)
-    //--------------------------------------------------------------------------
-    {
-      if (!is_logical_owner())
-      {
-        // If we are not the owner we have to send the user back to the owner
-        RtUserEvent remote_update_event = Runtime::create_rt_user_event();
-        Serializer rez;
-        {
-          RezCheck z(rez);
-          rez.serialize(did);
-          rez.serialize(remote_update_event);
-          rez.serialize<bool>(true); // is copy
-          rez.serialize<bool>(restrict_out);
-          rez.serialize(usage);
-          rez.serialize(copy_mask);
-          rez.serialize(child_color);
-          rez.serialize(origin_node->handle);
-          rez.serialize(creator_op_id);
-          rez.serialize(index);
-          rez.serialize(copy_term);
-          // Figure out which version infos we need
-          LegionMap<VersionID,FieldMask>::aligned needed_versions;
-          FieldVersions field_versions;
-          // We don't need to worry about split fields here, that
-          // will be taken care of on the handler side, just pack
-          // up the version infos as they are currently stored
-          versions->get_field_versions(logical_node, false/*split prev*/,
-                                       copy_mask, field_versions);
-          for (LegionMap<VersionID,FieldMask>::aligned::const_iterator it = 
-                field_versions.begin(); it != field_versions.end(); it++)
-          {
-            FieldMask overlap = it->second & copy_mask;
-            if (!overlap)
-              continue;
-            needed_versions[it->first] = overlap;
-          }
-          rez.serialize<size_t>(needed_versions.size());
-          for (LegionMap<VersionID,FieldMask>::aligned::const_iterator it = 
-                needed_versions.begin(); it != needed_versions.end(); it++)
-          {
-            rez.serialize(it->first);
-            rez.serialize(it->second);
-          }
-          FieldMask local_split;
-          versions->get_split_mask(logical_node, copy_mask, local_split);
-          rez.serialize(local_split);
-          rez.serialize<bool>(base_user);
-        }
-        runtime->send_view_remote_update(logical_owner, rez);
-        // Tell the operation it has to wait for this event
-        // to trigger before it can be considered mapped
-        applied_events.insert(remote_update_event);
-      }
-      PhysicalUser *user = new PhysicalUser(usage, child_color, 
-                                    creator_op_id, index, origin_node);
-      user->add_reference();
-      bool issue_collect = false;
-      {
-        AutoLock v_lock(view_lock);
-        add_current_user(user, copy_term, copy_mask); 
-        if (trace_info.recording)
-        {
-#ifdef DEBUG_LEGION
-          assert(trace_info.tpl != NULL && trace_info.tpl->is_recording());
-#endif
-          trace_info.tpl->record_outstanding_gc_event(this, copy_term);
-        }
-        else
-        {
-          if (base_user)
-            issue_collect = (outstanding_gc_events.find(copy_term) ==
-                              outstanding_gc_events.end());
-          outstanding_gc_events.insert(copy_term);
-        }
-        // See if we need to check for read only invalidates
-        // Don't worry about writing copies, their invalidations
-        // will be sent if they update the version number
-        if (!valid_remote_instances.empty() && IS_READ_ONLY(usage))
-          perform_read_invalidations(copy_mask, versions, 
-                                     source, applied_events);
-      }
-      if (issue_collect)
-      {
-        WrapperReferenceMutator mutator(applied_events);
-        defer_collect_user(copy_term, &mutator);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    ApEvent MaterializedView::find_user_precondition(
-                          const RegionUsage &usage, ApEvent term_event,
-                          const FieldMask &user_mask, Operation *op,
-                          const unsigned index, VersionTracker *versions,
-                          std::set<RtEvent> &applied_events,
-                          PhysicalTraceInfo &trace_info)
-    //--------------------------------------------------------------------------
-    {
-      std::set<ApEvent> wait_on_events;
-      ApEvent start_use_event = manager->get_use_event();
-      if (start_use_event.exists())
-        wait_on_events.insert(start_use_event);
-      UniqueID op_id = op->get_unique_op_id();
-      RegionNode *origin_node = logical_node->is_region() ? 
-        logical_node->as_region_node() : 
-        logical_node->as_partition_node()->parent;
-      // Find our local preconditions
-      find_local_user_preconditions(usage, term_event, INVALID_COLOR, 
-          origin_node, versions, op_id, index, user_mask, 
-          wait_on_events, applied_events, trace_info);
-      // Go up the tree if we have to
-      if ((parent != NULL) && !versions->is_upper_bound_node(logical_node))
-      {
-        const LegionColor local_color = logical_node->get_color();
-        parent->find_user_preconditions_above(usage, term_event, local_color, 
-                              origin_node, versions, op_id, index, user_mask, 
-                              wait_on_events, applied_events,
-                              trace_info);
-      }
-      ApEvent result = Runtime::merge_events(wait_on_events);
-      if (trace_info.recording)
-      {
-#ifdef DEBUG_LEGION
-        assert(trace_info.tpl != NULL && trace_info.tpl->is_recording());
-#endif
-        trace_info.tpl->record_merge_events(result, wait_on_events,
-            trace_info.op);
-      }
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    void MaterializedView::find_user_preconditions_above(
-                                                const RegionUsage &usage,
-                                                ApEvent term_event,
-                                                const LegionColor child_color,
-                                                RegionNode *origin_node,
-                                                VersionTracker *versions,
-                                                const UniqueID op_id,
-                                                const unsigned index,
-                                                const FieldMask &user_mask,
-                                              std::set<ApEvent> &preconditions,
-                                              std::set<RtEvent> &applied_events,
-                                                PhysicalTraceInfo &trace_info)
-    //--------------------------------------------------------------------------
-    {
-      // Do the precondition analysis on the way up
-      find_local_user_preconditions_above(usage, term_event, child_color, 
-                          origin_node, versions, op_id, index, user_mask, 
-                          preconditions, applied_events, trace_info);
-      // Go up the tree if we have to
-      if ((parent != NULL) && !versions->is_upper_bound_node(logical_node))
-      {
-        const LegionColor local_color = logical_node->get_color();
-        parent->find_user_preconditions_above(usage, term_event, local_color, 
-                              origin_node, versions, op_id, index, user_mask, 
-                              preconditions, applied_events, trace_info);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void MaterializedView::find_local_user_preconditions(
-                                                const RegionUsage &usage,
-                                                ApEvent term_event,
-                                                const LegionColor child_color,
-                                                RegionNode *origin_node,
-                                                VersionTracker *versions,
-                                                const UniqueID op_id,
-                                                const unsigned index,
-                                                const FieldMask &user_mask,
-                                              std::set<ApEvent> &preconditions,
-                                              std::set<RtEvent> &applied_events,
-                                                PhysicalTraceInfo &trace_info)
-    //--------------------------------------------------------------------------
-    {
-      DETAILED_PROFILER(context->runtime, 
-                        MATERIALIZED_VIEW_FIND_LOCAL_PRECONDITIONS_CALL);
-      // If we are not the logical owner, we need to see if we are up to date 
-      if (!is_logical_owner())
-      {
-#ifdef DEBUG_LEGION
-        assert(!IS_REDUCE(usage)); // no user reductions currently, might change
-#endif
-        // Only writing if we are overwriting, otherwise we are also reading
-        perform_remote_valid_check(user_mask, versions, 
-                                   !HAS_WRITE_DISCARD(usage));
-      }
-      std::set<ApEvent> dead_events;
-      LegionMap<ApEvent,FieldMask>::aligned filter_current_users, 
-                                           filter_previous_users;
-      if (IS_READ_ONLY(usage))
-      {
-        AutoLock v_lock(view_lock,1,false/*exclusive*/);
-        FieldMask observed, non_dominated;
-        find_current_preconditions<true/*track*/>(user_mask, usage, child_color,
-                                   origin_node, term_event, op_id, index, 
-                                   preconditions, dead_events, 
-                                   filter_current_users,observed,non_dominated,
-                                   trace_info);
-        const FieldMask dominated = observed - non_dominated;
-        if (!!dominated)
-          find_previous_filter_users(dominated, filter_previous_users);
-        const FieldMask previous_mask = user_mask - dominated;
-        if (!!previous_mask)
-          find_previous_preconditions(previous_mask, usage, child_color, 
-                                      origin_node, term_event, op_id, index,
-                                      preconditions, dead_events, trace_info);
-      }
-      else
-      {
-        AutoLock v_lock(view_lock,1,false/*exclusive*/);
-        FieldMask observed, non_dominated;
-        find_current_preconditions<true/*track*/>(user_mask, usage, child_color,
-                                   origin_node, term_event, op_id, index, 
-                                   preconditions, dead_events, 
-                                   filter_current_users, observed,
-                                   non_dominated, trace_info);
-        const FieldMask dominated = observed - non_dominated;
-        if (!!dominated)
-          find_previous_filter_users(dominated, filter_previous_users);
-        const FieldMask previous_mask = user_mask - dominated;
-        if (!!previous_mask)
-          find_previous_preconditions(previous_mask, usage, child_color, 
-                                      origin_node, term_event, op_id, index,
-                                      preconditions, dead_events, trace_info);
-      }
-      if ((!dead_events.empty() || 
-           !filter_previous_users.empty() || !filter_current_users.empty()) &&
-          !trace_info.recording)
-      {
-        // Need exclusive permissions to modify data structures
-        AutoLock v_lock(view_lock);
-        if (!dead_events.empty())
-          for (std::set<ApEvent>::const_iterator it = dead_events.begin();
-                it != dead_events.end(); it++)
-            filter_local_users(*it); 
-        if (!filter_previous_users.empty())
-          for (LegionMap<ApEvent,FieldMask>::aligned::const_iterator it = 
-                filter_previous_users.begin(); it != 
-                filter_previous_users.end(); it++)
-            filter_previous_user(it->first, it->second);
-        if (!filter_current_users.empty())
-          for (LegionMap<ApEvent,FieldMask>::aligned::const_iterator it = 
-                filter_current_users.begin(); it !=
-                filter_current_users.end(); it++)
-            filter_current_user(it->first, it->second);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void MaterializedView::find_local_user_preconditions_above(
-                                                const RegionUsage &usage,
-                                                ApEvent term_event,
-                                                const LegionColor child_color,
-                                                RegionNode *origin_node,
-                                                VersionTracker *versions,
-                                                const UniqueID op_id,
-                                                const unsigned index,
-                                                const FieldMask &user_mask,
-                                              std::set<ApEvent> &preconditions,
-                                              std::set<RtEvent> &applied_events,
-                                                PhysicalTraceInfo &trace_info,
-                                                const bool actually_above)
-    //--------------------------------------------------------------------------
-    {
-      DETAILED_PROFILER(context->runtime, 
-                        MATERIALIZED_VIEW_FIND_LOCAL_PRECONDITIONS_CALL);
-      // If we are not the logical owner and we are not actually above the
-      // base level, then we need to see if we are up to date 
-      // If we are actually above then we already did this check at the
-      // base level and went all the way up the tree so there is no need
-      // to do it again here
-      if (!is_logical_owner() && !actually_above)
-      {
-#ifdef DEBUG_LEGION
-        assert(!IS_REDUCE(usage)); // no reductions for now, might change
-#endif
-        // We are reading if we are not overwriting
-        perform_remote_valid_check(user_mask, versions, 
-                                   !HAS_WRITE_DISCARD(usage));
-      }
-      std::set<ApEvent> dead_events;
-      LegionMap<ApEvent,FieldMask>::aligned filter_current_users;
-      if (IS_READ_ONLY(usage))
-      {
-        AutoLock v_lock(view_lock,1,false/*exclusive*/);
-        FieldMask observed, non_dominated;
-        find_current_preconditions<false/*track*/>(user_mask, usage, 
-                                   child_color, origin_node,
-                                   term_event, op_id, index, preconditions, 
-                                   dead_events, filter_current_users, 
-                                   observed, non_dominated, trace_info);
-        // No domination above
-        find_previous_preconditions(user_mask, usage, child_color, 
-                                    origin_node, term_event, op_id, index,
-                                    preconditions, dead_events, trace_info);
-      }
-      else
-      {
-        AutoLock v_lock(view_lock,1,false/*exclusive*/);
-        FieldMask observed, non_dominated;
-        find_current_preconditions<false/*track*/>(user_mask, usage, 
-                                   child_color, origin_node,
-                                   term_event, op_id, index, preconditions, 
-                                   dead_events, filter_current_users, 
-                                   observed, non_dominated, trace_info);
-        // No domination above
-        find_previous_preconditions(user_mask, usage, child_color, 
-                                    origin_node, term_event, op_id, index,
-                                    preconditions, dead_events, trace_info);
-      }
-#ifdef DEBUG_LEGION
-      assert(filter_current_users.empty());
-#endif
-      if (!dead_events.empty())
-      {
-        // Need exclusive permissions to modify data structures
-        AutoLock v_lock(view_lock);
-        if (!dead_events.empty())
-          for (std::set<ApEvent>::const_iterator it = dead_events.begin();
-                it != dead_events.end(); it++)
-            filter_local_users(*it); 
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void MaterializedView::add_user(const RegionUsage &usage,ApEvent term_event,
-                                    const FieldMask &user_mask, Operation *op,
-                                    const unsigned index, AddressSpaceID source,
-                                    VersionTracker *versions,
-                                    std::set<RtEvent> &applied_events,
-                                    PhysicalTraceInfo &trace_info)
-    //--------------------------------------------------------------------------
-    {
-      UniqueID op_id = op->get_unique_op_id();
-      bool need_version_update = false;
-      if (IS_WRITE(usage))
-      {
-        FieldVersions advance_versions;
-        versions->get_advance_versions(logical_node, true/*base*/,
-                                       user_mask, advance_versions);
-        need_version_update = update_version_numbers(user_mask,advance_versions,
-                                                     source, applied_events);
-      }
-      RegionNode *origin_node = logical_node->is_region() ? 
-        logical_node->as_region_node() : 
-        logical_node->as_partition_node()->parent;
-      // Go up the tree if necessary 
-      if ((parent != NULL) && !versions->is_upper_bound_node(logical_node))
-      {
-        const LegionColor local_color = logical_node->get_color();
-        parent->add_user_above(usage, term_event, local_color, origin_node,
-            versions, op_id, index, user_mask, need_version_update, 
-            source, applied_events, trace_info);
-      }
-      // Add our local user
-      const bool issue_collect = add_local_user(usage, term_event, 
-                         INVALID_COLOR, origin_node, true/*base*/, versions, 
-                         op_id, index, user_mask, source, applied_events,
-                         trace_info);
-      // Launch the garbage collection task, if it doesn't exist
-      // then the user wasn't registered anyway, see add_local_user
-      if (issue_collect)
-      {
-        WrapperReferenceMutator mutator(applied_events);
-        defer_collect_user(term_event, &mutator);
-      }
-      if (IS_ATOMIC(usage))
-        find_atomic_reservations(user_mask, op, IS_WRITE(usage));
-    }
-
-    //--------------------------------------------------------------------------
-    void MaterializedView::add_user_above(const RegionUsage &usage,
-                                          ApEvent term_event,
-                                          const LegionColor child_color,
-                                          RegionNode *origin_node,
-                                          VersionTracker *versions,
-                                          const UniqueID op_id,
-                                          const unsigned index,
-                                          const FieldMask &user_mask,
-                                          const bool need_version_update,
-                                          const AddressSpaceID source,
-                                          std::set<RtEvent> &applied_events,
-                                          PhysicalTraceInfo &trace_info)
-    //--------------------------------------------------------------------------
-    {
-      bool need_update_above = false;
-      if (need_version_update)
-      {
-        FieldVersions advance_versions;
-        versions->get_advance_versions(logical_node, false/*base*/,
-                                       user_mask, advance_versions);
-        need_update_above = update_version_numbers(user_mask, advance_versions,
-                                                   source, applied_events);
-      }
-      // Go up the tree if we have to
-      if ((parent != NULL) && !versions->is_upper_bound_node(logical_node))
-      {
-        const LegionColor local_color = logical_node->get_color();
-        parent->add_user_above(usage, term_event, local_color, origin_node,
-            versions, op_id, index, user_mask, need_update_above, 
-            source, applied_events, trace_info);
-      }
-      add_local_user(usage, term_event, child_color, origin_node, false/*base*/,
-                     versions, op_id, index, user_mask, source, applied_events,
-                     trace_info);
-    }
-
-    //--------------------------------------------------------------------------
-    bool MaterializedView::add_local_user(const RegionUsage &usage,
-                                          ApEvent term_event,
-                                          const LegionColor child_color,
-                                          RegionNode *origin_node,
-                                          const bool base_user,
-                                          VersionTracker *versions,
-                                          const UniqueID op_id,
-                                          const unsigned index,
-                                          const FieldMask &user_mask,
-                                          const AddressSpaceID source,
-                                          std::set<RtEvent> &applied_events,
-                                          PhysicalTraceInfo &trace_info)
-    //--------------------------------------------------------------------------
-    {
-      if (!term_event.exists())
-        return false;
-      if (!is_logical_owner())
-      {
-        RegionNode *origin_node = logical_node->is_region() ? 
-          logical_node->as_region_node() : 
-          logical_node->as_partition_node()->parent;
-        // If we are no the owner, we have to send the user back
-        RtUserEvent remote_update_event = Runtime::create_rt_user_event();
-        Serializer rez;
-        {
-          RezCheck z(rez);
-          rez.serialize(did);
-          rez.serialize(remote_update_event);
-          rez.serialize<bool>(false); // is copy
-          rez.serialize<bool>(false); // restrict out
-          rez.serialize(usage);
-          rez.serialize(user_mask);
-          rez.serialize(child_color);
-          rez.serialize(origin_node->handle);
-          rez.serialize(op_id);
-          rez.serialize(index);
-          rez.serialize(term_event);
-          // Figure out which version infos we need
-          LegionMap<VersionID,FieldMask>::aligned needed_versions;
-          FieldVersions field_versions;
-          // We don't need to worry about split fields here, that
-          // will be taken care of on the handler side, just pack
-          // up the version infos as they are currently stored
-          versions->get_field_versions(logical_node, false/*split previous*/,
-                                       user_mask, field_versions);
-          for (LegionMap<VersionID,FieldMask>::aligned::const_iterator it = 
-                field_versions.begin(); it != field_versions.end(); it++)
-          {
-            FieldMask overlap = it->second & user_mask;
-            if (!overlap)
-              continue;
-            needed_versions[it->first] = overlap;
-          }
-          rez.serialize<size_t>(needed_versions.size());
-          for (LegionMap<VersionID,FieldMask>::aligned::const_iterator it = 
-                needed_versions.begin(); it != needed_versions.end(); it++)
-          {
-            rez.serialize(it->first);
-            rez.serialize(it->second);
-          }
-          FieldMask local_split;
-          versions->get_split_mask(logical_node, user_mask, local_split);
-          rez.serialize(local_split);
-          rez.serialize<bool>(base_user);
-        }
-        runtime->send_view_remote_update(logical_owner, rez);
-        // Tell the operation it has to wait for this event to
-        // trigger before it can be considered mapped
-        applied_events.insert(remote_update_event);
-      }
-      PhysicalUser *new_user = 
-        new PhysicalUser(usage, child_color, op_id, index, origin_node);
-      new_user->add_reference();
-      // No matter what, we retake the lock in exclusive mode so we
-      // can handle any clean-up and add our user
-      AutoLock v_lock(view_lock);
-      // Finally add our user and return if we need to issue a GC meta-task
-      add_current_user(new_user, term_event, user_mask);
-      // See if we need to check for read only invalidates
-      // Don't worry about read-write, the invalidations will
-      // be sent automatically if the version number is advanced
-      if (!valid_remote_instances.empty() && IS_READ_ONLY(usage))
-        perform_read_invalidations(user_mask, versions, source, applied_events);
-      if (trace_info.recording)
-      {
-#ifdef DEBUG_LEGION
-        assert(trace_info.tpl != NULL && trace_info.tpl->is_recording());
-#endif
-        trace_info.tpl->record_outstanding_gc_event(this, term_event);
-        return false;
-      }
-      else if (outstanding_gc_events.find(term_event) == 
-               outstanding_gc_events.end())
-      {
-        outstanding_gc_events.insert(term_event);
-        return (child_color == INVALID_COLOR);
-      }
-      return false;
-    }
-
-    //--------------------------------------------------------------------------
-    ApEvent MaterializedView::add_user_fused(const RegionUsage &usage, 
-                                             ApEvent term_event,
-                                             const FieldMask &user_mask, 
-                                             Operation *op,const unsigned index,
-                                             VersionTracker *versions,
-                                             const AddressSpaceID source,
-                                             std::set<RtEvent> &applied_events,
-                                             PhysicalTraceInfo &trace_info,
-                                             bool update_versions/*=true*/)
-    //--------------------------------------------------------------------------
-    {
-      std::set<ApEvent> wait_on_events;
-      ApEvent start_use_event = manager->get_use_event();
-      if (start_use_event.exists())
-        wait_on_events.insert(start_use_event);
-      UniqueID op_id = op->get_unique_op_id();
-      RegionNode *origin_node = logical_node->is_region() ? 
-        logical_node->as_region_node() : 
-        logical_node->as_partition_node()->parent;
-      // Find our local preconditions
-      find_local_user_preconditions(usage, term_event, INVALID_COLOR, 
-                     origin_node, versions, op_id, index, user_mask, 
-                     wait_on_events, applied_events, trace_info);
-      bool need_version_update = false;
-      if (IS_WRITE(usage) && update_versions)
-      {
-        FieldVersions advance_versions;
-        versions->get_advance_versions(logical_node, true/*base*/,
-                                       user_mask, advance_versions);
-        need_version_update = update_version_numbers(user_mask,advance_versions,
-                                                     source, applied_events);
-      }
-      // Go up the tree if necessary
-      if ((parent != NULL) && !versions->is_upper_bound_node(logical_node))
-      {
-        const LegionColor local_color = logical_node->get_color();
-        parent->add_user_above_fused(usage, term_event, local_color, 
-                              origin_node, versions, op_id, index, 
-                              user_mask, source, wait_on_events, 
-                              applied_events, trace_info,
-                              need_version_update);
-      }
-      // Add our local user
-      const bool issue_collect = add_local_user(usage, term_event, 
-                         INVALID_COLOR, origin_node, true/*base*/, versions,
-                         op_id, index, user_mask, source, applied_events,
-                         trace_info);
-      // Launch the garbage collection task, if it doesn't exist
-      // then the user wasn't registered anyway, see add_local_user
-      if (issue_collect)
-      {
-        WrapperReferenceMutator mutator(applied_events);
-        defer_collect_user(term_event, &mutator);
-      }
-      // At this point tasks shouldn't be allowed to wait on themselves
-#ifdef DEBUG_LEGION
-      if (term_event.exists())
-        assert(wait_on_events.find(term_event) == wait_on_events.end());
-#endif
-      if (IS_ATOMIC(usage))
-        find_atomic_reservations(user_mask, op, IS_WRITE(usage));
-
-      ApEvent result = Runtime::merge_events(wait_on_events);
-      if (trace_info.recording)
-      {
-#ifdef DEBUG_LEGION
-        assert(trace_info.tpl != NULL && trace_info.tpl->is_recording());
-#endif
-        trace_info.tpl->record_merge_events(result, wait_on_events,
-            trace_info.op);
-      }
-      // Return the merge of the events
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    void MaterializedView::add_user_above_fused(const RegionUsage &usage, 
-                                                ApEvent term_event,
-                                                const LegionColor child_color,
-                                                RegionNode *origin_node,
-                                                VersionTracker *versions,
-                                                const UniqueID op_id,
-                                                const unsigned index,
-                                                const FieldMask &user_mask,
-                                                const AddressSpaceID source,
-                                              std::set<ApEvent> &preconditions,
-                                              std::set<RtEvent> &applied_events,
-                                                PhysicalTraceInfo &trace_info,
-                                                const bool need_version_update)
-    //--------------------------------------------------------------------------
-    {
-      // Do the precondition analysis on the way up
-      find_local_user_preconditions_above(usage, term_event, child_color, 
-                          origin_node, versions, op_id, index, user_mask, 
-                          preconditions, applied_events, trace_info);
-      bool need_update_above = false;
-      if (need_version_update)
-      {
-        FieldVersions advance_versions;
-        versions->get_advance_versions(logical_node, false/*base*/, 
-                                       user_mask, advance_versions);
-        need_update_above = update_version_numbers(user_mask, advance_versions,
-                                                   source, applied_events);
-      }
-      // Go up the tree if we have to
-      if ((parent != NULL) && !versions->is_upper_bound_node(logical_node))
-      {
-        const LegionColor local_color = logical_node->get_color();
-        parent->add_user_above_fused(usage, term_event, local_color,origin_node,
-                              versions, op_id, index, user_mask, source,
-                              preconditions, applied_events, trace_info,
-                              need_update_above);
-      }
-      // Add the user on the way back down
-      add_local_user(usage, term_event, child_color, origin_node, false/*base*/,
-                     versions, op_id, index, user_mask, source, applied_events,
-                     trace_info);
-      // No need to launch a collect user task, the child takes care of that
-    }
-
-    //--------------------------------------------------------------------------
     void MaterializedView::add_initial_user(ApEvent term_event,
                                             const RegionUsage &usage,
                                             const FieldMask &user_mask,
+                                            IndexSpaceExpression *user_expr,
                                             const UniqueID op_id,
                                             const unsigned index)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(logical_node->is_region());
+      assert(is_logical_owner());
+      assert(current_users != NULL);
 #endif
+      PhysicalUser *user = new PhysicalUser(usage, user_expr, op_id, index, 
+                                            false/*copy user*/, true/*covers*/);
       // No need to take the lock since we are just initializing
-      PhysicalUser *user = new PhysicalUser(usage, INVALID_COLOR, op_id, index, 
-                                            logical_node->as_region_node());
-      user->add_reference();
-      add_current_user(user, term_event, user_mask);
-      initial_user_events.insert(term_event);
-      // Don't need to actual launch a collection task, destructor
-      // will handle this case
-      outstanding_gc_events.insert(term_event);
+      // If it's the root this is easy
+      if (user_expr == current_users->view_expr)
+      {
+        current_users->add_current_user(user, term_event, user_mask, false);
+        return;
+      }
+      // See if we have it in the cache
+      std::map<IndexSpaceExprID,ExprView*>::const_iterator finder = 
+        expr_cache.find(user_expr->expr_id);
+      if (finder == expr_cache.end() || 
+          !(finder->second->invalid_fields * user_mask))
+      {
+        // No need for expr_lock since this is initialization
+        if (finder == expr_cache.end())
+        {
+          ExprView *target_view = current_users->find_congruent_view(user_expr);
+          // Couldn't find a congruent view so we need to make one
+          if (target_view == NULL)
+            target_view = new ExprView(context, manager, this, user_expr);
+          expr_cache[user_expr->expr_id] = target_view;
+          finder = expr_cache.find(user_expr->expr_id);
+        }
+        if (finder->second != current_users)
+        {
+          // Now insert it for the invalid fields
+          FieldMask insert_mask = user_mask & finder->second->invalid_fields;
+          // Mark that we're removing these fields from the invalid fields
+          // first since we're later going to destroy the insert mask
+          finder->second->invalid_fields -= insert_mask;
+          // Then insert the subview into the tree
+          current_users->insert_subview(finder->second, insert_mask);
+        }
+      }
+      // Now that the view is valid we can add the user to it
+      finder->second->add_current_user(user, term_event, user_mask, false);
+      // No need to launch a collection task as the destructor will handle it 
     }
+
+    //--------------------------------------------------------------------------
+    ApEvent MaterializedView::register_user(const RegionUsage &usage,
+                                            const FieldMask &user_mask,
+                                            IndexSpaceNode *user_expr,
+                                            const UniqueID op_id,
+                                            const unsigned index,
+                                            ApEvent term_event,
+                                            std::set<RtEvent> &applied_events,
+                                            const PhysicalTraceInfo &trace_info,
+                                            const AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      // Quick test for empty index space expressions
+      if (user_expr->is_empty())
+        return manager->get_use_event();
+      if (!is_logical_owner())
+      {
+        ApUserEvent ready_event;
+        // Check to see if this user came from somewhere that wasn't
+        // the logical owner, if so we need to send the update back 
+        // to the owner to be handled
+        if (source != logical_owner)
+        {
+          // If we're not the logical owner send a message there 
+          // to do the analysis and provide a user event to trigger
+          // with the precondition
+          ready_event = Runtime::create_ap_user_event();
+          RtUserEvent applied_event = Runtime::create_rt_user_event();
+          Serializer rez;
+          {
+            RezCheck z(rez);
+            rez.serialize(did);
+            rez.serialize(usage);
+            rez.serialize(user_mask);
+            rez.serialize(user_expr->handle);
+            rez.serialize(op_id);
+            rez.serialize(index);
+            rez.serialize(term_event);
+            rez.serialize(ready_event);
+            rez.serialize(applied_event);
+            trace_info.pack_trace_info<true/*pack operation*/>(rez, 
+                                    applied_events, logical_owner);
+          }
+          // Add a remote valid reference that will be removed by 
+          // the receiver once the changes have been applied
+          WrapperReferenceMutator mutator(applied_events);
+          add_base_valid_ref(REMOTE_DID_REF, &mutator);
+          runtime->send_view_register_user(logical_owner, rez);
+          applied_events.insert(applied_event);
+        }
+#ifdef ENABLE_VIEW_REPLICATION
+        // If we have any local fields then we also need to update
+        // them here too since the owner isn't going to send us any
+        // updates itself, Do this after sending the message to make
+        // sure that we see a sound set of local fields
+        AutoLock r_lock(replicated_lock);
+        // Only need to add it if it's still replicated
+        const FieldMask local_mask = user_mask & replicated_fields;
+        if (!!local_mask)
+        {
+          // See if we need to make the current users data structure
+          if (current_users == NULL)
+          {
+            // Prevent races between multiple added users at the same time
+            AutoLock v_lock(view_lock);
+            // See if we lost the race
+            if (current_users == NULL)
+            {
+              current_users = 
+               new ExprView(context, manager, this, manager->instance_domain);
+              current_users->add_reference();
+            }
+          }
+          // Add our local user
+          add_internal_task_user(usage, user_expr, local_mask, term_event,
+                                 op_id, index, trace_info.recording);
+          // Increment the number of remote added users
+          remote_added_users++;
+        }
+        // If we have outstanding requests to be made a replicated
+        // copy then we need to buffer this user so it can be applied
+        // later once we actually do get the update from the owner
+        // This only applies to updates from the local node though since
+        // any remote updates will be sent to us again by the owner
+        if ((repl_ptr.replicated_requests != NULL) && (source == local_space))
+        {
+#ifdef DEBUG_LEGION
+          assert(!repl_ptr.replicated_requests->empty());
+#endif
+          FieldMask buffer_mask;
+          for (LegionMap<RtUserEvent,FieldMask>::aligned::const_iterator
+                it = repl_ptr.replicated_requests->begin();
+                it != repl_ptr.replicated_requests->end(); it++)
+          {
+            const FieldMask overlap = user_mask & it->second;
+            if (!overlap)
+              continue;
+#ifdef DEBUG_LEGION
+            assert(overlap * buffer_mask);
+#endif
+            buffer_mask |= overlap;
+            // This user isn't fully applied until the request comes
+            // back to make this view valid and the user gets applied
+            applied_events.insert(it->first);
+          }
+          if (!!buffer_mask)
+          {
+            // Protected by exclusive replicated lock
+            if (remote_pending_users == NULL)
+              remote_pending_users = new std::list<RemotePendingUser*>();
+            remote_pending_users->push_back(
+                new PendingTaskUser(usage, buffer_mask, user_expr, op_id,
+                                    index, term_event));
+          }
+        }
+        if (remote_added_users >= user_cache_timeout)
+          update_remote_replication_state(applied_events);
+#endif // ENABLE_VIEW_REPLICATION
+        return ready_event;
+      }
+      else
+      {
+#ifdef ENABLE_VIEW_REPLICATION
+        // We need to hold a read-only copy of the replicated lock when
+        // doing this in order to make sure it's atomic with any 
+        // replication requests that arrive
+        AutoLock r_lock(replicated_lock,1,false/*exclusive*/);
+        // Send updates to any remote copies to get them in flight
+        if (repl_ptr.replicated_copies != NULL)
+        {
+#ifdef DEBUG_LEGION
+          assert(!repl_ptr.replicated_copies->empty());
+#endif
+          const FieldMask repl_mask = replicated_fields & user_mask;
+          if (!!repl_mask)
+          {
+            for (LegionMap<AddressSpaceID,FieldMask>::aligned::const_iterator
+                  it = repl_ptr.replicated_copies->begin(); 
+                  it != repl_ptr.replicated_copies->end(); it++)
+            {
+              if (it->first == source)
+                continue;
+              const FieldMask overlap = it->second & repl_mask;
+              if (!overlap)
+                continue;
+              // Send the update to the remote node
+              RtUserEvent applied_event = Runtime::create_rt_user_event();
+              Serializer rez;
+              {
+                RezCheck z(rez);
+                rez.serialize(did);
+                rez.serialize(usage);
+                rez.serialize(overlap);
+                rez.serialize(user_expr->handle);
+                rez.serialize(op_id);
+                rez.serialize(index);
+                rez.serialize(term_event);
+                rez.serialize(ApUserEvent::NO_AP_USER_EVENT);
+                rez.serialize(applied_event);
+                trace_info.pack_trace_info<true/*pack operation*/>(rez, 
+                                            applied_events, it->first);
+              }
+              runtime->send_view_register_user(it->first, rez);
+              applied_events.insert(applied_event);
+            }
+          }
+        }
+#endif // ENABLE_VIEW_REPLICATION
+        // Now we can do our local analysis
+        std::set<ApEvent> wait_on_events;
+        ApEvent start_use_event = manager->get_use_event();
+        if (start_use_event.exists())
+          wait_on_events.insert(start_use_event);
+        // Find the preconditions
+        const bool user_dominates = 
+          (user_expr->expr_id == current_users->view_expr->expr_id) ||
+          (user_expr->get_volume() == current_users->view_volume);
+        {
+          // Traversing the tree so need the expr_view lock
+          AutoLock e_lock(expr_lock,1,false/*exclusive*/);
+          current_users->find_user_preconditions(usage, user_expr, 
+                            user_dominates, user_mask, term_event, 
+                            op_id, index, wait_on_events, trace_info.recording);
+        }
+        // Add our local user
+        add_internal_task_user(usage, user_expr, user_mask, term_event, 
+                               op_id, index, trace_info.recording);
+        // At this point tasks shouldn't be allowed to wait on themselves
+#ifdef DEBUG_LEGION
+        if (term_event.exists())
+          assert(wait_on_events.find(term_event) == wait_on_events.end());
+#endif
+        // Return the merge of the events
+        if (!wait_on_events.empty())
+          return Runtime::merge_events(&trace_info, wait_on_events);
+        else
+          return ApEvent::NO_AP_EVENT;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent MaterializedView::find_copy_preconditions(bool reading,
+                                            const FieldMask &copy_mask,
+                                            IndexSpaceExpression *copy_expr,
+                                            UniqueID op_id, unsigned index,
+                                            CopyFillAggregator &aggregator,
+                                            const bool trace_recording,
+                                            const AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      if (!is_logical_owner())
+      {
+        // Check to see if there are any replicated fields here which we
+        // can handle locally so we don't have to send a message to the owner
+        RtUserEvent ready_event;
+#ifdef ENABLE_VIEW_REPLICATION
+        FieldMask new_remote_fields;
+#endif
+        FieldMask request_mask(copy_mask);
+#ifdef ENABLE_VIEW_REPLICATION
+        // See if we can handle this now while all the fields are local
+        {
+          AutoLock r_lock(replicated_lock,1,false/*exclusive*/);
+          if (!!replicated_fields)
+          {
+            request_mask -= replicated_fields;
+            if (!request_mask)
+            {
+              // All of our fields are local here so we can do the
+              // analysis now without waiting for anything
+              // We do this while holding the read-only lock on
+              // replication to prevent invalidations of the
+              // replication state while we're doing this analysis
+#ifdef DEBUG_LEGION
+              assert(current_users != NULL);
+#endif
+              EventFieldExprs preconditions;
+              ApEvent start_use_event = manager->get_use_event();
+              if (start_use_event.exists())
+                preconditions[start_use_event].insert(copy_expr, copy_mask);
+              const RegionUsage usage(reading ? READ_ONLY : READ_WRITE, 
+                                      EXCLUSIVE, 0);
+              const bool copy_dominates = 
+                (copy_expr->expr_id == current_users->view_expr->expr_id) ||
+                (copy_expr->get_volume() == current_users->view_volume);
+              {
+                // Need a read-only copy of the expr_view lock to 
+                // traverse the tree
+                AutoLock e_lock(expr_lock,1,false/*exclusive*/);
+                current_users->find_copy_preconditions(usage, copy_expr, 
+                                       copy_dominates, copy_mask, op_id, 
+                                       index, preconditions, trace_recording);
+              }
+              // Return any preconditions we found to the aggregator
+              if (!preconditions.empty())
+                aggregator.record_preconditions(this, reading, preconditions);
+              // See if there are any new fields we need to record
+              // as having been used for copy precondition testing
+              // We'll have to update them later with the lock in
+              // exclusive mode, this is technically unsafe, but in
+              // the worst case it will just invalidate the cache
+              // and we'll have to make it valid again later
+              new_remote_fields = copy_mask - remote_copy_pre_fields;
+            }
+          }
+        }
+        if (!!request_mask)
+#endif // ENABLE_VIEW_REPLICATION
+        {
+          // All the fields are not local, first send the request to 
+          // the owner to do the analysis since we're going to need 
+          // to do that anyway, then issue any request for replicated
+          // fields to be moved to this node and record it as a 
+          // precondition for the mapping
+          ready_event = Runtime::create_rt_user_event();
+          Serializer rez;
+          {
+            RezCheck z(rez);
+            rez.serialize(did);
+            rez.serialize<bool>(reading);
+            rez.serialize(copy_mask);
+            copy_expr->pack_expression(rez, logical_owner);
+            rez.serialize(op_id);
+            rez.serialize(index);
+            rez.serialize(&aggregator);
+            rez.serialize(ready_event);
+            rez.serialize<bool>(trace_recording);
+          }
+          runtime->send_view_find_copy_preconditions_request(logical_owner,rez);
+#ifdef ENABLE_VIEW_REPLICATION
+#ifndef DISABLE_VIEW_REPLICATION
+          // Need the lock for this next part
+          AutoLock r_lock(replicated_lock);
+          // Record these fields as being sampled
+          remote_copy_pre_fields |= (new_remote_fields & replicated_fields);
+          // Recompute this to make sure we didn't lose any races
+          request_mask = copy_mask - replicated_fields;
+          if (!!request_mask && (repl_ptr.replicated_requests != NULL))
+          {
+            for (LegionMap<RtUserEvent,FieldMask>::aligned::const_iterator it = 
+                  repl_ptr.replicated_requests->begin(); it !=
+                  repl_ptr.replicated_requests->end(); it++)
+            {
+              request_mask -= it->second;
+              if (!request_mask)
+                break;
+            }
+          }
+          if (!!request_mask)
+          {
+            // Send the request to the owner to make these replicated fields
+            const RtUserEvent request_event = Runtime::create_rt_user_event();
+            Serializer rez2;
+            {
+              RezCheck z2(rez2);
+              rez2.serialize(did);
+              rez2.serialize(request_mask);
+              rez2.serialize(request_event);
+            }
+            runtime->send_view_replication_request(logical_owner, rez2);
+            if (repl_ptr.replicated_requests == NULL)
+              repl_ptr.replicated_requests = 
+                new LegionMap<RtUserEvent,FieldMask>::aligned();
+            (*repl_ptr.replicated_requests)[request_event] = request_mask;
+            // Make sure this is done before things are considered "applied"
+            // in order to prevent dangling requests
+            aggregator.record_reference_mutation_effect(request_event);
+          }
+#endif
+#endif
+        }
+#ifdef ENABLE_VIEW_REPLICATION
+        else if (!!new_remote_fields)
+        {
+          AutoLock r_lock(replicated_lock);
+          // Record any new fields which are still replicated
+          remote_copy_pre_fields |= (new_remote_fields & replicated_fields);
+          // Then fall through like normal
+        }
+#endif
+        return ready_event;
+      }
+      else
+      {
+        // In the case where we're the owner we can just handle
+        // this without needing to do anything
+        EventFieldExprs preconditions;
+        const ApEvent start_use_event = manager->get_use_event();
+        if (start_use_event.exists())
+          preconditions[start_use_event].insert(copy_expr, copy_mask);
+        const RegionUsage usage(reading ? READ_ONLY : READ_WRITE, EXCLUSIVE, 0);
+        const bool copy_dominates = 
+          (copy_expr->expr_id == current_users->view_expr->expr_id) ||
+          (copy_expr->get_volume() == current_users->view_volume);
+        {
+          // Need a read-only copy of the expr_lock to traverse the tree
+          AutoLock e_lock(expr_lock,1,false/*exclusive*/);
+          current_users->find_copy_preconditions(usage,copy_expr,copy_dominates,
+                        copy_mask, op_id, index,preconditions, trace_recording);
+        }
+        // Return any preconditions we found to the aggregator
+        if (!preconditions.empty())
+          aggregator.record_preconditions(this, reading, preconditions);
+        // We're done with the analysis
+        return RtEvent::NO_RT_EVENT;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void MaterializedView::find_copy_preconditions_remote(bool reading,
+                                                const FieldMask &copy_mask,
+                                                IndexSpaceExpression *copy_expr,
+                                                UniqueID op_id, unsigned index,
+                                                EventFieldExprs &preconditions,
+                                                const bool trace_recording,
+                                                const AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(is_logical_owner());
+#endif
+      const ApEvent start_use_event = manager->get_use_event();
+      if (start_use_event.exists())
+        preconditions[start_use_event].insert(copy_expr, copy_mask);
+      const RegionUsage usage(reading ? READ_ONLY : READ_WRITE, EXCLUSIVE, 0);
+      const bool copy_dominates = 
+          (copy_expr->expr_id == current_users->view_expr->expr_id) ||
+          (copy_expr->get_volume() == current_users->view_volume);
+      // Need a read-only copy of the expr_lock to traverse the tree
+      AutoLock e_lock(expr_lock,1,false/*exclusive*/);
+      current_users->find_copy_preconditions(usage, copy_expr, copy_dominates,
+                      copy_mask, op_id, index, preconditions, trace_recording);
+    }
+
+    //--------------------------------------------------------------------------
+    void MaterializedView::add_copy_user(bool reading, ApEvent term_event,
+                                         const FieldMask &copy_mask,
+                                         IndexSpaceExpression *copy_expr,
+                                         UniqueID op_id, unsigned index,
+                                         std::set<RtEvent> &applied_events,
+                                         const bool trace_recording,
+                                         const AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      if (!is_logical_owner())
+      {
+        // Check to see if this update came from some place other than the
+        // source in which case we need to send it back to the source
+        if (source != logical_owner)
+        {
+          RtUserEvent applied_event = Runtime::create_rt_user_event();
+          Serializer rez;
+          {
+            RezCheck z(rez);
+            rez.serialize(did);
+            rez.serialize<bool>(reading);
+            rez.serialize(term_event);
+            rez.serialize(copy_mask);
+            copy_expr->pack_expression(rez, logical_owner);
+            rez.serialize(op_id);
+            rez.serialize(index);
+            rez.serialize(applied_event);
+            rez.serialize<bool>(trace_recording);
+          }
+          // Add a remote valid reference that will be removed by 
+          // the receiver once the changes have been applied
+          WrapperReferenceMutator mutator(applied_events);
+          add_base_valid_ref(REMOTE_DID_REF, &mutator);
+          runtime->send_view_add_copy_user(logical_owner, rez);
+          applied_events.insert(applied_event);
+        }
+#ifdef ENABLE_VIEW_REPLICATION
+        AutoLock r_lock(replicated_lock);
+        // Only need to add it if it's still replicated
+        const FieldMask local_mask = copy_mask & replicated_fields;
+        // If we have local fields to handle do that here
+        if (!!local_mask)
+        {
+          // See if we need to make the current users data structure
+          if (current_users == NULL)
+          {
+            // Prevent races between multiple added users at the same time
+            AutoLock v_lock(view_lock);
+            // See if we lost the race
+            if (current_users == NULL)
+            {
+              current_users = 
+               new ExprView(context, manager, this, manager->instance_domain);
+              current_users->add_reference();
+            }
+          }
+          const RegionUsage usage(reading ? READ_ONLY:READ_WRITE,EXCLUSIVE,0);
+          add_internal_copy_user(usage, copy_expr, local_mask, term_event, 
+                                 op_id, index, trace_recording);
+          // Increment the remote added users count
+          remote_added_users++;
+        }
+        // If we have pending replicated requests that overlap with this
+        // user then we need to record this as a pending user to be applied
+        // once we receive the update from the owner node
+        // This only applies to updates from the local node though since
+        // any remote updates will be sent to us again by the owner
+        if ((repl_ptr.replicated_requests != NULL) && (source == local_space))
+        {
+#ifdef DEBUG_LEGION
+          assert(!repl_ptr.replicated_requests->empty());
+#endif
+          FieldMask buffer_mask;
+          for (LegionMap<RtUserEvent,FieldMask>::aligned::const_iterator
+                it = repl_ptr.replicated_requests->begin();
+                it != repl_ptr.replicated_requests->end(); it++)
+          {
+            const FieldMask overlap = copy_mask & it->second;
+            if (!overlap)
+              continue;
+#ifdef DEBUG_LEGION
+            assert(overlap * buffer_mask);
+#endif
+            buffer_mask |= overlap;
+            // This user isn't fully applied until the request comes
+            // back to make this view valid and the user gets applied
+            applied_events.insert(it->first);
+          }
+          if (!!buffer_mask)
+          {
+            // Protected by exclusive replicated lock
+            if (remote_pending_users == NULL)
+              remote_pending_users = new std::list<RemotePendingUser*>();
+            remote_pending_users->push_back(
+                new PendingCopyUser(reading, buffer_mask, copy_expr, op_id,
+                                    index, term_event));
+          }
+        }
+        if (remote_added_users >= user_cache_timeout)
+          update_remote_replication_state(applied_events);
+#endif // ENABLE_VIEW_REPLICATION
+      }
+      else
+      {
+#ifdef ENABLE_VIEW_REPLICATION
+        // We need to hold this lock in read-only mode to properly
+        // synchronize this with any replication requests that arrive
+        AutoLock r_lock(replicated_lock,1,false/*exclusive*/);
+        // Send updates to any remote copies to get them in flight
+        if (repl_ptr.replicated_copies != NULL)
+        {
+#ifdef DEBUG_LEGION
+          assert(!repl_ptr.replicated_copies->empty());
+#endif
+          const FieldMask repl_mask = replicated_fields & copy_mask;
+          if (!!repl_mask)
+          {
+            for (LegionMap<AddressSpaceID,FieldMask>::aligned::const_iterator
+                  it = repl_ptr.replicated_copies->begin(); 
+                  it != repl_ptr.replicated_copies->end(); it++)
+            {
+              if (it->first == source)
+                continue;
+              const FieldMask overlap = it->second & repl_mask;
+              if (!overlap)
+                continue;
+              RtUserEvent applied_event = Runtime::create_rt_user_event();
+              Serializer rez;
+              {
+                RezCheck z(rez);
+                rez.serialize(did);
+                rez.serialize<bool>(reading);
+                rez.serialize(term_event);
+                rez.serialize(copy_mask);
+                copy_expr->pack_expression(rez, it->first);
+                rez.serialize(op_id);
+                rez.serialize(index);
+                rez.serialize(applied_event);
+                rez.serialize<bool>(trace_recording);
+              }
+              runtime->send_view_add_copy_user(it->first, rez);
+              applied_events.insert(applied_event);
+            }
+          }
+        }
+#endif
+        // Now we can do our local analysis
+        const RegionUsage usage(reading ? READ_ONLY : READ_WRITE, EXCLUSIVE, 0);
+        add_internal_copy_user(usage, copy_expr, copy_mask, term_event, 
+                               op_id, index, trace_recording);
+      }
+    }
+
+#ifdef ENABLE_VIEW_REPLICATION
+    //--------------------------------------------------------------------------
+    void MaterializedView::process_replication_request(AddressSpaceID source,
+                                                  const FieldMask &request_mask,
+                                                  RtUserEvent done_event)
+    //--------------------------------------------------------------------------
+    {
+      // Atomically we need to package up the response and send it back
+      AutoLock r_lock(replicated_lock); 
+      if (repl_ptr.replicated_copies == NULL)
+        repl_ptr.replicated_copies = 
+          new LegionMap<AddressSpaceID,FieldMask>::aligned();
+      LegionMap<AddressSpaceID,FieldMask>::aligned::iterator finder = 
+        repl_ptr.replicated_copies->find(source);
+      if (finder != repl_ptr.replicated_copies->end())
+      {
+#ifdef DEBUG_LEGION
+        assert(finder->second * request_mask);
+#endif
+        finder->second |= request_mask; 
+      }
+      else
+        (*repl_ptr.replicated_copies)[source] = request_mask;
+      // Update the summary as well
+      replicated_fields |= request_mask;
+      Serializer rez;
+      {
+        RezCheck z(rez);
+        rez.serialize(did);
+        rez.serialize(done_event);
+        std::map<PhysicalUser*,unsigned> indexes;
+        // Make sure no one else is mutating the state of the tree
+        // while we are doing the packing
+        AutoLock e_lock(expr_lock,1,false/*exclusive*/);
+        current_users->pack_replication(rez, indexes, request_mask, source);
+      }
+      runtime->send_view_replication_response(source, rez);
+    }
+
+    //--------------------------------------------------------------------------
+    void MaterializedView::process_replication_response(RtUserEvent done,
+                                                        Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!is_logical_owner());
+#endif
+      AutoLock r_lock(replicated_lock);
+      {
+        // Take the view lock so we can modify the cache as well
+        // as part of our unpacking
+        AutoLock v_lock(view_lock);
+        if (current_users == NULL)
+        {
+          current_users = 
+            new ExprView(context, manager, this, manager->instance_domain);
+          current_users->add_reference();
+        }
+        // We need to hold the expr lock here since we might have to 
+        // make ExprViews and we need this to be atomic with other
+        // operations that might also try to mutate the tree 
+        AutoLock e_lock(expr_lock);
+        std::vector<PhysicalUser*> users;
+        // The source is always from the logical owner space
+        current_users->unpack_replication(derez, current_users, 
+                                          logical_owner, expr_cache, users);
+        // Remove references from all our users
+        for (unsigned idx = 0; idx < users.size(); idx++)
+          if (users[idx]->remove_reference())
+            delete users[idx]; 
+      }
+#ifdef DEBUG_LEGION
+      assert(repl_ptr.replicated_requests != NULL);
+#endif
+      LegionMap<RtUserEvent,FieldMask>::aligned::iterator finder = 
+        repl_ptr.replicated_requests->find(done);
+#ifdef DEBUG_LEGION
+      assert(finder != repl_ptr.replicated_requests->end());
+#endif
+      // Go through and apply any pending remote users we've recorded 
+      if (remote_pending_users != NULL)
+      {
+        for (std::list<RemotePendingUser*>::iterator it = 
+              remote_pending_users->begin(); it != 
+              remote_pending_users->end(); /*nothing*/)
+        {
+          if ((*it)->apply(this, finder->second))
+          {
+            delete (*it);
+            it = remote_pending_users->erase(it);
+          }
+          else
+            it++;
+        }
+        if (remote_pending_users->empty())
+        {
+          delete remote_pending_users;
+          remote_pending_users = NULL;
+        }
+      }
+      // Record that these fields are now replicated
+      replicated_fields |= finder->second;
+      repl_ptr.replicated_requests->erase(finder);
+      if (repl_ptr.replicated_requests->empty())
+      {
+        delete repl_ptr.replicated_requests;
+        repl_ptr.replicated_requests = NULL;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void MaterializedView::process_replication_removal(AddressSpaceID source,
+                                                  const FieldMask &removal_mask)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock r_lock(replicated_lock);
+#ifdef DEBUG_LEGION
+      assert(is_logical_owner());
+      assert(repl_ptr.replicated_copies != NULL);
+#endif
+      LegionMap<AddressSpaceID,FieldMask>::aligned::iterator finder = 
+        repl_ptr.replicated_copies->find(source);
+#ifdef DEBUG_LEGION
+      assert(finder != repl_ptr.replicated_copies->end());
+      // We should know about all the fields being removed
+      assert(!(removal_mask - finder->second));
+#endif
+      finder->second -= removal_mask;
+      if (!finder->second)
+      {
+        repl_ptr.replicated_copies->erase(finder);
+        if (repl_ptr.replicated_copies->empty())
+        {
+          delete repl_ptr.replicated_copies;
+          repl_ptr.replicated_copies = NULL;
+          replicated_fields.clear();
+          return;
+        }
+        // Otherwise fall through and rebuild the replicated fields
+      }
+      // Rebuild the replicated fields so they are precise
+      if (repl_ptr.replicated_copies->size() > 1)
+      {
+        replicated_fields.clear();
+        for (LegionMap<AddressSpaceID,FieldMask>::aligned::const_iterator it =
+              repl_ptr.replicated_copies->begin(); it !=
+              repl_ptr.replicated_copies->end(); it++)
+          replicated_fields |= finder->second;
+      }
+      else
+        replicated_fields = repl_ptr.replicated_copies->begin()->second;
+    }
+#endif // ENABLE_VIEW_REPLICATION
  
     //--------------------------------------------------------------------------
     void MaterializedView::notify_active(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
-      if (parent == NULL)
-      {
-        if (is_owner())
-          manager->add_nested_gc_ref(did, mutator);
-        else
-          send_remote_gc_update(owner_space, mutator, 1, true/*add*/);
-      }
-      else
-        parent->add_nested_gc_ref(did, mutator);
+      manager->add_nested_gc_ref(did, mutator);
+      // If we're the logical owner, but not the original owner
+      // then we use a gc reference on the original owner to 
+      // keep all the views allive until we're done
+      if (is_logical_owner() && !is_owner())
+        send_remote_gc_increment(owner_space, mutator);
     }
 
     //--------------------------------------------------------------------------
     void MaterializedView::notify_inactive(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
-      if (parent == NULL)
-      {
-        // we have a resource reference on the manager so no need to check
-        if (is_owner())
-          manager->remove_nested_gc_ref(did, mutator);
-        else
-          send_remote_gc_update(owner_space, mutator, 1, false/*add*/);
-      }
-      else if (parent->remove_nested_gc_ref(did, mutator))
-        delete parent;
+      // we have a resource reference on the manager so no need to check
+      manager->remove_nested_gc_ref(did, mutator);
+      // If we're the logical owner but not the original owner
+      // then we remove the gc reference that we added
+      if (is_logical_owner() && !is_owner())
+        send_remote_gc_decrement(owner_space, RtEvent::NO_RT_EVENT, mutator);
     }
 
     //--------------------------------------------------------------------------
     void MaterializedView::notify_valid(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
-      if (parent == NULL)
+      // The logical owner is where complete set of users is and is therefore
+      // where garbage collection will take place so we need to send our 
+      // valid update there if we're not the owner, otherwise we send it 
+      // down to the manager
+      if (is_logical_owner())
         manager->add_nested_valid_ref(did, mutator);
       else
-        parent->add_nested_valid_ref(did, mutator);
+        send_remote_valid_increment(logical_owner, mutator);
     }
 
     //--------------------------------------------------------------------------
     void MaterializedView::notify_invalid(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
-      if (parent == NULL) 
+      if (is_logical_owner())
         // we have a resource reference on the manager so no need to check
         manager->remove_nested_valid_ref(did, mutator);
-      else if (parent->remove_nested_valid_ref(did, mutator))
-        delete parent;
+      else
+        send_remote_valid_decrement(logical_owner,RtEvent::NO_RT_EVENT,mutator);
     }
 
     //--------------------------------------------------------------------------
-    void MaterializedView::collect_users(const std::set<ApEvent> &term_events)
+    void MaterializedView::add_internal_task_user(const RegionUsage &usage,
+                                            IndexSpaceExpression *user_expr,
+                                            const FieldMask &user_mask,
+                                            ApEvent term_event, UniqueID op_id,
+                                            const unsigned index,
+                                            const bool trace_recording)
     //--------------------------------------------------------------------------
     {
+      PhysicalUser *user = new PhysicalUser(usage, user_expr, op_id, index, 
+                                            false/*copy user*/, true/*covers*/);
+      // Hold a reference to this in case it finishes before we're done
+      // with the analysis and its get pruned/deleted
+      user->add_reference();
+      ExprView *target_view = NULL;
+      bool has_target_view = false;
+      // Handle an easy case first, if the user_expr is the same as the 
+      // view_expr for the root then this is easy
+      bool update_count = true;
+      bool update_cache = false;
+      if (user_expr != current_users->view_expr)
       {
-        AutoLock v_lock(view_lock);
-        // Remove any event users from the current and previous users
-        for (std::set<ApEvent>::const_iterator it = term_events.begin();
-              it != term_events.end(); it++)
-          filter_local_users(*it); 
+        // Hard case where we will have subviews
+        AutoLock v_lock(view_lock,1,false/*exclusive*/);
+        // See if we can find the entry in the cache and it's valid 
+        // for all of our fields
+        LegionMap<IndexSpaceExprID,ExprView*>::aligned::const_iterator
+          finder = expr_cache.find(user_expr->expr_id);
+        if (finder != expr_cache.end())
+        {
+          target_view = finder->second;
+          AutoLock e_lock(expr_lock,1,false/*exclusive*/);
+          if (finder->second->invalid_fields * user_mask)
+            has_target_view = true;
+        }
+        else
+          update_cache = true;
+        // increment the number of outstanding additions
+        __sync_fetch_and_add(&outstanding_additions,1);
       }
-      if (parent != NULL)
-        parent->collect_users(term_events);
-    }
-
-    //--------------------------------------------------------------------------
-    void MaterializedView::update_gc_events(
-                                           const std::set<ApEvent> &term_events)
-    //--------------------------------------------------------------------------
-    {
-      if (parent != NULL)
-        parent->update_gc_events(term_events);
+      else // This is just going to add at the top so never needs to wait
+      {
+        target_view = current_users;
+        update_count = false;
+        has_target_view = true;
+      }
+      if (!has_target_view)
+      {
+        // This could change the shape of the view tree so we need
+        // exclusive privilege son the expr lock to serialize it
+        // with everything else traversing the tree
+        AutoLock e_lock(expr_lock);
+        // If we don't have a target view see if there is a 
+        // congruent one already in the tree
+        if (target_view == NULL)
+        {
+          target_view = current_users->find_congruent_view(user_expr);
+          if (target_view == NULL)
+            target_view = new ExprView(context, manager, this, user_expr);
+        }
+        if (target_view != current_users)
+        {
+          // Now see if we need to insert it
+          FieldMask insert_mask = user_mask & target_view->invalid_fields;
+          if (!!insert_mask)
+          {
+            // Remove these fields from being invalid before we
+            // destroy the insert mask
+            target_view->invalid_fields -= insert_mask;
+            // Do the insertion into the tree
+            current_users->insert_subview(target_view, insert_mask);
+          }
+        }
+      }
+      // Now we know the target view and it's valid for all fields
+      // so we can add it to the expr view
+      target_view->add_current_user(user, term_event,user_mask,trace_recording);
+      if (user->remove_reference())
+        delete user;
       AutoLock v_lock(view_lock);
-      for (std::set<ApEvent>::const_iterator it = term_events.begin();
-            it != term_events.end(); it++)
+      if (update_count)
       {
-        outstanding_gc_events.insert(*it);
+#ifdef DEBUG_LEGION
+        assert(outstanding_additions > 0);
+#endif
+        if ((--outstanding_additions == 0) && clean_waiting.exists())
+        {
+          // Wake up the clean waiter
+          Runtime::trigger_event(clean_waiting);
+          clean_waiting = RtUserEvent::NO_RT_USER_EVENT;
+        }
+      }
+      if (!update_cache)
+      {
+        // Update the timeout and see if we need to clear the cache
+        if (!expr_cache.empty())
+        {
+          expr_cache_uses++;
+          // Check for equality guarantees only one thread in here at a time
+          if (expr_cache_uses == user_cache_timeout)
+          {
+            // Wait until there are are no more outstanding additions
+            while (outstanding_additions > 0)
+            {
+#ifdef DEBUG_LEGION
+              assert(!clean_waiting.exists());
+#endif
+              clean_waiting = Runtime::create_rt_user_event();
+              const RtEvent wait_on = clean_waiting;
+              v_lock.release();
+              wait_on.wait();
+              v_lock.reacquire();
+            }
+            clean_cache<true/*need expr lock*/>();
+          }
+        }
+      }
+      else
+        expr_cache[user_expr->expr_id] = target_view;
+    }
+
+    //--------------------------------------------------------------------------
+    void MaterializedView::add_internal_copy_user(const RegionUsage &usage,
+                                            IndexSpaceExpression *user_expr,
+                                            const FieldMask &user_mask,
+                                            ApEvent term_event, UniqueID op_id,
+                                            const unsigned index,
+                                            const bool trace_recording)
+    //--------------------------------------------------------------------------
+    { 
+      // First we're going to check to see if we can add this directly to 
+      // an existing ExprView with the same expresssion in which case
+      // we'll be able to mark this user as being precise
+      ExprView *target_view = NULL;
+      bool has_target_view = false;
+      // Handle an easy case first, if the user_expr is the same as the 
+      // view_expr for the root then this is easy
+      bool update_count = false;
+      bool update_cache = false;
+      if (user_expr != current_users->view_expr)
+      {
+        // Hard case where we will have subviews
+        AutoLock v_lock(view_lock,1,false/*exclusive*/);
+        // See if we can find the entry in the cache and it's valid 
+        // for all of our fields
+        LegionMap<IndexSpaceExprID,ExprView*>::aligned::const_iterator
+          finder = expr_cache.find(user_expr->expr_id);
+        if (finder != expr_cache.end())
+        {
+          target_view = finder->second;
+          AutoLock e_lock(expr_lock,1,false/*exclusive*/);
+          if (finder->second->invalid_fields * user_mask)
+            has_target_view = true;
+        }
+        // increment the number of outstanding additions
+        __sync_fetch_and_add(&outstanding_additions,1);
+        update_count = true;
+      }
+      else // This is just going to add at the top so never needs to wait
+      {
+        target_view = current_users;
+        has_target_view = true;
+      }
+      if (!has_target_view)
+      {
+        // Do a quick test to see if we can find a target view
+        AutoLock e_lock(expr_lock);
+        // If we haven't found it yet, see if we can find it
+        if (target_view == NULL)
+        {
+          target_view = current_users->find_congruent_view(user_expr);
+          if (target_view != NULL)
+            update_cache = true;
+        }
+        // Don't make it though if we don't already have it
+        if (target_view != NULL)
+        {
+          // No need to insert this if it's the root
+          if (target_view != current_users)
+          {
+            FieldMask insert_mask = target_view->invalid_fields & user_mask;
+            if (!!insert_mask)
+            {
+              target_view->invalid_fields -= insert_mask;
+              current_users->insert_subview(target_view, insert_mask);
+            }
+          }
+          has_target_view = true;
+        }
+      }
+      if (has_target_view)
+      {
+        // If we have a target view, then we know we cover it because
+        // the expressions match directly
+        PhysicalUser *user = new PhysicalUser(usage, user_expr, op_id, index, 
+                                              true/*copy user*/,true/*covers*/);
+        // Hold a reference to this in case it finishes before we're done
+        // with the analysis and its get pruned/deleted
+        user->add_reference();
+        // We already know the view so we can just add the user directly
+        // there and then do any updates that we need to
+        target_view->add_current_user(user, term_event, 
+                                      user_mask, trace_recording);
+        if (user->remove_reference())
+          delete user;
+        if (update_count || update_cache)
+        {
+          AutoLock v_lock(view_lock);
+          if (update_cache)
+            expr_cache[user_expr->expr_id] = target_view;
+          if (update_count)
+          {
+#ifdef DEBUG_LEGION
+            assert(outstanding_additions > 0);
+#endif
+            if ((--outstanding_additions == 0) && clean_waiting.exists())
+            {
+              // Wake up the clean waiter
+              Runtime::trigger_event(clean_waiting);
+              clean_waiting = RtUserEvent::NO_RT_USER_EVENT;
+            }
+          }
+        }
+      }
+      else
+      {
+#ifdef DEBUG_LEGION
+        assert(update_count); // this should always be true
+        assert(!update_cache); // this should always be false
+#endif
+        // This is a case where we don't know where to add the copy user
+        // so we need to traverse down and find one, 
+        {
+          // We're traversing the view tree but not modifying it so 
+          // we need a read-only copy of the expr_lock
+          AutoLock e_lock(expr_lock,1,false/*exclusive*/);
+          current_users->add_partial_user(usage, op_id, index,
+                                          user_mask, term_event, user_expr, 
+                                          user_expr->get_volume(), 
+                                          trace_recording);
+        }
+        AutoLock v_lock(view_lock);
+#ifdef DEBUG_LEGION
+        assert(outstanding_additions > 0);
+#endif
+        if ((--outstanding_additions == 0) && clean_waiting.exists())
+        {
+          // Wake up the clean waiter
+          Runtime::trigger_event(clean_waiting);
+          clean_waiting = RtUserEvent::NO_RT_USER_EVENT;
+        }
+      } 
+    }
+
+    //--------------------------------------------------------------------------
+    template<bool NEED_EXPR_LOCK>
+    void MaterializedView::clean_cache(void)
+    //--------------------------------------------------------------------------
+    {
+      // Clear the cache
+      expr_cache.clear();
+      // Reset the cache use counter
+      expr_cache_uses = 0;
+      // Anytime we clean the cache, we also traverse the 
+      // view tree and see if there are any views we can 
+      // remove because they no longer have live users
+      FieldMask dummy_mask; 
+      FieldMaskSet<ExprView> clean_set;
+      if (NEED_EXPR_LOCK)
+      {
+        // Take the lock in exclusive mode since we might be modifying the tree
+        AutoLock e_lock(expr_lock);
+        current_users->clean_views(dummy_mask, clean_set);
+        // We can safely repopulate the cache with any view expressions which
+        // are still valid, remove all references for views in the clean set 
+        for (FieldMaskSet<ExprView>::const_iterator it = 
+              clean_set.begin(); it != clean_set.end(); it++)
+        {
+          if (!!(~(it->first->invalid_fields)))
+            expr_cache[it->first->view_expr->expr_id] = it->first;
+          if (it->first->remove_reference())
+            delete it->first;
+        }
+      }
+      else
+      {
+        // Same as above, but without needing to acquire the lock
+        // because the caller promised that they already have it
+        current_users->clean_views(dummy_mask, clean_set);
+        // We can safely repopulate the cache with any view expressions which
+        // are still valid, remove all references for views in the clean set 
+        for (FieldMaskSet<ExprView>::const_iterator it = 
+              clean_set.begin(); it != clean_set.end(); it++)
+        {
+          if (!!(~(it->first->invalid_fields)))
+            expr_cache[it->first->view_expr->expr_id] = it->first;
+          if (it->first->remove_reference())
+            delete it->first;
+        }
       }
     }
+
+#ifdef ENABLE_VIEW_REPLICATION
+    //--------------------------------------------------------------------------
+    void MaterializedView::update_remote_replication_state(
+                                              std::set<RtEvent> &applied_events)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!is_logical_owner());
+      assert(!!replicated_fields);
+      assert(current_users != NULL);
+      assert(remote_added_users >= user_cache_timeout);
+#endif
+      // We can reset the counter now
+      remote_added_users = 0;
+      // See what fields haven't been sampled recently and therefore
+      // we should stop maintaining as remote duplicates
+      const FieldMask deactivate_mask = 
+        replicated_fields - remote_copy_pre_fields; 
+      // We can clear this now for the next epoch
+      remote_copy_pre_fields.clear();
+      // If we have any outstanding requests though keep those
+      if (repl_ptr.replicated_requests != NULL)
+      {
+        for (LegionMap<RtUserEvent,FieldMask>::aligned::const_iterator it = 
+              repl_ptr.replicated_requests->begin(); it !=
+              repl_ptr.replicated_requests->end(); it++)
+        {
+#ifdef DEBUG_LEGION
+          assert(it->second * deactivate_mask);
+#endif
+          remote_copy_pre_fields |= it->second;
+        }
+      }
+      // If we don't have any fields to deactivate then we're done
+      if (!deactivate_mask)
+        return;
+      // Send the message to do the deactivation on the owner node
+      RtUserEvent done_event = Runtime::create_rt_user_event();
+      Serializer rez;
+      {
+        RezCheck z(rez);
+        rez.serialize(did);
+        rez.serialize(deactivate_mask);
+        rez.serialize(done_event);
+      }
+      runtime->send_view_replication_removal(logical_owner, rez);
+      applied_events.insert(done_event);
+      // Perform it locally
+      {
+        // Anytime we do a deactivate that can influence the valid
+        // set of ExprView objects so we need to clean the cache
+        AutoLock v_lock(view_lock);
+#ifdef DEBUG_LEGION
+        // There should be no outstanding_additions when we're here
+        // because we're already protected by the replication lock
+        assert(outstanding_additions == 0);
+#endif
+        // Go through and remove any users for the deactivate mask
+        // Need an exclusive copy of the expr_lock to do this
+        AutoLock e_lock(expr_lock);
+        current_users->deactivate_replication(deactivate_mask);
+        // Then clean the cache since we likely invalidated some
+        // things. This will also go through and remove any views
+        // that no longer have any active users
+        clean_cache<false/*need expr lock*/>();
+      }
+      // Record that these fields are no longer replicated 
+      replicated_fields -= deactivate_mask;
+    }
+#endif // ENABLE_VIEW_REPLICATION
 
     //--------------------------------------------------------------------------
     void MaterializedView::send_view(AddressSpaceID target)
@@ -1645,20 +3584,6 @@ namespace Legion {
         RezCheck z(rez);
         rez.serialize(did);
         rez.serialize(manager->did);
-        if (parent == NULL)
-          rez.serialize<DistributedID>(0);
-        else
-          rez.serialize<DistributedID>(parent->did);
-        if (logical_node->is_region())
-        {
-          rez.serialize<bool>(true);
-          rez.serialize(logical_node->as_region_node()->handle);
-        }
-        else
-        {
-          rez.serialize<bool>(false);
-          rez.serialize(logical_node->as_partition_node()->handle);
-        }
         rez.serialize(owner_space);
         rez.serialize(logical_owner);
         rez.serialize(owner_context);
@@ -1668,1374 +3593,68 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MaterializedView::update_gc_events(
-                                           const std::deque<ApEvent> &gc_events)
-    //--------------------------------------------------------------------------
-    {
-      if (parent != NULL)
-        parent->update_gc_events(gc_events);
-      AutoLock v_lock(view_lock);
-      for (std::deque<ApEvent>::const_iterator it = gc_events.begin();
-            it != gc_events.end(); it++)
-      {
-        outstanding_gc_events.insert(*it);
-      }
-    }    
-
-    //--------------------------------------------------------------------------
-    void MaterializedView::filter_invalid_fields(FieldMask &to_filter,
-                                                 VersionInfo &version_info)
-    //--------------------------------------------------------------------------
-    {
-      // If we're not the parent then keep going up
-      if ((parent != NULL) && !version_info.is_upper_bound_node(logical_node))
-        parent->filter_invalid_fields(to_filter, version_info);
-      // If we still have fields to filter, then do that now
-      if (!!to_filter)
-      {
-        // If we're not the owner then make sure that we are up to date
-        if (!is_logical_owner())
-          perform_remote_valid_check(to_filter, &version_info, true/*reading*/);
-        // Get the version numbers that we need 
-        FieldVersions needed_versions;
-        version_info.get_field_versions(logical_node, false/*split prev*/,
-                                        to_filter, needed_versions);
-        // Need the lock in read only mode while touching current versions
-        AutoLock v_lock(view_lock,1,false/*exclusive*/);
-        for (FieldVersions::iterator it = needed_versions.begin();
-              it != needed_versions.end(); it++)
-        {
-          std::map<VersionID,FieldMask>::const_iterator finder =  
-            current_versions.find(it->first);
-          if (finder != current_versions.end())
-          {
-            const FieldMask to_remove = it->second - finder->second;
-            if (!!to_remove)
-            {
-              to_filter -= to_remove;
-              if (!to_filter)
-                return;
-            }
-          }
-          else
-          {
-            // None of the fields are at the right version number
-            to_filter -= it->second;
-            if (!to_filter)
-              return;
-          }
-        }
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void MaterializedView::find_copy_version_updates(const FieldMask &copy_mask,
-                                                     VersionTracker *versions,
-                                                     FieldMask &write_skip_mask,
-                                                     FieldMask &filter_mask,
-                              LegionMap<VersionID,FieldMask>::aligned &advance,
-                              LegionMap<VersionID,FieldMask>::aligned &add_only,
-                                bool is_reduction, bool restrict_out, bool base)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      sanity_check_versions();
-#endif
-      // These are updates for a copy, so we are never going to the
-      // next version number, we only go to the current versions
-      FieldVersions update_versions;
-      // If we're doing a restrict out copy, the version we are updating
-      // is the advance version, otherwise it is the current version
-      // before the operation. We want split previous here because we
-      // haven't actually done the write yet, so if we're writing then
-      // we're just copying the previous version over.
-      if (restrict_out)
-        versions->get_advance_versions(logical_node, base, 
-                                       copy_mask, update_versions);
-      else
-        versions->get_field_versions(logical_node, true/*split previous*/,
-                                     copy_mask, update_versions);
-      FieldMask split_mask;
-      versions->get_split_mask(logical_node, copy_mask, split_mask);
-      for (LegionMap<VersionID,FieldMask>::aligned::const_iterator it = 
-            update_versions.begin(); it != update_versions.end(); it++)
-      {
-        FieldMask overlap = it->second & copy_mask;
-        if (!overlap)
-          continue;
-        if (it->first == 0)
-        {
-          filter_mask |= overlap;
-          add_only[it->first] = overlap;
-          continue;
-        }
-        // We're trying to get this to current version number, check to
-        // see if we're already at one of the most common values of
-        // either the previous version number or the current one
-        // otherwise we will have to add this to the set to filter later
-        const VersionID previous_number = it->first - 1;
-        const VersionID next_number = it->first;
-        LegionMap<VersionID,FieldMask>::aligned::const_iterator finder = 
-          current_versions.find(previous_number);
-        if (finder != current_versions.end())
-        {
-          const FieldMask intersect = overlap & finder->second;
-          if (!!intersect)
-          {
-            advance[previous_number] = intersect;
-            overlap -= intersect;
-            if (!overlap)
-              continue;
-          }
-          // Bump the iterator to the next entry, hopefully 
-          // it is the next version number, but if not we'll figure it out
-          finder++;
-        }
-        else
-          finder = current_versions.find(next_number);
-        // Check if the finder is good and the right version number
-        if ((finder != current_versions.end()) && 
-            (finder->first == next_number))
-        {
-          const FieldMask intersect = overlap & finder->second;
-          if (!!intersect)
-          {
-            // This is a write skip field since we're already
-            // at the version number at this view, but we're only
-            // really at the version number if we're not reducing
-            // We can't count split fields here because they might
-            // contain users from many versions
-#ifndef LEGION_SPY 
-            if (!is_reduction)
-            {
-              if (!!split_mask)
-                write_skip_mask |= (intersect - split_mask);
-              else
-                write_skip_mask |= intersect;
-            }
-#endif
-            overlap -= intersect;
-            if (!overlap)
-              continue;
-          }
-        }
-        // If we still have fields, then record we need to filter them
-        filter_mask |= overlap;
-        // Record the version number and fields to add after the filter
-        add_only[next_number] = overlap;
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void MaterializedView::apply_version_updates(FieldMask &filter_mask,
-                      const LegionMap<VersionID,FieldMask>::aligned &advance,
-                      const LegionMap<VersionID,FieldMask>::aligned &add_only,
-                      AddressSpaceID source, std::set<RtEvent> &applied_events)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      sanity_check_versions();
-#endif
-      // If we have remote instances, we need to check to see 
-      // if we need to send any invalidations
-      if (!valid_remote_instances.empty())
-      {
-#ifdef DEBUG_LEGION
-        assert(is_logical_owner());
-#endif
-        // Keep track of any invalidations that we have to apply 
-        // make a copy here before filter gets destroyed by the call
-        FieldMask invalidate_mask = filter_mask;
-        if (!!filter_mask)
-        {
-          // See if any of them are already up to date so we don't have
-          // to send invalidations, this is expensive enough that it is
-          // worth the extra analysis cost here to just do it
-          for (LegionMap<VersionID,FieldMask>::aligned::const_iterator it = 
-                add_only.begin(); it != add_only.end(); it++)
-          {
-            LegionMap<VersionID,FieldMask>::aligned::const_iterator finder = 
-              current_versions.find(it->first);
-            if (finder == current_versions.end())
-              continue;
-            FieldMask overlap = finder->second & it->second;
-            if (!!overlap)
-              invalidate_mask -= overlap;
-          }
-          filter_and_add(filter_mask, add_only);
-        }
-        if (!advance.empty())
-        {
-          for (LegionMap<VersionID,FieldMask>::aligned::const_iterator it = 
-                advance.begin(); it != advance.end(); it++)
-          {
-            LegionMap<VersionID,FieldMask>::aligned::iterator finder = 
-              current_versions.find(it->first);
-            // Someone else could already have advanced this
-            if (finder == current_versions.end())
-              continue;
-            FieldMask overlap = finder->second & it->second;
-            if (!overlap)
-              continue;
-            finder->second -= overlap;
-            if (!finder->second)
-              current_versions.erase(finder);
-            current_versions[it->first+1] |= overlap;
-            invalidate_mask |= overlap;
-          }
-        }
-        if (!!invalidate_mask)
-          send_invalidations(invalidate_mask, source, applied_events);
-      }
-      else
-      {
-        // This is the common path
-        if (!!filter_mask)
-          filter_and_add(filter_mask, add_only);
-        if (!advance.empty())
-        {
-          for (LegionMap<VersionID,FieldMask>::aligned::const_iterator it = 
-                advance.begin(); it != advance.end(); it++)
-          {
-            LegionMap<VersionID,FieldMask>::aligned::iterator finder = 
-              current_versions.find(it->first);
-            // Someone else could already have advanced this
-            if (finder == current_versions.end())
-              continue;
-            finder->second -= it->second;
-            if (!finder->second)
-              current_versions.erase(finder);
-            current_versions[it->first+1] |= it->second;
-          }
-        }
-      }
-#ifdef DEBUG_LEGION
-      sanity_check_versions();
-#endif
-    }
-
-    //--------------------------------------------------------------------------
-    void MaterializedView::filter_and_add(FieldMask &filter_mask,
-                    const LegionMap<VersionID,FieldMask>::aligned &add_versions)
-    //--------------------------------------------------------------------------
-    {
-      std::vector<VersionID> to_delete; 
-      for (LegionMap<VersionID,FieldMask>::aligned::iterator it = 
-            current_versions.begin(); it != current_versions.end(); it++)
-      {
-        FieldMask overlap = it->second & filter_mask;
-        if (!overlap)
-          continue;
-        it->second -= overlap;
-        if (!it->second)
-          to_delete.push_back(it->first);
-        filter_mask -= overlap;
-        if (!filter_mask)
-          break;
-      }
-      // Delete the old entries
-      if (!to_delete.empty())
-      {
-        for (std::vector<VersionID>::const_iterator it = to_delete.begin();
-              it != to_delete.end(); it++)
-          current_versions.erase(*it);
-      }
-      // Then add the new entries
-      for (LegionMap<VersionID,FieldMask>::aligned::const_iterator it = 
-            add_versions.begin(); it != add_versions.end(); it++)
-        current_versions[it->first] |= it->second;
-    }
-
-    //--------------------------------------------------------------------------
-    bool MaterializedView::update_version_numbers(const FieldMask &user_mask,
-                                           const FieldVersions &target_versions,
-                                           const AddressSpaceID source,
-                                           std::set<RtEvent> &applied_events)
-    //--------------------------------------------------------------------------
-    {
-      FieldMask filter_mask, invalidate_mask;
-      LegionMap<VersionID,FieldMask>::aligned update_versions;
-      bool need_check_above = false;
-      // Need the lock in exclusive mode to do the update
-      AutoLock v_lock(view_lock);
-      // If we are logical owner and we have remote valid instances
-      // we need to track which version numbers get updated so we can
-      // send invalidates
-      const bool need_invalidates = is_logical_owner() && 
-          !valid_remote_instances.empty() && !(user_mask * remote_valid_mask);
-#ifdef DEBUG_LEGION
-      sanity_check_versions();
-#endif
-      for (LegionMap<VersionID,FieldMask>::aligned::const_iterator it = 
-            target_versions.begin(); it != target_versions.end(); it++)
-      {
-#ifdef DEBUG_LEGION
-        assert(it->first > 0);
-#endif
-        FieldMask overlap = it->second & user_mask;
-        if (!overlap)
-          continue;
-        // We are always trying to advance the version numbers here
-        // since these are writing users and are therefore going from
-        // the current version number to the next one. We'll check for
-        // the most common cases here, and only filter if we don't find them.
-        const VersionID previous_number = it->first - 1; 
-        const VersionID next_number = it->first; 
-        LegionMap<VersionID,FieldMask>::aligned::iterator finder = 
-          current_versions.find(previous_number);
-        if (finder != current_versions.end())
-        {
-          FieldMask intersect = overlap & finder->second;
-          if (!!intersect)
-          {
-            need_check_above = true;
-            finder->second -= intersect;
-            if (need_invalidates)
-              invalidate_mask |= intersect;
-            if (!finder->second)
-            {
-              current_versions.erase(finder);
-              // We just deleted the iterator so we need a new one
-              finder = current_versions.find(next_number);
-            }
-            else // We didn't delete the iterator so trying bumping it
-              finder++;
-            if (finder != current_versions.end())
-            {
-              if (finder->first != next_number) 
-              {
-                current_versions[next_number] = intersect;
-                // Set it to end since we know there is no point in checking
-                finder = current_versions.end();
-              }
-              else // finder points to the right place
-                finder->second |= intersect;
-            }
-            else // no valid iterator so just put in the value
-              current_versions[next_number] = intersect;
-            overlap -= intersect;
-            if (!overlap)
-              continue;
-          }
-          else // Try the next element, hopefully it is version number+1
-            finder++;
-        }
-        else
-          finder = current_versions.find(next_number);
-        // Check if the finder is good and the right version number
-        if ((finder != current_versions.end()) && 
-            (finder->first == next_number))
-        {
-          FieldMask intersect = overlap & finder->second;
-          if (!!intersect)
-          {
-            finder->second |= intersect;
-            overlap -= intersect;
-            if (!overlap)
-              continue;
-          }
-        }
-        // If we still have fields, then record we need to filter them
-        filter_mask |= overlap;
-        // Record the version number and fields to add after the filter
-        update_versions[next_number] = overlap;
-        if (need_invalidates)
-          invalidate_mask |= overlap;
-      }
-      // If we need to filter, let's do that now
-      if (!!filter_mask)
-      {
-        need_check_above = true;
-        filter_and_add(filter_mask, update_versions);  
-      }
-#ifdef DEBUG_LEGION
-      sanity_check_versions();
-#endif
-      if (!!invalidate_mask)
-        send_invalidations(invalidate_mask, source, applied_events);
-      return need_check_above;
-    }
-
-#ifdef DEBUG_LEGION
-    //--------------------------------------------------------------------------
-    void MaterializedView::sanity_check_versions(void)
-    //--------------------------------------------------------------------------
-    {
-      FieldMask version_mask;
-      for (LegionMap<VersionID,FieldMask>::aligned::const_iterator it = 
-            current_versions.begin(); it != current_versions.end(); it++)
-      {
-        assert(version_mask * it->second);
-        version_mask |= it->second;
-      }
-    }
-#endif
-
-    //--------------------------------------------------------------------------
-    void MaterializedView::add_current_user(PhysicalUser *user, 
-                                            ApEvent term_event,
-                                            const FieldMask &user_mask)
-    //--------------------------------------------------------------------------
-    {
-      // Must be called while holding the lock
-      // Reference should already have been added
-      EventUsers &event_users = current_epoch_users[term_event];
-      if (event_users.single)
-      {
-        if (event_users.users.single_user == NULL)
-        {
-          // make it the entry
-          event_users.users.single_user = user;
-          event_users.user_mask = user_mask;
-        }
-        else
-        {
-          // convert to multi
-          LegionMap<PhysicalUser*,FieldMask>::aligned *new_map = 
-                           new LegionMap<PhysicalUser*,FieldMask>::aligned();
-          (*new_map)[event_users.users.single_user] = event_users.user_mask;
-          (*new_map)[user] = user_mask;
-          event_users.user_mask |= user_mask;
-          event_users.users.multi_users = new_map;
-          event_users.single = false;
-        }
-      }
-      else
-      {
-        // Add it to the set 
-        (*event_users.users.multi_users)[user] = user_mask;
-        event_users.user_mask |= user_mask;
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void MaterializedView::filter_local_users(ApEvent term_event) 
-    //--------------------------------------------------------------------------
-    {
-      // Caller must be holding the lock
-      DETAILED_PROFILER(context->runtime, 
-                        MATERIALIZED_VIEW_FILTER_LOCAL_USERS_CALL);
-      // Don't do this if we are in Legion Spy since we want to see
-      // all of the dependences on an instance
-#if !defined(LEGION_SPY) && !defined(EVENT_GRAPH_TRACE)
-      std::set<ApEvent>::iterator event_finder = 
-        outstanding_gc_events.find(term_event); 
-      if (event_finder != outstanding_gc_events.end())
-      {
-        LegionMap<ApEvent,EventUsers>::aligned::iterator current_finder = 
-          current_epoch_users.find(term_event);
-        if (current_finder != current_epoch_users.end())
-        {
-          EventUsers &event_users = current_finder->second;
-          if (event_users.single)
-          {
-            if (event_users.users.single_user->remove_reference())
-              delete (event_users.users.single_user);
-          }
-          else
-          {
-            for (LegionMap<PhysicalUser*,FieldMask>::aligned::iterator
-                  it = event_users.users.multi_users->begin(); it !=
-                  event_users.users.multi_users->end(); it++)
-            {
-              if (it->first->remove_reference())
-                delete (it->first);
-            }
-            delete event_users.users.multi_users;
-          }
-          current_epoch_users.erase(current_finder);
-        }
-        LegionMap<ApEvent,EventUsers>::aligned::iterator previous_finder = 
-          previous_epoch_users.find(term_event);
-        if (previous_finder != previous_epoch_users.end())
-        {
-          EventUsers &event_users = previous_finder->second; 
-          if (event_users.single)
-          {
-            if (event_users.users.single_user->remove_reference())
-              delete (event_users.users.single_user);
-          }
-          else
-          {
-            for (LegionMap<PhysicalUser*,FieldMask>::aligned::iterator
-                  it = event_users.users.multi_users->begin(); it !=
-                  event_users.users.multi_users->end(); it++)
-            {
-              if (it->first->remove_reference())
-                delete (it->first);
-            }
-            delete event_users.users.multi_users;
-          }
-          previous_epoch_users.erase(previous_finder);
-        }
-        outstanding_gc_events.erase(event_finder);
-      }
-#endif
-    }
-
-    //--------------------------------------------------------------------------
-    void MaterializedView::filter_local_users(const FieldMask &filter_mask,
-                      LegionMap<ApEvent,EventUsers>::aligned &local_epoch_users)
-    //--------------------------------------------------------------------------
-    {
-      // lock better be held by caller
-      DETAILED_PROFILER(context->runtime, 
-                        MATERIALIZED_VIEW_FILTER_LOCAL_USERS_CALL);
-      std::vector<ApEvent> to_delete;
-      for (LegionMap<ApEvent,EventUsers>::aligned::iterator lit = 
-           local_epoch_users.begin(); lit != local_epoch_users.end(); lit++)
-      {
-        const FieldMask overlap = lit->second.user_mask & filter_mask;
-        if (!overlap)
-          continue;
-        EventUsers &local_users = lit->second;
-        local_users.user_mask -= overlap;
-        if (!local_users.user_mask)
-        {
-          // Total removal of the entry
-          to_delete.push_back(lit->first);
-          if (local_users.single)
-          {
-            PhysicalUser *user = local_users.users.single_user;
-            if (user->remove_reference())
-              delete (user);
-          }
-          else
-          {
-            for (LegionMap<PhysicalUser*,FieldMask>::aligned::const_iterator 
-                  it = local_users.users.multi_users->begin(); it !=
-                  local_users.users.multi_users->end(); it++)
-            {
-              if (it->first->remove_reference())
-                delete (it->first);
-            }
-            // Delete the map too
-            delete local_users.users.multi_users;
-          }
-        }
-        else if (!local_users.single) // only need to filter for non-single
-        {
-          // Partial removal of the entry
-          std::vector<PhysicalUser*> to_erase;
-          for (LegionMap<PhysicalUser*,FieldMask>::aligned::iterator it = 
-                local_users.users.multi_users->begin(); it !=
-                local_users.users.multi_users->end(); it++)
-          {
-            it->second -= overlap;
-            if (!it->second)
-              to_erase.push_back(it->first);
-          }
-          if (!to_erase.empty())
-          {
-            for (std::vector<PhysicalUser*>::const_iterator it = 
-                  to_erase.begin(); it != to_erase.end(); it++)
-            {
-              local_users.users.multi_users->erase(*it);
-              if ((*it)->remove_reference())
-                delete (*it);
-            }
-            // See if we can shrink this back down
-            if (local_users.users.multi_users->size() == 1)
-            {
-              LegionMap<PhysicalUser*,FieldMask>::aligned::iterator first_it =
-                            local_users.users.multi_users->begin();     
-#ifdef DEBUG_LEGION
-              // This summary mask should dominate
-              assert(!(first_it->second - local_users.user_mask));
-#endif
-              PhysicalUser *user = first_it->first;
-              local_users.user_mask = first_it->second;
-              delete local_users.users.multi_users;
-              local_users.users.single_user = user;
-              local_users.single = true;
-            }
-          }
-        }
-      }
-      if (!to_delete.empty())
-      {
-        for (std::vector<ApEvent>::const_iterator it = to_delete.begin();
-              it != to_delete.end(); it++)
-          local_epoch_users.erase(*it);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void MaterializedView::filter_current_user(ApEvent user_event, 
-                                               const FieldMask &filter_mask)
-    //--------------------------------------------------------------------------
-    {
-      // lock better be held by caller
-      DETAILED_PROFILER(context->runtime, 
-                        MATERIALIZED_VIEW_FILTER_CURRENT_USERS_CALL);
-      LegionMap<ApEvent,EventUsers>::aligned::iterator cit = 
-        current_epoch_users.find(user_event);
-      // Some else might already have moved it back or it could have
-      // been garbage collected already
-      if (cit == current_epoch_users.end())
-        return;
-#if !defined(LEGION_SPY) && !defined(EVENT_GRAPH_TRACE)
-      if (cit->first.has_triggered_faultignorant())
-      {
-        EventUsers &current_users = cit->second;
-        if (current_users.single)
-        {
-          if (current_users.users.single_user->remove_reference())
-            delete (current_users.users.single_user);
-        }
-        else
-        {
-          for (LegionMap<PhysicalUser*,FieldMask>::aligned::iterator it = 
-                current_users.users.multi_users->begin(); it !=
-                current_users.users.multi_users->end(); it++)
-          {
-            if (it->first->remove_reference())
-              delete (it->first);
-          }
-          delete current_users.users.multi_users;
-        }
-        current_epoch_users.erase(cit);
-        return;
-      }
-#endif
-      EventUsers &current_users = cit->second;
-      FieldMask summary_overlap = current_users.user_mask & filter_mask;
-      if (!summary_overlap)
-        return;
-      current_users.user_mask -= summary_overlap;
-      EventUsers &prev_users = previous_epoch_users[cit->first];
-      if (current_users.single)
-      {
-        PhysicalUser *user = current_users.users.single_user;
-        if (prev_users.single)
-        {
-          // Single, see if something exists there yet
-          if (prev_users.users.single_user == NULL)
-          {
-            prev_users.users.single_user = user; 
-            prev_users.user_mask = summary_overlap;
-            if (!current_users.user_mask) // reference flows back
-              current_epoch_users.erase(cit);
-            else
-              user->add_reference(); // add a reference
-          }
-          else if (prev_users.users.single_user == user)
-          {
-            // Same user, update the fields 
-            prev_users.user_mask |= summary_overlap;
-            if (!current_users.user_mask)
-            {
-              current_epoch_users.erase(cit);
-              user->remove_reference(); // remove unnecessary reference
-            }
-          }
-          else
-          {
-            // Go to multi mode
-            LegionMap<PhysicalUser*,FieldMask>::aligned *new_map = 
-                          new LegionMap<PhysicalUser*,FieldMask>::aligned();
-            (*new_map)[prev_users.users.single_user] = prev_users.user_mask;
-            (*new_map)[user] = summary_overlap;
-            if (!current_users.user_mask) // reference flows back
-              current_epoch_users.erase(cit);
-            else
-              user->add_reference();
-            prev_users.user_mask |= summary_overlap;
-            prev_users.users.multi_users = new_map;
-            prev_users.single = false;
-          }
-        }
-        else
-        {
-          // Already multi
-          prev_users.user_mask |= summary_overlap;
-          // See if we can find it in the multi-set
-          LegionMap<PhysicalUser*,FieldMask>::aligned::iterator finder = 
-            prev_users.users.multi_users->find(user);
-          if (finder == prev_users.users.multi_users->end())
-          {
-            // Couldn't find it
-            (*prev_users.users.multi_users)[user] = summary_overlap;
-            if (!current_users.user_mask) // reference flows back
-              current_epoch_users.erase(cit);
-            else
-              user->add_reference();
-          }
-          else
-          {
-            // Found it, update it 
-            finder->second |= summary_overlap;
-            if (!current_users.user_mask)
-            {
-              current_epoch_users.erase(cit);
-              user->remove_reference(); // remove redundant reference
-            }
-          }
-        }
-      }
-      else
-      {
-        // Many things, filter them and move them back
-        if (!current_users.user_mask)
-        {
-          // Moving the whole set back, see what the previous looks like
-          if (prev_users.single)
-          {
-            if (prev_users.users.single_user != NULL)
-            {
-              // Merge the one user into this map so we can move 
-              // the whole map back
-              PhysicalUser *user = prev_users.users.single_user;  
-              LegionMap<PhysicalUser*,FieldMask>::aligned::iterator finder =
-                current_users.users.multi_users->find(user);
-              if (finder == current_users.users.multi_users->end())
-              {
-                // Add it reference is already there
-                (*current_users.users.multi_users)[user] = 
-                  prev_users.user_mask;
-              }
-              else
-              {
-                // Already there, update it and remove duplicate reference
-                finder->second |= prev_users.user_mask;
-                user->remove_reference();
-              }
-            }
-            // Now just move the map back
-            prev_users.user_mask |= summary_overlap;
-            prev_users.users.multi_users = current_users.users.multi_users;
-            prev_users.single = false;
-          }
-          else
-          {
-            // merge the two sets
-            for (LegionMap<PhysicalUser*,FieldMask>::aligned::const_iterator
-                  it = current_users.users.multi_users->begin();
-                  it != current_users.users.multi_users->end(); it++)
-            {
-              // See if we can find it
-              LegionMap<PhysicalUser*,FieldMask>::aligned::iterator finder = 
-                prev_users.users.multi_users->find(it->first);
-              if (finder == prev_users.users.multi_users->end())
-              {
-                // Didn't find it, just move it back, reference moves back
-                prev_users.users.multi_users->insert(*it);
-              }
-              else
-              {
-                finder->second |= it->second; 
-                // Remove the duplicate reference
-                it->first->remove_reference();
-              }
-            }
-            prev_users.user_mask |= summary_overlap;
-            // Now delete the set
-            delete current_users.users.multi_users;
-          }
-          current_epoch_users.erase(cit);
-        }
-        else
-        {
-          // Only send back filtered users
-          std::vector<PhysicalUser*> to_delete;
-          if (prev_users.single)
-          {
-            // Make a new map to send back  
-            LegionMap<PhysicalUser*,FieldMask>::aligned *new_map = 
-                          new LegionMap<PhysicalUser*,FieldMask>::aligned();
-            for (LegionMap<PhysicalUser*,FieldMask>::aligned::iterator it = 
-                  current_users.users.multi_users->begin(); it !=
-                  current_users.users.multi_users->end(); it++)
-            {
-              FieldMask overlap = summary_overlap & it->second;
-              if (!overlap)
-                continue;
-              // Can move without checking
-              (*new_map)[it->first] = overlap;
-              it->second -= overlap;
-              if (!it->second)
-                to_delete.push_back(it->first); // reference flows back
-              else
-                it->first->add_reference(); // need new reference
-            }
-            // Also capture the existing previous user if there is one
-            if (prev_users.users.single_user != NULL)
-            {
-              LegionMap<PhysicalUser*,FieldMask>::aligned::iterator finder = 
-                new_map->find(prev_users.users.single_user);
-              if (finder == new_map->end())
-              {
-                (*new_map)[prev_users.users.single_user] = 
-                  prev_users.user_mask;
-              }
-              else
-              {
-                finder->second |= prev_users.user_mask;
-                // Remove redundant reference
-                finder->first->remove_reference();
-              }
-            }
-            // Make the new map the previous set
-            prev_users.user_mask |= summary_overlap;
-            prev_users.users.multi_users = new_map;
-            prev_users.single = false;
-          }
-          else
-          {
-            for (LegionMap<PhysicalUser*,FieldMask>::aligned::iterator it =
-                  current_users.users.multi_users->begin(); it !=
-                  current_users.users.multi_users->end(); it++)
-            {
-              FieldMask overlap = summary_overlap & it->second; 
-              if (!overlap)
-                continue;
-              it->second -= overlap;
-              LegionMap<PhysicalUser*,FieldMask>::aligned::iterator finder = 
-                prev_users.users.multi_users->find(it->first);
-              // See if it already exists
-              if (finder == prev_users.users.multi_users->end())
-              {
-                // Doesn't exist yet, so add it 
-                (*prev_users.users.multi_users)[it->first] = overlap;
-                if (!it->second) // reference flows back
-                  to_delete.push_back(it->first);
-                else
-                  it->first->add_reference();
-              }
-              else
-              {
-                // Already exists so update it
-                finder->second |= overlap;
-                if (!it->second)
-                {
-                  to_delete.push_back(it->first);
-                  // Remove redundant reference
-                  it->first->remove_reference();
-                }
-              }
-            }
-            prev_users.user_mask |= summary_overlap;
-          }
-          // See if we can collapse this map back down
-          if (!to_delete.empty())
-          {
-            for (std::vector<PhysicalUser*>::const_iterator it = 
-                  to_delete.begin(); it != to_delete.end(); it++)
-            {
-              current_users.users.multi_users->erase(*it);
-            }
-            if (current_users.users.multi_users->size() == 1)
-            {
-              LegionMap<PhysicalUser*,FieldMask>::aligned::iterator 
-                first_it = current_users.users.multi_users->begin();
-#ifdef DEBUG_LEGION
-              // Should dominate as an upper bound
-              assert(!(first_it->second - current_users.user_mask));
-#endif
-              PhysicalUser *user = first_it->first;
-              current_users.user_mask = first_it->second;
-              delete current_users.users.multi_users;
-              current_users.users.single_user = user;   
-              current_users.single = true;
-            }
-          }
-        }
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void MaterializedView::filter_previous_user(ApEvent user_event,
-                                                const FieldMask &filter_mask)
-    //--------------------------------------------------------------------------
-    {
-      // lock better be held by caller
-      DETAILED_PROFILER(context->runtime,
-                        MATERIALIZED_VIEW_FILTER_PREVIOUS_USERS_CALL);
-      LegionMap<ApEvent,EventUsers>::aligned::iterator pit = 
-        previous_epoch_users.find(user_event);
-      // This might already have been filtered or garbage collected
-      if (pit == previous_epoch_users.end())
-        return;
-#if !defined(LEGION_SPY) && !defined(EVENT_GRAPH_TRACE)
-      if (pit->first.has_triggered_faultignorant())
-      {
-        EventUsers &previous_users = pit->second;
-        if (previous_users.single)
-        {
-          if (previous_users.users.single_user->remove_reference())
-            delete (previous_users.users.single_user);
-        }
-        else
-        {
-          for (LegionMap<PhysicalUser*,FieldMask>::aligned::iterator it = 
-                previous_users.users.multi_users->begin(); it !=
-                previous_users.users.multi_users->end(); it++)
-          {
-            if (it->first->remove_reference())
-              delete (it->first);
-          }
-          delete previous_users.users.multi_users;
-        }
-        previous_epoch_users.erase(pit);
-        return;
-      }
-#endif
-      EventUsers &previous_users = pit->second;
-      FieldMask summary_overlap = previous_users.user_mask & filter_mask;
-      if (!summary_overlap)
-        return;
-      previous_users.user_mask -= summary_overlap;
-      if (!previous_users.user_mask)
-      {
-        // We can delete the whole entry
-        if (previous_users.single)
-        {
-          PhysicalUser *user = previous_users.users.single_user;
-          if (user->remove_reference())
-            delete (user);
-        }
-        else
-        {
-          for (LegionMap<PhysicalUser*,FieldMask>::aligned::const_iterator 
-                it = previous_users.users.multi_users->begin(); it !=
-                previous_users.users.multi_users->end(); it++)
-          {
-            if (it->first->remove_reference())
-              delete (it->first);
-          }
-          // Delete the map too
-          delete previous_users.users.multi_users;
-        }
-        previous_epoch_users.erase(pit);
-      }
-      else if (!previous_users.single) // only need to filter for non-single
-      {
-        // Filter out the users for the dominated fields
-        std::vector<PhysicalUser*> to_delete;
-        for (LegionMap<PhysicalUser*,FieldMask>::aligned::iterator it = 
-              previous_users.users.multi_users->begin(); it !=
-              previous_users.users.multi_users->end(); it++)
-        {
-          it->second -= summary_overlap; 
-          if (!it->second)
-            to_delete.push_back(it->first);
-        }
-        if (!to_delete.empty())
-        {
-          for (std::vector<PhysicalUser*>::const_iterator it = 
-                to_delete.begin(); it != to_delete.end(); it++)
-          {
-            previous_users.users.multi_users->erase(*it);
-            if ((*it)->remove_reference())
-              delete (*it);
-          }
-          // See if we can shrink this back down
-          if (previous_users.users.multi_users->size() == 1)
-          {
-            LegionMap<PhysicalUser*,FieldMask>::aligned::iterator first_it =
-                          previous_users.users.multi_users->begin();     
-#ifdef DEBUG_LEGION
-            // This summary mask should dominate
-            assert(!(first_it->second - previous_users.user_mask));
-#endif
-            PhysicalUser *user = first_it->first;
-            previous_users.user_mask = first_it->second;
-            delete previous_users.users.multi_users;
-            previous_users.users.single_user = user;
-            previous_users.single = true;
-          }
-        }
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    template<bool TRACK_DOM>
-    void MaterializedView::find_current_preconditions(
-                                                 const FieldMask &user_mask,
-                                                 const RegionUsage &usage,
-                                                 const LegionColor child_color,
-                                                 RegionNode *origin_node,
-                                                 ApEvent term_event,
-                                                 const UniqueID op_id,
-                                                 const unsigned index,
-                                               std::set<ApEvent> &preconditions,
-                                               std::set<ApEvent> &dead_events,
-                           LegionMap<ApEvent,FieldMask>::aligned &filter_events,
-                                                 FieldMask &observed,
-                                                 FieldMask &non_dominated,
-                                                 PhysicalTraceInfo &trace_info)
-    //--------------------------------------------------------------------------
-    {
-      // Caller must be holding the lock
-      for (LegionMap<ApEvent,EventUsers>::aligned::const_iterator cit = 
-           current_epoch_users.begin(); cit != current_epoch_users.end(); cit++)
-      {
-        if (cit->first == term_event)
-          continue;
-#if !defined(LEGION_SPY) && !defined(EVENT_GRAPH_TRACE)
-        // We're about to do a bunch of expensive tests, 
-        // so first do something cheap to see if we can 
-        // skip all the tests.
-        if (!trace_info.recording && cit->first.has_triggered_faultignorant())
-        {
-          dead_events.insert(cit->first);
-          continue;
-        }
-        if (!trace_info.recording &&
-            preconditions.find(cit->first) != preconditions.end())
-          continue;
-#endif
-        const EventUsers &event_users = cit->second;
-        const FieldMask overlap = event_users.user_mask & user_mask;
-        if (!overlap)
-          continue;
-        else if (TRACK_DOM)
-          observed |= overlap;
-        if (event_users.single)
-        {
-          if (has_local_precondition(event_users.users.single_user, usage,
-                                     child_color, op_id, index, origin_node))
-          {
-            preconditions.insert(cit->first);
-            if (TRACK_DOM)
-              filter_events[cit->first] = overlap;
-          }
-          else if (TRACK_DOM)
-            non_dominated |= overlap;
-        }
-        else
-        {
-          for (LegionMap<PhysicalUser*,FieldMask>::aligned::const_iterator 
-                it = event_users.users.multi_users->begin(); it !=
-                event_users.users.multi_users->end(); it++)
-          {
-            const FieldMask user_overlap = user_mask & it->second;
-            if (!user_overlap)
-              continue;
-            if (has_local_precondition(it->first, usage, child_color, 
-                                       op_id, index, origin_node))
-            {
-              preconditions.insert(cit->first);
-              if (TRACK_DOM)
-                filter_events[cit->first] |= user_overlap;
-            }
-            else if (TRACK_DOM)
-              non_dominated |= user_overlap;
-          }
-        }
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void MaterializedView::find_previous_preconditions(
-                                                 const FieldMask &user_mask,
-                                                 const RegionUsage &usage,
-                                                 const LegionColor child_color,
-                                                 RegionNode *origin_node,
-                                                 ApEvent term_event,
-                                                 const UniqueID op_id,
-                                                 const unsigned index,
-                                               std::set<ApEvent> &preconditions,
-                                               std::set<ApEvent> &dead_events,
-                                                 PhysicalTraceInfo &trace_info)
-    //--------------------------------------------------------------------------
-    {
-      // Caller must be holding the lock
-      for (LegionMap<ApEvent,EventUsers>::aligned::const_iterator pit = 
-            previous_epoch_users.begin(); pit != 
-            previous_epoch_users.end(); pit++)
-      {
-        if (pit->first == term_event)
-          continue;
-#if !defined(LEGION_SPY) && !defined(EVENT_GRAPH_TRACE)
-        // We're about to do a bunch of expensive tests, 
-        // so first do something cheap to see if we can 
-        // skip all the tests.
-        if (!trace_info.recording && pit->first.has_triggered_faultignorant())
-        {
-          dead_events.insert(pit->first);
-          continue;
-        }
-        if (!trace_info.recording &&
-            preconditions.find(pit->first) != preconditions.end())
-          continue;
-#endif
-        const EventUsers &event_users = pit->second;
-        if (user_mask * event_users.user_mask)
-          continue;
-        if (event_users.single)
-        {
-          if (has_local_precondition(event_users.users.single_user, usage,
-                                     child_color, op_id, index, origin_node))
-            preconditions.insert(pit->first);
-        }
-        else
-        {
-          for (LegionMap<PhysicalUser*,FieldMask>::aligned::const_iterator 
-                it = event_users.users.multi_users->begin(); it !=
-                event_users.users.multi_users->end(); it++)
-          {
-            if (user_mask * it->second)
-              continue;
-            if (has_local_precondition(it->first, usage, child_color, 
-                                       op_id, index, origin_node))
-              preconditions.insert(pit->first);
-          }
-        }
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    template<bool TRACK_DOM>
-    void MaterializedView::find_current_preconditions(
-                                                 const FieldMask &user_mask,
-                                                 const RegionUsage &usage,
-                                                 const LegionColor child_color,
-                                                 RegionNode *origin_node,
-                                                 const UniqueID op_id,
-                                                 const unsigned index,
-                           LegionMap<ApEvent,FieldMask>::aligned &preconditions,
-                                                 std::set<ApEvent> &dead_events,
-                           LegionMap<ApEvent,FieldMask>::aligned &filter_events,
-                                                 FieldMask &observed,
-                                                 FieldMask &non_dominated,
-                                                 PhysicalTraceInfo &trace_info)
-    //--------------------------------------------------------------------------
-    {
-      // Caller must be holding the lock
-      for (LegionMap<ApEvent,EventUsers>::aligned::const_iterator cit = 
-           current_epoch_users.begin(); cit != current_epoch_users.end(); cit++)
-      {
-#if !defined(LEGION_SPY) && !defined(EVENT_GRAPH_TRACE)
-        // We're about to do a bunch of expensive tests, 
-        // so first do something cheap to see if we can 
-        // skip all the tests.
-        if (!trace_info.recording && cit->first.has_triggered_faultignorant())
-        {
-          dead_events.insert(cit->first);
-          continue;
-        }
-#endif
-        const EventUsers &event_users = cit->second;
-        FieldMask overlap = event_users.user_mask & user_mask;
-        if (!overlap)
-          continue;
-        LegionMap<ApEvent,FieldMask>::aligned::iterator finder = 
-          preconditions.find(cit->first);
-#ifndef LEGION_SPY
-        if (!trace_info.recording && finder != preconditions.end())
-        {
-          overlap -= finder->second;
-          if (!overlap)
-            continue;
-        }
-#endif
-        if (TRACK_DOM)
-          observed |= overlap;
-        if (event_users.single)
-        {
-          if (has_local_precondition(event_users.users.single_user, usage,
-                                     child_color, op_id, index, origin_node))
-          {
-            if (finder == preconditions.end())
-              preconditions[cit->first] = overlap;
-            else
-              finder->second |= overlap;
-            if (TRACK_DOM)
-              filter_events[cit->first] = overlap;
-          }
-          else if (TRACK_DOM)
-            non_dominated |= overlap;
-        }
-        else
-        {
-          for (LegionMap<PhysicalUser*,FieldMask>::aligned::const_iterator 
-                it = event_users.users.multi_users->begin(); it !=
-                event_users.users.multi_users->end(); it++)
-          {
-            const FieldMask user_overlap = user_mask & it->second;
-            if (!user_overlap)
-              continue;
-            if (has_local_precondition(it->first, usage, child_color, 
-                                       op_id, index, origin_node))
-            {
-              if (finder == preconditions.end())
-                preconditions[cit->first] = user_overlap;
-              else
-                finder->second |= user_overlap;
-              if (TRACK_DOM)
-                filter_events[cit->first] |= user_overlap;
-            }
-            else if (TRACK_DOM)
-              non_dominated |= user_overlap;
-          }
-        }
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void MaterializedView::find_previous_preconditions(
-                                                 const FieldMask &user_mask,
-                                                 const RegionUsage &usage,
-                                                 const LegionColor child_color,
-                                                 RegionNode *origin_node,
-                                                 const UniqueID op_id,
-                                                 const unsigned index,
-                           LegionMap<ApEvent,FieldMask>::aligned &preconditions,
-                                                 std::set<ApEvent> &dead_events,
-                                                 PhysicalTraceInfo &trace_info)
-    //--------------------------------------------------------------------------
-    {
-      // Caller must be holding the lock
-      for (LegionMap<ApEvent,EventUsers>::aligned::const_iterator pit = 
-            previous_epoch_users.begin(); pit != 
-            previous_epoch_users.end(); pit++)
-      {
-#if !defined(LEGION_SPY) && !defined(EVENT_GRAPH_TRACE)
-        // We're about to do a bunch of expensive tests, 
-        // so first do something cheap to see if we can 
-        // skip all the tests.
-        if (!trace_info.recording && pit->first.has_triggered_faultignorant())
-        {
-          dead_events.insert(pit->first);
-          continue;
-        }
-#endif
-        const EventUsers &event_users = pit->second;
-        FieldMask overlap = user_mask & event_users.user_mask;
-        if (!overlap)
-          continue;
-        LegionMap<ApEvent,FieldMask>::aligned::iterator finder = 
-          preconditions.find(pit->first);
-#ifndef LEGION_SPY
-        if (!trace_info.recording && finder != preconditions.end())
-        {
-          overlap -= finder->second;
-          if (!overlap)
-            continue;
-        }
-#endif
-        if (event_users.single)
-        {
-          if (has_local_precondition(event_users.users.single_user, usage,
-                                     child_color, op_id, index, origin_node))
-          {
-            if (finder == preconditions.end())
-              preconditions[pit->first] = overlap;
-            else
-              finder->second |= overlap;
-          }
-        }
-        else
-        {
-          for (LegionMap<PhysicalUser*,FieldMask>::aligned::const_iterator 
-                it = event_users.users.multi_users->begin(); it !=
-                event_users.users.multi_users->end(); it++)
-          {
-            const FieldMask user_overlap = overlap & it->second;
-            if (!user_overlap)
-              continue;
-            if (has_local_precondition(it->first, usage, child_color, 
-                                       op_id, index, origin_node))
-            {
-              if (finder == preconditions.end())
-              {
-                preconditions[pit->first] = user_overlap;
-                // Needed for when we go around the loop again
-                finder = preconditions.find(pit->first);
-              }
-              else
-                finder->second |= user_overlap;
-            }
-          }
-        }
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void MaterializedView::find_previous_filter_users(const FieldMask &dom_mask,
-                            LegionMap<ApEvent,FieldMask>::aligned &filter_users)
-    //--------------------------------------------------------------------------
-    {
-      // Lock better be held by caller
-      for (LegionMap<ApEvent,EventUsers>::aligned::const_iterator it = 
-           previous_epoch_users.begin(); it != previous_epoch_users.end(); it++)
-      {
-        FieldMask overlap = it->second.user_mask & dom_mask;
-        if (!overlap)
-          continue;
-        filter_users[it->first] = overlap;
-      }
-    }
-
-    //--------------------------------------------------------------------------
     void MaterializedView::find_atomic_reservations(const FieldMask &mask,
-                                                    Operation *op, bool excl)
+                                 Operation *op, const unsigned index, bool excl)
     //--------------------------------------------------------------------------
     {
-      // Keep going up the tree until we get to the root
-      if (parent == NULL)
+      // Compute the field set
+      std::vector<FieldID> atomic_fields;
+      manager->field_space_node->get_field_set(mask, op->get_context(), 
+                                               atomic_fields);
+      // If we are the owner we can do this here
+      if (is_owner())
       {
-        // Compute the field set
-        std::vector<FieldID> atomic_fields;
-        logical_node->column_source->get_field_set(mask, atomic_fields);
-        // If we are the owner we can do this here
-        if (is_owner())
+        std::vector<Reservation> reservations(atomic_fields.size());
+        find_field_reservations(atomic_fields, reservations);
+        for (unsigned idx = 0; idx < reservations.size(); idx++)
+          op->update_atomic_locks(index, reservations[idx], excl);
+      }
+      else
+      {
+        // Figure out which fields we need requests for and send them
+        std::vector<FieldID> needed_fields;
         {
-          std::vector<Reservation> reservations(atomic_fields.size());
-          find_field_reservations(atomic_fields, reservations);
-          for (unsigned idx = 0; idx < reservations.size(); idx++)
-            op->update_atomic_locks(reservations[idx], excl);
-        }
-        else
-        {
-          // Figure out which fields we need requests for and send them
-          std::vector<FieldID> needed_fields;
+          AutoLock v_lock(view_lock, 1, false);
+          for (std::vector<FieldID>::const_iterator it = 
+                atomic_fields.begin(); it != atomic_fields.end(); it++)
           {
-            AutoLock v_lock(view_lock, 1, false);
-            for (std::vector<FieldID>::const_iterator it = 
-                  atomic_fields.begin(); it != atomic_fields.end(); it++)
-            {
-              std::map<FieldID,Reservation>::const_iterator finder = 
-                atomic_reservations.find(*it);
-              if (finder == atomic_reservations.end())
-                needed_fields.push_back(*it);
-              else
-                op->update_atomic_locks(finder->second, excl);
-            }
+            std::map<FieldID,Reservation>::const_iterator finder = 
+              atomic_reservations.find(*it);
+            if (finder == atomic_reservations.end())
+              needed_fields.push_back(*it);
+            else
+              op->update_atomic_locks(index, finder->second, excl);
           }
-          if (!needed_fields.empty())
+        }
+        if (!needed_fields.empty())
+        {
+          RtUserEvent wait_on = Runtime::create_rt_user_event();
+          Serializer rez;
           {
-            RtUserEvent wait_on = Runtime::create_rt_user_event();
-            Serializer rez;
-            {
-              RezCheck z(rez);
-              rez.serialize(did);
-              rez.serialize<size_t>(needed_fields.size());
-              for (unsigned idx = 0; idx < needed_fields.size(); idx++)
-                rez.serialize(needed_fields[idx]);
-              rez.serialize(wait_on);
-            }
-            runtime->send_atomic_reservation_request(owner_space, rez);
-            wait_on.wait();
-            // Now retake the lock and get the remaining reservations
-            AutoLock v_lock(view_lock, 1, false);
-            for (std::vector<FieldID>::const_iterator it = 
-                  needed_fields.begin(); it != needed_fields.end(); it++)
-            {
-              std::map<FieldID,Reservation>::const_iterator finder =
-                atomic_reservations.find(*it);
+            RezCheck z(rez);
+            rez.serialize(did);
+            rez.serialize<size_t>(needed_fields.size());
+            for (unsigned idx = 0; idx < needed_fields.size(); idx++)
+              rez.serialize(needed_fields[idx]);
+            rez.serialize(wait_on);
+          }
+          runtime->send_atomic_reservation_request(owner_space, rez);
+          wait_on.wait();
+          // Now retake the lock and get the remaining reservations
+          AutoLock v_lock(view_lock, 1, false);
+          for (std::vector<FieldID>::const_iterator it = 
+                needed_fields.begin(); it != needed_fields.end(); it++)
+          {
+            std::map<FieldID,Reservation>::const_iterator finder =
+              atomic_reservations.find(*it);
 #ifdef DEBUG_LEGION
-              assert(finder != atomic_reservations.end());
+            assert(finder != atomic_reservations.end());
 #endif
-              op->update_atomic_locks(finder->second, excl);
-            }
+            op->update_atomic_locks(index, finder->second, excl);
           }
         }
       }
-      else
-        parent->find_atomic_reservations(mask, op, excl);
-    }
+    } 
 
     //--------------------------------------------------------------------------
     void MaterializedView::find_field_reservations(
@@ -3158,23 +3777,6 @@ namespace Legion {
       derez.deserialize(did);
       DistributedID manager_did;
       derez.deserialize(manager_did);
-      DistributedID parent_did;
-      derez.deserialize(parent_did);
-      bool is_region;
-      derez.deserialize(is_region);
-      RegionTreeNode *target_node;
-      if (is_region)
-      {
-        LogicalRegion handle;
-        derez.deserialize(handle);
-        target_node = runtime->forest->get_node(handle);
-      }
-      else
-      {
-        LogicalPartition handle;
-        derez.deserialize(handle);
-        target_node = runtime->forest->get_node(handle);
-      }
       AddressSpaceID owner_space;
       derez.deserialize(owner_space);
       AddressSpaceID logical_owner;
@@ -3182,778 +3784,57 @@ namespace Legion {
       UniqueID context_uid;
       derez.deserialize(context_uid);
       RtEvent man_ready;
-      PhysicalManager *phy_man = 
+      PhysicalManager *manager = 
         runtime->find_or_request_physical_manager(manager_did, man_ready);
-      MaterializedView *parent = NULL;
-      if (parent_did != 0)
+      if (man_ready.exists() && !man_ready.has_triggered())
       {
-        RtEvent par_ready;
-        LogicalView *par_view = 
-          runtime->find_or_request_logical_view(parent_did, par_ready);
-        if (par_ready.exists() && !par_ready.has_triggered())
-        {
-          // Need to avoid virtual channel deadlock here so defer it
-          DeferMaterializedViewArgs args(did, owner_space, logical_owner, 
-              // Have to static cast this since it might not be ready
-              target_node, phy_man, static_cast<MaterializedView*>(par_view), 
-              context_uid);
-          runtime->issue_runtime_meta_task(args, LG_LATENCY_DEFERRED_PRIORITY,
-                                  Runtime::merge_events(par_ready, man_ready));
-          return;
-        }
-#ifdef DEBUG_LEGION
-        assert(par_view->is_materialized_view());
-#endif
-        parent = par_view->as_materialized_view();
+        // Defer this until the manager is ready
+        DeferMaterializedViewArgs args(did, manager, owner_space,
+                                       logical_owner, context_uid);
+        runtime->issue_runtime_meta_task(args, 
+            LG_LATENCY_RESPONSE_PRIORITY, man_ready);
       }
-      if (man_ready.exists())
-        man_ready.wait();
+      else
+        create_remote_view(runtime, did, manager, owner_space, 
+                           logical_owner, context_uid); 
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void MaterializedView::handle_defer_materialized_view(
+                                             const void *args, Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      const DeferMaterializedViewArgs *dargs = 
+        (const DeferMaterializedViewArgs*)args; 
+      create_remote_view(runtime, dargs->did, dargs->manager, 
+          dargs->owner_space, dargs->logical_owner, dargs->context_uid);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void MaterializedView::create_remote_view(Runtime *runtime,
+                            DistributedID did, PhysicalManager *manager,
+                            AddressSpaceID owner_space,
+                            AddressSpaceID logical_owner, UniqueID context_uid)
+    //--------------------------------------------------------------------------
+    {
 #ifdef DEBUG_LEGION
-      assert(phy_man->is_instance_manager());
+      assert(manager->is_instance_manager());
 #endif
-      create_remote_materialized_view(runtime, did, owner_space, logical_owner,
-                                    target_node, phy_man, parent, context_uid);
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void MaterializedView::handle_deferred_materialized_view(
-                                             Runtime *runtime, const void *args)
-    //--------------------------------------------------------------------------
-    {
-      const DeferMaterializedViewArgs *margs = 
-        (const DeferMaterializedViewArgs*)args;
-      create_remote_materialized_view(runtime, margs->did, margs->owner_space,
-          margs->logical_owner, margs->target_node, margs->manager,
-          margs->parent, margs->context_uid);
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void MaterializedView::create_remote_materialized_view(
-       Runtime *runtime, DistributedID did, AddressSpaceID owner_space,
-       AddressSpaceID logical_owner, RegionTreeNode *target_node, 
-       PhysicalManager *phy_man, MaterializedView *parent, UniqueID context_uid)
-    //--------------------------------------------------------------------------
-    {
-      InstanceManager *inst_manager = phy_man->as_instance_manager();
+      InstanceManager *inst_manager = manager->as_instance_manager();
       void *location;
       MaterializedView *view = NULL;
       if (runtime->find_pending_collectable_location(did, location))
         view = new(location) MaterializedView(runtime->forest,
                                               did, owner_space, 
-                                              logical_owner, 
-                                              target_node, inst_manager,
-                                              parent, context_uid,
+                                              logical_owner, inst_manager,
+                                              context_uid,
                                               false/*register now*/);
       else
         view = new MaterializedView(runtime->forest, did, owner_space,
-                                    logical_owner, target_node, inst_manager, 
-                                    parent, context_uid,false/*register now*/);
-      if (parent != NULL)
-        parent->add_remote_child(view);
+                                    logical_owner, inst_manager, 
+                                    context_uid, false/*register now*/);
       // Register only after construction
       view->register_with_runtime(NULL/*remote registration not needed*/);
-    }
-
-    //--------------------------------------------------------------------------
-    void MaterializedView::perform_remote_valid_check(
-                  const FieldMask &check_mask, VersionTracker *versions,
-                  bool reading, std::set<RtEvent> *wait_on)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(!is_logical_owner());
-#endif
-      FieldMask need_valid_update;
-      std::set<RtEvent> local_wait_on;
-      RtUserEvent request_event;
-      if (reading)
-      {
-        // If we are reading we need to check to see if we are at
-        // the right version number and whether we have done the read
-        // request yet for our given version number
-        FieldVersions field_versions;
-        versions->get_field_versions(logical_node, true/*split prev*/,
-                                     check_mask, field_versions);
-        FieldMask split_mask;
-        versions->get_split_mask(logical_node, check_mask, split_mask);
-        const bool has_split_mask = !!split_mask;
-        need_valid_update = check_mask;
-        AutoLock v_lock(view_lock);
-        for (LegionMap<VersionID,FieldMask>::aligned::const_iterator it = 
-              field_versions.begin(); it != field_versions.end(); it++)
-        {
-          FieldMask overlap = it->second & check_mask;
-          if (!overlap)
-            continue;
-          // See if we can find it as the current version number
-          LegionMap<VersionID,FieldMask>::aligned::const_iterator finder = 
-            current_versions.find(it->first);
-          if (finder != current_versions.end())
-          {
-            const FieldMask version_overlap = overlap & finder->second;
-            if (!!version_overlap)
-            {
-              need_valid_update -= version_overlap;
-              if (!need_valid_update)
-                break;
-            }
-          }
-          // If we have a split mask, it's also alright if the current
-          // versions are at the next version number
-          if (has_split_mask)
-          {
-            const FieldMask split_overlap = overlap & split_mask;
-            if (!split_overlap)
-              continue;
-            finder = current_versions.find(it->first + 1);
-            if (finder != current_versions.end())
-            {
-              const FieldMask version_overlap = split_overlap & finder->second;
-              if (!!version_overlap)
-              {
-                need_valid_update -= version_overlap;
-                if (!need_valid_update)
-                  break;
-              }
-            }
-          }
-        }
-        // Also look for any pending requests that overlap since they
-        // will bring the result up to date for us too
-        if (!remote_update_requests.empty())
-        {
-          for (LegionMap<RtEvent,FieldMask>::aligned::const_iterator it =
-                remote_update_requests.begin(); it != 
-                remote_update_requests.end(); it++)
-          {
-            if (it->second * check_mask)
-              continue;
-            local_wait_on.insert(it->first);
-            need_valid_update -= it->second;
-          }
-        }
-        // Figure out what we need to send
-        if (!!need_valid_update)
-        {
-          request_event = Runtime::create_rt_user_event();
-          remote_update_requests[request_event] = need_valid_update;
-        }
-      }
-      else
-      {
-        // If we're writing all we need to do is check that we are valid,
-        // if we're not valid we have to send a request
-        AutoLock v_lock(view_lock);
-        need_valid_update = check_mask - remote_valid_mask;
-        if (!remote_update_requests.empty())
-        {
-          // See which fields we already have requests for
-          for (LegionMap<RtEvent,FieldMask>::aligned::const_iterator it = 
-                remote_update_requests.begin(); it != 
-                remote_update_requests.end(); it++)
-          {
-            FieldMask overlap = check_mask & it->second;
-            if (!overlap)
-              continue;
-            if (wait_on != NULL)
-              wait_on->insert(it->first);
-            else
-              local_wait_on.insert(it->first);
-            need_valid_update -= overlap;
-          }
-        }
-        if (!!need_valid_update)
-        {
-          request_event = Runtime::create_rt_user_event();
-          remote_update_requests[request_event] = need_valid_update;
-          // We also have to filter out the current and previous epoch 
-          // user lists so that when we get the update then we know we
-          // won't have polluting users in the list to start
-          filter_local_users(need_valid_update, current_epoch_users);
-          filter_local_users(need_valid_update, previous_epoch_users);
-        }
-      }
-      // If we have a request event, send the request now
-      if (request_event.exists())
-      {
-        Serializer rez;
-        {
-          RezCheck z(rez);
-          rez.serialize(did);
-          rez.serialize(request_event);
-          rez.serialize(need_valid_update);
-        }
-        context->runtime->send_view_update_request(logical_owner, rez);
-        local_wait_on.insert(request_event);
-      }
-      // If we have a parent, see if it needs to send requests too so 
-      // we can get as many in flight as possible in parallel
-      if (parent != NULL)
-      {
-        if (wait_on != NULL)
-          parent->perform_remote_valid_check(check_mask, versions,
-                                             reading, wait_on);
-        else
-          parent->perform_remote_valid_check(check_mask, versions,
-                                             reading, &local_wait_on);
-      }
-      // If we have any events to wait on do the right thing with them
-      if (!local_wait_on.empty())
-      {
-        if (wait_on == NULL)
-        {
-          // If we are the base caller, then we do the wait
-          RtEvent wait_for = Runtime::merge_events(local_wait_on);
-          wait_for.wait();
-        }
-        else // Otherwise add the events to the set to wait on
-          wait_on->insert(local_wait_on.begin(), local_wait_on.end());
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void MaterializedView::perform_read_invalidations(
-                 const FieldMask &check_mask, VersionTracker *versions,
-                 const AddressSpaceID source, std::set<RtEvent> &applied_events)
-    //--------------------------------------------------------------------------
-    {
-      // Must be called while holding the view lock in exclusive mode
-#ifdef DEBUG_LEGION
-      assert(is_logical_owner());
-#endif
-      // Quick test for intersection here to see if we are done early
-      if (check_mask * remote_valid_mask)
-        return;
-      FieldMask invalidate_mask;
-      // Check to see if we have a split mask, any fields which are
-      // not split have to be invalidated since we're directly reading
-      // the current version number (we know we're reading the current
-      // version number or else something else is broken). In the
-      // case of split version numbers the advance of the version
-      // number already invalidated the remote leases so we don't
-      // have to worry about it.
-      FieldMask split_mask;
-      versions->get_split_mask(logical_node, check_mask, split_mask);
-      if (!!split_mask)
-      {
-        const FieldMask invalidate_mask = check_mask - split_mask;
-        if (!!invalidate_mask)
-          send_invalidations(invalidate_mask, source, applied_events);
-      }
-      else // Reading at the base invalidates all remote leases
-        send_invalidations(check_mask, source, applied_events);
-    }
-
-    //--------------------------------------------------------------------------
-    void MaterializedView::send_invalidations(const FieldMask &invalidate_mask,
-              const AddressSpaceID can_skip, std::set<RtEvent> &applied_events)
-    //--------------------------------------------------------------------------
-    {
-      // Must be called while holding the view lock in exclusive mode
-#ifdef DEBUG_LEGION
-      assert(is_logical_owner());
-#endif
-      // No overlapping fields means we are done
-      if (invalidate_mask * remote_valid_mask)
-        return;
-      std::vector<AddressSpaceID> to_delete;
-      bool has_skip = false;
-      for (LegionMap<AddressSpaceID,FieldMask>::aligned::iterator it = 
-            valid_remote_instances.begin(); it != 
-            valid_remote_instances.end(); it++)
-      {
-        // If the update was from this node we don't need to send
-        // an invalidate because clearly it is still up to date
-        if (it->first == can_skip)
-        {
-          has_skip = true;
-          continue;
-        }
-        FieldMask overlap = it->second & invalidate_mask;
-        if (!overlap)
-          continue;
-        RtUserEvent invalidate_event = Runtime::create_rt_user_event();
-        Serializer rez;
-        {
-          RezCheck z(rez);
-          rez.serialize(did);
-          rez.serialize(overlap);
-          rez.serialize(invalidate_event);
-        }
-        context->runtime->send_view_remote_invalidate(it->first, rez);
-        applied_events.insert(invalidate_event);
-        it->second -= overlap;
-        if (!it->second)
-          to_delete.push_back(it->first);
-      }
-      if (!to_delete.empty())
-      {
-        for (std::vector<AddressSpaceID>::const_iterator it = 
-              to_delete.begin(); it != to_delete.end(); it++)
-          valid_remote_instances.erase(*it);
-      }
-      // Filter the remote valid mask and add back in any fields that
-      // were skipped
-      remote_valid_mask -= invalidate_mask;
-      if (has_skip)
-        remote_valid_mask |= valid_remote_instances[can_skip];
-    }
-
-    //--------------------------------------------------------------------------
-    void MaterializedView::process_update_request(AddressSpaceID source,
-                                    RtUserEvent done_event, Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(is_logical_owner());
-#endif
-      FieldMask request_mask;
-      derez.deserialize(request_mask);
-      Serializer rez;
-      {
-        RezCheck z(rez);
-        rez.serialize(did);
-        rez.serialize(done_event);
-        rez.serialize(request_mask);
-        // Hold the view lock when building up the information to send back
-        AutoLock v_lock(view_lock,1,false/*exclusive*/);
-        // Package up the information to send back
-        // First figure out which views to send back
-        LegionMap<VersionID,FieldMask>::aligned response_versions;
-        for (LegionMap<VersionID,FieldMask>::aligned::const_iterator it = 
-              current_versions.begin(); it != current_versions.end(); it++)
-        {
-          FieldMask overlap = it->second & request_mask;
-          if (!overlap)
-            continue;
-          response_versions[it->first] = overlap;
-        }
-        rez.serialize<size_t>(response_versions.size());
-        for (LegionMap<VersionID,FieldMask>::aligned::const_iterator it = 
-              response_versions.begin(); it != response_versions.end(); it++)
-        {
-          rez.serialize(it->first);
-          rez.serialize(it->second);
-        }
-        std::vector<ApEvent> current_events, previous_events;
-        for (LegionMap<ApEvent,EventUsers>::aligned::const_iterator it = 
-             current_epoch_users.begin(); it != current_epoch_users.end(); it++)
-        {
-          if (it->second.user_mask * request_mask)
-            continue;
-          current_events.push_back(it->first);
-        }
-        for (LegionMap<ApEvent,EventUsers>::aligned::const_iterator it = 
-              previous_epoch_users.begin(); it != 
-              previous_epoch_users.end(); it++)
-        {
-          if (it->second.user_mask * request_mask)
-            continue;
-          previous_events.push_back(it->first);
-        }
-        rez.serialize<size_t>(current_events.size());
-        for (std::vector<ApEvent>::const_iterator it = current_events.begin();
-              it != current_events.end(); it++)
-        {
-          rez.serialize(*it);
-          const EventUsers &users = current_epoch_users[*it];
-          if (users.single)
-          {
-            rez.serialize<size_t>(1);
-            users.users.single_user->pack_user(rez);
-            rez.serialize(users.user_mask);
-          }
-          else
-          {
-            // Figure out how many to send
-            std::vector<PhysicalUser*> to_send;
-            LegionVector<FieldMask>::aligned send_masks;
-            for (LegionMap<PhysicalUser*,FieldMask>::aligned::const_iterator 
-                  uit = users.users.multi_users->begin(); uit !=
-                  users.users.multi_users->end(); uit++)
-            {
-              const FieldMask user_mask = uit->second & request_mask;
-              if (!user_mask)
-                continue;
-              to_send.push_back(uit->first);
-              send_masks.push_back(user_mask);
-            }
-            rez.serialize<size_t>(to_send.size());
-            for (unsigned idx = 0; idx < to_send.size(); idx++)
-            {
-              to_send[idx]->pack_user(rez);
-              rez.serialize(send_masks[idx]);
-            }
-          }
-        }
-        rez.serialize<size_t>(previous_events.size());
-        for (std::vector<ApEvent>::const_iterator it = previous_events.begin();
-              it != previous_events.end(); it++)
-        {
-          rez.serialize(*it);
-          const EventUsers &users = previous_epoch_users[*it];
-          if (users.single)
-          {
-            rez.serialize<size_t>(1);
-            users.users.single_user->pack_user(rez);
-            rez.serialize(users.user_mask);
-          }
-          else
-          {
-            // Figure out how many to send
-            std::vector<PhysicalUser*> to_send;
-            LegionVector<FieldMask>::aligned send_masks;
-            for (LegionMap<PhysicalUser*,FieldMask>::aligned::const_iterator 
-                  uit = users.users.multi_users->begin(); uit !=
-                  users.users.multi_users->end(); uit++)
-            {
-              const FieldMask user_mask = uit->second & request_mask;
-              if (!user_mask)
-                continue;
-              to_send.push_back(uit->first);
-              send_masks.push_back(user_mask);
-            }
-            rez.serialize<size_t>(to_send.size());
-            for (unsigned idx = 0; idx < to_send.size(); idx++)
-            {
-              to_send[idx]->pack_user(rez);
-              rez.serialize(send_masks[idx]);
-            }
-          }
-        }
-      }
-      // Send the message back to get it on the wire before an 
-      // invalidate might be issued
-      runtime->send_view_update_response(source, rez);
-      // Retake the lock in exlcusive mode to update our
-      // set of remote instances
-      AutoLock v_lock(view_lock);
-      valid_remote_instances[source] |= request_mask;
-      remote_valid_mask |= request_mask;
-    }
-
-    //--------------------------------------------------------------------------
-    void MaterializedView::process_update_response(Deserializer &derez,
-                                                   RtUserEvent done_event,
-                                                   RegionTreeForest *forest)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(!is_logical_owner());
-#endif
-      FieldMask response_mask;
-      derez.deserialize(response_mask);
-      std::set<ApEvent> collect_events;
-      // Take the lock in exclusive mode and update all our state
-      {
-        AutoLock v_lock(view_lock);
-        LegionMap<VersionID,FieldMask>::aligned version_updates;
-        size_t num_versions;
-        derez.deserialize(num_versions);
-        for (unsigned idx = 0; idx < num_versions; idx++)
-        {
-          VersionID vid;
-          derez.deserialize(vid);
-          derez.deserialize(version_updates[vid]);
-        }
-        filter_and_add(response_mask, version_updates);
-        // Current users
-        size_t num_current;
-        derez.deserialize(num_current);
-        for (unsigned idx = 0; idx < num_current; idx++)
-        {
-          ApEvent current_event;
-          derez.deserialize(current_event);
-          size_t num_users;
-          derez.deserialize(num_users);
-          // See if we already have a users for this event
-          LegionMap<ApEvent,EventUsers>::aligned::iterator finder = 
-            current_epoch_users.find(current_event);
-          if (finder != current_epoch_users.end())
-          {
-            // Convert to multi users if we haven't already 
-            EventUsers &current_users = finder->second;
-            if (current_users.single)
-            {
-              LegionMap<PhysicalUser*,FieldMask>::aligned *new_users = 
-                new LegionMap<PhysicalUser*,FieldMask>::aligned();
-              (*new_users)[current_users.users.single_user] = 
-                current_users.user_mask;
-              current_users.users.multi_users = new_users;
-              current_users.single = false;
-            }
-            LegionMap<PhysicalUser*,FieldMask>::aligned &local = 
-                *(current_users.users.multi_users);
-            for (unsigned idx2 = 0; idx2 < num_users; idx2++)
-            {
-              PhysicalUser *new_user = 
-                PhysicalUser::unpack_user(derez, true/*add ref*/, forest);
-              FieldMask &new_mask = local[new_user];
-              derez.deserialize(new_mask);
-              current_users.user_mask |= new_mask;
-            }
-          }
-          else
-          {
-            EventUsers &current_users = current_epoch_users[current_event];
-            if (num_users == 1)
-            {
-              current_users.users.single_user = 
-                PhysicalUser::unpack_user(derez, true/*add ref*/, forest);
-              derez.deserialize(current_users.user_mask);
-            }
-            else
-            {
-              current_users.single = false;
-              current_users.users.multi_users = 
-                new LegionMap<PhysicalUser*,FieldMask>::aligned();
-              LegionMap<PhysicalUser*,FieldMask>::aligned &local = 
-                *(current_users.users.multi_users);
-              for (unsigned idx2 = 0; idx2 < num_users; idx2++)
-              {
-                PhysicalUser *new_user = 
-                  PhysicalUser::unpack_user(derez, true/*add ref*/, forest);
-                FieldMask &new_mask = local[new_user];
-                derez.deserialize(new_mask);
-                current_users.user_mask |= new_mask;
-              }
-            }
-            // Didn't have it before so update the collect events
-            if (outstanding_gc_events.find(current_event) == 
-                  outstanding_gc_events.end())
-            {
-              outstanding_gc_events.insert(current_event);
-              collect_events.insert(current_event);
-            }
-          }
-        }
-        // Previous users
-        size_t num_previous;
-        derez.deserialize(num_previous);
-        for (unsigned idx = 0; idx < num_previous; idx++)
-        {
-          ApEvent previous_event;
-          derez.deserialize(previous_event);
-          size_t num_users;
-          derez.deserialize(num_users);
-          // See if we already have a users for this event
-          LegionMap<ApEvent,EventUsers>::aligned::iterator finder = 
-            previous_epoch_users.find(previous_event);
-          if (finder != previous_epoch_users.end())
-          {
-            // Convert to multi users if we haven't already 
-            EventUsers &previous_users = finder->second;
-            if (previous_users.single)
-            {
-              LegionMap<PhysicalUser*,FieldMask>::aligned *new_users = 
-                new LegionMap<PhysicalUser*,FieldMask>::aligned();
-              (*new_users)[previous_users.users.single_user] = 
-                previous_users.user_mask;
-              previous_users.users.multi_users = new_users;
-              previous_users.single = false;
-            }
-            LegionMap<PhysicalUser*,FieldMask>::aligned &local = 
-                *(previous_users.users.multi_users);
-            for (unsigned idx2 = 0; idx2 < num_users; idx2++)
-            {
-              PhysicalUser *new_user = 
-                PhysicalUser::unpack_user(derez, true/*add ref*/, forest);
-              FieldMask &new_mask = local[new_user];
-              derez.deserialize(new_mask);
-              previous_users.user_mask |= new_mask;
-            }
-          }
-          else
-          {
-            EventUsers &previous_users = previous_epoch_users[previous_event];
-            if (num_users == 1)
-            {
-              previous_users.users.single_user = 
-                PhysicalUser::unpack_user(derez, true/*add ref*/, forest);
-              derez.deserialize(previous_users.user_mask);
-            }
-            else
-            {
-              previous_users.single = false;
-              previous_users.users.multi_users = 
-                new LegionMap<PhysicalUser*,FieldMask>::aligned();
-              LegionMap<PhysicalUser*,FieldMask>::aligned &local = 
-                *(previous_users.users.multi_users);
-              for (unsigned idx2 = 0; idx2 < num_users; idx2++)
-              {
-                PhysicalUser *new_user = 
-                  PhysicalUser::unpack_user(derez, true/*add ref*/, forest);
-                FieldMask &new_mask = local[new_user];
-                derez.deserialize(new_mask);
-                previous_users.user_mask |= new_mask;
-              }
-            }
-            // Didn't have it before so update the collect events
-            if (outstanding_gc_events.find(previous_event) == 
-                  outstanding_gc_events.end())
-            {
-              outstanding_gc_events.insert(previous_event);
-              collect_events.insert(previous_event);
-            }
-          }
-        }
-        // Update our remote valid mask
-        remote_valid_mask |= response_mask;
-        // Prune out the request event
-#ifdef DEBUG_LEGION
-        assert(remote_update_requests.find(done_event) != 
-                remote_update_requests.end());
-#endif
-        remote_update_requests.erase(done_event);
-      }
-      
-      if (!collect_events.empty())
-      {
-        std::set<RtEvent> applied_events;
-        WrapperReferenceMutator mutator(applied_events);
-        for (std::set<ApEvent>::const_iterator it = collect_events.begin();
-              it != collect_events.end(); it++)
-          defer_collect_user(*it, &mutator);
-        if (!applied_events.empty())
-        {
-          Runtime::trigger_event(done_event, 
-              Runtime::merge_events(applied_events));
-          return;
-        }
-        // Otherwise fall through to the normal trigger path
-      }
-      // Trigger our request saying everything is up to date
-      // Issue any defferred collections that we might have
-      Runtime::trigger_event(done_event);
-    }
-
-    //--------------------------------------------------------------------------
-    void MaterializedView::process_remote_update(Deserializer &derez,
-                                                 AddressSpaceID source,
-                                                 RegionTreeForest *forest)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(is_logical_owner());
-#endif
-      RtUserEvent update_event;
-      derez.deserialize(update_event);
-      bool is_copy;
-      derez.deserialize(is_copy);
-      bool restrict_out;
-      derez.deserialize(restrict_out);
-      RegionUsage usage;
-      derez.deserialize(usage);
-      FieldMask user_mask;
-      derez.deserialize(user_mask);
-      LegionColor child_color;
-      derez.deserialize(child_color);
-      LogicalRegion origin_handle;
-      derez.deserialize(origin_handle);
-      RegionNode *origin_node = forest->get_node(origin_handle);
-      UniqueID op_id;
-      derez.deserialize(op_id);
-      unsigned index;
-      derez.deserialize(index);
-      ApEvent term_event;
-      derez.deserialize(term_event);
-      size_t num_versions;
-      derez.deserialize(num_versions);
-      FieldVersions field_versions;
-      for (unsigned idx = 0; idx < num_versions; idx++)
-      {
-        VersionID vid;
-        derez.deserialize(vid);
-        derez.deserialize(field_versions[vid]);
-      }
-      FieldMask split_mask;
-      derez.deserialize(split_mask);
-      bool base_user;
-      derez.deserialize(base_user);
-      
-      // Make a dummy version info for doing the analysis calls
-      // and put our split mask in it
-      VersionInfo dummy_version_info;
-      dummy_version_info.resize(logical_node->get_depth());
-      dummy_version_info.record_split_fields(logical_node, split_mask);
-
-      std::set<RtEvent> applied_conditions;
-      PhysicalTraceInfo trace_info;
-      if (is_copy)
-      {
-        // Do analysis and register the user
-        LegionMap<ApEvent,FieldMask>::aligned dummy_preconditions;
-        // Do different things depending on whether we are a base
-        // user or a user being registered above in the tree
-        if (base_user)
-          // Always safe to assume single copy here since we don't
-          // actually use the results and assuming single copy means
-          // that fewer users will potentially be filtered
-          find_local_copy_preconditions(usage.redop, IS_READ_ONLY(usage),
-                                      true/*single copy*/, restrict_out,
-                                      user_mask, child_color, origin_node,
-                                      &dummy_version_info, op_id, index, source,
-                                      dummy_preconditions, applied_conditions,
-                                      trace_info);
-        else
-          find_local_copy_preconditions_above(usage.redop, IS_READ_ONLY(usage),
-                                      true/*single copy*/, restrict_out,
-                                      user_mask, child_color, origin_node,
-                                      &dummy_version_info, op_id, index, source,
-                                      dummy_preconditions, applied_conditions,
-                                      trace_info);
-        add_local_copy_user(usage, term_event, base_user, 
-                            restrict_out, child_color, origin_node,
-                            &dummy_version_info, op_id, index,
-                            user_mask, source, applied_conditions,
-                            trace_info);
-      }
-      else
-      {
-        // Do analysis and register the user
-        std::set<ApEvent> dummy_preconditions;
-        // We do different things depending on whether we are the base
-        // user or whether we are being registered above in the tree
-        if (base_user)
-          find_local_user_preconditions(usage, term_event, child_color,
-                                        origin_node, &dummy_version_info, op_id,
-                                        index,user_mask, dummy_preconditions, 
-                                        applied_conditions, trace_info);
-        else
-          find_local_user_preconditions_above(usage, term_event, child_color,
-                                        origin_node, &dummy_version_info, op_id,
-                                        index,user_mask, dummy_preconditions, 
-                                        applied_conditions, trace_info);
-        if (IS_WRITE(usage))
-          update_version_numbers(user_mask, field_versions,
-                                 source, applied_conditions);
-        if (add_local_user(usage, term_event, child_color, origin_node, 
-                           base_user, &dummy_version_info, op_id, index, 
-                           user_mask, source, applied_conditions,
-                           trace_info))
-        {
-          WrapperReferenceMutator mutator(applied_conditions);
-          defer_collect_user(term_event, &mutator);
-        }
-      }
-      // Chain the update events
-      if (!applied_conditions.empty())
-        Runtime::trigger_event(update_event,
-                               Runtime::merge_events(applied_conditions));
-      else
-        Runtime::trigger_event(update_event);
-    }
-
-    //--------------------------------------------------------------------------
-    void MaterializedView::process_remote_invalidate(
-                          const FieldMask &invalid_mask, RtUserEvent done_event)
-    //--------------------------------------------------------------------------
-    {
-      {
-        AutoLock v_lock(view_lock);
-        remote_valid_mask -= invalid_mask;
-      }
-      Runtime::trigger_event(done_event);
     }
 
     /////////////////////////////////////////////////////////////
@@ -3962,9 +3843,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     DeferredView::DeferredView(RegionTreeForest *ctx, DistributedID did,
-                               AddressSpaceID owner_sp,
-                               RegionTreeNode *node, bool register_now)
-      : LogicalView(ctx, did, owner_sp, node, register_now)
+                               AddressSpaceID owner_sp, bool register_now)
+      : LogicalView(ctx, did, owner_sp, register_now)
     //--------------------------------------------------------------------------
     {
     }
@@ -3975,2864 +3855,20 @@ namespace Legion {
     {
     }
 
-    //--------------------------------------------------------------------------
-    void DeferredView::issue_deferred_copies_across(const TraversalInfo &info,
-                                                     MaterializedView *dst,
-                                      const std::vector<unsigned> &src_indexes,
-                                      const std::vector<unsigned> &dst_indexes,
-                                         ApEvent precondition, PredEvent guard,
-                                         std::set<ApEvent> &postconditions,
-                                         PhysicalTraceInfo &trace_info)
-    //--------------------------------------------------------------------------
-    {
-      bool perfect = true;
-      FieldMask src_mask, dst_mask;
-      for (unsigned idx = 0; idx < dst_indexes.size(); idx++)
-      {
-        src_mask.set_bit(src_indexes[idx]);
-        dst_mask.set_bit(dst_indexes[idx]);
-        if (perfect && (src_indexes[idx] != dst_indexes[idx]))
-          perfect = false;
-      }
-      // Initialize the preconditions
-      LegionMap<ApEvent,FieldMask>::aligned preconditions;
-      preconditions[precondition] = src_mask;
-      // A seemingly common case but not the general one, if the fields
-      // are in the same locations for the source and destination then
-      // we can just do the normal deferred copy routine
-      LegionMap<ApEvent,FieldMask>::aligned local_postconditions;
-      if (perfect)
-      {
-        issue_deferred_copies(info, dst, src_mask, 
-                              preconditions, local_postconditions, guard,
-                              trace_info);
-      }
-      else
-      {
-        // Initialize the across copy helper
-        CopyAcrossHelper across_helper(src_mask);
-        dst->manager->initialize_across_helper(&across_helper, dst_mask, 
-                                               src_indexes, dst_indexes);
-        issue_deferred_copies(info, dst, src_mask, preconditions, 
-                              local_postconditions, guard, trace_info,
-                              &across_helper);
-      }
-      for (LegionMap<ApEvent,FieldMask>::aligned::const_iterator it = 
-            local_postconditions.begin(); it != 
-            local_postconditions.end(); it++)
-        postconditions.insert(it->first);
-    }
-
-    /////////////////////////////////////////////////////////////
-    // DeferredVersionInfo
-    /////////////////////////////////////////////////////////////
-
-    //--------------------------------------------------------------------------
-    DeferredVersionInfo::DeferredVersionInfo(void)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    DeferredVersionInfo::DeferredVersionInfo(const DeferredVersionInfo &rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    DeferredVersionInfo::~DeferredVersionInfo(void)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    DeferredVersionInfo& DeferredVersionInfo::operator=(
-                                                const DeferredVersionInfo &rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *this;
-    }
-
-    /////////////////////////////////////////////////////////////
-    // CompositeCopyNode
-    /////////////////////////////////////////////////////////////
-
-    //--------------------------------------------------------------------------
-    CompositeCopyNode::CompositeCopyNode(RegionTreeNode *node, CompositeView *v)
-      : logical_node(node), view_node(v)
-    //--------------------------------------------------------------------------
-    {
-    }
-    
-    //--------------------------------------------------------------------------
-    CompositeCopyNode::CompositeCopyNode(const CompositeCopyNode &rhs)
-      : logical_node(NULL), view_node(NULL)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    CompositeCopyNode::~CompositeCopyNode(void)
-    //--------------------------------------------------------------------------
-    {
-      // Delete our recursive nodes 
-      for (LegionMap<CompositeCopyNode*,FieldMask>::aligned::const_iterator it =
-            child_nodes.begin(); it != child_nodes.end(); it++)
-        delete it->first;
-      child_nodes.clear();
-      for (LegionMap<CompositeCopyNode*,FieldMask>::aligned::const_iterator it =
-            nested_nodes.begin(); it != nested_nodes.end(); it++)
-        delete it->first;
-      nested_nodes.clear();
-    }
-
-    //--------------------------------------------------------------------------
-    CompositeCopyNode& CompositeCopyNode::operator=(
-                                                   const CompositeCopyNode &rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *this;
-    }
-
-    //--------------------------------------------------------------------------
-    void CompositeCopyNode::add_child_node(CompositeCopyNode *child,
-                                           const FieldMask &child_mask)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(child_nodes.find(child) == child_nodes.end());
-#endif
-      child_nodes[child] = child_mask; 
-    }
-
-    //--------------------------------------------------------------------------
-    void CompositeCopyNode::add_nested_node(CompositeCopyNode *nested,
-                                            const FieldMask &nested_mask)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(nested->view_node != NULL);
-      assert(nested_nodes.find(nested) == nested_nodes.end());
-#endif
-      nested_nodes[nested] = nested_mask;
-    }
-
-    //--------------------------------------------------------------------------
-    void CompositeCopyNode::add_source_view(LogicalView *source_view,
-                                            const FieldMask &source_mask)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(source_views.find(source_view) == source_views.end());
-#endif
-      source_views[source_view] = source_mask;
-    }
-
-    //--------------------------------------------------------------------------
-    void CompositeCopyNode::add_reduction_view(ReductionView *reduction_view,
-                                               const FieldMask &reduction_mask)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(reduction_views.find(reduction_view) == reduction_views.end());
-#endif
-      reduction_views[reduction_view] = reduction_mask;
-    }
-
-    //--------------------------------------------------------------------------
-    void CompositeCopyNode::issue_copies(const TraversalInfo &traversal_info,
-                              MaterializedView *dst, const FieldMask &copy_mask,
-                              VersionTracker *src_version_tracker,
-                  const LegionMap<ApEvent,FieldMask>::aligned &preconditions,
-                        LegionMap<ApEvent,FieldMask>::aligned &postconditions,
-                        LegionMap<ApEvent,FieldMask>::aligned &postreductions,
-                        PredEvent pred_guard, PhysicalTraceInfo &trace_info,
-                        CopyAcrossHelper *helper) const
-    //--------------------------------------------------------------------------
-    {
-      // We're doing the painter's algorithm
-      // First traverse any nested composite instances and issue
-      // copies from them since they are older than us
-      const LegionMap<ApEvent,FieldMask>::aligned *local_preconditions = 
-                                                          &preconditions;
-      // Temporary data structures in case we need them
-      LegionMap<ApEvent,FieldMask>::aligned temp_local;
-      bool temp_copy = false;
-      if (!nested_nodes.empty())
-      {
-        LegionMap<ApEvent,FieldMask>::aligned nested_postconditions;
-        issue_nested_copies(traversal_info, dst, copy_mask, src_version_tracker,
-                      preconditions, nested_postconditions, pred_guard,
-                      trace_info, helper);
-        // Add the nested postconditions to our postconditions
-        postconditions.insert(nested_postconditions.begin(),
-                              nested_postconditions.end());
-        // See if we need to update our local or child preconditions
-        if (!source_views.empty() || !child_nodes.empty() || 
-            !reduction_views.empty())
-        {
-          // Makes new local_preconditions
-          local_preconditions = &temp_local;
-          temp_local = preconditions;
-          temp_copy = true;
-          temp_local.insert(nested_postconditions.begin(),
-                            nested_postconditions.end());
-        }
-      }
-      // Next issue copies from any of our source views 
-      if (!source_views.empty())
-      {
-        // Uses local_preconditions
-        LegionMap<ApEvent,FieldMask>::aligned local_postconditions;
-        issue_local_copies(traversal_info, dst, copy_mask, src_version_tracker,
-                           *local_preconditions, local_postconditions, 
-                           pred_guard, trace_info, helper);
-        postconditions.insert(local_postconditions.begin(),
-                              local_postconditions.end());
-        // Makes new local_preconditions
-        if (!child_nodes.empty() || !reduction_views.empty())
-        {
-          if (!temp_copy)
-          {
-            local_preconditions = &temp_local;
-            temp_local = preconditions;
-            temp_copy = true;
-          }
-          temp_local.insert(local_postconditions.begin(),
-                            local_postconditions.end());
-        }
-      }
-      // Traverse our children and issue any copies to them
-      if (!child_nodes.empty())
-      {
-        // Uses local_preconditions
-        LegionMap<ApEvent,FieldMask>::aligned child_postconditions;
-        issue_child_copies(traversal_info, dst, copy_mask, src_version_tracker,
-            *local_preconditions, child_postconditions, postreductions, 
-            pred_guard, trace_info, helper);
-        postconditions.insert(child_postconditions.begin(),
-                              child_postconditions.end());
-        // Makes new local_preconditions
-        if (!reduction_views.empty())
-        {
-          if (!temp_copy)
-          {
-            local_preconditions = &temp_local;
-            temp_local = preconditions;
-            temp_copy = true;
-          }
-          temp_local.insert(child_postconditions.begin(),
-                            child_postconditions.end());
-        }
-      }
-      // Finally apply any reductions that we have on the way back up
-      if (!reduction_views.empty())
-      {
-        // Uses local_preconditions
-        issue_reductions(traversal_info, dst, copy_mask, src_version_tracker,
-                   *local_preconditions, postreductions, pred_guard, trace_info,
-                   helper);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void CompositeCopyNode::copy_to_temporary(const TraversalInfo &info,
-                            MaterializedView *dst, const FieldMask &copy_mask,
-                            VersionTracker *src_version_tracker,
-                const LegionMap<ApEvent,FieldMask>::aligned &dst_preconditions,
-                      LegionMap<ApEvent,FieldMask>::aligned &postconditions,
-                      PredEvent pred_guard, AddressSpaceID local_space, 
-                      bool restrict_out, PhysicalTraceInfo &trace_info)
-    //--------------------------------------------------------------------------
-    {
-      // Make a temporary instance and issue copies to it
-      // then copy from the temporary instance to the target
-      MaterializedView *temporary_dst = 
-        info.op->create_temporary_instance(dst->manager,info.index, copy_mask);
-      // Get the corresponding sub_view to the destination
-      if (temporary_dst->logical_node != dst->logical_node)
-      {
-        std::vector<LegionColor> colors;
-        RegionTreeNode *dst_node = dst->logical_node;
-        do 
-        {
-#ifdef DEBUG_LEGION
-          assert(dst_node->get_depth() > 
-                  temporary_dst->logical_node->get_depth());
-#endif
-          colors.push_back(dst_node->get_color());
-          dst_node = dst_node->get_parent();
-        } 
-        while (dst_node != temporary_dst->logical_node);
-#ifdef DEBUG_LEGION
-        assert(!colors.empty());
-#endif
-        while (!colors.empty())
-        {
-          temporary_dst = 
-            temporary_dst->get_materialized_subview(colors.back());
-          colors.pop_back();
-        }
-#ifdef DEBUG_LEGION
-        assert(temporary_dst->logical_node == dst->logical_node);
-#endif
-      }
-      LegionMap<ApEvent,FieldMask>::aligned empty_pre, local_pre, local_reduce;
-      issue_copies(info, temporary_dst, copy_mask, src_version_tracker,
-         empty_pre, local_pre, local_reduce, pred_guard, trace_info,
-         NULL/*across helper*/);
-      // Now that we've done all the copies to the temporary instance
-      // we can compute the rest of the destination preconditions
-      dst->find_copy_preconditions(0/*redop*/, false/*reading*/, 
-                                   false/*single copy*/, restrict_out,
-                                   copy_mask, &info.version_info,
-                                   info.op->get_unique_op_id(), info.index,
-                                   local_space, local_pre, 
-                                   info.map_applied_events,
-                                   trace_info);
-      // Merge the destination preconditions
-      if (!dst_preconditions.empty())
-        local_pre.insert(dst_preconditions.begin(), dst_preconditions.end());
-      // Also merge any local reduces into the preconditons
-      if (!local_reduce.empty())
-        local_pre.insert(local_reduce.begin(), local_reduce.end());
-      // Compute the event sets
-      LegionList<EventSet>::aligned event_sets;
-      RegionTreeNode::compute_event_sets(copy_mask, local_pre, event_sets);
-      // Iterate over the event sets, for each event set, record a user
-      // on the temporary for being done with copies there, issue a copy
-      // from the temporary to the original destination, and then record
-      // users on both instances, put the done event in the postcondition set
-      for (LegionList<EventSet>::aligned::const_iterator it = 
-            event_sets.begin(); it != event_sets.end(); it++)
-      {
-        ApEvent copy_pre;
-        if (it->preconditions.size() == 1)
-        {
-          copy_pre = *(it->preconditions.begin());
-          if (trace_info.recording && !copy_pre.exists())
-          {
-            Realm::UserEvent rename(Realm::UserEvent::create_user_event());
-            rename.trigger();
-            copy_pre = ApEvent(rename);
-          }
-        }
-        else if (!it->preconditions.empty())
-        {
-          copy_pre = Runtime::merge_events(it->preconditions);
-          if (trace_info.recording)
-          {
-#ifdef DEBUG_LEGION
-            assert(trace_info.tpl != NULL && trace_info.tpl->is_recording());
-#endif
-            trace_info.tpl->record_merge_events(copy_pre, it->preconditions,
-                trace_info.op);
-          }
-        }
-
-        // Make a user for when the destination is up to date
-        if (copy_pre.exists())
-          temporary_dst->add_copy_user(0/*redop*/, copy_pre, 
-              &info.version_info, info.op->get_unique_op_id(), info.index,
-              it->set_mask, false/*reading*/, false/*restrict out*/, 
-              local_space, info.map_applied_events, trace_info); 
-        // Perform the copy
-        std::vector<CopySrcDstField> src_fields;
-        std::vector<CopySrcDstField> dst_fields;
-        temporary_dst->copy_from(it->set_mask, src_fields);
-        dst->copy_to(it->set_mask, dst_fields);
-#ifdef DEBUG_LEGION
-        assert(!src_fields.empty());
-        assert(!dst_fields.empty());
-        assert(src_fields.size() == dst_fields.size());
-#endif
-        ApEvent copy_post = dst->logical_node->issue_copy(info.op, src_fields,
-                              dst_fields, copy_pre, pred_guard,
-                              trace_info, logical_node);
-        if (copy_post.exists())
-        {
-          dst->add_copy_user(0/*redop*/, copy_post, &info.version_info,
-                             info.op->get_unique_op_id(), info.index,
-                             it->set_mask, false/*reading*/, 
-                             false/*restrict out*/, local_space,
-                             info.map_applied_events, trace_info);
-          temporary_dst->add_copy_user(0/*redop*/, copy_post, 
-                             &info.version_info, info.op->get_unique_op_id(),
-                             info.index, it->set_mask, true/*reading*/,
-                             false/*restrict out*/, local_space, 
-                             info.map_applied_events, trace_info);
-          postconditions[copy_post] = it->set_mask;
-        }
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void CompositeCopyNode::issue_nested_copies(
-                              const TraversalInfo &traversal_info,
-                              MaterializedView *dst, const FieldMask &copy_mask,
-                              VersionTracker *src_version_tracker,
-                  const LegionMap<ApEvent,FieldMask>::aligned &preconditions,
-                        LegionMap<ApEvent,FieldMask>::aligned &postconditions,
-                        PredEvent pred_guard, PhysicalTraceInfo &trace_info,
-                        CopyAcrossHelper *helper) const
-    //--------------------------------------------------------------------------
-    {
-      FieldMask nested_mask;
-      LegionMap<ApEvent,FieldMask>::aligned postreductions;
-      for (LegionMap<CompositeCopyNode*,FieldMask>::aligned::const_iterator it =
-            nested_nodes.begin(); it != nested_nodes.end(); it++)
-      {
-        const FieldMask overlap = it->second & copy_mask;
-        if (!overlap)
-          continue;
-        nested_mask |= overlap;
-#ifdef DEBUG_LEGION
-        assert(it->first->view_node != NULL);
-#endif
-        it->first->issue_copies(traversal_info, dst, overlap, 
-            it->first->view_node, preconditions, postconditions,
-            postreductions, pred_guard, trace_info, helper);
-      }
-      // We have to merge everything back together into postconditions here
-      // including the reductions because they have to finish before we issue
-      // any more copies to the destination
-      if (!!nested_mask)
-      {
-        if (!postreductions.empty())
-          postconditions.insert(postreductions.begin(), postreductions.end());
-        // Compute the event sets
-        LegionList<EventSet>::aligned event_sets;
-        RegionTreeNode::compute_event_sets(nested_mask, 
-                                           postconditions, event_sets);
-        // Clear out the post conditions and put the merge
-        // of the event sets there
-        postconditions.clear();
-        for (LegionList<EventSet>::aligned::const_iterator it = 
-              event_sets.begin(); it != event_sets.end(); it++)
-        {
-          ApEvent post;
-          if (it->preconditions.size() == 1)
-          {
-            post = *(it->preconditions.begin());
-            if (trace_info.recording && !post.exists())
-            {
-              Realm::UserEvent rename(Realm::UserEvent::create_user_event());
-              rename.trigger();
-              post = ApEvent(rename);
-            }
-          }
-          else if (!it->preconditions.empty())
-          {
-            post = Runtime::merge_events(it->preconditions);
-            if (trace_info.recording)
-            {
-#ifdef DEBUG_LEGION
-              assert(trace_info.tpl != NULL && trace_info.tpl->is_recording());
-#endif
-              trace_info.tpl->record_merge_events(post, it->preconditions,
-                  trace_info.op);
-            }
-          }
-
-          if (post.exists())
-          {
-            // post is not guaranteed to be unique!
-            LegionMap<ApEvent,FieldMask>::aligned::iterator finder = 
-              postconditions.find(post);
-            if (finder == postconditions.end())
-              postconditions[post] = it->set_mask;
-            else
-              finder->second |= it->set_mask;
-          }
-        }
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void CompositeCopyNode::issue_local_copies(const TraversalInfo &info,
-                              MaterializedView *dst, FieldMask copy_mask,
-                              VersionTracker *src_version_tracker,
-                  const LegionMap<ApEvent,FieldMask>::aligned &preconditions,
-                        LegionMap<ApEvent,FieldMask>::aligned &postconditions,
-                        PredEvent guard, PhysicalTraceInfo &trace_info,
-                        CopyAcrossHelper *across_helper) const
-    //--------------------------------------------------------------------------
-    {
-      // First check to see if the target is already valid
-      {
-        PhysicalManager *dst_manager = dst->get_manager();
-        for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it =
-              source_views.begin(); it != source_views.end(); it++)
-        {
-          if (it->first->is_deferred_view())
-            continue;
-#ifdef DEBUG_LEGION
-          assert(it->first->is_materialized_view());
-#endif
-          if (it->first->as_materialized_view()->manager == dst_manager)
-          {
-            copy_mask -= it->second;
-            if (!copy_mask)
-              return;
-          }
-        }
-      }
-      LegionMap<MaterializedView*,FieldMask>::aligned src_instances;
-      LegionMap<DeferredView*,FieldMask>::aligned deferred_instances;
-      // Sort the instances
-      dst->logical_node->sort_copy_instances(info, dst, copy_mask, 
-                            source_views, src_instances, deferred_instances);
-      if (!src_instances.empty())
-      {
-        // This has all our destination preconditions
-        // Only issue copies from fields which have values
-        FieldMask actual_copy_mask;
-        LegionMap<ApEvent,FieldMask>::aligned src_preconditions;
-        const AddressSpaceID local_space = 
-          logical_node->context->runtime->address_space;
-        for (LegionMap<MaterializedView*,FieldMask>::aligned::const_iterator 
-              it = src_instances.begin(); it != src_instances.end(); it++)
-        {
-          it->first->find_copy_preconditions(0/*redop*/, true/*reading*/,
-                                             true/*single copy*/,
-                                             false/*restrict out*/,
-                                             it->second, src_version_tracker,
-                                             info.op->get_unique_op_id(),
-                                             info.index, local_space, 
-                                             src_preconditions,
-                                             info.map_applied_events,
-                                             trace_info);
-          actual_copy_mask |= it->second;
-        }
-        // Move in any preconditions that overlap with our set of fields
-        for (LegionMap<ApEvent,FieldMask>::aligned::const_iterator it = 
-              preconditions.begin(); it != preconditions.end(); it++)
-        {
-          FieldMask overlap = it->second & actual_copy_mask;
-          if (!overlap)
-            continue;
-          LegionMap<ApEvent,FieldMask>::aligned::iterator finder = 
-            src_preconditions.find(it->first);
-          if (finder == src_preconditions.end())
-            src_preconditions[it->first] = overlap;
-          else
-            finder->second |= overlap;
-        }
-        // issue the grouped copies and put the result in the postconditions
-        // We are the intersect
-        dst->logical_node->issue_grouped_copies(info, dst,false/*restrict out*/,
-                                 guard, src_preconditions, actual_copy_mask, 
-                                 src_instances, src_version_tracker, 
-                                 postconditions, trace_info,
-                                 across_helper, logical_node);
-      }
-      if (!deferred_instances.empty())
-      {
-        for (LegionMap<DeferredView*,FieldMask>::aligned::const_iterator it = 
-              deferred_instances.begin(); it != deferred_instances.end(); it++)
-        {
-          LegionMap<ApEvent,FieldMask>::aligned deferred_preconditions;
-          for (LegionMap<ApEvent,FieldMask>::aligned::const_iterator pre_it =
-                preconditions.begin(); pre_it != preconditions.end(); pre_it++)
-          {
-            const FieldMask overlap = pre_it->second & it->second;
-            if (!overlap)
-              continue;
-            deferred_preconditions[pre_it->first] = overlap;
-          }
-          it->first->issue_deferred_copies(info, dst, it->second,
-              deferred_preconditions, postconditions, guard, trace_info,
-              across_helper);
-        }
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void CompositeCopyNode::issue_child_copies(
-                              const TraversalInfo &traversal_info,
-                              MaterializedView *dst, const FieldMask &copy_mask,
-                              VersionTracker *src_version_tracker,
-                  const LegionMap<ApEvent,FieldMask>::aligned &preconditions,
-                        LegionMap<ApEvent,FieldMask>::aligned &postconditions,
-                        LegionMap<ApEvent,FieldMask>::aligned &postreductions,
-                        PredEvent pred_guard, PhysicalTraceInfo &trace_info,
-                        CopyAcrossHelper *helper) const
-    //--------------------------------------------------------------------------
-    {
-      bool multiple_children = false;
-      FieldMask single_child_mask;
-      for (LegionMap<CompositeCopyNode*,FieldMask>::aligned::const_iterator it =
-            child_nodes.begin(); it != child_nodes.end(); it++)
-      {
-        const FieldMask overlap = it->second & copy_mask;
-        if (!overlap)
-          continue;
-        if (!multiple_children)
-          multiple_children = !!(single_child_mask & overlap);
-        single_child_mask |= overlap;
-        it->first->issue_copies(traversal_info, dst, overlap, 
-            src_version_tracker, preconditions, postconditions,
-            postreductions, pred_guard, trace_info, helper);
-      }
-      // Merge the postconditions from all the children to build a 
-      // common output event for each field if there were multiple children
-      // No need to merge the reduction postconditions, they just continue
-      // flowing up the tree
-      if (!postconditions.empty() && multiple_children)
-      {
-        LegionList<EventSet>::aligned event_sets;
-        // Have to do the merge for all fields
-        RegionTreeNode::compute_event_sets(single_child_mask,
-                                           postconditions, event_sets);
-        // Clear out the post conditions and put the merge
-        // of the event sets there
-        postconditions.clear();
-        for (LegionList<EventSet>::aligned::const_iterator it = 
-              event_sets.begin(); it != event_sets.end(); it++)
-        {
-          ApEvent post;
-          if (it->preconditions.size() == 1)
-          {
-            post = *(it->preconditions.begin());
-            if (trace_info.recording && !post.exists())
-            {
-              Realm::UserEvent rename(Realm::UserEvent::create_user_event());
-              rename.trigger();
-              post = ApEvent(rename);
-            }
-          }
-          else if (!it->preconditions.empty())
-          {
-            post = Runtime::merge_events(it->preconditions);
-            if (trace_info.recording)
-            {
-#ifdef DEBUG_LEGION
-              assert(trace_info.tpl != NULL && trace_info.tpl->is_recording());
-#endif
-              trace_info.tpl->record_merge_events(post, it->preconditions,
-                  trace_info.op);
-            }
-          }
-
-          if (post.exists())
-          {
-            // post is not guaranteed to be unique!
-            LegionMap<ApEvent,FieldMask>::aligned::iterator finder = 
-              postconditions.find(post);
-            if (finder == postconditions.end())
-              postconditions[post] = it->set_mask;
-            else
-              finder->second |= it->set_mask;
-          }
-        }  
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void CompositeCopyNode::issue_reductions(const TraversalInfo &info,
-                              MaterializedView *dst, const FieldMask &copy_mask,
-                              VersionTracker *src_version_tracker,
-                  const LegionMap<ApEvent,FieldMask>::aligned &preconditions,
-                        LegionMap<ApEvent,FieldMask>::aligned &postreductions,
-                              PredEvent pred_guard,
-                              PhysicalTraceInfo &trace_info,
-                              CopyAcrossHelper *across_helper) const
-    //--------------------------------------------------------------------------
-    {
-      for (LegionMap<ReductionView*,FieldMask>::aligned::const_iterator it =
-            reduction_views.begin(); it != reduction_views.end(); it++)
-      {
-        const FieldMask overlap = copy_mask & it->second;
-        if (!overlap)
-          continue;
-        // This is precise but maybe unecessary
-        std::set<ApEvent> local_preconditions;
-        for (LegionMap<ApEvent,FieldMask>::aligned::const_iterator pre_it = 
-              preconditions.begin(); pre_it != preconditions.end(); pre_it++)
-        {
-          FieldMask pre_overlap = overlap & pre_it->second;
-          if (!pre_overlap)
-            continue;
-          local_preconditions.insert(pre_it->first);
-        }
-        ApEvent reduce_event = it->first->perform_deferred_reduction(dst,
-            overlap, src_version_tracker, local_preconditions, info.op,
-            info.index, pred_guard, trace_info, across_helper, 
-            (dst->logical_node == it->first->logical_node) ?
-              NULL : it->first->logical_node, info.map_applied_events);
-        if (reduce_event.exists())
-          postreductions[reduce_event] = overlap;
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    bool CompositeCopyNode::empty()
-    //--------------------------------------------------------------------------
-    {
-      if (source_views.size() > 0 || reduction_views.size() > 0) return false;
-      for (LegionMap<CompositeCopyNode*,FieldMask>::aligned::const_iterator it =
-            nested_nodes.begin(); it != nested_nodes.end(); it++)
-        if (!it->first->empty()) return false;
-      for (LegionMap<CompositeCopyNode*,FieldMask>::aligned::const_iterator it =
-            child_nodes.begin(); it != child_nodes.end(); it++)
-        if (!it->first->empty()) return false;
-      return true;
-    }
-
-    /////////////////////////////////////////////////////////////
-    // CompositeCopier 
-    /////////////////////////////////////////////////////////////
-
-    //--------------------------------------------------------------------------
-    CompositeCopier::CompositeCopier(const FieldMask &copy_mask)
-      : destination_valid(copy_mask)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    CompositeCopier::CompositeCopier(const CompositeCopier &rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    CompositeCopier::~CompositeCopier(void)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    CompositeCopier& CompositeCopier::operator=(const CompositeCopier &rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *this;
-    }
-
-    //--------------------------------------------------------------------------
-    void CompositeCopier::filter_written_fields(RegionTreeNode *node,
-                                                FieldMask &mask) const
-    //--------------------------------------------------------------------------
-    {
-      // Traverse up the tree and remove any writen fields 
-      // that have been written at this level or a parent
-      LegionMap<RegionTreeNode*,FieldMask>::aligned::const_iterator finder = 
-        written_nodes.find(node);
-      while (finder != written_nodes.end())
-      {
-        mask -= finder->second;
-        if (!mask)
-          return;
-        node = node->get_parent();
-        if (node == NULL)
-          break;
-        finder = written_nodes.find(node);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void CompositeCopier::and_written_fields(RegionTreeNode *node,
-                                             FieldMask &mask) const
-    //--------------------------------------------------------------------------
-    {
-      LegionMap<RegionTreeNode*,FieldMask>::aligned::const_iterator finder = 
-        written_nodes.find(node);
-      FieldMask written_mask;
-      while (finder != written_nodes.end())
-      {
-        written_mask |= finder->second;
-        node = node->get_parent();
-        if (node == NULL)
-          break;
-        finder = written_nodes.find(node);
-      }
-      mask &= written_mask;
-    }
-
-    //--------------------------------------------------------------------------
-    void CompositeCopier::record_written_fields(RegionTreeNode *node,
-                                                const FieldMask &mask)
-    //--------------------------------------------------------------------------
-    {
-      LegionMap<RegionTreeNode*,FieldMask>::aligned::iterator finder = 
-        written_nodes.find(node);
-      if (finder == written_nodes.end())
-        written_nodes[node] = mask;
-      else
-        finder->second |= mask;
-    }
-
-    /////////////////////////////////////////////////////////////
-    // CompositeBase 
-    /////////////////////////////////////////////////////////////
-
-    //--------------------------------------------------------------------------
-    CompositeBase::CompositeBase(LocalLock &r)
-      : base_lock(r)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    CompositeBase::~CompositeBase(void)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    CompositeCopyNode* CompositeBase::construct_copy_tree(MaterializedView *dst,
-                                                   RegionTreeNode *logical_node,
-                                                   FieldMask &copy_mask,
-                                                   FieldMask &locally_complete,
-                                                   FieldMask &dominate_capture,
-                                                   CompositeCopier &copier,
-                                                   CompositeView *owner)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(!!copy_mask);
-#endif
-      // First check to see if we've already written to this node
-      copier.filter_written_fields(logical_node, copy_mask);
-      // If we've already written all our fields, no need to traverse here
-      if (!copy_mask)
-        return NULL;
-      // If we get here, we're going to return something
-      CompositeCopyNode *result = new CompositeCopyNode(logical_node, owner);
-      // Do the ready check first
-      perform_ready_check(copy_mask);
-      // Figure out which children we need to traverse because they intersect
-      // with the dst instance and any reductions that will need to be applied
-      LegionMap<CompositeNode*,FieldMask>::aligned children_to_traverse;
-      // We have to capture any local dirty data here
-      FieldMask local_capture, local_dominate;
-      const bool tested_all_children = perform_construction_analysis(dst,
-                                    logical_node, copy_mask, local_capture,
-                                    dominate_capture, local_dominate,
-                                    copier, result, children_to_traverse);
-      // Traverse all the children and see if our children make us
-      // complete in any way so we can avoid capturing locally
-      if (!children_to_traverse.empty())
-      {
-        // We can be locally complete in two ways:
-        // 1. We can have a child that is complete for us (e.g. we are region
-        //      and one of our partitions is complete)
-        FieldMask complete_child;
-        // 2. We are ourselves complete and all our children are written (note
-        //      that this also is alright if the children were written earlier)
-        //      Note we can actually only worry about this for interfering
-        //      children if we know the composite instance contains all the
-        //      interfering children we intersect with for the target region.
-        const bool is_complete = tested_all_children && 
-                                  logical_node->is_complete();
-        if (is_complete)
-          locally_complete = copy_mask;
-        for (LegionMap<CompositeNode*,FieldMask>::aligned::iterator it = 
-              children_to_traverse.begin(); it != 
-              children_to_traverse.end(); it++)
-        {
-          CompositeCopyNode *child = it->first->construct_copy_tree(dst,
-              it->first->logical_node, it->second, complete_child,
-              dominate_capture, copier);
-          if (child != NULL)
-          {
-            result->add_child_node(child, it->second);
-            if (is_complete && !!locally_complete)
-              copier.and_written_fields(it->first->logical_node, 
-                                        locally_complete);
-          }
-          else if (is_complete && !!locally_complete)
-            locally_complete.clear();
-        }
-        // Check to see if we are complete in any way, if we are then we
-        // can filter our local_capture mask and report up the tree that
-        // we are complete
-        if (!!complete_child)
-        {
-          local_capture -= complete_child;
-          copier.record_written_fields(logical_node, complete_child);
-        }
-        if (is_complete && !!locally_complete)
-        {
-          local_capture -= locally_complete;
-          copier.record_written_fields(logical_node, locally_complete);
-        }
-      }
-      // If we have to capture any data locally, do that now
-      if (!!local_capture)
-      {
-        LegionMap<LogicalView*,FieldMask>::aligned local_valid_views;
-        find_valid_views(local_capture, local_dominate, 
-                         local_valid_views, true/*need lock*/);
-        LegionMap<CompositeView*,FieldMask>::aligned nested_composite_views;
-        // Track which fields we see dirty updates for other instances
-        // versus for the destination instance
-        FieldMask other_dirty, destination_dirty;
-        for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it =
-              local_valid_views.begin(); it != local_valid_views.end(); it++)
-        {
-          if (it->first->is_composite_view())
-          {
-            nested_composite_views[it->first->as_composite_view()] = it->second;
-            continue;
-          }
-          // Record that we captured a non-composite view for these fields
-          if (!!local_capture)
-            local_capture -= it->second; 
-          result->add_source_view(it->first, it->second); 
-          if (it->first->is_materialized_view())
-          {
-            MaterializedView *mat_view = it->first->as_materialized_view();
-            // Check to see if this is the destination instance or not
-            if (mat_view->get_manager() == dst->get_manager())
-              destination_dirty |= it->second;
-            else
-              other_dirty |= it->second;
-          }
-          else
-            other_dirty |= it->second;
-        }
-        // Record that we have writes from any of the fields we have 
-        // actualy source instances (e.g. materialized or fills)
-        copier.record_written_fields(logical_node, 
-                                     other_dirty | destination_dirty);
-        // Also tell the copier whether the destination instance is
-        // no longer valid or whether it contains dirty data
-        if (!!destination_dirty)
-        {
-          copier.update_destination_dirty_fields(destination_dirty);
-          // No need to worry about issuing copies for these
-          // fields because the destination is already valid
-          other_dirty -= destination_dirty;
-        }
-        // Filter any fields which were not valid for the target
-        if (!!other_dirty)
-          copier.filter_destination_valid_fields(other_dirty);
-        // If there are any fields we didn't capture then see if we have
-        // a nested composite instance we need to traverse
-        if (!nested_composite_views.empty() && !!local_capture)
-        {
-          for (LegionMap<CompositeView*,FieldMask>::aligned::const_iterator it =
-                nested_composite_views.begin(); it != 
-                nested_composite_views.end(); it++)
-          {
-            FieldMask overlap = it->second & local_capture;
-            if (!overlap)
-              continue;
-            local_capture -= overlap;
-            FieldMask dummy_complete_below;
-            FieldMask dominate = overlap;
-            CompositeCopyNode *nested = it->first->construct_copy_tree(dst,
-                                    it->first->logical_node, overlap, 
-                                    dummy_complete_below, dominate, 
-                                    copier, it->first); 
-            if (nested != NULL)
-              result->add_nested_node(nested, overlap);
-            if (!local_capture)
-              break;
-          }
-        }
-      }
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    bool CompositeBase::perform_construction_analysis(MaterializedView *dst,
-                                                  RegionTreeNode *logical_node,
-                                                  const FieldMask &copy_mask,
-                                                  FieldMask &local_capture,
-                                                  FieldMask &dominate_capture,
-                                                  FieldMask &local_dominate,
-                                                  CompositeCopier &copier,
-                                                  CompositeCopyNode *result,
-             LegionMap<CompositeNode*,FieldMask>::aligned &children_to_traverse)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(!local_capture);
-      assert(!local_dominate);
-      assert(children_to_traverse.empty());
-#endif
-      // need this in read only to touch the children data structure
-      // and the list of reduction views
-      const size_t all_children = logical_node->get_num_children(); 
-      AutoLock b_lock(base_lock,1,false/*exclusive*/);
-      const bool tested_all_children = (children.size() == all_children);
-      if (children.empty())
-      {
-        if (!!dominate_capture)
-        {
-          local_dominate = copy_mask & dominate_capture;
-          if (!!local_dominate)
-            dominate_capture -= local_dominate;
-        }
-      }
-      else if (dst->logical_node == logical_node)
-      {
-        // Handle a common case of target and logical region 
-        // being the same, e.g. closing to this root
-        // We know all the children interfere and are dominated by us
-        for (LegionMap<CompositeNode*,FieldMask>::aligned::const_iterator it =
-              children.begin(); it != children.end(); it++)
-        {
-          const FieldMask overlap = it->second & copy_mask;
-          if (!overlap)
-            continue;
-          children_to_traverse[it->first] = overlap;
-        }
-        if (!!dominate_capture)
-        {
-          local_dominate = copy_mask & dominate_capture;
-          if (!!local_dominate)
-            dominate_capture -= local_dominate;
-        }
-      }
-      else if ((dst->logical_node->get_parent() == logical_node) &&
-                !logical_node->is_region() &&
-                logical_node->as_partition_node()->row_source->is_disjoint())
-      {
-        // If we're at a partition node and the destination is one of our
-        // children and we know the partition is disjoint then we just
-        // have to look for the destination node in the set of a 
-        // composite nodes
-        for (LegionMap<CompositeNode*,FieldMask>::aligned::const_iterator it = 
-              children.begin(); it != children.end(); it++)
-        {
-          if (it->first->logical_node != dst->logical_node)
-            continue;
-          // Once we find the node we can break out no matter what
-          const FieldMask overlap = it->second & copy_mask;
-          if (!overlap)
-            break;
-          children_to_traverse[it->first] = overlap;
-          break;
-        }
-      }
-      else if (!!dominate_capture && !(dominate_capture * copy_mask))
-      {
-        // See if we have exactly one dominating child that allows us
-        // to continue passing dominated fields down to that child so 
-        // we don't have to do the dominate analysis at this node
-        FieldMask single_dominated;
-        FieldMask invalid_dominated;
-        for (LegionMap<CompositeNode*,FieldMask>::aligned::const_iterator it =
-              children.begin(); it != children.end(); it++)
-        {
-          const FieldMask overlap = it->second & copy_mask;
-          if (!overlap)
-            continue;
-          // Skip any nodes that don't even intersect, they don't matter
-          if (!it->first->logical_node->intersects_with(dst->logical_node,
-                                                        false/*computes*/))
-            continue;
-          children_to_traverse[it->first] = overlap;
-          FieldMask dom_overlap = overlap & dominate_capture;
-          // If this doesn't overlap with the dominating capture fields
-          // then we don't need to worry about it anymore
-          if (!dom_overlap)
-            continue;
-          // We can remove any fields that have already been invalidated
-          if (!!invalid_dominated)
-          {
-            dom_overlap -= invalid_dominated;
-            if (!dom_overlap)
-              continue;
-          }
-          if (it->first->logical_node->dominates(dst->logical_node))
-          {
-            // See if we are the first or duplicate dominating child 
-            FieldMask duplicate_dom = single_dominated & dom_overlap;
-            if (!!duplicate_dom)
-            {
-              invalid_dominated |= duplicate_dom;
-              single_dominated |= (dom_overlap - duplicate_dom);
-            }
-            else
-              single_dominated |= dom_overlap; 
-          }
-          else // we intersect but don't dominate, so any fields are invalidated
-            invalid_dominated |= dom_overlap; 
-        }
-        // Remove any invalid fields from the single dominated
-        if (!!single_dominated && !!invalid_dominated)
-          single_dominated -= invalid_dominated;
-        // Our local dominate are the ones for this copy initially
-        local_dominate = dominate_capture & copy_mask;
-        // Remove these from the dominate mask
-        dominate_capture -= copy_mask;
-        if (!!single_dominated)
-        {
-          // We have to handle any fields that are not single dominated
-          local_dominate -= single_dominated;
-          // Put the single dominated fields back into the dominate capture mask
-          dominate_capture |= single_dominated;
-        }
-      } 
-      else
-      {
-        // There are no remaining dominate fields, so we just need to 
-        // look for interfering children
-        for (LegionMap<CompositeNode*,FieldMask>::aligned::const_iterator it =
-              children.begin(); it != children.end(); it++)
-        {
-          const FieldMask overlap = it->second & copy_mask;
-          if (!overlap)
-            continue;
-          // Skip any nodes that don't even intersect, they don't matter
-          if (!it->first->logical_node->intersects_with(dst->logical_node,
-                                                        false/*computes*/))
-            continue;
-          children_to_traverse[it->first] = overlap;
-        }
-      }
-      // Any dirty fields that we have here also need to be captured locally
-      // This includes any reduction fields which we are going to be reducing to
-      local_capture = (dirty_mask | reduction_mask) & copy_mask;
-      // Always include our local dominate in the local capture
-      if (!!local_dominate)
-        local_capture |= local_dominate;
-      if (!!reduction_mask)
-      {
-        FieldMask reduc_overlap = reduction_mask & copy_mask;
-        if (!!reduc_overlap)
-        {
-          for (LegionMap<ReductionView*,FieldMask>::aligned::const_iterator it =
-                reduction_views.begin(); it != reduction_views.end(); it++)
-          {
-            const FieldMask overlap = it->second & copy_mask; 
-            if (!overlap)
-              continue;
-            result->add_reduction_view(it->first, overlap);
-            copier.update_reduction_fields(overlap);
-          }
-        }
-      }
-      return tested_all_children;
-    }
-
-    //--------------------------------------------------------------------------
-    CompositeNode* CompositeBase::find_child_node(RegionTreeNode *child)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock b_lock(base_lock,1,false/*exclusive*/);
-      for (LegionMap<CompositeNode*,FieldMask>::aligned::const_iterator it = 
-            children.begin(); it != children.end(); it++)
-      {
-        if (it->first->logical_node == child)
-          return it->first;
-      }
-      // should never get here
-      assert(false);
-      return NULL;
-    }
-
-    //--------------------------------------------------------------------------
-    void CompositeBase::print_view_state(const FieldMask &capture_mask,
-                                         TreeStateLogger* logger,
-                                         int current_nesting,
-                                         int max_nesting)
-    //--------------------------------------------------------------------------
-    {
-      {
-        char *mask_string = dirty_mask.to_string();
-        logger->log("Dirty Mask: %s", mask_string);
-        free(mask_string);
-      }
-      {
-        char *mask_string = reduction_mask.to_string();
-        logger->log("Reduction Mask: %s", mask_string);
-        free(mask_string);
-      }
-      {
-        unsigned num_valid = 0;
-        for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it =
-              valid_views.begin(); it != valid_views.end(); it++)
-        {
-          if (it->second * capture_mask)
-            continue;
-          num_valid++;
-        }
-        if (num_valid > 0)
-        {
-          logger->log("Valid Instances (%d)", num_valid);
-          logger->down();
-          for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it =
-                valid_views.begin(); it != valid_views.end(); it++)
-          {
-            FieldMask overlap = it->second & capture_mask;
-            if (!overlap)
-              continue;
-            if (it->first->is_deferred_view())
-            {
-              if (it->first->is_composite_view())
-              {
-                CompositeView *composite_view = it->first->as_composite_view();
-                if (composite_view != NULL)
-                {
-                  logger->log("=== Composite Instance ===");
-                  logger->down();
-                  // We go only two levels down into the nested composite views
-                  composite_view->print_view_state(capture_mask, logger, 0, 2);
-                  logger->up();
-                  logger->log("==========================");
-                }
-              }
-              continue;
-            }
-            assert(it->first->as_instance_view()->is_materialized_view());
-            MaterializedView *current = 
-              it->first->as_instance_view()->as_materialized_view();
-            char *valid_mask = overlap.to_string();
-            logger->log("Instance " IDFMT "   Memory " IDFMT "   Mask %s",
-                        current->manager->get_instance().id, 
-                        current->manager->get_memory().id, valid_mask);
-            free(valid_mask);
-          }
-          logger->up();
-        }
-      }
-      {
-        unsigned num_valid = 0;
-        for (LegionMap<ReductionView*,FieldMask>::aligned::const_iterator it =
-              reduction_views.begin(); it != 
-              reduction_views.end(); it++)
-        {
-          if (it->second * capture_mask)
-            continue;
-          num_valid++;
-        }
-        if (num_valid > 0)
-        {
-          logger->log("Valid Reduction Instances (%d)", num_valid);
-          logger->down();
-          for (LegionMap<ReductionView*,FieldMask>::aligned::const_iterator it =
-                reduction_views.begin(); it !=
-                reduction_views.end(); it++)
-          {
-            FieldMask overlap = it->second & capture_mask;
-            if (!overlap)
-              continue;
-            char *valid_mask = overlap.to_string();
-            logger->log("Reduction Instance " IDFMT "   Memory " IDFMT
-                        "  Mask %s",
-                        it->first->manager->get_instance().id, 
-                        it->first->manager->get_memory().id, valid_mask);
-            free(valid_mask);
-          }
-          logger->up();
-        }
-      }
-      if (!children.empty())
-      {
-        logger->log("Children (%lu):", children.size());
-        logger->down();
-        for (LegionMap<CompositeNode*,FieldMask>::aligned::iterator it =
-              children.begin(); it !=
-              children.end(); it++)
-        {
-          it->first->logical_node->print_context_header(logger);
-          {
-            char *mask_string = it->second.to_string();
-            logger->log("Field Mask: %s", mask_string);
-            free(mask_string);
-          }
-          logger->down();
-          it->first->print_view_state(
-                              capture_mask, logger, current_nesting, max_nesting);
-          logger->up();
-        }
-        logger->up();
-      }
-    }
-
-    /////////////////////////////////////////////////////////////
-    // CompositeView
-    /////////////////////////////////////////////////////////////
-
-    //--------------------------------------------------------------------------
-    CompositeView::CompositeView(RegionTreeForest *ctx, DistributedID did,
-                              AddressSpaceID owner_proc, RegionTreeNode *node,
-                              DeferredVersionInfo *info, ClosedNode *tree, 
-                              InnerContext *context, bool register_now)
-      : DeferredView(ctx, encode_composite_did(did), owner_proc, 
-                     node, register_now), CompositeBase(view_lock),
-        version_info(info), closed_tree(tree), owner_context(context)
-    {
-      // Add our references
-      version_info->add_reference();
-      closed_tree->add_reference();
-      owner_context->add_reference();
-#ifdef DEBUG_LEGION
-      assert(owner_context != NULL);
-      assert(closed_tree != NULL);
-      assert(closed_tree->node == node);
-#endif
-#ifdef LEGION_GC
-      log_garbage.info("GC Composite View %lld %d", 
-          LEGION_DISTRIBUTED_ID_FILTER(did), local_space);
-#endif
-    }
-
-    //--------------------------------------------------------------------------
-    CompositeView::CompositeView(const CompositeView &rhs)
-      : DeferredView(NULL, 0, 0, NULL, false), CompositeBase(view_lock),
-        version_info(NULL), closed_tree(NULL), owner_context(NULL)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    CompositeView::~CompositeView(void)
-    //--------------------------------------------------------------------------
-    {
-      // Delete our children
-      for (LegionMap<CompositeNode*,FieldMask>::aligned::const_iterator it = 
-            children.begin(); it != children.end(); it++)
-        delete (it->first);
-      children.clear();
-      for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it = 
-            valid_views.begin(); it != valid_views.end(); it++)
-      {
-        if (it->first->remove_nested_resource_ref(did))
-          delete it->first;
-      }
-      valid_views.clear();
-      for (LegionMap<CompositeView*,FieldMask>::aligned::const_iterator it = 
-            nested_composite_views.begin(); it != 
-            nested_composite_views.end(); it++)
-      {
-        if (it->first->remove_nested_resource_ref(did))
-          delete (it->first);
-      }
-      nested_composite_views.clear();
-      for (LegionMap<ReductionView*,FieldMask>::aligned::const_iterator it = 
-            reduction_views.begin(); it != reduction_views.end(); it++)
-      {
-        if (it->first->remove_nested_resource_ref(did))
-          delete (it->first);
-      }
-      reduction_views.clear();
-      // Remove our references and delete if necessary
-      if (version_info->remove_reference())
-        delete version_info;
-      // Remove our references and delete if necessary
-      if (closed_tree->remove_reference())
-        delete closed_tree;
-      // Remove the reference on our context
-      if (owner_context->remove_reference())
-        delete owner_context;
-    }
-
-    //--------------------------------------------------------------------------
-    CompositeView& CompositeView::operator=(const CompositeView &rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *this;
-    }
-
-    //--------------------------------------------------------------------------
-    CompositeView* CompositeView::clone(const FieldMask &clone_mask,
-         const LegionMap<CompositeView*,FieldMask>::aligned &replacements) const
-    //--------------------------------------------------------------------------
-    {
-      Runtime *runtime = context->runtime; 
-      DistributedID result_did = runtime->get_available_distributed_id();
-      CompositeView *result = new CompositeView(context, result_did,
-          runtime->address_space, logical_node, version_info, closed_tree, 
-          owner_context, true/*register now*/);
-      // Clone the children
-      for (LegionMap<CompositeNode*,FieldMask>::aligned::const_iterator it = 
-            children.begin(); it != children.end(); it++)
-      {
-        FieldMask overlap = it->second & clone_mask;
-        if (!overlap)
-          continue;
-        it->first->clone(result, overlap);
-      }
-      FieldMask dirty_overlap = dirty_mask & clone_mask;
-      if (!!dirty_overlap)
-      {
-        result->record_dirty_fields(dirty_overlap);
-        for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator 
-              it = valid_views.begin(); it != valid_views.end(); it++)
-        {
-          FieldMask overlap = it->second & dirty_overlap;
-          if (!overlap)
-            continue;
-          result->record_valid_view(it->first, overlap);
-        }
-      }
-      // Can just insert the replacements directly
-      for (LegionMap<CompositeView*,FieldMask>::aligned::const_iterator it =
-            replacements.begin(); it != replacements.end(); it++)
-        result->record_valid_view(it->first, it->second);
-      FieldMask reduc_overlap = reduction_mask & clone_mask;
-      if (!!reduc_overlap)
-      {
-        result->record_reduction_fields(reduc_overlap);
-        for (LegionMap<ReductionView*,FieldMask>::aligned::const_iterator it = 
-              reduction_views.begin(); it != reduction_views.end(); it++)
-        {
-          FieldMask overlap = it->second & reduc_overlap;
-          if (!overlap)
-            continue;
-          result->record_reduction_view(it->first, overlap);
-        }
-      }
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    void CompositeView::notify_active(ReferenceMutator *mutator)
-    //--------------------------------------------------------------------------
-    {
-      // No need to do anything
-    }
-
-    //--------------------------------------------------------------------------
-    void CompositeView::notify_inactive(ReferenceMutator *mutator)
-    //--------------------------------------------------------------------------
-    {
-      // No need to do anything
-    }
-
-    //--------------------------------------------------------------------------
-    void CompositeView::notify_valid(ReferenceMutator *mutator)
-    //--------------------------------------------------------------------------
-    {
-      for (LegionMap<CompositeNode*,FieldMask>::aligned::const_iterator it = 
-            children.begin(); it != children.end(); it++)
-        it->first->notify_valid(mutator, true/*root*/);
-      for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it = 
-            valid_views.begin(); it != valid_views.end(); it++)
-        it->first->add_nested_valid_ref(did, mutator);
-      for (LegionMap<CompositeView*,FieldMask>::aligned::const_iterator it = 
-            nested_composite_views.begin(); it != 
-            nested_composite_views.end(); it++)
-        it->first->add_nested_valid_ref(did, mutator);
-      for (LegionMap<ReductionView*,FieldMask>::aligned::const_iterator it = 
-            reduction_views.begin(); it != reduction_views.end(); it++)
-        it->first->add_nested_valid_ref(did, mutator);
-    }
-
-    //--------------------------------------------------------------------------
-    void CompositeView::notify_invalid(ReferenceMutator *mutator)
-    //--------------------------------------------------------------------------
-    {
-      for (LegionMap<CompositeNode*,FieldMask>::aligned::const_iterator it = 
-            children.begin(); it != children.end(); it++)
-        it->first->notify_invalid(mutator, true/*root*/);
-      for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it = 
-            valid_views.begin(); it != valid_views.end(); it++)
-        it->first->remove_nested_valid_ref(did, mutator);
-      for (LegionMap<CompositeView*,FieldMask>::aligned::const_iterator it = 
-            nested_composite_views.begin(); it != 
-            nested_composite_views.end(); it++)
-        it->first->remove_nested_valid_ref(did, mutator);
-      for (LegionMap<ReductionView*,FieldMask>::aligned::const_iterator it = 
-            reduction_views.begin(); it != reduction_views.end(); it++)
-        it->first->remove_nested_valid_ref(did, mutator);
-    }
-
-    //--------------------------------------------------------------------------
-    void CompositeView::send_view(AddressSpaceID target)
-    //--------------------------------------------------------------------------
-    {
-      // Don't take the lock, it's alright to have duplicate sends
-      Serializer rez;
-      {
-        RezCheck z(rez);
-        rez.serialize(did);
-        rez.serialize(owner_space);
-        rez.serialize<UniqueID>(owner_context->get_context_uid());
-        bool is_region = logical_node->is_region();
-        rez.serialize(is_region);
-        if (is_region)
-          rez.serialize(logical_node->as_region_node()->handle);
-        else
-          rez.serialize(logical_node->as_partition_node()->handle);
-        version_info->pack_version_numbers(rez);
-        closed_tree->pack_closed_node(rez);
-        pack_composite_view(rez);
-      }
-      runtime->send_composite_view(target, rez);
-      update_remote_instances(target);
-    }
-
-    //--------------------------------------------------------------------------
-    LogicalView* CompositeView::get_subview(const LegionColor c)
-    //--------------------------------------------------------------------------
-    {
-      // Composite views don't need subviews
-      return this;
-    }
-
-    //--------------------------------------------------------------------------
-    void CompositeView::prune(ClosedNode *new_tree, FieldMask &valid_mask,
-                     LegionMap<CompositeView*,FieldMask>::aligned &replacements, 
-                     unsigned prune_depth)
-    //--------------------------------------------------------------------------
-    {
-      if (prune_depth >= LEGION_PRUNE_DEPTH_WARNING)
-        REPORT_LEGION_WARNING(LEGION_WARNING_PRUNE_DEPTH_EXCEEDED,
-                        "WARNING: Composite View Tree has depth %d which "
-                        "is larger than LEGION_PRUNE_DEPTH_WARNING of %d. "
-                        "Please report this use case to the Legion developers "
-                        "mailing list as it could be an important "
-                        "runtime performance bug.", prune_depth,
-                        LEGION_PRUNE_DEPTH_WARNING)
-      // Figure out which fields are not dominated
-      FieldMask non_dominated = valid_mask;
-      new_tree->filter_dominated_fields(closed_tree, non_dominated);
-      FieldMask dominated = valid_mask - non_dominated;
-      if (!!dominated)
-      {
-        // If we had any dominated fields then we try to prune our
-        // deferred valid views and put the results directly into 
-        // the replacements
-        for (LegionMap<CompositeView*,FieldMask>::aligned::const_iterator it = 
-              nested_composite_views.begin(); it != 
-              nested_composite_views.end(); it++)
-        {
-          FieldMask overlap = it->second & dominated;
-          if (!overlap)
-            continue;
-          it->first->prune(new_tree, overlap, replacements, prune_depth+1);
-          if (!!overlap)
-          {
-            // Some fields are still valid so add them to the replacements
-            LegionMap<CompositeView*,FieldMask>::aligned::iterator finder =
-              replacements.find(it->first);
-            if (finder == replacements.end())
-              replacements[it->first] = overlap;
-            else
-              finder->second |= overlap;
-          }
-        }
-        // Any fields that were dominated are no longer valid
-        valid_mask -= dominated;
-        // If all fields were dominated then we are done
-        if (!valid_mask)
-          return;
-      }
-      // For any non-dominated fields, see if any of our composite views change
-      FieldMask changed_mask;
-      LegionMap<CompositeView*,FieldMask>::aligned local_replacements;
-      for (LegionMap<CompositeView*,FieldMask>::aligned::iterator it = 
-            nested_composite_views.begin(); it != 
-            nested_composite_views.end(); it++)
-      {
-        FieldMask overlap = it->second & non_dominated;
-        if (!overlap)
-          continue;
-        FieldMask still_valid = overlap;
-        it->first->prune(new_tree, still_valid, 
-                         local_replacements, prune_depth+1);
-        // See if any fields were pruned, if so they are changed
-        FieldMask changed = overlap - still_valid;
-        if (!!changed)
-          changed_mask |= changed;
-      }
-      if (!local_replacements.empty())
-      {
-        for (LegionMap<CompositeView*,FieldMask>::aligned::const_iterator it =
-              local_replacements.begin(); it != local_replacements.end(); it++)
-          changed_mask |= it->second;
-      }
-      if (!!changed_mask)
-      {
-        CompositeView *view = clone(changed_mask, local_replacements);
-        view->finalize_capture(false/*need prune*/);
-        replacements[view] = changed_mask;
-        // Any fields that changed are no longer valid
-        valid_mask -= changed_mask;
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void CompositeView::issue_deferred_copies(const TraversalInfo &info,
-                                              MaterializedView *dst,
-                                              FieldMask copy_mask,
-                                              const RestrictInfo &restrict_info,
-                                              bool restrict_out,
-                                              PhysicalTraceInfo &trace_info)
-    //--------------------------------------------------------------------------
-    {
-      CompositeCopier copier(copy_mask);
-      FieldMask top_locally_complete;
-      FieldMask dominate_capture(copy_mask);
-      CompositeCopyNode *copy_tree = construct_copy_tree(dst, logical_node,
-          copy_mask, top_locally_complete, dominate_capture, copier, this);
-      if (trace_info.recording)
-      {
-#ifdef DEBUG_LEGION
-        assert(trace_info.tpl != NULL && trace_info.tpl->is_recording());
-#endif
-        if (copy_tree->empty())
-        {
-          ContextID logical_ctx =
-            info.op->find_logical_context(info.index)->get_context().get_id();
-          trace_info.tpl->record_empty_copy(this, copy_mask, dst, copy_mask,
-              logical_ctx);
-        }
-      }
-
-#ifdef DEBUG_LEGION
-      assert(copy_tree != NULL);
-#endif
-      copy_mask -= copier.get_already_valid_fields();       
-      // If we have any reduction fields though we still need to 
-      copy_mask |= copier.get_reduction_fields();
-      // issue copies for them
-      if (!copy_mask)
-      {
-        delete copy_tree;
-        return;
-      }
-      LegionMap<ApEvent,FieldMask>::aligned preconditions;
-      LegionMap<ApEvent,FieldMask>::aligned postconditions;
-      
-      if (restrict_info.has_restrictions())
-      {
-        FieldMask restrict_mask;
-        restrict_info.populate_restrict_fields(restrict_mask);
-        restrict_mask &= copy_mask;
-        if (!!restrict_mask)
-        {
-          ApEvent restrict_pre = info.op->get_restrict_precondition();
-          preconditions[restrict_pre] = restrict_mask;
-        }
-      }
-      // We have to do the copy for the remaining fields, see if we
-      // need to make a temporary instance to avoid overwriting data
-      // in the destination instance as part of the painter's algorithm
-      if (copier.has_dirty_destination_fields())
-      {
-        // We need to make a temporary instance 
-        copy_tree->copy_to_temporary(info, dst, copy_mask, this,
-                                     preconditions, postconditions, 
-                                     PredEvent::NO_PRED_EVENT,
-                                     local_space, restrict_out,
-                                     trace_info);
-      }
-      else
-      {
-        // Compute the rest of the destination preconditions now
-        dst->find_copy_preconditions(0/*redop*/, false/*reading*/, 
-                                     false/*single copy*/, restrict_out,
-                                     copy_mask, &info.version_info, 
-                                     info.op->get_unique_op_id(), info.index,
-                                     local_space, preconditions, 
-                                     info.map_applied_events,
-                                     trace_info);  
-        LegionMap<ApEvent,FieldMask>::aligned postreductions;
-        // No temporary instance necessary here
-        copy_tree->issue_copies(info, dst, copy_mask, this, 
-            preconditions, postconditions, postreductions, 
-            PredEvent::NO_PRED_EVENT, trace_info, NULL);
-        if (!postreductions.empty())
-          postconditions.insert(postreductions.begin(),
-                                postreductions.end());
-      }
-      delete copy_tree;
-      // If we have no postconditions, then we are done
-      if (postconditions.empty())
-        return;
-      // Sort these into event sets and add a destination user for each merge
-      LegionList<EventSet>::aligned postcondition_sets;
-      RegionTreeNode::compute_event_sets(copy_mask, postconditions,
-                                         postcondition_sets);
-      
-      // Now we can register our dependences on the target
-      for (LegionList<EventSet>::aligned::const_iterator it = 
-            postcondition_sets.begin(); it != postcondition_sets.end(); it++)
-      {
-        if (it->preconditions.empty())
-          continue;
-        ApEvent done_event;
-        if (it->preconditions.size() == 1)
-        {
-          done_event = *(it->preconditions.begin());
-          if (trace_info.recording && !done_event.exists())
-          {
-            Realm::UserEvent rename(Realm::UserEvent::create_user_event());
-            rename.trigger();
-            done_event = ApEvent(rename);
-          }
-        }
-        else
-        {
-          done_event = Runtime::merge_events(it->preconditions);
-          if (trace_info.recording)
-          {
-#ifdef DEBUG_LEGION
-            assert(trace_info.tpl != NULL && trace_info.tpl->is_recording());
-#endif
-            trace_info.tpl->record_merge_events(done_event, it->preconditions,
-                trace_info.op);
-          }
-        }
-
-        dst->add_copy_user(0/*redop*/, done_event, &info.version_info,
-                           info.op->get_unique_op_id(), info.index,
-                           it->set_mask, false/*reading*/, restrict_out,
-                           local_space, info.map_applied_events,
-                           trace_info);
-      }
-      if (restrict_out && restrict_info.has_restrictions())
-      {
-        FieldMask restrict_mask;
-        restrict_info.populate_restrict_fields(restrict_mask);
-        for (LegionMap<ApEvent,FieldMask>::aligned::const_iterator it = 
-              postconditions.begin(); it != postconditions.end(); it++)
-        {
-          if (it->second * restrict_mask)
-            continue;
-          info.op->record_restrict_postcondition(it->first);
-        }
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void CompositeView::issue_deferred_copies(const TraversalInfo &info,
-                                              MaterializedView *dst,
-                                              FieldMask copy_mask,
-                    const LegionMap<ApEvent,FieldMask>::aligned &preconditions,
-                          LegionMap<ApEvent,FieldMask>::aligned &postconditions,
-                                              PredEvent pred_guard,
-                                              PhysicalTraceInfo &trace_info,
-                                              CopyAcrossHelper *across_helper)
-    //--------------------------------------------------------------------------
-    {
-      DETAILED_PROFILER(context->runtime, 
-                        COMPOSITE_VIEW_ISSUE_DEFERRED_COPIES_CALL);
-      LegionMap<ApEvent,FieldMask>::aligned postreductions;
-      CompositeCopier copier(copy_mask);
-      FieldMask dummy_locally_complete;
-      FieldMask dominate_capture(copy_mask);
-      CompositeCopyNode *copy_tree = construct_copy_tree(dst, logical_node,
-          copy_mask, dummy_locally_complete, dominate_capture, copier, this);
-#ifdef DEBUG_LEGION
-      assert(copy_tree != NULL);
-#endif
-      copy_tree->issue_copies(info, dst, copy_mask, this, preconditions, 
-              postconditions, postreductions, pred_guard, trace_info,
-              across_helper);
-      delete copy_tree;
-      if (!postreductions.empty())
-      {
-        for (LegionMap<ApEvent,FieldMask>::aligned::const_iterator it = 
-              postreductions.begin(); it != postreductions.end(); it++)
-          postconditions.insert(*it);
-      }
-    } 
-
-    //--------------------------------------------------------------------------
-    bool CompositeView::is_upper_bound_node(RegionTreeNode *node) const
-    //--------------------------------------------------------------------------
-    {
-      return version_info->is_upper_bound_node(node);
-    }
-
-    //--------------------------------------------------------------------------
-    void CompositeView::get_field_versions(RegionTreeNode *node,bool split_prev,
-                                           const FieldMask &needed_fields,
-                                           FieldVersions &field_versions)
-    //--------------------------------------------------------------------------
-    {
-      // Check to see if this is at the depth of our root node or above it
-      // if it is then we can just ask our version info for the results
-      if ((node == logical_node) || 
-          (node->get_depth() <= logical_node->get_depth()))
-      {
-        version_info->get_field_versions(node, split_prev,
-                                         needed_fields, field_versions);
-        return;
-      }
-      // See if we've already cached the result
-      FieldMask still_needed;
-      {
-        AutoLock v_lock(view_lock,1,false/*exlcusive*/);
-        LegionMap<RegionTreeNode*,NodeVersionInfo>::aligned::const_iterator
-          finder = node_versions.find(node);
-        if (finder != node_versions.end())
-        {
-          still_needed = needed_fields - finder->second.valid_fields;
-          if (!still_needed)
-          {
-            // We have to make a copy here since these versions could change
-            field_versions = finder->second.versions;
-            return;
-          }
-        }
-        else
-          still_needed = needed_fields; // we still need all the fields
-      }
-      CompositeNode *capture_node = capture_above(node, still_needed);
-      // Result wasn't cached, retake the lock in exclusive mode and compute it
-      AutoLock v_lock(view_lock);
-      NodeVersionInfo &result = node_versions[node];
-      capture_node->capture_field_versions(result.versions, still_needed);
-      result.valid_fields |= still_needed;
-      field_versions = result.versions;
-    }
-
-    //--------------------------------------------------------------------------
-    void CompositeView::get_advance_versions(RegionTreeNode *node, bool base,
-                                             const FieldMask &needed_fields,
-                                             FieldVersions &field_versions)
-    //--------------------------------------------------------------------------
-    {
-      // This should never be called here
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    void CompositeView::get_split_mask(RegionTreeNode *node, 
-                                       const FieldMask &needed_fields,
-                                       FieldMask &split)
-    //--------------------------------------------------------------------------
-    {
-      // Check to see if this is at the depth of our root node or above it
-      // if it is above then we can just ask our version info for the results
-      if (node->get_depth() < logical_node->get_depth())
-        version_info->get_split_mask(node, needed_fields, split);
-      // Nothing at or below here is considered to be split because it is 
-      // closed so there is no need for us to do anything
-    }
-
-    //--------------------------------------------------------------------------
-    CompositeNode* CompositeView::capture_above(RegionTreeNode *node,
-                                                const FieldMask &needed_fields)
-    //--------------------------------------------------------------------------
-    {
-      // Recurse up the tree to get the parent version state
-      RegionTreeNode *parent = node->get_parent();
-#ifdef DEBUG_LEGION
-      assert(parent != NULL);
-#endif
-      if (parent == logical_node)
-      {
-        // We've reached the top, no need to capture, return the proper child
-        return find_child_node(node);
-      }
-      // Otherwise continue up the tree 
-      CompositeNode *parent_node = capture_above(parent, needed_fields);
-      // Now make sure that this node has captured for all subregions
-      // Do this on the way back down to know that the parent node is good
-      parent_node->perform_ready_check(needed_fields);
-      return parent_node->find_child_node(node);
-    }
-
-    //--------------------------------------------------------------------------
-    InnerContext* CompositeView::get_owner_context(void) const
-    //--------------------------------------------------------------------------
-    {
-      return owner_context;
-    }
-
-    //--------------------------------------------------------------------------
-    void CompositeView::perform_ready_check(FieldMask mask)
-    //--------------------------------------------------------------------------
-    {
-      // Nothing to do here
-    }
-
-    //--------------------------------------------------------------------------
-    void CompositeView::find_valid_views(const FieldMask &update_mask,
-                                         const FieldMask &up_mask,
-                       LegionMap<LogicalView*,FieldMask>::aligned &result_views,
-                                         bool needs_lock)
-    //--------------------------------------------------------------------------
-    {
-      // Never need the lock here anyway
-      for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it =
-            valid_views.begin(); it != valid_views.end(); it++)
-      {
-        FieldMask overlap = update_mask & it->second;
-        if (!overlap)
-          continue;
-        LegionMap<LogicalView*,FieldMask>::aligned::iterator finder = 
-          result_views.find(it->first);
-        if (finder == result_views.end())
-          result_views[it->first] = overlap;
-        else
-          finder->second |= overlap;
-      }
-      for (LegionMap<CompositeView*,FieldMask>::aligned::const_iterator it = 
-            nested_composite_views.begin(); it != 
-            nested_composite_views.end(); it++)
-      {
-        FieldMask overlap = update_mask & it->second;
-        if (!overlap)
-          continue;
-        LegionMap<LogicalView*,FieldMask>::aligned::iterator finder = 
-          result_views.find(it->first);
-        if (finder == result_views.end())
-          result_views[it->first] = overlap;
-        else
-          finder->second |= overlap;
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void CompositeView::handle_send_composite_view(Runtime *runtime,
-                                    Deserializer &derez, AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      DerezCheck z(derez); 
-      DistributedID did;
-      derez.deserialize(did);
-      AddressSpaceID owner;
-      derez.deserialize(owner);
-      UniqueID owner_uid;
-      derez.deserialize(owner_uid);
-      bool is_region;
-      derez.deserialize(is_region);
-      RegionTreeNode *target_node;
-      if (is_region)
-      {
-        LogicalRegion handle;
-        derez.deserialize(handle);
-        target_node = runtime->forest->get_node(handle);
-      }
-      else
-      {
-        LogicalPartition handle;
-        derez.deserialize(handle);
-        target_node = runtime->forest->get_node(handle);
-      }
-      DeferredVersionInfo *version_info = new DeferredVersionInfo();
-      version_info->unpack_version_numbers(derez, runtime->forest);
-      ClosedNode *closed_tree = 
-        ClosedNode::unpack_closed_node(derez, runtime, is_region);
-      InnerContext *owner_context = runtime->find_context(owner_uid);
-      // Make the composite view, but don't register it yet
-      void *location;
-      CompositeView *view = NULL;
-      if (runtime->find_pending_collectable_location(did, location))
-        view = new(location) CompositeView(runtime->forest, 
-                                           did, owner, target_node, 
-                                           version_info, closed_tree,
-                                           owner_context,
-                                           false/*register now*/);
-      else
-        view = new CompositeView(runtime->forest, did, owner, 
-                           target_node, version_info, closed_tree, 
-                           owner_context, false/*register now*/);
-      // Unpack all the internal data structures
-      std::set<RtEvent> ready_events;
-      view->unpack_composite_view(derez, ready_events);
-      if (!ready_events.empty())
-      {
-        RtEvent wait_on = Runtime::merge_events(ready_events);
-        DeferCompositeViewRegistrationArgs args(view);
-        runtime->issue_runtime_meta_task(args, LG_LATENCY_DEFERRED_PRIORITY,
-                                         wait_on);
-        // Not ready to perform registration yet
-        return;
-      }
-      // If we get here, we are ready to perform the registration
-      view->register_with_runtime(NULL/*remote registration not needed*/);
-    } 
-
-    //--------------------------------------------------------------------------
-    /*static*/ void CompositeView::handle_deferred_view_registration(
-                                                               const void *args)
-    //--------------------------------------------------------------------------
-    {
-      const DeferCompositeViewRegistrationArgs *vargs = 
-        (const DeferCompositeViewRegistrationArgs*)args;
-      // Register only after construction
-      vargs->view->register_with_runtime(NULL/*no remote registration*/);
-    }
-
-    //--------------------------------------------------------------------------
-    void CompositeView::record_dirty_fields(const FieldMask &dirty)
-    //--------------------------------------------------------------------------
-    {
-      dirty_mask |= dirty; 
-    }
-
-    //--------------------------------------------------------------------------
-    void CompositeView::record_valid_view(LogicalView *view, const FieldMask &m)
-    //--------------------------------------------------------------------------
-    {
-      // For now we'll just record it, we'll add references later
-      // during the call to finalize_capture
-      if (view->is_instance_view())
-      {
-#ifdef DEBUG_LEGION
-        assert(view->is_materialized_view());
-#endif
-        MaterializedView *mat_view = view->as_materialized_view();
-        LegionMap<LogicalView*,FieldMask>::aligned::iterator finder = 
-          valid_views.find(mat_view);
-        if (finder == valid_views.end())
-          valid_views[mat_view] = m;
-        else
-          finder->second |= m;
-      }
-      else
-      {
-        DeferredView *def_view = view->as_deferred_view();
-        if (def_view->is_composite_view())
-        {
-          CompositeView *composite_view = def_view->as_composite_view();
-          // See if it is a nested on or from above
-          if (composite_view->logical_node == logical_node)
-          {
-            // nested
-            LegionMap<CompositeView*,FieldMask>::aligned::iterator finder = 
-              nested_composite_views.find(composite_view);
-            if (finder == nested_composite_views.end())
-              nested_composite_views[composite_view] = m;
-            else
-              finder->second |= m;
-          }
-          else
-          {
-            // not nested
-#ifdef DEBUG_LEGION
-            assert(composite_view->logical_node->get_depth() < 
-                    logical_node->get_depth()); // should be above us
-#endif
-            LegionMap<LogicalView*,FieldMask>::aligned::iterator finder = 
-              valid_views.find(composite_view);
-            if (finder == valid_views.end())
-              valid_views[composite_view] = m;
-            else
-              finder->second |= m;
-          }
-        }
-        else
-        {
-          // Just add it like normal
-          LegionMap<LogicalView*,FieldMask>::aligned::iterator finder = 
-            valid_views.find(def_view);
-          if (finder == valid_views.end())
-            valid_views[def_view] = m;
-          else
-            finder->second |= m;
-        }
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void CompositeView::record_reduction_fields(const FieldMask &reduc)
-    //--------------------------------------------------------------------------
-    {
-      reduction_mask |= reduc;
-    }
-
-    //--------------------------------------------------------------------------
-    void CompositeView::record_reduction_view(ReductionView *view, 
-                                              const FieldMask &mask)
-    //--------------------------------------------------------------------------
-    {
-      // For now just add it, we'll record references 
-      // during finalize_capture
-      LegionMap<ReductionView*,FieldMask>::aligned::iterator finder = 
-        reduction_views.find(view);
-      if (finder == reduction_views.end())
-        reduction_views[view] = mask;
-      else
-        finder->second |= mask;
-    }
-
-    //--------------------------------------------------------------------------
-    void CompositeView::record_child_version_state(const LegionColor color, 
-          VersionState *state, const FieldMask &mask, ReferenceMutator *mutator)
-    //--------------------------------------------------------------------------
-    {
-      RegionTreeNode *child_node = logical_node->get_tree_child(color);
-      for (LegionMap<CompositeNode*,FieldMask>::aligned::iterator it = 
-            children.begin(); it != children.end(); it++)
-      {
-        if (it->first->logical_node == child_node)
-        {
-          it->first->record_version_state(state, mask, mutator, true/*root*/);
-          it->second |= mask;
-          return;
-        }
-      }
-      // Didn't find it so make it
-      CompositeNode *child = 
-        new CompositeNode(child_node, this, did); 
-      child->record_version_state(state, mask, mutator, true/*root*/);
-      children[child] = mask;
-    }
-
-    //--------------------------------------------------------------------------
-    void CompositeView::finalize_capture(bool need_prune)
-    //--------------------------------------------------------------------------
-    {
-      // We add base resource references to all our views
-      for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it =
-            valid_views.begin(); it != valid_views.end(); it++)
-        it->first->add_nested_resource_ref(did);
-      for (LegionMap<ReductionView*,FieldMask>::aligned::const_iterator it = 
-            reduction_views.begin(); it != reduction_views.end(); it++)
-        it->first->add_nested_resource_ref(did);
-      // For the deferred views, we try to prune them 
-      // based on our closed tree if they are the same we keep them 
-      if (need_prune)
-      {
-        std::vector<CompositeView*> to_erase;
-        LegionMap<CompositeView*,FieldMask>::aligned replacements;
-        for (LegionMap<CompositeView*,FieldMask>::aligned::iterator it = 
-              nested_composite_views.begin(); it != 
-              nested_composite_views.end(); it++)
-        {
-          // If the composite view is above in the tree we don't
-          // need to worry about pruning it for resource reasons
-          if (it->first->logical_node != logical_node)
-          {
-#ifdef DEBUG_LEGION
-            // Should be above us in the region tree
-            assert(logical_node->get_depth() > 
-                    it->first->logical_node->get_depth());
-#endif
-            it->first->add_nested_resource_ref(did);
-            continue;
-          }
-          it->first->prune(closed_tree, it->second, replacements, 0/*depth*/);
-          if (!it->second)
-            to_erase.push_back(it->first);
-          else
-            it->first->add_nested_resource_ref(did);
-        }
-        if (!to_erase.empty())
-        {
-          for (std::vector<CompositeView*>::const_iterator it = 
-                to_erase.begin(); it != to_erase.end(); it++)
-            nested_composite_views.erase(*it);
-        }
-        if (!replacements.empty())
-        {
-          for (LegionMap<CompositeView*,FieldMask>::aligned::const_iterator it =
-                replacements.begin(); it != replacements.end(); it++)
-          {
-            LegionMap<CompositeView*,FieldMask>::aligned::iterator finder =
-              nested_composite_views.find(it->first);
-            if (finder == nested_composite_views.end())
-            {
-              it->first->add_nested_resource_ref(did);
-              nested_composite_views.insert(*it);
-            }
-            else
-              finder->second |= it->second;
-          }
-        }
-      }
-      else
-      {
-        for (LegionMap<CompositeView*,FieldMask>::aligned::const_iterator it = 
-              nested_composite_views.begin(); it != 
-              nested_composite_views.end(); it++)
-          it->first->add_nested_resource_ref(did);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void CompositeView::pack_composite_view(Serializer &rez) const
-    //--------------------------------------------------------------------------
-    {
-      rez.serialize(dirty_mask);
-      rez.serialize<size_t>(valid_views.size());
-      for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it = 
-            valid_views.begin(); it != valid_views.end(); it++)
-      {
-        rez.serialize(it->first->did);
-        rez.serialize(it->second);
-      }
-      rez.serialize<size_t>(nested_composite_views.size());
-      for (LegionMap<CompositeView*,FieldMask>::aligned::const_iterator it = 
-            nested_composite_views.begin(); it != 
-            nested_composite_views.end(); it++)
-      {
-        rez.serialize(it->first->did);
-        rez.serialize(it->second);
-      }
-      rez.serialize(reduction_mask);
-      rez.serialize<size_t>(reduction_views.size());
-      for (LegionMap<ReductionView*,FieldMask>::aligned::const_iterator it = 
-            reduction_views.begin(); it != reduction_views.end(); it++)
-      {
-        rez.serialize(it->first->did);
-        rez.serialize(it->second);
-      }
-      rez.serialize<size_t>(children.size());
-      for (LegionMap<CompositeNode*,FieldMask>::aligned::const_iterator it =
-            children.begin(); it != children.end(); it++)
-      {
-        it->first->pack_composite_node(rez);
-        rez.serialize(it->second);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void CompositeView::unpack_composite_view(Deserializer &derez,
-                                              std::set<RtEvent> &preconditions)
-    //--------------------------------------------------------------------------
-    {
-      derez.deserialize(dirty_mask);
-      size_t num_mat_views;
-      derez.deserialize(num_mat_views);
-      for (unsigned idx = 0; idx < num_mat_views; idx++)
-      {
-        DistributedID view_did;
-        derez.deserialize(view_did);
-        RtEvent ready;
-        LogicalView *view = static_cast<LogicalView*>(
-            runtime->find_or_request_logical_view(view_did, ready));
-        derez.deserialize(valid_views[view]);
-        if (ready.exists() && !ready.has_triggered())
-          preconditions.insert(defer_add_reference(view, ready));
-        else // Otherwise we can add the reference now
-          view->add_nested_resource_ref(did);
-      }
-      size_t num_nested_views;
-      derez.deserialize(num_nested_views);
-      for (unsigned idx = 0; idx < num_nested_views; idx++)
-      {
-        DistributedID view_did;
-        derez.deserialize(view_did);
-        RtEvent ready;
-        CompositeView *view = static_cast<CompositeView*>(
-            runtime->find_or_request_logical_view(view_did, ready));
-        derez.deserialize(nested_composite_views[view]);
-        if (ready.exists() && !ready.has_triggered())
-          preconditions.insert(defer_add_reference(view, ready));
-        else
-          view->add_nested_resource_ref(did);
-      }
-      derez.deserialize(reduction_mask);
-      size_t num_reduc_views;
-      derez.deserialize(num_reduc_views);
-      for (unsigned idx = 0; idx < num_reduc_views; idx++)
-      {
-        DistributedID view_did;
-        derez.deserialize(view_did);
-        RtEvent ready;
-        ReductionView *reduc_view = static_cast<ReductionView*>(
-            runtime->find_or_request_logical_view(view_did, ready));
-        derez.deserialize(reduction_views[reduc_view]);
-        if (ready.exists() && !ready.has_triggered())
-          preconditions.insert(defer_add_reference(reduc_view, ready));
-        else
-          reduc_view->add_nested_resource_ref(did);
-      }
-      size_t num_children;
-      derez.deserialize(num_children);
-      for (unsigned idx = 0; idx < num_children; idx++)
-      {
-        CompositeNode *child = CompositeNode::unpack_composite_node(derez, 
-                              this, context->runtime, did, preconditions);
-        derez.deserialize(children[child]);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    RtEvent CompositeView::defer_add_reference(DistributedCollectable *dc, 
-                                               RtEvent precondition) const
-    //--------------------------------------------------------------------------
-    {
-      DeferCompositeViewRefArgs args(dc, did);
-      return context->runtime->issue_runtime_meta_task(args, 
-          LG_LATENCY_DEFERRED_PRIORITY, precondition);
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void CompositeView::handle_deferred_view_ref(const void *args)
-    //--------------------------------------------------------------------------
-    {
-      const DeferCompositeViewRefArgs *ref_args = 
-        (const DeferCompositeViewRefArgs*)args;
-      ref_args->dc->add_nested_resource_ref(ref_args->did);
-    }
-
-    //--------------------------------------------------------------------------
-    void CompositeView::print_view_state(const FieldMask &capture_mask,
-                                         TreeStateLogger* logger,
-                                         int current_nesting,
-                                         int max_nesting)
-    //--------------------------------------------------------------------------
-    {
-      CompositeBase::print_view_state(
-                            capture_mask, logger, current_nesting, max_nesting);
-      int num_nested_views = 0;
-      for (LegionMap<CompositeView*,FieldMask>::aligned::iterator it =
-            nested_composite_views.begin(); it !=
-            nested_composite_views.end(); it++)
-      {
-        if (it->second * capture_mask)
-          continue;
-        num_nested_views++;
-      }
-      if (num_nested_views > 0)
-      {
-        if (current_nesting < max_nesting)
-        {
-          logger->log("---- Nested Instances (Depth: %d) ----",
-              current_nesting + 1);
-          for (LegionMap<CompositeView*,FieldMask>::aligned::iterator it =
-                nested_composite_views.begin(); it !=
-                nested_composite_views.end(); it++)
-          {
-            {
-              char *mask_string = it->second.to_string();
-              logger->log("Field Mask: %s", mask_string);
-              free(mask_string);
-            }
-            logger->down();
-            it->first->print_view_state(
-                          capture_mask, logger, current_nesting + 1, max_nesting);
-            logger->up();
-          }
-          logger->log("--------------------------------------");
-        }
-        else
-        {
-          logger->log("--- Instances of Depth > %d Elided ---",
-              current_nesting);
-        }
-      }
-    }
-
-    /////////////////////////////////////////////////////////////
-    // CompositeNode 
-    /////////////////////////////////////////////////////////////
-
-    //--------------------------------------------------------------------------
-    CompositeNode::CompositeNode(RegionTreeNode* node, CompositeBase *p,
-                                 DistributedID own_did)
-      : CompositeBase(node_lock), logical_node(node), parent(p), 
-        owner_did(own_did), currently_valid(false)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    CompositeNode::CompositeNode(const CompositeNode &rhs)
-      : CompositeBase(node_lock), logical_node(NULL), parent(NULL), owner_did(0)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    CompositeNode::~CompositeNode(void)
-    //--------------------------------------------------------------------------
-    {
-      for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it = 
-            version_states.begin(); it != version_states.end(); it++)
-      {
-        if (it->first->remove_nested_resource_ref(owner_did))
-          delete (it->first);
-      }
-      version_states.clear();
-      // Free up all our children 
-      for (LegionMap<CompositeNode*,FieldMask>::aligned::const_iterator it = 
-            children.begin(); it != children.end(); it++)
-      {
-        delete (it->first);
-      }
-      children.clear();
-      for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it = 
-            valid_views.begin(); it != valid_views.end(); it++)
-      {
-        if (it->first->remove_nested_resource_ref(owner_did))
-          delete it->first;
-      }
-      valid_views.clear();
-      for (LegionMap<ReductionView*,FieldMask>::aligned::const_iterator it = 
-            reduction_views.begin(); it != reduction_views.end(); it++)
-      {
-        if (it->first->remove_nested_resource_ref(owner_did))
-          delete (it->first);
-      }
-      reduction_views.clear();
-    }
-
-    //--------------------------------------------------------------------------
-    CompositeNode& CompositeNode::operator=(const CompositeNode &rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *this;
-    }
-
-    //--------------------------------------------------------------------------
-    InnerContext* CompositeNode::get_owner_context(void) const
-    //--------------------------------------------------------------------------
-    {
-      return parent->get_owner_context();
-    }
-
-    //--------------------------------------------------------------------------
-    void CompositeNode::perform_ready_check(FieldMask mask)
-    //--------------------------------------------------------------------------
-    {
-      // Do a quick test with read-only lock first
-      {
-        AutoLock n_lock(node_lock,1,false/*exclusive*/);
-        // Remove any fields that are already valid
-        mask -= valid_fields;
-        if (!mask)
-          return;
-      }
-      RtUserEvent capture_event;
-      std::set<RtEvent> preconditions; 
-      LegionMap<VersionState*,FieldMask>::aligned needed_states;
-      {
-        AutoLock n_lock(node_lock);
-        // Retest to see if we lost the race
-        mask -= valid_fields;
-        if (!mask)
-          return;
-        for (LegionMap<RtUserEvent,FieldMask>::aligned::const_iterator it = 
-              pending_captures.begin(); it != pending_captures.end(); it++)
-        {
-          if (it->second * mask)
-            continue;
-          preconditions.insert(it->first);
-          mask -= it->second;
-          if (!mask)
-            break;
-        }
-        // If we still have fields, we're going to do a pending capture
-        if (!!mask)
-        {
-          capture_event = Runtime::create_rt_user_event();
-          pending_captures[capture_event] = mask;
-          for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator 
-                it = version_states.begin(); it != version_states.end(); it++)
-          {
-            FieldMask overlap = it->second & mask;
-            if (!overlap)
-              continue;
-            needed_states[it->first] = overlap;
-          }
-        }
-      }
-      if (!needed_states.empty())
-      {
-        // Request final states for all the version states and then either
-        // launch a task to do the capture, or do it now
-        std::set<RtEvent> capture_preconditions;
-        InnerContext *owner_context = parent->get_owner_context();
-        for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it = 
-              needed_states.begin(); it != needed_states.end(); it++)
-          it->first->request_final_version_state(owner_context, it->second,
-                                                 capture_preconditions);
-        if (!capture_preconditions.empty())
-        {
-          RtEvent capture_precondition = 
-            Runtime::merge_events(capture_preconditions);
-          DeferCaptureArgs args(this, capture_event);
-          Runtime *runtime = logical_node->context->runtime;
-          RtEvent precondition = 
-            runtime->issue_runtime_meta_task(args, LG_LATENCY_DEFERRED_PRIORITY,
-                                             capture_precondition);
-          preconditions.insert(precondition);
-        }
-        else // We can do the capture now!
-        {
-          WrapperReferenceMutator mutator(preconditions);
-          capture(capture_event, &mutator);
-        }
-      }
-      if (!preconditions.empty())
-      {
-        RtEvent wait_on = Runtime::merge_events(preconditions);
-        wait_on.wait();
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void CompositeNode::find_valid_views(const FieldMask &update_mask,
-                                         const FieldMask &up_mask,
-                       LegionMap<LogicalView*,FieldMask>::aligned &result_views,
-                                         bool needs_lock)
-    //--------------------------------------------------------------------------
-    {
-      if (needs_lock)
-      {
-        AutoLock n_lock(node_lock,1,false/*exclusive*/);
-        find_valid_views(update_mask, up_mask, result_views, false);
-        return;
-      }
-      // Insert anything we have here
-      for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it = 
-            valid_views.begin(); it != valid_views.end(); it++)
-      {
-        FieldMask overlap = it->second & update_mask;
-        if (!overlap)
-          continue;
-        LegionMap<LogicalView*,FieldMask>::aligned::iterator finder = 
-          result_views.find(it->first);
-        if (finder == result_views.end())
-          result_views[it->first] = overlap;
-        else
-          finder->second |= overlap;
-      }
-      // See if we need to keep going up the view tree
-      if (!!up_mask)
-      {
-        // Only go up if necessary and only for fields which are not dirty here
-        // because those fields above are not valid
-        if (!!dirty_mask)
-        {
-          FieldMask local_up = up_mask - dirty_mask;
-          if (!!local_up)
-            parent->find_valid_views(local_up, local_up, result_views);
-        }
-        else
-          parent->find_valid_views(up_mask, up_mask, result_views);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void CompositeNode::capture(RtUserEvent capture_event, 
-                                ReferenceMutator *mutator)
-    //--------------------------------------------------------------------------
-    {
-      {
-        AutoLock n_lock(node_lock);
-        LegionMap<RtUserEvent,FieldMask>::aligned::iterator finder = 
-          pending_captures.find(capture_event);
-#ifdef DEBUG_LEGION
-        assert(finder != pending_captures.end());
-#endif
-        // Perform the capture of each of our overlapping version states
-        for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it = 
-              version_states.begin(); it != version_states.end(); it++)
-        {
-          FieldMask overlap = it->second & finder->second;
-          if (!overlap)
-            continue;
-          it->first->capture(this, overlap, mutator);
-        }
-        valid_fields |= finder->second;
-        pending_captures.erase(finder); 
-      }
-      Runtime::trigger_event(capture_event);
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void CompositeNode::handle_deferred_capture(const void *args)
-    //--------------------------------------------------------------------------
-    {
-      const DeferCaptureArgs *dargs = (const DeferCaptureArgs*)args;
-      LocalReferenceMutator mutator;
-      dargs->proxy_this->capture(dargs->capture_event, &mutator);
-    }
-
-    //--------------------------------------------------------------------------
-    void CompositeNode::clone(CompositeView *target,
-                              const FieldMask &clone_mask) const
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(currently_valid);
-#endif
-      const LegionColor color = logical_node->get_color();
-      AutoLock n_lock(node_lock,1,false/*exclusive*/);
-      for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it =  
-            version_states.begin(); it != version_states.end(); it++)
-      {
-        FieldMask overlap = it->second & clone_mask;
-        if (!overlap)
-          continue;
-        // We already hold a reference here so we can pass a NULL mutator
-        target->record_child_version_state(color, it->first, 
-                                           overlap, NULL/*mutator*/);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void CompositeNode::pack_composite_node(Serializer &rez) const
-    //--------------------------------------------------------------------------
-    {
-      if (logical_node->is_region())
-      {
-        rez.serialize<bool>(true);
-        rez.serialize(logical_node->as_region_node()->handle);
-      }
-      else
-      {
-        rez.serialize<bool>(false);
-        rez.serialize(logical_node->as_partition_node()->handle);
-      }
-      rez.serialize<size_t>(version_states.size());
-      for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it = 
-            version_states.begin(); it != version_states.end(); it++)
-      {
-        rez.serialize(it->first->did);
-        rez.serialize(it->second);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ CompositeNode* CompositeNode::unpack_composite_node(
-        Deserializer &derez, CompositeView *parent, Runtime *runtime, 
-        DistributedID owner_did, std::set<RtEvent> &preconditions)
-    //--------------------------------------------------------------------------
-    {
-      bool is_region;
-      derez.deserialize(is_region);
-      RegionTreeNode *node;
-      if (is_region)
-      {
-        LogicalRegion handle;
-        derez.deserialize(handle);
-        node = runtime->forest->get_node(handle);
-      }
-      else
-      {
-        LogicalPartition handle;
-        derez.deserialize(handle);
-        node = runtime->forest->get_node(handle);
-      }
-      CompositeNode *result = 
-        new CompositeNode(node, parent, owner_did);
-      size_t num_versions;
-      derez.deserialize(num_versions);
-      for (unsigned idx = 0; idx < num_versions; idx++)
-      {
-        DistributedID did;
-        derez.deserialize(did);
-        RtEvent ready;
-        VersionState *state = 
-          runtime->find_or_request_version_state(did, ready); 
-        derez.deserialize(result->version_states[state]);
-        if (ready.exists() && !ready.has_triggered())
-        {
-          DeferCompositeNodeRefArgs args(state, owner_did);
-          RtEvent precondition = 
-            runtime->issue_runtime_meta_task(args, LG_LATENCY_DEFERRED_PRIORITY,
-                                             ready);
-          preconditions.insert(precondition);
-        }
-        else
-          state->add_nested_resource_ref(owner_did);
-      }
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void CompositeNode::handle_deferred_node_ref(const void *args)
-    //--------------------------------------------------------------------------
-    {
-      const DeferCompositeNodeRefArgs *nargs = 
-        (const DeferCompositeNodeRefArgs*)args;
-      nargs->state->add_nested_resource_ref(nargs->owner_did);
-    }
-
-    //--------------------------------------------------------------------------
-    void CompositeNode::notify_valid(ReferenceMutator *mutator, bool root)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(!currently_valid);
-#endif
-      if (root)
-      {
-        for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it = 
-              version_states.begin(); it != version_states.end(); it++)
-          it->first->add_nested_valid_ref(owner_did, mutator);
-      }
-      for (LegionMap<CompositeNode*,FieldMask>::aligned::const_iterator it = 
-            children.begin(); it != children.end(); it++)
-        it->first->notify_valid(mutator, false/*root*/);
-      for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it = 
-            valid_views.begin(); it != valid_views.end(); it++)
-        it->first->add_nested_valid_ref(owner_did, mutator);
-      for (LegionMap<ReductionView*,FieldMask>::aligned::const_iterator it = 
-            reduction_views.begin(); it != reduction_views.end(); it++)
-        it->first->add_nested_valid_ref(owner_did, mutator);
-      currently_valid = true;
-    }
-
-    //--------------------------------------------------------------------------
-    void CompositeNode::notify_invalid(ReferenceMutator *mutator, bool root)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(currently_valid);
-#endif
-      if (root)
-      {
-        for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it = 
-              version_states.begin(); it != version_states.end(); it++)
-          it->first->remove_nested_valid_ref(owner_did, mutator);
-      }
-      for (LegionMap<CompositeNode*,FieldMask>::aligned::const_iterator it = 
-            children.begin(); it != children.end(); it++)
-        it->first->notify_invalid(mutator, false/*root*/);
-      for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it = 
-            valid_views.begin(); it != valid_views.end(); it++)
-        it->first->remove_nested_valid_ref(owner_did, mutator);
-      for (LegionMap<ReductionView*,FieldMask>::aligned::const_iterator it = 
-            reduction_views.begin(); it != reduction_views.end(); it++)
-        it->first->remove_nested_valid_ref(owner_did, mutator);
-      currently_valid = false;
-    } 
-
-    //--------------------------------------------------------------------------
-    void CompositeNode::record_dirty_fields(const FieldMask &dirty)
-    //--------------------------------------------------------------------------
-    {
-      // should already hold the lock from the caller
-      dirty_mask |= dirty;
-    }
-
-    //--------------------------------------------------------------------------
-    void CompositeNode::record_valid_view(LogicalView *view, const FieldMask &m)
-    //--------------------------------------------------------------------------
-    {
-      // should already hold the lock from the caller
-      LegionMap<LogicalView*,FieldMask>::aligned::iterator finder = 
-        valid_views.find(view);
-      if (finder == valid_views.end())
-      {
-        // Add both a resource and a valid reference
-        // No need for a mutator since these must be valid if we are capturing
-        view->add_nested_resource_ref(owner_did);
-        if (currently_valid)
-          view->add_nested_valid_ref(owner_did);
-        valid_views[view] = m;
-      }
-      else
-        finder->second |= m;
-    }
-
-    //--------------------------------------------------------------------------
-    void CompositeNode::record_reduction_fields(const FieldMask &reduc)
-    //--------------------------------------------------------------------------
-    {
-      // should already hold the lock from the caller
-      reduction_mask |= reduc;
-    }
-    
-    //--------------------------------------------------------------------------
-    void CompositeNode::record_reduction_view(ReductionView *view,
-                                              const FieldMask &mask)
-    //--------------------------------------------------------------------------
-    {
-      // should already hold the lock from the caller
-      LegionMap<ReductionView*,FieldMask>::aligned::iterator finder = 
-        reduction_views.find(view);
-      if (finder == reduction_views.end())
-      {
-        // Add both a resource and a valid reference
-        // No need for a mutator since these must be valid if we are capturing
-        view->add_nested_resource_ref(owner_did);
-        if (currently_valid)
-          view->add_nested_valid_ref(owner_did);
-        reduction_views[view] = mask;
-      }
-      else
-        finder->second |= mask;
-    }
-
-    //--------------------------------------------------------------------------
-    void CompositeNode::record_child_version_state(const LegionColor color,
-          VersionState *state, const FieldMask &mask, ReferenceMutator *mutator)
-    //--------------------------------------------------------------------------
-    {
-      RegionTreeNode *child_node = logical_node->get_tree_child(color);
-      for (LegionMap<CompositeNode*,FieldMask>::aligned::iterator it = 
-            children.begin(); it != children.end(); it++)
-      {
-        if (it->first->logical_node == child_node)
-        {
-          it->first->record_version_state(state, mask, mutator, false/*root*/); 
-          it->second |= mask;
-          return;
-        }
-      }
-      // Didn't find it so make it
-      CompositeNode *child = 
-        new CompositeNode(child_node, this, owner_did); 
-      child->record_version_state(state, mask, mutator, false/*root*/);
-      children[child] = mask;
-      if (currently_valid)
-        child->notify_valid(mutator, false/*root*/);
-    }
-
-    //--------------------------------------------------------------------------
-    void CompositeNode::record_version_state(VersionState *state, 
-                    const FieldMask &mask, ReferenceMutator *mutator, bool root)
-    //--------------------------------------------------------------------------
-    {
-      LegionMap<VersionState*,FieldMask>::aligned::iterator finder = 
-        version_states.find(state);
-      if (finder == version_states.end())
-      {
-        state->add_nested_resource_ref(owner_did);
-        version_states[state] = mask;
-        if (root && currently_valid)
-          state->add_nested_valid_ref(owner_did, mutator);
-      }
-      else
-        finder->second |= mask;
-    } 
-
-    //--------------------------------------------------------------------------
-    void CompositeNode::capture_field_versions(FieldVersions &versions,
-                                            const FieldMask &capture_mask) const
-    //--------------------------------------------------------------------------
-    {
-      AutoLock n_lock(node_lock,1,false/*exclusive*/);
-      for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it =
-            version_states.begin(); it != version_states.end(); it++)
-      {
-        FieldMask overlap = it->second & capture_mask;
-        if (!overlap)
-          continue;
-        FieldVersions::iterator finder = 
-          versions.find(it->first->version_number);
-        if (finder == versions.end())
-          versions[it->first->version_number] = overlap;
-        else
-          finder->second |= overlap;
-      }
-    }
-
     /////////////////////////////////////////////////////////////
     // FillView 
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
     FillView::FillView(RegionTreeForest *ctx, DistributedID did,
-                       AddressSpaceID owner_proc, RegionTreeNode *node, 
+                       AddressSpaceID owner_proc,
                        FillViewValue *val, bool register_now
 #ifdef LEGION_SPY
                        , UniqueID op_uid
 #endif
                        )
-      : DeferredView(ctx, encode_fill_did(did), owner_proc,
-                     node, register_now), value(val)
+      : DeferredView(ctx, encode_fill_did(did), owner_proc, register_now), 
+        value(val)
 #ifdef LEGION_SPY
         , fill_op_uid(op_uid)
 #endif
@@ -6850,7 +3886,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FillView::FillView(const FillView &rhs)
-      : DeferredView(NULL, 0, 0, NULL, false), value(NULL)
+      : DeferredView(NULL, 0, 0, false), value(NULL)
 #ifdef LEGION_SPY
         , fill_op_uid(0)
 #endif
@@ -6878,19 +3914,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    LogicalView* FillView::get_subview(const LegionColor c)
-    //--------------------------------------------------------------------------
-    {
-      // Fill views don't need subviews
-      return this;
-    }
-
-    //--------------------------------------------------------------------------
     void FillView::notify_active(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
       if (!is_owner())
-        send_remote_gc_update(owner_space, mutator, 1, true/*add*/);
+        send_remote_gc_increment(owner_space, mutator);
     }
 
     //--------------------------------------------------------------------------
@@ -6898,7 +3926,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (!is_owner())
-        send_remote_gc_update(owner_space, mutator, 1, false/*add*/);
+        send_remote_gc_decrement(owner_space, RtEvent::NO_RT_EVENT, mutator);
     }
     
     //--------------------------------------------------------------------------
@@ -6921,14 +3949,12 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(is_owner());
-      assert(logical_node->is_region());
 #endif
       Serializer rez;
       {
         RezCheck z(rez);
         rez.serialize(did);
         rez.serialize(owner_space);
-        rez.serialize(logical_node->as_region_node()->handle);
         rez.serialize(value->value_size);
         rez.serialize(value->value, value->value_size);
 #ifdef LEGION_SPY
@@ -6941,132 +3967,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void FillView::issue_deferred_copies(const TraversalInfo &info,
-                                         MaterializedView *dst,
-                                         FieldMask copy_mask,
-                                         const RestrictInfo &restrict_info,
-                                         bool restrict_out,
-                                         PhysicalTraceInfo &trace_info)
+    void FillView::flatten(CopyFillAggregator &aggregator,
+                           InstanceView *dst_view, const FieldMask &src_mask,
+                           IndexSpaceExpression *expr, CopyAcrossHelper *helper)
     //--------------------------------------------------------------------------
     {
-      LegionMap<ApEvent,FieldMask>::aligned preconditions;
-      // We know we're going to write all these fields so we can filter
-      dst->find_copy_preconditions(0/*redop*/, false/*reading*/,
-                                   true/*single copy*/, restrict_out,
-                                   copy_mask, &info.version_info, 
-                                   info.op->get_unique_op_id(),
-                                   info.index, local_space, 
-                                   preconditions, info.map_applied_events,
-                                   trace_info);
-      if (restrict_info.has_restrictions())
-      {
-        FieldMask restrict_mask;
-        restrict_info.populate_restrict_fields(restrict_mask);
-        restrict_mask &= copy_mask;
-        if (!!restrict_mask)
-        {
-          ApEvent restrict_pre = info.op->get_restrict_precondition();
-          preconditions[restrict_pre] = restrict_mask;
-        }
-      }
-      LegionMap<ApEvent,FieldMask>::aligned postconditions;
-      issue_deferred_copies(info, dst, copy_mask, preconditions,
-                            postconditions, PredEvent::NO_PRED_EVENT,
-                            trace_info);
-      // We know there is at most one event per field so no need
-      // to sort into event sets here
-      // Register the resulting events as users of the destination
-      for (LegionMap<ApEvent,FieldMask>::aligned::const_iterator it = 
-            postconditions.begin(); it != postconditions.end(); it++)
-      {
-        dst->add_copy_user(0/*redop*/, it->first, &info.version_info, 
-                           info.op->get_unique_op_id(), info.index,
-                           it->second, false/*reading*/, restrict_out,
-                           local_space, info.map_applied_events,
-                           trace_info);
-      }
-      if (restrict_out && restrict_info.has_restrictions())
-      {
-        FieldMask restrict_mask;
-        restrict_info.populate_restrict_fields(restrict_mask);
-        for (LegionMap<ApEvent,FieldMask>::aligned::const_iterator it = 
-              postconditions.begin(); it != postconditions.end(); it++)
-        {
-          if (it->second * restrict_mask)
-            continue;
-          info.op->record_restrict_postcondition(it->first);
-        }
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void FillView::issue_deferred_copies(const TraversalInfo &info,
-                                         MaterializedView *dst,
-                                         FieldMask copy_mask,
-                    const LegionMap<ApEvent,FieldMask>::aligned &preconditions,
-                          LegionMap<ApEvent,FieldMask>::aligned &postconditions,
-                                         PredEvent pred_guard,
-                                         PhysicalTraceInfo &trace_info,
-                                         CopyAcrossHelper *across_helper)
-    //--------------------------------------------------------------------------
-    {
-      // Compute the precondition sets
-      LegionList<EventSet>::aligned precondition_sets;
-      RegionTreeNode::compute_event_sets(copy_mask, preconditions,
-                                         precondition_sets);
-      // Iterate over the precondition sets
-      for (LegionList<EventSet>::aligned::iterator pit = 
-            precondition_sets.begin(); pit !=
-            precondition_sets.end(); pit++)
-      {
-        EventSet &pre_set = *pit;
-        // Build the src and dst fields vectors
-        std::vector<CopySrcDstField> dst_fields;
-        dst->copy_to(pre_set.set_mask, dst_fields, across_helper);
-        ApEvent fill_pre = Runtime::merge_events(pre_set.preconditions);
-        if (trace_info.recording)
-        {
-#ifdef DEBUG_LEGION
-          assert(trace_info.tpl != NULL && trace_info.tpl->is_recording());
-#endif
-          trace_info.tpl->record_merge_events(fill_pre, pre_set.preconditions,
-              trace_info.op);
-        }
-        // Issue the fill command
-        // Only apply an intersection if the destination logical node
-        // is different than our logical node
-        // If the intersection is empty we can skip the fill all together
-        if ((logical_node != dst->logical_node) && 
-            (!logical_node->intersects_with(dst->logical_node)))
-        {
-          if (trace_info.recording)
-          {
-#ifdef DEBUG_LEGION
-            assert(info.logical_ctx != -1U);
-#endif
-            trace_info.tpl->record_empty_copy_from_fill_view(
-                                    dst, copy_mask, info.logical_ctx, info.ctx);
-          }
-          continue;
-        }
-        ApEvent fill_post = dst->logical_node->issue_fill(info.op, dst_fields,
-                        value->value, value->value_size, fill_pre, pred_guard, 
-#ifdef LEGION_SPY
-                        fill_op_uid,
-#endif
-                        trace_info,
-                  (logical_node == dst->logical_node) ? NULL : logical_node);
-        if (trace_info.recording)
-        {
-#ifdef DEBUG_LEGION
-          assert(info.logical_ctx != -1U);
-#endif
-          trace_info.tpl->record_deferred_copy_from_fill_view(
-                              this, dst, copy_mask, info.logical_ctx, info.ctx);
-        }
-        if (fill_post.exists())
-          postconditions[fill_post] = pre_set.set_mask;
-      }
+      aggregator.record_fill(dst_view, this, src_mask, expr, helper);
     }
 
     //--------------------------------------------------------------------------
@@ -7079,8 +3985,6 @@ namespace Legion {
       derez.deserialize(did);
       AddressSpaceID owner_space;
       derez.deserialize(owner_space);
-      LogicalRegion handle;
-      derez.deserialize(handle);
       size_t value_size;
       derez.deserialize(value_size);
       void *value = malloc(value_size);
@@ -7090,14 +3994,13 @@ namespace Legion {
       derez.deserialize(op_uid);
 #endif
       
-      RegionNode *target_node = runtime->forest->get_node(handle);
       FillView::FillViewValue *fill_value = 
                       new FillView::FillViewValue(value, value_size);
       void *location;
       FillView *view = NULL;
       if (runtime->find_pending_collectable_location(did, location))
         view = new(location) FillView(runtime->forest, did,
-                                      owner_space, target_node, fill_value,
+                                      owner_space, fill_value,
                                       false/*register now*/
 #ifdef LEGION_SPY
                                       , op_uid
@@ -7105,7 +4008,7 @@ namespace Legion {
                                       );
       else
         view = new FillView(runtime->forest, did, owner_space,
-                            target_node,fill_value,false/*register now*/
+                            fill_value, false/*register now*/
 #ifdef LEGION_SPY
                             , op_uid
 #endif
@@ -7120,15 +4023,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     PhiView::PhiView(RegionTreeForest *ctx, DistributedID did, 
                      AddressSpaceID owner_space,
-                     DeferredVersionInfo *info, RegionTreeNode *node, 
                      PredEvent tguard, PredEvent fguard, 
                      InnerContext *owner, bool register_now) 
-      : DeferredView(ctx, encode_phi_did(did), owner_space, node, 
-                     register_now), true_guard(tguard), false_guard(fguard), 
-        version_info(info), owner_context(owner)
+      : DeferredView(ctx, encode_phi_did(did), owner_space, register_now),
+        true_guard(tguard), false_guard(fguard), owner_context(owner)
     //--------------------------------------------------------------------------
     {
-      version_info->add_reference();
 #ifdef LEGION_GC
       log_garbage.info("GC Phi View %lld %d", 
           LEGION_DISTRIBUTED_ID_FILTER(did), local_space);
@@ -7137,10 +4037,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     PhiView::PhiView(const PhiView &rhs)
-      : DeferredView(NULL, 0, 0, NULL, false),
-        true_guard(PredEvent::NO_PRED_EVENT),
-        false_guard(PredEvent::NO_PRED_EVENT), 
-        version_info(NULL), owner_context(NULL)
+      : DeferredView(NULL, 0, 0, false),
+        true_guard(PredEvent::NO_PRED_EVENT), 
+        false_guard(PredEvent::NO_PRED_EVENT), owner_context(NULL)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -7165,8 +4064,6 @@ namespace Legion {
           delete it->first;
       }
       false_views.clear();
-      if (version_info->remove_reference())
-        delete version_info;
     }
 
     //--------------------------------------------------------------------------
@@ -7179,19 +4076,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    LogicalView* PhiView::get_subview(const LegionColor c)
-    //--------------------------------------------------------------------------
-    {
-      // Phi views don't need subviews
-      return this;
-    }
-
-    //--------------------------------------------------------------------------
     void PhiView::notify_active(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
       if (!is_owner())
-        send_remote_gc_update(owner_space, mutator, 1, true/*add*/);
+        send_remote_gc_increment(owner_space, mutator);
     }
 
     //--------------------------------------------------------------------------
@@ -7199,7 +4088,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (!is_owner())
-        send_remote_gc_update(owner_space, mutator, 1, false/*add*/);
+        send_remote_gc_decrement(owner_space, RtEvent::NO_RT_EVENT, mutator);
     }
 
     //--------------------------------------------------------------------------
@@ -7224,212 +4113,6 @@ namespace Legion {
       for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it = 
             false_views.begin(); it != false_views.end(); it++)
         it->first->remove_nested_valid_ref(did, mutator);
-    }
-
-    //--------------------------------------------------------------------------
-    void PhiView::issue_deferred_copies(const TraversalInfo &info,
-                                        MaterializedView *dst,
-                                        FieldMask copy_mask,
-                                        const RestrictInfo &restrict_info,
-                                        bool restrict_out,
-                                        PhysicalTraceInfo &trace_info)
-    //--------------------------------------------------------------------------
-    {
-      LegionMap<ApEvent,FieldMask>::aligned preconditions;
-      // We know we're going to write all these fields so we can filter
-      dst->find_copy_preconditions(0/*redop*/, false/*reading*/,
-                                   true/*single copy*/, restrict_out,
-                                   copy_mask, &info.version_info, 
-                                   info.op->get_unique_op_id(),
-                                   info.index, local_space, 
-                                   preconditions, info.map_applied_events,
-                                   trace_info);
-      if (restrict_info.has_restrictions())
-      {
-        FieldMask restrict_mask;
-        restrict_info.populate_restrict_fields(restrict_mask);
-        restrict_mask &= copy_mask;
-        if (!!restrict_mask)
-        {
-          ApEvent restrict_pre = info.op->get_restrict_precondition();
-          preconditions[restrict_pre] = restrict_mask;
-        }
-      }
-      LegionMap<ApEvent,FieldMask>::aligned postconditions;
-      // Now issue copies for both cases 
-      issue_guarded_update_copies(info, dst, copy_mask, true_guard,
-                                  true_views, restrict_info, restrict_out,
-                                  preconditions, postconditions,
-                                  trace_info);
-      issue_guarded_update_copies(info, dst, copy_mask, false_guard,
-                                  false_views, restrict_info, restrict_out,
-                                  preconditions, postconditions,
-                                  trace_info);
-      // Now merge the postconditions and register them with the destination
-      LegionList<EventSet>::aligned event_sets;
-      RegionTreeNode::compute_event_sets(copy_mask, postconditions, event_sets);
-      FieldMask restrict_mask;
-      if (restrict_out && restrict_info.has_restrictions())
-        restrict_info.populate_restrict_fields(restrict_mask);
-      for (LegionList<EventSet>::aligned::const_iterator it = 
-            event_sets.begin(); it != event_sets.end(); it++)
-      {
-        ApEvent post = Runtime::merge_events(it->preconditions);
-        if (post.exists())
-          dst->add_copy_user(0/*redop*/, post, &info.version_info,
-                             info.op->get_unique_op_id(), info.index,
-                             it->set_mask, false/*reading*/, restrict_out,
-                             local_space, info.map_applied_events,
-                             trace_info);
-        if (restrict_out && !(it->set_mask * restrict_mask))
-          info.op->record_restrict_postcondition(post);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void PhiView::issue_deferred_copies(const TraversalInfo &info,
-                                        MaterializedView *dst,
-                                        FieldMask copy_mask,
-                    const LegionMap<ApEvent,FieldMask>::aligned &preconditions,
-                          LegionMap<ApEvent,FieldMask>::aligned &postconditions,
-                                        PredEvent pred_guard,
-                                        PhysicalTraceInfo &trace_info,
-                                        CopyAcrossHelper *helper)
-    //--------------------------------------------------------------------------
-    {
-      RestrictInfo dummy_restrict_info;
-      LegionMap<ApEvent,FieldMask>::aligned local_postconditions;
-      // Issue copies for both cases 
-      // We can skip the cases where the polarity is different for the guard
-      if (pred_guard != false_guard)
-        issue_guarded_update_copies(info, dst, copy_mask, true_guard,
-                                    true_views, dummy_restrict_info, 
-                                    false/*restrict out*/, preconditions, 
-                                    local_postconditions, trace_info, helper);
-      if (pred_guard != true_guard)
-        issue_guarded_update_copies(info, dst, copy_mask, false_guard,
-                                    false_views, dummy_restrict_info,
-                                    false/*restrict out*/, preconditions,
-                                    local_postconditions, trace_info, helper);
-      // Now merge the postconditions and protect them for when we are done
-      LegionList<EventSet>::aligned event_sets;
-      RegionTreeNode::compute_event_sets(copy_mask, postconditions, event_sets);
-      for (LegionList<EventSet>::aligned::const_iterator it = 
-            event_sets.begin(); it != event_sets.end(); it++)
-      {
-        ApEvent post = Runtime::merge_events(it->preconditions);
-        if (post.exists())
-        {
-          // post is not guaranteed to be unique
-          LegionMap<ApEvent,FieldMask>::aligned::iterator finder = 
-            postconditions.find(post);
-          if (finder == postconditions.end())
-            postconditions[post] = it->set_mask;
-          else
-            finder->second |= it->set_mask;
-        }
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void PhiView::issue_guarded_update_copies(const TraversalInfo &info,
-                                       MaterializedView *dst,
-                                       FieldMask copy_mask,
-                                       PredEvent predicate_guard,
-                  const LegionMap<LogicalView*,FieldMask>::aligned &valid_views,
-                                       const RestrictInfo &restrict_info,
-                                       bool restrict_out,
-                  const LegionMap<ApEvent,FieldMask>::aligned &preconditions,
-                        LegionMap<ApEvent,FieldMask>::aligned &postconditions,
-                                       PhysicalTraceInfo &trace_info,
-                                       CopyAcrossHelper *across_helper)
-    //--------------------------------------------------------------------------
-    {
-      // First check to see if the target is already valid
-      {
-        PhysicalManager *dst_manager = dst->get_manager();
-        for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it =
-              valid_views.begin(); it != valid_views.end(); it++)
-        {
-          if (it->first->is_deferred_view())
-            continue;
-#ifdef DEBUG_LEGION
-          assert(it->first->is_materialized_view());
-#endif
-          if (it->first->as_materialized_view()->manager == dst_manager)
-          {
-            copy_mask -= it->second;
-            if (!copy_mask)
-              return;
-          }
-        }
-      }
-      LegionMap<MaterializedView*,FieldMask>::aligned src_instances;
-      LegionMap<DeferredView*,FieldMask>::aligned deferred_instances;
-      // Sort the instances
-      dst->logical_node->sort_copy_instances(info, dst, copy_mask, 
-                            valid_views, src_instances, deferred_instances);
-      if (!src_instances.empty())
-      {
-        // This has all our destination preconditions
-        // Only issue copies from fields which have values
-        FieldMask actual_copy_mask;
-        LegionMap<ApEvent,FieldMask>::aligned src_preconditions;
-        const AddressSpaceID local_space = context->runtime->address_space;
-        for (LegionMap<MaterializedView*,FieldMask>::aligned::const_iterator 
-              it = src_instances.begin(); it != src_instances.end(); it++)
-        {
-          it->first->find_copy_preconditions(0/*redop*/, true/*reading*/,
-                                             true/*single copy*/,
-                                             false/*restrict out*/,
-                                             it->second, this,
-                                             info.op->get_unique_op_id(),
-                                             info.index, local_space, 
-                                             src_preconditions,
-                                             info.map_applied_events,
-                                             trace_info);
-          actual_copy_mask |= it->second;
-        }
-        // Move in any preconditions that overlap with our set of fields
-        for (LegionMap<ApEvent,FieldMask>::aligned::const_iterator it = 
-              preconditions.begin(); it != preconditions.end(); it++)
-        {
-          FieldMask overlap = it->second & actual_copy_mask;
-          if (!overlap)
-            continue;
-          LegionMap<ApEvent,FieldMask>::aligned::iterator finder = 
-            src_preconditions.find(it->first);
-          if (finder == src_preconditions.end())
-            src_preconditions[it->first] = overlap;
-          else
-            finder->second |= overlap;
-        }
-        // issue the grouped copies and put the result in the postconditions
-        dst->logical_node->issue_grouped_copies(info, dst,false/*restrict out*/,
-                                 predicate_guard, src_preconditions, 
-                                 actual_copy_mask, src_instances, this, 
-                                 postconditions, trace_info, across_helper,
-                                 logical_node);
-      }
-      if (!deferred_instances.empty())
-      {
-        for (LegionMap<DeferredView*,FieldMask>::aligned::const_iterator it = 
-              deferred_instances.begin(); it != deferred_instances.end(); it++)
-        {
-          LegionMap<ApEvent,FieldMask>::aligned deferred_preconditions;
-          for (LegionMap<ApEvent,FieldMask>::aligned::const_iterator pre_it =
-                preconditions.begin(); pre_it != preconditions.end(); pre_it++)
-          {
-            const FieldMask overlap = pre_it->second & it->second;
-            if (!overlap)
-              continue;
-            deferred_preconditions[pre_it->first] = overlap;
-          }
-          it->first->issue_deferred_copies(info, dst, it->second, 
-              deferred_preconditions, postconditions, 
-              predicate_guard, trace_info, across_helper);
-        }
-      }
     }
 
     //--------------------------------------------------------------------------
@@ -7538,15 +4221,8 @@ namespace Legion {
         RezCheck z(rez);
         rez.serialize(did);
         rez.serialize(owner_space);
-        bool is_region = logical_node->is_region();
-        rez.serialize(is_region);
-        if (is_region)
-          rez.serialize(logical_node->as_region_node()->handle);
-        else
-          rez.serialize(logical_node->as_partition_node()->handle);
         rez.serialize(true_guard);
         rez.serialize(false_guard);
-        version_info->pack_version_numbers(rez);
         rez.serialize<UniqueID>(owner_context->get_context_uid());
         pack_phi_view(rez);
       }
@@ -7555,45 +4231,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool PhiView::is_upper_bound_node(RegionTreeNode *node) const
+    void PhiView::flatten(CopyFillAggregator &aggregator,
+                          InstanceView *dst_view, const FieldMask &src_mask,
+                          IndexSpaceExpression *expr, CopyAcrossHelper *helper)
     //--------------------------------------------------------------------------
     {
-      return version_info->is_upper_bound_node(node);
-    }
-
-    //--------------------------------------------------------------------------
-    void PhiView::get_field_versions(RegionTreeNode *node, bool split_prev,
-                                     const FieldMask &needed_fields,
-                                     FieldVersions &field_versions)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(node->get_depth() <= logical_node->get_depth());
-#endif
-      version_info->get_field_versions(node, split_prev,
-                                       needed_fields, field_versions);
-    }
-
-    //--------------------------------------------------------------------------
-    void PhiView::get_advance_versions(RegionTreeNode *node, bool base,
-                                       const FieldMask &needed_fields,
-                                       FieldVersions &field_versions)
-    //--------------------------------------------------------------------------
-    {
-      // This should never be called here
+      // TODO: implement this
       assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    void PhiView::get_split_mask(RegionTreeNode *node, 
-                                 const FieldMask &needed_fields,
-                                 FieldMask &split_mask)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(node->get_depth() <= logical_node->get_depth());
-#endif
-      version_info->get_split_mask(node, needed_fields, split_mask);
     }
 
     //--------------------------------------------------------------------------
@@ -7606,43 +4250,28 @@ namespace Legion {
       derez.deserialize(did);
       AddressSpaceID owner;
       derez.deserialize(owner);
-      bool is_region;
-      derez.deserialize(is_region);
-      RegionTreeNode *target_node;
-      if (is_region)
-      {
-        LogicalRegion handle;
-        derez.deserialize(handle);
-        target_node = runtime->forest->get_node(handle);
-      }
-      else
-      {
-        LogicalPartition handle;
-        derez.deserialize(handle);
-        target_node = runtime->forest->get_node(handle);
-      }
       PredEvent true_guard, false_guard;
       derez.deserialize(true_guard);
       derez.deserialize(false_guard);
-      DeferredVersionInfo *version_info = new DeferredVersionInfo();
-      version_info->unpack_version_numbers(derez, runtime->forest);
       UniqueID owner_uid;
       derez.deserialize(owner_uid);
-      InnerContext *owner_context = runtime->find_context(owner_uid);
+      std::set<RtEvent> ready_events;
+      RtEvent ctx_ready;
+      InnerContext *owner_context = 
+        runtime->find_context(owner_uid, false, &ctx_ready);
+      if (ctx_ready.exists())
+        ready_events.insert(ctx_ready);
       // Make the phi view but don't register it yet
       void *location;
       PhiView *view = NULL;
       if (runtime->find_pending_collectable_location(did, location))
-        view = new(location) PhiView(runtime->forest,
-                                     did, owner, version_info, target_node, 
+        view = new(location) PhiView(runtime->forest, did, owner,
                                      true_guard, false_guard, owner_context, 
                                      false/*register_now*/);
       else
-        view = new PhiView(runtime->forest, did, owner,
-                           version_info, target_node, true_guard, 
+        view = new PhiView(runtime->forest, did, owner, true_guard, 
                            false_guard, owner_context, false/*register now*/);
       // Unpack all the internal data structures
-      std::set<RtEvent> ready_events;
       view->unpack_phi_view(derez, ready_events);
       if (!ready_events.empty())
       {
@@ -7679,18 +4308,16 @@ namespace Legion {
     //--------------------------------------------------------------------------
     ReductionView::ReductionView(RegionTreeForest *ctx, DistributedID did,
                                  AddressSpaceID own_sp,
-                                 AddressSpaceID log_own, RegionTreeNode *node, 
+                                 AddressSpaceID log_own,
                                  ReductionManager *man, UniqueID own_ctx, 
                                  bool register_now)
       : InstanceView(ctx, encode_reduction_did(did), own_sp, log_own, 
-                     node, own_ctx, register_now), 
-        manager(man), remote_request_event(RtEvent::NO_RT_EVENT)
+                     own_ctx, register_now), manager(man)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(manager != NULL);
 #endif
-      logical_node->register_instance_view(manager, owner_context, this);
       manager->add_nested_resource_ref(did);
 #ifdef LEGION_GC
       log_garbage.info("GC Reduction View %lld %d %lld", 
@@ -7701,7 +4328,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ReductionView::ReductionView(const ReductionView &rhs)
-      : InstanceView(NULL, 0, 0, 0, NULL, 0, false), manager(NULL)
+      : InstanceView(NULL, 0, 0, 0, 0, false), manager(NULL)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -7712,8 +4339,6 @@ namespace Legion {
     ReductionView::~ReductionView(void)
     //--------------------------------------------------------------------------
     {
-      // Always unregister ourselves with the region tree node
-      logical_node->unregister_instance_view(manager, owner_context);
       if (manager->remove_nested_resource_ref(did))
       {
         if (manager->is_list_manager())
@@ -7728,8 +4353,7 @@ namespace Legion {
               it != initial_user_events.end(); it++)
           filter_local_users(*it);
       }
-#if !defined(LEGION_SPY) && !defined(EVENT_GRAPH_TRACE) && \
-      defined(DEBUG_LEGION)
+#if !defined(LEGION_DISABLE_EVENT_PRUNING) && defined(LEGION_DEBUG)
       assert(reduction_users.empty());
       assert(reading_users.empty());
       assert(outstanding_gc_events.empty());
@@ -7746,195 +4370,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReductionView::perform_reduction(InstanceView *target,
-                                          const FieldMask &reduce_mask,
-                                          VersionTracker *versions,
-                                          Operation *op, unsigned index,
-                                          std::set<RtEvent> &map_applied_events,
-                                          PredEvent pred_guard, 
-                                          PhysicalTraceInfo &trace_info,
-                                          bool restrict_out)
-    //--------------------------------------------------------------------------
-    {
-      DETAILED_PROFILER(context->runtime,REDUCTION_VIEW_PERFORM_REDUCTION_CALL);
-      std::vector<CopySrcDstField> src_fields;
-      std::vector<CopySrcDstField> dst_fields;
-
-      bool fold = target->reduce_to(manager->redop, reduce_mask, dst_fields);
-      this->reduce_from(manager->redop, reduce_mask, src_fields);
-
-      LegionMap<ApEvent,FieldMask>::aligned preconditions;
-      target->find_copy_preconditions(manager->redop, false/*reading*/, 
-            false/*single copy*/, restrict_out, reduce_mask, versions, 
-            op->get_unique_op_id(), index, local_space, preconditions, 
-            map_applied_events, trace_info);
-      this->find_copy_preconditions(manager->redop, true/*reading*/, 
-           true/*single copy*/, restrict_out, reduce_mask, versions, 
-           op->get_unique_op_id(), index, local_space, preconditions, 
-           map_applied_events, trace_info);
-      std::set<ApEvent> event_preconds;
-      for (LegionMap<ApEvent,FieldMask>::aligned::const_iterator it = 
-            preconditions.begin(); it != preconditions.end(); it++)
-      {
-        event_preconds.insert(it->first);
-      }
-      ApEvent reduce_pre = Runtime::merge_events(event_preconds); 
-      if (trace_info.recording)
-      {
-#ifdef DEBUG_LEGION
-        assert(trace_info.tpl != NULL && trace_info.tpl->is_recording());
-#endif
-        trace_info.tpl->record_merge_events(reduce_pre, event_preconds,
-            trace_info.op);
-        ContextID logical_ctx =
-          op->find_logical_context(index)->get_context().get_id();
-        ContextID physical_ctx =
-          op->find_physical_context(index)->get_context().get_id();
-        trace_info.tpl->record_copy_views(this, reduce_mask,
-            logical_ctx, physical_ctx, target, reduce_mask,
-            logical_ctx, physical_ctx);
-      }
-      ApEvent reduce_post = manager->issue_reduction(op, 
-                                                     src_fields, dst_fields,
-                                                     target->logical_node,
-                                                     reduce_pre, pred_guard,
-                                                     fold, true/*precise*/,
-                                                     trace_info,
-                                                     NULL/*intersect*/);
-      target->add_copy_user(manager->redop, reduce_post, versions,
-                           op->get_unique_op_id(), index, reduce_mask, 
-                           false/*reading*/, restrict_out, local_space, 
-                           map_applied_events, trace_info);
-      this->add_copy_user(manager->redop, reduce_post, versions,
-                         op->get_unique_op_id(), index, reduce_mask, 
-                         true/*reading*/, restrict_out, local_space, 
-                         map_applied_events, trace_info);
-      if (restrict_out)
-        op->record_restrict_postcondition(reduce_post);
-    } 
-
-    //--------------------------------------------------------------------------
-    ApEvent ReductionView::perform_deferred_reduction(MaterializedView *target,
-                                                    const FieldMask &red_mask,
-                                                    VersionTracker *versions,
-                                                   const std::set<ApEvent> &pre,
-                                                  Operation *op, unsigned index,
-                                                    PredEvent predicate_guard,
-                                                  PhysicalTraceInfo &trace_info,
-                                                    CopyAcrossHelper *helper,
-                                                    RegionTreeNode *intersect,
-                                          std::set<RtEvent> &map_applied_events)
-    //--------------------------------------------------------------------------
-    {
-      DETAILED_PROFILER(context->runtime, 
-                        REDUCTION_VIEW_PERFORM_DEFERRED_REDUCTION_CALL);
-      std::vector<CopySrcDstField> src_fields;
-      std::vector<CopySrcDstField> dst_fields;
-      bool fold = target->reduce_to(manager->redop, red_mask, 
-                                    dst_fields, helper);
-      this->reduce_from(manager->redop, red_mask, src_fields);
-      LegionMap<ApEvent,FieldMask>::aligned src_pre;
-      // Don't need to ask the target for preconditions as they 
-      // are included as part of the pre set
-      find_copy_preconditions(manager->redop, true/*reading*/, 
-                              true/*single copy*/, false/*restrict out*/,
-                              red_mask, versions, op->get_unique_op_id(), index,
-                              local_space, src_pre, map_applied_events,
-                              trace_info);
-      std::set<ApEvent> preconditions = pre;
-      for (LegionMap<ApEvent,FieldMask>::aligned::const_iterator it =
-            src_pre.begin(); it != src_pre.end(); it++)
-      {
-        preconditions.insert(it->first);
-      }
-      ApEvent reduce_pre = Runtime::merge_events(preconditions); 
-      if (trace_info.recording)
-      {
-#ifdef DEBUG_LEGION
-        assert(trace_info.tpl != NULL && trace_info.tpl->is_recording());
-#endif
-        trace_info.tpl->record_merge_events(reduce_pre, preconditions,
-            trace_info.op);
-        ContextID logical_ctx =
-          op->find_logical_context(index)->get_context().get_id();
-        ContextID physical_ctx =
-          op->find_physical_context(index)->get_context().get_id();
-        trace_info.tpl->record_copy_views(this, red_mask,
-            logical_ctx, physical_ctx, target, red_mask,
-            logical_ctx, physical_ctx);
-      }
-      ApEvent reduce_post = target->logical_node->issue_copy(op, 
-                             src_fields, dst_fields, reduce_pre, 
-                             predicate_guard, trace_info, intersect,
-                             manager->redop, fold);
-      // No need to add the user to the destination as that will
-      // be handled by the caller using the reduce post event we return
-      add_copy_user(manager->redop, reduce_post, versions,
-                    op->get_unique_op_id(), index, red_mask, 
-                    true/*reading*/, false/*restrict out*/,
-                    local_space, map_applied_events, trace_info);
-      return reduce_post;
-    }
-
-    //--------------------------------------------------------------------------
-    ApEvent ReductionView::perform_deferred_across_reduction(
-                              MaterializedView *target, FieldID dst_field, 
-                              FieldID src_field, unsigned src_index, 
-                              VersionTracker *versions,
-                              const std::set<ApEvent> &preconds,
-                              Operation *op, unsigned index,
-                              PredEvent predicate_guard,
-                              RegionTreeNode *intersect,
-                              std::set<RtEvent> &map_applied_events,
-                              PhysicalTraceInfo &trace_info)
-    //--------------------------------------------------------------------------
-    {
-      DETAILED_PROFILER(context->runtime, 
-                        REDUCTION_VIEW_PERFORM_DEFERRED_REDUCTION_ACROSS_CALL);
-      std::vector<CopySrcDstField> src_fields;
-      std::vector<CopySrcDstField> dst_fields;
-      const bool fold = false;
-      target->copy_field(dst_field, dst_fields);
-      FieldMask red_mask; red_mask.set_bit(src_index);
-      this->reduce_from(manager->redop, red_mask, src_fields);
-      LegionMap<ApEvent,FieldMask>::aligned src_pre;
-      // Don't need to ask the target for preconditions as they 
-      // are included as part of the pre set
-      find_copy_preconditions(manager->redop, true/*reading*/, 
-                              true/*singe copy*/, false/*restrict out*/,
-                              red_mask, versions, op->get_unique_op_id(), index,
-                              local_space, src_pre, map_applied_events,
-                              trace_info);
-      std::set<ApEvent> preconditions = preconds;
-      for (LegionMap<ApEvent,FieldMask>::aligned::const_iterator it = 
-            src_pre.begin(); it != src_pre.end(); it++)
-      {
-        preconditions.insert(it->first);
-      }
-      ApEvent reduce_pre = Runtime::merge_events(preconditions); 
-      if (trace_info.recording)
-      {
-#ifdef DEBUG_LEGION
-        assert(false); // XXX: This seems to be a dead code
-#endif
-      }
-      ApEvent reduce_post = manager->issue_reduction(op, 
-                                             src_fields, dst_fields,
-                                             intersect, reduce_pre,
-                                             predicate_guard,
-                                             fold, false/*precise*/,
-                                             trace_info,
-                                             target->logical_node);
-      // No need to add the user to the destination as that will
-      // be handled by the caller using the reduce post event we return
-      add_copy_user(manager->redop, reduce_post, versions,
-                    op->get_unique_op_id(), index, red_mask, 
-                    true/*reading*/, false/*restrict out*/,
-                    local_space, map_applied_events, trace_info);
-      return reduce_post;
-    }
-
-    //--------------------------------------------------------------------------
     PhysicalManager* ReductionView::get_manager(void) const
     //--------------------------------------------------------------------------
     {
@@ -7942,460 +4377,352 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    LogicalView* ReductionView::get_subview(const LegionColor c)
+    void ReductionView::add_initial_user(ApEvent term_event, 
+                                         const RegionUsage &usage,
+                                         const FieldMask &user_mask,
+                                         IndexSpaceExpression *user_expr,
+                                         const UniqueID op_id,
+                                         const unsigned index)
     //--------------------------------------------------------------------------
     {
-      // Right now we don't make sub-views for reductions
-      return this;
+#ifdef DEBUG_LEGION
+      assert(is_logical_owner());
+#endif
+      // We don't use field versions for doing interference tests on
+      // reductions so there is no need to record it
+      PhysicalUser *user = new PhysicalUser(usage, user_expr, op_id, index, 
+                                            false/*copy*/, true/*covers*/);
+      user->add_reference();
+      add_physical_user(user, IS_READ_ONLY(usage), term_event, user_mask);
+      initial_user_events.insert(term_event);
+      // Don't need to actual launch a collection task, destructor
+      // will handle this case
+      outstanding_gc_events.insert(term_event);
     }
 
     //--------------------------------------------------------------------------
-    void ReductionView::find_copy_preconditions(ReductionOpID redop,
-                                                bool reading,
-                                                bool single_copy,
-                                                bool restrict_out,
-                                                const FieldMask &copy_mask,
-                                                VersionTracker *versions,
-                                                const UniqueID creator_op_id,
-                                                const unsigned index,
-                                                const AddressSpaceID source,
-                           LegionMap<ApEvent,FieldMask>::aligned &preconditions,
-                                              std::set<RtEvent> &applied_events,
-                                                PhysicalTraceInfo &trace_info,
-                                                bool can_filter)
+    ApEvent ReductionView::register_user(const RegionUsage &usage,
+                                         const FieldMask &user_mask,
+                                         IndexSpaceNode *user_expr,
+                                         const UniqueID op_id,
+                                         const unsigned index,
+                                         ApEvent term_event,
+                                         std::set<RtEvent> &applied_events,
+                                         const PhysicalTraceInfo &trace_info,
+                                         const AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      DETAILED_PROFILER(context->runtime, 
-                        REDUCTION_VIEW_FIND_COPY_PRECONDITIONS_CALL);
 #ifdef DEBUG_LEGION
-      assert(can_filter); // should always be able to filter reductions
-#endif
-      ApEvent use_event = manager->get_use_event();
-      if (use_event.exists())
-      {
-        LegionMap<ApEvent,FieldMask>::aligned::iterator finder = 
-            preconditions.find(use_event);
-        if (finder == preconditions.end())
-          preconditions[use_event] = copy_mask;
-        else
-          finder->second |= copy_mask;
-      }
-      if (!is_logical_owner() && reading)
-        perform_remote_valid_check();
-      AutoLock v_lock(view_lock,1,false/*exclusive*/);
-      if (reading)
-      {
-        // Register dependences on any reducers
-        for (LegionMap<ApEvent,EventUsers>::aligned::const_iterator rit = 
-              reduction_users.begin(); rit != reduction_users.end(); rit++)
-        {
-          const EventUsers &event_users = rit->second;
-          if (event_users.single)
-          {
-            FieldMask overlap = copy_mask & event_users.user_mask;
-            if (!overlap)
-              continue;
-            LegionMap<ApEvent,FieldMask>::aligned::iterator finder = 
-              preconditions.find(rit->first);
-            if (finder == preconditions.end())
-              preconditions[rit->first] = overlap;
-            else
-              finder->second |= overlap;
-          }
-          else
-          {
-            if (!(copy_mask * event_users.user_mask))
-            {
-              for (LegionMap<PhysicalUser*,FieldMask>::aligned::const_iterator 
-                    it = event_users.users.multi_users->begin(); it !=
-                    event_users.users.multi_users->end(); it++)
-              {
-                FieldMask overlap = copy_mask & it->second;
-                if (!overlap)
-                  continue;
-                LegionMap<ApEvent,FieldMask>::aligned::iterator finder = 
-                  preconditions.find(rit->first);
-                if (finder == preconditions.end())
-                  preconditions[rit->first] = overlap;
-                else
-                  finder->second |= overlap;
-              }
-            }
-          }
-        }
-      }
+      if (IS_REDUCE(usage))
+        assert(usage.redop == manager->redop);
       else
-      {
-        // Register dependences on any readers
-        for (LegionMap<ApEvent,EventUsers>::aligned::const_iterator rit =
-              reading_users.begin(); rit != reading_users.end(); rit++)
-        {
-          const EventUsers &event_users = rit->second;
-          if (event_users.single)
-          {
-            FieldMask overlap = copy_mask & event_users.user_mask;
-            if (!overlap)
-              continue;
-            LegionMap<ApEvent,FieldMask>::aligned::iterator finder =
-              preconditions.find(rit->first);
-            if (finder == preconditions.end())
-              preconditions[rit->first] = overlap;
-            else
-              finder->second |= overlap;
-          }
-          else
-          {
-            if (!(copy_mask * event_users.user_mask))
-            {
-              for (LegionMap<PhysicalUser*,FieldMask>::aligned::const_iterator 
-                    it = event_users.users.multi_users->begin(); it !=
-                    event_users.users.multi_users->end(); it++)
-              {
-                FieldMask overlap = copy_mask & it->second;
-                if (!overlap)
-                  continue;
-                LegionMap<ApEvent,FieldMask>::aligned::iterator finder =
-                  preconditions.find(rit->first);
-                if (finder == preconditions.end())
-                  preconditions[rit->first] = overlap;
-                else
-                  finder->second |= overlap;
-              }
-            }
-          }
-        }
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void ReductionView::add_copy_user(ReductionOpID redop, ApEvent copy_term,
-                                      VersionTracker *versions,
-                                      const UniqueID creator_op_id,
-                                      const unsigned index,
-                                      const FieldMask &mask, 
-                                      bool reading, bool restrict_out,
-                                      const AddressSpaceID source,
-                                      std::set<RtEvent> &applied_events,
-                                      PhysicalTraceInfo &trace_info)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(redop == manager->redop);
+        assert(IS_READ_ONLY(usage));
 #endif
+      // Quick test for empty index space expressions
+      if (user_expr->is_empty())
+        return manager->get_use_event();
       if (!is_logical_owner())
       {
-        // If we are not the logical owner we have to send our result back
-        RtUserEvent remote_applied_event = Runtime::create_rt_user_event();
+        // If we're not the logical owner send a message there 
+        // to do the analysis and provide a user event to trigger
+        // with the precondition
+        ApUserEvent ready_event = Runtime::create_ap_user_event();
+        RtUserEvent applied_event = Runtime::create_rt_user_event();
         Serializer rez;
         {
           RezCheck z(rez);
           rez.serialize(did);
-          rez.serialize(remote_applied_event);
-          rez.serialize(copy_term);
-          rez.serialize(mask);
-          rez.serialize(creator_op_id);
+          rez.serialize(usage);
+          rez.serialize(user_mask);
+          rez.serialize(user_expr->handle);
+          rez.serialize(op_id);
           rez.serialize(index);
-          rez.serialize<bool>(true); // is_copy
-          rez.serialize(redop);
-          rez.serialize<bool>(reading);
+          rez.serialize(term_event);
+          rez.serialize(ready_event);
+          rez.serialize(applied_event);
+          trace_info.pack_trace_info<true/*pack operation*/>(rez,
+                                  applied_events, logical_owner);
         }
-        runtime->send_view_remote_update(logical_owner, rez);
-        applied_events.insert(remote_applied_event);
+        // Add a remote valid reference that will be removed by 
+        // the receiver once the changes have been applied
+        WrapperReferenceMutator mutator(applied_events);
+        add_base_valid_ref(REMOTE_DID_REF, &mutator);
+        runtime->send_view_register_user(logical_owner, rez);
+        applied_events.insert(applied_event);
+        return ready_event;
       }
-      // Quick test: only need to do this if copy term exists
-      bool issue_collect = false;
-      if (copy_term.exists())
+      else
       {
-        PhysicalUser *user;
-        // We don't use field versions for doing interference 
-        // tests on reductions so no need to record it
-#ifdef DEBUG_LEGION
-        assert(logical_node->is_region());
-#endif
+        std::set<ApEvent> wait_on_events;
+        ApEvent start_use_event = manager->get_use_event();
+        if (start_use_event.exists())
+          wait_on_events.insert(start_use_event);
+        if (IS_READ_ONLY(usage))
+        {
+          AutoLock v_lock(view_lock,1,false/*exclusive*/);
+          find_reading_preconditions(user_mask, user_expr,op_id,wait_on_events);
+        }
+        else
+        {
+          AutoLock v_lock(view_lock,1,false/*exclusive*/);
+          find_reducing_preconditions(user_mask,user_expr,op_id,wait_on_events);
+        }
+        // Add our local user
+        const bool issue_collect = add_user(usage, user_expr, user_mask, 
+                                      term_event, op_id, index, false/*copy*/, 
+                                      applied_events, trace_info.recording);
+        // Launch the garbage collection task, if it doesn't exist
+        // then the user wasn't registered anyway, see add_local_user
+        if (issue_collect)
+        {
+          WrapperReferenceMutator mutator(applied_events);
+          defer_collect_user(get_manager(), term_event, &mutator);
+        }
+        if (!wait_on_events.empty())
+          return Runtime::merge_events(&trace_info, wait_on_events);
+        else
+          return ApEvent::NO_AP_EVENT;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent ReductionView::find_copy_preconditions(bool reading,
+                                            const FieldMask &copy_mask,
+                                            IndexSpaceExpression *copy_expr,
+                                            UniqueID op_id, unsigned index,
+                                            CopyFillAggregator &aggregator,
+                                            const bool trace_recording,
+                                            const AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      if (!is_logical_owner())
+      {
+        RtUserEvent ready_event = Runtime::create_rt_user_event();
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(did);
+          rez.serialize<bool>(reading);
+          rez.serialize(copy_mask);
+          copy_expr->pack_expression(rez, logical_owner);
+          rez.serialize(op_id);
+          rez.serialize(index);
+          rez.serialize(&aggregator);
+          rez.serialize(ready_event);
+          rez.serialize<bool>(trace_recording);
+        }
+        runtime->send_view_find_copy_preconditions_request(logical_owner, rez);
+        return ready_event;
+      }
+      else
+      {
+        EventFieldExprs preconditions;
+        ApEvent start_use_event = manager->get_use_event();
+        if (start_use_event.exists())
+          preconditions[start_use_event].insert(copy_expr, copy_mask);
         if (reading)
         {
-          RegionUsage usage(READ_ONLY, EXCLUSIVE, 0);
-          user = new PhysicalUser(usage, INVALID_COLOR, creator_op_id, index, 
-                                  logical_node->as_region_node());
+          AutoLock v_lock(view_lock,1,false/*exclusive*/);
+          find_reading_preconditions(copy_mask, copy_expr, op_id,preconditions);
         }
         else
         {
-          RegionUsage usage(REDUCE, EXCLUSIVE, redop);
-          user = new PhysicalUser(usage, INVALID_COLOR, creator_op_id, index, 
-                                  logical_node->as_region_node());
+          AutoLock v_lock(view_lock,1,false/*exclusive*/);
+          find_reducing_preconditions(copy_mask, copy_expr,op_id,preconditions);
         }
-        AutoLock v_lock(view_lock);
-        add_physical_user(user, reading, copy_term, mask);
-        if (trace_info.recording)
-        {
-          trace_info.tpl->record_outstanding_gc_event(this, copy_term);
-        }
-        else
-        {
-          // Update the reference users
-          if (outstanding_gc_events.find(copy_term) ==
-              outstanding_gc_events.end())
-          {
-            outstanding_gc_events.insert(copy_term);
-            issue_collect = true;
-          }
-        }
-      }
-      // Launch the garbage collection task if necessary
-      if (issue_collect)
-      {
-        WrapperReferenceMutator mutator(applied_events);
-        defer_collect_user(copy_term, &mutator);
+        // Return any preconditions we found to the aggregator
+        if (!preconditions.empty())
+          aggregator.record_preconditions(this, reading, preconditions);
+        // We're done with the analysis
+        return RtEvent::NO_RT_EVENT;
       }
     }
 
     //--------------------------------------------------------------------------
-    ApEvent ReductionView::find_user_precondition(const RegionUsage &usage,
-                                                  ApEvent term_event,
-                                                  const FieldMask &user_mask,
-                                                  Operation *op, 
-                                                  const unsigned index,
-                                                  VersionTracker *versions,
-                                              std::set<RtEvent> &applied_events,
-                                                  PhysicalTraceInfo &trace_info)
+    void ReductionView::find_copy_preconditions_remote(bool reading,
+                                            const FieldMask &copy_mask,
+                                            IndexSpaceExpression *copy_expr,
+                                            UniqueID op_id, unsigned index,
+                                            EventFieldExprs &preconditions,
+                                            const bool trace_recording,
+                                            const AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      DETAILED_PROFILER(context->runtime, 
-                        REDUCTION_VIEW_FIND_USER_PRECONDITIONS_CALL);
 #ifdef DEBUG_LEGION
-      if (IS_REDUCE(usage))
-        assert(usage.redop == manager->redop);
-      else
-        assert(IS_READ_ONLY(usage));
+      assert(is_logical_owner());
+      assert(preconditions.empty());
 #endif
-      const bool reading = IS_READ_ONLY(usage);
-      if (!is_logical_owner() && reading)
-        perform_remote_valid_check();
-      std::set<ApEvent> wait_on;
-      ApEvent use_event = manager->get_use_event();
-      if (use_event.exists())
-        wait_on.insert(use_event);
+      ApEvent start_use_event = manager->get_use_event();
+      if (start_use_event.exists())
+        preconditions[start_use_event].insert(copy_expr, copy_mask);
+      if (reading)
       {
         AutoLock v_lock(view_lock,1,false/*exclusive*/);
-        if (!reading)
-          find_reducing_preconditions(user_mask, term_event, wait_on);
-        else
-          find_reading_preconditions(user_mask, term_event, wait_on);
+        find_reading_preconditions(copy_mask, copy_expr, op_id, preconditions);
       }
-      ApEvent result = Runtime::merge_events(wait_on);
-      if (trace_info.recording)
-      {
-#ifdef DEBUG_LEGION
-        assert(trace_info.tpl != NULL && trace_info.tpl->is_recording());
-#endif
-        trace_info.tpl->record_merge_events(result, wait_on,
-            trace_info.op);
-      }
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    void ReductionView::add_user(const RegionUsage &usage, ApEvent term_event,
-                                 const FieldMask &user_mask, Operation *op,
-                                 const unsigned index, AddressSpaceID source,
-                                 VersionTracker *versions,
-                                 std::set<RtEvent> &applied_events,
-                                 PhysicalTraceInfo &trace_info)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      if (IS_REDUCE(usage))
-        assert(usage.redop == manager->redop);
       else
-        assert(IS_READ_ONLY(usage));
-#endif
-      if (!term_event.exists())
-        return;
-      UniqueID op_id = op->get_unique_op_id();
-      if (!is_logical_owner())
       {
-        // Send back the results to the logical owner node
-        RtUserEvent remote_applied_event = Runtime::create_rt_user_event();
-        Serializer rez;
-        {
-          RezCheck z(rez);
-          rez.serialize(did);
-          rez.serialize(remote_applied_event);
-          rez.serialize(term_event);
-          rez.serialize(user_mask);
-          rez.serialize(op_id);
-          rez.serialize(index);
-          rez.serialize<bool>(false); // is copy
-          rez.serialize(usage);
-        }
-        runtime->send_view_remote_update(logical_owner, rez);
-        applied_events.insert(remote_applied_event);
-      }
-#ifdef DEBUG_LEGION
-      assert(logical_node->is_region());
-#endif
-      const bool reading = IS_READ_ONLY(usage);
-      PhysicalUser *new_user = new PhysicalUser(usage, INVALID_COLOR, op_id, 
-                                      index, logical_node->as_region_node());
-      bool issue_collect = false;
-      {
-        AutoLock v_lock(view_lock);
-        add_physical_user(new_user, reading, term_event, user_mask);
-        if (trace_info.recording)
-        {
-          trace_info.tpl->record_outstanding_gc_event(this, term_event);
-        }
-        else
-        {
-          // Only need to do this if we actually have a term event
-          if (outstanding_gc_events.find(term_event) == 
-              outstanding_gc_events.end())
-          {
-            outstanding_gc_events.insert(term_event);
-            issue_collect = true;
-          }
-        }
-      }
-      // Launch the garbage collection task if we need to
-      if (issue_collect)
-      {
-        WrapperReferenceMutator mutator(applied_events);
-        defer_collect_user(term_event, &mutator);
+        AutoLock v_lock(view_lock,1,false/*exclusive*/);
+        find_reducing_preconditions(copy_mask, copy_expr, op_id, preconditions);
       }
     }
 
     //--------------------------------------------------------------------------
-    ApEvent ReductionView::add_user_fused(const RegionUsage &usage, 
-                                          ApEvent term_event,
-                                          const FieldMask &user_mask, 
-                                          Operation *op, const unsigned index,
-                                          VersionTracker *versions,
-                                          const AddressSpaceID source,
-                                          std::set<RtEvent> &applied_events,
-                                          PhysicalTraceInfo &trace_info,
-                                          bool update_versions/*=true*/)
+    void ReductionView::add_copy_user(bool reading, ApEvent term_event, 
+                                      const FieldMask &copy_mask,
+                                      IndexSpaceExpression *copy_expr,
+                                      UniqueID op_id, unsigned index,
+                                      std::set<RtEvent> &applied_events,
+                                      const bool trace_recording,
+                                      const AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      if (IS_REDUCE(usage))
-        assert(usage.redop == manager->redop);
-      else
-        assert(IS_READ_ONLY(usage));
-#endif
-      UniqueID op_id = op->get_unique_op_id();
       if (!is_logical_owner())
       {
-        // Send back the results to the logical owner node
-        RtUserEvent remote_applied_event = Runtime::create_rt_user_event();
+        RtUserEvent applied_event = Runtime::create_rt_user_event();
         Serializer rez;
         {
           RezCheck z(rez);
           rez.serialize(did);
-          rez.serialize(remote_applied_event);
+          rez.serialize<bool>(reading);
           rez.serialize(term_event);
-          rez.serialize(user_mask);
+          rez.serialize(copy_mask);
+          copy_expr->pack_expression(rez, logical_owner);
           rez.serialize(op_id);
           rez.serialize(index);
-          rez.serialize<bool>(false); // is copy
-          rez.serialize(usage);
+          rez.serialize(applied_event);
+          rez.serialize<bool>(trace_recording);
         }
-        runtime->send_view_remote_update(logical_owner, rez);
-        applied_events.insert(remote_applied_event);
-      }
-      const bool reading = IS_READ_ONLY(usage);
-      std::set<ApEvent> wait_on;
-      ApEvent use_event = manager->get_use_event();
-      if (use_event.exists())
-        wait_on.insert(use_event);
-      if (!is_logical_owner() && reading)
-        perform_remote_valid_check();
-#ifdef DEBUG_LEGION
-      assert(logical_node->is_region());
-#endif
-      // Who cares just hold the lock in exlcusive mode, this analysis
-      // shouldn't be too expensive for reduction views
-      bool issue_collect = false;
-      PhysicalUser *new_user = new PhysicalUser(usage, INVALID_COLOR, op_id, 
-                                      index, logical_node->as_region_node());
-      {
-        AutoLock v_lock(view_lock);
-        if (!reading) // Reducing
-          find_reducing_preconditions(user_mask, term_event, wait_on);
-        else // We're reading so wait on any reducers
-          find_reading_preconditions(user_mask, term_event, wait_on);  
-        // Only need to do this if we actually have a term event
-        if (term_event.exists())
-        {
-          add_physical_user(new_user, reading, term_event, user_mask);
-          if (trace_info.recording)
-          {
-            trace_info.tpl->record_outstanding_gc_event(this, term_event);
-          }
-          else
-          {
-            if (outstanding_gc_events.find(term_event) ==
-                outstanding_gc_events.end())
-            {
-              outstanding_gc_events.insert(term_event);
-              issue_collect = true;
-            }
-          }
-        }
-      }
-      // Launch the garbage collection task if we need to
-      if (issue_collect)
-      {
+        // Add a remote valid reference that will be removed by 
+        // the receiver once the changes have been applied
         WrapperReferenceMutator mutator(applied_events);
-        defer_collect_user(term_event, &mutator);
+        add_base_valid_ref(REMOTE_DID_REF, &mutator);
+        runtime->send_view_add_copy_user(logical_owner, rez);
+        applied_events.insert(applied_event);
       }
-      ApEvent result = Runtime::merge_events(wait_on);
-      if (trace_info.recording)
+      else
       {
-#ifdef DEBUG_LEGION
-        assert(trace_info.tpl != NULL && trace_info.tpl->is_recording());
-#endif
-        trace_info.tpl->record_merge_events(result, wait_on,
-            trace_info.op);
+        const RegionUsage usage(reading ? READ_ONLY : REDUCE, 
+                                EXCLUSIVE, manager->redop);
+        const bool issue_collect = add_user(usage, copy_expr, copy_mask,
+          term_event, op_id, index,true/*copy*/,applied_events,trace_recording);
+        // Launch the garbage collection task, if it doesn't exist
+        // then the user wasn't registered anyway, see add_local_user
+        if (issue_collect)
+        {
+          WrapperReferenceMutator mutator(applied_events);
+          defer_collect_user(get_manager(), term_event, &mutator);
+        }
       }
-      // Return our result
-      return result;
     }
 
     //--------------------------------------------------------------------------
     void ReductionView::find_reducing_preconditions(const FieldMask &user_mask,
-                                                    ApEvent term_event,
-                                                    std::set<ApEvent> &wait_on)
+                                               IndexSpaceExpression *user_expr,
+                                               UniqueID op_id,
+                                               std::set<ApEvent> &wait_on)
     //--------------------------------------------------------------------------
     {
       // lock must be held by caller
-      for (LegionMap<ApEvent,EventUsers>::aligned::const_iterator rit = 
-            reading_users.begin(); rit != reading_users.end(); rit++)
+      for (EventFieldUsers::const_iterator uit = reading_users.begin();
+            uit != reading_users.end(); uit++)
       {
-        if (rit->first == term_event)
+        const FieldMask event_mask = uit->second.get_valid_mask() & user_mask;
+        if (!event_mask)
           continue;
-        const EventUsers &event_users = rit->second;
-        if (event_users.single)
+        for (EventUsers::const_iterator it = uit->second.begin();
+              it != uit->second.end(); it++)
         {
-          FieldMask overlap = user_mask & event_users.user_mask;
+          if (it->first->op_id == op_id)
+            continue;
+          const FieldMask overlap = event_mask & it->second;
           if (!overlap)
             continue;
-          wait_on.insert(rit->first);
+          IndexSpaceExpression *expr_overlap = 
+            context->intersect_index_spaces(user_expr, it->first->expr);
+          if (expr_overlap->is_empty())
+            continue;
+          // Once we have one event precondition we are done
+          wait_on.insert(uit->first);
+          break;
         }
-        else
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void ReductionView::find_reading_preconditions(const FieldMask &user_mask,
+                                              IndexSpaceExpression *user_expr,
+                                              UniqueID op_id,
+                                              std::set<ApEvent> &wait_on)
+    //--------------------------------------------------------------------------
+    {
+      // lock must be held by caller
+      for (EventFieldUsers::const_iterator uit = reduction_users.begin();
+            uit != reduction_users.end(); uit++)
+      {
+        const FieldMask event_mask = uit->second.get_valid_mask() & user_mask;
+        if (!event_mask)
+          continue;
+        for (EventUsers::const_iterator it = uit->second.begin();
+              it != uit->second.end(); it++)
         {
-          if (!(user_mask * event_users.user_mask))
+          if (it->first->op_id == op_id)
+            continue;
+          const FieldMask overlap = event_mask & it->second;
+          if (!overlap)
+            continue;
+          IndexSpaceExpression *expr_overlap = 
+            context->intersect_index_spaces(user_expr, it->first->expr);
+          if (expr_overlap->is_empty())
+            continue;
+          // Once we have one event precondition we are done
+          wait_on.insert(uit->first);
+          break;
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void ReductionView::find_reducing_preconditions(const FieldMask &user_mask,
+                                               IndexSpaceExpression *user_expr,
+                                               UniqueID op_id,
+                                               EventFieldExprs &preconditions)
+    //--------------------------------------------------------------------------
+    {
+      // lock must be held by caller
+      for (EventFieldUsers::const_iterator uit = reading_users.begin();
+            uit != reading_users.end(); uit++)
+      {
+        const FieldMask event_mask = uit->second.get_valid_mask() & user_mask;
+        if (!event_mask)
+          continue;
+        EventFieldExprs::iterator event_finder = preconditions.find(uit->first);
+        for (EventUsers::const_iterator it = uit->second.begin();
+              it != uit->second.end(); it++)
+        {
+          if (it->first->op_id == op_id)
+            continue;
+          const FieldMask overlap = event_mask & it->second;
+          if (!overlap)
+            continue;
+          IndexSpaceExpression *expr_overlap = 
+            context->intersect_index_spaces(user_expr, it->first->expr);
+          if (expr_overlap->is_empty())
+            continue;
+          // Have a precondition so we need to record it
+          if (event_finder == preconditions.end())
           {
-            for (LegionMap<PhysicalUser*,FieldMask>::aligned::const_iterator
-                  it = event_users.users.multi_users->begin(); it !=
-                  event_users.users.multi_users->end(); it++)
-            {
-              FieldMask overlap = user_mask & it->second;
-              if (!overlap)
-                continue;
-              // Once we have one event precondition we are done
-              wait_on.insert(rit->first);
-              break;
-            }
+            preconditions[uit->first].insert(expr_overlap, overlap);
+            event_finder = preconditions.find(uit->first);
+          }
+          else
+          {
+            FieldMaskSet<IndexSpaceExpression>::iterator finder = 
+              event_finder->second.find(expr_overlap);
+            if (finder == event_finder->second.end())
+              event_finder->second.insert(expr_overlap, overlap);
+            else
+              finder.merge(overlap);
           }
         }
       }
@@ -8403,42 +4730,77 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ReductionView::find_reading_preconditions(const FieldMask &user_mask,
-                                                   ApEvent term_event,
-                                                   std::set<ApEvent> &wait_on)
+                                               IndexSpaceExpression *user_expr,
+                                               UniqueID op_id,
+                                               EventFieldExprs &preconditions)
     //--------------------------------------------------------------------------
     {
       // lock must be held by caller
-      for (LegionMap<ApEvent,EventUsers>::aligned::const_iterator rit = 
-            reduction_users.begin(); rit != reduction_users.end(); rit++)
+      for (EventFieldUsers::const_iterator uit = reduction_users.begin();
+            uit != reduction_users.end(); uit++)
       {
-        if (rit->first == term_event)
+        const FieldMask event_mask = uit->second.get_valid_mask() & user_mask;
+        if (!event_mask)
           continue;
-        const EventUsers &event_users = rit->second;
-        if (event_users.single)
+        EventFieldExprs::iterator event_finder = preconditions.find(uit->first);
+        for (EventUsers::const_iterator it = uit->second.begin();
+              it != uit->second.end(); it++)
         {
-          FieldMask overlap = user_mask & event_users.user_mask;
+          if (it->first->op_id == op_id)
+            continue;
+          const FieldMask overlap = event_mask & it->second;
           if (!overlap)
             continue;
-          wait_on.insert(rit->first);
-        }
-        else
-        {
-          if (!(user_mask * event_users.user_mask))
+          IndexSpaceExpression *expr_overlap = 
+            context->intersect_index_spaces(user_expr, it->first->expr);
+          if (expr_overlap->is_empty())
+            continue;
+          // Have a precondition so we need to record it
+          if (event_finder == preconditions.end())
           {
-            for (LegionMap<PhysicalUser*,FieldMask>::aligned::const_iterator 
-                  it = event_users.users.multi_users->begin(); it !=
-                  event_users.users.multi_users->end(); it++)
-            {
-              FieldMask overlap = user_mask & it->second;
-              if (!overlap)
-                continue;
-              // Once we have one event precondition we are done
-              wait_on.insert(rit->first);
-              break;
-            }
+            preconditions[uit->first].insert(expr_overlap, overlap);
+            event_finder = preconditions.find(uit->first);
+          }
+          else
+          {
+            FieldMaskSet<IndexSpaceExpression>::iterator finder = 
+              event_finder->second.find(expr_overlap);
+            if (finder == event_finder->second.end())
+              event_finder->second.insert(expr_overlap, overlap);
+            else
+              finder.merge(overlap);
           }
         }
       }
+    }
+
+    //--------------------------------------------------------------------------
+    bool ReductionView::add_user(const RegionUsage &usage,
+                                 IndexSpaceExpression *user_expr,
+                                 const FieldMask &user_mask, ApEvent term_event,
+                                 UniqueID op_id, unsigned index, bool copy_user,
+                                 std::set<RtEvent> &applied_events,
+                                 const bool trace_recording)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(is_logical_owner());
+#endif
+      PhysicalUser *new_user = new PhysicalUser(usage, user_expr, op_id, index, 
+                                                copy_user, true/*covers*/);
+      new_user->add_reference();
+      // No matter what, we retake the lock in exclusive mode so we
+      // can handle any clean-up and add our user
+      AutoLock v_lock(view_lock);
+      add_physical_user(new_user, IS_READ_ONLY(usage), term_event, user_mask);
+
+      if (outstanding_gc_events.find(term_event) == outstanding_gc_events.end())
+      {
+        outstanding_gc_events.insert(term_event);
+        return true;
+      }
+      else
+        return false;
     }
 
     //--------------------------------------------------------------------------
@@ -8448,37 +4810,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Better already be holding the lock
-      EventUsers *event_users;
-      if (reading)
-        event_users = &(reading_users[term_event]);
-      else
-        event_users = &(reduction_users[term_event]);
-      if (event_users->single)
-      {
-        if (event_users->users.single_user == NULL)
-        {
-          // make it the entry
-          event_users->users.single_user = user;
-          event_users->user_mask = user_mask;
-        }
-        else
-        {
-          // convert to multi
-          LegionMap<PhysicalUser*,FieldMask>::aligned *new_map = 
-                           new LegionMap<PhysicalUser*,FieldMask>::aligned();
-          (*new_map)[event_users->users.single_user] = event_users->user_mask;
-          (*new_map)[user] = user_mask;
-          event_users->user_mask |= user_mask;
-          event_users->users.multi_users = new_map;
-          event_users->single = false;
-        }
-      }
-      else
-      {
-        // Add it to the set 
-        (*event_users->users.multi_users)[user] = user_mask;
-        event_users->user_mask |= user_mask;
-      }
+      EventUsers &event_users = reading ? 
+        reading_users[term_event] : reduction_users[term_event];
+#ifdef DEBUG_LEGION
+      assert(event_users.find(user) == event_users.end());
+#endif
+      event_users.insert(user, user_mask);
     }
 
     //--------------------------------------------------------------------------
@@ -8492,112 +4829,39 @@ namespace Legion {
         outstanding_gc_events.find(term_event);
       if (event_finder != outstanding_gc_events.end())
       {
-        LegionMap<ApEvent,EventUsers>::aligned::iterator finder = 
-          reduction_users.find(term_event);
+        EventFieldUsers::iterator finder = reduction_users.find(term_event);
         if (finder != reduction_users.end())
         {
-          EventUsers &event_users = finder->second;
-          if (event_users.single)
-          {
-            delete (event_users.users.single_user);
-          }
-          else
-          {
-            for (LegionMap<PhysicalUser*,FieldMask>::aligned::const_iterator it
-                  = event_users.users.multi_users->begin(); it !=
-                  event_users.users.multi_users->end(); it++)
-            {
-              delete (it->first);
-            }
-            delete event_users.users.multi_users;
-          }
+          for (EventUsers::const_iterator it = finder->second.begin();
+                it != finder->second.end(); it++)
+            if (it->first->remove_reference())
+              delete it->first;
           reduction_users.erase(finder);
         }
         finder = reading_users.find(term_event);
         if (finder != reading_users.end())
         {
-          EventUsers &event_users = finder->second;
-          if (event_users.single)
-          {
-            delete (event_users.users.single_user);
-          }
-          else
-          {
-            for (LegionMap<PhysicalUser*,FieldMask>::aligned::const_iterator 
-                  it = event_users.users.multi_users->begin(); it !=
-                  event_users.users.multi_users->end(); it++)
-            {
-              delete (it->first);
-            }
-            delete event_users.users.multi_users;
-          }
+          for (EventUsers::const_iterator it = finder->second.begin();
+                it != finder->second.end(); it++)
+            if (it->first->remove_reference())
+              delete it->first;
           reading_users.erase(finder);
         }
         outstanding_gc_events.erase(event_finder);
       }
-    }
-
-    //--------------------------------------------------------------------------
-    void ReductionView::add_initial_user(ApEvent term_event, 
-                                         const RegionUsage &usage,
-                                         const FieldMask &user_mask,
-                                         const UniqueID op_id,
-                                         const unsigned index)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(logical_node->is_region());
-#endif
-      // We don't use field versions for doing interference tests on
-      // reductions so there is no need to record it
-      PhysicalUser *user = new PhysicalUser(usage, INVALID_COLOR, op_id, index,
-                                            logical_node->as_region_node());
-      add_physical_user(user, IS_READ_ONLY(usage), term_event, user_mask);
-      initial_user_events.insert(term_event);
-      // Don't need to actual launch a collection task, destructor
-      // will handle this case
-      outstanding_gc_events.insert(term_event);
-    }
+    } 
  
-    //--------------------------------------------------------------------------
-    bool ReductionView::reduce_to(ReductionOpID redop, 
-                                  const FieldMask &reduce_mask,
-                                  std::vector<CopySrcDstField> &dst_fields,
-                                  CopyAcrossHelper *across_helper)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(redop == manager->redop);
-#endif
-      // Get the destination fields for this copy
-      if (across_helper == NULL)
-        manager->find_field_offsets(reduce_mask, dst_fields);
-      else
-        across_helper->compute_across_offsets(reduce_mask, dst_fields);
-      return manager->is_foldable();
-    }
-
-    //--------------------------------------------------------------------------
-    void ReductionView::reduce_from(ReductionOpID redop,
-                                    const FieldMask &reduce_mask,
-                                    std::vector<CopySrcDstField> &src_fields)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(redop == manager->redop);
-      assert(FieldMask::pop_count(reduce_mask) == 1); // only one field
-#endif
-      manager->find_field_offsets(reduce_mask, src_fields);
-    }
-
     //--------------------------------------------------------------------------
     void ReductionView::copy_to(const FieldMask &copy_mask,
                                 std::vector<CopySrcDstField> &dst_fields,
                                 CopyAcrossHelper *across_helper)
     //--------------------------------------------------------------------------
     {
-      // should never be called
-      assert(false);
+      // Get the destination fields for this copy
+      if (across_helper == NULL)
+        manager->find_field_offsets(copy_mask, dst_fields);
+      else
+        across_helper->compute_across_offsets(copy_mask, dst_fields);
     }
 
     //--------------------------------------------------------------------------
@@ -8605,44 +4869,84 @@ namespace Legion {
                                   std::vector<CopySrcDstField> &src_fields)
     //--------------------------------------------------------------------------
     {
-      // should never be called
-      assert(false);
+#ifdef DEBUG_LEGION
+      assert(FieldMask::pop_count(copy_mask) == 1); // only one field
+#endif
+      manager->find_field_offsets(copy_mask, src_fields);
     }
 
     //--------------------------------------------------------------------------
     void ReductionView::notify_active(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
-      if (is_owner())
-        manager->add_nested_gc_ref(did, mutator);
-      else
-        send_remote_gc_update(owner_space, mutator, 1, true/*add*/);
+      manager->add_nested_gc_ref(did, mutator);
+      // If we're the logical owner, but not the original owner
+      // then we use a gc reference on the original owner to 
+      // keep all the views allive until we're done
+      if (is_logical_owner() && !is_owner())
+        send_remote_gc_increment(owner_space, mutator);
     }
 
     //--------------------------------------------------------------------------
     void ReductionView::notify_inactive(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
-      if (is_owner())
-        manager->remove_nested_gc_ref(did, mutator);
-      else
-        send_remote_gc_update(owner_space, mutator, 1, false/*add*/);
+      manager->remove_nested_gc_ref(did, mutator);
+      // If we're the logical owner but not the original owner
+      // then we remove the gc reference that we added
+      if (is_logical_owner() && !is_owner())
+        send_remote_gc_decrement(owner_space, RtEvent::NO_RT_EVENT, mutator);
     }
 
     //--------------------------------------------------------------------------
     void ReductionView::notify_valid(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
-      manager->add_nested_valid_ref(did, mutator);
+      // The logical owner is where complete set of users is and is therefore
+      // where garbage collection will take place so we need to send our 
+      // valid update there if we're not the owner, otherwise we send it 
+      // down to the manager
+      if (is_logical_owner())
+        manager->add_nested_valid_ref(did, mutator);
+      else
+        send_remote_valid_increment(logical_owner, mutator);
     }
 
     //--------------------------------------------------------------------------
     void ReductionView::notify_invalid(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
-      // No need to check for deletion of the manager since
-      // we know that we also hold a resource reference
-      manager->remove_nested_valid_ref(did, mutator);
+      if (is_logical_owner())
+        // we have a resource reference on the manager so no need to check
+        manager->remove_nested_valid_ref(did, mutator);
+      else
+        send_remote_valid_decrement(logical_owner,RtEvent::NO_RT_EVENT,mutator);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReductionView::add_collectable_reference(ReferenceMutator *mutator)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(mutator != NULL);
+#endif
+      // Only the logical owner adds the full GC reference as this is where
+      // the actual garbage collection algorithm will take place and we know
+      // that we have all the valid gc event users
+      if (is_logical_owner())
+        add_base_gc_ref(PENDING_GC_REF, mutator);
+      else
+        add_base_resource_ref(PENDING_GC_REF);
+    }
+
+    //--------------------------------------------------------------------------
+    bool ReductionView::remove_collectable_reference(ReferenceMutator *mutator)
+    //--------------------------------------------------------------------------
+    {
+      if (is_logical_owner())
+        return remove_base_gc_ref(PENDING_GC_REF, mutator);
+      else
+        return remove_base_resource_ref(PENDING_GC_REF);
     }
 
     //--------------------------------------------------------------------------
@@ -8651,7 +4955,7 @@ namespace Legion {
     {
       // Do not do this if we are in LegionSpy so we can see 
       // all of the dependences
-#if !defined(LEGION_SPY) && !defined(EVENT_GRAPH_TRACE)
+#ifndef LEGION_DISABLE_EVENT_PRUNING
       AutoLock v_lock(view_lock);
       for (std::set<ApEvent>::const_iterator it = term_events.begin();
             it != term_events.end(); it++)
@@ -8662,25 +4966,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReductionView::update_gc_events(const std::set<ApEvent> &term_events)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock v_lock(view_lock);
-      for (std::set<ApEvent>::const_iterator it = term_events.begin();
-            it != term_events.end(); it++)
-      {
-        outstanding_gc_events.insert(*it);
-      }
-    }
-
-
-    //--------------------------------------------------------------------------
     void ReductionView::send_view(AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(is_owner());
-      assert(logical_node->is_region()); // Always regions at the top
 #endif
       // Don't take the lock, it's alright to have duplicate sends
       Serializer rez;
@@ -8688,7 +4978,6 @@ namespace Legion {
         RezCheck z(rez);
         rez.serialize(did);
         rez.serialize(manager->did);
-        rez.serialize(logical_node->as_region_node()->handle);
         rez.serialize(owner_space);
         rez.serialize(logical_owner);
         rez.serialize(owner_context);
@@ -8721,8 +5010,6 @@ namespace Legion {
       derez.deserialize(did);
       DistributedID manager_did;
       derez.deserialize(manager_did);
-      LogicalRegion handle;
-      derez.deserialize(handle);
       AddressSpaceID owner_space;
       derez.deserialize(owner_space);
       AddressSpaceID logical_owner;
@@ -8730,278 +5017,56 @@ namespace Legion {
       UniqueID context_uid;
       derez.deserialize(context_uid);
 
-      RegionNode *target_node = runtime->forest->get_node(handle);
       RtEvent man_ready;
-      PhysicalManager *phy_man = 
+      PhysicalManager *manager = 
         runtime->find_or_request_physical_manager(manager_did, man_ready);
-      if (man_ready.exists())
-        man_ready.wait();
+      if (man_ready.exists() && !man_ready.has_triggered())
+      {
+        // Defer this until the manager is ready
+        DeferReductionViewArgs args(did, manager, owner_space,
+                                    logical_owner, context_uid);
+        runtime->issue_runtime_meta_task(args,
+            LG_LATENCY_RESPONSE_PRIORITY, man_ready);
+      }
+      else
+        create_remote_view(runtime, did, manager, owner_space, 
+                           logical_owner, context_uid);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void ReductionView::handle_defer_reduction_view(
+                                             const void *args, Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      const DeferReductionViewArgs *dargs = 
+        (const DeferReductionViewArgs*)args; 
+      create_remote_view(runtime, dargs->did, dargs->manager, 
+          dargs->owner_space, dargs->logical_owner, dargs->context_uid);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void ReductionView::create_remote_view(Runtime *runtime,
+                            DistributedID did, PhysicalManager *manager,
+                            AddressSpaceID owner_space, 
+                            AddressSpaceID logical_owner, UniqueID context_uid)
+    //--------------------------------------------------------------------------
+    {
 #ifdef DEBUG_LEGION
-      assert(phy_man->is_reduction_manager());
+      assert(manager->is_reduction_manager());
 #endif
-      ReductionManager *red_manager = phy_man->as_reduction_manager();
+      ReductionManager *red_manager = manager->as_reduction_manager();
       void *location;
       ReductionView *view = NULL;
       if (runtime->find_pending_collectable_location(did, location))
-        view = new(location) ReductionView(runtime->forest,
-                                           did, owner_space, logical_owner,
-                                           target_node, red_manager,
+        view = new(location) ReductionView(runtime->forest, did, owner_space, 
+                                           logical_owner, red_manager,
                                            context_uid, false/*register now*/);
       else
         view = new ReductionView(runtime->forest, did, owner_space,
-                                 logical_owner, target_node, red_manager, 
+                                 logical_owner, red_manager, 
                                  context_uid, false/*register now*/);
       // Only register after construction
       view->register_with_runtime(NULL/*remote registration not needed*/);
-    }
-
-    //--------------------------------------------------------------------------
-    void ReductionView::perform_remote_valid_check(void)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(!is_logical_owner());
-#endif
-      bool send_request = false;
-      // If we don't have any registered readers, we have to ask
-      // the owner for all the current reducers
-      {
-        AutoLock v_lock(view_lock);  
-        if (!remote_request_event.exists())
-        {
-          remote_request_event = Runtime::create_rt_user_event();
-          send_request = true;
-        }
-        // else request was already sent
-      }
-      // If we made the event send the request
-      if (send_request)
-      {
-        Serializer rez;
-        {
-          RezCheck z(rez);
-          rez.serialize(did);
-          rez.serialize(remote_request_event);
-        }
-        context->runtime->send_view_update_request(logical_owner, rez);
-      }
-      if (!remote_request_event.has_triggered())
-        remote_request_event.wait();
-    }
-
-    //--------------------------------------------------------------------------
-    void ReductionView::process_update_request(AddressSpaceID source,
-                                    RtUserEvent done_event, Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(is_logical_owner());
-#endif
-      // Send back all the reduction users
-      Serializer rez;
-      {
-        RezCheck z(rez);
-        rez.serialize(did);
-        rez.serialize(done_event);
-        AutoLock v_lock(view_lock,1,false/*exclusive*/);
-        rez.serialize<size_t>(reduction_users.size());
-        for (LegionMap<ApEvent,EventUsers>::aligned::const_iterator it = 
-              reduction_users.begin(); it != reduction_users.end(); it++)
-        {
-          rez.serialize(it->first);
-          if (it->second.single)
-          {
-            rez.serialize<size_t>(1);
-            it->second.users.single_user->pack_user(rez);
-            rez.serialize(it->second.user_mask);
-          }
-          else
-          {
-            rez.serialize<size_t>(it->second.users.multi_users->size());
-            for (LegionMap<PhysicalUser*,FieldMask>::aligned::const_iterator 
-                  uit = it->second.users.multi_users->begin(); uit != 
-                  it->second.users.multi_users->end(); uit++)
-            {
-              uit->first->pack_user(rez);
-              rez.serialize(uit->second);
-            }
-          }
-        }
-      }
-      runtime->send_view_update_response(source, rez);
-    }
-
-    //--------------------------------------------------------------------------
-    void ReductionView::process_update_response(Deserializer &derez,
-                                                RtUserEvent done_event,
-                                                RegionTreeForest *forest)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(!is_logical_owner());
-#endif
-      std::set<ApEvent> deferred_collections;
-      {
-        // Take the lock in exclusive mode and start unpacking things
-        size_t num_events;
-        derez.deserialize(num_events);
-        AutoLock v_lock(view_lock);
-        for (unsigned idx1 = 0; idx1 < num_events; idx1++)
-        {
-          ApEvent term_event;
-          derez.deserialize(term_event);
-          outstanding_gc_events.insert(term_event);
-#ifdef DEBUG_LEGION
-          // should never have this event before now
-          assert(reduction_users.find(term_event) == reduction_users.end());
-#endif
-          EventUsers &current_users = reduction_users[term_event];
-          size_t num_users;
-          derez.deserialize(num_users);
-          if (num_users == 1)
-          {
-            current_users.users.single_user = 
-              PhysicalUser::unpack_user(derez, false/*add ref*/, forest);
-            derez.deserialize(current_users.user_mask);
-          }
-          else
-          {
-            current_users.single = false;
-            current_users.users.multi_users = 
-              new LegionMap<PhysicalUser*,FieldMask>::aligned();
-            LegionMap<PhysicalUser*,FieldMask>::aligned &multi = 
-              *(current_users.users.multi_users);
-            for (unsigned idx2 = 0; idx2 < num_users; idx2++)
-            {
-              PhysicalUser *user =
-                PhysicalUser::unpack_user(derez, false/*add ref*/, forest);
-              derez.deserialize(multi[user]);
-            }
-          }
-          deferred_collections.insert(term_event);
-        }
-      }
-      // Defer all the event collections
-      if (!deferred_collections.empty())
-      {
-        std::set<RtEvent> applied_events;
-        WrapperReferenceMutator mutator(applied_events);
-        for (std::set<ApEvent>::const_iterator it = 
-              deferred_collections.begin(); it != 
-              deferred_collections.end(); it++)
-          defer_collect_user(*it, &mutator);
-        if (!applied_events.empty())
-        {
-          Runtime::trigger_event(done_event, 
-              Runtime::merge_events(applied_events));
-          return;
-        }
-      }
-      // Trigger the done event
-      Runtime::trigger_event(done_event); 
-    }
-
-    //--------------------------------------------------------------------------
-    void ReductionView::process_remote_update(Deserializer &derez,
-                                              AddressSpaceID source,
-                                              RegionTreeForest *forest)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(is_logical_owner());
-#endif
-      RtUserEvent done_event;
-      derez.deserialize(done_event);
-      ApEvent term_event;
-      derez.deserialize(term_event);
-      FieldMask user_mask;
-      derez.deserialize(user_mask);
-      UniqueID op_id;
-      derez.deserialize(op_id);
-      unsigned index;
-      derez.deserialize(index);
-      bool is_copy;
-      derez.deserialize(is_copy);
-      bool issue_collect = false;
-      if (is_copy)
-      {
-        ReductionOpID redop;
-        derez.deserialize(redop);
-        bool reading;
-        derez.deserialize(reading);
-        PhysicalUser *user = NULL;
-#ifdef DEBUG_LEGION
-        assert(logical_node->is_region());
-#endif
-        // We don't use field versions for doing interference 
-        // tests on reductions so no need to record it
-        if (reading)
-        {
-          RegionUsage usage(READ_ONLY, EXCLUSIVE, 0);
-          user = new PhysicalUser(usage, INVALID_COLOR, op_id, index,
-                                  logical_node->as_region_node());
-        }
-        else
-        {
-          RegionUsage usage(REDUCE, EXCLUSIVE, redop);
-          user = new PhysicalUser(usage, INVALID_COLOR, op_id, index,
-                                  logical_node->as_region_node());
-        }
-        AutoLock v_lock(view_lock);
-        add_physical_user(user, reading, term_event, user_mask);
-        // Update the reference users
-        if (outstanding_gc_events.find(term_event) ==
-            outstanding_gc_events.end())
-        {
-          outstanding_gc_events.insert(term_event);
-          issue_collect = true;
-        }
-      }
-      else
-      {
-        RegionUsage usage;
-        derez.deserialize(usage);
-        const bool reading = IS_READ_ONLY(usage);
-#ifdef DEBUG_LEGION
-        assert(logical_node->is_region());
-#endif
-        PhysicalUser *new_user = 
-          new PhysicalUser(usage, INVALID_COLOR, op_id, index,
-                           logical_node->as_region_node());
-        AutoLock v_lock(view_lock);
-        add_physical_user(new_user, reading, term_event, user_mask);
-        // Only need to do this if we actually have a term event
-        if (outstanding_gc_events.find(term_event) == 
-            outstanding_gc_events.end())
-        {
-          outstanding_gc_events.insert(term_event);
-          issue_collect = true;
-        }
-      }
-      // Launch the garbage collection task if we need to
-      if (issue_collect)
-      {
-        std::set<RtEvent> applied_events;
-        WrapperReferenceMutator mutator(applied_events);
-        defer_collect_user(term_event, &mutator);
-        if (!applied_events.empty())
-        {
-          Runtime::trigger_event(done_event,
-              Runtime::merge_events(applied_events));
-          return;
-        }
-      }
-      // Now we can trigger our done event
-      Runtime::trigger_event(done_event);
-    }
-
-    //--------------------------------------------------------------------------
-    void ReductionView::process_remote_invalidate(const FieldMask &invalid_mask,
-                                                  RtUserEvent done_event)
-    //--------------------------------------------------------------------------
-    {
-      // Should never be called, there are no invalidates for reduction views
-      assert(false);
     }
 
   }; // namespace Internal 

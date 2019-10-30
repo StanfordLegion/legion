@@ -383,6 +383,9 @@ void top_level_task(const void *args, size_t arglen,
       inst1.destroy();
     }
   }
+
+  // HACK: there's a shutdown race condition related to instance destruction
+  usleep(100000);
 }
 
 int main(int argc, char **argv)

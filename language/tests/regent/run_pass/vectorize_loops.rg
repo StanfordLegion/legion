@@ -1,4 +1,4 @@
--- Copyright 2018 Stanford University
+-- Copyright 2019 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -11,11 +11,6 @@
 -- WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
-
--- FIXME: Turn off this test until vectorizer supports scattered reads again.
--- runs-with:
--- []
---
 
 import "regent"
 
@@ -60,39 +55,47 @@ do
   for e in r do
     var x = e.v1.x
     var y = e.v1.y
-    e.p.v1.x += exp2(exp(log10(fabs(log2(fabs(log(fabs(sin(cos(fabs(sqrt(x + 10))))))))))))
-    e.p.v1.y += exp2(exp(log10(fabs(log2(fabs(log(fabs(sin(cos(fabs(sqrt(y + 10))))))))))))
-    e.v1.x -= e.p.v1.x
-    e.v1.y *= e.p.v1.y
+    var a = exp2(exp(log10(fabs(log2(fabs(log(fabs(sin(cos(fabs(sqrt(x + 10))))))))))))
+    var b = exp2(exp(log10(fabs(log2(fabs(log(fabs(sin(cos(fabs(sqrt(y + 10))))))))))))
+    e.p.v1.x += a
+    e.p.v1.y += b
+    e.v1.x -= a
+    e.v1.y *= b
   end
   __forbid(__vectorize)
   for e in r do
     var x = e.v2.x
     var y = e.v2.y
-    e.p.v2.x += exp2(exp(log10(fabs(log2(fabs(log(fabs(sin(cos(fabs(sqrt(x + 10))))))))))))
-    e.p.v2.y += exp2(exp(log10(fabs(log2(fabs(log(fabs(sin(cos(fabs(sqrt(y + 10))))))))))))
-    e.v2.x -= e.p.v2.x
-    e.v2.y *= e.p.v2.y
+    var a = exp2(exp(log10(fabs(log2(fabs(log(fabs(sin(cos(fabs(sqrt(x + 10))))))))))))
+    var b = exp2(exp(log10(fabs(log2(fabs(log(fabs(sin(cos(fabs(sqrt(y + 10))))))))))))
+    e.p.v2.x += a
+    e.p.v2.y += b
+    e.v2.x -= a
+    e.v2.y *= b
   end
 end
 
 task toplevel()
   var n = 20
-  var ra = region(ispace(ptr, n), fs2)
-  var rb = region(ispace(ptr, n), fs2)
+  var ra = region(ispace(ptr, n / 2), fs2)
+  var rb = region(ispace(ptr, n / 2), fs2)
   var r1 = region(ispace(ptr, n), fs1(ra, rb))
   for i = 0, n do
-    var ptra = dynamic_cast(ptr(fs2, ra), i)
-    ptra.v1.x = 1.0 + i
-    ptra.v1.y = 1.0 + i
-    ptra.v2.x = 1.0 + i
-    ptra.v2.y = 1.0 + i
+    var ptra = dynamic_cast(ptr(fs2, ra), i / 2)
+    if i % 2 == 0 then
+      ptra.v1.x = 1.0 + i
+      ptra.v1.y = 1.0 + i
+      ptra.v2.x = 1.0 + i
+      ptra.v2.y = 1.0 + i
+    end
 
-    var ptrb = dynamic_cast(ptr(fs2, rb), i)
-    ptrb.v1.x = 4.0 + i
-    ptrb.v1.y = 4.0 + i
-    ptrb.v2.x = 4.0 + i
-    ptrb.v2.y = 4.0 + i
+    var ptrb = dynamic_cast(ptr(fs2, rb), i / 2)
+    if i % 2 == 0 then
+      ptrb.v1.x = 4.0 + i
+      ptrb.v1.y = 4.0 + i
+      ptrb.v2.x = 4.0 + i
+      ptrb.v2.y = 4.0 + i
+    end
 
     var ptr1 = dynamic_cast(ptr(fs1(ra, rb), r1), i)
     ptr1.v1.x = 3.0 + i

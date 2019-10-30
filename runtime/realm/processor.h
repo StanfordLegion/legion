@@ -1,4 +1,4 @@
-/* Copyright 2018 Stanford University, NVIDIA Corporation
+/* Copyright 2019 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -92,6 +92,13 @@ namespace Realm {
 
       // returns the finish event for the currently running task
       static Event get_current_finish_event(void);
+
+      // a scheduler lock prevents the current thread from releasing its
+      //  execution resources even when waiting on an Event - multiple
+      //  nested calls to 'enable_scheduler_lock' are permitted, but a
+      //  matching number of calls to 'disable_scheduler_lock' are required
+      static void enable_scheduler_lock(void);
+      static void disable_scheduler_lock(void);
 
       // dynamic task registration - this may be done for:
       //  1) a specific processor/group (anywhere in the system)

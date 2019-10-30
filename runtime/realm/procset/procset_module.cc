@@ -1,4 +1,4 @@
-/* Copyright 2018 Stanford University, NVIDIA Corporation
+/* Copyright 2019 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -89,7 +89,7 @@ namespace Realm {
       , cfg_num_mp_threads(0)
       , cfg_num_mp_procs(0)
       , cfg_num_mp_cpus(0)
-      , cfg_stack_size_in_mb(2)
+      , cfg_stack_size(2 << 20)
     {
     }
       
@@ -138,16 +138,16 @@ namespace Realm {
     {
       Module::create_processors(runtime);
       // for simplicity don't allow more that one procset per node for now
-      if (cfg_num_mp_procs > (max_node_id + 1)) {
+      if (cfg_num_mp_procs > (Network::max_node_id + 1)) {
 	    log_procset.fatal() << "error num_mp_procs > number of nodes";
 	    assert(false);
       }
       if (cfg_num_mp_threads) {
         // if num_mp_procs is not set then assume one procset on every node
-        if (cfg_num_mp_procs == 0 || my_node_id < cfg_num_mp_procs) { 
+        if (cfg_num_mp_procs == 0 || Network::my_node_id < cfg_num_mp_procs) { 
           Processor p = runtime->next_local_processor_id();
           ProcessorImpl *pi = new LocalProcessorSet(p, runtime->core_reservation_set(),
-						    cfg_stack_size_in_mb << 20, cfg_num_mp_threads,
+						    cfg_stack_size, cfg_num_mp_threads,
 						    Config::force_kernel_threads);
           runtime->add_processor(pi);
         // if there are not procSets on all nodes and cfg_num_mp_cpus is set
@@ -156,7 +156,7 @@ namespace Realm {
           for (int i = 0; i < cfg_num_mp_cpus; i++) {
             Processor p = runtime->next_local_processor_id();
             ProcessorImpl *pi = new LocalCPUProcessor(p, runtime->core_reservation_set(),
-						      cfg_stack_size_in_mb << 20,
+						      cfg_stack_size,
 						      Config::force_kernel_threads);
             runtime->add_processor(pi);
           }

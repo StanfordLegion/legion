@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-# Copyright 2018 Stanford University
+# Copyright 2019 Stanford University
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -46,8 +46,10 @@ class TestFailure(Exception):
 
 def detect_python_interpreter():
     try:
-        if subprocess.call(["pypy", "-h"], stdout=subprocess.PIPE, stderr=subprocess.PIPE) == 0:
+        if _version == 2 and subprocess.call(["pypy", "-h"], stdout=subprocess.PIPE, stderr=subprocess.PIPE) == 0:
             return "pypy"
+        if _version == 3 and subprocess.call(["pypy3", "-h"], stdout=subprocess.PIPE, stderr=subprocess.PIPE) == 0:
+            return "pypy3"
     except:
         pass
     return sys.executable
@@ -262,17 +264,23 @@ class Counter:
         self.passed = 0
         self.failed = 0
 
-def get_test_specs(legion_dir, use_run, use_spy, use_prof, use_hdf5, use_openmp, use_python, short, extra_flags):
+def get_test_specs(legion_dir, use_run, use_spy, use_prof, use_hdf5, use_openmp, use_cuda, use_python, max_dim, short, extra_flags):
+    base_env = {
+    }
+    run_env = {
+        'REALM_BACKTRACE': '1',
+    }
+
     base = [
         # FIXME: Move this flag into a per-test parameter so we don't use it everywhere.
         # Don't include backtraces on those expected to fail
-        ('compile_fail', (test_compile_fail, (['-fbounds-checks', '1'] + extra_flags, {})),
+        ('compile_fail', (test_compile_fail, (['-fbounds-checks', '1'] + extra_flags, base_env)),
          (os.path.join('tests', 'regent', 'compile_fail'),
           os.path.join('tests', 'bishop', 'compile_fail'),
          )),
     ]
     pretty = [
-        ('pretty', (test_run_pass, (['-fpretty', '1'] + extra_flags, {})),
+        ('pretty', (test_run_pass, (['-fpretty', '1'] + extra_flags, base_env)),
          (os.path.join('tests', 'regent', 'run_pass'),
           os.path.join('tests', 'regent', 'perf'),
           os.path.join('tests', 'regent', 'bugs'),
@@ -283,7 +291,7 @@ def get_test_specs(legion_dir, use_run, use_spy, use_prof, use_hdf5, use_openmp,
          )),
     ]
     run = [
-        ('run_pass', (test_run_pass, ([] + extra_flags, {'REALM_BACKTRACE': '1'})),
+        ('run_pass', (test_run_pass, ([] + extra_flags, run_env)),
          (os.path.join('tests', 'regent', 'unit_test'),
           os.path.join('tests', 'regent', 'run_pass'),
           os.path.join('tests', 'regent', 'perf'),
@@ -297,7 +305,7 @@ def get_test_specs(legion_dir, use_run, use_spy, use_prof, use_hdf5, use_openmp,
          )),
     ]
     spy = [
-        ('spy', (test_spy, ([] + extra_flags, {})),
+        ('spy', (test_spy, ([] + extra_flags, base_env)),
          (os.path.join('tests', 'regent', 'run_pass'),
           os.path.join('tests', 'regent', 'perf'),
           os.path.join('tests', 'regent', 'bugs'),
@@ -308,7 +316,7 @@ def get_test_specs(legion_dir, use_run, use_spy, use_prof, use_hdf5, use_openmp,
          )),
     ]
     prof = [
-        ('prof', (test_prof, ([] + extra_flags, {})),
+        ('prof', (test_prof, ([] + extra_flags, base_env)),
          (os.path.join('tests', 'regent', 'run_pass'),
           os.path.join('tests', 'regent', 'perf'),
           os.path.join('tests', 'regent', 'bugs'),
@@ -319,30 +327,41 @@ def get_test_specs(legion_dir, use_run, use_spy, use_prof, use_hdf5, use_openmp,
          )),
     ]
     hdf5 = [
-        ('run_pass', (test_run_pass, ([] + extra_flags, {})),
+        ('run_pass', (test_run_pass, ([] + extra_flags, run_env)),
          (os.path.join('tests', 'hdf5', 'run_pass'),
          )),
     ]
     openmp = [
-        ('run_pass', (test_run_pass, ([] + extra_flags, {})),
+        ('compile_fail', (test_compile_fail, (['-fbounds-checks', '1', "-fopenmp", "1", "-fopenmp-offline", "1"] + extra_flags, base_env)),
+         (os.path.join('tests', 'openmp', 'compile_fail'),
+         )),
+        ('run_pass', (test_run_pass, ([] + extra_flags, run_env)),
          (os.path.join('tests', 'openmp', 'run_pass'),
          )),
     ]
-    py_env = {
-        'PYTHONPATH': ':'.join(
-            os.environ.get('PYTHONPATH', '').split(':') + [
-                os.path.join(legion_dir, 'bindings', 'python'),
-                '.',
-            ]),
-    }
-    python = [
-        ('run_pass', (test_run_pass, ([] + extra_flags, py_env)),
-         (os.path.join('tests', 'python', 'run_pass'),
+    cuda = [
+        ('compile_fail', (test_compile_fail, (['-fbounds-checks', '1', "-fcuda", "1", "-fcuda-offline", "1"] + extra_flags, base_env)),
+         (os.path.join('tests', 'cuda', 'compile_fail'),
+         )),
+        ('run_pass', (test_run_pass, ([] + extra_flags, run_env)),
+         (os.path.join('tests', 'cuda', 'run_pass'),
          )),
     ]
+    python = [
+        ('run_pass', (test_run_pass, ([] + extra_flags, run_env)),
+         (os.path.join('tests', 'python', 'run_pass'),
+          os.path.join('..', 'apps'),
+         )),
+    ]
+    def max_dim_tests(dim):
+        return [
+            ('run_pass', (test_run_pass, ([] + extra_flags, run_env)),
+             (os.path.join('tests', 'maxdim%s' % dim, 'run_pass'),
+             )),
+        ]
 
     result = []
-    if not use_run and not use_spy and not use_prof and not use_hdf5:
+    if not use_run and not use_spy and not use_prof and not use_hdf5 and not use_cuda:
         result.extend(base)
         if not short:
             result.extend(pretty)
@@ -357,11 +376,15 @@ def get_test_specs(legion_dir, use_run, use_spy, use_prof, use_hdf5, use_openmp,
         result.extend(hdf5)
     if use_openmp:
         result.extend(openmp)
+    if use_cuda:
+        result.extend(cuda)
     if use_python:
         result.extend(python)
+    for dim in range(4, min(max_dim, 4) + 1):
+        result.extend(max_dim_tests(dim))
     return result
 
-def run_all_tests(thread_count, debug, run, spy, prof, hdf5, openmp, python, extra_flags, verbose, quiet,
+def run_all_tests(thread_count, debug, max_dim, run, spy, prof, hdf5, openmp, cuda, python, extra_flags, verbose, quiet,
                   only_patterns, skip_patterns, timelimit, short):
     thread_pool = multiprocessing.Pool(thread_count)
     results = []
@@ -371,7 +394,7 @@ def run_all_tests(thread_count, debug, run, spy, prof, hdf5, openmp, python, ext
     py_exe_path = detect_python_interpreter()
 
     # Run tests asynchronously.
-    tests = get_test_specs(legion_dir, run, spy, prof, hdf5, openmp, python, short, extra_flags)
+    tests = get_test_specs(legion_dir, run, spy, prof, hdf5, openmp, cuda, python, max_dim, short, extra_flags)
     for test_name, test_fn, test_dirs in tests:
         test_paths = []
         for test_dir in test_dirs:
@@ -484,6 +507,11 @@ def test_driver(argv):
                         action='store_true',
                         help='enable debug mode',
                         dest='debug')
+    parser.add_argument('--max-dim',
+                        type=int,
+                        default=3,
+                        help='maximum number of dimensions',
+                        dest='max_dim')
     parser.add_argument('--run_pass',
                         action='store_true',
                         help='limit to run_pass tests',
@@ -504,6 +532,10 @@ def test_driver(argv):
                         action='store_true',
                         help='run OpenMP tests',
                         dest='openmp')
+    parser.add_argument('--cuda',
+                        action='store_true',
+                        help='run CUDA tests',
+                        dest='cuda')
     parser.add_argument('--python',
                         action='store_true',
                         help='run Python tests',
@@ -545,11 +577,13 @@ def test_driver(argv):
     run_all_tests(
         args.thread_count,
         args.debug,
+        args.max_dim,
         args.run_pass,
         args.spy,
         args.prof,
         args.hdf5,
         args.openmp,
+        args.cuda,
         args.python,
         args.extra_flags,
         args.verbose,

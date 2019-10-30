@@ -1,4 +1,4 @@
-/* Copyright 2018 Stanford University, NVIDIA Corporation
+/* Copyright 2019 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -60,7 +60,6 @@ namespace Legion {
       DerezCheck z(derez);
       derez.deserialize(memo_state);
       derez.deserialize(need_prepipeline_stage);
-      // TODO: remote mapping is not yet supported in dynamic tracing
       tpl = NULL;
     }
 
@@ -79,29 +78,24 @@ namespace Legion {
     void MemoizableOp<OP>::execute_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
-      invoke_memoize_operation(OP::get_mappable()->map_id);
+#ifdef DEBUG_LEGION
+      assert(memo_state == NO_MEMO); // should always be no memo here
+#endif
+      PhysicalTrace *const physical_trace = (OP::trace == NULL) ? NULL :
+          OP::trace->get_physical_trace();
+      // Only invoke memoization if we are doing physical tracing
+      if (physical_trace != NULL)
+        invoke_memoize_operation(OP::get_mappable()->map_id);
 #ifdef DEBUG_LEGION
       assert(memo_state == NO_MEMO || memo_state == MEMO_REQ);
 #endif
       if (memo_state == MEMO_REQ)
       {
-#ifdef DEBUG_LEGION
-        assert(OP::trace != NULL);
-#endif
-        PhysicalTrace *physical_trace = OP::trace->get_physical_trace();
-        if (physical_trace == NULL)
-        {
-          REPORT_LEGION_ERROR(ERROR_INVALID_PHYSICAL_TRACING,
-              "Invalid memoization request. An operation cannot be memoized "
-              "when it is in a logical-only trace. Please change the mapper "
-              "not to request memoization or allow memoization for the trace.");
-        }
         tpl = physical_trace->get_current_template();
         if (tpl == NULL)
         {
           OP::trace->set_state_record();
-          tpl = physical_trace->start_new_template(
-              OP::parent_ctx->get_current_execution_fence_event());
+          tpl = physical_trace->start_new_template();
           assert(tpl != NULL);
         }
 
@@ -140,42 +134,87 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<typename OP>
-    void MemoizableOp<OP>::invoke_memoize_operation(MapperID mapper_id)
+    PhysicalTemplate* MemoizableOp<OP>::get_template(void) const
     //--------------------------------------------------------------------------
     {
-      // If we're not in a trace or tracing isn't enabled then don't do anything
-      if ((OP::trace != NULL) && !this->runtime->no_tracing &&
-          !this->runtime->no_physical_tracing)
-      {
-        Mapper::MemoizeInput  input;
-        Mapper::MemoizeOutput output;
-        input.trace_id = OP::trace->get_trace_id();
-        output.memoize = false;
-        Processor mapper_proc = OP::parent_ctx->get_executing_processor();
-        MapperManager *mapper = OP::runtime->find_mapper(mapper_proc,mapper_id);
-        Mappable *mappable = OP::get_mappable();
-#ifdef DEBUG_LEGION
-        assert(mappable != NULL);
-#endif
-        mapper->invoke_memoize_operation(mappable, &input, &output);
-        if (OP::trace == NULL && output.memoize)
-          REPORT_LEGION_ERROR(ERROR_INVALID_PHYSICAL_TRACING,
-              "Invalid mapper output from 'memoize_operation'. Mapper requested"
-              " memoization of an operation that is not being traced.");
-        set_memoize(output.memoize);
-      }
+      return tpl;
     }
 
     //--------------------------------------------------------------------------
     template<typename OP>
-    void MemoizableOp<OP>::set_memoize(bool memoize)
+    ApEvent MemoizableOp<OP>::compute_init_precondition(
+                                                    const TraceInfo &trace_info)
+    //--------------------------------------------------------------------------
+    {
+      ApEvent sync_precondition = compute_sync_precondition(&trace_info);
+      if (sync_precondition.exists())
+      {
+        if (this->execution_fence_event.exists())
+          return Runtime::merge_events(&trace_info, sync_precondition,
+                                       this->execution_fence_event);
+        else
+          return sync_precondition;
+      }
+      else
+        return this->execution_fence_event;
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    RtEvent MemoizableOp<OP>::complete_memoizable(RtEvent complete_event)
+    //--------------------------------------------------------------------------
+    {
+      if (tpl != NULL)
+        complete_event =
+          Runtime::merge_events(complete_event, tpl->get_recording_done());
+      return complete_event;
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    void MemoizableOp<OP>::find_equivalence_sets(Runtime *runtime, unsigned idx, 
+                 const FieldMask &mask, FieldMaskSet<EquivalenceSet> &eqs) const
+    //--------------------------------------------------------------------------
+    {
+      const VersionInfo &info = get_version_info(idx);
+      const FieldMaskSet<EquivalenceSet> &sets = info.get_equivalence_sets();
+      if (mask != sets.get_valid_mask())
+      {
+        for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
+              sets.begin(); it != sets.end(); it++)
+        {
+          const FieldMask overlap = it->second & mask;
+          if (!overlap)
+            continue;
+          eqs.insert(it->first, overlap);
+        }
+      }
+      else
+        eqs = sets;
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    void MemoizableOp<OP>::invoke_memoize_operation(MapperID mapper_id)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(memo_state == NO_MEMO);
+      assert(OP::trace != NULL);
+      assert(!this->runtime->no_tracing);
+      assert(!this->runtime->no_physical_tracing);
 #endif
-      if (memoize && !this->runtime->no_tracing && 
-          !this->runtime->no_physical_tracing)
+      Mapper::MemoizeInput  input;
+      Mapper::MemoizeOutput output;
+      input.trace_id = OP::trace->get_trace_id();
+      output.memoize = false;
+      Processor mapper_proc = OP::parent_ctx->get_executing_processor();
+      MapperManager *mapper = OP::runtime->find_mapper(mapper_proc,mapper_id);
+      Mappable *mappable = OP::get_mappable();
+#ifdef DEBUG_LEGION
+      assert(mappable != NULL);
+#endif
+      mapper->invoke_memoize_operation(mappable, &input, &output);
+      if (output.memoize)
         memo_state = MEMO_REQ;
     }
 

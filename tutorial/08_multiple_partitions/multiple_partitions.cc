@@ -1,4 +1,4 @@
-/* Copyright 2018 Stanford University
+/* Copyright 2019 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -142,7 +142,7 @@ void top_level_task(const Task *task,
   stencil_launcher.add_field(0, FID_VAL);
   stencil_launcher.add_region_requirement(
       RegionRequirement(disjoint_lp, 0/*projection ID*/,
-                        READ_WRITE, EXCLUSIVE, stencil_lr));
+                        WRITE_DISCARD, EXCLUSIVE, stencil_lr));
   stencil_launcher.add_field(1, FID_DERIV);
   runtime->execute_index_space(ctx, stencil_launcher);
 
@@ -161,6 +161,7 @@ void top_level_task(const Task *task,
   runtime->destroy_logical_region(ctx, stencil_lr);
   runtime->destroy_field_space(ctx, fs);
   runtime->destroy_index_space(ctx, is);
+  runtime->destroy_index_space(ctx, color_is);
 }
 
 // The standard initialize field task from earlier examples

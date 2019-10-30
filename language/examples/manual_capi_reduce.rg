@@ -1,4 +1,4 @@
--- Copyright 2018 Stanford University
+-- Copyright 2019 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -15,7 +15,7 @@
 local tasklib = require("manual_capi_tasklib")
 local c = tasklib.c
 
-RED_PLUS_INT = 1
+RED_PLUS_INT = c.LEGION_REDOP_SUM_INT32
 
 FID_1 = 1
 FID_2 = 2
@@ -129,13 +129,13 @@ local args = require("manual_capi_args")
 
 terra main()
   c.printf("in main...\n")
-  c.register_reduction_plus_int32(RED_PLUS_INT)
 
   var execution_constraints = c.legion_execution_constraint_set_create()
   c.legion_execution_constraint_set_add_processor_constraint(execution_constraints, c.LOC_PROC)
   var layout_constraints = c.legion_task_layout_constraint_set_create()
   [ tasklib.preregister_task(top_level_task) ](
     TID_TOP_LEVEL_TASK,
+    -1, -- AUTO_GENERATE_ID
     "top_level_task", "top_level_task",
     execution_constraints, layout_constraints,
     c.legion_task_config_options_t {
@@ -143,6 +143,7 @@ terra main()
     nil, 0)
   [ tasklib.preregister_task(sub_task) ](
     TID_SUB_TASK,
+    -1, -- AUTO_GENERATE_ID
     "sub_task", "sub_task",
     execution_constraints, layout_constraints,
     c.legion_task_config_options_t {

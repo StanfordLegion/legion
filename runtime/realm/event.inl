@@ -1,4 +1,4 @@
-/* Copyright 2018 Stanford University, NVIDIA Corporation
+/* Copyright 2019 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -50,6 +50,36 @@ namespace Realm {
   }
 
   inline std::ostream& operator<<(std::ostream& os, Event e)
+  {
+    return os << std::hex << e.id << std::dec;
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class CompletionQueue
+
+  inline bool CompletionQueue::operator<(const CompletionQueue& rhs) const
+  {
+    return id < rhs.id;
+  }
+
+  inline bool CompletionQueue::operator==(const CompletionQueue& rhs) const
+  {
+    return id == rhs.id;
+  }
+
+  inline bool CompletionQueue::operator!=(const CompletionQueue& rhs) const
+  {
+    return id != rhs.id;
+  }
+
+  inline bool CompletionQueue::exists(void) const
+  {
+    return id != 0;
+  }
+
+  inline std::ostream& operator<<(std::ostream& os, CompletionQueue e)
   {
     return os << std::hex << e.id << std::dec;
   }

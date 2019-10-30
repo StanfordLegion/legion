@@ -1,4 +1,4 @@
--- Copyright 2018 Stanford University
+-- Copyright 2019 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -33,6 +33,22 @@ local all_math_fns = terralib.newlist({
   "scalbn", "sin", "sinh", "sqrt", "tan",
   "tanh", "tgamma", "trunc",
   "y0", "y1", "yn",
+})
+
+-- Slow Terra implementations for CUDA-only math functions
+local function rsqrt_cpu(arg_type)
+  if arg_type == double then
+    return terra(v : double) return cmath.pow(v, -0.5) end
+  else
+    return terra(v : float) return cmath.powf(v, -0.5) end
+  end
+end
+
+local cuda_only_math_fns = terralib.newlist({
+  {
+    name = "rsqrt",
+    default_variant = rsqrt_cpu,
+  },
 })
 
 local math_fn = {}
@@ -104,6 +120,15 @@ all_math_fns:map(function(fn_name)
   math[fn_name] = terralib.memoize(function(arg_type)
     assert(arg_type:isfloat(), "Math operations support only float types.")
     return math_fn.new_math_fn(fn_name, arg_type)
+  end)
+end)
+
+cuda_only_math_fns:map(function(fn)
+  math[fn.name] = terralib.memoize(function(arg_type)
+    assert(arg_type:isfloat(), "Math operations support only float types.")
+    local f = math_fn.new_math_fn(fn.name, arg_type)
+    f:set_variant("default", fn.default_variant(arg_type))
+    return f
   end)
 end)
 

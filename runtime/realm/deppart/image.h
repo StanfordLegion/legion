@@ -1,4 +1,4 @@
-/* Copyright 2018 Stanford University, NVIDIA Corporation
+/* Copyright 2019 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -30,10 +30,6 @@ namespace Realm {
     static const int DIM2 = N2;
     typedef T2 IDXTYPE2;
 
-    static const Opcode OPCODE = UOPCODE_IMAGE;
-
-    static DynamicTemplates::TagType type_tag(void);
-
     ImageMicroOp(IndexSpace<N,T> _parent_space, IndexSpace<N2,T2> _inst_space,
 		 RegionInstance _inst, size_t _field_offset, bool _is_ranged);
     virtual ~ImageMicroOp(void);
@@ -49,9 +45,12 @@ namespace Realm {
     void dispatch(PartitioningOperation *op, bool inline_ok);
 
   protected:
-    friend struct RemoteMicroOpMessage;
+    friend struct RemoteMicroOpMessage<ImageMicroOp<N,T,N2,T2> >;
+    static ActiveMessageHandlerReg<RemoteMicroOpMessage<ImageMicroOp<N,T,N2,T2> > > areg;
+
+    friend class PartitioningMicroOp;
     template <typename S>
-    bool serialize_params(S& s) const;
+    bool serialize_params(S& s) const WARN_UNUSED;
 
     // construct from received packet
     template <typename S>
@@ -87,12 +86,12 @@ namespace Realm {
     ImageOperation(const IndexSpace<N,T>& _parent,
 		   const std::vector<FieldDataDescriptor<IndexSpace<N2,T2>,Point<N,T> > >& _field_data,
 		   const ProfilingRequestSet &reqs,
-		   Event _finish_event);
+		   GenEventImpl *_finish_event, EventImpl::gen_t _finish_gen);
 
     ImageOperation(const IndexSpace<N,T>& _parent,
 		   const std::vector<FieldDataDescriptor<IndexSpace<N2,T2>,Rect<N,T> > >& _field_data,
 		   const ProfilingRequestSet &reqs,
-		   Event _finish_event);
+		   GenEventImpl *_finish_event, EventImpl::gen_t _finish_gen);
 
     virtual ~ImageOperation(void);
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-# Copyright 2018 Stanford University
+# Copyright 2019 Stanford University
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -30,12 +30,18 @@ elif _version == 3: # Python 3.x:
 else:
     raise Exception('Incompatible Python version')
 
+# allow the make executable name to be overridden by the environment
+make_exe = os.environ.get('MAKE', 'make')
+
 os_name = platform.system()
 
 if os_name == 'Linux':
     dylib_ext = '.so'
 elif os_name == 'Darwin':
     dylib_ext = '.dylib'
+elif os_name == 'FreeBSD':
+    dylib_ext = '.so'
+    make_exe = os.environ.get('MAKE', 'gmake')  # default needs to be GNU make
 else:
     raise Exception('install.py script does not work on %s' % platform.system())
 
@@ -109,14 +115,36 @@ def install_rdir(rdir, legion_dir, regent_dir):
     if rdir != 'skip':
         dump_json_config(config_filename, rdir)
 
-def build_terra(terra_dir, thread_count, llvm):
-    subprocess.check_call(
-        ['make', 'all', '-j', str(thread_count)] +
-        (['REEXPORT_LLVM_COMPONENTS=irreader mcjit x86'] if llvm else []),
-        cwd=terra_dir)
+def build_terra(terra_dir, terra_branch, use_cmake, cmake_exe, thread_count, llvm):
+    build_dir = os.path.join(terra_dir, 'build')
+    release_dir = os.path.join(terra_dir, 'release')
+    if use_cmake is None:
+        build_detected = os.path.exists(os.path.join(build_dir, 'main.o'))
+        cmake_detected = os.path.exists(os.path.join(build_dir, 'CMakeCache.txt'))
+        use_cmake = cmake_detected or not build_detected
+        if not use_cmake:
+            print('Detected previous Makefile build in Terra, disabling Terra CMake build...')
 
-def install_terra(terra_dir, terra_url, terra_branch, external_terra_dir,
-                  thread_count, llvm):
+    flags = []
+    if llvm:
+        assert not use_cmake, "LLVM mode not supported with Terra CMake build, see https://github.com/zdevito/terra/issues/394"
+        flags.extend(['REEXPORT_LLVM_COMPONENTS=irreader mcjit x86'])
+
+    if use_cmake:
+        if not os.path.exists(os.path.join(build_dir, 'CMakeCache.txt')):
+            subprocess.check_call(
+                [cmake_exe, '..', '-DCMAKE_INSTALL_PREFIX=%s' % release_dir],
+                cwd=build_dir)
+        subprocess.check_call(
+            [make_exe, 'install', '-j', str(thread_count)],
+            cwd=build_dir)
+    else:
+        subprocess.check_call(
+            [make_exe, 'all', '-j', str(thread_count)] + flags,
+            cwd=terra_dir)
+
+def install_terra(terra_dir, terra_url, terra_branch, use_cmake, cmake_exe,
+                  external_terra_dir, thread_count, llvm):
     if external_terra_dir is not None:
         if terra_url is not None or terra_branch is not None:
             raise Exception('Terra URL/branch are incompatible with setting an external installation directory')
@@ -159,7 +187,7 @@ def install_terra(terra_dir, terra_url, terra_branch, external_terra_dir,
         if terra_url is not None or terra_branch is not None:
             raise Exception('Terra URL/branch must be set on first install, please delete the terra directory and try again')
         git_update(terra_dir)
-    build_terra(terra_dir, thread_count, llvm)
+    build_terra(terra_dir, terra_branch, use_cmake, cmake_exe, thread_count, llvm)
 
 def symlink(from_path, to_path):
     if not os.path.lexists(to_path):
@@ -193,6 +221,9 @@ def install_bindings(regent_dir, legion_dir, bindings_dir, runtime_dir,
             shutil.rmtree(build_dir)
         if not os.path.exists(build_dir):
             os.mkdir(build_dir)
+        cc_flags = os.environ['CC_FLAGS'] if 'CC_FLAGS' in os.environ else ''
+        if spy:
+            cc_flags = cc_flags + ' -DLEGION_SPY'
         flags = (
             ['-DCMAKE_BUILD_TYPE=%s' % ('Debug' if debug else 'Release'),
              '-DLegion_USE_CUDA=%s' % ('ON' if cuda else 'OFF'),
@@ -207,9 +238,15 @@ def install_bindings(regent_dir, legion_dir, bindings_dir, runtime_dir,
             (['-DGASNet_ROOT_DIR=%s' % gasnet_dir] if gasnet_dir is not None else []) +
             (['-DGASNet_CONDUIT=%s' % conduit] if conduit is not None else []) +
             (['-DCMAKE_CXX_COMPILER=%s' % os.environ['CXX']] if 'CXX' in os.environ else []) +
-            (['-DCMAKE_CXX_FLAGS=%s' % os.environ['CC_FLAGS']] if 'CC_FLAGS' in os.environ else []))
+            (['-DCMAKE_CXX_FLAGS=%s' % cc_flags] if cc_flags else []))
+        if llvm:
+            # mess with a few things so that Realm uses terra's LLVM
+            flags.append('-DLegion_ALLOW_MISSING_LLVM_LIBS=ON')
+            flags.append('-DLegion_LINK_LLVM_LIBS=OFF')
+            # pass through LLVM_CONFIG, if set
+            if 'LLVM_CONFIG' in os.environ:
+                flags.append('-DLLVM_CONFIG_EXECUTABLE=%s' % os.environ['LLVM_CONFIG'])
         make_flags = ['VERBOSE=1'] if verbose else []
-        assert not spy # unimplemented
         try:
             subprocess.check_output([cmake_exe, '--version'])
         except OSError:
@@ -223,7 +260,7 @@ def install_bindings(regent_dir, legion_dir, bindings_dir, runtime_dir,
             [cmake_exe] + flags + [legion_dir],
             cwd=build_dir)
         subprocess.check_call(
-            ['make'] + make_flags + ['-j', str(thread_count)],
+            [make_exe] + make_flags + ['-j', str(thread_count)],
             cwd=build_dir)
     else:
         flags = (
@@ -243,13 +280,11 @@ def install_bindings(regent_dir, legion_dir, bindings_dir, runtime_dir,
 
         if clean_first:
             subprocess.check_call(
-                ['make'] + flags + ['clean'],
+                [make_exe] + flags + ['clean'],
                 cwd=bindings_dir)
         subprocess.check_call(
-            ['make'] + flags + ['-j', str(thread_count)],
+            [make_exe] + flags + ['-j', str(thread_count)],
             cwd=bindings_dir)
-        symlink(os.path.join(bindings_dir, 'libregent.so'),
-                os.path.join(bindings_dir, 'libregent%s' % dylib_ext))
 
         # This last bit is necessary because Mac OS X shared libraries
         # have paths hard-coded into them, and in this case those paths
@@ -267,7 +302,7 @@ def install_bindings(regent_dir, legion_dir, bindings_dir, runtime_dir,
             subprocess.check_call(
                 ['install_name_tool', '-change',
                  '/usr/local/lib/libluajit-5.1.2.dylib', 'libluajit-5.1.2.dylib',
-                 os.path.join(bindings_dir, 'libregent.so')])
+                 os.path.join(bindings_dir, 'libregent.dylib')])
 
 def get_cmake_config(cmake, regent_dir, default=None):
     config_filename = os.path.join(regent_dir, '.cmake.json')
@@ -282,7 +317,7 @@ def get_cmake_config(cmake, regent_dir, default=None):
 def install(gasnet=False, cuda=False, openmp=False, hdf=False, llvm=False,
             spy=False, conduit=None, cmake=None, rdir=None,
             cmake_exe=None, cmake_build_dir=None,
-            terra_url=None, terra_branch=None, external_terra_dir=None,
+            terra_url=None, terra_branch=None, terra_use_cmake=None, external_terra_dir=None,
             gasnet_dir=None, debug=False, clean_first=True, extra_flags=[],
             thread_count=None, verbose=False):
     regent_dir = os.path.dirname(os.path.realpath(__file__))
@@ -299,9 +334,6 @@ def install(gasnet=False, cuda=False, openmp=False, hdf=False, llvm=False,
     if clean_first and cmake_build_dir is not None:
         raise Exception('Cannot clean a pre-existing build directory')
 
-    if spy and not debug:
-        raise Exception('Debugging mode is required for detailed Legion Spy.')
-
     thread_count = thread_count
     if thread_count is None:
         thread_count = multiprocessing.cpu_count()
@@ -315,8 +347,8 @@ def install(gasnet=False, cuda=False, openmp=False, hdf=False, llvm=False,
     install_rdir(rdir, legion_dir, regent_dir)
 
     terra_dir = os.path.join(regent_dir, 'terra')
-    install_terra(terra_dir, terra_url, terra_branch, external_terra_dir,
-                  thread_count, llvm)
+    install_terra(terra_dir, terra_url, terra_branch, terra_use_cmake, cmake_exe,
+                  external_terra_dir, thread_count, llvm)
 
     bindings_dir = os.path.join(legion_dir, 'bindings', 'regent')
     install_bindings(regent_dir, legion_dir, bindings_dir, runtime_dir,
@@ -334,6 +366,14 @@ def driver():
     parser.add_argument(
         '--terra-branch', dest='terra_branch', metavar='BRANCH', required=False,
         help='Name of Terra branch to clone (optional).')
+    parser.add_argument(
+        '--terra-cmake', dest='terra_use_cmake', action='store_true', required=False,
+        default=None,
+        help='Build Terra with CMake.')
+    parser.add_argument(
+        '--no-terra-cmake', dest='terra_use_cmake', action='store_false', required=False,
+        default=None,
+        help="Don't build Terra with CMake (instead use GNU Make).")
     parser.add_argument(
         '--with-terra', dest='external_terra_dir', metavar='DIR', required=False,
         help='Path to Terra installation directory (optional).')

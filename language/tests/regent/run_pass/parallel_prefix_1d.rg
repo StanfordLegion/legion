@@ -1,4 +1,4 @@
--- Copyright 2018 Stanford University, Los Alamos National Laboratory
+-- Copyright 2019 Stanford University, Los Alamos National Laboratory
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -11,6 +11,12 @@
 -- WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
+
+-- runs-with:
+-- [
+--   ["-fbounds-checks", "0"],
+--   ["-fbounds-checks", "1", "-fcuda", "0"]
+-- ]
 
 import "regent"
 

@@ -1,4 +1,4 @@
-/* Copyright 2018 Stanford University, NVIDIA Corporation
+/* Copyright 2019 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -31,6 +31,7 @@
 namespace Realm {
 
   class RuntimeImpl;
+  class NetworkModule;
 
   class Module {
   protected:
@@ -88,6 +89,10 @@ namespace Realm {
   public:
     ModuleRegistrar(RuntimeImpl *_runtime);
 
+    // called by the runtime during init - these may change the command line!
+    void create_network_modules(std::vector<NetworkModule *>& modules,
+				int *argc, const char ***argv);
+
     // called by the runtime during init
     void create_static_modules(std::vector<std::string>& cmdline,
 			       std::vector<Module *>& modules);
@@ -102,8 +107,10 @@ namespace Realm {
     // TODO: consider some sort of "priority" scheme to order modules' inits?
     class StaticRegistrationBase {
     public:
+      StaticRegistrationBase() : next(0) {}
       virtual Module *create_module(RuntimeImpl *runtime,
 				    std::vector<std::string>& cmdline) const = 0;
+      StaticRegistrationBase *next;
     };
     template <typename T>
     class StaticRegistration : public StaticRegistrationBase {
@@ -118,12 +125,38 @@ namespace Realm {
       {
 	return T::create_module(runtime, cmdline);
       }
-
-      int FORCE_LINKAGE;
     };
 
     // called by the module registration helpers
-    static void add_static_registration(const StaticRegistrationBase *reg);
+    static void add_static_registration(StaticRegistrationBase *reg);
+
+    // similar constructs for network modules
+    class NetworkRegistrationBase {
+    public:
+      NetworkRegistrationBase() : next(0) {}
+      virtual NetworkModule *create_network_module(RuntimeImpl *runtime,
+						   int *argc,
+						   const char ***argv) const = 0;
+      NetworkRegistrationBase *next;
+    };
+    template <typename T>
+    class NetworkRegistration : public NetworkRegistrationBase {
+    public:
+      NetworkRegistration(void)
+      {
+	ModuleRegistrar::add_network_registration(this);
+      }
+
+      virtual NetworkModule *create_network_module(RuntimeImpl *runtime,
+						   int *argc,
+						   const char ***argv) const
+      {
+	return T::create_network_module(runtime, argc, argv);
+      }
+    };
+
+    // called by the module registration helpers
+    static void add_network_registration(NetworkRegistrationBase *reg);
 
   protected:
     RuntimeImpl *runtime;
@@ -132,11 +165,13 @@ namespace Realm {
 	
 #ifdef REALM_MODULE_REGISTRATION_STATIC
 #define REGISTER_REALM_MODULE(classname) ModuleRegistrar::StaticRegistration<classname> classname ## _registration
+#define REGISTER_REALM_NETWORK_MODULE(classname) ModuleRegistrar::NetworkRegistration<classname> classname ## _registration
 #else
 #ifdef REALM_MODULE_REGISTRATION_DYNAMIC
 #define REGISTER_REALM_MODULE(classname) extern "C" { Module *create_realm_module(RuntimeImpl *runtime, std::vector<std::string>& cmdline) { return classname::create_module(runtime, cmdline); }
 #else
 #define REGISTER_REALM_MODULE(classname) /* nothing */
+#define REGISTER_REALM_NETWORK_MODULE(classname) /* nothing */
 #endif
 #endif
 

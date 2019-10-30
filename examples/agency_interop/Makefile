@@ -1,4 +1,4 @@
-# Copyright 2018 Stanford University, NVIDIA Corporation
+# Copyright 2019 Stanford University, NVIDIA Corporation
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -20,6 +20,7 @@ endif
 
 # Flags for directing the runtime makefile what to include
 DEBUG           ?= 1		# Include debugging symbols
+MAX_DIM         ?= 3		# Maximum number of dimensions
 OUTPUT_LEVEL    ?= LEVEL_DEBUG	# Compile time logging level
 USE_OPENMP	?= 1		# Include OpenMP support
 USE_CUDA        ?= 0		# Include CUDA support (requires CUDA)

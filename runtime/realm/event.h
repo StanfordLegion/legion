@@ -1,4 +1,4 @@
-/* Copyright 2018 Stanford University, NVIDIA Corporation
+/* Copyright 2019 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -50,11 +50,20 @@ namespace Realm {
       // used by non-legion threads to wait on an event - always blocking
       void external_wait(void) const;
 
+      // external wait with a timeout - returns true if event triggers, false
+      //  if the maximum delay occurs first
+      bool external_timedwait(long long max_ns) const;
+
       // fault-aware versions of the above (the above versions will cause the
       //  caller to fault as well if a poisoned event is queried)
       bool has_triggered_faultaware(bool& poisoned) const;
       void wait_faultaware(bool& poisoned) const;
       void external_wait_faultaware(bool& poisoned) const;
+      bool external_timedwait_faultaware(bool& poisoned, long long max_ns) const;
+
+      // subscribes to an event, ensuring the triggeredness of it will be
+      //  available as soon as possible (and without having to call wait)
+      void subscribe(void) const;
 
       // attempts to cancel the operation associated with this event
       // "reason_data" will be provided to any profilers of the operation
@@ -94,7 +103,8 @@ namespace Realm {
     class UserEvent : public Event {
     public:
       static UserEvent create_user_event(void);
-      void trigger(Event wait_on = Event::NO_EVENT) const;
+      void trigger(Event wait_on = Event::NO_EVENT,
+		   bool ignore_faults = false) const;
 
       // cancels (poisons) the event
       void cancel(void) const;
@@ -117,6 +127,11 @@ namespace Realm {
 				    const void *initial_value = 0, size_t initial_value_size = 0);
       void destroy_barrier(void);
 
+      static const ::realm_event_gen_t MAX_PHASES;
+
+      // barriers can be reused up to MAX_PHASES times by using "advance_barrier"
+      //  to advance a Barrier handle to the next phase - attempts to advance
+      //  beyond the last phase return NO_BARRIER instead
       Barrier advance_barrier(void) const;
       Barrier alter_arrival_count(int delta) const;
       Barrier get_previous_phase(void) const;
@@ -127,6 +142,61 @@ namespace Realm {
       bool get_result(void *value, size_t value_size) const;
     };
 
+    // a CompletionQueue funnels the completion of unordered events into a
+    //  single stream that can be queried (and waited on) by a single servicer
+    class CompletionQueue {
+    public:
+      typedef ::realm_id_t id_t;
+
+      id_t id;
+      bool operator<(const CompletionQueue& rhs) const;
+      bool operator==(const CompletionQueue& rhs) const;
+      bool operator!=(const CompletionQueue& rhs) const;
+
+      static const CompletionQueue NO_QUEUE;
+
+      bool exists(void) const;
+
+      // creates a completion queue that can hold at least 'max_size'
+      //  triggered events (at the moment, overflow is a fatal error)
+      // a 'max_size' of 0 allows for arbitrary queue growth, at the cost
+      //  of additional overhead
+      static CompletionQueue create_completion_queue(size_t max_size);
+
+      // destroy a completion queue
+      void destroy(Event wait_on = Event::NO_EVENT);
+
+      // adds an event to the completion queue (once it triggers)
+      // non-faultaware version raises a fatal error if the specified 'event'
+      //  is poisoned
+      void add_event(Event event);
+      void add_event_faultaware(Event event);
+
+      // requests up to 'max_events' triggered events to be popped from the
+      //  queue and stored in the provided 'events' array (if null, the
+      //  identities of the triggered events are discarded)
+      // this call returns the actual number of events popped, which may be
+      //  zero (this call is nonblocking)
+      // when 'add_event_faultaware' is used, any poisoning of the returned
+      //  events is not signalled explicitly - the caller is expected to
+      //  check via 'has_triggered_faultaware' itself
+      size_t pop_events(Event *events, size_t max_events);
+
+      // get an event that, once triggered, guarantees that (at least) one
+      //  call to pop_events made since the non-empty event was requested
+      //  will return a non-zero number of triggered events
+      // once a call to pop_events has been made (by the caller of
+      //  get_nonempty_event or anybody else), the guarantee is lost and
+      //  a new non-empty event must be requested
+      // note that 'get_nonempty_event().has_triggered()' is unlikely to
+      //  ever return 'true' if called from a node other than the one that
+      //  created the completion queue (i.e. the query at least has the
+      //  round-trip network communication latency to deal with) - if polling
+      //  on the completion queue is unavoidable, the loop should poll on
+      //  pop_events directly
+      Event get_nonempty_event(void);
+    };
+    
 
 }; // namespace Realm
 

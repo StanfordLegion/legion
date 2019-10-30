@@ -1,4 +1,4 @@
-# Copyright 2018 Stanford University
+# Copyright 2019 Stanford University
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -19,6 +19,7 @@ endif
 
 # Flags for directing the runtime makefile what to include
 DEBUG           ?= 1		# Include debugging symbols
+MAX_DIM         ?= 3		# Maximum number of dimensions
 OUTPUT_LEVEL    ?= LEVEL_DEBUG	# Compile time logging level
 USE_CUDA        ?= 0		# Include CUDA support (requires CUDA)
 USE_GASNET      ?= 0		# Include GASNet support (requires GASNet)
@@ -27,7 +28,12 @@ ALT_MAPPERS     ?= 0		# Include alternative mappers (not recommended)
 USE_SPY         ?= 0    # Include detailed Legion Spy support
 
 # Put the binary file name here
+ifeq ($(shell uname), Darwin)
+OUTFILE		?= libregent.dylib
+else
 OUTFILE		?= libregent.so
+endif
+
 # List all the application source files here
 GEN_SRC		?= regent.cc regent_partitions.cc bishop_mapper.cc bishop_c.cc murmur_hash3.cc # .cc files
 GEN_GPU_SRC	?=		# .cu files
@@ -58,6 +64,9 @@ endif
 ifeq ($(strip $(USE_SPY)),1)
 	CC_FLAGS += -DLEGION_SPY
 endif
+
+# Use reduction operators for complex types by default
+CC_FLAGS += -DLEGION_REDOP_COMPLEX
 
 # terra already includes LLVM libs, so we don't want them in our .so
 CC_FLAGS += -DREALM_ALLOW_MISSING_LLVM_LIBS

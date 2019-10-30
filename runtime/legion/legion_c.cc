@@ -1,4 +1,4 @@
-/* Copyright 2018 Stanford University
+/* Copyright 2019 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -38,30 +38,26 @@
 using namespace Legion;
 using namespace Legion::Mapping;
 using namespace Legion::Mapping::Utilities;
-typedef Point<1,coord_t> Point1D;
-typedef Point<2,coord_t> Point2D;
-typedef Point<3,coord_t> Point3D;
-typedef Rect<1,coord_t> Rect1D;
-typedef Rect<2,coord_t> Rect2D;
-typedef Rect<3,coord_t> Rect3D;
-typedef Transform<1,1,coord_t> Transform1x1;
-typedef Transform<1,2,coord_t> Transform1x2;
-typedef Transform<1,3,coord_t> Transform1x3;
-typedef Transform<2,1,coord_t> Transform2x1;
-typedef Transform<2,2,coord_t> Transform2x2;
-typedef Transform<2,3,coord_t> Transform2x3;
-typedef Transform<3,1,coord_t> Transform3x1;
-typedef Transform<3,2,coord_t> Transform3x2;
-typedef Transform<3,3,coord_t> Transform3x3;
-typedef AffineTransform<1,1,coord_t> AffineTransform1x1;
-typedef AffineTransform<1,2,coord_t> AffineTransform1x2;
-typedef AffineTransform<1,3,coord_t> AffineTransform1x3;
-typedef AffineTransform<2,1,coord_t> AffineTransform2x1;
-typedef AffineTransform<2,2,coord_t> AffineTransform2x2;
-typedef AffineTransform<2,3,coord_t> AffineTransform2x3;
-typedef AffineTransform<3,1,coord_t> AffineTransform3x1;
-typedef AffineTransform<3,2,coord_t> AffineTransform3x2;
-typedef AffineTransform<3,3,coord_t> AffineTransform3x3;
+#define TYPEDEF_POINT(DIM) \
+  typedef Point<DIM,coord_t> Point##DIM##D;
+LEGION_FOREACH_N(TYPEDEF_POINT)
+#undef TYPEDEF_POINT
+#define TYPEDEF_RECT(DIM) \
+  typedef Rect<DIM,coord_t> Rect##DIM##D;
+LEGION_FOREACH_N(TYPEDEF_RECT)
+#undef TYPEDEF_RECT
+#define TYPEDEF_TRANSFORM(D1,D2) \
+  typedef Transform<D1,D2,coord_t> Transform##D1##x##D2;
+LEGION_FOREACH_NN(TYPEDEF_TRANSFORM)
+#undef TYPEDEF_TRANSFORM
+#define TYPEDEF_AFFINE(D1,D2) \
+  typedef AffineTransform<D1,D2,coord_t> AffineTransform##D1##x##D2;
+LEGION_FOREACH_NN(TYPEDEF_AFFINE)
+#undef TYPEDEF_AFFINE
+#define TYPEDEF_BUFFER(DIM) \
+  typedef DeferredBuffer<char,DIM> DeferredBufferChar##DIM##D;
+LEGION_FOREACH_N(TYPEDEF_BUFFER)
+#undef TYPEDEF_BUFFER
 
 // -----------------------------------------------------------------------
 // Pointer Operations
@@ -100,29 +96,16 @@ legion_ptr_safe_cast(legion_runtime_t runtime_,
 // Domain Operations
 // -----------------------------------------------------------------------
 
-legion_domain_t
-legion_domain_from_rect_1d(legion_rect_1d_t r_)
-{
-  Rect1D r = CObjectWrapper::unwrap(r_);
-
-  return CObjectWrapper::wrap(Domain(r));
+#define FROM_RECT(DIM) \
+legion_domain_t \
+legion_domain_from_rect_##DIM##d(legion_rect_##DIM##d_t r_) \
+{ \
+  Rect##DIM##D r = CObjectWrapper::unwrap(r_); \
+ \
+  return CObjectWrapper::wrap(Domain(r)); \
 }
-
-legion_domain_t
-legion_domain_from_rect_2d(legion_rect_2d_t r_)
-{
-  Rect2D r = CObjectWrapper::unwrap(r_);
-
-  return CObjectWrapper::wrap(Domain(r));
-}
-
-legion_domain_t
-legion_domain_from_rect_3d(legion_rect_3d_t r_)
-{
-  Rect3D r = CObjectWrapper::unwrap(r_);
-
-  return CObjectWrapper::wrap(Domain(r));
-}
+LEGION_FOREACH_N(FROM_RECT)
+#undef FROM_RECT
 
 legion_domain_t
 legion_domain_from_index_space(legion_runtime_t runtime_,
@@ -134,32 +117,17 @@ legion_domain_from_index_space(legion_runtime_t runtime_,
   return CObjectWrapper::wrap(runtime->get_index_space_domain(is));
 }
 
-legion_rect_1d_t
-legion_domain_get_rect_1d(legion_domain_t d_)
-{
-  Domain d = CObjectWrapper::unwrap(d_);
-  Rect1D r = d;
-
-  return CObjectWrapper::wrap(r);
+#define GET_RECT(DIM) \
+legion_rect_##DIM##d_t \
+legion_domain_get_rect_##DIM##d(legion_domain_t d_) \
+{ \
+  Domain d = CObjectWrapper::unwrap(d_); \
+  Rect##DIM##D r = d; \
+\
+  return CObjectWrapper::wrap(r); \
 }
-
-legion_rect_2d_t
-legion_domain_get_rect_2d(legion_domain_t d_)
-{
-  Domain d = CObjectWrapper::unwrap(d_);
-  Rect2D r = d;
-
-  return CObjectWrapper::wrap(r);
-}
-
-legion_rect_3d_t
-legion_domain_get_rect_3d(legion_domain_t d_)
-{
-  Domain d = CObjectWrapper::unwrap(d_);
-  Rect3D r = d;
-
-  return CObjectWrapper::wrap(r);
-}
+LEGION_FOREACH_N(GET_RECT)
+#undef GET_RECT
 
 bool
 legion_domain_is_dense(legion_domain_t d_)
@@ -169,32 +137,17 @@ legion_domain_is_dense(legion_domain_t d_)
   return d.dense();
 }
 
-legion_rect_1d_t
-legion_domain_get_bounds_1d(legion_domain_t d_)
-{
-  Domain d = CObjectWrapper::unwrap(d_);
-  DomainT<1,coord_t> space = d;
-
-  return CObjectWrapper::wrap(space.bounds);
+#define GET_BOUNDS(DIM) \
+legion_rect_##DIM##d_t \
+legion_domain_get_bounds_##DIM##d(legion_domain_t d_) \
+{ \
+  Domain d = CObjectWrapper::unwrap(d_); \
+  DomainT<DIM,coord_t> space = d; \
+ \
+  return CObjectWrapper::wrap(space.bounds); \
 }
-
-legion_rect_2d_t
-legion_domain_get_bounds_2d(legion_domain_t d_)
-{
-  Domain d = CObjectWrapper::unwrap(d_);
-  DomainT<2,coord_t> space = d;
-
-  return CObjectWrapper::wrap(space.bounds);
-}
-
-legion_rect_3d_t
-legion_domain_get_bounds_3d(legion_domain_t d_)
-{
-  Domain d = CObjectWrapper::unwrap(d_);
-  DomainT<3,coord_t> space = d;
-
-  return CObjectWrapper::wrap(space.bounds);
-}
+LEGION_FOREACH_N(GET_BOUNDS)
+#undef GET_BOUNDS
 
 bool
 legion_domain_contains(legion_domain_t d_, legion_domain_point_t p_)
@@ -216,204 +169,54 @@ legion_domain_get_volume(legion_domain_t d_)
 // Domain Transform Operations
 // -----------------------------------------------------------------------
 
-legion_domain_transform_t
-legion_domain_transform_from_1x1(legion_transform_1x1_t t_)
-{
-  Transform1x1 t = CObjectWrapper::unwrap(t_);
-
-  return CObjectWrapper::wrap(DomainTransform(t));
+#define FROM_TRANSFORM(D1,D2) \
+legion_domain_transform_t \
+legion_domain_transform_from_##D1##x##D2(legion_transform_##D1##x##D2##_t t_) \
+{ \
+  Transform##D1##x##D2 t = CObjectWrapper::unwrap(t_); \
+ \
+  return CObjectWrapper::wrap(DomainTransform(t)); \
 }
+LEGION_FOREACH_NN(FROM_TRANSFORM)
+#undef FROM_TRANSFORM
 
-legion_domain_transform_t
-legion_domain_transform_from_1x2(legion_transform_1x2_t t_)
-{
-  Transform1x2 t = CObjectWrapper::unwrap(t_);
-
-  return CObjectWrapper::wrap(DomainTransform(t));
+#define FROM_AFFINE(D1,D2) \
+legion_domain_affine_transform_t \
+legion_domain_affine_transform_from_##D1##x##D2(legion_affine_transform_##D1##x##D2##_t t_) \
+{ \
+  AffineTransform##D1##x##D2 t = CObjectWrapper::unwrap(t_); \
+ \
+  return CObjectWrapper::wrap(DomainAffineTransform(t)); \
 }
-
-legion_domain_transform_t
-legion_domain_transform_from_1x3(legion_transform_1x3_t t_)
-{
-  Transform1x3 t = CObjectWrapper::unwrap(t_);
-
-  return CObjectWrapper::wrap(DomainTransform(t));
-}
-
-legion_domain_transform_t
-legion_domain_transform_from_2x1(legion_transform_2x1_t t_)
-{
-  Transform2x1 t = CObjectWrapper::unwrap(t_);
-
-  return CObjectWrapper::wrap(DomainTransform(t));
-}
-
-legion_domain_transform_t
-legion_domain_transform_from_2x2(legion_transform_2x2_t t_)
-{
-  Transform2x2 t = CObjectWrapper::unwrap(t_);
-
-  return CObjectWrapper::wrap(DomainTransform(t));
-}
-
-legion_domain_transform_t
-legion_domain_transform_from_2x3(legion_transform_2x3_t t_)
-{
-  Transform2x3 t = CObjectWrapper::unwrap(t_);
-
-  return CObjectWrapper::wrap(DomainTransform(t));
-}
-
-legion_domain_transform_t
-legion_domain_transform_from_3x1(legion_transform_3x1_t t_)
-{
-  Transform3x1 t = CObjectWrapper::unwrap(t_);
-
-  return CObjectWrapper::wrap(DomainTransform(t));
-}
-
-legion_domain_transform_t
-legion_domain_transform_from_3x2(legion_transform_3x2_t t_)
-{
-  Transform3x2 t = CObjectWrapper::unwrap(t_);
-
-  return CObjectWrapper::wrap(DomainTransform(t));
-}
-
-legion_domain_transform_t
-legion_domain_transform_from_3x3(legion_transform_3x3_t t_)
-{
-  Transform3x3 t = CObjectWrapper::unwrap(t_);
-
-  return CObjectWrapper::wrap(DomainTransform(t));
-}
-
-legion_domain_affine_transform_t
-legion_domain_affine_transform_from_1x1(legion_affine_transform_1x1_t t_)
-{
-  AffineTransform1x1 t = CObjectWrapper::unwrap(t_);
-
-  return CObjectWrapper::wrap(DomainAffineTransform(t));
-}
-
-legion_domain_affine_transform_t
-legion_domain_affine_transform_from_1x2(legion_affine_transform_1x2_t t_)
-{
-  AffineTransform1x2 t = CObjectWrapper::unwrap(t_);
-
-  return CObjectWrapper::wrap(DomainAffineTransform(t));
-}
-
-legion_domain_affine_transform_t
-legion_domain_affine_transform_from_1x3(legion_affine_transform_1x3_t t_)
-{
-  AffineTransform1x3 t = CObjectWrapper::unwrap(t_);
-
-  return CObjectWrapper::wrap(DomainAffineTransform(t));
-}
-
-legion_domain_affine_transform_t
-legion_domain_affine_transform_from_2x1(legion_affine_transform_2x1_t t_)
-{
-  AffineTransform2x1 t = CObjectWrapper::unwrap(t_);
-
-  return CObjectWrapper::wrap(DomainAffineTransform(t));
-}
-
-legion_domain_affine_transform_t
-legion_domain_affine_transform_from_2x2(legion_affine_transform_2x2_t t_)
-{
-  AffineTransform2x2 t = CObjectWrapper::unwrap(t_);
-
-  return CObjectWrapper::wrap(DomainAffineTransform(t));
-}
-
-legion_domain_affine_transform_t
-legion_domain_affine_transform_from_2x3(legion_affine_transform_2x3_t t_)
-{
-  AffineTransform2x3 t = CObjectWrapper::unwrap(t_);
-
-  return CObjectWrapper::wrap(DomainAffineTransform(t));
-}
-
-legion_domain_affine_transform_t
-legion_domain_affine_transform_from_3x1(legion_affine_transform_3x1_t t_)
-{
-  AffineTransform3x1 t = CObjectWrapper::unwrap(t_);
-
-  return CObjectWrapper::wrap(DomainAffineTransform(t));
-}
-
-legion_domain_affine_transform_t
-legion_domain_affine_transform_from_3x2(legion_affine_transform_3x2_t t_)
-{
-  AffineTransform3x2 t = CObjectWrapper::unwrap(t_);
-
-  return CObjectWrapper::wrap(DomainAffineTransform(t));
-}
-
-legion_domain_affine_transform_t
-legion_domain_affine_transform_from_3x3(legion_affine_transform_3x3_t t_)
-{
-  AffineTransform3x3 t = CObjectWrapper::unwrap(t_);
-
-  return CObjectWrapper::wrap(DomainAffineTransform(t));
-}
+LEGION_FOREACH_NN(FROM_AFFINE)
+#undef FROM_AFFINE
 
 // -----------------------------------------------------------------------
 // Domain Point Operations
 // -----------------------------------------------------------------------
 
-legion_domain_point_t
-legion_domain_point_from_point_1d(legion_point_1d_t p_)
-{
-  Point1D p = CObjectWrapper::unwrap(p_);
-
-  return CObjectWrapper::wrap(DomainPoint(p));
+#define FROM_POINT(DIM) \
+legion_domain_point_t \
+legion_domain_point_from_point_##DIM##d(legion_point_##DIM##d_t p_) \
+{ \
+  Point##DIM##D p = CObjectWrapper::unwrap(p_); \
+ \
+  return CObjectWrapper::wrap(DomainPoint(p)); \
 }
+LEGION_FOREACH_N(FROM_POINT)
+#undef FROM_POINT
 
-legion_domain_point_t
-legion_domain_point_from_point_2d(legion_point_2d_t p_)
-{
-  Point2D p = CObjectWrapper::unwrap(p_);
-
-  return CObjectWrapper::wrap(DomainPoint(p));
+#define GET_POINT(DIM) \
+legion_point_##DIM##d_t \
+legion_domain_point_get_point_##DIM##d(legion_domain_point_t p_) \
+{ \
+  DomainPoint d = CObjectWrapper::unwrap(p_); \
+  Point##DIM##D p = d; \
+ \
+  return CObjectWrapper::wrap(p); \
 }
-
-legion_domain_point_t
-legion_domain_point_from_point_3d(legion_point_3d_t p_)
-{
-  Point3D p = CObjectWrapper::unwrap(p_);
-
-  return CObjectWrapper::wrap(DomainPoint(p));
-}
-
-legion_point_1d_t
-legion_domain_point_get_point_1d(legion_domain_point_t p_)
-{
-  DomainPoint d = CObjectWrapper::unwrap(p_);
-  Point1D p = d;
-
-  return CObjectWrapper::wrap(p);
-}
-
-legion_point_2d_t
-legion_domain_point_get_point_2d(legion_domain_point_t p_)
-{
-  DomainPoint d = CObjectWrapper::unwrap(p_);
-  Point2D p = d;
-
-  return CObjectWrapper::wrap(p);
-}
-
-legion_point_3d_t
-legion_domain_point_get_point_3d(legion_domain_point_t p_)
-{
-  DomainPoint d = CObjectWrapper::unwrap(p_);
-  Point3D p = d;
-
-  return CObjectWrapper::wrap(p);
-}
+LEGION_FOREACH_N(GET_POINT)
+#undef GET_POINT
 
 legion_domain_point_t
 legion_domain_point_nil()
@@ -490,6 +293,7 @@ legion_domain_point_iterator_next(legion_domain_point_iterator_t handle_)
 // Rect in Domain Iterator
 // -----------------------------------------------------------------------
 
+#if __cplusplus < 201103L
 #define DEFINE_RECT_IN_DOMAIN_ITERATOR(N)                                      \
                                                                                \
 legion_rect_in_domain_iterator_##N##d_t                                        \
@@ -532,11 +336,55 @@ legion_rect_in_domain_iterator_get_rect_##N##d(                                \
 {                                                                              \
   RectInDomainIterator<N,coord_t> *itr = CObjectWrapper::unwrap(handle_);      \
   return CObjectWrapper::wrap(**itr);                                          \
+}
+#else
+#define DEFINE_RECT_IN_DOMAIN_ITERATOR(N)                                      \
+                                                                               \
+legion_rect_in_domain_iterator_##N##d_t                                        \
+legion_rect_in_domain_iterator_create_##N##d(legion_domain_t handle_)          \
+{                                                                              \
+  Domain domain = CObjectWrapper::unwrap(handle_);                             \
+  assert(domain.dim == N);                                                     \
+  RectInDomainIterator<N,coord_t> *itr =                                       \
+    new RectInDomainIterator<N,coord_t>(domain);                               \
+  return CObjectWrapper::wrap(itr);                                            \
 }                                                                              \
+                                                                               \
+void                                                                           \
+legion_rect_in_domain_iterator_destroy_##N##d(                                 \
+                              legion_rect_in_domain_iterator_##N##d_t handle_) \
+{                                                                              \
+  RectInDomainIterator<N,coord_t> *itr = CObjectWrapper::unwrap(handle_);      \
+  delete itr;                                                                  \
+}                                                                              \
+                                                                               \
+bool                                                                           \
+legion_rect_in_domain_iterator_valid_##N##d(                                   \
+                              legion_rect_in_domain_iterator_##N##d_t handle_) \
+{                                                                              \
+  RectInDomainIterator<N,coord_t> *itr = CObjectWrapper::unwrap(handle_);      \
+  return itr->valid();                                                         \
+}                                                                              \
+                                                                               \
+bool                                                                           \
+legion_rect_in_domain_iterator_step_##N##d(                                    \
+                              legion_rect_in_domain_iterator_##N##d_t handle_) \
+{                                                                              \
+  RectInDomainIterator<N,coord_t> *itr = CObjectWrapper::unwrap(handle_);      \
+  return itr->step();                                                          \
+}                                                                              \
+                                                                               \
+legion_rect_##N##d_t                                                           \
+legion_rect_in_domain_iterator_get_rect_##N##d(                                \
+                              legion_rect_in_domain_iterator_##N##d_t handle_) \
+{                                                                              \
+  RectInDomainIterator<N,coord_t> *itr = CObjectWrapper::unwrap(handle_);      \
+  return CObjectWrapper::wrap(**itr);                                          \
+}
+#endif
 
-DEFINE_RECT_IN_DOMAIN_ITERATOR(1)
-DEFINE_RECT_IN_DOMAIN_ITERATOR(2)
-DEFINE_RECT_IN_DOMAIN_ITERATOR(3)
+LEGION_FOREACH_N(DEFINE_RECT_IN_DOMAIN_ITERATOR)
+#undef DEFINE_RECT_IN_DOMAIN_ITERATOR
 
 // -------------------------------------------------------
 // Coloring Operations
@@ -819,16 +667,40 @@ legion_index_space_intersection(legion_runtime_t runtime_,
   return CObjectWrapper::wrap(is);
 }
 
+legion_index_space_t
+legion_index_space_subtraction(legion_runtime_t runtime_,
+                               legion_context_t ctx_,
+                               legion_index_space_t left_,
+                               legion_index_space_t right_)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+  IndexSpace left = CObjectWrapper::unwrap(left_);
+  IndexSpace right = CObjectWrapper::unwrap(right_);
+
+  return CObjectWrapper::wrap(
+      runtime->subtract_index_spaces(ctx, left, right));
+}
+
 void
 legion_index_space_destroy(legion_runtime_t runtime_,
                            legion_context_t ctx_,
                            legion_index_space_t handle_)
 {
+  legion_index_space_destroy_unordered(runtime_, ctx_, handle_, false);
+}
+
+void
+legion_index_space_destroy_unordered(legion_runtime_t runtime_,
+                                     legion_context_t ctx_,
+                                     legion_index_space_t handle_,
+                                     bool unordered)
+{
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_)->context();
   IndexSpace handle = CObjectWrapper::unwrap(handle_);
 
-  runtime->destroy_index_space(ctx, handle);
+  runtime->destroy_index_space(ctx, handle, unordered);
 }
 
 bool
@@ -849,6 +721,16 @@ legion_index_space_get_domain(legion_runtime_t runtime_,
   IndexSpace handle = CObjectWrapper::unwrap(handle_);
 
   return CObjectWrapper::wrap(runtime->get_index_space_domain(handle));
+}
+
+bool
+legion_index_space_has_parent_index_partition(legion_runtime_t runtime_,
+                                              legion_index_space_t handle_)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  IndexSpace handle = CObjectWrapper::unwrap(handle_);
+
+  return runtime->has_parent_index_partition(handle);
 }
 
 legion_index_partition_t
@@ -1019,18 +901,82 @@ legion_index_partition_create_domain_point_coloring(
             (*coloring)[c.p] = Domain(Rect1D(0, -1)); 
             break;
           }
+#if LEGION_MAX_DIM >= 2
       case 2:
           {
             (*coloring)[c.p] =
               Domain(Rect2D(Point2D(0, 0), Point2D(-1, -1)));
             break;
           }
+#endif
+#if LEGION_MAX_DIM >= 3
       case 3:
           {
             (*coloring)[c.p] =
               Domain(Rect3D(Point3D(0, 0, 0), Point3D(-1, -1, -1)));
             break;
           }
+#endif
+#if LEGION_MAX_DIM >= 4
+      case 4:
+          {
+            const coord_t lovals[4] = { 0, 0, 0, 0 };
+            const coord_t hivals[4] = {-1, -1, -1, -1 };
+            (*coloring)[c.p] =
+              Domain(Rect4D(Point4D(lovals), Point4D(hivals)));
+            break;
+          }
+#endif
+#if LEGION_MAX_DIM >= 5
+      case 5:
+          {
+            const coord_t lovals[5] = { 0, 0, 0, 0, 0 };
+            const coord_t hivals[5] = {-1, -1, -1, -1, -1 };
+            (*coloring)[c.p] =
+              Domain(Rect5D(Point5D(lovals), Point5D(hivals)));
+            break;
+          }
+#endif
+#if LEGION_MAX_DIM >= 6
+      case 6:
+          {
+            const coord_t lovals[6] = { 0, 0, 0, 0, 0, 0 };
+            const coord_t hivals[6] = {-1, -1, -1, -1, -1, -1 };
+            (*coloring)[c.p] =
+              Domain(Rect6D(Point6D(lovals), Point6D(hivals)));
+            break;
+          }
+#endif
+#if LEGION_MAX_DIM >= 7
+      case 7:
+          {
+            const coord_t lovals[7] = { 0, 0, 0, 0, 0, 0, 0 };
+            const coord_t hivals[7] = {-1, -1, -1, -1, -1, -1, -1 };
+            (*coloring)[c.p] =
+              Domain(Rect7D(Point7D(lovals), Point7D(hivals)));
+            break;
+          }
+#endif
+#if LEGION_MAX_DIM >= 8
+      case 8:
+          {
+            const coord_t lovals[8] = { 0, 0, 0, 0, 0, 0, 0, 0 };
+            const coord_t hivals[8] = {-1, -1, -1, -1, -1, -1, -1, -1 };
+            (*coloring)[c.p] =
+              Domain(Rect8D(Point8D(lovals), Point8D(hivals)));
+            break;
+          }
+#endif
+#if LEGION_MAX_DIM >= 9
+      case 9:
+          {
+            const coord_t lovals[9] = { 0, 0, 0, 0, 0, 0, 0, 0, 0 };
+            const coord_t hivals[9] = {-1, -1, -1, -1, -1, -1, -1, -1, -1 };
+            (*coloring)[c.p] =
+              Domain(Rect9D(Point9D(lovals), Point9D(hivals)));
+            break;
+          }
+#endif
       default:
         break;
       }
@@ -1068,18 +1014,82 @@ legion_index_partition_create_multi_domain_point_coloring(
             (*coloring)[c.p].insert(Domain(Rect1D(0, -1)));
             break;
           }
+#if LEGION_MAX_DIM >= 2
       case 2:
           {
             (*coloring)[c.p].insert(
                 Domain(Rect2D(Point2D(0, 0), Point2D(-1, -1))));
             break;
           }
+#endif
+#if LEGION_MAX_DIM >= 3
       case 3:
           {
             (*coloring)[c.p].insert(
                 Domain(Rect3D(Point3D(0, 0, 0), Point3D(-1, -1, -1))));
             break;
           }
+#endif
+#if LEGION_MAX_DIM >= 4
+      case 4:
+          {
+            const coord_t lovals[4] = { 0, 0, 0, 0 };
+            const coord_t hivals[4] = {-1, -1, -1, -1 };
+            (*coloring)[c.p].insert(
+                Domain(Rect4D(Point4D(lovals), Point4D(hivals))));
+            break;
+          }
+#endif
+#if LEGION_MAX_DIM >= 5
+      case 5:
+          {
+            const coord_t lovals[5] = { 0, 0, 0, 0, 0 };
+            const coord_t hivals[5] = {-1, -1, -1, -1, -1 };
+            (*coloring)[c.p].insert(
+                Domain(Rect5D(Point5D(lovals), Point5D(hivals))));
+            break;
+          }
+#endif
+#if LEGION_MAX_DIM >= 6
+      case 6:
+          {
+            const coord_t lovals[6] = { 0, 0, 0, 0, 0, 0 };
+            const coord_t hivals[6] = {-1, -1, -1, -1, -1, -1 };
+            (*coloring)[c.p].insert(
+                Domain(Rect6D(Point6D(lovals), Point6D(hivals))));
+            break;
+          }
+#endif
+#if LEGION_MAX_DIM >= 7
+      case 7:
+          {
+            const coord_t lovals[7] = { 0, 0, 0, 0, 0, 0, 0 };
+            const coord_t hivals[7] = {-1, -1, -1, -1, -1, -1, -1 };
+            (*coloring)[c.p].insert(
+                Domain(Rect7D(Point7D(lovals), Point7D(hivals))));
+            break;
+          }
+#endif
+#if LEGION_MAX_DIM >= 8
+      case 8:
+          {
+            const coord_t lovals[8] = { 0, 0, 0, 0, 0, 0, 0, 0 };
+            const coord_t hivals[8] = {-1, -1, -1, -1, -1, -1, -1, -1 };
+            (*coloring)[c.p].insert(
+                Domain(Rect8D(Point8D(lovals), Point8D(hivals))));
+            break;
+          }
+#endif
+#if LEGION_MAX_DIM >= 9
+      case 9:
+          {
+            const coord_t lovals[9] = { 0, 0, 0, 0, 0, 0, 0, 0, 0 };
+            const coord_t hivals[9] = {-1, -1, -1, -1, -1, -1, -1, -1, -1 };
+            (*coloring)[c.p].insert(
+                Domain(Rect9D(Point9D(lovals), Point9D(hivals))));
+            break;
+          }
+#endif
       default:
         break;
       }
@@ -1092,62 +1102,27 @@ legion_index_partition_create_multi_domain_point_coloring(
   return CObjectWrapper::wrap(ip);
 }
 
-legion_index_partition_t
-legion_index_partition_create_blockify_1d(
-  legion_runtime_t runtime_,
-  legion_context_t ctx_,
-  legion_index_space_t parent_,
-  legion_blockify_1d_t blockify_,
-  int part_color /* = AUTO_GENERATE_ID */)
-{
-  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
-  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
-  IndexSpace parent = CObjectWrapper::unwrap(parent_);
-  CObjectWrapper::Blockify<1> blockify = CObjectWrapper::unwrap(blockify_);
-
-  IndexPartition ip =
-    runtime->create_partition_by_blockify(ctx, IndexSpaceT<1,coord_t>(parent),
-        blockify.block_size, blockify.offset, part_color);
-  return CObjectWrapper::wrap(ip);
+#define CREATE_BLOCKIFY(DIM) \
+legion_index_partition_t \
+legion_index_partition_create_blockify_##DIM##d( \
+  legion_runtime_t runtime_, \
+  legion_context_t ctx_, \
+  legion_index_space_t parent_, \
+  legion_blockify_##DIM##d_t blockify_, \
+  int part_color /* = AUTO_GENERATE_ID */) \
+{ \
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_); \
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context(); \
+  IndexSpace parent = CObjectWrapper::unwrap(parent_); \
+  CObjectWrapper::Blockify<DIM> blockify = CObjectWrapper::unwrap(blockify_); \
+ \
+  IndexPartition ip = \
+    runtime->create_partition_by_blockify(ctx, IndexSpaceT<DIM,coord_t>(parent), \
+        blockify.block_size, blockify.offset, part_color); \
+  return CObjectWrapper::wrap(ip); \
 }
-
-legion_index_partition_t
-legion_index_partition_create_blockify_2d(
-  legion_runtime_t runtime_,
-  legion_context_t ctx_,
-  legion_index_space_t parent_,
-  legion_blockify_2d_t blockify_,
-  int part_color /* = AUTO_GENERATE_ID */)
-{
-  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
-  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
-  IndexSpace parent = CObjectWrapper::unwrap(parent_);
-  CObjectWrapper::Blockify<2> blockify = CObjectWrapper::unwrap(blockify_);
-
-  IndexPartition ip =
-    runtime->create_partition_by_blockify(ctx, IndexSpaceT<2,coord_t>(parent),
-        blockify.block_size, blockify.offset, part_color);
-  return CObjectWrapper::wrap(ip);
-}
-
-legion_index_partition_t
-legion_index_partition_create_blockify_3d(
-  legion_runtime_t runtime_,
-  legion_context_t ctx_,
-  legion_index_space_t parent_,
-  legion_blockify_3d_t blockify_,
-  int part_color /* = AUTO_GENERATE_ID */)
-{
-  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
-  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
-  IndexSpace parent = CObjectWrapper::unwrap(parent_);
-  CObjectWrapper::Blockify<3> blockify = CObjectWrapper::unwrap(blockify_);
-
-  IndexPartition ip =
-    runtime->create_partition_by_blockify(ctx, IndexSpaceT<3,coord_t>(parent),
-        blockify.block_size, blockify.offset, part_color);
-  return CObjectWrapper::wrap(ip);
-}
+LEGION_FOREACH_N(CREATE_BLOCKIFY)
+#undef CREATE_BLOCKIFY
 
 legion_index_partition_t
 legion_index_partition_create_equal(legion_runtime_t runtime_,
@@ -1213,6 +1188,27 @@ legion_index_partition_create_by_intersection(
   IndexPartition ip =
     runtime->create_partition_by_intersection(ctx, parent, handle1, handle2,
                                               color_space, part_kind, color);
+  return CObjectWrapper::wrap(ip);
+}
+
+legion_index_partition_t
+legion_index_partition_create_by_intersection_mirror(
+  legion_runtime_t runtime_,
+  legion_context_t ctx_,
+  legion_index_space_t parent_,
+  legion_index_partition_t handle_,
+  legion_partition_kind_t part_kind /* = COMPUTE_KIND */,
+  int color /* = AUTO_GENERATE_ID */,
+  bool dominates /* = false */)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+  IndexSpace parent = CObjectWrapper::unwrap(parent_);
+  IndexPartition handle = CObjectWrapper::unwrap(handle_);
+
+  IndexPartition ip =
+    runtime->create_partition_by_intersection(ctx, parent, handle, part_kind,
+                                              color, dominates);
   return CObjectWrapper::wrap(ip);
 }
 
@@ -1389,6 +1385,132 @@ legion_index_partition_create_by_restriction(
         ctx, parent, color_space, transform, extent, part_kind, color);
 
   return CObjectWrapper::wrap(ip);
+}
+
+legion_index_partition_t
+legion_index_partition_create_pending_partition(
+  legion_runtime_t runtime_,
+  legion_context_t ctx_,
+  legion_index_space_t parent_,
+  legion_index_space_t color_space_,
+  legion_partition_kind_t part_kind /* = COMPUTE_KIND */,
+  int color /* = AUTO_GENERATE_ID */)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+  IndexSpace parent = CObjectWrapper::unwrap(parent_);
+  IndexSpace color_space = CObjectWrapper::unwrap(color_space_);
+
+  IndexPartition ip =
+    runtime->create_pending_partition(
+        ctx, parent, color_space, part_kind, color);
+
+  return CObjectWrapper::wrap(ip);
+}
+
+legion_index_space_t
+legion_index_partition_create_index_space_union_spaces(
+  legion_runtime_t runtime_,
+  legion_context_t ctx_,
+  legion_index_partition_t parent_,
+  legion_domain_point_t color_,
+  const legion_index_space_t *spaces_,
+  size_t num_spaces)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+  IndexPartition parent = CObjectWrapper::unwrap(parent_);
+  DomainPoint color = CObjectWrapper::unwrap(color_);
+
+  std::vector<IndexSpace> handles;
+  for (size_t idx = 0; idx < num_spaces; ++idx)
+    handles.push_back(CObjectWrapper::unwrap(spaces_[idx]));
+
+  return CObjectWrapper::wrap(
+      runtime->create_index_space_union(ctx, parent, color, handles));
+}
+
+legion_index_space_t
+legion_index_partition_create_index_space_union_partition(
+  legion_runtime_t runtime_,
+  legion_context_t ctx_,
+  legion_index_partition_t parent_,
+  legion_domain_point_t color_,
+  legion_index_partition_t handle_)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+  IndexPartition parent = CObjectWrapper::unwrap(parent_);
+  DomainPoint color = CObjectWrapper::unwrap(color_);
+  IndexPartition handle = CObjectWrapper::unwrap(handle_);
+
+  return CObjectWrapper::wrap(
+      runtime->create_index_space_union(ctx, parent, color, handle));
+}
+
+legion_index_space_t
+legion_index_partition_create_index_space_intersection_spaces(
+  legion_runtime_t runtime_,
+  legion_context_t ctx_,
+  legion_index_partition_t parent_,
+  legion_domain_point_t color_,
+  const legion_index_space_t *spaces_,
+  size_t num_spaces)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+  IndexPartition parent = CObjectWrapper::unwrap(parent_);
+  DomainPoint color = CObjectWrapper::unwrap(color_);
+
+  std::vector<IndexSpace> handles;
+  for (size_t idx = 0; idx < num_spaces; ++idx)
+    handles.push_back(CObjectWrapper::unwrap(spaces_[idx]));
+
+  return CObjectWrapper::wrap(
+      runtime->create_index_space_intersection(ctx, parent, color, handles));
+}
+
+legion_index_space_t
+legion_index_partition_create_index_space_intersection_partition(
+  legion_runtime_t runtime_,
+  legion_context_t ctx_,
+  legion_index_partition_t parent_,
+  legion_domain_point_t color_,
+  legion_index_partition_t handle_)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+  IndexPartition parent = CObjectWrapper::unwrap(parent_);
+  DomainPoint color = CObjectWrapper::unwrap(color_);
+  IndexPartition handle = CObjectWrapper::unwrap(handle_);
+
+  return CObjectWrapper::wrap(
+      runtime->create_index_space_intersection(ctx, parent, color, handle));
+}
+
+legion_index_space_t
+legion_index_partition_create_index_space_difference(
+  legion_runtime_t runtime_,
+  legion_context_t ctx_,
+  legion_index_partition_t parent_,
+  legion_domain_point_t color_,
+  legion_index_space_t initial_,
+  const legion_index_space_t *spaces_,
+  size_t num_spaces)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+  IndexPartition parent = CObjectWrapper::unwrap(parent_);
+  DomainPoint color = CObjectWrapper::unwrap(color_);
+  IndexSpace initial = CObjectWrapper::unwrap(initial_);
+
+  std::vector<IndexSpace> handles;
+  for (size_t idx = 0; idx < num_spaces; ++idx)
+    handles.push_back(CObjectWrapper::unwrap(spaces_[idx]));
+
+  return CObjectWrapper::wrap(
+      runtime->create_index_space_difference(
+        ctx, parent, color, initial, handles));
 }
 
 bool
@@ -1575,11 +1697,20 @@ legion_field_space_destroy(legion_runtime_t runtime_,
                            legion_context_t ctx_,
                            legion_field_space_t handle_)
 {
+  legion_field_space_destroy_unordered(runtime_, ctx_, handle_, false);
+}
+
+void
+legion_field_space_destroy_unordered(legion_runtime_t runtime_,
+                                     legion_context_t ctx_,
+                                     legion_field_space_t handle_,
+                                     bool unordered)
+{
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_)->context();
   FieldSpace handle = CObjectWrapper::unwrap(handle_);
 
-  runtime->destroy_field_space(ctx, handle);
+  runtime->destroy_field_space(ctx, handle, unordered);
 }
 
 void
@@ -1612,6 +1743,24 @@ legion_field_space_retrieve_semantic_information(
 
   runtime->retrieve_semantic_information(
                        handle, tag, *result, *size, can_fail, wait_until_ready);
+}
+
+bool
+legion_field_space_has_fields(legion_runtime_t runtime_,
+                              legion_context_t ctx_,
+                              legion_field_space_t handle_,
+                              const legion_field_id_t *fields_,
+                              size_t fields_size)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+  FieldSpace handle = CObjectWrapper::unwrap(handle_);
+
+  std::set<FieldID> fields;
+  runtime->get_field_space_fields(ctx, handle, fields);
+  for (size_t idx = 0; idx < fields_size; ++idx)
+    if (fields.find(fields_[idx]) == fields.end()) return false;
+  return true;
 }
 
 void
@@ -1696,6 +1845,19 @@ legion_field_id_retrieve_name(legion_runtime_t runtime_,
   runtime->retrieve_name(handle, id, *result);
 }
 
+size_t
+legion_field_id_get_size(legion_runtime_t runtime_,
+                         legion_context_t ctx_,
+                         legion_field_space_t handle_,
+                         legion_field_id_t id)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+  FieldSpace handle = CObjectWrapper::unwrap(handle_);
+
+  return runtime->get_field_size(ctx, handle, id);
+}
+
 // -------------------------------------------------------
 // Logical Region Operations
 // -------------------------------------------------------
@@ -1722,11 +1884,20 @@ legion_logical_region_destroy(legion_runtime_t runtime_,
                               legion_context_t ctx_,
                               legion_logical_region_t handle_)
 {
+  legion_logical_region_destroy_unordered(runtime_, ctx_, handle_, false);
+}
+
+void
+legion_logical_region_destroy_unordered(legion_runtime_t runtime_,
+                                        legion_context_t ctx_,
+                                        legion_logical_region_t handle_,
+                                        bool unordered)
+{
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_)->context();
   LogicalRegion handle = CObjectWrapper::unwrap(handle_);
 
-  runtime->destroy_logical_region(ctx, handle);
+  runtime->destroy_logical_region(ctx, handle, unordered);
 }
 
 legion_color_t
@@ -1868,11 +2039,20 @@ legion_logical_partition_destroy(legion_runtime_t runtime_,
                                  legion_context_t ctx_,
                                  legion_logical_partition_t handle_)
 {
+  legion_logical_partition_destroy_unordered(runtime_, ctx_, handle_, false);
+}
+
+void
+legion_logical_partition_destroy_unordered(legion_runtime_t runtime_,
+                                           legion_context_t ctx_,
+                                           legion_logical_partition_t handle_,
+                                           bool unordered)
+{
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_)->context();
   LogicalPartition handle = CObjectWrapper::unwrap(handle_);
 
-  runtime->destroy_logical_partition(ctx, handle);
+  runtime->destroy_logical_partition(ctx, handle, unordered);
 }
 
 legion_logical_region_t
@@ -2201,8 +2381,16 @@ void
 legion_field_allocator_free_field(legion_field_allocator_t allocator_,
                                   legion_field_id_t fid)
 {
+  legion_field_allocator_free_field_unordered(allocator_, fid, false);
+}
+
+void
+legion_field_allocator_free_field_unordered(legion_field_allocator_t allocator_,
+                                            legion_field_id_t fid,
+                                            bool unordered)
+{
   FieldAllocator *allocator = CObjectWrapper::unwrap(allocator_);
-  allocator->free_field(fid);
+  allocator->free_field(fid, unordered);
 }
 
 legion_field_id_t
@@ -2553,6 +2741,50 @@ legion_future_map_get_future(legion_future_map_t fm_,
   return CObjectWrapper::wrap(new Future(fm->get_future(dp)));
 }
 
+// -----------------------------------------------------------------------
+// Deferred Buffer Operations
+// -----------------------------------------------------------------------
+
+#define CREATE_BUFFER(DIM) \
+legion_deferred_buffer_char_##DIM##d_t \
+legion_deferred_buffer_char_##DIM##d_create( \
+    legion_rect_##DIM##d_t bounds_, \
+    legion_memory_kind_t kind_, \
+    char *initial_value) \
+{ \
+  Rect##DIM##D bounds = CObjectWrapper::unwrap(bounds_); \
+  Memory::Kind kind = CObjectWrapper::unwrap(kind_); \
+ \
+  return CObjectWrapper::wrap( \
+      new DeferredBufferChar##DIM##D(bounds, kind, initial_value)); \
+}
+LEGION_FOREACH_N(CREATE_BUFFER)
+#undef CREATE_BUFFER
+
+#define BUFFER_PTR(DIM) \
+char* \
+legion_deferred_buffer_char_##DIM##d_ptr( \
+    legion_deferred_buffer_char_##DIM##d_t buffer_, \
+    legion_point_##DIM##d_t p_) \
+{ \
+  DeferredBufferChar##DIM##D *buffer = CObjectWrapper::unwrap(buffer_); \
+  Point##DIM##D p = CObjectWrapper::unwrap(p_); \
+  return buffer->ptr(p); \
+}
+LEGION_FOREACH_N(BUFFER_PTR)
+#undef BUFFER_PTR
+
+#define BUFFER_DESTROY(DIM) \
+void \
+legion_deferred_buffer_char_##DIM##d_destroy( \
+    legion_deferred_buffer_char_##DIM##d_t buffer_) \
+{ \
+  DeferredBufferChar##DIM##D *buffer = CObjectWrapper::unwrap(buffer_); \
+  delete buffer; \
+}
+LEGION_FOREACH_N(BUFFER_DESTROY)
+#undef BUFFER_DESTROY
+
 //------------------------------------------------------------------------
 // Task Launch Operations
 //------------------------------------------------------------------------
@@ -2634,6 +2866,51 @@ legion_task_launcher_add_region_requirement_logical_region_reduction(
 }
 
 void
+legion_task_launcher_set_region_requirement_logical_region(
+  legion_task_launcher_t launcher_,
+  unsigned idx,
+  legion_logical_region_t handle_,
+  legion_privilege_mode_t priv,
+  legion_coherence_property_t prop,
+  legion_logical_region_t parent_,
+  legion_mapping_tag_id_t tag /* = 0 */,
+  bool verified /* = false*/)
+{
+  TaskLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+  LogicalRegion handle = CObjectWrapper::unwrap(handle_);
+  LogicalRegion parent = CObjectWrapper::unwrap(parent_);
+
+  if (idx >= launcher->region_requirements.size()) {
+    launcher->region_requirements.resize(idx + 1);
+  }
+  launcher->region_requirements[idx] =
+    RegionRequirement(handle, priv, prop, parent, tag, verified);
+}
+
+void
+legion_task_launcher_set_region_requirement_logical_region_reduction(
+  legion_task_launcher_t launcher_,
+  unsigned idx,
+  legion_logical_region_t handle_,
+  legion_reduction_op_id_t redop,
+  legion_coherence_property_t prop,
+  legion_logical_region_t parent_,
+  legion_mapping_tag_id_t tag /* = 0 */,
+  bool verified /* = false*/)
+{
+  TaskLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+  LogicalRegion handle = CObjectWrapper::unwrap(handle_);
+  LogicalRegion parent = CObjectWrapper::unwrap(parent_);
+
+
+  if (idx >= launcher->region_requirements.size()) {
+    launcher->region_requirements.resize(idx + 1);
+  }
+  launcher->region_requirements[idx] =
+    RegionRequirement(handle, redop, prop, parent, tag, verified);
+}
+
+void
 legion_task_launcher_add_field(legion_task_launcher_t launcher_,
                                unsigned idx,
                                legion_field_id_t fid,
@@ -2642,6 +2919,25 @@ legion_task_launcher_add_field(legion_task_launcher_t launcher_,
   TaskLauncher *launcher = CObjectWrapper::unwrap(launcher_);
 
   launcher->add_field(idx, fid, inst);
+}
+
+const void*
+legion_index_launcher_get_projection_args(legion_region_requirement_t requirement_,
+					  size_t *size)
+{
+  return CObjectWrapper::unwrap(requirement_)->get_projection_args(size);
+}
+
+void
+legion_index_launcher_set_projection_args(legion_index_launcher_t launcher_,
+					  unsigned idx,
+					  const void *args,
+					  size_t size,
+					  bool own)
+{
+  IndexTaskLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+
+  launcher->region_requirements[idx].set_projection_args(args, size, own);
 }
 
 void
@@ -2788,6 +3084,22 @@ legion_index_launcher_execute_reduction(legion_runtime_t runtime_,
   return CObjectWrapper::wrap(new Future(f));
 }
 
+legion_future_t
+legion_index_launcher_execute_deterministic_reduction(
+                                        legion_runtime_t runtime_,
+                                        legion_context_t ctx_,
+                                        legion_index_launcher_t launcher_,
+                                        legion_reduction_op_id_t redop,
+                                        bool deterministic)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+  IndexTaskLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+
+  Future f = runtime->execute_index_space(ctx, *launcher, redop, deterministic);
+  return CObjectWrapper::wrap(new Future(f));
+}
+
 unsigned
 legion_index_launcher_add_region_requirement_logical_region(
   legion_index_launcher_t launcher_,
@@ -2870,6 +3182,98 @@ legion_index_launcher_add_region_requirement_logical_partition_reduction(
   launcher->add_region_requirement(
     RegionRequirement(handle, proj, redop, prop, parent, tag, verified));
   return idx;
+}
+
+void
+legion_index_launcher_set_region_requirement_logical_region(
+  legion_index_launcher_t launcher_,
+  unsigned idx,
+  legion_logical_region_t handle_,
+  legion_projection_id_t proj /* = 0 */,
+  legion_privilege_mode_t priv,
+  legion_coherence_property_t prop,
+  legion_logical_region_t parent_,
+  legion_mapping_tag_id_t tag /* = 0 */,
+  bool verified /* = false*/)
+{
+  IndexTaskLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+  LogicalRegion handle = CObjectWrapper::unwrap(handle_);
+  LogicalRegion parent = CObjectWrapper::unwrap(parent_);
+
+  if (idx >= launcher->region_requirements.size()) {
+    launcher->region_requirements.resize(idx + 1);
+  }
+  launcher->region_requirements[idx] =
+    RegionRequirement(handle, proj, priv, prop, parent, tag, verified);
+}
+
+void
+legion_index_launcher_set_region_requirement_logical_partition(
+  legion_index_launcher_t launcher_,
+  unsigned idx,
+  legion_logical_partition_t handle_,
+  legion_projection_id_t proj /* = 0 */,
+  legion_privilege_mode_t priv,
+  legion_coherence_property_t prop,
+  legion_logical_region_t parent_,
+  legion_mapping_tag_id_t tag /* = 0 */,
+  bool verified /* = false*/)
+{
+  IndexTaskLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+  LogicalPartition handle = CObjectWrapper::unwrap(handle_);
+  LogicalRegion parent = CObjectWrapper::unwrap(parent_);
+
+  if (idx >= launcher->region_requirements.size()) {
+    launcher->region_requirements.resize(idx + 1);
+  }
+  launcher->region_requirements[idx] =
+    RegionRequirement(handle, proj, priv, prop, parent, tag, verified);
+}
+
+void
+legion_index_launcher_set_region_requirement_logical_region_reduction(
+  legion_index_launcher_t launcher_,
+  unsigned idx,
+  legion_logical_region_t handle_,
+  legion_projection_id_t proj /* = 0 */,
+  legion_reduction_op_id_t redop,
+  legion_coherence_property_t prop,
+  legion_logical_region_t parent_,
+  legion_mapping_tag_id_t tag /* = 0 */,
+  bool verified /* = false*/)
+{
+  IndexTaskLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+  LogicalRegion handle = CObjectWrapper::unwrap(handle_);
+  LogicalRegion parent = CObjectWrapper::unwrap(parent_);
+
+  if (idx >= launcher->region_requirements.size()) {
+    launcher->region_requirements.resize(idx + 1);
+  }
+  launcher->region_requirements[idx] =
+    RegionRequirement(handle, proj, redop, prop, parent, tag, verified);
+}
+
+void
+legion_index_launcher_set_region_requirement_logical_partition_reduction(
+  legion_index_launcher_t launcher_,
+  unsigned idx,
+  legion_logical_partition_t handle_,
+  legion_projection_id_t proj /* = 0 */,
+  legion_reduction_op_id_t redop,
+  legion_coherence_property_t prop,
+  legion_logical_region_t parent_,
+  legion_mapping_tag_id_t tag /* = 0 */,
+  bool verified /* = false*/)
+{
+  IndexTaskLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+  LogicalPartition handle = CObjectWrapper::unwrap(handle_);
+  LogicalRegion parent = CObjectWrapper::unwrap(parent_);
+
+  if (idx >= launcher->region_requirements.size()) {
+    launcher->region_requirements.resize(idx + 1);
+  }
+  launcher->region_requirements[idx] =
+    RegionRequirement(handle, proj, redop, prop, parent, tag, verified);
 }
 
 void
@@ -3095,6 +3499,183 @@ legion_runtime_fill_field_future(
   runtime->fill_field(ctx, handle, parent, fid, *f, *pred);
 }
 
+void
+legion_runtime_index_fill_field(
+  legion_runtime_t runtime_,
+  legion_context_t ctx_,
+  legion_logical_partition_t handle_,
+  legion_logical_region_t parent_,
+  legion_field_id_t fid,
+  const void *value,
+  size_t value_size,
+  legion_projection_id_t proj /* = 0 */,
+  legion_predicate_t pred_ /* = legion_predicate_true() */,
+  legion_mapper_id_t id /* = 0 */,
+  legion_mapping_tag_id_t launcher_tag /* = 0 */)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+  LogicalPartition handle = CObjectWrapper::unwrap(handle_);
+  LogicalRegion parent = CObjectWrapper::unwrap(parent_);
+  Predicate *pred = CObjectWrapper::unwrap(pred_);
+
+  IndexFillLauncher launcher(
+      runtime->get_index_partition_color_space_name(handle.get_index_partition()),
+      handle, parent, TaskArgument(value, value_size), proj,
+      *pred, id, launcher_tag);
+  launcher.add_field(fid);
+  runtime->fill_fields(ctx, launcher);
+}
+
+void
+legion_runtime_index_fill_field_with_space(
+  legion_runtime_t runtime_,
+  legion_context_t ctx_,
+  legion_index_space_t space_,
+  legion_logical_partition_t handle_,
+  legion_logical_region_t parent_,
+  legion_field_id_t fid,
+  const void *value,
+  size_t value_size,
+  legion_projection_id_t proj /* = 0 */,
+  legion_predicate_t pred_ /* = legion_predicate_true() */,
+  legion_mapper_id_t id /* = 0 */,
+  legion_mapping_tag_id_t launcher_tag /* = 0 */)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+  IndexSpace space = CObjectWrapper::unwrap(space_);
+  LogicalPartition handle = CObjectWrapper::unwrap(handle_);
+  LogicalRegion parent = CObjectWrapper::unwrap(parent_);
+  Predicate *pred = CObjectWrapper::unwrap(pred_);
+
+  IndexFillLauncher launcher(
+      space, handle, parent, TaskArgument(value, value_size), proj,
+      *pred, id, launcher_tag);
+  launcher.add_field(fid);
+  runtime->fill_fields(ctx, launcher);
+}
+
+void
+legion_runtime_index_fill_field_with_domain(
+  legion_runtime_t runtime_,
+  legion_context_t ctx_,
+  legion_domain_t domain_,
+  legion_logical_partition_t handle_,
+  legion_logical_region_t parent_,
+  legion_field_id_t fid,
+  const void *value,
+  size_t value_size,
+  legion_projection_id_t proj /* = 0 */,
+  legion_predicate_t pred_ /* = legion_predicate_true() */,
+  legion_mapper_id_t id /* = 0 */,
+  legion_mapping_tag_id_t launcher_tag /* = 0 */)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+  Domain domain = CObjectWrapper::unwrap(domain_);
+  LogicalPartition handle = CObjectWrapper::unwrap(handle_);
+  LogicalRegion parent = CObjectWrapper::unwrap(parent_);
+  Predicate *pred = CObjectWrapper::unwrap(pred_);
+
+  IndexFillLauncher launcher(
+      domain, handle, parent, TaskArgument(value, value_size), proj,
+      *pred, id, launcher_tag);
+  launcher.add_field(fid);
+  runtime->fill_fields(ctx, launcher);
+}
+
+void
+legion_runtime_index_fill_field_future(
+  legion_runtime_t runtime_,
+  legion_context_t ctx_,
+  legion_logical_partition_t handle_,
+  legion_logical_region_t parent_,
+  legion_field_id_t fid,
+  legion_future_t f_,
+  legion_projection_id_t proj /* = 0 */,
+  legion_predicate_t pred_ /* = legion_predicate_true() */,
+  legion_mapper_id_t id /* = 0 */,
+  legion_mapping_tag_id_t launcher_tag /* = 0 */)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+  LogicalPartition handle = CObjectWrapper::unwrap(handle_);
+  LogicalRegion parent = CObjectWrapper::unwrap(parent_);
+  Future *f = CObjectWrapper::unwrap(f_);
+  Predicate *pred = CObjectWrapper::unwrap(pred_);
+
+  IndexFillLauncher launcher(
+      runtime->get_index_partition_color_space_name(handle.get_index_partition()),
+      handle, parent, *f, proj, *pred, id, launcher_tag);
+  launcher.add_field(fid);
+  runtime->fill_fields(ctx, launcher);
+}
+
+void
+legion_runtime_index_fill_field_future_with_space(
+  legion_runtime_t runtime_,
+  legion_context_t ctx_,
+  legion_index_space_t space_,
+  legion_logical_partition_t handle_,
+  legion_logical_region_t parent_,
+  legion_field_id_t fid,
+  legion_future_t f_,
+  legion_projection_id_t proj /* = 0 */,
+  legion_predicate_t pred_ /* = legion_predicate_true() */,
+  legion_mapper_id_t id /* = 0 */,
+  legion_mapping_tag_id_t launcher_tag /* = 0 */)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+  IndexSpace space = CObjectWrapper::unwrap(space_);
+  LogicalPartition handle = CObjectWrapper::unwrap(handle_);
+  LogicalRegion parent = CObjectWrapper::unwrap(parent_);
+  Future *f = CObjectWrapper::unwrap(f_);
+  Predicate *pred = CObjectWrapper::unwrap(pred_);
+
+  IndexFillLauncher launcher(
+      space, handle, parent, *f, proj, *pred, id, launcher_tag);
+  launcher.add_field(fid);
+  runtime->fill_fields(ctx, launcher);
+}
+
+void
+legion_runtime_index_fill_field_future_with_domain(
+  legion_runtime_t runtime_,
+  legion_context_t ctx_,
+  legion_domain_t domain_,
+  legion_logical_partition_t handle_,
+  legion_logical_region_t parent_,
+  legion_field_id_t fid,
+  legion_future_t f_,
+  legion_projection_id_t proj /* = 0 */,
+  legion_predicate_t pred_ /* = legion_predicate_true() */,
+  legion_mapper_id_t id /* = 0 */,
+  legion_mapping_tag_id_t launcher_tag /* = 0 */)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+  Domain domain = CObjectWrapper::unwrap(domain_);
+  LogicalPartition handle = CObjectWrapper::unwrap(handle_);
+  LogicalRegion parent = CObjectWrapper::unwrap(parent_);
+  Future *f = CObjectWrapper::unwrap(f_);
+  Predicate *pred = CObjectWrapper::unwrap(pred_);
+
+  IndexFillLauncher launcher(
+      domain, handle, parent, *f, proj, *pred, id, launcher_tag);
+  launcher.add_field(fid);
+  runtime->fill_fields(ctx, launcher);
+}
+
+legion_region_requirement_t
+legion_fill_get_requirement(legion_fill_t fill_)
+{
+  Fill *fill = CObjectWrapper::unwrap(fill_);
+
+  return CObjectWrapper::wrap(&fill->requirement);
+}
+
 // -----------------------------------------------------------------------
 // File Operations
 // -----------------------------------------------------------------------
@@ -3260,6 +3841,46 @@ legion_copy_launcher_add_dst_region_requirement_logical_region_reduction(
   return idx;
 }
 
+unsigned
+legion_copy_launcher_add_src_indirect_region_requirement_logical_region(
+  legion_copy_launcher_t launcher_,
+  legion_logical_region_t handle_,
+  legion_field_id_t fid,
+  legion_coherence_property_t prop,
+  legion_logical_region_t parent_,
+  legion_mapping_tag_id_t tag /* = 0 */,
+  bool verified /* = false*/)
+{
+  CopyLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+  LogicalRegion handle = CObjectWrapper::unwrap(handle_);
+  LogicalRegion parent = CObjectWrapper::unwrap(parent_);
+
+  unsigned idx = launcher->src_requirements.size();
+  launcher->add_src_indirect_field(
+    RegionRequirement(handle, READ_ONLY, prop, parent, tag, verified), fid);
+  return idx;
+}
+
+unsigned
+legion_copy_launcher_add_dst_indirect_region_requirement_logical_region(
+  legion_copy_launcher_t launcher_,
+  legion_logical_region_t handle_,
+  legion_field_id_t fid,
+  legion_coherence_property_t prop,
+  legion_logical_region_t parent_,
+  legion_mapping_tag_id_t tag /* = 0 */,
+  bool verified /* = false*/)
+{
+  CopyLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+  LogicalRegion handle = CObjectWrapper::unwrap(handle_);
+  LogicalRegion parent = CObjectWrapper::unwrap(parent_);
+
+  unsigned idx = launcher->dst_requirements.size();
+  launcher->add_dst_indirect_field(
+    RegionRequirement(handle, READ_ONLY, prop, parent, tag, verified), fid);
+  return idx;
+}
+
 void
 legion_copy_launcher_add_src_field(legion_copy_launcher_t launcher_,
                                    unsigned idx,
@@ -3300,6 +3921,27 @@ legion_copy_launcher_add_arrival_barrier(legion_copy_launcher_t launcher_,
   PhaseBarrier bar = CObjectWrapper::unwrap(bar_);
 
   launcher->add_arrival_barrier(bar);
+}
+
+legion_region_requirement_t
+legion_copy_get_requirement(legion_copy_t copy_, unsigned idx)
+{
+  Copy *copy = CObjectWrapper::unwrap(copy_);
+
+  if (idx < copy->src_requirements.size())
+    return CObjectWrapper::wrap(&copy->src_requirements[idx]);
+  else
+    idx -= copy->src_requirements.size();
+  if (idx < copy->dst_requirements.size())
+    return CObjectWrapper::wrap(&copy->dst_requirements[idx]);
+  else
+    idx -= copy->dst_requirements.size();
+  if (idx < copy->src_indirect_requirements.size())
+    return CObjectWrapper::wrap(&copy->src_indirect_requirements[idx]);
+  else
+    idx -= copy->src_indirect_requirements.size();
+  assert(idx < copy->dst_indirect_requirements.size());
+  return CObjectWrapper::wrap(&copy->dst_indirect_requirements[idx]);
 }
 
 // -----------------------------------------------------------------------
@@ -3463,6 +4105,90 @@ legion_index_copy_launcher_add_dst_region_requirement_logical_partition_reductio
   unsigned idx = launcher->dst_requirements.size();
   launcher->dst_requirements.push_back(
     RegionRequirement(handle, redop, proj, prop, parent, tag, verified));
+  return idx;
+}
+
+unsigned
+legion_index_copy_launcher_add_src_indirect_region_requirement_logical_region(
+  legion_index_copy_launcher_t launcher_,
+  legion_logical_region_t handle_,
+  legion_projection_id_t proj /* = 0 */,
+  legion_field_id_t fid,
+  legion_coherence_property_t prop,
+  legion_logical_region_t parent_,
+  legion_mapping_tag_id_t tag /* = 0 */,
+  bool verified /* = false*/)
+{
+  IndexCopyLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+  LogicalRegion handle = CObjectWrapper::unwrap(handle_);
+  LogicalRegion parent = CObjectWrapper::unwrap(parent_);
+
+  unsigned idx = launcher->src_requirements.size();
+  launcher->add_src_indirect_field(
+    RegionRequirement(handle, proj, READ_ONLY, prop, parent, tag, verified), fid);
+  return idx;
+}
+
+unsigned
+legion_index_copy_launcher_add_dst_indirect_region_requirement_logical_region(
+  legion_index_copy_launcher_t launcher_,
+  legion_logical_region_t handle_,
+  legion_projection_id_t proj /* = 0 */,
+  legion_field_id_t fid,
+  legion_coherence_property_t prop,
+  legion_logical_region_t parent_,
+  legion_mapping_tag_id_t tag /* = 0 */,
+  bool verified /* = false*/)
+{
+  IndexCopyLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+  LogicalRegion handle = CObjectWrapper::unwrap(handle_);
+  LogicalRegion parent = CObjectWrapper::unwrap(parent_);
+
+  unsigned idx = launcher->dst_requirements.size();
+  launcher->add_dst_indirect_field(
+    RegionRequirement(handle, proj, READ_ONLY, prop, parent, tag, verified), fid);
+  return idx;
+}
+
+unsigned
+legion_index_copy_launcher_add_src_indirect_region_requirement_logical_partition(
+  legion_index_copy_launcher_t launcher_,
+  legion_logical_partition_t handle_,
+  legion_projection_id_t proj /* = 0 */,
+  legion_field_id_t fid,
+  legion_coherence_property_t prop,
+  legion_logical_region_t parent_,
+  legion_mapping_tag_id_t tag /* = 0 */,
+  bool verified /* = false*/)
+{
+  IndexCopyLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+  LogicalPartition handle = CObjectWrapper::unwrap(handle_);
+  LogicalRegion parent = CObjectWrapper::unwrap(parent_);
+
+  unsigned idx = launcher->src_requirements.size();
+  launcher->add_src_indirect_field(
+    RegionRequirement(handle, proj, READ_ONLY, prop, parent, tag, verified), fid);
+  return idx;
+}
+
+unsigned
+legion_index_copy_launcher_add_dst_indirect_region_requirement_logical_partition(
+  legion_index_copy_launcher_t launcher_,
+  legion_logical_partition_t handle_,
+  legion_projection_id_t proj /* = 0 */,
+  legion_field_id_t fid,
+  legion_coherence_property_t prop,
+  legion_logical_region_t parent_,
+  legion_mapping_tag_id_t tag /* = 0 */,
+  bool verified /* = false*/)
+{
+  IndexCopyLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+  LogicalPartition handle = CObjectWrapper::unwrap(handle_);
+  LogicalRegion parent = CObjectWrapper::unwrap(parent_);
+
+  unsigned idx = launcher->dst_requirements.size();
+  launcher->add_dst_indirect_field(
+    RegionRequirement(handle, proj, READ_ONLY, prop, parent, tag, verified), fid);
   return idx;
 }
 
@@ -3669,6 +4395,24 @@ legion_attach_launcher_create(legion_logical_region_t logical_region_,
   return CObjectWrapper::wrap(launcher);
 }
 
+void 
+legion_attach_launcher_set_restricted(legion_attach_launcher_t handle_,
+                                      bool restricted)
+{
+  AttachLauncher *handle = CObjectWrapper::unwrap(handle_);
+
+  handle->restricted = restricted;
+}
+
+void
+legion_attach_launcher_set_mapped(legion_attach_launcher_t handle_,
+                                  bool mapped)
+{
+  AttachLauncher *handle = CObjectWrapper::unwrap(handle_);
+
+  handle->mapped = mapped;
+}
+
 void
 legion_attach_launcher_destroy(legion_attach_launcher_t handle_)
 {
@@ -3712,12 +4456,30 @@ legion_detach_external_resource(legion_runtime_t runtime_,
                                 legion_context_t ctx_,
                                 legion_physical_region_t handle_)
 {
+  return legion_unordered_detach_external_resource(runtime_, ctx_, handle_, true, false);
+}
+
+legion_future_t
+legion_flush_detach_external_resource(legion_runtime_t runtime_,
+                                      legion_context_t ctx_,
+                                      legion_physical_region_t handle_,
+                                      bool flush)
+{
+  return legion_unordered_detach_external_resource(runtime_, ctx_, handle_, flush, false);
+}
+
+legion_future_t
+legion_unordered_detach_external_resource(legion_runtime_t runtime_,
+                                          legion_context_t ctx_,
+                                          legion_physical_region_t handle_,
+                                          bool flush, bool unordered)
+{
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_)->context();
   PhysicalRegion *handle = CObjectWrapper::unwrap(handle_);
 
   Future *result = new Future(
-      runtime->detach_external_resource(ctx, *handle));
+      runtime->detach_external_resource(ctx, *handle, flush, unordered));
   return CObjectWrapper::wrap(result);
 }
 
@@ -3785,6 +4547,28 @@ legion_must_epoch_launcher_add_index_task(
 
   // Destroy handle.
   legion_index_launcher_destroy(handle_);
+}
+
+void
+legion_must_epoch_launcher_set_launch_domain(
+  legion_must_epoch_launcher_t launcher_,
+  legion_domain_t domain_)
+{
+  MustEpochLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+  Domain domain = CObjectWrapper::unwrap(domain_);
+
+  launcher->launch_domain = domain;
+}
+
+void
+legion_must_epoch_launcher_set_launch_space(
+  legion_must_epoch_launcher_t launcher_,
+  legion_index_space_t is_)
+{
+  MustEpochLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+  IndexSpace is = CObjectWrapper::unwrap(is_);
+
+  launcher->launch_space = is;
 }
 
 // -----------------------------------------------------------------------
@@ -3893,6 +4677,40 @@ legion_runtime_get_executing_processor(legion_runtime_t runtime_,
   return CObjectWrapper::wrap(proc);
 }
 
+void
+legion_runtime_enable_scheduler_lock()
+{
+  Processor::enable_scheduler_lock();
+}
+
+void
+legion_runtime_disable_scheduler_lock()
+{
+  Processor::disable_scheduler_lock();
+}
+
+void
+legion_runtime_print_once(legion_runtime_t runtime_,
+                          legion_context_t ctx_,
+                          FILE *f,
+                          const char *message)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+
+  runtime->print_once(ctx, f, message);
+}
+
+void
+legion_runtime_print_once_fd(legion_runtime_t runtime_,
+                             legion_context_t ctx_,
+                             int fd, const char *mode,
+                             const char *message)
+{
+  FILE *f = fdopen(fd, mode);
+  legion_runtime_print_once(runtime_, ctx_, f, message);
+}
+
 // -----------------------------------------------------------------------
 // Physical Data Operations
 // -----------------------------------------------------------------------
@@ -3957,19 +4775,55 @@ legion_physical_region_get_field_id(legion_physical_region_t handle_, size_t ind
   return fields[index];
 }
 
-legion_accessor_array_1d_t
-legion_physical_region_get_field_accessor_array_1d(
-  legion_physical_region_t handle_,
-  legion_field_id_t fid)
-{
-  PhysicalRegion *handle = CObjectWrapper::unwrap(handle_);
-  UnsafeFieldAccessor<char,1,coord_t,Realm::AffineAccessor<char,1,coord_t> >
-    *accessor = new UnsafeFieldAccessor<char,1,coord_t,
-                      Realm::AffineAccessor<char,1,coord_t> >(*handle, fid);
-
-  return CObjectWrapper::wrap(accessor);
+#define GET_ACCESSOR(DIM) \
+legion_accessor_array_##DIM##d_t \
+legion_physical_region_get_field_accessor_array_##DIM##d( \
+  legion_physical_region_t handle_, \
+  legion_field_id_t fid) \
+{ \
+  PhysicalRegion *handle = CObjectWrapper::unwrap(handle_); \
+  UnsafeFieldAccessor<char,DIM,coord_t,Realm::AffineAccessor<char,DIM,coord_t> > \
+    *accessor = new UnsafeFieldAccessor<char,DIM,coord_t, \
+                      Realm::AffineAccessor<char,DIM,coord_t> >(*handle, fid); \
+ \
+  return CObjectWrapper::wrap(accessor); \
 }
+LEGION_FOREACH_N(GET_ACCESSOR)
+#undef GET_ACCESSOR
 
+#define DESTROY_ACCESSOR(DIM) \
+void \
+legion_accessor_array_##DIM##d_destroy(legion_accessor_array_##DIM##d_t handle_) \
+{ \
+  UnsafeFieldAccessor<char,DIM,coord_t,Realm::AffineAccessor<char,DIM,coord_t> > \
+    *handle = CObjectWrapper::unwrap(handle_); \
+ \
+  delete handle; \
+}
+LEGION_FOREACH_N(DESTROY_ACCESSOR)
+#undef DESTROY_ACCESSOR
+
+#define RAW_RECT_PTR(DIM) \
+void *                    \
+legion_accessor_array_##DIM##d_raw_rect_ptr(legion_accessor_array_##DIM##d_t handle_, \
+                                            legion_rect_##DIM##d_t rect_, \
+                                            legion_rect_##DIM##d_t *subrect_, \
+                                            legion_byte_offset_t *offsets_) \
+{ \
+  UnsafeFieldAccessor<char,DIM,coord_t,Realm::AffineAccessor<char,DIM,coord_t> > \
+    *handle = CObjectWrapper::unwrap(handle_); \
+  Rect##DIM##D rect = CObjectWrapper::unwrap(rect_); \
+  \
+  void *data = handle->ptr(rect.lo); \
+  *subrect_ = CObjectWrapper::wrap(rect); \
+  for (int i = 0; i < DIM; i++) \
+    offsets_[i] = CObjectWrapper::wrap(handle->accessor.strides[i]); \
+  return data; \
+}
+LEGION_FOREACH_N(RAW_RECT_PTR)
+#undef RAW_RECT_PTR
+
+#if LEGION_MAX_DIM >= 1
 legion_accessor_array_1d_t
 legion_physical_region_get_field_accessor_array_1d_with_transform(
   legion_physical_region_t handle_,
@@ -3983,56 +4837,25 @@ legion_physical_region_get_field_accessor_array_1d_with_transform(
   assert(domtrans.transform.n == 1);
   switch (domtrans.transform.m)
   {
-    case 1:
-      {
-        const AffineTransform<1,1,coord_t> transform = domtrans; 
-        accessor = new UnsafeFieldAccessor<char,1,coord_t,
-                 Realm::AffineAccessor<char,1,coord_t> >(*handle, fid, transform);
-        break;
+#define AFFINE(DIM) \
+    case DIM: \
+      { \
+        const AffineTransform<DIM,1,coord_t> transform = domtrans; \
+        accessor = new UnsafeFieldAccessor<char,1,coord_t, \
+                 Realm::AffineAccessor<char,1,coord_t> >(*handle, fid, transform); \
+        break; \
       }
-    case 2:
-      {
-        const AffineTransform<2,1,coord_t> transform = domtrans; 
-        accessor = new UnsafeFieldAccessor<char,1,coord_t,
-                 Realm::AffineAccessor<char,1,coord_t> >(*handle, fid, transform);
-        break;
-      }
-    case 3:
-      {
-        const AffineTransform<3,1,coord_t> transform = domtrans; 
-        accessor = new UnsafeFieldAccessor<char,1,coord_t,
-                 Realm::AffineAccessor<char,1,coord_t> >(*handle, fid, transform);
-        break;
-      }
+    LEGION_FOREACH_N(AFFINE)
+#undef AFFINE
     default:
       assert(false);
   }
 
   return CObjectWrapper::wrap(accessor);
 }
+#endif
 
-void
-legion_accessor_array_1d_destroy(legion_accessor_array_1d_t handle_)
-{
-  UnsafeFieldAccessor<char,1,coord_t,Realm::AffineAccessor<char,1,coord_t> >
-    *handle = CObjectWrapper::unwrap(handle_);
-
-  delete handle;
-}
-
-legion_accessor_array_2d_t
-legion_physical_region_get_field_accessor_array_2d(
-  legion_physical_region_t handle_,
-  legion_field_id_t fid)
-{
-  PhysicalRegion *handle = CObjectWrapper::unwrap(handle_);
-  UnsafeFieldAccessor<char,2,coord_t,Realm::AffineAccessor<char,2,coord_t> >
-    *accessor = new UnsafeFieldAccessor<char,2,coord_t,
-                      Realm::AffineAccessor<char,2,coord_t> >(*handle, fid);
-
-  return CObjectWrapper::wrap(accessor);
-}
-
+#if LEGION_MAX_DIM >= 2
 legion_accessor_array_2d_t
 legion_physical_region_get_field_accessor_array_2d_with_transform(
   legion_physical_region_t handle_,
@@ -4046,56 +4869,25 @@ legion_physical_region_get_field_accessor_array_2d_with_transform(
   assert(domtrans.transform.n == 2);
   switch (domtrans.transform.m)
   {
-    case 1:
-      {
-        const AffineTransform<1,2,coord_t> transform = domtrans; 
-        accessor = new UnsafeFieldAccessor<char,2,coord_t,
-                 Realm::AffineAccessor<char,2,coord_t> >(*handle, fid, transform);
-        break;
+#define AFFINE(DIM) \
+    case DIM: \
+      { \
+        const AffineTransform<DIM,2,coord_t> transform = domtrans; \
+        accessor = new UnsafeFieldAccessor<char,2,coord_t, \
+                 Realm::AffineAccessor<char,2,coord_t> >(*handle, fid, transform); \
+        break; \
       }
-    case 2:
-      {
-        const AffineTransform<2,2,coord_t> transform = domtrans; 
-        accessor = new UnsafeFieldAccessor<char,2,coord_t,
-                 Realm::AffineAccessor<char,2,coord_t> >(*handle, fid, transform);
-        break;
-      }
-    case 3:
-      {
-        const AffineTransform<3,2,coord_t> transform = domtrans; 
-        accessor = new UnsafeFieldAccessor<char,2,coord_t,
-                 Realm::AffineAccessor<char,2,coord_t> >(*handle, fid, transform);
-        break;
-      }
+    LEGION_FOREACH_N(AFFINE)
+#undef AFFINE
     default:
       assert(false);
   }
 
   return CObjectWrapper::wrap(accessor);
 }
+#endif
 
-void
-legion_accessor_array_2d_destroy(legion_accessor_array_2d_t handle_)
-{
-  UnsafeFieldAccessor<char,2,coord_t,Realm::AffineAccessor<char,2,coord_t> >
-    *handle = CObjectWrapper::unwrap(handle_);
-
-  delete handle;
-}
-
-legion_accessor_array_3d_t
-legion_physical_region_get_field_accessor_array_3d(
-  legion_physical_region_t handle_,
-  legion_field_id_t fid)
-{
-  PhysicalRegion *handle = CObjectWrapper::unwrap(handle_);
-  UnsafeFieldAccessor<char,3,coord_t,Realm::AffineAccessor<char,3,coord_t> >
-    *accessor = new UnsafeFieldAccessor<char,3,coord_t,
-                      Realm::AffineAccessor<char,3,coord_t> >(*handle, fid);
-
-  return CObjectWrapper::wrap(accessor);
-}
-
+#if LEGION_MAX_DIM >= 3
 legion_accessor_array_3d_t
 legion_physical_region_get_field_accessor_array_3d_with_transform(
   legion_physical_region_t handle_,
@@ -4109,93 +4901,215 @@ legion_physical_region_get_field_accessor_array_3d_with_transform(
   assert(domtrans.transform.n == 3);
   switch (domtrans.transform.m)
   {
-    case 1:
-      {
-        const AffineTransform<1,3,coord_t> transform = domtrans; 
-        accessor = new UnsafeFieldAccessor<char,3,coord_t,
-                 Realm::AffineAccessor<char,3,coord_t> >(*handle, fid, transform);
-        break;
+#define AFFINE(DIM) \
+    case DIM: \
+      { \
+        const AffineTransform<DIM,3,coord_t> transform = domtrans; \
+        accessor = new UnsafeFieldAccessor<char,3,coord_t, \
+                 Realm::AffineAccessor<char,3,coord_t> >(*handle, fid, transform); \
+        break; \
       }
-    case 2:
-      {
-        const AffineTransform<2,3,coord_t> transform = domtrans; 
-        accessor = new UnsafeFieldAccessor<char,3,coord_t,
-                 Realm::AffineAccessor<char,3,coord_t> >(*handle, fid, transform);
-        break;
-      }
-    case 3:
-      {
-        const AffineTransform<3,3,coord_t> transform = domtrans; 
-        accessor = new UnsafeFieldAccessor<char,3,coord_t,
-                 Realm::AffineAccessor<char,3,coord_t> >(*handle, fid, transform);
-        break;
-      }
+    LEGION_FOREACH_N(AFFINE)
+#undef AFFINE
     default:
       assert(false);
   }
 
   return CObjectWrapper::wrap(accessor);
 }
+#endif
 
-void
-legion_accessor_array_3d_destroy(legion_accessor_array_3d_t handle_)
+#if LEGION_MAX_DIM >= 4
+legion_accessor_array_4d_t
+legion_physical_region_get_field_accessor_array_4d_with_transform(
+  legion_physical_region_t handle_,
+  legion_field_id_t fid,
+  legion_domain_affine_transform_t transform_)
 {
-  UnsafeFieldAccessor<char,3,coord_t,Realm::AffineAccessor<char,3,coord_t> >
-    *handle = CObjectWrapper::unwrap(handle_);
+  PhysicalRegion *handle = CObjectWrapper::unwrap(handle_);
+  DomainAffineTransform domtrans = CObjectWrapper::unwrap(transform_);
+  UnsafeFieldAccessor<char,4,coord_t,Realm::AffineAccessor<char,4,coord_t> >
+    *accessor = NULL;
+  assert(domtrans.transform.n == 4);
+  switch (domtrans.transform.m)
+  {
+#define AFFINE(DIM) \
+    case DIM: \
+      { \
+        const AffineTransform<DIM,4,coord_t> transform = domtrans; \
+        accessor = new UnsafeFieldAccessor<char,4,coord_t, \
+                 Realm::AffineAccessor<char,4,coord_t> >(*handle, fid, transform); \
+        break; \
+      }
+    LEGION_FOREACH_N(AFFINE)
+#undef AFFINE
+    default:
+      assert(false);
+  }
 
-  delete handle;
+  return CObjectWrapper::wrap(accessor);
 }
+#endif
 
-void *
-legion_accessor_array_1d_raw_rect_ptr(legion_accessor_array_1d_t handle_,
-                                      legion_rect_1d_t rect_,
-                                      legion_rect_1d_t *subrect_,
-                                      legion_byte_offset_t *offsets_)
+#if LEGION_MAX_DIM >= 5
+legion_accessor_array_5d_t
+legion_physical_region_get_field_accessor_array_5d_with_transform(
+  legion_physical_region_t handle_,
+  legion_field_id_t fid,
+  legion_domain_affine_transform_t transform_)
 {
-  UnsafeFieldAccessor<char,1,coord_t,Realm::AffineAccessor<char,1,coord_t> >
-    *handle = CObjectWrapper::unwrap(handle_);
-  Rect1D rect = CObjectWrapper::unwrap(rect_);
+  PhysicalRegion *handle = CObjectWrapper::unwrap(handle_);
+  DomainAffineTransform domtrans = CObjectWrapper::unwrap(transform_);
+  UnsafeFieldAccessor<char,5,coord_t,Realm::AffineAccessor<char,5,coord_t> >
+    *accessor = NULL;
+  assert(domtrans.transform.n == 5);
+  switch (domtrans.transform.m)
+  {
+#define AFFINE(DIM) \
+    case DIM: \
+      { \
+        const AffineTransform<DIM,5,coord_t> transform = domtrans; \
+        accessor = new UnsafeFieldAccessor<char,5,coord_t, \
+                 Realm::AffineAccessor<char,5,coord_t> >(*handle, fid, transform); \
+        break; \
+      }
+    LEGION_FOREACH_N(AFFINE)
+#undef AFFINE
+    default:
+      assert(false);
+  }
 
-  void *data = handle->ptr(rect.lo);
-  *subrect_ = CObjectWrapper::wrap(rect); // no checks
-  offsets_[0] = CObjectWrapper::wrap(handle->accessor.strides[0]);
-  return data;
+  return CObjectWrapper::wrap(accessor);
 }
+#endif
 
-void *
-legion_accessor_array_2d_raw_rect_ptr(legion_accessor_array_2d_t handle_,
-                                      legion_rect_2d_t rect_,
-                                      legion_rect_2d_t *subrect_,
-                                      legion_byte_offset_t *offsets_)
+#if LEGION_MAX_DIM >= 6
+legion_accessor_array_6d_t
+legion_physical_region_get_field_accessor_array_6d_with_transform(
+  legion_physical_region_t handle_,
+  legion_field_id_t fid,
+  legion_domain_affine_transform_t transform_)
 {
-  UnsafeFieldAccessor<char,2,coord_t,Realm::AffineAccessor<char,2,coord_t> >
-    *handle = CObjectWrapper::unwrap(handle_);
-  Rect2D rect = CObjectWrapper::unwrap(rect_);
+  PhysicalRegion *handle = CObjectWrapper::unwrap(handle_);
+  DomainAffineTransform domtrans = CObjectWrapper::unwrap(transform_);
+  UnsafeFieldAccessor<char,6,coord_t,Realm::AffineAccessor<char,6,coord_t> >
+    *accessor = NULL;
+  assert(domtrans.transform.n == 6);
+  switch (domtrans.transform.m)
+  {
+#define AFFINE(DIM) \
+    case DIM: \
+      { \
+        const AffineTransform<DIM,6,coord_t> transform = domtrans; \
+        accessor = new UnsafeFieldAccessor<char,6,coord_t, \
+                 Realm::AffineAccessor<char,6,coord_t> >(*handle, fid, transform); \
+        break; \
+      }
+    LEGION_FOREACH_N(AFFINE)
+#undef AFFINE
+    default:
+      assert(false);
+  }
 
-  void *data = handle->ptr(rect.lo);
-  *subrect_ = CObjectWrapper::wrap(rect); // no checks
-  offsets_[0] = CObjectWrapper::wrap(handle->accessor.strides[0]);
-  offsets_[1] = CObjectWrapper::wrap(handle->accessor.strides[1]);
-  return data;
+  return CObjectWrapper::wrap(accessor);
 }
+#endif
 
-void *
-legion_accessor_array_3d_raw_rect_ptr(legion_accessor_array_3d_t handle_,
-                                      legion_rect_3d_t rect_,
-                                      legion_rect_3d_t *subrect_,
-                                      legion_byte_offset_t *offsets_)
+#if LEGION_MAX_DIM >= 7
+legion_accessor_array_7d_t
+legion_physical_region_get_field_accessor_array_7d_with_transform(
+  legion_physical_region_t handle_,
+  legion_field_id_t fid,
+  legion_domain_affine_transform_t transform_)
 {
-  UnsafeFieldAccessor<char,3,coord_t,Realm::AffineAccessor<char,3,coord_t> >
-    *handle = CObjectWrapper::unwrap(handle_);
-  Rect3D rect = CObjectWrapper::unwrap(rect_);
+  PhysicalRegion *handle = CObjectWrapper::unwrap(handle_);
+  DomainAffineTransform domtrans = CObjectWrapper::unwrap(transform_);
+  UnsafeFieldAccessor<char,7,coord_t,Realm::AffineAccessor<char,7,coord_t> >
+    *accessor = NULL;
+  assert(domtrans.transform.n == 7);
+  switch (domtrans.transform.m)
+  {
+#define AFFINE(DIM) \
+    case DIM: \
+      { \
+        const AffineTransform<DIM,7,coord_t> transform = domtrans; \
+        accessor = new UnsafeFieldAccessor<char,7,coord_t, \
+                 Realm::AffineAccessor<char,7,coord_t> >(*handle, fid, transform); \
+        break; \
+      }
+    LEGION_FOREACH_N(AFFINE)
+#undef AFFINE
+    default:
+      assert(false);
+  }
 
-  void *data = handle->ptr(rect.lo);
-  *subrect_ = CObjectWrapper::wrap(rect); // no checks
-  offsets_[0] = CObjectWrapper::wrap(handle->accessor.strides[0]);
-  offsets_[1] = CObjectWrapper::wrap(handle->accessor.strides[1]);
-  offsets_[2] = CObjectWrapper::wrap(handle->accessor.strides[2]);
-  return data;
+  return CObjectWrapper::wrap(accessor);
 }
+#endif
+
+#if LEGION_MAX_DIM >= 8
+legion_accessor_array_8d_t
+legion_physical_region_get_field_accessor_array_8d_with_transform(
+  legion_physical_region_t handle_,
+  legion_field_id_t fid,
+  legion_domain_affine_transform_t transform_)
+{
+  PhysicalRegion *handle = CObjectWrapper::unwrap(handle_);
+  DomainAffineTransform domtrans = CObjectWrapper::unwrap(transform_);
+  UnsafeFieldAccessor<char,8,coord_t,Realm::AffineAccessor<char,8,coord_t> >
+    *accessor = NULL;
+  assert(domtrans.transform.n == 8);
+  switch (domtrans.transform.m)
+  {
+#define AFFINE(DIM) \
+    case DIM: \
+      { \
+        const AffineTransform<DIM,8,coord_t> transform = domtrans; \
+        accessor = new UnsafeFieldAccessor<char,8,coord_t, \
+                 Realm::AffineAccessor<char,8,coord_t> >(*handle, fid, transform); \
+        break; \
+      }
+    LEGION_FOREACH_N(AFFINE)
+#undef AFFINE
+    default:
+      assert(false);
+  }
+
+  return CObjectWrapper::wrap(accessor);
+}
+#endif
+
+#if LEGION_MAX_DIM >= 9
+legion_accessor_array_9d_t
+legion_physical_region_get_field_accessor_array_9d_with_transform(
+  legion_physical_region_t handle_,
+  legion_field_id_t fid,
+  legion_domain_affine_transform_t transform_)
+{
+  PhysicalRegion *handle = CObjectWrapper::unwrap(handle_);
+  DomainAffineTransform domtrans = CObjectWrapper::unwrap(transform_);
+  UnsafeFieldAccessor<char,9,coord_t,Realm::AffineAccessor<char,9,coord_t> >
+    *accessor = NULL;
+  assert(domtrans.transform.n == 9);
+  switch (domtrans.transform.m)
+  {
+#define AFFINE(DIM) \
+    case DIM: \
+      { \
+        const AffineTransform<DIM,9,coord_t> transform = domtrans; \
+        accessor = new UnsafeFieldAccessor<char,9,coord_t, \
+                 Realm::AffineAccessor<char,9,coord_t> >(*handle, fid, transform); \
+        break; \
+      }
+    LEGION_FOREACH_N(AFFINE)
+#undef AFFINE
+    default:
+      assert(false);
+  }
+
+  return CObjectWrapper::wrap(accessor);
+}
+#endif
 
 void
 legion_accessor_array_1d_read(legion_accessor_array_1d_t handle_,
@@ -4209,41 +5123,20 @@ legion_accessor_array_1d_read(legion_accessor_array_1d_t handle_,
   memcpy(dst, handle->ptr(ptr.value), bytes);
 }
 
-void
-legion_accessor_array_1d_read_point(legion_accessor_array_1d_t handle_,
-                                    legion_point_1d_t point_,
-                                    void *dst, size_t bytes)
-{
-  UnsafeFieldAccessor<char,1,coord_t,Realm::AffineAccessor<char,1,coord_t> >
-    *handle = CObjectWrapper::unwrap(handle_);
-  Point1D point = CObjectWrapper::unwrap(point_);
-
-  memcpy(dst, handle->ptr(point), bytes);
+#define READ_POINT(DIM) \
+void \
+legion_accessor_array_##DIM##d_read_point(legion_accessor_array_##DIM##d_t handle_, \
+                                          legion_point_##DIM##d_t point_, \
+                                          void *dst, size_t bytes) \
+{ \
+  UnsafeFieldAccessor<char,DIM,coord_t,Realm::AffineAccessor<char,DIM,coord_t> > \
+    *handle = CObjectWrapper::unwrap(handle_); \
+  Point##DIM##D point = CObjectWrapper::unwrap(point_); \
+ \
+  memcpy(dst, handle->ptr(point), bytes); \
 }
-
-void
-legion_accessor_array_2d_read_point(legion_accessor_array_2d_t handle_,
-                                    legion_point_2d_t point_,
-                                    void *dst, size_t bytes)
-{
-  UnsafeFieldAccessor<char,2,coord_t,Realm::AffineAccessor<char,2,coord_t> >
-    *handle = CObjectWrapper::unwrap(handle_);
-  Point2D point = CObjectWrapper::unwrap(point_);
-
-  memcpy(dst, handle->ptr(point), bytes);
-}
-
-void
-legion_accessor_array_3d_read_point(legion_accessor_array_3d_t handle_,
-                                    legion_point_3d_t point_,
-                                    void *dst, size_t bytes)
-{
-  UnsafeFieldAccessor<char,3,coord_t,Realm::AffineAccessor<char,3,coord_t> >
-    *handle = CObjectWrapper::unwrap(handle_);
-  Point3D point = CObjectWrapper::unwrap(point_);
-
-  memcpy(dst, handle->ptr(point), bytes);
-}
+LEGION_FOREACH_N(READ_POINT)
+#undef READ_POINT
 
 void
 legion_accessor_array_1d_write(legion_accessor_array_1d_t handle_,
@@ -4257,41 +5150,20 @@ legion_accessor_array_1d_write(legion_accessor_array_1d_t handle_,
   memcpy(handle->ptr(ptr.value), src, bytes); 
 }
 
-void
-legion_accessor_array_1d_write_point(legion_accessor_array_1d_t handle_,
-                                     legion_point_1d_t point_,
-                                     const void *src, size_t bytes)
-{
-  UnsafeFieldAccessor<char,1,coord_t,Realm::AffineAccessor<char,1,coord_t> >
-    *handle = CObjectWrapper::unwrap(handle_);
-  Point1D point = CObjectWrapper::unwrap(point_);
-
-  memcpy(handle->ptr(point), src, bytes);
+#define WRITE_POINT(DIM) \
+void \
+legion_accessor_array_##DIM##d_write_point(legion_accessor_array_##DIM##d_t handle_, \
+                                           legion_point_##DIM##d_t point_, \
+                                           const void *src, size_t bytes) \
+{ \
+  UnsafeFieldAccessor<char,DIM,coord_t,Realm::AffineAccessor<char,DIM,coord_t> > \
+    *handle = CObjectWrapper::unwrap(handle_); \
+  Point##DIM##D point = CObjectWrapper::unwrap(point_); \
+ \
+  memcpy(handle->ptr(point), src, bytes); \
 }
-
-void
-legion_accessor_array_2d_write_point(legion_accessor_array_2d_t handle_,
-                                     legion_point_2d_t point_,
-                                     const void *src, size_t bytes)
-{
-  UnsafeFieldAccessor<char,2,coord_t,Realm::AffineAccessor<char,2,coord_t> >
-    *handle = CObjectWrapper::unwrap(handle_);
-  Point2D point = CObjectWrapper::unwrap(point_);
-
-  memcpy(handle->ptr(point), src, bytes);
-}
-
-void
-legion_accessor_array_3d_write_point(legion_accessor_array_3d_t handle_,
-                                     legion_point_3d_t point_,
-                                     const void *src, size_t bytes)
-{
-  UnsafeFieldAccessor<char,3,coord_t,Realm::AffineAccessor<char,3,coord_t> >
-    *handle = CObjectWrapper::unwrap(handle_);
-  Point3D point = CObjectWrapper::unwrap(point_);
-
-  memcpy(handle->ptr(point), src, bytes);
-}
+LEGION_FOREACH_N(WRITE_POINT)
+#undef WRITE_POINT
 
 void *
 legion_accessor_array_1d_ref(legion_accessor_array_1d_t handle_,
@@ -4304,38 +5176,19 @@ legion_accessor_array_1d_ref(legion_accessor_array_1d_t handle_,
   return handle->ptr(ptr.value);
 }
 
-void *
-legion_accessor_array_1d_ref_point(legion_accessor_array_1d_t handle_,
-                                   legion_point_1d_t point_)
-{
-  UnsafeFieldAccessor<char,1,coord_t,Realm::AffineAccessor<char,1,coord_t> >
-    *handle = CObjectWrapper::unwrap(handle_);
-  Point1D point = CObjectWrapper::unwrap(point_);
-
-  return handle->ptr(point);
+#define REF_POINT(DIM) \
+void * \
+legion_accessor_array_##DIM##d_ref_point(legion_accessor_array_##DIM##d_t handle_, \
+                                         legion_point_##DIM##d_t point_) \
+{ \
+  UnsafeFieldAccessor<char,DIM,coord_t,Realm::AffineAccessor<char,DIM,coord_t> > \
+    *handle = CObjectWrapper::unwrap(handle_); \
+  Point##DIM##D point = CObjectWrapper::unwrap(point_); \
+ \
+  return handle->ptr(point); \
 }
-
-void *
-legion_accessor_array_2d_ref_point(legion_accessor_array_2d_t handle_,
-                                   legion_point_2d_t point_)
-{
-  UnsafeFieldAccessor<char,2,coord_t,Realm::AffineAccessor<char,2,coord_t> >
-    *handle = CObjectWrapper::unwrap(handle_);
-  Point2D point = CObjectWrapper::unwrap(point_);
-
-  return handle->ptr(point);
-}
-
-void *
-legion_accessor_array_3d_ref_point(legion_accessor_array_3d_t handle_,
-                                   legion_point_3d_t point_)
-{
-  UnsafeFieldAccessor<char,3,coord_t,Realm::AffineAccessor<char,3,coord_t> >
-    *handle = CObjectWrapper::unwrap(handle_);
-  Point3D point = CObjectWrapper::unwrap(point_);
-
-  return handle->ptr(point);
-}
+LEGION_FOREACH_N(REF_POINT)
+#undef REF_POINT
 
 legion_index_iterator_t
 legion_index_iterator_create(legion_runtime_t runtime_,
@@ -4382,6 +5235,58 @@ legion_index_iterator_next_span(legion_index_iterator_t handle_,
   IndexIterator *handle = CObjectWrapper::unwrap(handle_);
 
   return CObjectWrapper::wrap(handle->next_span(*act_count, req_count));
+}
+
+//------------------------------------------------------------------------
+// Mappable Operations
+//------------------------------------------------------------------------
+
+enum legion_mappable_type_id_t
+legion_mappable_get_type(legion_mappable_t mappable_)
+{
+  Mappable *mappable = CObjectWrapper::unwrap(mappable_);
+
+  return mappable->get_mappable_type();
+}
+
+legion_task_t
+legion_mappable_as_task(legion_mappable_t mappable_)
+{
+  Mappable *mappable = CObjectWrapper::unwrap(mappable_);
+  Task* task = const_cast<Task*>(mappable->as_task());
+  assert(task != NULL);
+
+  return CObjectWrapper::wrap(task);
+}
+
+legion_copy_t
+legion_mappable_as_copy(legion_mappable_t mappable_)
+{
+  Mappable *mappable = CObjectWrapper::unwrap(mappable_);
+  Copy* copy = const_cast<Copy*>(mappable->as_copy());
+  assert(copy != NULL);
+
+  return CObjectWrapper::wrap(copy);
+}
+
+legion_fill_t
+legion_mappable_as_fill(legion_mappable_t mappable_)
+{
+  Mappable *mappable = CObjectWrapper::unwrap(mappable_);
+  Fill* fill = const_cast<Fill*>(mappable->as_fill());
+  assert(fill != NULL);
+
+  return CObjectWrapper::wrap(fill);
+}
+
+legion_inline_t
+legion_mappable_as_inline_mapping(legion_mappable_t mappable_)
+{
+  Mappable *mappable = CObjectWrapper::unwrap(mappable_);
+  InlineMapping* mapping = const_cast<InlineMapping*>(mappable->as_inline());
+  assert(mapping != NULL);
+
+  return CObjectWrapper::wrap(mapping);
 }
 
 //------------------------------------------------------------------------
@@ -4529,9 +5434,10 @@ legion_task_get_regions_size(legion_task_t task_)
 }
 
 legion_region_requirement_t
-legion_task_get_region(legion_task_t task_, unsigned idx)
+legion_task_get_requirement(legion_task_t task_, unsigned idx)
 {
   Task *task = CObjectWrapper::unwrap(task_);
+  assert(idx < task->regions.size());
 
   return CObjectWrapper::wrap(&task->regions[idx]);
 }
@@ -4668,7 +5574,7 @@ legion_execution_constraint_set_add_launch_constraint_multi_dim(
 }
 
 void
-legion_execution_constraint_set_add_colocation_constraints(
+legion_execution_constraint_set_add_colocation_constraint(
   legion_execution_constraint_set_t handle_,
   const unsigned *indexes,
   size_t num_indexes,
@@ -4921,6 +5827,12 @@ legion_runtime_set_top_level_task_id(legion_task_id_t top_id)
   Runtime::set_top_level_task_id(top_id);
 }
 
+size_t
+legion_runtime_get_maximum_dimension(void)
+{
+  return Runtime::get_maximum_dimension();
+}
+
 const legion_input_args_t
 legion_runtime_get_input_args(void)
 {
@@ -5136,6 +6048,28 @@ legion_runtime_generate_library_projection_ids(
   return runtime->generate_library_projection_ids(library_name, count);
 }
 
+legion_sharding_id_t
+legion_runtime_generate_library_sharding_ids(
+    legion_runtime_t runtime_,
+    const char *library_name,
+    size_t count)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+
+  return runtime->generate_library_sharding_ids(library_name, count);
+}
+
+legion_reduction_op_id_t
+legion_runtime_generate_library_reduction_ids(
+    legion_runtime_t runtime_,
+    const char *library_name,
+    size_t count)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+
+  return runtime->generate_library_reduction_ids(library_name, count);
+}
+
 void
 legion_runtime_preregister_projection_functor(
   legion_projection_id_t id,
@@ -5260,6 +6194,7 @@ legion_runtime_register_task_variant_fnptr(
 legion_task_id_t
 legion_runtime_preregister_task_variant_fnptr(
   legion_task_id_t id /* = AUTO_GENERATE_ID */,
+  legion_variant_id_t variant_id /* = AUTO_GENERATE_ID */,
   const char *task_name /* = NULL*/,
   const char *variant_name /* = NULL*/,
   legion_execution_constraint_set_t execution_constraints_,
@@ -5291,7 +6226,7 @@ legion_runtime_preregister_task_variant_fnptr(
   code_desc.add_implementation(new Realm::FunctionPointerImplementation((void(*)())wrapped_task_pointer));
 
   /*VariantID vid =*/ Runtime::preregister_task_variant(
-    registrar, code_desc, userdata, userlen, task_name);
+    registrar, code_desc, userdata, userlen, task_name, variant_id);
 
   return id;
 }
@@ -5344,6 +6279,7 @@ legion_runtime_register_task_variant_llvmir(
 legion_task_id_t
 legion_runtime_preregister_task_variant_llvmir(
   legion_task_id_t id /* = AUTO_GENERATE_ID */,
+  legion_variant_id_t variant_id /* = AUTO_GENERATE_ID */,
   const char *task_name /* = NULL*/,
   legion_execution_constraint_set_t execution_constraints_,
   legion_task_layout_constraint_set_t layout_constraints_,
@@ -5375,7 +6311,7 @@ legion_runtime_preregister_task_variant_llvmir(
   code_desc.add_implementation(new Realm::LLVMIRImplementation(llvmir, strlen(llvmir), entry_symbol));
 
   /*VariantID vid =*/ Runtime::preregister_task_variant(
-    registrar, code_desc, userdata, userlen, task_name);
+    registrar, code_desc, userdata, userlen, task_name, variant_id);
   return id;
 }
 #endif

@@ -1,4 +1,4 @@
-/* Copyright 2018 Stanford University, NVIDIA Corporation
+/* Copyright 2019 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -70,6 +70,8 @@ namespace Realm {
 
       ThreadPool::WorkItem *work = new ThreadPool::WorkItem;
       work->remaining_workers = act_threads;
+      work->single_winner = -1;
+      work->barrier_count = 0;
       wi->push_work_item(work);
 
       wi->thread_id = 0;
@@ -109,6 +111,70 @@ namespace Realm {
       GOMP_parallel_start(fnptr, data, nthreads);
       fnptr(data);
       GOMP_parallel_end();
+    }
+
+    bool GOMP_single_start(void)
+    {
+      Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info();
+      if(!wi) {
+	log_omp.warning() << "OpenMP-parallelized loop on non-OpenMP Realm processor!";
+	return true;  // trivially the winner
+      }
+
+      if(!wi->work_item) {
+	// not inside a larger construct - treat as nop
+	return true;
+      }
+
+      // try to become the "single" winner - the intent in OpenMP is that the
+      //  first worker to get here should do the work
+      int prev = __sync_val_compare_and_swap(&wi->work_item->single_winner,
+					     -1, wi->thread_id);
+      //log_omp.print() << "single claim: me=" << wi->thread_id << " winner=" << prev;
+      if((prev == -1) || (prev == wi->thread_id)) {
+	return true;
+      } else {
+	return false;
+      }
+    }
+
+    void GOMP_barrier(void)
+    {
+      Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info();
+      if(!wi) {
+	log_omp.warning() << "OpenMP barrier on non-OpenMP Realm processor!";
+	return;
+      }
+
+      //log_omp.print() << "barrier enter: id=" << wi->thread_id;
+
+      if(wi->work_item && (wi->num_threads > 1)) {
+	// step 1: observe that barrier is not still being exited
+	int c;
+	do {
+	  c = __sync_fetch_and_add(&wi->work_item->barrier_count, 0);
+	} while(c >= wi->num_threads);
+	// step 2: increment counter to enter
+	c = __sync_add_and_fetch(&wi->work_item->barrier_count, 1);
+	if(c == wi->num_threads) {
+	  // last arriver - reset count once all others have exited
+	  //   reset "single" winner too
+	  wi->work_item->single_winner = -1;
+	  while(!__sync_bool_compare_and_swap(&wi->work_item->barrier_count,
+					      2 * wi->num_threads - 1, 0)) {}
+	} else {
+	  // step 3: observe that all threads have entered
+	  do {
+	    c = __sync_fetch_and_add(&wi->work_item->barrier_count, 0);
+	  } while(c < wi->num_threads);
+	  // step 4: increment counter again to exit
+	  __sync_fetch_and_add(&wi->work_item->barrier_count, 1);
+	}
+      } else {
+	// not inside a larger construct - nothing to do
+      }
+
+      //log_omp.print() << "barrier exit: id=" << wi->thread_id;
     }
   };
 #endif
@@ -165,6 +231,11 @@ namespace Realm {
 
     void __kmpc_serialized_parallel(ident_t *loc, kmp_int32 global_tid);
     void __kmpc_end_serialized_parallel(ident_t *loc, kmp_int32 global_tid);
+
+    kmp_int32 __kmpc_single(ident_t *loc, kmp_int32 global_tid);
+    void __kmpc_end_single(ident_t *loc, kmp_int32 global_tid);
+
+    void __kmpc_barrier(ident_t *loc, kmp_int32 global_tid);
   };
 
   struct kmp_thunk {
@@ -539,6 +610,75 @@ namespace Realm {
     assert(work != 0);
     assert(work->remaining_workers == 1);
     delete work;
+  }
+
+  kmp_int32 __kmpc_single(ident_t *loc, kmp_int32 global_tid)
+  {
+    Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info();
+    if(!wi) {
+      log_omp.warning() << "OpenMP-parallelized loop on non-OpenMP Realm processor!";
+      return 1;  // trivially the winner
+    }
+
+    if(!wi->work_item) {
+      // not inside a larger construct - treat as nop
+      return 1;
+    }
+
+    // try to become the "single" winner - the intent in OpenMP is that the
+    //  first worker to get here should do the work
+    int prev = __sync_val_compare_and_swap(&wi->work_item->single_winner,
+					   -1, wi->thread_id);
+    //log_omp.print() << "single claim: me=" << wi->thread_id << " winner=" << prev;
+    if((prev == -1) || (prev == wi->thread_id)) {
+      return 1;
+    } else {
+      return 0;
+    }
+  }
+
+  void __kmpc_end_single(ident_t *loc, kmp_int32 global_tid)
+  {
+    // we didn't create a team for __kmpc_single, so nothing to do here
+  }
+
+  void __kmpc_barrier(ident_t *loc, kmp_int32 global_tid)
+  {
+    Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info();
+    if(!wi) {
+      log_omp.warning() << "OpenMP barrier on non-OpenMP Realm processor!";
+      return;
+    }
+
+    //log_omp.print() << "barrier enter: id=" << wi->thread_id;
+
+    if(wi->work_item && (wi->num_threads > 1)) {
+      // step 1: observe that barrier is not still being exited
+      int c;
+      do {
+	c = __sync_fetch_and_add(&wi->work_item->barrier_count, 0);
+      } while(c >= wi->num_threads);
+      // step 2: increment counter to enter
+      c = __sync_add_and_fetch(&wi->work_item->barrier_count, 1);
+      if(c == wi->num_threads) {
+	// last arriver - reset count once all others have exited
+	//   reset "single" winner too
+	wi->work_item->single_winner = -1;
+	while(!__sync_bool_compare_and_swap(&wi->work_item->barrier_count,
+					    2 * wi->num_threads - 1, 0)) {}
+      } else {
+	// step 3: observe that all threads have entered
+	do {
+	  c = __sync_fetch_and_add(&wi->work_item->barrier_count, 0);
+	} while(c < wi->num_threads);
+	// step 4: increment counter again to exit
+	__sync_fetch_and_add(&wi->work_item->barrier_count, 1);
+      }
+    } else {
+      // not inside a larger construct - nothing to do
+    }
+    
+    //log_omp.print() << "barrier exit: id=" << wi->thread_id;
   }
 #endif
 

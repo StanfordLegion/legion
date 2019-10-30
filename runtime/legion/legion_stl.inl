@@ -1,4 +1,4 @@
-/* Copyright 2018 Stanford University, NVIDIA Corporation
+/* Copyright 2019 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -65,7 +65,7 @@ namespace Legion {
     inline std::tuple<Us ...>
     deserialize_(const void *buffer, phantom<>, std::tuple<Us ...> &&us)
     {
-      return us;
+      return std::move(us);
     }
 
     template<typename T1, typename ... Ts, typename ... Us>

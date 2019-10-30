@@ -1,4 +1,4 @@
--- Copyright 2018 Stanford University
+-- Copyright 2019 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -23,7 +23,7 @@ end
 task main()
   var low : uint = 0
   var high : uint = 0
-  __demand(__parallel)
+  __demand(__index_launch)
   for i = low, high do
     f()
   end

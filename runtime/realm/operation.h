@@ -1,4 +1,4 @@
-/* Copyright 2018 Stanford University, NVIDIA Corporation
+/* Copyright 2019 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,7 +19,7 @@
 #include "realm/profiling.h"
 #include "realm/event_impl.h"
 
-#include "realm/activemsg.h"
+#include "realm/network.h"
 
 #include <set>
 #include <iostream>
@@ -29,7 +29,8 @@ namespace Realm {
   class Operation {
   protected:
     // must be subclassed
-    Operation(Event _finish_event, const ProfilingRequestSet &_requests);
+    Operation(GenEventImpl *_finish_event, EventImpl::gen_t _finish_gen,
+	      const ProfilingRequestSet &_requests);
 
     // can't destroy directly either - done when last reference is removed
     // (subclasses may still override the method - just not call it directly)
@@ -72,7 +73,7 @@ namespace Realm {
       virtual ~AsyncWorkItem(void);
 
       void mark_finished(bool successful);
-
+      void mark_gpu_task_start(void);
       virtual void request_cancellation(void) = 0;
 
       virtual void print(std::ostream& os) const = 0;
@@ -92,7 +93,6 @@ namespace Realm {
   protected:
     // called by AsyncWorkItem::mark_finished from an arbitrary thread
     void work_item_finished(AsyncWorkItem *item, bool successful);
-
     virtual void mark_completed(void);
 
     void clear_profiling(void);
@@ -102,14 +102,17 @@ namespace Realm {
 
     void send_profiling_data(void);
 
-    Event finish_event;
+    GenEventImpl *finish_event;
+    EventImpl::gen_t finish_gen;
     int refcount;
   public:
-    Event get_finish_event(void) const { return finish_event; }
+    Event get_finish_event(void) const;
   protected:
     typedef ProfilingMeasurements::OperationStatus Status;
     ProfilingMeasurements::OperationStatus status;
+    bool wants_timeline;
     ProfilingMeasurements::OperationTimeline timeline;
+    ProfilingMeasurements::OperationTimelineGPU timeline_gpu; // gpu start/end times
     bool wants_event_waits;
     ProfilingMeasurements::OperationEventWaits waits;
     ProfilingRequestSet requests; 
@@ -140,22 +143,32 @@ namespace Realm {
     
     static void register_handlers(void);
 
+    // checks that all operations have finished before shutdown
+    void shutdown_check(void);
+
   protected:
     void event_triggered(Event e);
 
+#if 0
     class TableCleaner : public EventWaiter {
     public:
       TableCleaner(OperationTable *_table);
-      virtual bool event_triggered(Event e, bool poisoned);
+      virtual bool event_triggered(bool poisoned);
       virtual void print(std::ostream& os) const;
       virtual Event get_finish_event(void) const;
 
     protected:
       OperationTable *table;
     };
+#endif
 
-    struct TableEntry {
-      //Event finish_event;
+    struct TableEntry : public EventWaiter {
+      virtual void event_triggered(bool poisoned);
+      virtual void print(std::ostream& os) const;
+      virtual Event get_finish_event(void) const;
+
+      OperationTable *table;
+      Event finish_event;
       Operation *local_op;
       int remote_node;
       bool pending_cancellation;
@@ -169,10 +182,17 @@ namespace Realm {
     // try to avoid a serial bottleneck by splitting events over 4 different tables
     static const int NUM_TABLES = 4;
     
-    GASNetHSL mutexes[NUM_TABLES];
+    Mutex mutexes[NUM_TABLES];
     Table tables[NUM_TABLES];
-    TableCleaner cleaner;
+    //TableCleaner cleaner;
 #endif
+  };
+
+  struct CancelOperationMessage {
+    Event finish_event;
+
+    static void handle_message(NodeID sender, const CancelOperationMessage &msg,
+			       const void *data, size_t datalen);
   };
 
 };

@@ -1,4 +1,4 @@
--- Copyright 2018 Stanford University
+-- Copyright 2019 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -24,21 +24,22 @@ local builtins = {}
 
 builtins.aliased = std.aliased
 builtins.complex = std.complex
+builtins.complex32 = std.complex32
+builtins.complex64 = std.complex64
 builtins.cross_product = std.cross_product
 builtins.disjoint = std.disjoint
 builtins.dynamic_collective = std.dynamic_collective
 builtins.index_type = std.index_type
-builtins.int1d = std.int1d
-builtins.int2d = std.int2d
-builtins.int3d = std.int3d
-builtins.rect1d = std.rect1d
-builtins.rect2d = std.rect2d
-builtins.rect3d = std.rect3d
+for dim = 1, std.max_dim do
+  builtins["int" .. dim .. "d"] = std["int" .. dim .. "d"]
+  builtins["rect" .. dim .. "d"] = std["rect" .. dim .. "d"]
+end
 builtins.ispace = std.ispace
 builtins.partition = std.partition
 builtins.phase_barrier = std.phase_barrier
 builtins.ptr = std.ptr
 builtins.region = std.region
+builtins.transform = std.transform
 builtins.wild = std.wild
 
 return builtins

@@ -177,6 +177,91 @@ namespace Realm {
     unlock_slow();
   }
 
+  // basically copies of the above for the try* cases
+  inline bool FastReservation::trylock(void)
+  {
+    return trywrlock();
+  }
+
+  inline bool FastReservation::trywrlock()
+  {
+#ifdef REALM_DEBUG_FRSRV_HOLDERS
+    if(!ThreadLocal::frsv_debug ||
+       (ThreadLocal::frsv_debug->owner != Thread::self()))
+      ThreadLocal::frsv_debug = FastReservationDebugInfo::lookup_debuginfo();
+    assert(ThreadLocal::frsv_debug->locks_held.count(this) == 0);
+    ThreadLocal::frsv_debug->locks_held[this] = -1;
+    ThreadLocal::frsv_debug->locks_log.push_back(std::make_pair(this, 1));
+#endif
+
+    // the fast case for a writer lock is when it is completely uncontended
+    State old_state = 0;
+    State new_state = STATE_WRITER;
+
+    bool got_lock = __sync_bool_compare_and_swap(&state, old_state, new_state);
+    if(__builtin_expect(got_lock, true))
+      return true;
+
+    // contention or some exceptional condition?  take slow path
+    bool success = trywrlock_slow();
+#ifdef REALM_DEBUG_FRSRV_HOLDERS
+    if(!success) {
+      // didn't actually get the lock
+      ThreadLocal::frsv_debug->locks_held.erase(this);
+      ThreadLocal::frsv_debug->locks_log.push_back(std::make_pair(this, -1));
+    }
+#endif
+    return success;
+  }
+
+  inline bool FastReservation::tryrdlock(void)
+  {
+#ifdef REALM_DEBUG_FRSRV_HOLDERS
+    if(!ThreadLocal::frsv_debug ||
+       (ThreadLocal::frsv_debug->owner != Thread::self()))
+      ThreadLocal::frsv_debug = FastReservationDebugInfo::lookup_debuginfo();
+    if(ThreadLocal::frsv_debug->locks_held.count(this) != 0) {
+      // uncomment next line to disallow nested read locks
+      //assert(0);
+      assert(ThreadLocal::frsv_debug->locks_held[this] > 0);
+      ThreadLocal::frsv_debug->locks_held[this]++;
+    } else
+      ThreadLocal::frsv_debug->locks_held[this] = 1;
+    ThreadLocal::frsv_debug->locks_log.push_back(std::make_pair(this, 2));
+#endif
+
+    // the fast case for a reader lock is to observe a lack of writers or
+    //  base reservation requests, atomically increment the reader count, and
+    //  still observe lack of writer/rsrv contention (we check first so that
+    //  a pending writer doesn't get interference from new attempted readers)
+    // note that a sleeper is ok, as long as it's a reader
+    State cur_state = (volatile const State&)state;
+    if(__builtin_expect((cur_state & ~(STATE_SLEEPER | STATE_READER_COUNT_MASK)) == 0, 1)) {
+      State orig_state = __sync_fetch_and_add(&state, 1);
+      if(__builtin_expect((orig_state & ~(STATE_SLEEPER | STATE_READER_COUNT_MASK)) == 0, 1)) {
+	return true;
+      } else {
+	// put the count back before we go down the slow path
+	__sync_fetch_and_sub(&state, 1);
+      }
+    }
+
+    // contention or some exceptional condition?  take slow path
+    bool success = tryrdlock_slow();
+#ifdef REALM_DEBUG_FRSRV_HOLDERS
+    if(!success) {
+      // didn't actually get the lock
+      if(ThreadLocal::frsv_debug->locks_held[this] <= 1) {
+	assert(ThreadLocal::frsv_debug->locks_held[this] != 0);
+	ThreadLocal::frsv_debug->locks_held.erase(this);
+      } else
+	ThreadLocal::frsv_debug->locks_held[this]--;
+      ThreadLocal::frsv_debug->locks_log.push_back(std::make_pair(this, -2));
+    }
+#endif
+    return success;
+  }
+
 	
 }; // namespace Realm
 

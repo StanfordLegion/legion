@@ -1,4 +1,4 @@
--- Copyright 2018 Stanford University
+-- Copyright 2019 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -18,11 +18,11 @@ task main()
   var r = region(ispace(ptr, 5), int)
 
   for i = 0, 5 do
-    regentlib.assert([ptr](i) <= r, "test failed")
+    regentlib.assert(ptr(i) <= r, "test failed")
   end
 
   for i = 5, 10 do
-    regentlib.assert(not ([ptr](i) <= r), "test failed")
+    regentlib.assert(not (ptr(i) <= r), "test failed")
   end
 end
 

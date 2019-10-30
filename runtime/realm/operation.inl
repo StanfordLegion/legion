@@ -1,4 +1,4 @@
-/* Copyright 2018 Stanford University, NVIDIA Corporation
+/* Copyright 2019 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -13,7 +13,7 @@
  * limitations under the License.
  */
 
-// INCLDUED FROM operation.h - DO NOT INCLUDE THIS DIRECTLY
+// INCLUDED FROM operation.h - DO NOT INCLUDE THIS DIRECTLY
 
 // this is a nop, but it's for the benefit of IDEs trying to parse this file
 #include "realm/operation.h"
@@ -25,9 +25,11 @@ namespace Realm {
   // class Operation
   //
 
-  inline Operation::Operation(Event _finish_event,
+  inline Operation::Operation(GenEventImpl *_finish_event,
+			      EventImpl::gen_t _finish_gen,
                               const ProfilingRequestSet &_requests)
     : finish_event(_finish_event)
+    , finish_gen(_finish_gen)
     , refcount(1)
     , requests(_requests)
     , pending_work_items(1 /* i.e. the main work item */)
@@ -36,8 +38,11 @@ namespace Realm {
     status.result = ProfilingMeasurements::OperationStatus::WAITING;
     status.error_code = 0;
     measurements.import_requests(requests); 
-    timeline.record_create_time();
+    wants_timeline = (measurements.wants_measurement<ProfilingMeasurements::OperationTimeline>() ||
+		      measurements.wants_measurement<ProfilingMeasurements::OperationTimelineGPU>());
     wants_event_waits = measurements.wants_measurement<ProfilingMeasurements::OperationEventWaits>();
+    if(wants_timeline)
+      timeline.record_create_time();
   }
 
   inline void Operation::add_reference(void)
@@ -73,13 +78,19 @@ namespace Realm {
     //  to zero, we're complete
     int remaining = __sync_sub_and_fetch(&pending_work_items, 1);
 
-    if(remaining == 0)
+    if(remaining == 0) {
       mark_completed();
+   }
   }
 
   inline bool Operation::cancellation_requested(void) const
   {
     return status.result == Status::INTERRUPT_REQUESTED;
+  }
+
+  inline Event Operation::get_finish_event(void) const
+  {
+    return finish_event->make_event(finish_gen);
   }
 
   // used to record event wait intervals, if desired
@@ -115,5 +126,11 @@ namespace Realm {
     op->work_item_finished(this, successful);
   }
 
+  inline void Operation::AsyncWorkItem::mark_gpu_task_start()
+  {
+    if(op->wants_timeline)
+      op->timeline_gpu.record_start_time();
+    mark_finished(true);
+  }
 
 }; // namespace Realm

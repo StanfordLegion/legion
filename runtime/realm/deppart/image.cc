@@ -1,4 +1,4 @@
-/* Copyright 2018 Stanford University, NVIDIA Corporation
+/* Copyright 2019 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -40,8 +40,9 @@ namespace Realm {
     // output vector should start out empty
     assert(images.empty());
 
-    Event e = GenEventImpl::create_genevent()->current_event();
-    ImageOperation<N,T,N2,T2> *op = new ImageOperation<N,T,N2,T2>(*this, field_data, reqs, e);
+    GenEventImpl *finish_event = GenEventImpl::create_genevent();
+    Event e = finish_event->current_event();
+    ImageOperation<N,T,N2,T2> *op = new ImageOperation<N,T,N2,T2>(*this, field_data, reqs, finish_event, ID(e).event_generation());
 
     size_t n = sources.size();
     images.resize(n);
@@ -50,7 +51,7 @@ namespace Realm {
       log_dpops.info() << "image: " << *this << " src=" << sources[i] << " -> " << images[i] << " (" << e << ")";
     }
 
-    op->deferred_launch(wait_on);
+    op->launch(wait_on);
     return e;
   }
 
@@ -65,8 +66,9 @@ namespace Realm {
     // output vector should start out empty
     assert(images.empty());
 
-    Event e = GenEventImpl::create_genevent()->current_event();
-    ImageOperation<N,T,N2,T2> *op = new ImageOperation<N,T,N2,T2>(*this, field_data, reqs, e);
+    GenEventImpl *finish_event = GenEventImpl::create_genevent();
+    Event e = finish_event->current_event();
+    ImageOperation<N,T,N2,T2> *op = new ImageOperation<N,T,N2,T2>(*this, field_data, reqs, finish_event, ID(e).event_generation());
 
     size_t n = sources.size();
     images.resize(n);
@@ -75,7 +77,7 @@ namespace Realm {
       log_dpops.info() << "image: " << *this << " src=" << sources[i] << " -> " << images[i] << " (" << e << ")";
     }
 
-    op->deferred_launch(wait_on);
+    op->launch(wait_on);
     return e;
   }
 
@@ -91,8 +93,9 @@ namespace Realm {
     // output vector should start out empty
     assert(images.empty());
 
-    Event e = GenEventImpl::create_genevent()->current_event();
-    ImageOperation<N,T,N2,T2> *op = new ImageOperation<N,T,N2,T2>(*this, field_data, reqs, e);
+    GenEventImpl *finish_event = GenEventImpl::create_genevent();
+    Event e = finish_event->current_event();
+    ImageOperation<N,T,N2,T2> *op = new ImageOperation<N,T,N2,T2>(*this, field_data, reqs, finish_event, ID(e).event_generation());
 
     size_t n = sources.size();
     images.resize(n);
@@ -101,7 +104,7 @@ namespace Realm {
       log_dpops.info() << "image: " << *this << " src=" << sources[i] << " mask=" << diff_rhss[i] << " -> " << images[i] << " (" << e << ")";
     }
 
-    op->deferred_launch(wait_on);
+    op->launch(wait_on);
     return e;
   }
 
@@ -109,12 +112,6 @@ namespace Realm {
   ////////////////////////////////////////////////////////////////////////
   //
   // class ImageMicroOp<N,T,N2,T2>
-
-  template <int N, typename T, int N2, typename T2>
-  inline /*static*/ DynamicTemplates::TagType ImageMicroOp<N,T,N2,T2>::type_tag(void)
-  {
-    return NTNT_TemplateHelper::encode_tag<N,T,N2,T2>();
-  }
 
   template <int N, typename T, int N2, typename T2>
   ImageMicroOp<N,T,N2,T2>::ImageMicroOp(IndexSpace<N,T> _parent_space,
@@ -129,7 +126,9 @@ namespace Realm {
     , is_ranged(_is_ranged)
     , approx_output_index(-1)
     , approx_output_op(0)
-  {}
+  {
+    areg.force_instantiation();
+  }
 
   template <int N, typename T, int N2, typename T2>
   ImageMicroOp<N,T,N2,T2>::~ImageMicroOp(void)
@@ -312,12 +311,16 @@ namespace Realm {
       else
 	populate_approx_bitmask_ptrs(approx_rects);
 
-      if(requestor == my_node_id) {
+      if(requestor == Network::my_node_id) {
 	PreimageOperation<N2,T2,N,T> *op = reinterpret_cast<PreimageOperation<N2,T2,N,T> *>(approx_output_op);
 	op->provide_sparse_image(approx_output_index, &approx_rects.rects[0], approx_rects.rects.size());
       } else {
-	ApproxImageResponseMessage::send_request<N2,T2,N,T>(requestor, approx_output_op, approx_output_index,
-							    &approx_rects.rects[0], approx_rects.rects.size());
+	size_t payload_size = approx_rects.rects.size() * sizeof(Rect<N2,T2>);
+	ActiveMessage<ApproxImageResponseMessage<PreimageOperation<N2,T2,N,T> > > amsg(requestor, payload_size);
+	amsg->approx_output_op = approx_output_op;
+	amsg->approx_output_index = approx_output_index;
+	amsg.add_payload(&approx_rects.rects[0], payload_size);
+	amsg.commit();
       }
     }
   }
@@ -326,16 +329,10 @@ namespace Realm {
   void ImageMicroOp<N,T,N2,T2>::dispatch(PartitioningOperation *op, bool inline_ok)
   {
     // an ImageMicroOp should always be executed on whichever node the field data lives
-    NodeID exec_node = ID(inst).instance.owner_node;
+    NodeID exec_node = ID(inst).instance_owner_node();
 
-    if(exec_node != my_node_id) {
-      // we're going to ship it elsewhere, which means we always need an AsyncMicroOp to
-      //  track it
-      async_microop = new AsyncMicroOp(op, this);
-      op->add_async_work_item(async_microop);
-
-      RemoteMicroOpMessage::send_request(exec_node, op, *this);
-      delete this;
+    if(exec_node != Network::my_node_id) {
+      forward_microop<ImageMicroOp<N,T,N2,T2> >(exec_node, op, this);
       return;
     }
 
@@ -411,6 +408,9 @@ namespace Realm {
     assert(ok);
   }
 
+  template <int N, typename T, int N2, typename T2>
+  ActiveMessageHandlerReg<RemoteMicroOpMessage<ImageMicroOp<N,T,N2,T2> > > ImageMicroOp<N,T,N2,T2>::areg;
+
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -420,8 +420,9 @@ namespace Realm {
   ImageOperation<N,T,N2,T2>::ImageOperation(const IndexSpace<N,T>& _parent,
 					    const std::vector<FieldDataDescriptor<IndexSpace<N2,T2>,Point<N,T> > >& _field_data,
 					    const ProfilingRequestSet &reqs,
-					    Event _finish_event)
-    : PartitioningOperation(reqs, _finish_event)
+					    GenEventImpl *_finish_event,
+					    EventImpl::gen_t _finish_gen)
+    : PartitioningOperation(reqs, _finish_event, _finish_gen)
     , parent(_parent)
     , ptr_data(_field_data)
   {}
@@ -430,8 +431,9 @@ namespace Realm {
   ImageOperation<N,T,N2,T2>::ImageOperation(const IndexSpace<N,T>& _parent,
 					    const std::vector<FieldDataDescriptor<IndexSpace<N2,T2>,Rect<N,T> > >& _field_data,
 					    const ProfilingRequestSet &reqs,
-					    Event _finish_event)
-    : PartitioningOperation(reqs, _finish_event)
+					    GenEventImpl *_finish_event,
+					    EventImpl::gen_t _finish_gen)
+    : PartitioningOperation(reqs, _finish_event, _finish_gen)
     , parent(_parent)
     , range_data(_field_data)
   {}
@@ -455,12 +457,12 @@ namespace Realm {
     // get a sparsity ID by round-robin'ing across the nodes that have field data
     int target_node;
     if(!source.dense())
-      target_node = ID(source.sparsity).sparsity.creator_node;
+      target_node = ID(source.sparsity).sparsity_creator_node();
     else
       if(!ptr_data.empty())
-	target_node = ID(ptr_data[sources.size() % ptr_data.size()].inst).instance.owner_node;
+	target_node = ID(ptr_data[sources.size() % ptr_data.size()].inst).instance_owner_node();
       else
-	target_node = ID(range_data[sources.size() % range_data.size()].inst).instance.owner_node;
+	target_node = ID(range_data[sources.size() % range_data.size()].inst).instance_owner_node();
     SparsityMap<N,T> sparsity = get_runtime()->get_available_sparsity_impl(target_node)->me.convert<SparsityMap<N,T> >();
     image.sparsity = sparsity;
 
@@ -486,12 +488,12 @@ namespace Realm {
     // get a sparsity ID by round-robin'ing across the nodes that have field data
     int target_node;
     if(!source.dense())
-      target_node = ID(source.sparsity).sparsity.creator_node;
+      target_node = ID(source.sparsity).sparsity_creator_node();
     else
       if(!ptr_data.empty())
-	target_node = ID(ptr_data[sources.size() % ptr_data.size()].inst).instance.owner_node;
+	target_node = ID(ptr_data[sources.size() % ptr_data.size()].inst).instance_owner_node();
       else
-	target_node = ID(range_data[sources.size() % range_data.size()].inst).instance.owner_node;
+	target_node = ID(range_data[sources.size() % range_data.size()].inst).instance_owner_node();
     SparsityMap<N,T> sparsity = get_runtime()->get_available_sparsity_impl(target_node)->me.convert<SparsityMap<N,T> >();
     image.sparsity = sparsity;
 
@@ -636,26 +638,6 @@ namespace Realm {
     os << "ImageOperation(" << parent << ")";
   }
 
-#define DOIT(N1,T1,N2,T2) \
-  template class ImageMicroOp<N1,T1,N2,T2>; \
-  template class ImageOperation<N1,T1,N2,T2>; \
-  template ImageMicroOp<N1,T1,N2,T2>::ImageMicroOp(NodeID, AsyncMicroOp *, Serialization::FixedBufferDeserializer&); \
-  template Event IndexSpace<N1,T1>::create_subspaces_by_image(const std::vector<FieldDataDescriptor<IndexSpace<N2,T2>,Point<N1,T1> > >&, \
-							       const std::vector<IndexSpace<N2,T2> >&,	\
-							       std::vector<IndexSpace<N1,T1> >&, \
-							       const ProfilingRequestSet&, \
-							       Event) const; \
-  template Event IndexSpace<N1,T1>::create_subspaces_by_image(const std::vector<FieldDataDescriptor<IndexSpace<N2,T2>,Rect<N1,T1> > >&, \
-							       const std::vector<IndexSpace<N2,T2> >&,	\
-							       std::vector<IndexSpace<N1,T1> >&, \
-							       const ProfilingRequestSet&, \
-							       Event) const; \
-  template Event IndexSpace<N1,T1>::create_subspaces_by_image_with_difference(const std::vector<FieldDataDescriptor<IndexSpace<N2,T2>,Point<N1,T1> > >&, \
-									       const std::vector<IndexSpace<N2,T2> >&,	\
-									       const std::vector<IndexSpace<N1,T1> >&,	\
-									       std::vector<IndexSpace<N1,T1> >&, \
-									       const ProfilingRequestSet&, \
-									       Event) const;
+  // instantiations of templates handled in image_tmpl.cc
 
-  FOREACH_NTNT(DOIT)
 };

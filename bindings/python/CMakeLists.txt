@@ -1,5 +1,5 @@
 #------------------------------------------------------------------------------#
-# Copyright 2018 Stanford University
+# Copyright 2019 Stanford University
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -22,7 +22,9 @@ if(NOT Legion_SOURCE_DIR)
   find_package(Legion REQUIRED)
 endif()
 
-add_executable(legion_python main.cc)
+add_executable(legion_python
+  main.cc
+)
 set_target_properties(legion_python PROPERTIES OUTPUT_NAME "legion_python${INSTALL_SUFFIX}")
 target_link_libraries(legion_python Legion::Legion)
 if(BINDINGS_DEFAULT_MODULE)

@@ -1,4 +1,4 @@
--- Copyright 2018 Stanford University
+-- Copyright 2019 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -24,13 +24,41 @@ local c = terralib.includec("embed.h", {"-I", root_dir})
 
 local fs = c.fs -- Get the field space from C header
 
-task my_regent_task(r : region(ispace(int1d), fs), x : int)
-where reads writes(r.{x, y}), reads(r.z) do
-  regentlib.c.printf("Hello from Regent! (value %d)\n", x)
+task unexposed_task(r : region(ispace(int1d), fs), p : partition(disjoint, r, ispace(int1d)))
+  regentlib.c.printf("Unexposed task!\n")
 end
 
--- Save tasks to libembed_tasks.so
-local embed_tasks_h = root_dir .. "embed_tasks.h"
-local embed_tasks_so = root_dir .. "libembed_tasks.so"
-regentlib.save_tasks(embed_tasks_h, embed_tasks_so)
-return "embed_tasks"
+
+task my_regent_task(r : region(ispace(int1d), fs), x : int, y : double, z : bool)
+where reads writes(r.{x, y}), reads(r.z) do
+  regentlib.c.printf("Hello from Regent! (values %d %e %d)\n", x, y, z)
+  var p = partition(equal, r, ispace(int1d, 2))
+  unexposed_task(r, p)
+end
+
+
+task other_regent_task(r : region(ispace(int1d), fs), s : region(ispace(int1d), fs))
+where reads writes(r.{x, y}, s.z), reads(r.z, s.x), reduces+(s.y) do
+  regentlib.c.printf("Task with two region requirements\n")
+end
+
+local embed_tasks_dir
+if os.getenv('SAVEOBJ') == '1' then
+  embed_tasks_dir = root_dir
+else
+  -- use os.tmpname to get a hopefully-unique directory to work in
+  local tmpfile = os.tmpname()
+  embed_tasks_dir = tmpfile .. ".d/"
+  local res = os.execute("mkdir " .. embed_tasks_dir)
+  assert(res == 0)
+  os.remove(tmpfile)  -- remove this now that we have our directory
+end
+
+local task_whitelist = {}
+task_whitelist["my_regent_task"] = my_regent_task
+task_whitelist["other_regent_task"] = other_regent_task
+
+local embed_tasks_h = embed_tasks_dir .. "embed_tasks.h"
+local embed_tasks_so = embed_tasks_dir .. "libembed_tasks.so"
+regentlib.save_tasks(embed_tasks_h, embed_tasks_so, nil, nil, "embed_tasks_register", task_whitelist)
+return embed_tasks_dir

@@ -1,4 +1,4 @@
--- Copyright 2018 Stanford University
+-- Copyright 2019 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -13,9 +13,9 @@
 -- limitations under the License.
 
 -- fails-with:
--- vectorize_loops2.rg:33: vectorization failed: loop body has an assignment of a non-scalar expression to a scalar expression
+-- vectorize_loops2.rg:33: vectorization failed: found a loop-carried dependence
 --     acc = acc + e.v
---           ^
+--       ^
 
 import "regent"
 
@@ -24,14 +24,12 @@ fspace fs
   v : float,
 }
 
-task toplevel()
-  var n = 8
-  var r = region(ispace(ptr, n), fs)
+task f(r : region(fs))
+where reads writes(r)
+do
   var acc : float = 0.0
   __demand(__vectorize)
   for e in r do
     acc = acc + e.v
   end
 end
-
-regentlib.start(toplevel)

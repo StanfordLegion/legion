@@ -1,4 +1,4 @@
-/* Copyright 2018 Stanford University, NVIDIA Corporation
+/* Copyright 2019 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -41,16 +41,16 @@ namespace Legion {
       REDUCTION_LIST_DC = 0x3,
       MATERIALIZED_VIEW_DC = 0x4,
       REDUCTION_VIEW_DC = 0x5,
-      COMPOSITE_VIEW_DC = 0x6,
-      FILL_VIEW_DC = 0x7,
-      PHI_VIEW_DC = 0x8,
-      VERSION_STATE_DC = 0x9,
-      FUTURE_DC = 0xA,
-      FUTURE_MAP_DC = 0xB,
-      INDEX_TREE_NODE_DC = 0xC,
-      FIELD_SPACE_DC = 0xD,
-      REGION_TREE_NODE_DC = 0xE,
-      DIST_TYPE_LAST_DC,
+      FILL_VIEW_DC = 0x6,
+      PHI_VIEW_DC = 0x7,
+      VERSION_STATE_DC = 0x8,
+      FUTURE_DC = 0x9,
+      FUTURE_MAP_DC = 0xA,
+      INDEX_TREE_NODE_DC = 0xB,
+      FIELD_SPACE_DC = 0xC,
+      REGION_TREE_NODE_DC = 0xD,
+      EQUIVALENCE_SET_DC = 0xE,
+      DIST_TYPE_LAST_DC = 0xF,
     };
 
     enum ReferenceSource {
@@ -79,7 +79,10 @@ namespace Legion {
       REGION_TREE_REF = 22,
       LAYOUT_DESC_REF = 23,
       RUNTIME_REF = 24,
-      LAST_SOURCE_REF = 25,
+      IS_EXPR_REF = 25,
+      TRACE_REF = 26,
+      AGGREGATORE_REF = 27,
+      LAST_SOURCE_REF = 28,
     };
 
     enum ReferenceKind {
@@ -115,6 +118,9 @@ namespace Legion {
       "Region Tree Reference",                      \
       "Layout Description Reference",               \
       "Runtime Reference",                          \
+      "Index Space Expression Reference",           \
+      "Physical Trace Reference",                   \
+      "Aggregator Reference",                       \
     }
 
     extern Realm::Logger log_garbage;
@@ -244,44 +250,9 @@ namespace Legion {
         PENDING_VALID_STATE,
         PENDING_INVALID_STATE,
         PENDING_ACTIVE_VALID_STATE,
+        PENDING_INACTIVE_INVALID_STATE,
       };
     public:
-      template<ReferenceKind REF_KIND, bool ADD>
-      class UpdateReferenceFunctor {
-      public:
-        UpdateReferenceFunctor(DistributedCollectable *dc, 
-                               ReferenceMutator *m,
-                               unsigned cnt = 1)
-          : source(dc), mutator(m), count(cnt) { }
-      public:
-        inline void apply(AddressSpaceID target);
-      protected:
-        DistributedCollectable *const source;
-        ReferenceMutator *const mutator;
-        unsigned count;
-      };
-      class RemoteInvalidateFunctor {
-      public:
-        RemoteInvalidateFunctor(DistributedCollectable *dc,
-                                ReferenceMutator *m)
-          : source(dc), mutator(m) { }
-      public:
-        inline void apply(AddressSpaceID target);
-      protected:
-        DistributedCollectable *const source;
-        ReferenceMutator *const mutator;
-      };
-      class RemoteDeactivateFunctor {
-      public:
-        RemoteDeactivateFunctor(DistributedCollectable *dc,
-                                ReferenceMutator *m)
-          : source(dc), mutator(m) { }
-      public:
-        inline void apply(AddressSpaceID target);
-      protected:
-        DistributedCollectable *const source;
-        ReferenceMutator *const mutator;
-      };
       class UnregisterFunctor {
       public:
         UnregisterFunctor(Runtime *rt, const DistributedID d,
@@ -294,6 +265,22 @@ namespace Legion {
         const DistributedID did;
         const VirtualChannelKind vc;
         std::set<RtEvent> &done_events;
+      };
+      struct DeferRemoteDecrementArgs : 
+        public LgTaskArgs<DeferRemoteDecrementArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_DEFER_REMOTE_DECREMENT_TASK_ID;
+      public:
+        DeferRemoteDecrementArgs(DistributedCollectable *d, AddressSpaceID t,
+                                 ReferenceMutator *m, unsigned c, bool v)
+          : LgTaskArgs<DeferRemoteDecrementArgs>(implicit_provenance),
+            dc(d), target(t), mutator(m), count(c), valid(v) { } 
+      public:
+        DistributedCollectable *const dc;
+        const AddressSpaceID target;
+        ReferenceMutator *const mutator;
+        const unsigned count;
+        const bool valid;
       };
     public:
       DistributedCollectable(Runtime *rt, DistributedID did,
@@ -374,9 +361,6 @@ namespace Legion {
       virtual void notify_inactive(ReferenceMutator *mutator) = 0;
       virtual void notify_valid(ReferenceMutator *mutator) = 0;
       virtual void notify_invalid(ReferenceMutator *mutator) = 0;
-      // For explicit remote messages
-      virtual void notify_remote_inactive(ReferenceMutator *mutator);
-      virtual void notify_remote_invalid(ReferenceMutator *mutator);
     public:
       inline bool is_owner(void) const { return (owner_space == local_space); }
       inline bool is_registered(void) const { return registered_with_runtime; }
@@ -399,18 +383,20 @@ namespace Legion {
                                                 Deserializer &derez);
     public:
       virtual void send_remote_registration(ReferenceMutator *mutator);
-      void send_remote_valid_update(AddressSpaceID target, 
+      void send_remote_valid_increment(AddressSpaceID target,
+                                       ReferenceMutator *mutator,
+                                       unsigned count = 1);
+      void send_remote_valid_decrement(AddressSpaceID target,
+                                       RtEvent precondition,
+                                       ReferenceMutator *mutator = NULL,
+                                       unsigned count = 1);
+      void send_remote_gc_increment(AddressSpaceID target,
                                     ReferenceMutator *mutator,
-                                    unsigned count, bool add);
-      void send_remote_gc_update(AddressSpaceID target,
-                                 ReferenceMutator *mutator,
-                                 unsigned count, bool add);
-      void send_remote_resource_update(AddressSpaceID target,
-                                       unsigned count, bool add);
-      void send_remote_invalidate(AddressSpaceID target,
-                                  ReferenceMutator *mutator);
-      void send_remote_deactivate(AddressSpaceID target,
-                                  ReferenceMutator *mutator);
+                                    unsigned count = 1);
+      void send_remote_gc_decrement(AddressSpaceID target,
+                                    RtEvent precondition,
+                                    ReferenceMutator *mutator = NULL,
+                                    unsigned count = 1);
 #ifdef USE_REMOTE_REFERENCES
     public:
       ReferenceKind send_create_reference(AddressSpaceID target);
@@ -425,18 +411,14 @@ namespace Legion {
                                                  Deserializer &derez);
       static void handle_did_remote_gc_update(Runtime *runtime,
                                               Deserializer &derez);
-      static void handle_did_remote_resource_update(Runtime *runtime,
-                                                    Deserializer &derez);
-      static void handle_did_remote_invalidate(Runtime *runtime,
-                                               Deserializer &derez);
-      static void handle_did_remote_deactivate(Runtime *runtime,
-                                               Deserializer &derez);
+      static void handle_defer_remote_decrement(const void *args);
     public:
       static void handle_did_add_create(Runtime *runtime, 
                                         Deserializer &derez);
       static void handle_did_remove_create(Runtime *runtime, 
                                            Deserializer &derez);
     protected:
+      RtEvent check_for_transition_event(void);
       bool update_state(bool &need_activate, bool &need_validate,
                         bool &need_invalidate, bool &need_deactivate,
                         bool &do_deletion);
@@ -446,10 +428,11 @@ namespace Legion {
       const DistributedID did;
       const AddressSpaceID owner_space;
       const AddressSpaceID local_space;
-    protected: // derived users can get the gc lock
+    private: // derived users can't get the gc lock
       mutable LocalLock gc_lock;
     private: // derived users can't see the state information
       State current_state;
+      RtUserEvent transition_event;
       bool has_gc_references;
       bool has_valid_references;
       bool has_resource_references;
@@ -474,7 +457,7 @@ namespace Legion {
       std::map<ReferenceSource,int> detailed_base_resource_references;
       std::map<DistributedID,int> detailed_nested_resource_references;
 #endif
-    protected:
+    private:
       // Track all the remote instances (relative to ourselves) we know about
       NodeSet                  remote_instances;
     protected:
@@ -551,50 +534,6 @@ namespace Legion {
     {
       AutoLock gc(gc_lock,1,false/*exclusive*/); 
       remote_instances.map(functor); 
-    }
-
-    //--------------------------------------------------------------------------
-    inline void DistributedCollectable::RemoteInvalidateFunctor::apply(
-                                                          AddressSpaceID target)
-    //--------------------------------------------------------------------------
-    {
-      source->send_remote_invalidate(target, mutator);
-    }
-
-    //--------------------------------------------------------------------------
-    inline void DistributedCollectable::RemoteDeactivateFunctor::apply(
-                                                          AddressSpaceID target)
-    //--------------------------------------------------------------------------
-    {
-      source->send_remote_deactivate(target, mutator);
-    }
-
-    //--------------------------------------------------------------------------
-    template<ReferenceKind REF_KIND, bool ADD>
-    void DistributedCollectable::UpdateReferenceFunctor<REF_KIND,ADD>::apply(
-                                                          AddressSpaceID target)
-    //--------------------------------------------------------------------------
-    {
-      switch (REF_KIND)
-      {
-        case GC_REF_KIND:
-          {
-            source->send_remote_gc_update(target, mutator, count, ADD);
-            break;
-          }
-        case VALID_REF_KIND:
-          {
-            source->send_remote_valid_update(target, mutator, count, ADD);
-            break;
-          }
-        case RESOURCE_REF_KIND:
-          {
-            source->send_remote_resource_update(target, count, ADD);
-            break;
-          }
-        default:
-          assert(false); // should never get here
-      }
     }
 
     //--------------------------------------------------------------------------

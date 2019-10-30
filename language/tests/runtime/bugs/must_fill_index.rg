@@ -1,4 +1,4 @@
--- Copyright 2018 Stanford University
+-- Copyright 2019 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -59,8 +59,8 @@ task k() : int
 
 -- KEY 3: error only occurs with an index launch - individual task launches for
 --  each subregion works fine
-    __demand(__parallel)
-    -- __forbid(__parallel)
+    __demand(__index_launch)
+    -- __forbid(__index_launch)
     for i = 0, 3 do
       g(p[i], 20)
     end

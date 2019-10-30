@@ -1,4 +1,4 @@
-/* Copyright 2018 Stanford University, NVIDIA Corporation
+/* Copyright 2019 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -12,18 +12,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
-// SJT: this comes first because some systems require __STDC_FORMAT_MACROS
-//  to be defined before inttypes.h is included anywhere
-#ifdef __MACH__
-#define MASK_FMT "llx"
-#else
-#ifndef __STDC_FORMAT_MACROS
-#define __STDC_FORMAT_MACROS
-#endif
-#include <inttypes.h>
-#define MASK_FMT PRIx64
-#endif
 
 #include "legion.h"
 #include "legion/runtime.h"
@@ -62,9 +50,11 @@ namespace Legion {
     Realm::Logger log_inst("instances");
     Realm::Logger log_variant("variants");
     Realm::Logger log_allocation("allocation");
+    Realm::Logger log_migration("migration");
     Realm::Logger log_prof("legion_prof");
     Realm::Logger log_garbage("legion_gc");
     Realm::Logger log_shutdown("shutdown");
+    Realm::Logger log_tracing("tracing");
     namespace LegionSpy {
       Realm::Logger log_spy("legion_spy");
     };
@@ -73,6 +63,7 @@ namespace Legion {
     __thread Runtime *implicit_runtime = NULL;
     __thread AutoLock *local_lock_list = NULL;
     __thread UniqueID implicit_provenance = 0;
+    __thread bool implicit_top_level_task = false;
 
     const LgEvent LgEvent::NO_LG_EVENT = LgEvent();
     const ApEvent ApEvent::NO_AP_EVENT = ApEvent();
@@ -254,6 +245,87 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
+    // Field Allocator Impl
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    FieldAllocatorImpl::FieldAllocatorImpl(FieldSpace space, TaskContext *ctx)
+      : field_space(space), context(ctx)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(field_space.exists());
+      assert(context != NULL);
+#endif
+      context->add_reference();
+    }
+
+    //--------------------------------------------------------------------------
+    FieldAllocatorImpl::FieldAllocatorImpl(const FieldAllocatorImpl &rhs)
+      : field_space(rhs.field_space), context(rhs.context)
+    //--------------------------------------------------------------------------
+    {
+      // Should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    FieldAllocatorImpl::~FieldAllocatorImpl(void)
+    //--------------------------------------------------------------------------
+    {
+      context->destroy_field_allocator(field_space);
+      if (context->remove_reference())
+        delete context;
+    }
+
+    //--------------------------------------------------------------------------
+    FieldAllocatorImpl& FieldAllocatorImpl::operator=(
+                                                  const FieldAllocatorImpl &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // Should never be called
+      assert(false);
+      return *this;
+    }
+    
+    //--------------------------------------------------------------------------
+    FieldID FieldAllocatorImpl::allocate_field(size_t field_size,
+                                               FieldID desired_fieldid,
+                                               CustomSerdezID serdez_id, 
+                                               bool local)
+    //--------------------------------------------------------------------------
+    {
+      return context->allocate_field(field_space, field_size, desired_fieldid,
+                                     local, serdez_id);
+    }
+
+    //--------------------------------------------------------------------------
+    void FieldAllocatorImpl::free_field(FieldID fid, const bool unordered)
+    //--------------------------------------------------------------------------
+    {
+      context->free_field(field_space, fid, unordered);
+    }
+
+    //--------------------------------------------------------------------------
+    void FieldAllocatorImpl::allocate_fields(
+                                        const std::vector<size_t> &field_sizes,
+                                        std::vector<FieldID> &resulting_fields,
+                                        CustomSerdezID serdez_id, bool local)
+    //--------------------------------------------------------------------------
+    {
+      context->allocate_fields(field_space, field_sizes, resulting_fields,
+                               local, serdez_id);
+    }
+
+    //--------------------------------------------------------------------------
+    void FieldAllocatorImpl::free_fields(const std::set<FieldID> &to_free,
+                                         const bool unordered)
+    //--------------------------------------------------------------------------
+    {
+      context->free_fields(field_space, to_free, unordered);
+    }
+
+    /////////////////////////////////////////////////////////////
     // Future Impl 
     /////////////////////////////////////////////////////////////
 
@@ -264,6 +336,7 @@ namespace Legion {
           LEGION_DISTRIBUTED_HELP_ENCODE(did, FUTURE_DC), 
           own_space, register_now),
         producer_op(o), op_gen((o == NULL) ? 0 : o->get_generation()),
+        producer_depth((o == NULL) ? -1 : o->get_context()->get_depth()),
 #ifdef LEGION_SPY
         producer_uid((o == NULL) ? 0 : o->get_unique_op_id()),
 #endif
@@ -281,7 +354,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FutureImpl::FutureImpl(const FutureImpl &rhs)
-      : DistributedCollectable(NULL, 0, 0), producer_op(NULL), op_gen(0)
+      : DistributedCollectable(NULL, 0, 0), producer_op(NULL), op_gen(0),
+        producer_depth(0)
 #ifdef LEGION_SPY
         , producer_uid(0)
 #endif
@@ -318,28 +392,32 @@ namespace Legion {
     }
     
     //--------------------------------------------------------------------------
-    void FutureImpl::get_void_result(bool silence_warnings)
+    void* FutureImpl::get_untyped_result(bool silence_warnings,
+                                      const char *warning_string, bool internal, 
+                                      bool check_size, size_t future_size)
     //--------------------------------------------------------------------------
     {
-      if (runtime->runtime_warnings && !silence_warnings && 
-          (producer_op != NULL))
+      if (!internal)
       {
-        TaskContext *context = producer_op->get_context();
-        if (!context->is_leaf_context())
+        if (runtime->runtime_warnings && !silence_warnings && 
+            (implicit_context != NULL))
         {
-          REPORT_LEGION_WARNING(LEGION_WARNING_WAITING_FUTURE_NONLEAF,
-             "Waiting on a future in non-leaf task %s "
-             "(UID %lld) is a violation of Legion's deferred execution model "
-             "best practices. You may notice a severe performance degradation.",
-             context->get_task_name(), context->get_unique_id());
+          if (!implicit_context->is_leaf_context())
+            REPORT_LEGION_WARNING(LEGION_WARNING_WAITING_FUTURE_NONLEAF, 
+               "Waiting on a future in non-leaf task %s "
+               "(UID %lld) is a violation of Legion's deferred execution model "
+               "best practices. You may notice a severe performance "
+               "degradation. Warning string: %s",
+               implicit_context->get_task_name(), 
+               implicit_context->get_unique_id(),
+               (warning_string == NULL) ? "" : warning_string)
         }
+        if ((implicit_context != NULL) && !runtime->separate_runtime_instances)
+          implicit_context->record_blocking_call();
       }
-      if (producer_op != NULL && Internal::implicit_context != NULL)
-        Internal::implicit_context->record_blocking_call();
       if (!ready_event.has_triggered())
       {
-        TaskContext *context =
-          (producer_op == NULL) ? NULL : producer_op->get_context();
+        TaskContext *context = implicit_context;
         if (context != NULL)
         {
           context->begin_task_wait(false/*from runtime*/);
@@ -349,74 +427,57 @@ namespace Legion {
         else
           ready_event.wait();
       }
-    }
-
-    //--------------------------------------------------------------------------
-    void* FutureImpl::get_untyped_result(bool silence_warnings)
-    //--------------------------------------------------------------------------
-    {
-      if (runtime->runtime_warnings && !silence_warnings && 
-          (producer_op != NULL))
+      if (check_size)
       {
-        TaskContext *context = producer_op->get_context();
-        if (!context->is_leaf_context())
-          REPORT_LEGION_WARNING(LEGION_WARNING_FUTURE_NONLEAF, 
-             "Waiting on a future in non-leaf task %s "
-             "(UID %lld) is a violation of Legion's deferred execution model "
-             "best practices. You may notice a severe performance degradation.",
-             context->get_task_name(), context->get_unique_id())
+        if (empty)
+          REPORT_LEGION_ERROR(ERROR_REQUEST_FOR_EMPTY_FUTURE, 
+                              "Accessing empty future! (UID %lld)",
+                              (producer_op == NULL) ? 0 :
+                                producer_op->get_unique_op_id())
+        else if (future_size != result_size)
+          REPORT_LEGION_ERROR(ERROR_FUTURE_SIZE_MISMATCH,
+              "Future size mismatch! Expected type of %zd bytes but "
+              "requested type is %zd bytes. (UID %lld)", 
+              result_size, future_size, (producer_op == NULL) ? 0 : 
+              producer_op->get_unique_op_id())
       }
-      if (producer_op != NULL && Internal::implicit_context != NULL)
-        Internal::implicit_context->record_blocking_call();
-      if (!ready_event.has_triggered())
-      {
-        TaskContext *context =
-          (producer_op == NULL) ? NULL : producer_op->get_context();
-        if (context != NULL)
-        {
-          context->begin_task_wait(false/*from runtime*/);
-          ready_event.wait();
-          context->end_task_wait();
-        }
-        else
-          ready_event.wait();
-      }
-      if (empty)
-        REPORT_LEGION_ERROR(ERROR_ACCESSING_EMPTY_FUTURE, 
-                            "Accessing empty future! (UID %lld)",
-                            (producer_op == NULL) ? 0 :
-                              producer_op->get_unique_op_id())
       mark_sampled();
       return result;
     }
 
     //--------------------------------------------------------------------------
-    size_t FutureImpl::get_untyped_size(void)
+    size_t FutureImpl::get_untyped_size(bool internal)
     //--------------------------------------------------------------------------
     {
       // Call this first to make sure the future is ready
-      get_void_result();
+      get_untyped_result(true, NULL, internal);
       return result_size;
     }
 
     //--------------------------------------------------------------------------
-    bool FutureImpl::is_empty(bool block, bool silence_warnings)
+    bool FutureImpl::is_empty(bool block, bool silence_warnings,
+                              const char *warning_string, bool internal)
     //--------------------------------------------------------------------------
     {
-      if (runtime->runtime_warnings && !silence_warnings && 
-          (producer_op != NULL))
+      if (!internal)
       {
-        TaskContext *context = producer_op->get_context();
-        if (!context->is_leaf_context())
-          REPORT_LEGION_WARNING(LEGION_WARNING_BLOCKING_EMPTY, 
-              "Performing a blocking is_empty test on a "
-              "in non-leaf task %s (UID %lld) is a violation of Legion's "
-              "deferred execution model best practices. You may notice a "
-              "severe performance degradation.", context->get_task_name(), 
-              context->get_unique_id())
+        if (runtime->runtime_warnings && !silence_warnings && 
+            (producer_op != NULL))
+        {
+          TaskContext *context = producer_op->get_context();
+          if (!context->is_leaf_context())
+            REPORT_LEGION_WARNING(LEGION_WARNING_BLOCKING_EMPTY, 
+                "Performing a blocking is_empty test on a "
+                "in non-leaf task %s (UID %lld) is a violation of Legion's "
+                "deferred execution model best practices. You may notice a "
+                "severe performance degradation. Warning string: %s", 
+                context->get_task_name(), 
+                context->get_unique_id(),
+                (warning_string == NULL) ? "" : warning_string)
+        }
+        if (block && producer_op != NULL && Internal::implicit_context != NULL)
+          Internal::implicit_context->record_blocking_call();
       }
-      if (block && producer_op != NULL && Internal::implicit_context != NULL)
-        Internal::implicit_context->record_blocking_call();
       if (block && !ready_event.has_triggered())
       {
         TaskContext *context =
@@ -532,7 +593,7 @@ namespace Legion {
     {
       // If we are not the owner, send a gc reference back to the owner
       if (!is_owner())
-        send_remote_gc_update(owner_space, mutator, 1/*count*/, true/*add*/);
+        send_remote_gc_increment(owner_space, mutator);
     }
 
     //--------------------------------------------------------------------------
@@ -557,7 +618,7 @@ namespace Legion {
     {
       // If we are not the owner, remove our gc reference
       if (!is_owner())
-        send_remote_gc_update(owner_space, mutator, 1/*count*/, false/*add*/);
+        send_remote_gc_decrement(owner_space, RtEvent::NO_RT_EVENT, mutator);
     }
 
     //--------------------------------------------------------------------------
@@ -565,7 +626,26 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (producer_op != NULL)
-        consumer_op->register_dependence(producer_op, op_gen);
+      {
+        // Only record dependences on things from the same context
+        // We know futures can never flow up the task tree so the
+        // only way they have the same depth is if they are from 
+        // the same parent context
+        TaskContext *context = consumer_op->get_context();
+        const int consumer_depth = context->get_depth();
+#ifdef DEBUG_LEGION
+        assert(consumer_depth >= producer_depth);
+#endif
+        if (consumer_depth == producer_depth)
+        {
+          consumer_op->register_dependence(producer_op, op_gen);
+#ifdef LEGION_SPY
+          LegionSpy::log_mapping_dependence(
+              context->get_unique_id(), producer_uid, 0,
+              consumer_op->get_unique_op_id(), 0, TRUE_DEPENDENCE);
+#endif
+        }
+      }
 #ifdef DEBUG_LEGION
       else
         assert(!empty); // better not be empty if it doesn't have an op
@@ -587,7 +667,7 @@ namespace Legion {
       assert(is_owner());
 #endif
       // Need to hold the lock when reading the set of remote spaces
-      AutoLock gc(gc_lock,1,false/*exclusive*/);
+      AutoLock f_lock(future_lock,1,false/*exclusive*/);
       if (!registered_waiters.empty())
       {
         Serializer rez;
@@ -606,14 +686,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void FutureImpl::register_waiter(AddressSpaceID sid)
+    void FutureImpl::register_waiter(AddressSpaceID sid, 
+                                     ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
       if (is_owner())
       {
         bool send_result;
         {
-          AutoLock gc(gc_lock);
+          AutoLock f_lock(future_lock);
           if (registered_waiters.find(sid) == registered_waiters.end())
           {
             send_result = ready_event.has_triggered();
@@ -637,16 +718,28 @@ namespace Legion {
       }
       else
       {
+#ifdef DEBUG_LEGION
+        assert(mutator != NULL);
+#endif
+        // Add a reference to the future to prevent it from being
+        // collected until the response comes back
+        add_base_resource_ref(RUNTIME_REF);
         // not the owner so send a message to the owner
         Serializer rez;
         rez.serialize(did);
         rez.serialize(sid);
+        // We fuse the subscription with the remote registration for futures
+        // so this has to do the same thing that 
+        // DistributedCollectable::send_remote_registration would do
+        RtUserEvent registered_event = Runtime::create_rt_user_event();
+        rez.serialize(registered_event);
         runtime->send_future_subscription(owner_space, rez);
+        mutator->record_reference_mutation_effect(registered_event);
       }
     }
 
     //--------------------------------------------------------------------------
-    void FutureImpl::record_future_registered(ReferenceMutator *creator)
+    void FutureImpl::record_future_registered(void)
     //--------------------------------------------------------------------------
     {
       // Similar to DistributedCollectable::register_with_runtime but
@@ -656,13 +749,8 @@ namespace Legion {
       assert(!registered_with_runtime);
 #endif
       registered_with_runtime = true;
-      if (!is_owner())
-      {
-        // Send the remote registration notice
-        send_remote_registration(creator);
-        // Then send the subscription for this future
-        register_waiter(runtime->address_space);
-      }
+      // If we're not the owner don't bother with sending the remote
+      // registration as that is fused with the future subscription message
     }
 
     //--------------------------------------------------------------------------
@@ -681,17 +769,23 @@ namespace Legion {
 #endif
       future->unpack_future(derez);
       future->complete_future();
+      // Now we can remove the reference that we added from before we
+      // sent the subscription message
+      if (future->remove_base_resource_ref(RUNTIME_REF))
+        delete future;
     }
 
     //--------------------------------------------------------------------------
     /*static*/ void FutureImpl::handle_future_subscription(
-                                         Deserializer &derez, Runtime *runtime)
+                   Deserializer &derez, Runtime *runtime, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
       DistributedID did;
       derez.deserialize(did);
       AddressSpaceID subscriber;
       derez.deserialize(subscriber);
+      RtUserEvent registered_event;
+      derez.deserialize(registered_event);
       DistributedCollectable *dc = runtime->find_distributed_collectable(did);
 #ifdef DEBUG_LEGION
       FutureImpl *future = dynamic_cast<FutureImpl*>(dc);
@@ -699,7 +793,12 @@ namespace Legion {
 #else
       FutureImpl *future = static_cast<FutureImpl*>(dc);
 #endif
-      future->register_waiter(subscriber); 
+      // Record the remote instance
+      future->update_remote_instances(source);
+      // Register this as a waiter
+      LocalReferenceMutator mutator;
+      future->register_waiter(subscriber, &mutator); 
+      Runtime::trigger_event(registered_event, mutator.get_done_event());
     }
 
     //--------------------------------------------------------------------------
@@ -804,7 +903,7 @@ namespace Legion {
     {
       // If we are not the owner, send a gc reference back to the owner
       if (!is_owner())
-        send_remote_gc_update(owner_space, mutator, 1/*count*/, true/*add*/);
+        send_remote_gc_increment(owner_space, mutator);
     }
 
     //--------------------------------------------------------------------------
@@ -829,7 +928,7 @@ namespace Legion {
     {
       // If we are not the owner, remove our gc reference
       if (!is_owner())
-        send_remote_gc_update(owner_space, mutator, 1/*count*/, false/*add*/);
+        send_remote_gc_decrement(owner_space, RtEvent::NO_RT_EVENT, mutator);
     }
 
     //--------------------------------------------------------------------------
@@ -840,7 +939,7 @@ namespace Legion {
       {
         // See if we already have it
         {
-          AutoLock m_lock(gc_lock,1,false/*exlusive*/);
+          AutoLock fm_lock(future_map_lock,1,false/*exlusive*/);
           std::map<DomainPoint,Future>::const_iterator finder = 
                                                 futures.find(point);
           if (finder != futures.end())
@@ -860,7 +959,7 @@ namespace Legion {
         runtime->send_future_map_request_future(owner_space, rez);
         ready_event.wait(); 
         // When we wake up it should be here
-        AutoLock m_lock(gc_lock,1,false/*exlusive*/);
+        AutoLock fm_lock(future_map_lock,1,false/*exlusive*/);
         std::map<DomainPoint,Future>::const_iterator finder = 
                                               futures.find(point);
         if (allow_empty && (finder == futures.end()))
@@ -897,7 +996,7 @@ namespace Legion {
         {
           Future result;
           {
-            AutoLock gc(gc_lock);
+            AutoLock fm_lock(future_map_lock);
             // Check to see if we already have a future for the point
             std::map<DomainPoint,Future>::const_iterator finder = 
                                                   futures.find(point);
@@ -918,7 +1017,7 @@ namespace Legion {
         else if (allow_empty)
           return Future();
         else
-          return runtime->help_create_future();
+          return runtime->help_create_future(op);
       }
     }
 
@@ -932,21 +1031,23 @@ namespace Legion {
 #endif
       // Add the reference first and then set the future
       impl->add_base_gc_ref(FUTURE_HANDLE_REF, mutator);
-      AutoLock g_lock(gc_lock);
+      AutoLock fm_lock(future_map_lock);
       futures[point] = Future(impl, false/*need reference*/);
     }
 
     //--------------------------------------------------------------------------
     void FutureMapImpl::get_void_result(const DomainPoint &point,
-                                        bool silence_warnings)
+                                        bool silence_warnings,
+                                        const char *warning_string)
     //--------------------------------------------------------------------------
     {
       Future f = get_future(point);
-      f.get_void_result(silence_warnings);
+      f.get_void_result(silence_warnings, warning_string);
     }
 
     //--------------------------------------------------------------------------
-    void FutureMapImpl::wait_all_results(bool silence_warnings)
+    void FutureMapImpl::wait_all_results(bool silence_warnings,
+                                         const char *warning_string)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -958,8 +1059,10 @@ namespace Legion {
             "Waiting for all futures in a future map in "
             "non-leaf task %s (UID %lld) is a violation of Legion's deferred "
             "execution model best practices. You may notice a severe "
-            "performance degredation.", context->get_task_name(),
-            context->get_unique_id())
+            "performance degredation. Warning string: %s", 
+            context->get_task_name(),
+            context->get_unique_id(),
+            (warning_string == NULL) ? "" : warning_string)
       if (op != NULL && Internal::implicit_context != NULL)
         Internal::implicit_context->record_blocking_call();
       // Wait on the event that indicates the entire task has finished
@@ -984,7 +1087,7 @@ namespace Legion {
       assert(is_owner());
       assert(valid);
 #endif
-      AutoLock l_lock(gc_lock);
+      AutoLock fm_lock(future_map_lock);
       for (std::map<DomainPoint,Future>::const_iterator it = 
             futures.begin(); it != futures.end(); it++)
       {
@@ -1001,7 +1104,7 @@ namespace Legion {
       assert(valid);
 #endif
       bool result = false;
-      AutoLock l_lock(gc_lock);
+      AutoLock fm_lock(future_map_lock);
       for (std::map<DomainPoint,Future>::const_iterator it = 
             futures.begin(); it != futures.end(); it++)
       {
@@ -1159,8 +1262,10 @@ namespace Legion {
                                    MapperID mid, MappingTagID t, 
                                    bool leaf, bool virt, Runtime *rt)
       : Collectable(), runtime(rt), context(ctx), map_id(mid), tag(t),
-        leaf_region(leaf), virtual_mapped(virt), ready_event(ready), req(r), 
-        mapped(m), valid(false), trigger_on_unmap(false), made_accessor(false)
+        leaf_region(leaf), virtual_mapped(virt), 
+        replaying((ctx != NULL) ? ctx->owner_task->is_replaying() : false),
+        ready_event(ready), req(r), mapped(m), valid(false), 
+        trigger_on_unmap(false), made_accessor(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -1168,7 +1273,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     PhysicalRegionImpl::PhysicalRegionImpl(const PhysicalRegionImpl &rhs)
       : Collectable(), runtime(NULL), context(NULL), map_id(0), tag(0),
-        leaf_region(false), virtual_mapped(false), 
+        leaf_region(false), virtual_mapped(false), replaying(false),
         ready_event(ApEvent::NO_AP_EVENT), mapped(false), valid(false), 
         trigger_on_unmap(false), made_accessor(false)
     //--------------------------------------------------------------------------
@@ -1188,7 +1293,7 @@ namespace Legion {
         trigger_on_unmap = false;
         Runtime::trigger_event(termination_event);
       }
-      if (!references.empty() && !context->owner_task->is_replaying())
+      if (!references.empty() && !replaying)
         references.remove_valid_references(PHYSICAL_REGION_REF);
     }
 
@@ -1204,6 +1309,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void PhysicalRegionImpl::wait_until_valid(bool silence_warnings, 
+                                              const char *warning_string,
                                               bool warn, const char *source)
     //--------------------------------------------------------------------------
     {
@@ -1217,19 +1323,18 @@ namespace Legion {
               "Waiting for a physical region to be valid "
               "for call %s in non-leaf task %s (UID %lld) is a violation of "
               "Legion's deferred execution model best practices. You may "
-              "notice a severe performance degradation.", source,
-              context->get_task_name(), context->get_unique_id())
+              "notice a severe performance degradation. Warning string: %s", 
+              source, context->get_task_name(), context->get_unique_id(),
+              (warning_string == NULL) ? "" : warning_string)
         else
           REPORT_LEGION_WARNING(LEGION_WARNING_WAITING_REGION, 
               "Waiting for a physical region to be valid "
               "in non-leaf task %s (UID %lld) is a violation of Legion's "
               "deferred execution model best practices. You may notice a "
-              "severe performance degradation.", context->get_task_name(), 
-              context->get_unique_id())
+              "severe performance degradation. Warning string: %s", 
+              context->get_task_name(), context->get_unique_id(),
+              (warning_string == NULL) ? "" : warning_string)
       }
-#ifdef DEBUG_LEGION
-      assert(mapped); // should only be waiting on mapped regions
-#endif
       // If we've already gone through this process we're good
       if (valid)
         return;
@@ -1240,8 +1345,9 @@ namespace Legion {
               "Request for %s was performed on a "
               "physical region in task %s (ID %lld) without first waiting "
               "for the physical region to be valid. Legion is performing "
-              "the wait for you.", source, context->get_task_name(), 
-              context->get_unique_id())
+              "the wait for you. Warning string: %s", source, 
+              context->get_task_name(), context->get_unique_id(),
+              (warning_string == NULL) ? "" : warning_string)
         if (context != NULL)
           context->begin_task_wait(false/*from runtime*/);
         ready_event.wait();
@@ -1251,7 +1357,7 @@ namespace Legion {
       // Now wait for the reference to be ready
       std::set<ApEvent> wait_on;
       references.update_wait_on_events(wait_on);
-      ApEvent ref_ready = Runtime::merge_events(wait_on);
+      ApEvent ref_ready = Runtime::merge_events(NULL, wait_on);
       bool poisoned;
       if (!ref_ready.has_triggered_faultaware(poisoned))
       {
@@ -1273,11 +1379,11 @@ namespace Legion {
     {
       if (valid)
         return true;
-      if (mapped && ready_event.has_triggered())
+      if (ready_event.has_triggered())
       {
         std::set<ApEvent> wait_on;
         references.update_wait_on_events(wait_on);
-        ApEvent ref_ready = Runtime::merge_events(wait_on);
+        ApEvent ref_ready = Runtime::merge_events(NULL, wait_on);
         return ref_ready.has_triggered();
       }
       return false;
@@ -1355,7 +1461,7 @@ namespace Legion {
 #endif
       }
       // Wait until we are valid before returning the accessor
-      wait_until_valid(silence_warnings, 
+      wait_until_valid(silence_warnings, NULL, 
                        runtime->runtime_warnings, "get_accessor");
       // You can only legally invoke this method when you have one instance
       if (references.size() > 1)
@@ -1429,7 +1535,7 @@ namespace Legion {
 #endif 
       }
       // Wait until we are valid before returning the accessor
-      wait_until_valid(silence_warnings, 
+      wait_until_valid(silence_warnings, NULL, 
                        runtime->runtime_warnings, "get_field_acessor");
 #ifdef DEBUG_LEGION
       if (req.privilege_fields.find(fid) == req.privilege_fields.end())
@@ -1458,7 +1564,7 @@ namespace Legion {
     {
       if (!mapped)
         return;
-      wait_until_valid(true/*silence warnings*/);
+      wait_until_valid(true/*silence warnings*/, NULL);
       if (trigger_on_unmap)
       {
         trigger_on_unmap = false;
@@ -1467,7 +1573,7 @@ namespace Legion {
         references.update_wait_on_events(wait_on);
         wait_on.insert(ready_event);
         Runtime::trigger_event(termination_event,
-                               Runtime::merge_events(wait_on));
+                               Runtime::merge_events(NULL, wait_on));
       }
       valid = false;
       mapped = false;
@@ -1524,9 +1630,6 @@ namespace Legion {
                                        ApUserEvent term_event, ApEvent wait_for)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(mapped);
-#endif
       if (!references.empty())
         references.remove_valid_references(PHYSICAL_REGION_REF);
       references = refs;
@@ -1620,6 +1723,7 @@ namespace Legion {
     PhysicalInstance PhysicalRegionImpl::get_instance_info(PrivilegeMode mode, 
                                               FieldID fid, size_t field_size, 
                                               void *realm_is, TypeTag type_tag,
+                                              const char *warning_string,
                                               bool silence_warnings, 
                                               bool generic_accessor,
                                               bool check_field_size,
@@ -1647,8 +1751,10 @@ namespace Legion {
                                 "creating read-write accessor for "
                                 "field %d in task %s which only has "
                                 "WRITE_DISCARD privileges. You may be "
-                                "accessing uninitialized data.",
-                                fid, context->get_task_name())
+                                "accessing uninitialized data. "
+                                "Warning string: %s",
+                                fid, context->get_task_name(),
+                                (warning_string == NULL) ? "" : warning_string)
             }
             else if (req.privilege != READ_WRITE)
               REPORT_LEGION_ERROR(ERROR_ACCESSOR_PRIVILEGE_CHECK, 
@@ -1708,8 +1814,9 @@ namespace Legion {
               "Accessor construction in non-leaf "
               "task %s (UID %lld) is a blocking operation in violation of "
               "Legion's deferred execution model best practices. You may "
-              "notice a severe performance degradation.", 
-              context->get_task_name(), context->get_unique_id())
+              "notice a severe performance degradation. Warning string: %s",
+              context->get_task_name(), context->get_unique_id(),
+              (warning_string == NULL) ? "" : warning_string)
       }
       // If this physical region isn't mapped, then we have to
       // map it before we can return an accessor
@@ -1725,8 +1832,9 @@ namespace Legion {
                           "Accessor construction was "
                           "performed on an unmapped region in task %s "
                           "(UID %lld). Legion is mapping it for you. "
-                          "Please try to be more careful.",
-                          context->get_task_name(), context->get_unique_id())
+                          "Please try to be more careful. Warning string: %s",
+                          context->get_task_name(), context->get_unique_id(),
+                          (warning_string == NULL) ? "" : warning_string)
         runtime->remap_region(context, PhysicalRegion(this));
         // At this point we should have a new ready event
         // and be mapped
@@ -1744,13 +1852,15 @@ namespace Legion {
                               "physical instance of task %s (UID %lld). "
                               "Generic accessors are very slow and are "
                               "strongly discouraged for use in high "
-                              "performance code.", context->get_task_name(),
-                              context->get_unique_id())
+                              "performance code. Warning string: %s", 
+                              context->get_task_name(),
+                              context->get_unique_id(),
+                              (warning_string == NULL) ? "" : warning_string)
       // Get the index space to use for the accessor
       runtime->get_index_space_domain(req.region.get_index_space(),
                                       realm_is, type_tag);
       // Wait until we are valid before returning the accessor
-      wait_until_valid(silence_warnings, 
+      wait_until_valid(silence_warnings, warning_string,
                        runtime->runtime_warnings, "Accessor Construction");
       made_accessor = true;
       for (unsigned idx = 0; idx < references.size(); idx++)
@@ -1762,7 +1872,7 @@ namespace Legion {
           if (check_field_size)
           {
             const size_t actual_size = 
-              manager->region_node->column_source->get_field_size(fid);
+              manager->field_space_node->get_field_size(fid);
             if (actual_size != field_size)
               REPORT_LEGION_ERROR(ERROR_ACCESSOR_FIELD_SIZE_CHECK,
                             "Error creating accessor for field %d with a "
@@ -1888,6 +1998,16 @@ namespace Legion {
       }
     }
 
+    //--------------------------------------------------------------------------
+    void PhysicalRegionImpl::report_incompatible_accessor(
+              const char *accessor_kind, PhysicalInstance instance, FieldID fid)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_ACCESSOR_COMPATIBILITY_CHECK,
+          "Unable to create Realm %s for field %d of instance %llx in task %s",
+          accessor_kind, fid, instance.id, context->get_task_name())
+    }
+
     /////////////////////////////////////////////////////////////
     // Grant Impl 
     /////////////////////////////////////////////////////////////
@@ -1961,7 +2081,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock g_lock(grant_lock);
-      ApEvent deferred_release = Runtime::merge_events(completion_events);
+      ApEvent deferred_release = Runtime::merge_events(NULL, completion_events);
       for (std::vector<ReservationRequest>::const_iterator it = 
             requests.begin(); it != requests.end(); it++)
       {
@@ -2467,10 +2587,11 @@ namespace Legion {
       : runtime(rt), local_proc(proc), proc_kind(kind), 
         stealing_disabled(no_steal), replay_execution(replay), 
         next_local_index(0), task_scheduler_enabled(false), 
+        outstanding_task_scheduler(false),
         total_active_contexts(0), total_active_mappers(0)
     //--------------------------------------------------------------------------
     {
-      context_states.resize(DEFAULT_CONTEXTS);
+      context_states.resize(LEGION_DEFAULT_CONTEXTS);
       // Find our set of visible memories
       Machine::MemoryQuery vis_mems(runtime->machine);
       vis_mems.has_affinity_to(proc);
@@ -2483,8 +2604,7 @@ namespace Legion {
     ProcessorManager::ProcessorManager(const ProcessorManager &rhs)
       : runtime(NULL), local_proc(Processor::NO_PROC),
         proc_kind(Processor::LOC_PROC), stealing_disabled(false), 
-        replay_execution(false), next_local_index(0),
-        task_scheduler_enabled(false), total_active_contexts(0)
+        replay_execution(false)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -2621,19 +2741,27 @@ namespace Legion {
       // Now re-take the lock and re-check the condition to see 
       // if the next scheduling task should be launched
       AutoLock q_lock(queue_lock);
-      if ((total_active_contexts > 0) && (total_active_mappers > 0))
+#ifdef DEBUG_LEGION
+      assert(outstanding_task_scheduler);
+#endif
+      // If the task scheduler is enabled launch ourselves again
+      if (task_scheduler_enabled)
       {
-        task_scheduler_enabled = true;
-        launch_task_scheduler();
+        SchedulerArgs sched_args(local_proc);
+        runtime->issue_runtime_meta_task(sched_args, LG_LATENCY_WORK_PRIORITY);
       }
       else
-        task_scheduler_enabled = false; 
+        outstanding_task_scheduler = false;
     } 
 
     //--------------------------------------------------------------------------
     void ProcessorManager::launch_task_scheduler(void)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(!outstanding_task_scheduler);
+#endif
+      outstanding_task_scheduler = true;
       SchedulerArgs sched_args(local_proc);
       runtime->issue_runtime_meta_task(sched_args, LG_LATENCY_WORK_PRIORITY);
     } 
@@ -2715,7 +2843,8 @@ namespace Legion {
           (total_active_mappers > 0))
       {
         task_scheduler_enabled = true;
-        launch_task_scheduler();
+        if (!outstanding_task_scheduler)
+          launch_task_scheduler();
       }
       total_active_contexts++;
     }
@@ -2742,7 +2871,8 @@ namespace Legion {
           (total_active_contexts > 0))
       {
         task_scheduler_enabled = true;
-        launch_task_scheduler();
+        if (!outstanding_task_scheduler)
+          launch_task_scheduler();
       }
       total_active_mappers++;
     }
@@ -2782,64 +2912,113 @@ namespace Legion {
         MapperManager *mapper = find_mapper(stealer);
         if (mapper == NULL)
           continue;
-        
-        // Construct a vector of tasks eligible for stealing
+        // Wait until we can exclusive access to the ready queue
+        std::list<TaskOp*> queue_copy;
+        RtEvent queue_copy_ready;
+        // Pull out the current tasks for this mapping operation
+        // Need to iterate until we get access to the queue
+        do
+        {
+          if (queue_copy_ready.exists() && !queue_copy_ready.has_triggered())
+          {
+            queue_copy_ready.wait();
+            queue_copy_ready = RtEvent::NO_RT_EVENT;
+          }
+          AutoLock q_lock(queue_lock);
+          MapperState &map_state = mapper_states[*steal_it];
+          if (!map_state.queue_guard)
+          {
+            // If we don't have a deferral event then grab our
+            // ready queue of tasks so we can try to map them
+            // this will also prevent them from being stolen
+            if (!map_state.ready_queue.empty())
+            {
+              map_state.ready_queue.swap(queue_copy);
+              // Set the queue guard so no one else tries to
+              // read the ready queue while we've checked it out
+              map_state.queue_guard = true;
+            }
+          }
+          else
+          {
+            // Make an event if necessary
+            if (!map_state.queue_waiter.exists())
+              map_state.queue_waiter = Runtime::create_rt_user_event();
+            // Record that we need to wait on it
+            queue_copy_ready = map_state.queue_waiter;
+          }
+        } while (queue_copy_ready.exists());
+        if (queue_copy.empty())
+          continue;
         Mapper::StealRequestInput input;
         input.thief_proc = thief;
-        std::vector<const Task*> &mapper_tasks = input.stealable_tasks;
+        for (std::list<TaskOp*>::const_iterator it = 
+              queue_copy.begin(); it != queue_copy.end(); it++)
         {
-          AutoLock q_lock(queue_lock,1,false/*exclusive*/);
-          std::list<TaskOp*> &target_list = mapper_states[stealer].ready_queue;
-          for (std::list<TaskOp*>::const_iterator it = 
-                target_list.begin(); it != target_list.end(); it++)
-          {
-            if ((*it)->is_stealable() && !(*it)->is_origin_mapped())
-              mapper_tasks.push_back(*it);
-          }
+          if ((*it)->is_stealable() && !(*it)->is_origin_mapped())
+            input.stealable_tasks.push_back(*it);
         }
         Mapper::StealRequestOutput output;
         // Ask the mapper what it wants to allow be stolen
-        if (!mapper_tasks.empty())
+        if (!input.stealable_tasks.empty())
           mapper->invoke_permit_steal_request(&input, &output);
-        std::deque<TaskOp*> temp_stolen;
-        const std::set<const Task*> &to_steal = output.stolen_tasks;
-        if (!to_steal.empty())
+        // See which tasks we can succesfully steal
+        std::vector<TaskOp*> local_stolen;
+        if (!output.stolen_tasks.empty())
         {
-          // See if we can still get it out of the queue
-          AutoLock q_lock(queue_lock);
-          MapperState &map_state = mapper_states[stealer];
-          std::list<TaskOp*> &target_list = map_state.ready_queue;
-          for (std::set<const Task*>::const_iterator steal_it = 
-                to_steal.begin(); steal_it != to_steal.end(); steal_it++)
+          std::set<const Task*> to_steal(output.stolen_tasks.begin(), 
+                                         output.stolen_tasks.end());
+          // Remove any tasks that are going to be stolen
+          for (std::list<TaskOp*>::iterator it = 
+                queue_copy.begin(); it != queue_copy.end(); /*nothing*/)
           {
-            TaskOp *target = static_cast<TaskOp*>(
-                              const_cast<Task*>(*steal_it));
-            bool found = false;
-            for (std::list<TaskOp*>::iterator it = target_list.begin();
-                  it != target_list.end(); it++)
+            if ((to_steal.find(*it) != to_steal.end()) && 
+                (*it)->prepare_steal())
             {
-              if ((*it) == target)
-              {
-                target_list.erase(it);
-                if (target_list.empty())
-                {
-                  // If we already have a deferral event then we
-                  // are already not active so just clear it
-                  if (map_state.deferral_event.exists())
-                    map_state.deferral_event = RtEvent::NO_RT_EVENT;
-                  else
-                    decrement_active_mappers();
-                }
-                found = true;
-                break;
-              }
+              // Mark this as stolen and update the target processor
+              (*it)->mark_stolen();
+              local_stolen.push_back(*it);
+              it = queue_copy.erase(it);
             }
-            if (found)
+            else
+              it++;
+          }
+        }
+        {
+          // Retake the lock, put any tasks still in the ready queue
+          // back into the queue and remove the queue guard
+          AutoLock q_lock(queue_lock);
+          MapperState &map_state = mapper_states[*steal_it];
+#ifdef DEBUG_LEGION
+          assert(map_state.queue_guard);
+#endif
+          std::list<TaskOp*> &rqueue = map_state.ready_queue;
+          if (!queue_copy.empty())
+          {
+            // Put any new items on the back of the queue
+            if (!rqueue.empty())
             {
-              temp_stolen.push_back(target);
+              for (std::list<TaskOp*>::const_iterator it = 
+                    rqueue.begin(); it != rqueue.end(); it++)
+                queue_copy.push_back(*it);
+            }
+            rqueue.swap(queue_copy);
+          }
+          else if (rqueue.empty())
+          {
+            if (map_state.deferral_event.exists())
+              map_state.deferral_event = RtEvent::NO_RT_EVENT;
+            else
+              decrement_active_mappers();
+          }
+          if (!local_stolen.empty())
+          {
+            for (std::vector<TaskOp*>::const_iterator it = 
+                  local_stolen.begin(); it != local_stolen.end(); it++)
+            {
               // Wait until we are no longer holding the lock
               // to mark that this is no longer an outstanding task
-              ContextID ctx_id = target->get_context()->get_context_id();
+              ContextID ctx_id = (*it)->get_context()->get_context_id();
               ContextState &state = context_states[ctx_id];
 #ifdef DEBUG_LEGION
               assert(state.owned_tasks > 0);
@@ -2849,49 +3028,26 @@ namespace Legion {
                 decrement_active_contexts();
             }
           }
+          // Remove the queue guard
+          map_state.queue_guard = false;
+          if (map_state.queue_waiter.exists())
+          {
+            Runtime::trigger_event(map_state.queue_waiter);
+            map_state.queue_waiter = RtUserEvent::NO_RT_USER_EVENT;
+          }
         }
-        // Now see if we can actually steal the task, if not
-        // then we have to put it back on the queue
-        bool successful_steal = false;
-        for (unsigned idx = 0; idx < temp_stolen.size(); idx++)
+        if (!local_stolen.empty())
         {
-          if (temp_stolen[idx]->prepare_steal())
+          successful_thiefs.push_back(stealer);
+          for (std::vector<TaskOp*>::const_iterator it = 
+                local_stolen.begin(); it != local_stolen.end(); it++)
           {
-            // Mark this as stolen and update the target processor
-            temp_stolen[idx]->mark_stolen();
-            stolen.insert(temp_stolen[idx]);
-            successful_steal = true;
-            temp_stolen[idx]->deactivate_outstanding_task();
-          }
-          else
-          {
-            // Always set this before putting anything on
-            // the ready queue
-            ContextID ctx_id = 
-              temp_stolen[idx]->get_context()->get_context_id();
-            AutoLock q_lock(queue_lock);
-            ContextState &state = context_states[ctx_id];
-            if (state.active && (state.owned_tasks == 0))
-              increment_active_contexts();
-            state.owned_tasks++;
-            MapperState &map_state = mapper_states[stealer];
-            if (map_state.ready_queue.empty())
-            {
-              // Clear any deferral event if we are changing state
-              map_state.deferral_event = RtEvent::NO_RT_EVENT;
-              increment_active_mappers();
-            }
-            // Otherwise the state hasn't actually changed so
-            // we can't actually clear any deferral events
-            map_state.ready_queue.push_back(temp_stolen[idx]);
-            map_state.added_tasks = true;
+            (*it)->deactivate_outstanding_task();
+            stolen.insert(*it);
           }
         }
-
-        if (!successful_steal) 
-          mapper->process_failed_steal(thief);
         else
-          successful_thiefs.push_back(stealer);
+          mapper->process_failed_steal(thief);
       }
       if (!stolen.empty())
       {
@@ -2959,7 +3115,6 @@ namespace Legion {
         increment_active_mappers();
       }
       map_state.ready_queue.push_back(task);
-      map_state.added_tasks = true;
     }
 
     //--------------------------------------------------------------------------
@@ -2998,39 +3153,57 @@ namespace Legion {
       {
         const MapperID map_id = it->first;
         MapperManager *const mapper = it->second;
-        Mapper::SelectMappingInput input;
-        std::list<const Task*> &visible_tasks = input.ready_tasks;
-        // We also need to capture the generations here
-        std::list<GenerationID> visible_generations;
+        std::list<TaskOp*> queue_copy;
+        RtEvent queue_copy_ready;
         // Pull out the current tasks for this mapping operation
+        // Need to iterate until we get access to the queue
+        do
         {
-          AutoLock q_lock(queue_lock,1,false/*exclusive*/);
-          MapperState &map_state = mapper_states[map_id];
-          // Only grap tasks if we don't have a deferral event
-          if (!map_state.deferral_event.exists())
+          if (queue_copy_ready.exists() && !queue_copy_ready.has_triggered())
           {
-            std::list<TaskOp*> &target_list = map_state.ready_queue;
-            for (std::list<TaskOp*>::const_iterator it = 
-                  target_list.begin(); it != target_list.end(); it++)
-            {
-              visible_tasks.push_back(*it);
-              visible_generations.push_back((*it)->get_generation());
-            }  
+            queue_copy_ready.wait();
+            queue_copy_ready = RtEvent::NO_RT_EVENT;
           }
-          // Set our flag to check for added tasks while we do the mapper call
-          map_state.added_tasks = false;
-        }
+          AutoLock q_lock(queue_lock);
+          MapperState &map_state = mapper_states[map_id];
+          if (!map_state.queue_guard)
+          {
+            // If we don't have a deferral event then grab our
+            // ready queue of tasks so we can try to map them
+            // this will also prevent them from being stolen
+            if (!map_state.deferral_event.exists() &&
+                !map_state.ready_queue.empty())
+            {
+              map_state.ready_queue.swap(queue_copy);
+              // Set the queue guard so no one else tries to
+              // read the ready queue while we've checked it out
+              map_state.queue_guard = true;
+            }
+          }
+          else
+          {
+            // Make an event if necessary
+            if (!map_state.queue_waiter.exists())
+              map_state.queue_waiter = Runtime::create_rt_user_event();
+            // Record that we need to wait on it
+            queue_copy_ready = map_state.queue_waiter;
+          }
+        } while (queue_copy_ready.exists());
         // Do this before anything else in case we don't have any tasks
         if (!stealing_disabled)
           mapper->perform_stealing(stealing_targets);
-        // Nothing to do if there are no visible tasks
-        if (visible_tasks.empty())
+        // Nothing to do if there are no tasks on the queue
+        if (queue_copy.empty())
           continue;
         // Ask the mapper which tasks it would like to schedule
+        Mapper::SelectMappingInput input;
         Mapper::SelectMappingOutput output;
-        if (!visible_tasks.empty())
-          mapper->invoke_select_tasks_to_map(&input, &output);
+        for (std::list<TaskOp*>::const_iterator it = 
+              queue_copy.begin(); it != queue_copy.end(); it++)
+          input.ready_tasks.push_back(*it);
+        mapper->invoke_select_tasks_to_map(&input, &output);
         // If we had no entry then we better have gotten a mapper event
+        std::vector<TaskOp*> to_trigger;
         if (output.map_tasks.empty() && output.relocate_tasks.empty())
         {
           const RtEvent wait_on = output.deferral_event.impl;
@@ -3042,15 +3215,35 @@ namespace Legion {
             // We have to check to see if any new tasks were added to 
             // the ready queue while we were doing our mapper call, if 
             // they were then we need to invoke select_tasks_to_map again
-            if (!map_state.added_tasks)
+            if (map_state.ready_queue.empty())
             {
 #ifdef DEBUG_LEGION
               assert(!map_state.deferral_event.exists());
+              assert(map_state.queue_guard);
 #endif
               map_state.deferral_event = wait_on;
               // Decrement the number of active mappers
               decrement_active_mappers();
+              // Put our tasks back on the queue
+              map_state.ready_queue.swap(queue_copy);
+              // Clear the queue guard
+              map_state.queue_guard = false;
+              if (map_state.queue_waiter.exists())
+              {
+                Runtime::trigger_event(map_state.queue_waiter);
+                map_state.queue_waiter = RtUserEvent::NO_RT_USER_EVENT;
+              }
+              // Launch a task to remove the deferred mapper 
+              // event when it triggers
+              DeferMapperSchedulerArgs args(this, map_id, wait_on);
+              runtime->issue_runtime_meta_task(args, 
+                  LG_LATENCY_DEFERRED_PRIORITY, wait_on);
+              // We can continue because there is nothing 
+              // left to do for this mapper
+              continue;
             }
+            // Otherwise we fall through to put our tasks back on the queue 
+            // which will lead to select_tasks_to_map being called again
           }
           else // Very bad, error message
             REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
@@ -3061,81 +3254,67 @@ namespace Legion {
                           "livelock conditions. Please return a "
                           "'deferral_event' in the 'output' struct.",
                           mapper->get_mapper_name())
-          // Launch a task to remove the deferred mapper event when it triggers
-          DeferMapperSchedulerArgs args(this, map_id, wait_on);
-          runtime->issue_runtime_meta_task(args, LG_LATENCY_DEFERRED_PRIORITY,
-                                           wait_on);
-          // We can continue because there is nothing left to do for this mapper
-          continue;
         }
-        // Process the results first remove the operations that were
-        // selected to be mapped from the queue.  Note its possible
-        // that we can't actually find the task because it has been
-        // stolen from the queue while we were deciding what to
-        // map.  It's also possible the task is no longer in the same
-        // place if the queue was prepended to.
+        else
         {
-          // First things first: filter our visible list before we are holding
-          // the lock on the ready queues
-          std::list<GenerationID>::iterator gen_it = 
-            visible_generations.begin();
-          for (std::list<const Task*>::iterator vis_it = visible_tasks.begin();
-                vis_it != visible_tasks.end(); /*nothing*/)
+          // Figure out which tasks are to be triggered
+          std::set<const Task*> selected;
+          if (!output.map_tasks.empty())
+            selected.insert(output.map_tasks.begin(), output.map_tasks.end());
+          if (!output.relocate_tasks.empty())
           {
-            // Check to see if this is a task that we care about
-            if ((output.map_tasks.find(*vis_it) != output.map_tasks.end()) ||
-                (output.relocate_tasks.find(*vis_it) != 
-                 output.relocate_tasks.end()))
-            {
-              vis_it++; // still care about it
-              gen_it++;
-            }
-            else // Otherwise we don't care so we can erase it
-            {
-              vis_it = visible_tasks.erase(vis_it);
-              gen_it = visible_generations.erase(gen_it);
-            }
+            for (std::map<const Task*,Processor>::const_iterator it = 
+                  output.relocate_tasks.begin(); it != 
+                  output.relocate_tasks.end(); it++)
+              selected.insert(it->first);
           }
-          // Reset the iterator to the start
-          gen_it = visible_generations.begin();
-          AutoLock q_lock(queue_lock);
-          MapperState &map_state = mapper_states[map_id];
-          std::list<TaskOp*> &rqueue = map_state.ready_queue;
-          for (std::list<const Task*>::iterator vis_it = visible_tasks.begin(); 
-                vis_it != visible_tasks.end(); gen_it++)
+          // Remove any tasks that are going to be triggered
+          for (std::list<TaskOp*>::iterator it = 
+                queue_copy.begin(); it != queue_copy.end(); /*nothing*/)
           {
-            bool found = false;
-            for (std::list<TaskOp*>::iterator it = rqueue.begin();
-                  it != rqueue.end(); it++)
+            if (selected.find(*it) != selected.end())
             {
-              // In order to be the same task, they need to have the
-              // same pointer and have the same generation
-              if (((*it) == (*vis_it)) &&
-                  ((*gen_it) == (*it)->get_generation()))
-              {
-                rqueue.erase(it);
-                if (rqueue.empty())
-                {
-                  if (map_state.deferral_event.exists())
-                    map_state.deferral_event = RtEvent::NO_RT_EVENT;
-                  else
-                    decrement_active_mappers();
-                }
-                found = true;
-                break;
-              }
-            }
-            if (!found) // stolen
-            {
-              // Remove it from our list
-              vis_it = visible_tasks.erase(vis_it);
+              to_trigger.push_back(*it);
+              it = queue_copy.erase(it);
             }
             else
+              it++;
+          }
+        }
+        {
+          // Retake the lock, put any tasks that the mapper didn't select
+          // back on the queue and update the context states for any
+          // that were selected 
+          AutoLock q_lock(queue_lock);
+          MapperState &map_state = mapper_states[map_id];
+#ifdef DEBUG_LEGION
+          assert(map_state.queue_guard);
+#endif
+          std::list<TaskOp*> &rqueue = map_state.ready_queue;
+          if (!queue_copy.empty())
+          {
+            // Put any new items on the back of the queue
+            if (!rqueue.empty())
             {
-              // Wait until we are not holding the queue lock
-              // to mark that this task is no longer outstanding
-              TaskOp *task = static_cast<TaskOp*>(const_cast<Task*>(*vis_it));
-              ContextID ctx_id = task->get_context()->get_context_id(); 
+              for (std::list<TaskOp*>::const_iterator it = 
+                    rqueue.begin(); it != rqueue.end(); it++)
+                queue_copy.push_back(*it);
+            }
+            rqueue.swap(queue_copy);
+          }
+          else if (rqueue.empty())
+          {
+            if (map_state.deferral_event.exists())
+              map_state.deferral_event = RtEvent::NO_RT_EVENT;
+            else
+              decrement_active_mappers();
+          }
+          if (!to_trigger.empty())
+          {
+            for (std::vector<TaskOp*>::const_iterator it = 
+                  to_trigger.begin(); it != to_trigger.end(); it++)
+            {
+              ContextID ctx_id = (*it)->get_context()->get_context_id(); 
               ContextState &state = context_states[ctx_id];
 #ifdef DEBUG_LEGION
               assert(state.owned_tasks > 0);
@@ -3143,10 +3322,9 @@ namespace Legion {
               state.owned_tasks--;
               if (state.active && (state.owned_tasks == 0))
                 decrement_active_contexts();
-              vis_it++;
             }
           }
-          if (!stealing_disabled)
+          if (!stealing_disabled && !rqueue.empty())
           {
             for (std::list<TaskOp*>::const_iterator it =
                   rqueue.begin(); it != rqueue.end(); it++)
@@ -3158,22 +3336,27 @@ namespace Legion {
               }
             }
           }
+          // Remove the queue guard
+          map_state.queue_guard = false;
+          if (map_state.queue_waiter.exists())
+          {
+            Runtime::trigger_event(map_state.queue_waiter);
+            map_state.queue_waiter = RtUserEvent::NO_RT_USER_EVENT;
+          }
         }
-        // Now that we've removed them from the queue, issue the
-        // mapping analysis calls
-        for (std::list<const Task*>::iterator vis_it = visible_tasks.begin();
-              vis_it != visible_tasks.end(); vis_it++)
+        // Now we can trigger our tasks that the mapper selected
+        for (std::vector<TaskOp*>::const_iterator it = 
+              to_trigger.begin(); it != to_trigger.end(); it++)
         {
-          TaskOp *task = static_cast<TaskOp*>(const_cast<Task*>(*vis_it));
           // Update the target processor for this task if necessary
           std::map<const Task*,Processor>::const_iterator finder = 
-            output.relocate_tasks.find(*vis_it);
+            output.relocate_tasks.find(*it);
           const bool send_remotely = (finder != output.relocate_tasks.end());
           if (send_remotely)
-            task->set_target_proc(finder->second);
+            (*it)->set_target_proc(finder->second);
           // Mark that this task is no longer outstanding
-          task->deactivate_outstanding_task();
-          TaskOp::TriggerTaskArgs trigger_args(task);
+          (*it)->deactivate_outstanding_task();
+          TaskOp::TriggerTaskArgs trigger_args(*it);
           runtime->issue_runtime_meta_task(trigger_args,
                                            LG_THROUGHPUT_WORK_PRIORITY);
         }
@@ -3245,6 +3428,32 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void MemoryManager::find_shutdown_preconditions(
+                                               std::set<ApEvent> &preconditions)
+    //--------------------------------------------------------------------------
+    {
+      std::vector<PhysicalManager*> to_check;
+      {
+        AutoLock m_lock(manager_lock,1,false/*exclusive*/);
+        for (std::map<RegionTreeID,TreeInstances>::const_iterator cit = 
+              current_instances.begin(); cit != current_instances.end(); cit++)
+          for (TreeInstances::const_iterator it = 
+                cit->second.begin(); it != cit->second.end(); it++)
+          {
+            it->first->add_base_resource_ref(MEMORY_MANAGER_REF);
+            to_check.push_back(it->first);
+          }
+      }
+      for (std::vector<PhysicalManager*>::const_iterator it = 
+            to_check.begin(); it != to_check.end(); it++)
+      {
+        (*it)->find_shutdown_preconditions(preconditions);
+        if ((*it)->remove_base_resource_ref(MEMORY_MANAGER_REF))
+          delete (*it);
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void MemoryManager::prepare_for_shutdown(void)
     //--------------------------------------------------------------------------
     {
@@ -3255,34 +3464,45 @@ namespace Legion {
       {
         AutoLock m_lock(manager_lock);
         std::vector<PhysicalManager*> to_remove;
-        for (std::map<PhysicalManager*,InstanceInfo>::iterator it = 
-              current_instances.begin(); it != current_instances.end(); it++)
-        {
-          if (it->second.current_state == PENDING_COLLECTED_STATE)
-            continue;
+        for (std::map<RegionTreeID,TreeInstances>::iterator cit = 
+              current_instances.begin(); cit != current_instances.end(); cit++)
+          for (TreeInstances::iterator it = 
+                cit->second.begin(); it != cit->second.end(); it++)
+          {
+            if (it->second.current_state == PENDING_COLLECTED_STATE)
+              continue;
 #ifdef DEBUG_LEGION
-          assert(it->second.current_state != PENDING_COLLECTED_STATE);
-          assert(it->second.current_state != PENDING_ACQUIRE_STATE);
+            assert(it->second.current_state != PENDING_COLLECTED_STATE);
+            assert(it->second.current_state != PENDING_ACQUIRE_STATE);
 #endif
-          if (it->second.current_state != COLLECTABLE_STATE)
-          {
-            RtUserEvent deferred_collect = Runtime::create_rt_user_event();
-            it->second.current_state = PENDING_COLLECTED_STATE;
-            it->second.deferred_collect = deferred_collect;
-            to_delete[it->first] = deferred_collect;
-            it->first->add_base_resource_ref(MEMORY_MANAGER_REF);   
+            if (it->second.current_state != COLLECTABLE_STATE)
+            {
+              RtUserEvent deferred_collect = Runtime::create_rt_user_event();
+              it->second.current_state = PENDING_COLLECTED_STATE;
+              it->second.deferred_collect = deferred_collect;
+              to_delete[it->first] = deferred_collect;
+              it->first->add_base_resource_ref(MEMORY_MANAGER_REF);   
+            }
+            else // reference flows out since we're deleting this
+            {
+              to_delete[it->first] = RtEvent::NO_RT_EVENT;
+              to_remove.push_back(it->first);
+            }
           }
-          else // reference flows out since we're deleting this
-          {
-            to_delete[it->first] = RtEvent::NO_RT_EVENT;
-            to_remove.push_back(it->first);
-          }
-        }
         if (!to_remove.empty())
         {
           for (std::vector<PhysicalManager*>::const_iterator it = 
                 to_remove.begin(); it != to_remove.end(); it++)
-            current_instances.erase(*it);
+          {
+            std::map<RegionTreeID,TreeInstances>::iterator finder = 
+              current_instances.find((*it)->tree_id);
+#ifdef DEBUG_LEGION
+            assert(finder != current_instances.end());
+#endif
+            finder->second.erase(*it);
+            if (finder->second.empty())
+              current_instances.erase(finder);
+          }
         }
       }
       for (std::map<PhysicalManager*,RtEvent>::const_iterator it = 
@@ -3302,14 +3522,16 @@ namespace Legion {
       if (!is_owner)
         return;
       // No need for the lock, no one should be doing anything at this point
-      for (std::map<PhysicalManager*,InstanceInfo>::const_iterator it = 
-            current_instances.begin(); it != current_instances.end(); it++)
-      {
-        if (it->second.current_state == PENDING_COLLECTED_STATE)
-          Runtime::trigger_event(it->second.deferred_collect);
-        else
-          it->first->force_deletion();
-      }
+      for (std::map<RegionTreeID,TreeInstances>::const_iterator cit = 
+            current_instances.begin(); cit != current_instances.end(); cit++)
+        for (std::map<PhysicalManager*,InstanceInfo>::const_iterator it = 
+              cit->second.begin(); it != cit->second.end(); it++)
+        {
+          if (it->second.current_state == PENDING_COLLECTED_STATE)
+            Runtime::trigger_event(it->second.deferred_collect);
+          else
+            it->first->force_deletion();
+        }
     }
     
     //--------------------------------------------------------------------------
@@ -3318,12 +3540,13 @@ namespace Legion {
     {
       const size_t inst_size = manager->get_instance_size();
       AutoLock m_lock(manager_lock);
+      TreeInstances &insts = current_instances[manager->tree_id];
 #ifdef DEBUG_LEGION
-      assert(current_instances.find(manager) == current_instances.end());
+      assert(insts.find(manager) == insts.end());
 #endif
       // Make it valid to start since we know when we were created
       // that we were made valid to begin with
-      InstanceInfo &info = current_instances[manager];
+      InstanceInfo &info = insts[manager];
       info.instance_size = inst_size;
     }
 
@@ -3332,10 +3555,15 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock m_lock(manager_lock);
+      std::map<RegionTreeID,TreeInstances>::iterator finder = 
+        current_instances.find(manager->tree_id);
  #ifdef DEBUG_LEGION
-      assert(current_instances.find(manager) != current_instances.end());
+      assert(finder != current_instances.end());
+      assert(finder->second.find(manager) != finder->second.end());
 #endif     
-      current_instances.erase(manager);
+      finder->second.erase(manager);
+      if (finder->second.empty())
+        current_instances.erase(finder);
     }
 
     //--------------------------------------------------------------------------
@@ -3343,10 +3571,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock m_lock(manager_lock);
-      std::map<PhysicalManager*,InstanceInfo>::iterator finder = 
-        current_instances.find(manager);
 #ifdef DEBUG_LEGION
-      assert(current_instances.find(manager) != current_instances.end());
+      assert(current_instances.find(manager->tree_id) != 
+              current_instances.end());
+#endif
+      TreeInstances::iterator finder = 
+        current_instances[manager->tree_id].find(manager);
+#ifdef DEBUG_LEGION
+      assert(finder != current_instances[manager->tree_id].end());
       // This can be a valid state too if we just made the instance
       // and we marked it valid to prevent GC from claiming it before
       // it can be used for the first time
@@ -3373,10 +3605,14 @@ namespace Legion {
       bool remove_reference = false;
       {
         AutoLock m_lock(manager_lock);
-        std::map<PhysicalManager*,InstanceInfo>::iterator finder =
-          current_instances.find(manager);
+        std::map<RegionTreeID,TreeInstances>::iterator tree_finder = 
+          current_instances.find(manager->tree_id);
 #ifdef DEBUG_LEGION
-        assert(finder != current_instances.end());
+        assert(tree_finder != current_instances.end());
+#endif
+        TreeInstances::iterator finder = tree_finder->second.find(manager);
+#ifdef DEBUG_LEGION
+        assert(finder != tree_finder->second.end());
         assert((finder->second.current_state == ACTIVE_STATE) ||
                (finder->second.current_state == PENDING_COLLECTED_STATE) ||
                (finder->second.current_state == PENDING_ACQUIRE_STATE));
@@ -3393,7 +3629,9 @@ namespace Legion {
 #endif
           Runtime::trigger_event(info.deferred_collect);
           // Now we can delete our entry because it has been deleted
-          current_instances.erase(finder);
+          tree_finder->second.erase(finder);
+          if (tree_finder->second.empty())
+            current_instances.erase(tree_finder);
           remove_reference = true;
         }
         else if (finder->second.current_state == PENDING_ACQUIRE_STATE)
@@ -3409,7 +3647,9 @@ namespace Legion {
           // currently allow the mappers to reuse them
           perform_deletion = true;
           remove_reference = true;
-          current_instances.erase(finder);
+          tree_finder->second.erase(finder);
+          if (tree_finder->second.empty())
+            current_instances.erase(tree_finder);
         }
         else // didn't collect it yet
           info.current_state = COLLECTABLE_STATE;
@@ -3428,10 +3668,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock m_lock(manager_lock);
-      std::map<PhysicalManager*,InstanceInfo>::iterator finder = 
-        current_instances.find(manager);
+      TreeInstances::iterator finder = 
+        current_instances[manager->tree_id].find(manager);
 #ifdef DEBUG_LEGION
-      assert(finder != current_instances.end());
+      assert(finder != current_instances[manager->tree_id].end());
       assert((finder->second.current_state == ACTIVE_STATE) ||
              (finder->second.current_state == PENDING_ACQUIRE_STATE) ||
              (finder->second.current_state == VALID_STATE));
@@ -3452,10 +3692,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock m_lock(manager_lock);
-      std::map<PhysicalManager*,InstanceInfo>::iterator finder = 
-        current_instances.find(manager);
+      TreeInstances::iterator finder = 
+        current_instances[manager->tree_id].find(manager);
 #ifdef DEBUG_LEGION
-      assert(finder != current_instances.end());
+      assert(finder != current_instances[manager->tree_id].end());
       assert((finder->second.current_state == VALID_STATE) ||
              (finder->second.current_state == PENDING_ACQUIRE_STATE) ||
              (finder->second.current_state == PENDING_COLLECTED_STATE));
@@ -3479,10 +3719,13 @@ namespace Legion {
       assert(is_owner);
 #endif
       AutoLock m_lock(manager_lock);
-      std::map<PhysicalManager*,InstanceInfo>::iterator finder = 
-        current_instances.find(manager);
+      std::map<RegionTreeID,TreeInstances>::iterator tree_finder = 
+        current_instances.find(manager->tree_id);
+      if (tree_finder == current_instances.end())
+        return false;
+      TreeInstances::iterator finder = tree_finder->second.find(manager);
       // If we can't even find it then it was deleted
-      if (finder == current_instances.end())
+      if (finder == tree_finder->second.end())
         return false;
       // If it's going to be deleted that is not going to work
       if (finder->second.current_state == PENDING_COLLECTED_STATE)
@@ -3504,10 +3747,14 @@ namespace Legion {
       assert(is_owner);
 #endif
       AutoLock m_lock(manager_lock);
-      std::map<PhysicalManager*,InstanceInfo>::iterator finder = 
-        current_instances.find(manager);
 #ifdef DEBUG_LEGION
-      assert(finder != current_instances.end());
+      assert(current_instances.find(manager->tree_id) != 
+              current_instances.end());
+#endif
+      std::map<PhysicalManager*,InstanceInfo>::iterator finder = 
+        current_instances[manager->tree_id].find(manager);
+#ifdef DEBUG_LEGION
+      assert(finder != current_instances[manager->tree_id].end());
       assert(finder->second.current_state == PENDING_ACQUIRE_STATE);
       assert(finder->second.pending_acquires > 0);
 #endif
@@ -3523,7 +3770,8 @@ namespace Legion {
                                 const std::vector<LogicalRegion> &regions,
                                 MappingInstance &result, MapperID mapper_id, 
                                 Processor processor, bool acquire, 
-                                GCPriority priority, UniqueID creator_id,
+                                GCPriority priority, bool tight_bounds,
+                                size_t *footprint, UniqueID creator_id,
                                 bool remote)
     //--------------------------------------------------------------------------
     {
@@ -3546,6 +3794,8 @@ namespace Legion {
           rez.serialize(mapper_id);
           rez.serialize(processor);
           rez.serialize(priority);
+          rez.serialize<bool>(tight_bounds);
+          rez.serialize(footprint);
           rez.serialize(creator_id);
           rez.serialize(&success);
           rez.serialize(&result);
@@ -3565,7 +3815,8 @@ namespace Legion {
         if (wait_on.exists())
           wait_on.wait();
         // Try to make the result
-        PhysicalManager *manager = allocate_physical_instance(builder);
+        PhysicalManager *manager = 
+          allocate_physical_instance(builder, footprint);
         if (manager != NULL)
         {
           if (runtime->legion_spy_enabled)
@@ -3586,7 +3837,8 @@ namespace Legion {
                                      const std::vector<LogicalRegion> &regions,
                                      MappingInstance &result,MapperID mapper_id,
                                      Processor processor, bool acquire, 
-                                     GCPriority priority, UniqueID creator_id,
+                                     GCPriority priority, bool tight_bounds,
+                                     size_t *footprint, UniqueID creator_id,
                                      bool remote)
     //--------------------------------------------------------------------------
     {
@@ -3609,6 +3861,8 @@ namespace Legion {
           rez.serialize(mapper_id);
           rez.serialize(processor);
           rez.serialize(priority);
+          rez.serialize<bool>(tight_bounds);
+          rez.serialize(footprint);
           rez.serialize(creator_id);
           rez.serialize(&success);
           rez.serialize(&result);
@@ -3628,7 +3882,8 @@ namespace Legion {
         if (wait_on.exists())
           wait_on.wait();
         // Try to make the instance
-        PhysicalManager *manager = allocate_physical_instance(builder);
+        PhysicalManager *manager = 
+          allocate_physical_instance(builder, footprint);
         if (manager != NULL)
         {
           if (runtime->legion_spy_enabled)
@@ -3651,7 +3906,7 @@ namespace Legion {
                                   MappingInstance &result, bool &created, 
                                   MapperID mapper_id, Processor processor,
                                   bool acquire, GCPriority priority,
-                                  bool tight_region_bounds,
+                                  bool tight_region_bounds, size_t *footprint,
                                   UniqueID creator_id, bool remote)
     //--------------------------------------------------------------------------
     {
@@ -3682,6 +3937,7 @@ namespace Legion {
           rez.serialize(processor);
           rez.serialize(priority);
           rez.serialize<bool>(tight_region_bounds);
+          rez.serialize(footprint);
           rez.serialize(creator_id);
           rez.serialize(&success);
           rez.serialize(&result);
@@ -3710,7 +3966,8 @@ namespace Legion {
         if (!success)
         {
           // If we couldn't find it, we have to make it
-          PhysicalManager *manager = allocate_physical_instance(builder);
+          PhysicalManager *manager = 
+            allocate_physical_instance(builder, footprint);
           if (manager != NULL)
           {
             success = true;
@@ -3736,7 +3993,7 @@ namespace Legion {
                                 MappingInstance &result, bool &created,
                                 MapperID mapper_id, Processor processor,
                                 bool acquire, GCPriority priority, 
-                                bool tight_region_bounds,
+                                bool tight_region_bounds, size_t *footprint,
                                 UniqueID creator_id, bool remote)
     //--------------------------------------------------------------------------
     {
@@ -3767,6 +4024,7 @@ namespace Legion {
           rez.serialize(processor);
           rez.serialize(priority);
           rez.serialize<bool>(tight_region_bounds);
+          rez.serialize(footprint);
           rez.serialize(creator_id);
           rez.serialize(&success);
           rez.serialize(&result);
@@ -3796,7 +4054,8 @@ namespace Legion {
         if (!success)
         {
           // If we couldn't find it, we have to make it
-          PhysicalManager *manager = allocate_physical_instance(builder);
+          PhysicalManager *manager = 
+            allocate_physical_instance(builder, footprint);
           if (manager != NULL)
           {
             success = true;
@@ -3915,15 +4174,20 @@ namespace Legion {
       // Take the manager lock and see if there are any managers
       // we can release now
       std::map<PhysicalManager*,std::pair<RtEvent,bool> > to_release;
+      do 
       {
         std::vector<PhysicalManager*> to_remove;
         AutoLock m_lock(manager_lock);
-        for (std::map<PhysicalManager*,InstanceInfo>::iterator it = 
-              current_instances.begin(); it != current_instances.end(); it++)
+        std::map<RegionTreeID,TreeInstances>::iterator finder = 
+          current_instances.find(tree_id);
+        if (finder == current_instances.end())
+          break;
+        for (TreeInstances::iterator it = 
+              finder->second.begin(); it != finder->second.end(); it++)
         {
           // If the region for the instance is not for the tree then
           // we get to skip it
-          if (it->first->region_node->handle.get_tree_id() != tree_id)
+          if (it->first->tree_id != tree_id)
             continue;
           // If it's already been deleted, then there is nothing to do
           if (it->second.current_state == PENDING_COLLECTED_STATE)
@@ -3964,9 +4228,11 @@ namespace Legion {
         {
           for (std::vector<PhysicalManager*>::const_iterator it = 
                 to_remove.begin(); it != to_remove.end(); it++)
-            current_instances.erase(*it);
+            finder->second.erase(*it);
+          if (finder->second.empty())
+            current_instances.erase(finder);
         }
-      }
+      } while (false);
       for (std::map<PhysicalManager*,std::pair<RtEvent,bool> >::
             const_iterator it = to_release.begin(); it != to_release.end();it++)
       {
@@ -4006,31 +4272,41 @@ namespace Legion {
         {
           // See if we need a handback
           AutoLock m_lock(manager_lock,1,false);
-          std::map<PhysicalManager*,InstanceInfo>::const_iterator finder = 
-            current_instances.find(manager);
-          if (finder != current_instances.end())
+          std::map<RegionTreeID,TreeInstances>::const_iterator tree_finder =
+            current_instances.find(manager->tree_id);
+          if (tree_finder != current_instances.end())
           {
-            // If priority is already max priority, then we are done
-            if (finder->second.min_priority == priority)
-              return;
-            // Make an event for a callback
-            never_gc_wait = Runtime::create_rt_user_event();
+            TreeInstances::const_iterator finder = 
+              tree_finder->second.find(manager);
+            if (finder != tree_finder->second.end())
+            {
+              // If priority is already max priority, then we are done
+              if (finder->second.min_priority == priority)
+                return;
+              // Make an event for a callback
+              never_gc_wait = Runtime::create_rt_user_event();
+            }
           }
         }
         else
         {
           AutoLock m_lock(manager_lock);
-          std::map<PhysicalManager*,InstanceInfo>::iterator finder = 
-            current_instances.find(manager);
-          if (finder != current_instances.end())
+          std::map<RegionTreeID,TreeInstances>::iterator tree_finder =
+            current_instances.find(manager->tree_id);
+          if (tree_finder != current_instances.end())
           {
-            if (finder->second.min_priority == GC_NEVER_PRIORITY)
+            TreeInstances::iterator finder = 
+              tree_finder->second.find(manager);
+            if (finder != tree_finder->second.end())
             {
-              finder->second.mapper_priorities.erase(key);
-              if (finder->second.mapper_priorities.empty())
+              if (finder->second.min_priority == GC_NEVER_PRIORITY)
               {
-                finder->second.min_priority = 0;
-                remove_never_gc_ref = true;
+                finder->second.mapper_priorities.erase(key);
+                if (finder->second.mapper_priorities.empty())
+                {
+                  finder->second.min_priority = 0;
+                  remove_never_gc_ref = true;
+                }
               }
             }
           }
@@ -4064,15 +4340,22 @@ namespace Legion {
           bool remove_duplicate = false;
           if (success)
           {
+            LocalReferenceMutator local_mutator;
             // Add our local reference
-            manager->add_base_valid_ref(NEVER_GC_REF, &mutator);
-            manager->send_remote_valid_update(owner_space,NULL,1,false/*add*/);
+            manager->add_base_valid_ref(NEVER_GC_REF, &local_mutator);
+            const RtEvent reference_effects = local_mutator.get_done_event();
+            manager->send_remote_valid_decrement(owner_space,reference_effects);
+            if (reference_effects.exists())
+              mutator.record_reference_mutation_effect(reference_effects);
             // Then record it
             AutoLock m_lock(manager_lock);
 #ifdef DEBUG_LEGION
-            assert(current_instances.find(manager) != current_instances.end());
+            assert(current_instances.find(manager->tree_id) !=
+                    current_instances.end());
+            assert(current_instances[manager->tree_id].find(manager) != 
+                    current_instances[manager->tree_id].end());
 #endif
-            InstanceInfo &info = current_instances[manager];
+            InstanceInfo &info = current_instances[manager->tree_id][manager];
             if (info.min_priority == GC_NEVER_PRIORITY)
               remove_duplicate = true; // lost the race
             else
@@ -4093,69 +4376,74 @@ namespace Legion {
           return;
         // Do the update locally 
         AutoLock m_lock(manager_lock);
-        std::map<PhysicalManager*,InstanceInfo>::iterator finder = 
-          current_instances.find(manager);
-        if (finder != current_instances.end())
+        std::map<RegionTreeID,TreeInstances>::iterator tree_finder = 
+          current_instances.find(manager->tree_id);
+        if (tree_finder != current_instances.end())
         {
-          std::map<std::pair<MapperID,Processor>,GCPriority> 
-            &mapper_priorities = finder->second.mapper_priorities;
-          std::pair<MapperID,Processor> key(mapper_id,processor);
-          // If the new priority is NEVER_GC and we were already at NEVER_GC
-          // then we need to remove the redundant reference when we are done
-          if ((priority == GC_NEVER_PRIORITY) && 
-              (finder->second.min_priority == GC_NEVER_PRIORITY))
-            remove_min_reference = true;
-          // See if we can find the current priority  
-          std::map<std::pair<MapperID,Processor>,GCPriority>::iterator 
-            priority_finder = mapper_priorities.find(key);
-          if (priority_finder != mapper_priorities.end())
+          std::map<PhysicalManager*,InstanceInfo>::iterator finder = 
+            tree_finder->second.find(manager);
+          if (finder != tree_finder->second.end())
           {
-            // See if it changed
-            if (priority_finder->second != priority)
+            std::map<std::pair<MapperID,Processor>,GCPriority> 
+              &mapper_priorities = finder->second.mapper_priorities;
+            std::pair<MapperID,Processor> key(mapper_id,processor);
+            // If the new priority is NEVER_GC and we were already at NEVER_GC
+            // then we need to remove the redundant reference when we are done
+            if ((priority == GC_NEVER_PRIORITY) && 
+                (finder->second.min_priority == GC_NEVER_PRIORITY))
+              remove_min_reference = true;
+            // See if we can find the current priority  
+            std::map<std::pair<MapperID,Processor>,GCPriority>::iterator 
+              priority_finder = mapper_priorities.find(key);
+            if (priority_finder != mapper_priorities.end())
             {
-              // Update the min if necessary
-              if (priority < finder->second.min_priority)
+              // See if it changed
+              if (priority_finder->second != priority)
               {
-                // It decreased 
-                finder->second.min_priority = priority;
-              }
-              // It might go up if this was (one of) the min priorities
-              else if ((priority > finder->second.min_priority) &&
-                       (finder->second.min_priority == priority_finder->second))
-              {
-                // This was (one of) the min priorities, but it 
-                // is about to go up so compute the new min
-                GCPriority new_min = priority;
-                for (std::map<std::pair<MapperID,Processor>,GCPriority>::
-                      const_iterator it = mapper_priorities.begin(); it != 
-                      mapper_priorities.end(); it++)
+                // Update the min if necessary
+                if (priority < finder->second.min_priority)
                 {
-                  if (it->first == key)
-                    continue;
-                  // If we find another one with the same as the current 
-                  // min then we know we are just going to stay the same
-                  if (it->second == finder->second.min_priority)
-                  {
-                    new_min = it->second;
-                    break;
-                  }
-                  if (it->second < new_min)
-                    new_min = it->second;
+                  // It decreased 
+                  finder->second.min_priority = priority;
                 }
-                if ((finder->second.min_priority == GC_NEVER_PRIORITY) &&
-                    (new_min > GC_NEVER_PRIORITY))
-                  remove_min_reference = true;
-                finder->second.min_priority = new_min;
+                // It might go up if this was (one of) the min priorities
+                else if ((priority > finder->second.min_priority) &&
+                       (finder->second.min_priority == priority_finder->second))
+                {
+                  // This was (one of) the min priorities, but it 
+                  // is about to go up so compute the new min
+                  GCPriority new_min = priority;
+                  for (std::map<std::pair<MapperID,Processor>,GCPriority>::
+                        const_iterator it = mapper_priorities.begin(); it != 
+                        mapper_priorities.end(); it++)
+                  {
+                    if (it->first == key)
+                      continue;
+                    // If we find another one with the same as the current 
+                    // min then we know we are just going to stay the same
+                    if (it->second == finder->second.min_priority)
+                    {
+                      new_min = it->second;
+                      break;
+                    }
+                    if (it->second < new_min)
+                      new_min = it->second;
+                  }
+                  if ((finder->second.min_priority == GC_NEVER_PRIORITY) &&
+                      (new_min > GC_NEVER_PRIORITY))
+                    remove_min_reference = true;
+                  finder->second.min_priority = new_min;
+                }
+                // Finally update the priority
+                priority_finder->second = priority;
               }
-              // Finally update the priority
-              priority_finder->second = priority;
             }
-          }
-          else // previous priority was zero, see if we need to update it
-          {
-            mapper_priorities[key] = priority;
-            if (priority < finder->second.min_priority)
-              finder->second.min_priority = priority;
+            else // previous priority was zero, see if we need to update it
+            {
+              mapper_priorities[key] = priority;
+              if (priority < finder->second.min_priority)
+                finder->second.min_priority = priority;
+            }
           }
         }
       }
@@ -4172,6 +4460,7 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(!is_owner); // should never be called on the owner
+      assert(results.empty());
 #endif
       results.resize(managers.size(), false/*assume everything fails*/);
       // Package everything up and send the request 
@@ -4225,6 +4514,10 @@ namespace Legion {
             derez.deserialize(processor);
             GCPriority priority;
             derez.deserialize(priority);
+            bool tight_region_bounds;
+            derez.deserialize<bool>(tight_region_bounds);
+            size_t *remote_footprint; // warning: remote pointer
+            derez.deserialize(remote_footprint);
             UniqueID creator_id;
             derez.deserialize(creator_id);
             bool *remote_success;
@@ -4232,30 +4525,38 @@ namespace Legion {
             MappingInstance *remote_target;
             derez.deserialize(remote_target);
             MappingInstance result;
+            size_t local_footprint;
             bool success = create_physical_instance(constraints, regions, 
                                    result, mapper_id, processor, acquire, 
-                                   priority, creator_id, true/*remote*/);
-            if (success)
+                                   priority, tight_region_bounds,
+                                   &local_footprint, creator_id,true/*remote*/);
+            if (success || (remote_footprint != NULL))
             {
               // Send back the response starting with the instance
-              PhysicalManager *manager = result.impl;
               Serializer rez;
               {
                 RezCheck z(rez);
                 rez.serialize(memory);
                 rez.serialize(to_trigger);
-                rez.serialize(manager->did);
-                rez.serialize<bool>(acquire);
-                rez.serialize(remote_target);
-                rez.serialize(remote_success);
-                rez.serialize(kind);
-                bool min_priority = (priority == GC_NEVER_PRIORITY);
-                rez.serialize<bool>(min_priority);
-                if (min_priority)
+                rez.serialize<bool>(success);
+                if (success)
                 {
-                  rez.serialize(mapper_id);
-                  rez.serialize(processor);
+                  PhysicalManager *manager = result.impl;
+                  rez.serialize(manager->did);
+                  rez.serialize<bool>(acquire);
+                  rez.serialize(remote_target);
+                  rez.serialize(remote_success);
+                  rez.serialize(kind);
+                  bool min_priority = (priority == GC_NEVER_PRIORITY);
+                  rez.serialize<bool>(min_priority);
+                  if (min_priority)
+                  {
+                    rez.serialize(mapper_id);
+                    rez.serialize(processor);
+                  }
                 }
+                rez.serialize(remote_footprint);
+                rez.serialize(local_footprint);
               }
               runtime->send_instance_response(source, rez);
             }
@@ -4273,6 +4574,10 @@ namespace Legion {
             derez.deserialize(processor);
             GCPriority priority;
             derez.deserialize(priority);
+            bool tight_region_bounds;
+            derez.deserialize<bool>(tight_region_bounds);
+            size_t *remote_footprint; // warning: remote pointer
+            derez.deserialize(remote_footprint);
             UniqueID creator_id;
             derez.deserialize(creator_id);
             bool *remote_success;
@@ -4282,29 +4587,37 @@ namespace Legion {
             LayoutConstraints *constraints = 
               runtime->find_layout_constraints(layout_id);
             MappingInstance result;
+            size_t local_footprint;
             bool success = create_physical_instance(constraints, regions, 
                                    result, mapper_id, processor, acquire, 
-                                   priority, creator_id, true/*remote*/);
-            if (success)
+                                   priority, tight_region_bounds,
+                                   &local_footprint, creator_id,true/*remote*/);
+            if (success || (remote_footprint != NULL))
             {
-              PhysicalManager *manager = result.impl;
               Serializer rez;
               {
                 RezCheck z(rez);
                 rez.serialize(memory);
                 rez.serialize(to_trigger);
-                rez.serialize(manager->did);
-                rez.serialize<bool>(acquire);
-                rez.serialize(remote_target);
-                rez.serialize(remote_success);
-                rez.serialize(kind);
-                bool min_priority = (priority == GC_NEVER_PRIORITY);
-                rez.serialize<bool>(min_priority);
-                if (min_priority)
+                rez.serialize<bool>(success);
+                if (success)
                 {
-                  rez.serialize(mapper_id);
-                  rez.serialize(processor);
+                  PhysicalManager *manager = result.impl;
+                  rez.serialize(manager->did);
+                  rez.serialize<bool>(acquire);
+                  rez.serialize(remote_target);
+                  rez.serialize(remote_success);
+                  rez.serialize(kind);
+                  bool min_priority = (priority == GC_NEVER_PRIORITY);
+                  rez.serialize<bool>(min_priority);
+                  if (min_priority)
+                  {
+                    rez.serialize(mapper_id);
+                    rez.serialize(processor);
+                  }
                 }
+                rez.serialize(remote_footprint);
+                rez.serialize(local_footprint);
               }
               runtime->send_instance_response(source, rez);
             }
@@ -4324,6 +4637,8 @@ namespace Legion {
             derez.deserialize(priority);
             bool tight_bounds;
             derez.deserialize(tight_bounds);
+            size_t *remote_footprint; // warning: remote pointer
+            derez.deserialize(remote_footprint);
             UniqueID creator_id;
             derez.deserialize(creator_id);
             bool *remote_success, *remote_created;
@@ -4332,36 +4647,43 @@ namespace Legion {
             derez.deserialize(remote_target);
             derez.deserialize(remote_created);
             MappingInstance result;
+            size_t local_footprint;
             bool created;
             bool success = find_or_create_physical_instance(constraints, 
                                 regions, result, created, mapper_id, 
                                 processor, acquire, priority, tight_bounds,
-                                creator_id, true/*remote*/);
-            if (success)
+                                &local_footprint, creator_id, true/*remote*/);
+            if (success || (remote_footprint != NULL))
             {
-              PhysicalManager *manager = result.impl;
               Serializer rez;
               {
                 RezCheck z(rez);
                 rez.serialize(memory);
                 rez.serialize(to_trigger);
-                rez.serialize(manager->did);
-                rez.serialize<bool>(acquire);
-                rez.serialize(remote_target);
-                rez.serialize(remote_success);
-                rez.serialize(kind);
-                rez.serialize(remote_created);
-                rez.serialize<bool>(created);
-                if (created)
+                rez.serialize<bool>(success);
+                if (success)
                 {
-                  bool min_priority = (priority == GC_NEVER_PRIORITY);
-                  rez.serialize<bool>(min_priority);
-                  if (min_priority)
+                  PhysicalManager *manager = result.impl;
+                  rez.serialize(manager->did);
+                  rez.serialize<bool>(acquire);
+                  rez.serialize(remote_target);
+                  rez.serialize(remote_success);
+                  rez.serialize(kind);
+                  rez.serialize(remote_created);
+                  rez.serialize<bool>(created);
+                  if (created)
                   {
-                    rez.serialize(mapper_id);
-                    rez.serialize(processor);
+                    bool min_priority = (priority == GC_NEVER_PRIORITY);
+                    rez.serialize<bool>(min_priority);
+                    if (min_priority)
+                    {
+                      rez.serialize(mapper_id);
+                      rez.serialize(processor);
+                    }
                   }
                 }
+                rez.serialize(remote_footprint);
+                rez.serialize(local_footprint);
               }
               runtime->send_instance_response(source, rez);
             }
@@ -4381,6 +4703,8 @@ namespace Legion {
             derez.deserialize(priority);
             bool tight_bounds;
             derez.deserialize(tight_bounds);
+            size_t *remote_footprint; // warning: remote pointer
+            derez.deserialize(remote_footprint);
             UniqueID creator_id;
             derez.deserialize(creator_id);
             bool *remote_success, *remote_created;
@@ -4391,36 +4715,43 @@ namespace Legion {
             LayoutConstraints *constraints = 
               runtime->find_layout_constraints(layout_id);
             MappingInstance result;
+            size_t local_footprint;
             bool created;
             bool success = find_or_create_physical_instance(constraints, 
                                  regions, result, created, mapper_id, 
                                  processor, acquire, priority, tight_bounds,
-                                 creator_id, true/*remote*/);
-            if (success)
+                                 &local_footprint, creator_id, true/*remote*/);
+            if (success || (remote_footprint != NULL))
             {
-              PhysicalManager *manager = result.impl;
               Serializer rez;
               {
                 RezCheck z(rez);
                 rez.serialize(memory);
                 rez.serialize(to_trigger);
-                rez.serialize(manager->did);
-                rez.serialize<bool>(acquire);
-                rez.serialize(remote_target);
-                rez.serialize(remote_success);
-                rez.serialize(kind);
-                rez.serialize(remote_created);
-                rez.serialize<bool>(created);
-                if (created)
+                rez.serialize<bool>(success);
+                if (success)
                 {
-                  bool min_priority = (priority == GC_NEVER_PRIORITY);
-                  rez.serialize<bool>(min_priority);
-                  if (min_priority)
+                  PhysicalManager *manager = result.impl;
+                  rez.serialize(manager->did);
+                  rez.serialize<bool>(acquire);
+                  rez.serialize(remote_target);
+                  rez.serialize(remote_success);
+                  rez.serialize(kind);
+                  rez.serialize(remote_created);
+                  rez.serialize<bool>(created);
+                  if (created)
                   {
-                    rez.serialize(mapper_id);
-                    rez.serialize(processor);
+                    bool min_priority = (priority == GC_NEVER_PRIORITY);
+                    rez.serialize<bool>(min_priority);
+                    if (min_priority)
+                    {
+                      rez.serialize(mapper_id);
+                      rez.serialize(processor);
+                    }
                   }
                 }
+                rez.serialize(remote_footprint);
+                rez.serialize(local_footprint);
               }
               runtime->send_instance_response(source, rez);
             }
@@ -4449,11 +4780,15 @@ namespace Legion {
                 RezCheck z(rez);
                 rez.serialize(memory);
                 rez.serialize(to_trigger);
+                rez.serialize<bool>(true); // success
                 rez.serialize(manager->did);
                 rez.serialize<bool>(acquire);
                 rez.serialize(remote_target);
                 rez.serialize(remote_success);
                 rez.serialize(kind);
+                // No footprint for us to pass back here
+                rez.serialize<size_t*>(NULL);
+                rez.serialize<size_t>(0);
               }
               runtime->send_instance_response(source, rez);
             }
@@ -4484,11 +4819,15 @@ namespace Legion {
                 RezCheck z(rez);
                 rez.serialize(memory);
                 rez.serialize(to_trigger);
+                rez.serialize<bool>(true); // success
                 rez.serialize(manager->did);
                 rez.serialize<bool>(acquire);
                 rez.serialize(remote_target);
                 rez.serialize(remote_success);
                 rez.serialize(kind);
+                // No footprint for us to pass back here
+                rez.serialize<size_t*>(NULL);
+                rez.serialize<size_t>(0);
               }
               runtime->send_instance_response(source, rez);
             }
@@ -4508,119 +4847,149 @@ namespace Legion {
     {
       RtUserEvent to_trigger;
       derez.deserialize(to_trigger);
-      DistributedID did;
-      derez.deserialize(did);
-      bool acquire;
-      derez.deserialize(acquire);
-      MappingInstance *target;
-      derez.deserialize(target);
-      bool *success;
-      derez.deserialize(success);
-      RequestKind kind;
-      derez.deserialize(kind);
-#ifdef DEBUG_LEGION
-      assert((CREATE_INSTANCE_CONSTRAINTS <= kind) &&
-             (kind <= FIND_ONLY_LAYOUT));
-#endif
-      RtEvent manager_ready = RtEvent::NO_RT_EVENT;
-      PhysicalManager *manager = 
-        runtime->find_or_request_physical_manager(did, manager_ready);
+      bool success;
+      derez.deserialize<bool>(success);
       std::set<RtEvent> preconditions;
-      WrapperReferenceMutator mutator(preconditions);
-      // If the manager isn't ready yet, then we need to wait for it
-      if (manager_ready.exists())
-        manager_ready.wait();
-      // If we acquired on the owner node, add our own local reference
-      // and then remove the remote DID
-      if (acquire)
+      if (success)
       {
-        manager->add_base_valid_ref(MAPPING_ACQUIRE_REF, &mutator);
-        manager->send_remote_valid_update(source, NULL, 1, false/*add*/);
-      }
-      *target = MappingInstance(manager);
-      *success = true;
-      if ((kind == FIND_OR_CREATE_CONSTRAINTS) || 
-          (kind == FIND_OR_CREATE_LAYOUT))
-      {
-        bool *created_ptr;
-        derez.deserialize(created_ptr);
-        bool created;
-        derez.deserialize(created);
-        *created_ptr = created;
-        bool min_priority = false;
-        MapperID mapper_id = 0;
-        Processor processor = Processor::NO_PROC;
-        if (created)
+        DistributedID did;
+        derez.deserialize(did);
+        bool acquire;
+        derez.deserialize(acquire);
+        MappingInstance *target;
+        derez.deserialize(target);
+        bool *success_ptr;
+        derez.deserialize(success_ptr);
+        RequestKind kind;
+        derez.deserialize(kind);
+#ifdef DEBUG_LEGION
+        assert((CREATE_INSTANCE_CONSTRAINTS <= kind) &&
+               (kind <= FIND_ONLY_LAYOUT));
+#endif
+        RtEvent manager_ready = RtEvent::NO_RT_EVENT;
+        PhysicalManager *manager = 
+          runtime->find_or_request_physical_manager(did, manager_ready);
+        WrapperReferenceMutator mutator(preconditions);
+        // If the manager isn't ready yet, then we need to wait for it
+        if (manager_ready.exists())
+          manager_ready.wait();
+        // If we acquired on the owner node, add our own local reference
+        // and then remove the remote DID
+        if (acquire)
         {
+          LocalReferenceMutator local_mutator;
+          manager->add_base_valid_ref(MAPPING_ACQUIRE_REF, &local_mutator);
+          const RtEvent reference_effects = local_mutator.get_done_event();
+          manager->send_remote_valid_decrement(source, reference_effects);
+          if (reference_effects.exists())
+            mutator.record_reference_mutation_effect(reference_effects);
+        }
+        *target = MappingInstance(manager);
+        *success_ptr = true;
+        if ((kind == FIND_OR_CREATE_CONSTRAINTS) || 
+            (kind == FIND_OR_CREATE_LAYOUT))
+        {
+          bool *created_ptr;
+          derez.deserialize(created_ptr);
+          bool created;
+          derez.deserialize(created);
+          *created_ptr = created;
+          bool min_priority = false;
+          MapperID mapper_id = 0;
+          Processor processor = Processor::NO_PROC;
+          if (created)
+          {
+            derez.deserialize(min_priority);
+            if (min_priority)
+            {
+              derez.deserialize(mapper_id);
+              derez.deserialize(processor);
+            }
+          }
+          // Record the instance as a max priority instance
+          bool remove_duplicate_valid = false;
+          // No need to be safe here, we have a valid reference
+          if (created && min_priority)
+            manager->add_base_valid_ref(NEVER_GC_REF, &mutator);
+          {
+            AutoLock m_lock(manager_lock);
+            std::map<RegionTreeID,TreeInstances>::iterator tree_finder = 
+              current_instances.find(manager->tree_id);
+            if (tree_finder != current_instances.end())
+            {
+              TreeInstances::const_iterator finder = 
+                tree_finder->second.find(manager);
+            if (finder == tree_finder->second.end())
+              tree_finder->second[manager] = InstanceInfo();  
+            }
+            else
+              current_instances[manager->tree_id][manager] = InstanceInfo();
+            if (created && min_priority)
+            {
+              std::pair<MapperID,Processor> key(mapper_id,processor);
+              InstanceInfo &info = current_instances[manager->tree_id][manager];
+              if (info.min_priority == GC_NEVER_PRIORITY)
+                remove_duplicate_valid = true;
+              else
+                info.min_priority = GC_NEVER_PRIORITY;
+              info.mapper_priorities[key] = GC_NEVER_PRIORITY;
+            }
+          }
+          if (remove_duplicate_valid && 
+              manager->remove_base_valid_ref(NEVER_GC_REF, &mutator))
+            delete manager;
+        }
+        else if ((kind == CREATE_INSTANCE_CONSTRAINTS) ||
+                 (kind == CREATE_INSTANCE_LAYOUT))
+        {
+          bool min_priority;
           derez.deserialize(min_priority);
+          MapperID mapper_id = 0;
+          Processor processor = Processor::NO_PROC;
           if (min_priority)
           {
             derez.deserialize(mapper_id);
             derez.deserialize(processor);
           }
-        }
-        // Record the instance as a max priority instance
-        bool remove_duplicate_valid = false;
-        // No need to be safe here, we have a valid reference
-        if (created && min_priority)
-          manager->add_base_valid_ref(NEVER_GC_REF, &mutator);
-        {
-          AutoLock m_lock(manager_lock);
-          std::map<PhysicalManager*,InstanceInfo>::const_iterator finder = 
-            current_instances.find(manager);
-          if (finder == current_instances.end())
-            current_instances[manager] = InstanceInfo();
-          if (created && min_priority)
+          bool remove_duplicate_valid = false;
+          if (min_priority)
+            manager->add_base_valid_ref(NEVER_GC_REF, &mutator);
           {
             std::pair<MapperID,Processor> key(mapper_id,processor);
-            InstanceInfo &info = current_instances[manager];
-            if (info.min_priority == GC_NEVER_PRIORITY)
-              remove_duplicate_valid = true;
+            AutoLock m_lock(manager_lock);
+            std::map<RegionTreeID,TreeInstances>::iterator tree_finder = 
+              current_instances.find(manager->tree_id);
+            if (tree_finder != current_instances.end())
+            {
+              TreeInstances::const_iterator finder = 
+                tree_finder->second.find(manager);
+            if (finder == tree_finder->second.end())
+              tree_finder->second[manager] = InstanceInfo();  
+            }
             else
-              info.min_priority = GC_NEVER_PRIORITY;
-            info.mapper_priorities[key] = GC_NEVER_PRIORITY;
+              current_instances[manager->tree_id][manager] = InstanceInfo();
+            if (min_priority)
+            {
+              InstanceInfo &info = current_instances[manager->tree_id][manager];
+              if (info.min_priority == GC_NEVER_PRIORITY)
+                remove_duplicate_valid = true;
+              else
+                info.min_priority = GC_NEVER_PRIORITY;
+              info.mapper_priorities[key] = GC_NEVER_PRIORITY;
+            }
           }
+          if (remove_duplicate_valid && 
+              manager->remove_base_valid_ref(NEVER_GC_REF, &mutator))
+            delete manager;
         }
-        if (remove_duplicate_valid && 
-            manager->remove_base_valid_ref(NEVER_GC_REF, &mutator))
-          delete manager;
       }
-      else if ((kind == CREATE_INSTANCE_CONSTRAINTS) ||
-               (kind == CREATE_INSTANCE_LAYOUT))
-      {
-        bool min_priority;
-        derez.deserialize(min_priority);
-        MapperID mapper_id = 0;
-        Processor processor = Processor::NO_PROC;
-        if (min_priority)
-        {
-          derez.deserialize(mapper_id);
-          derez.deserialize(processor);
-        }
-        bool remove_duplicate_valid = false;
-        if (min_priority)
-          manager->add_base_valid_ref(NEVER_GC_REF, &mutator);
-        {
-          std::pair<MapperID,Processor> key(mapper_id,processor);
-          AutoLock m_lock(manager_lock);
-          std::map<PhysicalManager*,InstanceInfo>::const_iterator finder = 
-            current_instances.find(manager);
-          if (finder == current_instances.end())
-            current_instances[manager] = InstanceInfo();
-          if (min_priority)
-          {
-            InstanceInfo &info = current_instances[manager];
-            if (info.min_priority == GC_NEVER_PRIORITY)
-              remove_duplicate_valid = true;
-            else
-              info.min_priority = GC_NEVER_PRIORITY;
-            info.mapper_priorities[key] = GC_NEVER_PRIORITY;
-          }
-        }
-        if (remove_duplicate_valid && 
-            manager->remove_base_valid_ref(NEVER_GC_REF, &mutator))
-          delete manager;
-      }
+      // Unpack the footprint and asign it if necessary
+      size_t *local_footprint;
+      derez.deserialize(local_footprint);
+      size_t footprint;
+      derez.deserialize(footprint);
+      if (local_footprint != NULL)
+        *local_footprint = footprint;
       // Trigger that we are done
       if (!preconditions.empty())
         Runtime::trigger_event(to_trigger,Runtime::merge_events(preconditions));
@@ -4763,7 +5132,7 @@ namespace Legion {
           manager->remove_base_resource_ref(MEMORY_MANAGER_REF);
         }
       }
-      std::vector<unsigned> *target;
+      std::vector<bool> *target;
       derez.deserialize(target);
       RtUserEvent to_trigger;
       derez.deserialize(to_trigger);
@@ -4797,21 +5166,24 @@ namespace Legion {
                                                  AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      std::vector<unsigned> *target;
+      std::vector<bool> *target;
       derez.deserialize(target);
-      size_t num_failures;
-      derez.deserialize(num_failures);
+      size_t num_successes;
+      derez.deserialize(num_successes);
       std::set<RtEvent> preconditions;
-      WrapperReferenceMutator mutator(preconditions);
-      for (unsigned idx = 0; idx < num_failures; idx++)
+      for (unsigned idx = 0; idx < num_successes; idx++)
       {
         unsigned index;
         derez.deserialize(index);
         (*target)[index] = true;
         PhysicalManager *manager;
         derez.deserialize(manager);
-        manager->add_base_valid_ref(MAPPING_ACQUIRE_REF, &mutator);
-        manager->send_remote_valid_update(source, NULL, 1, false/*add*/);  
+        LocalReferenceMutator local_mutator;
+        manager->add_base_valid_ref(MAPPING_ACQUIRE_REF, &local_mutator);
+        const RtEvent reference_effects = local_mutator.get_done_event();
+        manager->send_remote_valid_decrement(source, reference_effects);  
+        if (reference_effects.exists())
+          preconditions.insert(reference_effects);
       }
       RtUserEvent to_trigger;
       derez.deserialize(to_trigger);
@@ -4829,35 +5201,51 @@ namespace Legion {
                                 bool tight_region_bounds, bool remote)
     //--------------------------------------------------------------------------
     {
-      // Hold the lock while iterating here
+      if (regions.empty())
+        return false;
       std::deque<PhysicalManager*> candidates;
+      const RegionTreeID tree_id = regions[0].get_tree_id(); 
+      do 
       {
+        // Hold the lock while iterating here
         AutoLock m_lock(manager_lock, 1, false/*exclusive*/);
-        for (std::map<PhysicalManager*,InstanceInfo>::const_iterator it = 
-              current_instances.begin(); it != current_instances.end(); it++)
+        std::map<RegionTreeID,TreeInstances>::const_iterator finder = 
+          current_instances.find(tree_id);
+        if (finder == current_instances.end())
+          break;
+        for (TreeInstances::const_iterator it = 
+              finder->second.begin(); it != finder->second.end(); it++)
         {
           // Skip it if has already been collected
           if (it->second.current_state == PENDING_COLLECTED_STATE)
             continue;
-          // Skip any unattached external instances too
-          if (it->second.unattached_external)
-            continue;
-          if (!it->first->meets_region_tree(regions))
-            continue;
           it->first->add_base_resource_ref(MEMORY_MANAGER_REF);
           candidates.push_back(it->first);
         }
-      }
+      } while (false);
       // If we have any candidates check their constraints
       bool found = false;
       if (!candidates.empty())
       {
+        std::set<IndexSpaceExpression*> region_exprs;
+        RegionTreeForest *forest = runtime->forest;
+        for (std::vector<LogicalRegion>::const_iterator it = 
+              regions.begin(); it != regions.end(); it++)
+        {
+          // If the region tree IDs don't match that is bad
+          if (tree_id != it->get_tree_id())
+            return false;
+          RegionNode *node = forest->get_node(*it);
+          region_exprs.insert(node->row_source);
+        }
+        IndexSpaceExpression *space_expr = (region_exprs.size() == 1) ?
+          *(region_exprs.begin()) : forest->union_index_spaces(region_exprs);
         for (std::deque<PhysicalManager*>::const_iterator it = 
               candidates.begin(); it != candidates.end(); it++)
         {
-          if (!(*it)->meets_regions(regions, tight_region_bounds))
+          if (!(*it)->meets_expression(space_expr, tight_region_bounds))
             continue;
-          if ((*it)->entails(constraints))
+          if ((*it)->entails(constraints, NULL))
           {
             // Check to see if we need to acquire
             // If we fail to acquire then keep going
@@ -4882,35 +5270,51 @@ namespace Legion {
                                       bool tight_region_bounds, bool remote)
     //--------------------------------------------------------------------------
     {
-      // Hold the lock while iterating here
+      if (regions.empty())
+        return false;
       std::deque<PhysicalManager*> candidates;
+      const RegionTreeID tree_id = regions[0].get_tree_id();
+      do
       {
+        // Hold the lock while iterating here
         AutoLock m_lock(manager_lock, 1, false/*exclusive*/);
-        for (std::map<PhysicalManager*,InstanceInfo>::const_iterator it = 
-              current_instances.begin(); it != current_instances.end(); it++)
+        std::map<RegionTreeID,TreeInstances>::const_iterator finder = 
+          current_instances.find(tree_id);
+        if (finder == current_instances.end())
+          break;
+        for (TreeInstances::const_iterator it = 
+              finder->second.begin(); it != finder->second.end(); it++)
         {
           // Skip it if has already been collected
           if (it->second.current_state == PENDING_COLLECTED_STATE)
             continue;
-          // Skip any unattached external instances too
-          if (it->second.unattached_external)
-            continue;
-          if (!it->first->meets_region_tree(regions))
-            continue;
           it->first->add_base_resource_ref(MEMORY_MANAGER_REF);
           candidates.push_back(it->first);
         }
-      }
+      } while (false);
       // If we have any candidates check their constraints
       bool found = false;
       if (!candidates.empty())
       {
+        std::set<IndexSpaceExpression*> region_exprs;
+        RegionTreeForest *forest = runtime->forest;
+        for (std::vector<LogicalRegion>::const_iterator it = 
+              regions.begin(); it != regions.end(); it++)
+        {
+          // If the region tree IDs don't match that is bad
+          if (tree_id != it->get_tree_id())
+            return false;
+          RegionNode *node = forest->get_node(*it);
+          region_exprs.insert(node->row_source);
+        }
+        IndexSpaceExpression *space_expr = (region_exprs.size() == 1) ?
+          *(region_exprs.begin()) : forest->union_index_spaces(region_exprs);
         for (std::deque<PhysicalManager*>::const_iterator it = 
               candidates.begin(); it != candidates.end(); it++)
         {
-          if (!(*it)->meets_regions(regions, tight_region_bounds))
+          if (!(*it)->meets_expression(space_expr, tight_region_bounds))
             continue;
-          if ((*it)->entails(constraints))
+          if ((*it)->entails(constraints, NULL))
           {
             // Check to see if we need to acquire
             // If we fail to acquire then keep going
@@ -4936,33 +5340,52 @@ namespace Legion {
                                      bool tight_region_bounds, bool remote)
     //--------------------------------------------------------------------------
     {
-      // Hold the lock while iterating here
+      if (regions.empty())
+        return false;
       std::deque<PhysicalManager*> candidates;
+      const RegionTreeID tree_id = regions[0].get_tree_id();
+      do
       {
+        // Hold the lock while iterating here
         AutoLock m_lock(manager_lock, 1, false/*exclusive*/);
-        for (std::map<PhysicalManager*,InstanceInfo>::const_iterator it = 
-              current_instances.begin(); it != current_instances.end(); it++)
+        std::map<RegionTreeID,TreeInstances>::const_iterator finder = 
+          current_instances.find(tree_id);
+        if (finder == current_instances.end())
+          break;
+        for (TreeInstances::const_iterator it = 
+              finder->second.begin(); it != finder->second.end(); it++)
         {
+
           // Only consider ones that are currently valid
           if (it->second.current_state != VALID_STATE)
-            continue;
-          // Skip any unattached external instances too
-          if (it->second.unattached_external)
             continue;
           it->first->add_base_resource_ref(MEMORY_MANAGER_REF);
           candidates.push_back(it->first);
         }
-      }
+      } while (false);
       // If we have any candidates check their constraints
       bool found = false;
       if (!candidates.empty())
       {
+        std::set<IndexSpaceExpression*> region_exprs;
+        RegionTreeForest *forest = runtime->forest;
+        for (std::vector<LogicalRegion>::const_iterator it = 
+              regions.begin(); it != regions.end(); it++)
+        {
+          // If the region tree IDs don't match that is bad
+          if (tree_id != it->get_tree_id())
+            return false;
+          RegionNode *node = forest->get_node(*it);
+          region_exprs.insert(node->row_source);
+        }
+        IndexSpaceExpression *space_expr = (region_exprs.size() == 1) ?
+          *(region_exprs.begin()) : forest->union_index_spaces(region_exprs);
         for (std::deque<PhysicalManager*>::const_iterator it = 
               candidates.begin(); it != candidates.end(); it++)
         {
-          if (!(*it)->meets_regions(regions, tight_region_bounds))
+          if (!(*it)->meets_expression(space_expr, tight_region_bounds))
             continue;
-          if ((*it)->entails(constraints))
+          if ((*it)->entails(constraints, NULL))
           {
             // Check to see if we need to acquire
             // If we fail to acquire then keep going
@@ -4988,33 +5411,51 @@ namespace Legion {
                                      bool tight_region_bounds, bool remote)
     //--------------------------------------------------------------------------
     {
-      // Hold the lock while iterating here
+      if (regions.empty())
+        return false;
       std::deque<PhysicalManager*> candidates;
+      const RegionTreeID tree_id = regions[0].get_tree_id();
+      do
       {
+        // Hold the lock while iterating here
         AutoLock m_lock(manager_lock, 1, false/*exclusive*/);
+        std::map<RegionTreeID,TreeInstances>::const_iterator finder = 
+          current_instances.find(tree_id);
+        if (finder == current_instances.end())
+          break;
         for (std::map<PhysicalManager*,InstanceInfo>::const_iterator it = 
-              current_instances.begin(); it != current_instances.end(); it++)
+              finder->second.begin(); it != finder->second.end(); it++)
         {
           // Only consider ones that are currently valid
           if (it->second.current_state != VALID_STATE)
             continue;
-          // Skip any unattached external instances too
-          if (it->second.unattached_external)
-            continue;
           it->first->add_base_resource_ref(MEMORY_MANAGER_REF);
           candidates.push_back(it->first);
         }
-      }
+      } while (false);
       // If we have any candidates check their constraints
       bool found = false;
       if (!candidates.empty())
       {
+        std::set<IndexSpaceExpression*> region_exprs;
+        RegionTreeForest *forest = runtime->forest;
+        for (std::vector<LogicalRegion>::const_iterator it = 
+              regions.begin(); it != regions.end(); it++)
+        {
+          // If the region tree IDs don't match that is bad
+          if (tree_id != it->get_tree_id())
+            return false;
+          RegionNode *node = forest->get_node(*it);
+          region_exprs.insert(node->row_source);
+        }
+        IndexSpaceExpression *space_expr = (region_exprs.size() == 1) ?
+          *(region_exprs.begin()) : forest->union_index_spaces(region_exprs);
         for (std::deque<PhysicalManager*>::const_iterator it = 
               candidates.begin(); it != candidates.end(); it++)
         {
-          if (!(*it)->meets_regions(regions, tight_region_bounds))
+          if (!(*it)->meets_expression(space_expr, tight_region_bounds))
             continue;
-          if ((*it)->entails(constraints))
+          if ((*it)->entails(constraints, NULL))
           {
             // Check to see if we need to acquire
             // If we fail to acquire then keep going
@@ -5082,16 +5523,19 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     PhysicalManager* MemoryManager::allocate_physical_instance(
-                                                      InstanceBuilder &builder)
+                                    InstanceBuilder &builder, size_t *footprint)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(is_owner);
 #endif
       // First, just try to make the instance as is, if it works we are done 
+      size_t needed_size;
       PhysicalManager *manager = 
-                              builder.create_physical_instance(runtime->forest);
-      if (manager != NULL)
+        builder.create_physical_instance(runtime->forest, &needed_size);
+      if (footprint != NULL)
+        *footprint = needed_size;
+      if ((manager != NULL) || (needed_size == 0))
         return manager;
       // If that didn't work then we're going to try to delete some instances
       // from this memory to make space. We do this in four separate passes:
@@ -5100,7 +5544,6 @@ namespace Legion {
       // 3. Delete deferred collectable objects larger than what we need
       // 4. Delete deferred collectable objects smaller than what we need
       // If we get through all these and still can't collect then we're screwed
-      const size_t needed_size = builder.compute_needed_size(runtime->forest);
       // Keep trying to delete large collectable instances first
       while (!delete_by_size_and_state(needed_size, COLLECTABLE_STATE, 
                                        true/*large only*/))
@@ -5163,10 +5606,11 @@ namespace Legion {
       manager->add_base_resource_ref(MEMORY_MANAGER_REF);
       {
         AutoLock m_lock(manager_lock);
+        TreeInstances &insts = current_instances[manager->tree_id];
 #ifdef DEBUG_LEGION
-        assert(current_instances.find(manager) == current_instances.end());
+        assert(insts.find(manager) == insts.end());
 #endif
-        InstanceInfo &info = current_instances[manager];
+        InstanceInfo &info = insts[manager];
         if (early_valid)
           info.current_state = VALID_STATE;
         info.min_priority = priority;
@@ -5187,12 +5631,28 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MemoryManager::record_external_instance(PhysicalManager *manager)
+    RtEvent MemoryManager::attach_external_instance(PhysicalManager *manager)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(is_owner);
       assert(manager->is_external_instance());
+#endif
+      if (!manager->is_owner())
+      {
+        // Send a message to the owner node to do the record
+        RtUserEvent result = Runtime::create_rt_user_event();
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(memory);
+          rez.serialize(manager->did);
+          rez.serialize(result);
+        }
+        runtime->send_external_attach(manager->owner_space, rez);
+        return result;
+      }
+#ifdef DEBUG_LEGION
+      assert(is_owner);
 #endif
       // First do the insertion
       // If we're going to add a valid reference, mark this valid early
@@ -5202,31 +5662,14 @@ namespace Legion {
       manager->add_base_resource_ref(MEMORY_MANAGER_REF);
       {
         AutoLock m_lock(manager_lock);
+        TreeInstances &insts = current_instances[manager->tree_id];
 #ifdef DEBUG_LEGION
-        assert(current_instances.find(manager) == current_instances.end());
+        assert(insts.find(manager) == insts.end());
 #endif
-        InstanceInfo &info = current_instances[manager];
+        InstanceInfo &info = insts[manager];
         info.instance_size = instance_size;
-        info.unattached_external = true;
       }
-    }
-
-    //--------------------------------------------------------------------------
-    void MemoryManager::attach_external_instance(PhysicalManager *manager)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(is_owner);
-      assert(manager->is_external_instance());
-#endif
-      AutoLock m_lock(manager_lock);
-      std::map<PhysicalManager*,InstanceInfo>::iterator finder = 
-        current_instances.find(manager);
-#ifdef DEBUG_LEGION
-      assert(finder != current_instances.end());
-      assert(finder->second.unattached_external);
-#endif
-      finder->second.unattached_external = false;
+      return RtEvent::NO_RT_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -5241,30 +5684,45 @@ namespace Legion {
         AutoLock m_lock(manager_lock);
         if (state == COLLECTABLE_STATE)
         {
-          for (std::map<PhysicalManager*,InstanceInfo>::const_iterator it = 
-                current_instances.begin(); it != current_instances.end(); it++)
+          for (std::map<RegionTreeID,TreeInstances>::const_iterator cit = 
+               current_instances.begin(); cit != current_instances.end(); cit++)
           {
-            if (it->second.current_state != COLLECTABLE_STATE)
-              continue;
-            const size_t inst_size = it->first->get_instance_size();
-            if ((inst_size >= needed_size) || !larger_only)
+            for (TreeInstances::const_iterator it = 
+                  cit->second.begin(); it != cit->second.end(); it++)
             {
-              // Resource references will flow out
-              to_delete[it->first] = RtEvent::NO_RT_EVENT;
-              total_deleted += inst_size;
-              if (total_deleted >= needed_size)
+              if (it->second.current_state != COLLECTABLE_STATE)
+                continue;
+              const size_t inst_size = it->first->get_instance_size();
+              if ((inst_size >= needed_size) || !larger_only)
               {
-                // If we exit early we are not done with this pass
-                pass_complete = false;
-                break;
+                // Resource references will flow out
+                to_delete[it->first] = RtEvent::NO_RT_EVENT;
+                total_deleted += inst_size;
+                if (total_deleted >= needed_size)
+                {
+                  // If we exit early we are not done with this pass
+                  pass_complete = false;
+                  break;
+                }
               }
             }
+            if (!pass_complete)
+              break;
           }
           if (!to_delete.empty())
           {
             for (std::map<PhysicalManager*,RtEvent>::const_iterator it = 
                   to_delete.begin(); it != to_delete.end(); it++)
-              current_instances.erase(it->first);
+            {
+              std::map<RegionTreeID,TreeInstances>::iterator finder = 
+                current_instances.find(it->first->tree_id);
+#ifdef DEBUG_LEGION
+              assert(finder != current_instances.end());
+#endif
+              finder->second.erase(it->first);
+              if (finder->second.empty())
+                current_instances.erase(finder);
+            }
           }
         }
         else
@@ -5272,29 +5730,35 @@ namespace Legion {
 #ifdef DEBUG_LEGION
           assert(state == ACTIVE_STATE);
 #endif
-          for (std::map<PhysicalManager*,InstanceInfo>::iterator it = 
-                current_instances.begin(); it != current_instances.end(); it++)
+          for (std::map<RegionTreeID,TreeInstances>::iterator cit = 
+               current_instances.begin(); cit != current_instances.end(); cit++)
           {
-            if (it->second.current_state != ACTIVE_STATE)
-              continue;
-            const size_t inst_size = it->first->get_instance_size();
-            if ((inst_size >= needed_size) || !larger_only)
+            for (TreeInstances::iterator it = 
+                  cit->second.begin(); it != cit->second.end(); it++)
             {
-              RtUserEvent deferred_collect = Runtime::create_rt_user_event();
-              to_delete[it->first] = deferred_collect;
-              // Add our own reference here as this flows out
-              it->first->add_base_resource_ref(MEMORY_MANAGER_REF);
-              // Update the state information
-              it->second.current_state = PENDING_COLLECTED_STATE;
-              it->second.deferred_collect = deferred_collect;
-              total_deleted += inst_size;
-              if (total_deleted >= needed_size)
+              if (it->second.current_state != ACTIVE_STATE)
+                continue;
+              const size_t inst_size = it->first->get_instance_size();
+              if ((inst_size >= needed_size) || !larger_only)
               {
-                // If we exit early we are not done with this pass
-                pass_complete = false;
-                break;
+                RtUserEvent deferred_collect = Runtime::create_rt_user_event();
+                to_delete[it->first] = deferred_collect;
+                // Add our own reference here as this flows out
+                it->first->add_base_resource_ref(MEMORY_MANAGER_REF);
+                // Update the state information
+                it->second.current_state = PENDING_COLLECTED_STATE;
+                it->second.deferred_collect = deferred_collect;
+                total_deleted += inst_size;
+                if (total_deleted >= needed_size)
+                {
+                  // If we exit early we are not done with this pass
+                  pass_complete = false;
+                  break;
+                }
               }
             }
+            if (!pass_complete)
+              break;
           }
         }
       }
@@ -5334,16 +5798,24 @@ namespace Legion {
         runtime->send_external_detach(manager->owner_space, rez);
         return result;
       }
+#ifdef DEBUG_LEGION
+      assert(is_owner);
+#endif
       // Either delete the instance now or do a deferred deltion
       // that will delete the instance once all operations are
       // done using it
       RtEvent deferred_collect = RtEvent::NO_RT_EVENT;
       {
         AutoLock m_lock(manager_lock);
-        std::map<PhysicalManager*,InstanceInfo>::iterator finder = 
-          current_instances.find(manager);
+        std::map<RegionTreeID,TreeInstances>::iterator tree_finder = 
+          current_instances.find(manager->tree_id);
 #ifdef DEBUG_LEGION
-        assert(finder != current_instances.end());
+        assert(tree_finder != current_instances.end());
+#endif
+        std::map<PhysicalManager*,InstanceInfo>::iterator finder = 
+          tree_finder->second.find(manager);
+#ifdef DEBUG_LEGION
+        assert(finder != tree_finder->second.end());
         assert(finder->second.current_state != PENDING_COLLECTED_STATE);
         assert(finder->second.current_state != PENDING_ACQUIRE_STATE);
 #endif
@@ -5355,7 +5827,11 @@ namespace Legion {
           manager->add_base_resource_ref(MEMORY_MANAGER_REF);
         }
         else // Reference will flow out
-          current_instances.erase(finder);
+        {
+          tree_finder->second.erase(finder);
+          if (tree_finder->second.empty())
+            current_instances.erase(tree_finder);
+        }
       }
       // Perform the deletion contingent on references being removed
       manager->perform_deletion(deferred_collect);
@@ -5375,7 +5851,15 @@ namespace Legion {
         size_t max_message_size, LegionProfiler *prof)
       : sending_buffer((char*)malloc(max_message_size)), 
         sending_buffer_size(max_message_size), 
-        observed_recent(true), profiler(prof)
+        ordered_channel((kind != DEFAULT_VIRTUAL_CHANNEL) &&
+                        (kind != THROUGHPUT_VIRTUAL_CHANNEL)), 
+        request_priority((kind == THROUGHPUT_VIRTUAL_CHANNEL) ?
+            LG_THROUGHPUT_MESSAGE_PRIORITY : (kind == UPDATE_VIRTUAL_CHANNEL) ?
+            LG_LATENCY_DEFERRED_PRIORITY : LG_LATENCY_MESSAGE_PRIORITY),
+        response_priority((kind == THROUGHPUT_VIRTUAL_CHANNEL) ?
+            LG_THROUGHPUT_RESPONSE_PRIORITY : (kind == UPDATE_VIRTUAL_CHANNEL) ?
+            LG_LATENCY_MESSAGE_PRIORITY : LG_LATENCY_RESPONSE_PRIORITY),
+        partial_messages(0), observed_recent(true), profiler(prof)
     //--------------------------------------------------------------------------
     //
     {
@@ -5386,14 +5870,17 @@ namespace Legion {
       assert(sending_buffer != NULL);
       assert(receiving_buffer != NULL);
 #endif
+      // Use a dummy implicit provenance at the front for the message
+      // to comply with the requirements of the meta-task handler which
+      // expects this before the task ID. We'll actually have individual
+      // implicit provenances that will override this when handling the
+      // messages so we can just set this to zero.
+      *((UniqueID*)sending_buffer) = 0;
+      sending_index = sizeof(UniqueID);
       // Set up the buffer for sending the first batch of messages
       // Only need to write the processor once
-      *((LgTaskID*)sending_buffer) = LG_MESSAGE_ID;
-      sending_index = sizeof(LgTaskID);
-      // We pack a dummy entry for provenance here as we store it
-      // separately for each message
-      *((UniqueID*)(((char*)sending_buffer)+sending_index)) = 0;
-      sending_index += sizeof(UniqueID);
+      *((LgTaskID*)(((char*)sending_buffer)+sending_index))= LG_MESSAGE_ID;
+      sending_index += sizeof(LgTaskID);
       *((AddressSpaceID*)
           (((char*)sending_buffer)+sending_index)) = local_address_space;
       sending_index += sizeof(local_address_space);
@@ -5405,6 +5892,8 @@ namespace Legion {
       packaged_messages = 0;
       sending_index += sizeof(packaged_messages);
       last_message_event = RtEvent::NO_RT_EVENT;
+      partial_message_id = 0;
+      partial_assembly = NULL;
       partial = false;
       // Set up the receiving buffer
       received_messages = 0;
@@ -5413,7 +5902,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     VirtualChannel::VirtualChannel(const VirtualChannel &rhs)
-      : sending_buffer(NULL), sending_buffer_size(0), profiler(NULL)
+      : sending_buffer(NULL), sending_buffer_size(0), 
+        ordered_channel(false), request_priority(rhs.request_priority),
+        response_priority(rhs.response_priority), profiler(NULL)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -5428,6 +5919,8 @@ namespace Legion {
       free(receiving_buffer);
       receiving_buffer = NULL;
       receiving_buffer_size = 0;
+      if (partial_assembly != NULL)
+        delete partial_assembly;
     }
 
     //--------------------------------------------------------------------------
@@ -5443,7 +5936,7 @@ namespace Legion {
       const size_t header_size = 
         sizeof(k) + sizeof(implicit_provenance) + sizeof(buffer_size);
       // Need to hold the lock when manipulating the buffer
-      AutoLock s_lock(send_lock);
+      AutoLock c_lock(channel_lock);
       if ((sending_index+header_size+buffer_size) > sending_buffer_size)
       {
         // Make sure we can at least get the meta-data into the buffer
@@ -5502,18 +5995,35 @@ namespace Legion {
     {
       // See if we need to switch the header file
       // and update the state of partial
+      bool first_partial = false;
       if (!complete)
       {
         header = PARTIAL_MESSAGE;
-        partial = true;
+        // If this is an unordered virtual channel, then embed our partial
+        // message id in the high-order bits
+        if (!ordered_channel)
+          header = (MessageHeader)
+            (((unsigned)header) | (partial_message_id << 2));
+        if (!partial)
+        {
+          partial = true;
+          first_partial = true;
+        }
       }
       else if (partial)
       {
         header = FINAL_MESSAGE;
+        // If this is an unordered virtual channel, then embed our partial
+        // message id in the high-order bits
+        if (!ordered_channel)
+          // Also increment the partial message id for the next message
+          // This can overflow safely since it's an unsigned integer
+          header = (MessageHeader)
+            (((unsigned)header) | (partial_message_id++ << 2));
         partial = false;
       }
       // Save the header and the number of messages into the buffer
-      const size_t base_size = sizeof(LgTaskID) + sizeof(UniqueID) + 
+      const size_t base_size = sizeof(UniqueID) + sizeof(LgTaskID) + 
         sizeof(AddressSpaceID) + sizeof(VirtualChannelKind);
       *((MessageHeader*)(sending_buffer + base_size)) = header;
       *((unsigned*)(sending_buffer + base_size + sizeof(header))) = 
@@ -5529,14 +6039,44 @@ namespace Legion {
       {
         Realm::ProfilingRequestSet requests;
         LegionProfiler::add_message_request(requests, target);
-        last_message_event = RtEvent(target.spawn(LG_TASK_ID, sending_buffer, 
-            sending_index, requests, last_message_event, response ? 
-              LG_LATENCY_RESPONSE_PRIORITY : LG_LATENCY_MESSAGE_PRIORITY));
+        last_message_event = RtEvent(target.spawn(
+#ifdef LEGION_SEPARATE_META_TASKS
+              LG_TASK_ID + LG_MESSAGE_ID,
+#else
+              LG_TASK_ID, 
+#endif
+              sending_buffer, sending_index, requests, 
+              (ordered_channel || 
+               ((header != FULL_MESSAGE) && !first_partial)) ?
+               last_message_event : RtEvent::NO_RT_EVENT, 
+              response ? response_priority : request_priority));
+        if (!ordered_channel && (header != PARTIAL_MESSAGE))
+        {
+          unordered_events.insert(last_message_event);
+          if (unordered_events.size() >= MAX_UNORDERED_EVENTS)
+            filter_unordered_events();
+        }
       }
       else
-        last_message_event = RtEvent(target.spawn(LG_TASK_ID, sending_buffer, 
-              sending_index, last_message_event, response ? 
-                LG_LATENCY_RESPONSE_PRIORITY : LG_LATENCY_MESSAGE_PRIORITY));
+      {
+        last_message_event = RtEvent(target.spawn(
+#ifdef LEGION_SEPARATE_META_TASKS
+                LG_TASK_ID + LG_MESSAGE_ID,
+#else
+                LG_TASK_ID, 
+#endif
+                sending_buffer, sending_index, 
+                (ordered_channel || 
+                 ((header != FULL_MESSAGE) && !first_partial)) ?
+                  last_message_event : RtEvent::NO_RT_EVENT, 
+                response ? response_priority : request_priority));
+        if (!ordered_channel && (header != PARTIAL_MESSAGE))
+        {
+          unordered_events.insert(last_message_event);
+          if (unordered_events.size() >= MAX_UNORDERED_EVENTS)
+            filter_unordered_events();
+        }
+      }
       // Reset the state of the buffer
       sending_index = base_size + sizeof(header) + sizeof(unsigned);
       if (partial)
@@ -5547,43 +6087,128 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void VirtualChannel::filter_unordered_events(void)
+    //--------------------------------------------------------------------------
+    {
+      // Lock held from caller
+#ifdef DEBUG_LEGION
+      assert(!ordered_channel);
+      assert(unordered_events.size() >= MAX_UNORDERED_EVENTS);
+#endif
+      // Prune out any triggered events
+      for (std::set<RtEvent>::iterator it = unordered_events.begin();
+            it != unordered_events.end(); /*nothing*/)
+      {
+        if (it->has_triggered())
+        {
+          std::set<RtEvent>::iterator to_delete = it++;
+          unordered_events.erase(to_delete);
+        }
+        else
+          it++;
+      }
+      // If we still have too many events, collapse them down
+      if (unordered_events.size() >= MAX_UNORDERED_EVENTS)
+      {
+        const RtEvent summary = Runtime::merge_events(unordered_events);
+        unordered_events.clear();
+        unordered_events.insert(summary);
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void VirtualChannel::confirm_shutdown(ShutdownManager *shutdown_manager,
                                           bool phase_one)
     //--------------------------------------------------------------------------
     {
-      AutoLock s_lock(send_lock);
+      AutoLock c_lock(channel_lock);
       if (phase_one)
       {
         if (packaged_messages > 0)
           shutdown_manager->record_recent_message();
-        // This is only sound because we know we are on the owner
-        // node for the event, otherwise Realm could lie to us
-        if (!last_message_event.has_triggered())
+        if (ordered_channel)
         {
-          // A little hack here for slow gasnet conduits
-          // If the event didn't trigger yet, make sure its just
-          // because we haven't gotten the return message yet
-          usleep(1000);
           if (!last_message_event.has_triggered())
-            shutdown_manager->record_pending_message(last_message_event);
+          {
+            // Subscribe to make sure we see this trigger
+            last_message_event.subscribe();
+            // A little hack here for slow gasnet conduits
+            // If the event didn't trigger yet, make sure its just
+            // because we haven't gotten the return message yet
+            usleep(1000);
+            if (!last_message_event.has_triggered())
+              shutdown_manager->record_pending_message(last_message_event);
+            else
+              observed_recent = false;
+          }
           else
             observed_recent = false;
         }
         else
+        {
           observed_recent = false;
+          for (std::set<RtEvent>::const_iterator it = 
+                unordered_events.begin(); it != unordered_events.end(); it++)
+          {
+            if (!it->has_triggered())
+            {
+              // Subscribe to make sure we see this trigger
+              it->subscribe();
+              // A little hack here for slow gasnet conduits
+              // If the event didn't trigger yet, make sure its just
+              // because we haven't gotten the return message yet
+              usleep(1000);
+              if (!it->has_triggered())
+              {
+                shutdown_manager->record_pending_message(*it); 
+                observed_recent = true;
+                break;
+              }
+            }
+          }
+        }
       }
       else
       {
         if (observed_recent || (packaged_messages > 0)) 
           shutdown_manager->record_recent_message(); 
-        else if (!last_message_event.has_triggered())
+        else
         {
-          // A little hack here for slow gasnet conduits
-          // If the event didn't trigger yet, make sure its just
-          // because we haven't gotten the return message yet
-          usleep(1000);
-          if (!last_message_event.has_triggered())
-            shutdown_manager->record_recent_message();
+          if (ordered_channel)
+          {
+            if (!last_message_event.has_triggered())
+            {
+              // Subscribe to make sure we see this trigger
+              last_message_event.subscribe();
+              // A little hack here for slow gasnet conduits
+              // If the event didn't trigger yet, make sure its just
+              // because we haven't gotten the return message yet
+              usleep(1000);
+              if (!last_message_event.has_triggered())
+                shutdown_manager->record_recent_message();
+            }
+          }
+          else
+          {
+            for (std::set<RtEvent>::const_iterator it = 
+                  unordered_events.begin(); it != unordered_events.end(); it++)
+            {
+              if (!it->has_triggered())
+              {
+                // Subscribe to make sure we see this trigger
+                it->subscribe();
+                // A little hack here for slow gasnet conduits
+                // If the event didn't trigger yet, make sure its just
+                // because we haven't gotten the return message yet
+                usleep(1000);
+                if (!it->has_triggered())
+                {
+                  shutdown_manager->record_recent_message();
+                  break;
+                }
+              }
+            }
+          }
         }
       }
     }
@@ -5610,32 +6235,124 @@ namespace Legion {
       unsigned num_messages = *((const unsigned*)buffer);
       buffer += sizeof(num_messages);
       arglen -= sizeof(num_messages);
+      unsigned incoming_message_id = 0;
+      if (!ordered_channel)
+      {
+        incoming_message_id = ((unsigned)head) >> 2; 
+        head = (MessageHeader)(((unsigned)head) & 0x3);
+      }
       switch (head)
       {
         case FULL_MESSAGE:
           {
             // Can handle these messages directly
-            handle_messages(num_messages, runtime, 
-                            remote_address_space, buffer, arglen);
+            if (handle_messages(num_messages, runtime, 
+                                remote_address_space, buffer, arglen) &&
+                // If we had a shutdown message and a profiler then we
+                // shouldn't have incremented the outstanding profiling
+                // count because we don't actually do profiling requests
+                // on any shutdown messages
+                (profiler != NULL))
+            {
+#ifdef DEBUG_LEGION
+              profiler->decrement_total_outstanding_requests(
+                          LegionProfiler::LEGION_PROF_MESSAGE);
+#else
+              profiler->decrement_total_outstanding_requests();
+#endif
+            }
             break;
           }
         case PARTIAL_MESSAGE:
           {
             // Save these messages onto the receiving buffer
             // but do not handle them
-            buffer_messages(num_messages, buffer, arglen);
+            if (!ordered_channel)
+            {
+              AutoLock c_lock(channel_lock);
+              if (partial_assembly == NULL)
+                partial_assembly = new std::map<unsigned,PartialMessage>();
+              PartialMessage &message = 
+                (*partial_assembly)[incoming_message_id];
+              // Allocate the buffer on the first pass
+              if (message.buffer == NULL)
+              {
+                // Same as max message size
+                message.size = sending_buffer_size;
+                message.buffer = 
+                  (char*)legion_malloc(MESSAGE_BUFFER_ALLOC, message.size);
+              }
+              buffer_messages(num_messages, buffer, arglen,
+                              message.buffer, message.size,
+                              message.index, message.messages, message.total);
+            }
+            else
+              // Ordered channels don't need the lock
+              buffer_messages(num_messages, buffer, arglen, receiving_buffer, 
+                              receiving_buffer_size, receiving_index, 
+                              received_messages, partial_messages);
             break;
           }
         case FINAL_MESSAGE:
           {
             // Save the remaining messages onto the receiving
             // buffer, then handle them and reset the state.
-            buffer_messages(num_messages, buffer, arglen);
-            handle_messages(received_messages, runtime,
-                            remote_address_space,
-                            receiving_buffer, receiving_index);
-            receiving_index = 0;
-            received_messages = 0;
+            char *final_buffer = NULL;
+            unsigned final_messages = 0, final_index = 0, final_total = 0;
+            bool free_buffer = false;
+            if (!ordered_channel)
+            {
+              AutoLock c_lock(channel_lock);
+#ifdef DEBUG_LEGION
+              assert(partial_assembly != NULL);
+#endif
+              std::map<unsigned,PartialMessage>::iterator finder = 
+                partial_assembly->find(incoming_message_id);
+#ifdef DEBUG_LEGION
+              assert(finder != partial_assembly->end());
+              assert(finder->second.buffer != NULL);
+#endif
+              buffer_messages(num_messages, buffer, arglen,
+                              finder->second.buffer, finder->second.size,
+                              finder->second.index, finder->second.messages,
+                              finder->second.total);
+              final_index = finder->second.index;
+              final_buffer = finder->second.buffer;
+              final_messages = finder->second.messages;
+              final_total = finder->second.total;
+              free_buffer = true;
+              partial_assembly->erase(finder);
+            }
+            else
+            {
+              buffer_messages(num_messages, buffer, arglen, receiving_buffer,
+                              receiving_buffer_size, receiving_index, 
+                              received_messages, partial_messages);
+              final_index = receiving_index;
+              final_buffer = receiving_buffer;
+              final_messages = received_messages;
+              final_total = partial_messages;
+              receiving_index = 0;
+              received_messages = 0;
+              partial_messages = 0;
+            }
+            if (handle_messages(final_messages, runtime, remote_address_space,
+                                final_buffer, final_index) &&
+                // If we had a shutdown message and a profiler then we
+                // shouldn't have incremented the outstanding profiling
+                // count because we don't actually do profiling requests
+                // on any shutdown messages
+                (profiler != NULL))
+            {
+#ifdef DEBUG_LEGION
+              profiler->decrement_total_outstanding_requests(
+                          LegionProfiler::LEGION_PROF_MESSAGE, final_total);
+#else
+              profiler->decrement_total_outstanding_requests(final_total);
+#endif
+            }
+            if (free_buffer)
+              free(final_buffer);
             break;
           }
         default:
@@ -5644,12 +6361,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void VirtualChannel::handle_messages(unsigned num_messages,
+    bool VirtualChannel::handle_messages(unsigned num_messages,
                                          Runtime *runtime,
                                          AddressSpaceID remote_address_space,
-                                         const char *args, size_t arglen)
+                                         const char *args, size_t arglen) const
     //--------------------------------------------------------------------------
     {
+      bool has_shutdown = false;
       // For profiling if we are doing it
       unsigned long long start = 0, stop = 0;
       for (unsigned idx = 0; idx < num_messages; idx++)
@@ -5696,6 +6414,11 @@ namespace Legion {
               runtime->handle_advertisement(derez);
               break;
             }
+          case SEND_REMOTE_TASK_REPLAY:
+            {
+              runtime->handle_remote_task_replay(derez);
+              break;
+            }
           case SEND_INDEX_SPACE_NODE:
             {
               runtime->handle_index_space_node(derez, remote_address_space);
@@ -5738,6 +6461,23 @@ namespace Legion {
               runtime->handle_index_space_colors_response(derez);
               break;
             }
+          case SEND_INDEX_SPACE_REMOTE_EXPRESSION_REQUEST:
+            {
+              runtime->handle_index_space_remote_expression_request(derez,
+                                                          remote_address_space);
+              break;
+            }
+          case SEND_INDEX_SPACE_REMOTE_EXPRESSION_RESPONSE:
+            {
+              runtime->handle_index_space_remote_expression_response(derez,
+                                                          remote_address_space);
+              break;
+            }
+          case SEND_INDEX_SPACE_REMOTE_EXPRESSION_INVALIDATION:
+            {
+              runtime->handle_index_space_remote_expression_invalidation(derez);
+              break;
+            }
           case SEND_INDEX_PARTITION_NOTIFICATION:
             {
               runtime->handle_index_partition_notification(derez);
@@ -5768,6 +6508,11 @@ namespace Legion {
           case SEND_INDEX_PARTITION_CHILD_RESPONSE:
             {
               runtime->handle_index_partition_child_response(derez);
+              break;
+            }
+          case SEND_INDEX_PARTITION_DISJOINT_UPDATE:
+            {
+              runtime->handle_index_partition_disjoint_update(derez);
               break;
             }
           case SEND_FIELD_SPACE_NODE:
@@ -5872,11 +6617,6 @@ namespace Legion {
                                                           remote_address_space);
               break;
             }
-          case INDIVIDUAL_REMOTE_MAPPED:
-            {
-              runtime->handle_individual_remote_mapped(derez); 
-              break;
-            }
           case INDIVIDUAL_REMOTE_COMPLETE:
             {
               runtime->handle_individual_remote_complete(derez);
@@ -5918,21 +6658,6 @@ namespace Legion {
               runtime->handle_did_remote_gc_update(derez); 
               break;
             }
-          case DISTRIBUTED_RESOURCE_UPDATE:
-            {
-              runtime->handle_did_remote_resource_update(derez);
-              break;
-            }
-          case DISTRIBUTED_INVALIDATE:
-            {
-              runtime->handle_did_remote_invalidate(derez);
-              break;
-            }
-          case DISTRIBUTED_DEACTIVATE:
-            {
-              runtime->handle_did_remote_deactivate(derez);
-              break;
-            }
           case DISTRIBUTED_CREATE_ADD:
             {
               runtime->handle_did_create_add(derez);
@@ -5961,18 +6686,14 @@ namespace Legion {
             }
           case SEND_BACK_LOGICAL_STATE:
             {
-              runtime->handle_send_back_logical_state(derez);
+              runtime->handle_send_back_logical_state(derez, 
+                                                      remote_address_space);
               break;
             }
           case SEND_MATERIALIZED_VIEW:
             {
               runtime->handle_send_materialized_view(derez, 
                                                      remote_address_space);
-              break;
-            }
-          case SEND_COMPOSITE_VIEW:
-            {
-              runtime->handle_send_composite_view(derez, remote_address_space);
               break;
             }
           case SEND_FILL_VIEW:
@@ -6013,41 +6734,51 @@ namespace Legion {
               runtime->handle_create_top_view_response(derez);
               break;
             }
-          case SEND_SUBVIEW_DID_REQUEST:
-            {
-              runtime->handle_subview_did_request(derez, remote_address_space);
-              break;
-            }
-          case SEND_SUBVIEW_DID_RESPONSE:
-            {
-              runtime->handle_subview_did_response(derez);
-              break;
-            }
           case SEND_VIEW_REQUEST:
             {
               runtime->handle_view_request(derez, remote_address_space);
               break;
             }
-          case SEND_VIEW_UPDATE_REQUEST:
+          case SEND_VIEW_REGISTER_USER:
             {
-              runtime->handle_view_update_request(derez, remote_address_space);
+              runtime->handle_view_register_user(derez, remote_address_space);
               break;
             }
-          case SEND_VIEW_UPDATE_RESPONSE:
+          case SEND_VIEW_FIND_COPY_PRE_REQUEST:
             {
-              runtime->handle_view_update_response(derez);
+              runtime->handle_view_copy_pre_request(derez,remote_address_space);
               break;
             }
-          case SEND_VIEW_REMOTE_UPDATE:
+          case SEND_VIEW_FIND_COPY_PRE_RESPONSE:
             {
-              runtime->handle_view_remote_update(derez, remote_address_space);
+              runtime->handle_view_copy_pre_response(derez,
+                                                    remote_address_space);
               break;
             }
-          case SEND_VIEW_REMOTE_INVALIDATE:
+          case SEND_VIEW_ADD_COPY_USER:
             {
-              runtime->handle_view_remote_invalidate(derez);
+              runtime->handle_view_add_copy_user(derez, remote_address_space);
               break;
             }
+#ifdef ENABLE_VIEW_REPLICATION
+          case SEND_VIEW_REPLICATION_REQUEST:
+            {
+              runtime->handle_view_replication_request(derez, 
+                                                       remote_address_space);
+              break;
+            }
+          case SEND_VIEW_REPLICATION_RESPONSE:
+            {
+              runtime->handle_view_replication_response(derez);
+              break;
+            }
+          case SEND_VIEW_REPLICATION_REMOVAL:
+            {
+              runtime->handle_view_replication_removal(derez, 
+                                                       remote_address_space);
+              break;
+            }
+#endif
           case SEND_MANAGER_REQUEST:
             {
               runtime->handle_manager_request(derez, remote_address_space);
@@ -6060,7 +6791,7 @@ namespace Legion {
             }
           case SEND_FUTURE_SUBSCRIPTION:
             {
-              runtime->handle_future_subscription(derez);
+              runtime->handle_future_subscription(derez, remote_address_space);
               break;
             }
           case SEND_FUTURE_MAP_REQUEST:
@@ -6199,73 +6930,117 @@ namespace Legion {
               runtime->handle_remote_context_physical_response(derez);
               break;
             }
-          case SEND_VERSION_OWNER_REQUEST: 
+          case SEND_COMPUTE_EQUIVALENCE_SETS_REQUEST: 
             {
-              runtime->handle_version_owner_request(derez,remote_address_space);
+              runtime->handle_compute_equivalence_sets_request(derez,
+                                               remote_address_space);
               break;
             }
-          case SEND_VERSION_OWNER_RESPONSE:
+          case SEND_EQUIVALENCE_SET_REQUEST:
             {
-              runtime->handle_version_owner_response(derez);
+              runtime->handle_equivalence_set_request(derez, 
+                                      remote_address_space);
               break;
             }
-          case SEND_VERSION_STATE_REQUEST:
+          case SEND_EQUIVALENCE_SET_RESPONSE:
             {
-              runtime->handle_version_state_request(derez,remote_address_space);
+              runtime->handle_equivalence_set_response(derez,
+                                                       remote_address_space);
               break;
             }
-          case SEND_VERSION_STATE_RESPONSE:
+          case SEND_EQUIVALENCE_SET_SUBSET_REQUEST:
             {
-              runtime->handle_version_state_response(derez,
-                                                     remote_address_space);
+              runtime->handle_equivalence_set_subset_request(derez); 
               break;
             }
-          case SEND_VERSION_STATE_UPDATE_REQUEST:
+          case SEND_EQUIVALENCE_SET_SUBSET_RESPONSE:
             {
-              runtime->handle_version_state_update_request(derez);
+              runtime->handle_equivalence_set_subset_response(derez);
               break;
             }
-          case SEND_VERSION_STATE_UPDATE_RESPONSE:
+          case SEND_EQUIVALENCE_SET_SUBSET_UPDATE:
             {
-              runtime->handle_version_state_update_response(derez);
+              runtime->handle_equivalence_set_subset_update(derez);
               break;
             }
-          case SEND_VERSION_STATE_VALID_NOTIFICATION:
+          case SEND_EQUIVALENCE_SET_RAY_TRACE_REQUEST:
             {
-              runtime->handle_version_state_valid_notification(derez,
-                                                 remote_address_space);
+              runtime->handle_equivalence_set_ray_trace_request(derez,
+                                                remote_address_space);
               break;
             }
-          case SEND_VERSION_MANAGER_ADVANCE:
+          case SEND_EQUIVALENCE_SET_RAY_TRACE_RESPONSE:
             {
-              runtime->handle_version_manager_advance(derez);
+              runtime->handle_equivalence_set_ray_trace_response(derez);
               break;
             }
-          case SEND_VERSION_MANAGER_INVALIDATE:
+          case SEND_EQUIVALENCE_SET_MIGRATION:
             {
-              runtime->handle_version_manager_invalidate(derez);
+              runtime->handle_equivalence_set_migration(derez,
+                                                        remote_address_space);
               break;
             }
-          case SEND_VERSION_MANAGER_REQUEST:
+          case SEND_EQUIVALENCE_SET_OWNER_UPDATE:
             {
-              runtime->handle_version_manager_request(derez,
-                                                      remote_address_space);
+              runtime->handle_equivalence_set_owner_update(derez);
               break;
             }
-          case SEND_VERSION_MANAGER_RESPONSE:
+          case SEND_EQUIVALENCE_SET_REMOTE_REFINEMENT:
             {
-              runtime->handle_version_manager_response(derez);
+              runtime->handle_equivalence_set_remote_refinement(derez);
               break;
             }
-          case SEND_VERSION_MANAGER_UNVERSIONED_REQUEST:
+          case SEND_EQUIVALENCE_SET_REMOTE_REQUEST_INSTANCES:
             {
-              runtime->handle_version_manager_unversioned_request(derez,
-                                                  remote_address_space);
+              runtime->handle_equivalence_set_remote_request_instances(derez,
+                                                        remote_address_space);
               break;
             }
-          case SEND_VERSION_MANAGER_UNVERSIONED_RESPONSE:
+          case SEND_EQUIVALENCE_SET_REMOTE_REQUEST_INVALID:
             {
-              runtime->handle_version_manager_unversioned_response(derez);
+              runtime->handle_equivalence_set_remote_request_invalid(derez,
+                                                        remote_address_space);
+              break;
+            }
+          case SEND_EQUIVALENCE_SET_REMOTE_UPDATES:
+            {
+              runtime->handle_equivalence_set_remote_updates(derez,
+                                              remote_address_space);
+              break;
+            }
+          case SEND_EQUIVALENCE_SET_REMOTE_ACQUIRES:
+            {
+              runtime->handle_equivalence_set_remote_acquires(derez,
+                                              remote_address_space);
+              break;
+            }
+          case SEND_EQUIVALENCE_SET_REMOTE_RELEASES:
+            {
+              runtime->handle_equivalence_set_remote_releases(derez,
+                                              remote_address_space);
+              break;
+            }
+          case SEND_EQUIVALENCE_SET_REMOTE_COPIES_ACROSS:
+            {
+              runtime->handle_equivalence_set_remote_copies_across(derez,
+                                                    remote_address_space);
+              break;
+            }
+          case SEND_EQUIVALENCE_SET_REMOTE_OVERWRITES:
+            {
+              runtime->handle_equivalence_set_remote_overwrites(derez,
+                                                remote_address_space);
+            break;
+            }
+          case SEND_EQUIVALENCE_SET_REMOTE_FILTERS:
+            {
+              runtime->handle_equivalence_set_remote_filters(derez,
+                                              remote_address_space);
+              break;
+            }
+          case SEND_EQUIVALENCE_SET_REMOTE_INSTANCES:
+            {
+              runtime->handle_equivalence_set_remote_instances(derez);
               break;
             }
           case SEND_INSTANCE_REQUEST:
@@ -6276,6 +7051,22 @@ namespace Legion {
           case SEND_INSTANCE_RESPONSE:
             {
               runtime->handle_instance_response(derez, remote_address_space);
+              break;
+            }
+          case SEND_EXTERNAL_CREATE_REQUEST:
+            {
+              runtime->handle_external_create_request(derez, 
+                                                      remote_address_space);
+              break;
+            }
+          case SEND_EXTERNAL_CREATE_RESPONSE:
+            {
+              runtime->handle_external_create_response(derez);
+              break;
+            }
+          case SEND_EXTERNAL_ATTACH:
+            {
+              runtime->handle_external_attach(derez);
               break;
             }
           case SEND_EXTERNAL_DETACH:
@@ -6301,16 +7092,6 @@ namespace Legion {
           case SEND_ACQUIRE_RESPONSE:
             {
               runtime->handle_acquire_response(derez, remote_address_space);
-              break;
-            }
-          case SEND_VARIANT_REQUEST:
-            {
-              runtime->handle_variant_request(derez, remote_address_space);
-              break;
-            }
-          case SEND_VARIANT_RESPONSE:
-            {
-              runtime->handle_variant_response(derez);
               break;
             }
           case SEND_VARIANT_BROADCAST:
@@ -6380,33 +7161,73 @@ namespace Legion {
               runtime->handle_library_task_response(derez);
               break;
             }
+          case SEND_LIBRARY_REDOP_REQUEST:
+            {
+              runtime->handle_library_redop_request(derez,remote_address_space);
+              break;
+            }
+          case SEND_LIBRARY_REDOP_RESPONSE:
+            {
+              runtime->handle_library_redop_response(derez);
+              break;
+            }
+          case SEND_LIBRARY_SERDEZ_REQUEST:
+            {
+              runtime->handle_library_serdez_request(derez,
+                                      remote_address_space);
+              break;
+            }
+          case SEND_LIBRARY_SERDEZ_RESPONSE:
+            {
+              runtime->handle_library_serdez_response(derez);
+              break;
+            }
+          case SEND_REMOTE_OP_REPORT_UNINIT:
+            {
+              runtime->handle_remote_op_report_uninitialized(derez);
+              break;
+            }
+          case SEND_REMOTE_OP_PROFILING_COUNT_UPDATE:
+            {
+              runtime->handle_remote_op_profiling_count_update(derez);
+              break;
+            }
+          case SEND_REMOTE_TRACE_UPDATE:
+            {
+              runtime->handle_remote_tracing_update(derez,remote_address_space);
+              break;
+            }
+          case SEND_REMOTE_TRACE_RESPONSE:
+            {
+              runtime->handle_remote_tracing_response(derez);
+              break;
+            }
+          case SEND_REMOTE_TRACE_EQ_REQUEST:
+            {
+              runtime->handle_remote_tracing_eq_request(derez,
+                                          remote_address_space);
+              break;
+            }
+          case SEND_REMOTE_TRACE_EQ_RESPONSE:
+            {
+              runtime->handle_remote_tracing_eq_response(derez);
+              break;
+            }
           case SEND_SHUTDOWN_NOTIFICATION:
             {
-              // If we have a profiler, we shouldn't have incremented the
-              // outstanding profiling count because we don't actually
-              // do profiling requests on shutdown messages
-              if (profiler != NULL)
 #ifdef DEBUG_LEGION
-                profiler->decrement_total_outstanding_requests(
-                            LegionProfiler::LEGION_PROF_MESSAGE);
-#else
-                profiler->decrement_total_outstanding_requests();
+              assert(!has_shutdown); // should only be one per message
 #endif
+              has_shutdown = true; 
               runtime->handle_shutdown_notification(derez,remote_address_space);
               break;
             }
           case SEND_SHUTDOWN_RESPONSE:
             {
-              // If we have a profiler, we shouldn't have incremented the
-              // outstanding profiling count because we don't actually
-              // do profiling requests on shutdown messages
-              if (profiler != NULL)
 #ifdef DEBUG_LEGION
-                profiler->decrement_total_outstanding_requests(
-                            LegionProfiler::LEGION_PROF_MESSAGE);
-#else
-                profiler->decrement_total_outstanding_requests();
+              assert(!has_shutdown); // should only be one per message
 #endif
+              has_shutdown = true;
               runtime->handle_shutdown_response(derez);
               break;
             }
@@ -6425,14 +7246,21 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(arglen == 0); // make sure we processed everything
 #endif
+      return has_shutdown;
     }
 
     //--------------------------------------------------------------------------
-    void VirtualChannel::buffer_messages(unsigned num_messages,
-                                         const void *args, size_t arglen)
+    /*static*/ void VirtualChannel::buffer_messages(unsigned num_messages,
+                                         const void *args, size_t arglen,
+                                         char *&receiving_buffer,
+                                         size_t &receiving_buffer_size,
+                                         unsigned &receiving_index,
+                                         unsigned &received_messages,
+                                         unsigned &partial_messages)
     //--------------------------------------------------------------------------
     {
       received_messages += num_messages;
+      partial_messages += 1; // up the number of partial messages received
       // Check to see if it fits
       if (receiving_buffer_size < (receiving_index+arglen))
       {
@@ -6465,37 +7293,15 @@ namespace Legion {
     //--------------------------------------------------------------------------
     MessageManager::MessageManager(AddressSpaceID remote,
                                    Runtime *rt, size_t max_message_size,
-                                   const std::set<Processor> &remote_util_procs)
-      : remote_address_space(remote), runtime(rt), channels((VirtualChannel*)
-                      malloc(MAX_NUM_VIRTUAL_CHANNELS*sizeof(VirtualChannel))) 
+                                   const Processor remote_util_group)
+      : remote_address_space(remote), runtime(rt), target(remote_util_group), 
+        channels((VirtualChannel*)
+                  malloc(MAX_NUM_VIRTUAL_CHANNELS*sizeof(VirtualChannel))) 
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(remote != runtime->address_space);
 #endif
-      // Figure out which processor to send to based on our address
-      // space ID.  If there is an explicit utility processor for one
-      // of the processors in our set then we use that.  Otherwise we
-      // round-robin senders onto different target processors on the
-      // remote node to avoid over-burdening any one of them with messages.
-      {
-        unsigned idx = 0;
-        const unsigned target_idx = rt->address_space % 
-                                    remote_util_procs.size();
-        // Iterate over all the processors and either choose a 
-        // utility processor to be our target or get the target processor
-        target = Processor::NO_PROC;
-        for (std::set<Processor>::const_iterator it = 
-              remote_util_procs.begin(); it != 
-              remote_util_procs.end(); it++,idx++)
-        {
-          if (idx == target_idx)
-            target = (*it);
-        }
-#ifdef DEBUG_LEGION
-        assert(target.exists());
-#endif
-      }
       // Initialize our virtual channels 
       for (unsigned idx = 0; idx < MAX_NUM_VIRTUAL_CHANNELS; idx++)
       {
@@ -6506,7 +7312,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     MessageManager::MessageManager(const MessageManager &rhs)
-      : remote_address_space(0), runtime(NULL), channels(NULL)
+      : remote_address_space(0), runtime(NULL),target(rhs.target),channels(NULL)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -6733,6 +7539,50 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::handle_remote_op_report_uninitialized(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      RemoteOp::handle_report_uninitialized(derez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_remote_op_profiling_count_update(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      RemoteOp::handle_report_profiling_count_update(derez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_remote_tracing_update(Deserializer &derez,
+                                               AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      RemoteTraceRecorder::handle_remote_update(derez, this, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_remote_tracing_response(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      RemoteTraceRecorder::handle_remote_response(derez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_remote_tracing_eq_request(Deserializer &derez,
+                                                   AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      RemoteMemoizable::handle_eq_request(derez, this, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_remote_tracing_eq_response(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      RemoteMemoizable::handle_eq_response(derez, this);
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ void ShutdownManager::handle_shutdown_notification(
                    Deserializer &derez, Runtime *runtime, AddressSpaceID source)
     //--------------------------------------------------------------------------
@@ -6793,103 +7643,6 @@ namespace Legion {
       result = false;
       wait_for.insert(pending_event);
       log_shutdown.info("Pending message on node %d", runtime->address_space);
-    }
-
-    /////////////////////////////////////////////////////////////
-    // Garbage Collection Epoch 
-    /////////////////////////////////////////////////////////////
-
-    //--------------------------------------------------------------------------
-    GarbageCollectionEpoch::GarbageCollectionEpoch(Runtime *rt)
-      : runtime(rt)
-    //--------------------------------------------------------------------------
-    {
-    }
-    
-    //--------------------------------------------------------------------------
-    GarbageCollectionEpoch::GarbageCollectionEpoch(
-                                              const GarbageCollectionEpoch &rhs)
-      : runtime(rhs.runtime)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    GarbageCollectionEpoch::~GarbageCollectionEpoch(void)
-    //--------------------------------------------------------------------------
-    {
-      runtime->complete_gc_epoch(this);
-    }
-
-    //--------------------------------------------------------------------------
-    GarbageCollectionEpoch& GarbageCollectionEpoch::operator=(
-                                              const GarbageCollectionEpoch &rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *this;
-    }
-
-    //--------------------------------------------------------------------------
-    void GarbageCollectionEpoch::add_collection(LogicalView *view, ApEvent term,
-                                                ReferenceMutator *mutator)
-    //--------------------------------------------------------------------------
-    {
-      std::map<LogicalView*,std::set<ApEvent> >::iterator finder = 
-        collections.find(view);
-      if (finder == collections.end())
-      {
-        // Add a garbage collection reference to the view, it will
-        // be removed in LogicalView::handle_deferred_collect
-        view->add_base_gc_ref(PENDING_GC_REF, mutator);
-        collections[view].insert(term);
-      }
-      else
-        finder->second.insert(term);
-    }
-
-    //--------------------------------------------------------------------------
-    bool GarbageCollectionEpoch::launch(RtEvent *done/*=NULL*/)
-    //--------------------------------------------------------------------------
-    {
-      if (collections.empty())
-        return true;
-      // Set remaining to the total number of collections + 1 for a guard
-      remaining = collections.size() + 1;
-      GarbageCollectionArgs args(this);
-      std::set<RtEvent> events;
-      for (std::map<LogicalView*,std::set<ApEvent> >::const_iterator it =
-            collections.begin(); it != collections.end(); it++)
-      {
-        args.view = it->first;
-        RtEvent precondition = Runtime::protect_merge_events(it->second);
-        RtEvent e = runtime->issue_runtime_meta_task(args,
-                LG_THROUGHPUT_WORK_PRIORITY, precondition);
-        if (done != NULL)
-          events.insert(e);
-      }
-      if (done != NULL)
-        *done = Runtime::merge_events(events);
-      // Remove our guard and return if we should delete this or not
-      return (__sync_add_and_fetch(&remaining, -1) == 0);
-    }
-
-    //--------------------------------------------------------------------------
-    bool GarbageCollectionEpoch::handle_collection(
-                                              const GarbageCollectionArgs *args)
-    //--------------------------------------------------------------------------
-    {
-      std::map<LogicalView*,std::set<ApEvent> >::iterator finder = 
-        collections.find(args->view);
-#ifdef DEBUG_LEGION
-      assert(finder != collections.end());
-#endif
-      LogicalView::handle_deferred_collect(args->view, finder->second);
-      // See if we are done
-      return (__sync_add_and_fetch(&remaining, -1) == 0);
     }
 
     /////////////////////////////////////////////////////////////
@@ -7095,9 +7848,12 @@ namespace Legion {
         has_return_type = impl->returns_value();
         all_idempotent  = impl->is_idempotent();
       }
+      // Check to see if this variant has already been registered
+      if (variants.find(impl->vid) != variants.end())
+        REPORT_LEGION_ERROR(ERROR_DUPLICATE_VARIANT_REGISTRATION,
+                      "Duplicate variant ID %d registered for task %s (ID %d)",
+                      impl->vid, get_name(false/*need lock*/), task_id)
       variants[impl->vid] = impl;
-      // Erase the outstanding request if there is one
-      outstanding_requests.erase(impl->vid);
       // Erase the pending VariantID if there is one
       pending_variants.erase(impl->vid);
     }
@@ -7114,63 +7870,11 @@ namespace Legion {
         if (finder != variants.end())
           return finder->second;
       }
-      // If we don't have it, see if we can go get it
-      AddressSpaceID owner_space = 
-        VariantImpl::get_owner_space(variant_id, runtime); 
-      if (owner_space == runtime->address_space)
-      {
-        if (can_fail)
-          return NULL;
+      if (!can_fail)
         REPORT_LEGION_ERROR(ERROR_UNREGISTERED_VARIANT, 
-                            "Unable to find variant %ld of task %s!",
+                            "Unable to find variant %d of task %s!",
                             variant_id, get_name())
-      }
-      // Retake the lock and see if we can send a request
-      RtEvent wait_on;
-      RtUserEvent request_event;
-      {
-        AutoLock t_lock(task_lock);
-        // Check to see if we lost the race
-        std::map<VariantID,VariantImpl*>::const_iterator finder = 
-          variants.find(variant_id);
-        if (finder != variants.end())
-          return finder->second;
-        std::map<VariantID,RtEvent>::const_iterator out_finder = 
-          outstanding_requests.find(variant_id);
-        if (out_finder == outstanding_requests.end())
-        {
-          request_event = Runtime::create_rt_user_event();
-          outstanding_requests[variant_id] = request_event;
-          wait_on = request_event;
-        }
-        else
-          wait_on = out_finder->second;
-      }
-      if (request_event.exists())
-      {
-        // Send a request to the owner node for the variant
-        Serializer rez;
-        {
-          RezCheck z(rez);
-          rez.serialize(task_id);
-          rez.serialize(variant_id);
-          rez.serialize(wait_on);
-          rez.serialize(can_fail);
-        }
-        runtime->send_variant_request(owner_space, rez);
-      }
-      // Wait for the results
-      wait_on.wait();
-      // Now we can re-take the lock and find our variant
-      AutoLock t_lock(task_lock,1,false/*exclusive*/);
-      std::map<VariantID,VariantImpl*>::const_iterator finder = 
-        variants.find(variant_id);
-      if (can_fail && (finder == variants.end()))
-        return NULL;
-#ifdef DEBUG_LEGION
-      assert(finder != variants.end());
-#endif
-      return finder->second;
+      return NULL;
     }
 
     //--------------------------------------------------------------------------
@@ -7195,7 +7899,7 @@ namespace Legion {
         for (std::map<VariantID,VariantImpl*>::const_iterator it = 
               variants.begin(); it != variants.end(); it++)
         {
-          if (kind == it->second->get_processor_kind(false/*warn*/))
+          if (it->second->can_use(kind, true/*warn*/))
             valid_variants.push_back(it->first);
         }
       }
@@ -7560,29 +8264,6 @@ namespace Legion {
       return (task_id % runtime->runtime_stride);
     }
 
-    //--------------------------------------------------------------------------
-    /*static*/ void TaskImpl::handle_variant_request(Runtime *runtime,
-                                     Deserializer &derez, AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      DerezCheck z(derez); 
-      TaskID task_id;
-      derez.deserialize(task_id);
-      VariantID variant_id;
-      derez.deserialize(variant_id);
-      RtUserEvent done_event;
-      derez.deserialize(done_event);
-      bool can_fail;
-      derez.deserialize(can_fail);
-      TaskImpl *task_impl = runtime->find_task_impl(task_id);
-      VariantImpl *var_impl = task_impl->find_variant_impl(variant_id,can_fail);
-      // If we can fail and there is no variant, just trigger the event
-      if (can_fail && (var_impl == NULL))
-        Runtime::trigger_event(done_event);
-      else
-        var_impl->send_variant_response(source, done_event);
-    }
-
     /////////////////////////////////////////////////////////////
     // Variant Impl 
     /////////////////////////////////////////////////////////////
@@ -7610,15 +8291,52 @@ namespace Legion {
       }
       else
         user_data = NULL;
+      // If we have a variant name, then record it
+      if (registrar.task_variant_name == NULL)
+      {
+        variant_name = (char*)malloc(64*sizeof(char));
+        snprintf(variant_name,64,"unnamed_variant_%d", vid);
+      }
+      else
+        variant_name = strdup(registrar.task_variant_name);
+      // If a global registration was requested, but the code descriptor
+      // provided does not have portable implementations, try to make one
+      // (if it fails, we'll complain below)
+      if (global && !realm_descriptor->has_portable_implementations())
+	realm_descriptor->create_portable_implementation();
       // Perform the registration, the normal case is not to have separate
       // runtime instances, but if we do have them, we only register on
       // the local processor
       if (!runtime->separate_runtime_instances)
       {
         Realm::ProfilingRequestSet profiling_requests;
-        ready_event = ApEvent(Processor::register_task_by_kind(
-            get_processor_kind(true), false/*global*/, descriptor_id, 
-            *realm_descriptor, profiling_requests, user_data, user_data_size));
+        const ProcessorConstraint &proc_constraint = 
+          execution_constraints.processor_constraint;
+        if (proc_constraint.valid_kinds.empty())
+        {
+          REPORT_LEGION_WARNING(LEGION_WARNING_MISSING_PROC_CONSTRAINT, 
+                     "NO PROCESSOR CONSTRAINT SPECIFIED FOR VARIANT"
+                     " %s (ID %d) OF TASK %s (ID %d)! ASSUMING LOC_PROC!",
+                     variant_name, vid, owner->get_name(false), owner->task_id)
+          ready_event = ApEvent(Processor::register_task_by_kind(
+                Processor::LOC_PROC, false/*global*/, descriptor_id, 
+                *realm_descriptor, profiling_requests, user_data, user_data_size));
+        }
+        else if (proc_constraint.valid_kinds.size() > 1)
+        {
+          std::set<ApEvent> ready_events;
+          for (std::vector<Processor::Kind>::const_iterator it = 
+                proc_constraint.valid_kinds.begin(); it !=
+                proc_constraint.valid_kinds.end(); it++)
+            ready_events.insert(ApEvent(Processor::register_task_by_kind(*it,
+                false/*global*/, descriptor_id, *realm_descriptor, 
+                profiling_requests, user_data, user_data_size)));
+          ready_event = Runtime::merge_events(NULL, ready_events);
+        }
+        else
+          ready_event = ApEvent(Processor::register_task_by_kind(
+                proc_constraint.valid_kinds[0], false/*global*/, descriptor_id, 
+                *realm_descriptor, profiling_requests, user_data, user_data_size));
       }
       else
       {
@@ -7641,16 +8359,8 @@ namespace Legion {
           handled_kinds.insert(kind);
         }
         if (!ready_events.empty())
-          ready_event = Runtime::merge_events(ready_events);
+          ready_event = Runtime::merge_events(NULL, ready_events);
       }
-      // If we have a variant name, then record it
-      if (registrar.task_variant_name == NULL)
-      {
-        variant_name = (char*)malloc(64*sizeof(char));
-        snprintf(variant_name,64,"unnamed_variant_%ld", vid);
-      }
-      else
-        variant_name = strdup(registrar.task_variant_name);
       // register this with the runtime profiler if we have to
       if (runtime->profiler != NULL)
         runtime->profiler->register_task_variant(own->task_id, vid,
@@ -7662,7 +8372,7 @@ namespace Legion {
                          "a portable implementation.", variant_name)
       if (leaf_variant && inner_variant)
         REPORT_LEGION_ERROR(ERROR_INNER_LEAF_MISMATCH, 
-                      "Task variant %s (ID %ld) of task %s (ID %d) is not "
+                      "Task variant %s (ID %d) of task %s (ID %d) is not "
                       "permitted to be both inner and leaf tasks "
                       "simultaneously.", variant_name, vid,
                       owner->get_name(), owner->task_id)
@@ -7737,7 +8447,13 @@ namespace Legion {
 #endif
       // Add any profiling requests
       if (runtime->profiler != NULL)
-        runtime->profiler->add_task_request(requests, owner->task_id, vid,task);
+      {
+        if (target.kind() == Processor::TOC_PROC)
+          runtime->profiler->add_gpu_task_request(requests, owner->task_id, 
+                                                  vid, task);
+        else
+          runtime->profiler->add_task_request(requests,owner->task_id,vid,task);
+      }
       // Increment the number of outstanding tasks
 #ifdef DEBUG_LEGION
       runtime->increment_total_outstanding_tasks(task->task_id, false/*meta*/);
@@ -7749,7 +8465,7 @@ namespace Legion {
       if (predicate_guard.exists())
       {
         // Merge in the predicate guard
-        ApEvent pre = Runtime::merge_events(precondition, ready_event, 
+        ApEvent pre = Runtime::merge_events(NULL, precondition, ready_event, 
                                             ApEvent(predicate_guard));
         // Have to protect the result in case it misspeculates
         return Runtime::ignorefaults(target.spawn(descriptor_id, 
@@ -7760,7 +8476,7 @@ namespace Legion {
         // No predicate guard
         if (!ready_event.has_triggered())
           return ApEvent(target.spawn(descriptor_id, &ctx, sizeof(ctx),requests,
-                   Runtime::merge_events(precondition, ready_event), priority));
+             Runtime::merge_events(NULL, precondition, ready_event), priority));
         return ApEvent(target.spawn(descriptor_id, &ctx, sizeof(ctx), requests, 
                                     precondition, priority));
       }
@@ -7783,62 +8499,19 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Processor::Kind VariantImpl::get_processor_kind(bool warn) const
+    bool VariantImpl::can_use(Processor::Kind kind, bool warn) const
     //--------------------------------------------------------------------------
     {
       const ProcessorConstraint &constraint = 
                                   execution_constraints.processor_constraint;
       if (constraint.is_valid())
-        return constraint.get_kind();
+        return constraint.can_use(kind);
       if (warn)
         REPORT_LEGION_WARNING(LEGION_WARNING_MISSING_PROC_CONSTRAINT, 
            "NO PROCESSOR CONSTRAINT SPECIFIED FOR VARIANT"
-                        " %s (ID %ld) OF TASK %s (ID %d)! ASSUMING LOC_PROC!",
+                        " %s (ID %d) OF TASK %s (ID %d)! ASSUMING LOC_PROC!",
                       variant_name, vid, owner->get_name(false),owner->task_id)
-      return Processor::LOC_PROC;
-    }
-
-    //--------------------------------------------------------------------------
-    void VariantImpl::send_variant_response(AddressSpaceID target, 
-                                            RtUserEvent done)
-    //--------------------------------------------------------------------------
-    {
-      if (!global)
-        REPORT_LEGION_ERROR(ERROR_ILLEGAL_USE_OF_NON_GLOBAL_VARIANT,
-                      "Illegal remote use of variant %s of task %s "
-                      "which was not globally registered.",
-                      variant_name, owner->get_name())
-      // Package up this variant and send it over to the target 
-      Serializer rez;
-      {
-        RezCheck z(rez);
-        rez.serialize(owner->task_id);
-        rez.serialize(vid);
-        rez.serialize(done);
-        rez.serialize(has_return_value);
-        // pack the code descriptors 
-        Realm::Serialization::ByteCountSerializer counter;
-        realm_descriptor->serialize(counter, true/*portable*/);
-        const size_t impl_size = counter.bytes_used();
-        rez.serialize(impl_size);
-        {
-          Realm::Serialization::FixedBufferSerializer 
-            serializer(rez.reserve_bytes(impl_size), impl_size);
-          realm_descriptor->serialize(serializer, true/*portable*/);
-        }
-        rez.serialize(user_data_size);
-        if (user_data_size > 0)
-          rez.serialize(user_data, user_data_size);
-        rez.serialize(leaf_variant);
-        rez.serialize(inner_variant);
-        rez.serialize(idempotent_variant);
-        size_t name_size = strlen(variant_name)+1;
-        rez.serialize(variant_name, name_size);
-        // Pack the constraints
-        execution_constraints.serialize(rez);
-        layout_constraints.serialize(rez);
-      }
-      runtime->send_variant_response(target, rez);
+      return (Processor::LOC_PROC == kind);
     }
 
     //--------------------------------------------------------------------------
@@ -7870,7 +8543,31 @@ namespace Legion {
             RezCheck z(rez);
             rez.serialize(owner->task_id);
             rez.serialize(vid);
+            // Extra padding to fix a realm bug for now
+            rez.serialize(vid);
             rez.serialize(next_done);
+            rez.serialize(has_return_value);
+            // pack the code descriptors 
+            Realm::Serialization::ByteCountSerializer counter;
+            realm_descriptor->serialize(counter, true/*portable*/);
+            const size_t impl_size = counter.bytes_used();
+            rez.serialize(impl_size);
+            {
+              Realm::Serialization::FixedBufferSerializer 
+                serializer(rez.reserve_bytes(impl_size), impl_size);
+              realm_descriptor->serialize(serializer, true/*portable*/);
+            }
+            rez.serialize(user_data_size);
+            if (user_data_size > 0)
+              rez.serialize(user_data, user_data_size);
+            rez.serialize(leaf_variant);
+            rez.serialize(inner_variant);
+            rez.serialize(idempotent_variant);
+            size_t name_size = strlen(variant_name)+1;
+            rez.serialize(variant_name, name_size);
+            // Pack the constraints
+            execution_constraints.serialize(rez);
+            layout_constraints.serialize(rez);
             rez.serialize(origin);
             rez.serialize(locals[idx]);
           }
@@ -7889,39 +8586,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
-      TaskID tid;
-      derez.deserialize(tid);
-      VariantID vid;
-      derez.deserialize(vid);
-      RtUserEvent done;
-      derez.deserialize(done);
-      AddressSpaceID origin;
-      derez.deserialize(origin);
-      AddressSpaceID local;
-      derez.deserialize(local);
-      VariantImpl *impl = runtime->find_variant_impl(tid, vid);
-      impl->broadcast_variant(done, origin, local);
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ AddressSpaceID VariantImpl::get_owner_space(VariantID vid,
-                                                           Runtime *runtime)
-    //--------------------------------------------------------------------------
-    {
-      return (vid % runtime->runtime_stride);
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void VariantImpl::handle_variant_response(Runtime *runtime,
-                                                         Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      DerezCheck z(derez);
       TaskID task_id;
       derez.deserialize(task_id);
       TaskVariantRegistrar registrar(task_id, false/*global*/);
       VariantID variant_id;
       derez.deserialize(variant_id);
+      // Extra padding to fix a realm bug for now
+      derez.deserialize(variant_id); 
       RtUserEvent done;
       derez.deserialize(done);
       bool has_return;
@@ -7969,7 +8640,12 @@ namespace Legion {
       // Ask the runtime to perform the registration 
       runtime->register_variant(registrar, user_data, user_data_size,
               realm_desc, has_return, variant_id, false/*check task*/);
-      Runtime::trigger_event(done);
+      AddressSpaceID origin;
+      derez.deserialize(origin);
+      AddressSpaceID local;
+      derez.deserialize(local);
+      VariantImpl *impl = runtime->find_variant_impl(task_id, variant_id);
+      impl->broadcast_variant(done, origin, local);
     }
 
     /////////////////////////////////////////////////////////////
@@ -7981,8 +8657,8 @@ namespace Legion {
                                      Runtime *rt, bool inter, DistributedID did)
       : LayoutConstraintSet(), DistributedCollectable(rt, (did > 0) ? did : 
           rt->get_available_distributed_id(), get_owner_space(lay_id, rt), 
-          (did == 0)), layout_id(lay_id), handle(h), internal(inter), 
-        constraints_name(NULL), layout_lock(gc_lock)
+          false/*register*/), layout_id(lay_id), handle(h), internal(inter), 
+        constraints_name(NULL)
     //--------------------------------------------------------------------------
     {
 #ifdef LEGION_GC
@@ -7996,9 +8672,9 @@ namespace Legion {
       const LayoutConstraintRegistrar &registrar, bool inter, DistributedID did)
       : LayoutConstraintSet(registrar.layout_constraints), 
         DistributedCollectable(rt, (did > 0) ? did : 
-            rt->get_available_distributed_id(), get_owner_space(lay_id, rt)), 
-        layout_id(lay_id), handle(registrar.handle), internal(inter), 
-        layout_lock(gc_lock)
+            rt->get_available_distributed_id(), get_owner_space(lay_id, rt),
+            false/*register with runtime*/), 
+        layout_id(lay_id), handle(registrar.handle), internal(inter)
     //--------------------------------------------------------------------------
     {
       if (registrar.layout_name == NULL)
@@ -8019,8 +8695,9 @@ namespace Legion {
                                          const LayoutConstraintSet &cons,
                                          FieldSpace h, bool inter)
       : LayoutConstraintSet(cons), DistributedCollectable(rt,
-          rt->get_available_distributed_id(), get_owner_space(lay_id, rt)), 
-        layout_id(lay_id), handle(h), internal(inter), layout_lock(gc_lock)
+          rt->get_available_distributed_id(), get_owner_space(lay_id, rt),
+          false/*register with runtime*/), 
+        layout_id(lay_id), handle(h), internal(inter)
     //--------------------------------------------------------------------------
     {
       constraints_name = (char*)malloc(64*sizeof(char));
@@ -8034,8 +8711,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     LayoutConstraints::LayoutConstraints(const LayoutConstraints &rhs)
       : LayoutConstraintSet(rhs), DistributedCollectable(NULL, 0, 0), 
-        layout_id(rhs.layout_id), handle(rhs.handle), internal(false),
-        layout_lock(gc_lock)
+        layout_id(rhs.layout_id), handle(rhs.handle), internal(false)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -8065,7 +8741,7 @@ namespace Legion {
     {
       // If we're not the owner add a remote reference
       if (!is_owner())
-        send_remote_gc_update(owner_space, mutator, 1/*count*/, true/*add*/);
+        send_remote_gc_increment(owner_space, mutator);
     }
 
     //--------------------------------------------------------------------------
@@ -8075,7 +8751,7 @@ namespace Legion {
       if (is_owner())
         runtime->unregister_layout(layout_id);
       else
-        send_remote_gc_update(owner_space, mutator, 1/*count*/, false/*add*/);
+        send_remote_gc_decrement(owner_space, RtEvent::NO_RT_EVENT, mutator);
     }
 
     //--------------------------------------------------------------------------
@@ -8115,9 +8791,7 @@ namespace Legion {
         rez.serialize(done_event);
       }
       runtime->send_constraint_response(target, rez);
-      // Hold our lock when updating our se of remote instances
-      AutoLock lay_lock(layout_lock);
-      remote_instances.add(target);
+      update_remote_instances(target);
     }
 
     //--------------------------------------------------------------------------
@@ -8137,95 +8811,162 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool LayoutConstraints::entails(LayoutConstraints *constraints,
-                                    unsigned total_dims)
+                unsigned total_dims, const LayoutConstraint **failed_constraint)
     //--------------------------------------------------------------------------
     {
+      const std::pair<LayoutConstraintID,unsigned> 
+        key(constraints->layout_id, total_dims);
       // Check to see if the result is in the cache
       {
         AutoLock lay(layout_lock,1,false/*exclusive*/);
-        std::map<LayoutConstraintID,bool>::const_iterator finder = 
-          entailment_cache.find(constraints->layout_id);
+        std::map<std::pair<LayoutConstraintID,unsigned>,
+                  const LayoutConstraint*>::const_iterator finder = 
+            entailment_cache.find(key);
         if (finder != entailment_cache.end())
-          return finder->second;
+        {
+          if (finder->second != NULL)
+          {
+            if (failed_constraint != NULL)
+              *failed_constraint = finder->second;
+            return false;
+          }
+          else
+            return true;
+        }
       }
       // Didn't find it, so do the test for real
-      bool result = entails(*constraints, total_dims);
+      const LayoutConstraint *result = NULL;
+      const bool entailment = entails(*constraints, total_dims, &result);
+#ifdef DEBUG_LEGION
+      assert(entailment ^ (result != NULL)); // only one should be true
+#endif
       // Save the result in the cache
       AutoLock lay(layout_lock);
-      entailment_cache[constraints->layout_id] = result;
-      return result;
+      entailment_cache[key] = result;
+      if (!entailment && (failed_constraint != NULL))
+        *failed_constraint = result;
+      return entailment;
     }
 
     //--------------------------------------------------------------------------
     bool LayoutConstraints::entails(const LayoutConstraintSet &other,
-                                    unsigned total_dims) const
+          unsigned total_dims, const LayoutConstraint **failed_constraint) const
     //--------------------------------------------------------------------------
     {
-      return LayoutConstraintSet::entails(other, total_dims);
+      return LayoutConstraintSet::entails(other, total_dims, failed_constraint);
     }
 
     //--------------------------------------------------------------------------
     bool LayoutConstraints::conflicts(LayoutConstraints *constraints,
-                                      unsigned total_dims)
+              unsigned total_dims, const LayoutConstraint **conflict_constraint)
     //--------------------------------------------------------------------------
     {
+      const std::pair<LayoutConstraintID,unsigned> 
+        key(constraints->layout_id, total_dims);
       // Check to see if the result is in the cache
       {
         AutoLock lay(layout_lock,1,false/*exclusive*/);
-        std::map<LayoutConstraintID,bool>::const_iterator finder = 
-          conflict_cache.find(constraints->layout_id);
+        std::map<std::pair<LayoutConstraintID,unsigned>,
+                  const LayoutConstraint*>::const_iterator finder = 
+          conflict_cache.find(key);
         if (finder != conflict_cache.end())
-          return finder->second;
+        {
+          if (finder->second != NULL)
+          {
+            if (conflict_constraint != NULL)
+              *conflict_constraint = finder->second;
+            return true;
+          }
+          else
+            return false;
+        }
       }
       // Didn't find it, so do the test for real
-      bool result = conflicts(*constraints, total_dims);
+      const LayoutConstraint *result = NULL;
+      const bool conflicted = conflicts(*constraints, total_dims, &result);
+#ifdef DEBUG_LEGION
+      assert(conflicted ^ (result == NULL)); // only one should be true
+#endif
       // Save the result in the cache
       AutoLock lay(layout_lock);
-      conflict_cache[constraints->layout_id] = result;
-      return result;
+      conflict_cache[key] = result;
+      if (conflicted && (conflict_constraint != NULL))
+        *conflict_constraint = result;
+      return conflicted;
     }
 
     //--------------------------------------------------------------------------
     bool LayoutConstraints::conflicts(const LayoutConstraintSet &other,
-                                      unsigned total_dims) const
+        unsigned total_dims, const LayoutConstraint **conflict_constraint) const
     //--------------------------------------------------------------------------
     {
-      return LayoutConstraintSet::conflicts(other, total_dims);
+      return LayoutConstraintSet::conflicts(other, total_dims, 
+                                            conflict_constraint);
     }
 
     //--------------------------------------------------------------------------
     bool LayoutConstraints::entails_without_pointer(
-                            LayoutConstraints *constraints, unsigned total_dims)
+                            LayoutConstraints *constraints, unsigned total_dims,
+                            const LayoutConstraint **failed_constraint)
     //--------------------------------------------------------------------------
     {
+      const std::pair<LayoutConstraintID,unsigned> 
+        key(constraints->layout_id, total_dims);
       // See if we have it in the cache
       {
         AutoLock lay(layout_lock,1,false/*exclusive*/);
-        std::map<LayoutConstraintID,bool>::const_iterator finder = 
-          no_pointer_entailment_cache.find(constraints->layout_id);
+        std::map<std::pair<LayoutConstraintID,unsigned>,
+                  const LayoutConstraint*>::const_iterator finder = 
+            no_pointer_entailment_cache.find(key);
         if (finder != no_pointer_entailment_cache.end())
-          return finder->second;
+        {
+          if (finder->second != NULL)
+          {
+            if (failed_constraint != NULL)
+              *failed_constraint = finder->second;
+            return false;
+          }
+          else
+            return true;
+        }
       }
       // Didn't find it so do the test for real
-      bool result = entails_without_pointer(*constraints, total_dims);
+      const LayoutConstraint *result = NULL;
+      const bool entailment = 
+        entails_without_pointer(*constraints, total_dims, &result);
       // Save the result in the cache
       AutoLock lay(layout_lock);
-      no_pointer_entailment_cache[constraints->layout_id] = result;
-      return result;
+      no_pointer_entailment_cache[key] = result;
+      if (!entailment && (failed_constraint != NULL))
+        *failed_constraint = result;
+      return entailment;
     }
 
     //--------------------------------------------------------------------------
     bool LayoutConstraints::entails_without_pointer(
-                    const LayoutConstraintSet &other, unsigned total_dims) const
+                          const LayoutConstraintSet &other, unsigned total_dims,
+                          const LayoutConstraint **failed_constraint) const
     //--------------------------------------------------------------------------
     {
       // Do all the normal entailment but don't check the pointer constraint 
       if (!specialized_constraint.entails(other.specialized_constraint))
+      {
+        if (failed_constraint != NULL)
+          *failed_constraint = &other.specialized_constraint; 
         return false;
+      }
       if (!field_constraint.entails(other.field_constraint))
+      {
+        if (failed_constraint != NULL)
+          *failed_constraint = &other.field_constraint;
         return false;
+      }
       if (!memory_constraint.entails(other.memory_constraint))
+      {
+        if (failed_constraint != NULL)
+          *failed_constraint = &other.memory_constraint;
         return false;
+      }
       if (!ordering_constraint.entails(other.ordering_constraint, total_dims))
         return false;
       for (std::vector<SplittingConstraint>::const_iterator it = 
@@ -8242,7 +8983,11 @@ namespace Legion {
           }
         }
         if (!entailed)
+        {
+          if (failed_constraint != NULL)
+            *failed_constraint = &(*it);
           return false;
+        }
       }
       for (std::vector<DimensionConstraint>::const_iterator it = 
             other.dimension_constraints.begin(); it != 
@@ -8258,7 +9003,11 @@ namespace Legion {
           }
         }
         if (!entailed)
+        {
+          if (failed_constraint != NULL)
+            *failed_constraint = &(*it);
           return false;
+        }
       }
       for (std::vector<AlignmentConstraint>::const_iterator it = 
             other.alignment_constraints.begin(); it != 
@@ -8274,7 +9023,11 @@ namespace Legion {
           }
         }
         if (!entailed)
+        {
+          if (failed_constraint != NULL)
+            *failed_constraint = &(*it);
           return false;
+        }
       }
       for (std::vector<OffsetConstraint>::const_iterator it = 
             other.offset_constraints.begin(); it != 
@@ -8290,7 +9043,11 @@ namespace Legion {
           }
         }
         if (!entailed)
+        {
+          if (failed_constraint != NULL)
+            *failed_constraint = &(*it);
           return false;
+        }
       }
       return true;
     }
@@ -8324,7 +9081,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ LayoutConstraintID LayoutConstraints::process_response(
+    /*static*/ void LayoutConstraints::process_response(
                    Runtime *runtime, Deserializer &derez, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
@@ -8342,14 +9099,10 @@ namespace Legion {
         new LayoutConstraints(lay_id, handle, runtime, internal, did);
       new_constraints->update_constraints(derez);
       std::set<RtEvent> preconditions;
+      WrapperReferenceMutator mutator(preconditions);
       // Now try to register this with the runtime
-      if (!runtime->register_layout(new_constraints))
+      if (!runtime->register_layout(new_constraints, &mutator))
         delete new_constraints;
-      else
-      {
-        WrapperReferenceMutator mutator(preconditions);
-        new_constraints->register_with_runtime(&mutator);
-      }
       // Trigger our done event and then return it
       RtUserEvent done_event;
       derez.deserialize(done_event);
@@ -8357,7 +9110,6 @@ namespace Legion {
         Runtime::trigger_event(done_event,Runtime::merge_events(preconditions));
       else
         Runtime::trigger_event(done_event);
-      return lay_id;
     }
 
     /////////////////////////////////////////////////////////////
@@ -8825,6 +9577,7 @@ namespace Legion {
         gc_epoch_size(config.gc_epoch_size),
         max_local_fields(config.max_local_fields),
         max_replay_parallelism(config.max_replay_parallelism),
+        implicit_top_level(config.implicit_top_level),
         program_order_execution(config.program_order_execution),
         dump_physical_traces(config.dump_physical_traces),
         no_tracing(config.no_tracing),
@@ -8834,6 +9587,8 @@ namespace Legion {
         replay_on_cpus(config.replay_on_cpus),
         verify_disjointness(config.verify_disjointness),
         runtime_warnings(config.runtime_warnings),
+        warnings_backtrace(config.warnings_backtrace),
+        report_leaks(config.report_leaks),
         separate_runtime_instances(config.separate_runtime_instances),
         record_registration(config.record_registration),
         stealing_disabled(config.stealing_disabled),
@@ -8854,8 +9609,8 @@ namespace Legion {
         verbose_logging(config.verbose_logging),
         logical_logging_only(config.logical_logging_only),
         physical_logging_only(config.physical_logging_only),
-        check_privileges(config.check_privileges),
 #endif
+        check_privileges(config.check_privileges),
         num_profiling_nodes(config.num_profiling_nodes),
         legion_collective_radix(config.legion_collective_radix),
         legion_collective_log_radix(config.legion_collective_log_radix),
@@ -8874,22 +9629,26 @@ namespace Legion {
         unique_index_tree_id((unique == 0) ? runtime_stride : unique),
         unique_region_tree_id((unique == 0) ? runtime_stride : unique),
         unique_operation_id((unique == 0) ? runtime_stride : unique),
-        unique_field_id(MAX_APPLICATION_FIELD_ID + 
+        unique_field_id(LEGION_MAX_APPLICATION_FIELD_ID + 
                         ((unique == 0) ? runtime_stride : unique)),
         unique_code_descriptor_id(LG_TASK_ID_AVAILABLE +
                         ((unique == 0) ? runtime_stride : unique)),
         unique_constraint_id((unique == 0) ? runtime_stride : unique),
+        unique_is_expr_id((unique == 0) ? runtime_stride : unique),
         unique_task_id(get_current_static_task_id()+unique),
         unique_mapper_id(get_current_static_mapper_id()+unique),
         unique_projection_id(get_current_static_projection_id()+unique),
+        unique_redop_id(get_current_static_reduction_id()+unique),
+        unique_serdez_id(get_current_static_serdez_id()+unique),
         unique_library_mapper_id(LEGION_INITIAL_LIBRARY_ID_OFFSET),
         unique_library_projection_id(LEGION_INITIAL_LIBRARY_ID_OFFSET),
         unique_library_task_id(LEGION_INITIAL_LIBRARY_ID_OFFSET),
-        unique_distributed_id((unique == 0) ? runtime_stride : unique),
-        gc_epoch_counter(0)
+        unique_library_redop_id(LEGION_INITIAL_LIBRARY_ID_OFFSET),
+        unique_library_serdez_id(LEGION_INITIAL_LIBRARY_ID_OFFSET),
+        unique_distributed_id((unique == 0) ? runtime_stride : unique)
     //--------------------------------------------------------------------------
     {
-      log_run.debug("Initializing high-level runtime in address space %x",
+      log_run.debug("Initializing Legion runtime in address space %x",
                             address_space);
       // Construct a local utility processor group
       if (local_utils.empty())
@@ -8926,26 +9685,23 @@ namespace Legion {
 #endif
         ProcessorManager *manager = new ProcessorManager(*it,
 				    (*it).kind(), this,
-                                    DEFAULT_MAPPER_SLOTS, 
+                                    LEGION_DEFAULT_MAPPER_SLOTS, 
                                     stealing_disabled,
                                     (replay_file != NULL));
         proc_managers[*it] = manager;
       }
       // Initialize the message manager array so that we can construct
       // message managers lazily as they are needed
-      for (unsigned idx = 0; idx < MAX_NUM_NODES; idx++)
+      for (unsigned idx = 0; idx < LEGION_MAX_NUM_NODES; idx++)
         message_managers[idx] = NULL;
       
       // Make the default number of contexts
       // No need to hold the lock yet because nothing is running
-      for (total_contexts = 0; total_contexts < DEFAULT_CONTEXTS; 
+      for (total_contexts = 0; total_contexts < LEGION_DEFAULT_CONTEXTS; 
             total_contexts++)
       {
         available_contexts.push_back(RegionTreeContext(total_contexts)); 
       }
-      // Create our first GC epoch
-      current_gc_epoch = new GarbageCollectionEpoch(this);
-      pending_gc_epochs.insert(current_gc_epoch);
       // Initialize our random number generator state
       random_state[0] = address_space & 0xFFFF; // low-order bits of node ID 
       random_state[1] = (address_space >> 16) & 0xFFFF; // high-order bits
@@ -8956,6 +9712,21 @@ namespace Legion {
       // Initialize our profiling instance
       if (address_space < num_profiling_nodes)
         initialize_legion_prof(config);
+#ifdef TRACE_ALLOCATION
+      allocation_tracing_count = 0;
+      // Instantiate all the kinds of allocations
+      for (unsigned idx = ARGUMENT_MAP_ALLOC; idx < LAST_ALLOC; idx++)
+        allocation_manager[((AllocationType)idx)] = AllocationTracker();
+#endif
+#ifdef LEGION_GC
+      {
+        REFERENCE_NAMES_ARRAY(reference_names);
+        for (unsigned idx = 0; idx < LAST_SOURCE_REF; idx++)
+        {
+          log_garbage.info("GC Source Kind %d %s", idx, reference_names[idx]);
+        }
+      }
+#endif
       // Pull in any static registrations that were done
       register_static_variants();
       register_static_constraints();
@@ -8970,21 +9741,6 @@ namespace Legion {
 	assert(tree_state_logger != NULL);
       } else {
 	tree_state_logger = NULL;
-      }
-#endif
-#ifdef TRACE_ALLOCATION
-      allocation_tracing_count = 0;
-      // Instantiate all the kinds of allocations
-      for (unsigned idx = ARGUMENT_MAP_ALLOC; idx < LAST_ALLOC; idx++)
-        allocation_manager[((AllocationType)idx)] = AllocationTracker();
-#endif
-#ifdef LEGION_GC
-      {
-        REFERENCE_NAMES_ARRAY(reference_names);
-        for (unsigned idx = 0; idx < LAST_SOURCE_REF; idx++)
-        {
-          log_garbage.info("GC Source Kind %d %s", idx, reference_names[idx]);
-        }
       }
 #endif
 #ifdef DEBUG_SHUTDOWN_HANG
@@ -9017,6 +9773,7 @@ namespace Legion {
         gc_epoch_size(rhs.gc_epoch_size), 
         max_local_fields(rhs.max_local_fields),
         max_replay_parallelism(rhs.max_replay_parallelism),
+        implicit_top_level(rhs.implicit_top_level),
         program_order_execution(rhs.program_order_execution),
         dump_physical_traces(rhs.dump_physical_traces),
         no_tracing(rhs.no_tracing),
@@ -9026,6 +9783,8 @@ namespace Legion {
         replay_on_cpus(rhs.replay_on_cpus),
         verify_disjointness(rhs.verify_disjointness),
         runtime_warnings(rhs.runtime_warnings),
+        warnings_backtrace(rhs.warnings_backtrace),
+        report_leaks(rhs.report_leaks),
         separate_runtime_instances(rhs.separate_runtime_instances),
         record_registration(rhs.record_registration),
         stealing_disabled(rhs.stealing_disabled),
@@ -9042,8 +9801,8 @@ namespace Legion {
         verbose_logging(rhs.verbose_logging),
         logical_logging_only(rhs.logical_logging_only),
         physical_logging_only(rhs.physical_logging_only),
-        check_privileges(rhs.check_privileges),
 #endif
+        check_privileges(rhs.check_privileges),
         num_profiling_nodes(rhs.num_profiling_nodes),
         legion_collective_radix(rhs.legion_collective_radix),
         legion_collective_log_radix(rhs.legion_collective_log_radix),
@@ -9064,7 +9823,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Make sure we don't send anymore messages
-      for (unsigned idx = 0; idx < MAX_NUM_NODES; idx++)
+      for (unsigned idx = 0; idx < LEGION_MAX_NUM_NODES; idx++)
       {
         if (message_managers[idx] != NULL)
         {
@@ -9161,33 +9920,13 @@ namespace Legion {
         delete (*it);
       }
       available_deletion_ops.clear();
-      for (std::deque<OpenOp*>::const_iterator it = 
-            available_open_ops.begin(); it !=
-            available_open_ops.end(); it++)
+      for (std::deque<MergeCloseOp*>::const_iterator it = 
+            available_merge_close_ops.begin(); it !=
+            available_merge_close_ops.end(); it++)
       {
         delete (*it);
       }
-      available_open_ops.clear();
-      for (std::deque<AdvanceOp*>::const_iterator it = 
-            available_advance_ops.begin(); it !=
-            available_advance_ops.end(); it++)
-      {
-        delete (*it);
-      }
-      available_advance_ops.clear();
-      for (std::deque<InterCloseOp*>::const_iterator it = 
-            available_inter_close_ops.begin(); it !=
-            available_inter_close_ops.end(); it++)
-      {
-        delete (*it);
-      }
-      available_inter_close_ops.clear();
-      for (std::deque<ReadCloseOp*>::const_iterator it = 
-            available_read_close_ops.begin(); it != 
-            available_read_close_ops.end(); it++)
-      {
-        delete (*it);
-      }
+      available_merge_close_ops.clear();
       for (std::deque<PostCloseOp*>::const_iterator it = 
             available_post_close_ops.begin(); it !=
             available_post_close_ops.end(); it++)
@@ -9265,6 +10004,27 @@ namespace Legion {
         delete (*it);
       }
       available_trace_ops.clear();
+      for (std::deque<TraceReplayOp*>::const_iterator it = 
+            available_replay_ops.begin(); it !=
+            available_replay_ops.end(); it++)
+      {
+        delete (*it);
+      }
+      available_replay_ops.clear();
+      for (std::deque<TraceBeginOp*>::const_iterator it = 
+            available_begin_ops.begin(); it !=
+            available_begin_ops.end(); it++)
+      {
+        delete (*it);
+      }
+      available_begin_ops.clear();
+      for (std::deque<TraceSummaryOp*>::const_iterator it = 
+            available_summary_ops.begin(); it !=
+            available_summary_ops.end(); it++)
+      {
+        delete (*it);
+      }
+      available_summary_ops.clear();
       for (std::deque<MustEpochOp*>::const_iterator it = 
             available_epoch_ops.begin(); it !=
             available_epoch_ops.end(); it++)
@@ -9591,62 +10351,62 @@ namespace Legion {
         {
           switch (kind)
           {
-            case GLOBAL_MEM:
+	    case Memory::GLOBAL_MEM:
               {
                 LegionSpy::log_memory_kind(kind, "GASNet");
                 break;
               }
-            case SYSTEM_MEM:
+	    case Memory::SYSTEM_MEM:
               {
                 LegionSpy::log_memory_kind(kind, "System");
                 break;
               }
-            case REGDMA_MEM:
+	    case Memory::REGDMA_MEM:
               {
                 LegionSpy::log_memory_kind(kind, "Registered");
                 break;
               }
-            case SOCKET_MEM:
+	    case Memory::SOCKET_MEM:
               {
                 LegionSpy::log_memory_kind(kind, "NUMA");
                 break;
               }
-            case Z_COPY_MEM:
+	    case Memory::Z_COPY_MEM:
               {
                 LegionSpy::log_memory_kind(kind, "Zero-Copy");
                 break;
               }
-            case GPU_FB_MEM:
+	    case Memory::GPU_FB_MEM:
               {
                 LegionSpy::log_memory_kind(kind, "Framebuffer");
                 break;
               }
-            case DISK_MEM:
+	    case Memory::DISK_MEM:
               {
                 LegionSpy::log_memory_kind(kind, "Disk");
                 break;
               }
-            case HDF_MEM:
+	    case Memory::HDF_MEM:
               {
                 LegionSpy::log_memory_kind(kind, "HDF");
                 break;
               }
-            case FILE_MEM:
+	    case Memory::FILE_MEM:
               {
                 LegionSpy::log_memory_kind(kind, "File");
                 break;
               }
-            case LEVEL3_CACHE:
+	    case Memory::LEVEL3_CACHE:
               {
                 LegionSpy::log_memory_kind(kind, "L3");
                 break;
               }
-            case LEVEL2_CACHE:
+	    case Memory::LEVEL2_CACHE:
               {
                 LegionSpy::log_memory_kind(kind, "L2");
                 break;
               }
-            case LEVEL1_CACHE:
+	    case Memory::LEVEL1_CACHE:
               {
                 LegionSpy::log_memory_kind(kind, "L1");
                 break;
@@ -9730,12 +10490,14 @@ namespace Legion {
           }
 #endif
           // Now ask the application what it wants to do
-          if (!Runtime::registration_callbacks.empty())
+          const std::vector<RegistrationCallbackFnptr> &registration_callbacks
+            = get_pending_registration_callbacks();
+          if (!registration_callbacks.empty())
           {
             log_run.info("Invoking mapper registration callback functions...");
             for (std::vector<RegistrationCallbackFnptr>::const_iterator it = 
-                  Runtime::registration_callbacks.begin(); it !=
-                  Runtime::registration_callbacks.end(); it++)
+                  registration_callbacks.begin(); it !=
+                  registration_callbacks.end(); it++)
               (**it)(machine, external, local_procs);
             log_run.info("Finished execution of mapper registration callbacks");
           }
@@ -9822,8 +10584,10 @@ namespace Legion {
           it->second->startup_mappers();
       }
       // If we are runtime 0 then we launch the top-level task
-      if (address_space == 0)
+      if ((address_space == 0) && !this->implicit_top_level)
       {
+        if (legion_spy_enabled)
+          log_machine(machine);
 #ifdef DEBUG_LEGION
         assert(!local_procs.empty());
 #endif 
@@ -9853,11 +10617,11 @@ namespace Legion {
         top_context->add_reference();
         // Set the executing processor
         top_context->set_executing_processor(target);
-        TaskLauncher launcher(Runtime::legion_main_id, TaskArgument());
+        TaskLauncher launcher(Runtime::legion_main_id, TaskArgument(),
+                              Predicate::TRUE_PRED, legion_main_mapper_id);
         // Mark that this task is the top-level task
-        top_task->set_top_level();
         top_task->initialize_task(top_context, launcher, 
-                                  false/*check priv*/, false/*track parent*/);
+                                  false/*track parent*/,true/*top level task*/);
         // Set up the input arguments
         top_task->arglen = sizeof(InputArgs);
         top_task->args = malloc(top_task->arglen);
@@ -9865,13 +10629,6 @@ namespace Legion {
         // Set this to be the current processor
         top_task->set_current_proc(target);
         top_task->select_task_options();
-        if (legion_spy_enabled)
-        {
-          log_machine(machine);
-          LegionSpy::log_top_level_task(Runtime::legion_main_id,
-                                        top_task->get_unique_id(),
-                                        top_task->get_task_name());
-        }
         increment_outstanding_top_level_tasks();
         // Launch a task to deactivate the top-level context
         // when the top-level task is done
@@ -9906,8 +10663,8 @@ namespace Legion {
     
     //--------------------------------------------------------------------------
     ApEvent Runtime::launch_mapper_task(Mapper *mapper, Processor proc, 
-                                        Processor::TaskFuncID tid,
-                                        const TaskArgument &arg,MapperID map_id)
+                                        TaskID tid, const TaskArgument &arg,
+                                        MapperID map_id)
     //--------------------------------------------------------------------------
     {
       // Get an individual task to be the top-level task
@@ -9919,7 +10676,7 @@ namespace Legion {
       map_context->set_executing_processor(proc);
       TaskLauncher launcher(tid, arg, Predicate::TRUE_PRED, map_id);
       Future f = mapper_task->initialize_task(map_context, launcher, 
-                                   false/*check priv*/, false/*track parent*/);
+                                              false/*track parent*/);
       mapper_task->set_current_proc(proc);
       mapper_task->select_task_options();
       // Create a temporary event to name the result since we 
@@ -9999,38 +10756,25 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::destroy_index_space(Context ctx, IndexSpace handle)
+    void Runtime::destroy_index_space(Context ctx, IndexSpace handle,
+                                      const bool unordered)
     //--------------------------------------------------------------------------
     {
       if (!handle.exists())
         return;
       if (ctx == DUMMY_CONTEXT)
         REPORT_DUMMY_CONTEXT("Illegal dummy context destroy index space!");
-      ctx->destroy_index_space(handle);
+      ctx->destroy_index_space(handle, unordered);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::finalize_index_space_destroy(IndexSpace handle)
-    //--------------------------------------------------------------------------
-    {
-      forest->destroy_index_space(handle, address_space);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::destroy_index_partition(Context ctx, 
-                                                   IndexPartition handle)
+    void Runtime::destroy_index_partition(Context ctx, IndexPartition handle,
+                                          const bool unordered)
     //--------------------------------------------------------------------------
     {
       if (ctx == DUMMY_CONTEXT)
         REPORT_DUMMY_CONTEXT("Illegal dummy context destroy index partition!");
-      ctx->destroy_index_partition(handle);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::finalize_index_partition_destroy(IndexPartition handle)
-    //--------------------------------------------------------------------------
-    {
-      forest->destroy_index_partition(handle, address_space);
+      ctx->destroy_index_partition(handle, unordered);
     }
 
     //--------------------------------------------------------------------------
@@ -10101,6 +10845,31 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    IndexPartition Runtime::create_partition_by_intersection(Context ctx, 
+                                                      IndexSpace parent,
+                                                      IndexPartition partition,
+                                                      PartitionKind kind,
+                                                      Color color, 
+                                                      bool dominates)
+    //--------------------------------------------------------------------------
+    {
+      if (ctx == DUMMY_CONTEXT)
+        REPORT_DUMMY_CONTEXT(
+            "Illegal dummy context create partition by intersection!");
+      IndexPartition result = 
+        ctx->create_partition_by_intersection(forest, parent, partition,
+                                              kind, color, dominates);
+      if (verify_disjointness && ((kind == DISJOINT_KIND) ||
+            (kind == DISJOINT_COMPLETE_KIND) ||
+            (kind == DISJOINT_INCOMPLETE_KIND)) && !forest->is_disjoint(result))
+        REPORT_LEGION_ERROR(ERROR_DISJOINTNESS_TEST_FAILURE,
+                            "Disjointness test failure for create partition "
+                            "by intersection in task %s (UID %lld)",
+                            ctx->get_task_name(), ctx->get_unique_id())
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
     IndexPartition Runtime::create_partition_by_difference(Context ctx, 
                                                       IndexSpace parent,
                                                       IndexPartition handle1,
@@ -10149,24 +10918,15 @@ namespace Legion {
         // This code will only work if the color space has type coord_t
         switch (color_space.get_dim())
         {
-          case 1:
-            {
-              TypeTag type_tag = NT_TemplateHelper::encode_tag<1,coord_t>();
-              assert(handle1.get_type_tag() == type_tag);
-              break;
+#define DIMFUNC(DIM) \
+          case DIM: \
+            { \
+              TypeTag type_tag = NT_TemplateHelper::encode_tag<DIM,coord_t>(); \
+              assert(handle1.get_type_tag() == type_tag); \
+              break; \
             }
-          case 2:
-            {
-              TypeTag type_tag = NT_TemplateHelper::encode_tag<2,coord_t>();
-              assert(handle1.get_type_tag() == type_tag);
-              break;
-            }
-          case 3:
-            {
-              TypeTag type_tag = NT_TemplateHelper::encode_tag<3,coord_t>();
-              assert(handle1.get_type_tag() == type_tag);
-              break;
-            }
+          LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
           default:
             assert(false);
         }
@@ -10175,24 +10935,15 @@ namespace Legion {
           IndexSpace subspace;
           switch (color_space.get_dim())
           {
-            case 1:
-              {
-                const Point<1,coord_t> p(itr.p);
-                subspace = get_index_subspace(handle1, &p, sizeof(p));
-                break;
+#define DIMFUNC(DIM) \
+            case DIM: \
+              { \
+                const Point<DIM,coord_t> p(itr.p); \
+                subspace = get_index_subspace(handle1, &p, sizeof(p)); \
+                break; \
               }
-            case 2:
-              {
-                const Point<2,coord_t> p(itr.p);
-                subspace = get_index_subspace(handle1, &p, sizeof(p));
-                break;
-              }
-            case 3:
-              {
-                const Point<3,coord_t> p(itr.p);
-                subspace = get_index_subspace(handle1, &p, sizeof(p));
-                break;
-              }
+            LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
             default:
               assert(false);
           }
@@ -10613,27 +11364,16 @@ namespace Legion {
       const IndexSpace color_space = part->color_space->handle;
       switch (NT_TemplateHelper::get_dim(color_space.get_type_tag()))
       {
-        case 1:
-          {
-            DomainT<1,coord_t> color_index_space;
-            forest->get_index_space_domain(color_space, &color_index_space,
-                                           color_space.get_type_tag());
-            return Domain(color_index_space);
+#define DIMFUNC(DIM) \
+        case DIM: \
+          { \
+            DomainT<DIM,coord_t> color_index_space; \
+            forest->get_index_space_domain(color_space, &color_index_space, \
+                                           color_space.get_type_tag()); \
+            return Domain(color_index_space); \
           }
-        case 2:
-          {
-            DomainT<2,coord_t> color_index_space;
-            forest->get_index_space_domain(color_space, &color_index_space,
-                                           color_space.get_type_tag());
-            return Domain(color_index_space);
-          }
-        case 3:
-          {
-            DomainT<3,coord_t> color_index_space;
-            forest->get_index_space_domain(color_space, &color_index_space,
-                                           color_space.get_type_tag());
-            return Domain(color_index_space);
-          }
+        LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
         default:
           assert(false);
       }
@@ -10909,12 +11649,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::destroy_field_space(Context ctx, FieldSpace handle)
+    void Runtime::destroy_field_space(Context ctx, FieldSpace handle,
+                                      const bool unordered)
     //--------------------------------------------------------------------------
     {
       if (ctx == DUMMY_CONTEXT)
         REPORT_DUMMY_CONTEXT("Illegal dummy context destroy field space!");
-      ctx->destroy_field_space(handle);
+      ctx->destroy_field_space(handle, unordered);
     }
 
     //--------------------------------------------------------------------------
@@ -10957,29 +11698,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::finalize_field_space_destroy(FieldSpace handle)
-    //--------------------------------------------------------------------------
-    {
-      forest->destroy_field_space(handle, address_space);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::finalize_field_destroy(FieldSpace handle, FieldID fid)
-    //--------------------------------------------------------------------------
-    {
-      forest->free_field(handle, fid);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::finalize_field_destroy(FieldSpace handle, 
-                                               const std::set<FieldID> &to_free)
-    //--------------------------------------------------------------------------
-    {
-      std::vector<FieldID> dense(to_free.begin(), to_free.end());
-      forest->free_fields(handle, dense);
-    }
-
-    //--------------------------------------------------------------------------
     LogicalRegion Runtime::create_logical_region(Context ctx, 
                 IndexSpace index_space, FieldSpace field_space, bool task_local)
     //--------------------------------------------------------------------------
@@ -10992,38 +11710,25 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::destroy_logical_region(Context ctx, LogicalRegion handle)
+    void Runtime::destroy_logical_region(Context ctx, LogicalRegion handle,
+                                         const bool unordered)
     //--------------------------------------------------------------------------
     {
       if (ctx == DUMMY_CONTEXT)
         REPORT_DUMMY_CONTEXT(
             "Illegal dummy context destroy logical region!");
-      ctx->destroy_logical_region(handle); 
+      ctx->destroy_logical_region(handle, unordered); 
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::destroy_logical_partition(Context ctx,LogicalPartition handle)
+    void Runtime::destroy_logical_partition(Context ctx,LogicalPartition handle,
+                                            const bool unordered)
     //--------------------------------------------------------------------------
     {
       if (ctx == DUMMY_CONTEXT)
         REPORT_DUMMY_CONTEXT(
             "Illegal dummy context destroy logical partition!");
-      ctx->destroy_logical_partition(handle); 
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::finalize_logical_region_destroy(LogicalRegion handle)
-    //--------------------------------------------------------------------------
-    {
-      forest->destroy_logical_region(handle, address_space);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::finalize_logical_partition_destroy(
-                                                        LogicalPartition handle)
-    //--------------------------------------------------------------------------
-    {
-      forest->destroy_logical_partition(handle, address_space);
+      ctx->destroy_logical_partition(handle, unordered); 
     }
 
     //--------------------------------------------------------------------------
@@ -11328,14 +12033,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    FieldAllocator Runtime::create_field_allocator(Context ctx, 
-                                                            FieldSpace handle)
+    FieldAllocator Runtime::create_field_allocator(Context ctx,
+                                                   FieldSpace handle)
     //--------------------------------------------------------------------------
     {
       if (ctx == DUMMY_CONTEXT)
         REPORT_DUMMY_CONTEXT(
             "Illegal dummy context create field allocator!");
-      return ctx->create_field_allocator(external, handle); 
+      return FieldAllocator(ctx->create_field_allocator(handle)); 
     }
 
     //--------------------------------------------------------------------------
@@ -11370,12 +12075,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     Future Runtime::execute_index_space(Context ctx, 
-                         const IndexTaskLauncher &launcher, ReductionOpID redop)
+     const IndexTaskLauncher &launcher, ReductionOpID redop, bool deterministic)
     //--------------------------------------------------------------------------
     {
       if (ctx == DUMMY_CONTEXT)
         REPORT_DUMMY_CONTEXT("Illegal dummy context execute index space!");
-      return ctx->execute_index_space(launcher, redop); 
+      return ctx->execute_index_space(launcher, redop, deterministic); 
     }
 
     //--------------------------------------------------------------------------
@@ -11461,13 +12166,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Future Runtime::detach_external_resource(Context ctx, PhysicalRegion region)
+    Future Runtime::detach_external_resource(Context ctx, PhysicalRegion region,
+                                         const bool flush, const bool unordered)
     //--------------------------------------------------------------------------
     {
       if (ctx == DUMMY_CONTEXT)
         REPORT_DUMMY_CONTEXT(
             "Illegal dummy context detach external resource!");
-      return ctx->detach_resource(region);
+      return ctx->detach_resource(region, flush, unordered);
     }
 
     //--------------------------------------------------------------------------
@@ -11731,18 +12437,7 @@ namespace Legion {
       if (ctx == DUMMY_CONTEXT)
         REPORT_DUMMY_CONTEXT(
             "Illegal dummy context get dynamic collective result!");
-#ifdef DEBUG_LEGION
-      log_run.debug("Get dynamic collective result in task %s (ID %lld)",
-                          ctx->get_task_name(), ctx->get_unique_id());
-#endif
-      ctx->begin_runtime_call();
-      DynamicCollectiveOp *collective = 
-        get_available_dynamic_collective_op();
-      Future result = collective->initialize(ctx, dc);
-      Processor proc = ctx->get_executing_processor();
-      add_to_dependence_queue(ctx, proc, collective);
-      ctx->end_runtime_call();
-      return result;
+      return ctx->get_dynamic_collective_result(dc);
     }
 
     //--------------------------------------------------------------------------
@@ -11874,7 +12569,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     Future Runtime::select_tunable_value(Context ctx, TunableID tid,
-                                         MapperID mid, MappingTagID tag)
+                                         MapperID mid, MappingTagID tag,
+                                         const void *args, size_t argsize)
     //--------------------------------------------------------------------------
     {
       if (ctx == DUMMY_CONTEXT)
@@ -11892,11 +12588,11 @@ namespace Legion {
       // Make this here to get a local reference on it now
       Future result_future(result);
       result->add_base_gc_ref(FUTURE_HANDLE_REF);
-      SelectTunableArgs args(ctx->get_owner_task()->get_unique_op_id(),
-          mid, tag, tid, ctx, result);
+      SelectTunableArgs task_args(ctx->get_owner_task()->get_unique_op_id(),
+          mid, tag, tid, args, argsize, ctx, result);
       if (legion_spy_enabled)
-        args.tunable_index = ctx->get_tunable_index();
-      issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY); 
+        task_args.tunable_index = ctx->get_tunable_index();
+      issue_runtime_meta_task(task_args, LG_LATENCY_WORK_PRIORITY); 
       ctx->end_runtime_call();
       return result_future;
     }
@@ -11909,7 +12605,7 @@ namespace Legion {
       if (ctx == DUMMY_CONTEXT)
         REPORT_DUMMY_CONTEXT("Illegal dummy context get tunable value!");
       ctx->begin_runtime_call();
-      Future f = select_tunable_value(ctx, tid, mid, tag);
+      Future f = select_tunable_value(ctx, tid, mid, tag, NULL, 0);
       int result = f.get_result<int>();
       if (legion_spy_enabled)
       {
@@ -11932,6 +12628,8 @@ namespace Legion {
       Mapper::SelectTunableOutput output;
       input.tunable_id = args->tunable_id;
       input.mapping_tag = args->tag;
+      input.args = args->args;
+      input.size = args->argsize;
       output.value = NULL;
       output.size = 0;
       output.take_ownership = true;
@@ -11944,7 +12642,7 @@ namespace Legion {
       if ((output.value != NULL) && (output.size > 0))
         args->result->set_result(output.value, output.size, 
                                  output.take_ownership);
-      args->result->complete_future();
+      args->result->complete_future(); 
     }
 
     //--------------------------------------------------------------------------
@@ -12231,7 +12929,7 @@ namespace Legion {
     /*static*/ MapperID& Runtime::get_current_static_mapper_id(void)
     //--------------------------------------------------------------------------
     {
-      static MapperID current_mapper_id = MAX_APPLICATION_MAPPER_ID;
+      static MapperID current_mapper_id = LEGION_MAX_APPLICATION_MAPPER_ID;
       return current_mapper_id;
     }
 
@@ -12302,6 +13000,20 @@ namespace Legion {
           assert(false);
       }
       return manager;
+    }
+
+    //--------------------------------------------------------------------------
+    MapperManager* Runtime::find_mapper(MapperID map_id)
+    //--------------------------------------------------------------------------
+    {
+      for (std::map<Processor,ProcessorManager*>::const_iterator it = 
+            proc_managers.begin(); it != proc_managers.end(); it++)
+      {
+        MapperManager *result = it->second->find_mapper(map_id);
+        if (result != NULL)
+          return result;
+      }
+      return NULL;
     }
 
     //--------------------------------------------------------------------------
@@ -12447,7 +13159,8 @@ namespace Legion {
     /*static*/ ProjectionID& Runtime::get_current_static_projection_id(void)
     //--------------------------------------------------------------------------
     {
-      static ProjectionID current_projection_id = MAX_APPLICATION_PROJECTION_ID;
+      static ProjectionID current_projection_id = 
+        LEGION_MAX_APPLICATION_PROJECTION_ID;
       return current_projection_id;
     }
 
@@ -12467,7 +13180,8 @@ namespace Legion {
     void Runtime::register_projection_functor(ProjectionID pid,
                                               ProjectionFunctor *functor,
                                               bool need_zero_check,
-                                              bool silence_warnings)
+                                              bool silence_warnings,
+                                              const char *warning_string)
     //--------------------------------------------------------------------------
     {
       if (need_zero_check && (pid == 0))
@@ -12479,8 +13193,9 @@ namespace Legion {
                         "registered for a multi-node run with %d nodes. It is "
                         "currently the responsibility of the application to "
                         "ensure that this projection functor is registered on "
-                        "all nodes where it will be required.",
-                        pid, total_address_spaces)
+                        "all nodes where it will be required. "
+                        "Warning string: %s", pid, total_address_spaces,
+                        (warning_string == NULL) ? "" : warning_string)
       ProjectionFunction *function = new ProjectionFunction(pid, functor);
       AutoLock p_lock(projection_lock);
       // No need for a lock because these all need to be reserved at
@@ -12694,50 +13409,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    FieldID Runtime::allocate_field(Context ctx, FieldSpace space,
-                                          size_t field_size, FieldID fid,
-                                          bool local, CustomSerdezID serdez_id)
-    //--------------------------------------------------------------------------
-    {
-      if (ctx == DUMMY_CONTEXT)
-        REPORT_DUMMY_CONTEXT("Illegal dummy context allocate field!");
-      return ctx->allocate_field(forest, space, field_size, 
-                                 fid, local, serdez_id); 
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::free_field(Context ctx, FieldSpace space, FieldID fid)
-    //--------------------------------------------------------------------------
-    {
-      if (ctx == DUMMY_CONTEXT)
-        REPORT_DUMMY_CONTEXT("Illegal dummy context free field!");
-      ctx->free_field(space, fid); 
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::allocate_fields(Context ctx, FieldSpace space,
-                                        const std::vector<size_t> &sizes,
-                                        std::vector<FieldID> &resulting_fields,
-                                        bool local, CustomSerdezID serdez_id)
-    //--------------------------------------------------------------------------
-    {
-      if (ctx == DUMMY_CONTEXT)
-        REPORT_DUMMY_CONTEXT("Illegal dummy context allocate fields!");
-      ctx->allocate_fields(forest, space, sizes, resulting_fields, 
-                           local, serdez_id); 
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::free_fields(Context ctx, FieldSpace space,
-                                    const std::set<FieldID> &to_free)
-    //--------------------------------------------------------------------------
-    {
-      if (ctx == DUMMY_CONTEXT)
-        REPORT_DUMMY_CONTEXT("Illegal dummy context free fields!");
-      ctx->free_fields(space, to_free); 
-    }
-
-    //--------------------------------------------------------------------------
     TaskID Runtime::generate_dynamic_task_id(void)
     //--------------------------------------------------------------------------
     {
@@ -12862,20 +13533,21 @@ namespace Legion {
     //--------------------------------------------------------------------------
     VariantID Runtime::register_variant(const TaskVariantRegistrar &registrar,
                                   const void *user_data, size_t user_data_size,
-                                  CodeDescriptor *realm,
+                                  CodeDescriptor *realm_code_desc,
                                   bool ret,VariantID vid /*= AUTO_GENERATE_ID*/,
                                   bool check_task_id /*= true*/)
     //--------------------------------------------------------------------------
     {
       // TODO: figure out a way to make this check safe with dynamic generation
 #if 0
-      if (check_task_id && (registrar.task_id >= MAX_APPLICATION_TASK_ID))
+      if (check_task_id && 
+          (registrar.task_id >= LEGION_MAX_APPLICATION_TASK_ID))
         REPORT_LEGION_ERROR(ERROR_MAX_APPLICATION_TASK_ID_EXCEEDED, 
                       "Error registering task with ID %d. Exceeds the "
                       "statically set bounds on application task IDs of %d. "
                       "See %s in legion_config.h.", 
-                      registrar.task_id, MAX_APPLICATION_TASK_ID, 
-                      LEGION_MACRO_TO_STRING(MAX_APPLICATION_TASK_ID))
+                      registrar.task_id, LEGION_MAX_APPLICATION_TASK_ID, 
+                      LEGION_MACRO_TO_STRING(LEGION_MAX_APPLICATION_TASK_ID))
 #endif
       // First find the task implementation
       TaskImpl *task_impl = find_or_create_task_impl(registrar.task_id);
@@ -12889,7 +13561,7 @@ namespace Legion {
                       "generators.", registrar.task_id)
       // Make our variant and add it to the set of variants
       VariantImpl *impl = new VariantImpl(this, vid, task_impl, 
-                                          registrar, ret, realm,
+                                          registrar, ret, realm_code_desc,
                                           user_data, user_data_size);
       // Add this variant to the owner
       task_impl->add_variant(impl);
@@ -12959,6 +13631,254 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    ReductionOpID Runtime::generate_dynamic_reduction_id(void)
+    //--------------------------------------------------------------------------
+    {
+      ReductionOpID result = 
+        __sync_fetch_and_add(&unique_redop_id, runtime_stride);
+      // Check for hitting the library limit
+      if (result >= LEGION_INITIAL_LIBRARY_ID_OFFSET)
+        REPORT_LEGION_FATAL(LEGION_FATAL_EXCEEDED_LIBRARY_ID_OFFSET,
+            "Dynamic Reduction IDs exceeded library ID offset %d",
+            LEGION_INITIAL_LIBRARY_ID_OFFSET)
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    ReductionOpID Runtime::generate_library_reduction_ids(const char *name,
+                                                          size_t count)
+    //--------------------------------------------------------------------------
+    {
+      // Easy case if the user asks for no IDs
+      if (count == 0)
+        return AUTO_GENERATE_ID;
+      const std::string library_name(name); 
+      // Take the lock in read only mode and see if we can find the result
+      RtEvent wait_on;
+      {
+        AutoLock l_lock(library_lock,1,false/*exclusive*/);
+        std::map<std::string,LibraryRedopIDs>::const_iterator finder = 
+          library_redop_ids.find(library_name);
+        if (finder != library_redop_ids.end())
+        {
+          // First do a check to see if the counts match
+          if (finder->second.count != count)
+            REPORT_LEGION_ERROR(ERROR_LIBRARY_COUNT_MISMATCH,
+                "ReductionOpID generation counts %zd and %zd differ for "
+                "library %s", finder->second.count, count, name)
+          if (finder->second.result_set)
+            return finder->second.result;
+          // This should never happen unless we are on a node other than 0
+#ifdef DEBUG_LEGION
+          assert(address_space > 0);
+#endif
+          wait_on = finder->second.ready;
+        }
+      }
+      RtUserEvent request_event;
+      if (!wait_on.exists())
+      {
+        AutoLock l_lock(library_lock);
+        // Check to make sure we didn't lose the race
+        std::map<std::string,LibraryRedopIDs>::const_iterator finder = 
+          library_redop_ids.find(library_name);
+        if (finder != library_redop_ids.end())
+        {
+          // First do a check to see if the counts match
+          if (finder->second.count != count)
+            REPORT_LEGION_ERROR(ERROR_LIBRARY_COUNT_MISMATCH,
+                "ReductionOpID generation counts %zd and %zd differ for "
+                "library %s", finder->second.count, count, name)
+          if (finder->second.result_set)
+            return finder->second.result;
+          // This should never happen unless we are on a node other than 0
+#ifdef DEBUG_LEGION
+          assert(address_space > 0);
+#endif
+          wait_on = finder->second.ready;
+        }
+        if (!wait_on.exists())
+        {
+          LibraryRedopIDs &record = library_redop_ids[library_name];
+          record.count = count;
+          if (address_space == 0)
+          {
+            // We're going to make the result
+            record.result = unique_library_redop_id;
+            unique_library_redop_id += count;
+#ifdef DEBUG_LEGION
+            assert(unique_library_redop_id > unsigned(record.result));
+#endif
+            record.result_set = true;
+            return record.result;
+          }
+          else
+          {
+            // We're going to request the result
+            request_event = Runtime::create_rt_user_event();
+            record.ready = request_event;
+            record.result_set = false;
+            wait_on = request_event;
+          }
+        }
+      }
+      // Should only get here on nodes other than 0
+#ifdef DEBUG_LEGION
+      assert(address_space > 0);
+      assert(wait_on.exists());
+#endif
+      if (request_event.exists())
+      {
+        // Include the null terminator in length
+        const size_t string_length = strlen(name) + 1;
+        // Send the request to node 0 for the result
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize<size_t>(string_length);
+          rez.serialize(name, string_length);
+          rez.serialize<size_t>(count);
+          rez.serialize(request_event);
+        }
+        send_library_redop_request(0/*target*/, rez);
+      }
+      wait_on.wait();
+      // When we wake up we should be able to find the result
+      AutoLock l_lock(library_lock,1,false/*exclusive*/);
+      std::map<std::string,LibraryRedopIDs>::const_iterator finder = 
+          library_redop_ids.find(library_name);
+#ifdef DEBUG_LEGION
+      assert(finder != library_redop_ids.end());
+      assert(finder->second.result_set);
+#endif
+      return finder->second.result;
+    }
+
+    //--------------------------------------------------------------------------
+    CustomSerdezID Runtime::generate_dynamic_serdez_id(void)
+    //--------------------------------------------------------------------------
+    {
+      CustomSerdezID result = 
+        __sync_fetch_and_add(&unique_serdez_id, runtime_stride);
+      // Check for hitting the library limit
+      if (result >= LEGION_INITIAL_LIBRARY_ID_OFFSET)
+        REPORT_LEGION_FATAL(LEGION_FATAL_EXCEEDED_LIBRARY_ID_OFFSET,
+            "Dynamic Custom Serdez IDs exceeded library ID offset %d",
+            LEGION_INITIAL_LIBRARY_ID_OFFSET)
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    CustomSerdezID Runtime::generate_library_serdez_ids(const char *name,
+                                                        size_t count)
+    //--------------------------------------------------------------------------
+    {
+      // Easy case if the user asks for no IDs
+      if (count == 0)
+        return AUTO_GENERATE_ID;
+      const std::string library_name(name); 
+      // Take the lock in read only mode and see if we can find the result
+      RtEvent wait_on;
+      {
+        AutoLock l_lock(library_lock,1,false/*exclusive*/);
+        std::map<std::string,LibrarySerdezIDs>::const_iterator finder = 
+          library_serdez_ids.find(library_name);
+        if (finder != library_serdez_ids.end())
+        {
+          // First do a check to see if the counts match
+          if (finder->second.count != count)
+            REPORT_LEGION_ERROR(ERROR_LIBRARY_COUNT_MISMATCH,
+                "CustomSerdezID generation counts %zd and %zd differ for "
+                "library %s", finder->second.count, count, name)
+          if (finder->second.result_set)
+            return finder->second.result;
+          // This should never happen unless we are on a node other than 0
+#ifdef DEBUG_LEGION
+          assert(address_space > 0);
+#endif
+          wait_on = finder->second.ready;
+        }
+      }
+      RtUserEvent request_event;
+      if (!wait_on.exists())
+      {
+        AutoLock l_lock(library_lock);
+        // Check to make sure we didn't lose the race
+        std::map<std::string,LibrarySerdezIDs>::const_iterator finder = 
+          library_serdez_ids.find(library_name);
+        if (finder != library_serdez_ids.end())
+        {
+          // First do a check to see if the counts match
+          if (finder->second.count != count)
+            REPORT_LEGION_ERROR(ERROR_LIBRARY_COUNT_MISMATCH,
+                "CustomSerdezID generation counts %zd and %zd differ for "
+                "library %s", finder->second.count, count, name)
+          if (finder->second.result_set)
+            return finder->second.result;
+          // This should never happen unless we are on a node other than 0
+#ifdef DEBUG_LEGION
+          assert(address_space > 0);
+#endif
+          wait_on = finder->second.ready;
+        }
+        if (!wait_on.exists())
+        {
+          LibrarySerdezIDs &record = library_serdez_ids[library_name];
+          record.count = count;
+          if (address_space == 0)
+          {
+            // We're going to make the result
+            record.result = unique_library_serdez_id;
+            unique_library_serdez_id += count;
+#ifdef DEBUG_LEGION
+            assert(unique_library_serdez_id > unsigned(record.result));
+#endif
+            record.result_set = true;
+            return record.result;
+          }
+          else
+          {
+            // We're going to request the result
+            request_event = Runtime::create_rt_user_event();
+            record.ready = request_event;
+            record.result_set = false;
+            wait_on = request_event;
+          }
+        }
+      }
+      // Should only get here on nodes other than 0
+#ifdef DEBUG_LEGION
+      assert(address_space > 0);
+      assert(wait_on.exists());
+#endif
+      if (request_event.exists())
+      {
+        // Include the null terminator in length
+        const size_t string_length = strlen(name) + 1;
+        // Send the request to node 0 for the result
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize<size_t>(string_length);
+          rez.serialize(name, string_length);
+          rez.serialize<size_t>(count);
+          rez.serialize(request_event);
+        }
+        send_library_serdez_request(0/*target*/, rez);
+      }
+      wait_on.wait();
+      // When we wake up we should be able to find the result
+      AutoLock l_lock(library_lock,1,false/*exclusive*/);
+      std::map<std::string,LibrarySerdezIDs>::const_iterator finder = 
+          library_serdez_ids.find(library_name);
+#ifdef DEBUG_LEGION
+      assert(finder != library_serdez_ids.end());
+      assert(finder->second.result_set);
+#endif
+      return finder->second.result;
+    }
+
+    //--------------------------------------------------------------------------
     MemoryManager* Runtime::find_memory_manager(Memory mem)
     //--------------------------------------------------------------------------
     {
@@ -12995,7 +13915,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(sid < MAX_NUM_NODES);
+      assert(sid < LEGION_MAX_NUM_NODES);
       assert(sid != address_space); // shouldn't be sending messages to ourself
 #endif
       MessageManager *result = message_managers[sid];
@@ -13004,35 +13924,67 @@ namespace Legion {
       // If we made it here, then we don't have a message manager yet
       // re-take the lock and re-check to see if we don't have a manager
       // If we still don't then we need to make one
-      AutoLock m_lock(message_manager_lock);
-      // Re-check to see if we lost the race, force the compiler
-      // to re-load the value here
-      result = *(((MessageManager**volatile)message_managers)+sid);
-      // If we're still NULL then we need to make the message manager
-      if (result == NULL)
+      RtEvent wait_on;
+      bool send_request = false;
       {
-        // Compute the set of processors in the remote address space
-        std::set<Processor> remote_procs;
-        std::set<Processor> remote_util_procs;
+        AutoLock m_lock(message_manager_lock);
+        // Re-check to see if we lost the race, force the compiler
+        // to re-load the value here
+        result = *(((MessageManager**volatile)message_managers)+sid);
+        if (result != NULL)
+          return result;
+        // Figure out if there is an event to wait on yet
+        std::map<AddressSpace,RtUserEvent>::const_iterator finder = 
+          pending_endpoint_requests.find(sid);
+        if (finder == pending_endpoint_requests.end())
+        {
+          RtUserEvent done = Runtime::create_rt_user_event();
+          pending_endpoint_requests[sid] = done;
+          wait_on = done;
+          send_request = true;
+        }
+        else
+          wait_on = finder->second;
+      }
+      if (send_request)
+      {
+#ifdef DEBUG_LEGION
+        bool found = false;
+#endif
+        // Find a processor on which to send the task
         for (std::map<Processor,AddressSpaceID>::const_iterator it = 
               proc_spaces.begin(); it != proc_spaces.end(); it++)
         {
           if (it->second != sid)
             continue;
-          Processor::Kind k = it->first.kind();
-          if (k == Processor::UTIL_PROC)
-            remote_util_procs.insert(it->first);
-          else
-            remote_procs.insert(it->first);
+#ifdef DEBUG_LEGION
+          found = true;
+#endif
+          Serializer rez;
+          {
+            RezCheck z(rez);
+            rez.serialize<bool>(true); // request
+            rez.serialize(utility_group);
+          }
+          const Realm::ProfilingRequestSet empty_requests;
+          it->first.spawn(LG_ENDPOINT_TASK_ID, rez.get_buffer(),
+              rez.get_used_bytes(), empty_requests);
+          break;
         }
 #ifdef DEBUG_LEGION
-        assert(!remote_procs.empty() || !remote_util_procs.empty());
+        assert(found);
 #endif
-        result = new MessageManager(sid, this, max_message_size,
-            (remote_util_procs.empty() ? remote_procs : remote_util_procs));
-        // Save the result
-        message_managers[sid] = result;
       }
+#ifdef DEBUG_LEGION
+      assert(wait_on.exists());
+#endif
+      if (!wait_on.has_triggered())
+        wait_on.wait();
+      // When we wake up there should be a result
+      result = *(((MessageManager**volatile)message_managers)+sid);
+#ifdef DEBUG_LEGION
+      assert(result != NULL);
+#endif
       return result;
     }
 
@@ -13049,10 +14001,59 @@ namespace Legion {
     {
       std::map<Processor,AddressSpaceID>::const_iterator finder = 
         proc_spaces.find(target);
+      if (finder != proc_spaces.end())
+        return finder->second;
 #ifdef DEBUG_LEGION
-      assert(finder != proc_spaces.end());
+      // If we get here then this better be a processor group
+      assert(target.kind() == Processor::PROC_GROUP);
+#endif
+      AutoLock m_lock(message_manager_lock,1,false/*exclusive*/);
+      finder = endpoint_spaces.find(target);
+#ifdef DEBUG_LEGION
+      assert(finder != endpoint_spaces.end());
 #endif
       return finder->second;
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_endpoint_creation(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      bool request;
+      derez.deserialize(request);
+      Processor remote_utility_group;
+      derez.deserialize(remote_utility_group);
+      if (request)
+      {
+        Serializer rez;
+        {
+          RezCheck z2(rez);
+          rez.serialize<bool>(false/*request*/);
+          rez.serialize(utility_group);
+          rez.serialize(address_space);
+        }
+        const Realm::ProfilingRequestSet empty_requests;
+        remote_utility_group.spawn(LG_ENDPOINT_TASK_ID, rez.get_buffer(),
+            rez.get_used_bytes(), empty_requests); 
+      }
+      else
+      {
+        AddressSpaceID remote_space;
+        derez.deserialize(remote_space);
+        AutoLock m_lock(message_manager_lock);
+        message_managers[remote_space] = new MessageManager(remote_space, 
+                            this, max_message_size, remote_utility_group);
+        // Also update the endpoint spaces
+        endpoint_spaces[remote_utility_group] = remote_space;
+        std::map<AddressSpaceID,RtUserEvent>::iterator finder = 
+          pending_endpoint_requests.find(remote_space);
+#ifdef DEBUG_LEGION
+        assert(finder != pending_endpoint_requests.end());
+#endif
+        Runtime::trigger_event(finder->second);
+        pending_endpoint_requests.erase(finder);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -13171,16 +14172,15 @@ namespace Legion {
         MessageManager *manager = find_messenger(target);
         Serializer rez;
         bool deactivate_task;
+        const AddressSpaceID target_addr = find_address_space(target);
         {
           RezCheck z(rez);
           rez.serialize(target);
           rez.serialize(task->get_task_kind());
-          deactivate_task = task->pack_task(rez, target);
+          deactivate_task = task->pack_task(rez, target_addr);
         }
-        // Send tasks on the physical state virtual channel in case
-        // they moved any state when they were sent
         manager->send_message(rez, TASK_MESSAGE, 
-                              DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+                              TASK_VIRTUAL_CHANNEL, true/*flush*/);
         if (deactivate_task)
           task->deactivate();
       }
@@ -13212,6 +14212,7 @@ namespace Legion {
         // Otherwise we need to send it remotely
         MessageManager *manager = find_messenger(target);
         unsigned idx = 1;
+        const AddressSpaceID target_addr = find_address_space(target);
         for (std::set<TaskOp*>::const_iterator it = tasks.begin();
               it != tasks.end(); it++,idx++)
         {
@@ -13221,13 +14222,11 @@ namespace Legion {
             RezCheck z(rez);
             rez.serialize(target);
             rez.serialize((*it)->get_task_kind());
-            deactivate_task = (*it)->pack_task(rez, target);
+            deactivate_task = (*it)->pack_task(rez, target_addr);
           }
           // Put it in the queue, flush the last task
-          // Send tasks on the physical state virtual channel in case
-          // they moved any state when they were sent
           manager->send_message(rez, TASK_MESSAGE,
-                                DEFAULT_VIRTUAL_CHANNEL, (idx == tasks.size()));
+                                TASK_VIRTUAL_CHANNEL, (idx == tasks.size()));
           // Deactivate the task if it is remote
           if (deactivate_task)
             (*it)->deactivate();
@@ -13313,11 +14312,20 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_remote_task_replay(AddressSpaceID target,Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_REMOTE_TASK_REPLAY,
+                                DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_index_space_node(AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
+      // Will be flushed by index space return
       find_messenger(target)->send_message(rez, SEND_INDEX_SPACE_NODE,
-                               INDEX_SPACE_VIRTUAL_CHANNEL, true/*flush*/);
+                               INDEX_SPACE_VIRTUAL_CHANNEL, false/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -13326,7 +14334,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_INDEX_SPACE_REQUEST, 
-                                INDEX_SPACE_VIRTUAL_CHANNEL, true/*flush*/);
+                                DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -13342,7 +14350,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_INDEX_SPACE_SET,
-              INDEX_SPACE_VIRTUAL_CHANNEL, true/*flush*/, true/*return*/);
+              DEFAULT_VIRTUAL_CHANNEL, true/*flush*/, true/*return*/);
     }
 
     //--------------------------------------------------------------------------
@@ -13351,7 +14359,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_INDEX_SPACE_CHILD_REQUEST,
-                                INDEX_SPACE_VIRTUAL_CHANNEL, true/*flush*/);
+                                DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -13360,7 +14368,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_INDEX_SPACE_CHILD_RESPONSE,
-                  INDEX_SPACE_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
+                  DEFAULT_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
     }
 
     //--------------------------------------------------------------------------
@@ -13369,7 +14377,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_INDEX_SPACE_COLORS_REQUEST,
-                                INDEX_SPACE_VIRTUAL_CHANNEL, true/*flush*/);
+                                DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -13378,7 +14386,37 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez,SEND_INDEX_SPACE_COLORS_RESPONSE,
-                  INDEX_SPACE_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
+                  DEFAULT_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_index_space_remote_expression_request(
+                                         AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, 
+          SEND_INDEX_SPACE_REMOTE_EXPRESSION_REQUEST,
+          DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_index_space_remote_expression_response(
+                                         AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, 
+          SEND_INDEX_SPACE_REMOTE_EXPRESSION_RESPONSE,
+          EXPRESSION_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_index_space_remote_expression_invalidation(
+                                         AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, 
+          SEND_INDEX_SPACE_REMOTE_EXPRESSION_INVALIDATION,
+          EXPRESSION_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -13388,7 +14426,7 @@ namespace Legion {
     {
       find_messenger(target)->send_message(rez, 
                                   SEND_INDEX_PARTITION_NOTIFICATION, 
-                                  INDEX_SPACE_VIRTUAL_CHANNEL, true/*flush*/);
+                                  DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -13396,8 +14434,9 @@ namespace Legion {
                                             Serializer &rez)
     //--------------------------------------------------------------------------
     {
+      // Will be flushed by the return
       find_messenger(target)->send_message(rez, SEND_INDEX_PARTITION_NODE,
-                               INDEX_SPACE_VIRTUAL_CHANNEL, true/*flush*/);
+                               INDEX_SPACE_VIRTUAL_CHANNEL, false/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -13406,7 +14445,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_INDEX_PARTITION_REQUEST,
-                                INDEX_SPACE_VIRTUAL_CHANNEL, true/*flush*/);
+                                DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -13425,7 +14464,7 @@ namespace Legion {
     {
       find_messenger(target)->send_message(rez,
                                 SEND_INDEX_PARTITION_CHILD_REQUEST,
-                                INDEX_SPACE_VIRTUAL_CHANNEL, true/*flush*/);
+                                DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -13435,7 +14474,20 @@ namespace Legion {
     {
       find_messenger(target)->send_message(rez, 
                                 SEND_INDEX_PARTITION_CHILD_RESPONSE, 
-                                INDEX_SPACE_VIRTUAL_CHANNEL, 
+                                DEFAULT_VIRTUAL_CHANNEL, 
+                                true/*flush*/, true/*response*/); 
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_index_partition_disjoint_update(AddressSpaceID target,
+                                                       Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      // This has to go on the index space virtual channel so that it is
+      // ordered with respect to the index_partition_node messages
+      find_messenger(target)->send_message(rez, 
+                                SEND_INDEX_PARTITION_DISJOINT_UPDATE, 
+                                INDEX_SPACE_VIRTUAL_CHANNEL,
                                 true/*flush*/, true/*response*/); 
     }
 
@@ -13443,8 +14495,9 @@ namespace Legion {
     void Runtime::send_field_space_node(AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
+      // Will be flushed by return
       find_messenger(target)->send_message(rez, SEND_FIELD_SPACE_NODE,
-                               FIELD_SPACE_VIRTUAL_CHANNEL, true/*flush*/);
+                               FIELD_SPACE_VIRTUAL_CHANNEL, false/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -13453,7 +14506,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_FIELD_SPACE_REQUEST,
-                                FIELD_SPACE_VIRTUAL_CHANNEL, true/*flush*/);
+                                DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -13471,7 +14524,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_FIELD_ALLOC_REQUEST,
-                                FIELD_SPACE_VIRTUAL_CHANNEL, true/*flush*/);
+                                DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -13480,7 +14533,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_FIELD_ALLOC_NOTIFICATION,
-                FIELD_SPACE_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
+                DEFAULT_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
     }
 
     //--------------------------------------------------------------------------
@@ -13489,7 +14542,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_FIELD_SPACE_TOP_ALLOC,
-                                FIELD_SPACE_VIRTUAL_CHANNEL, true/*flush*/);
+                                DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -13497,7 +14550,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_FIELD_FREE,
-                                FIELD_SPACE_VIRTUAL_CHANNEL, true/*flush*/);
+                                DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -13506,7 +14559,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_LOCAL_FIELD_ALLOC_REQUEST,
-                                FIELD_SPACE_VIRTUAL_CHANNEL, true/*flush*/);
+                                DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -13515,7 +14568,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_LOCAL_FIELD_ALLOC_RESPONSE,
-                  FIELD_SPACE_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
+                  DEFAULT_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
     }
 
     //--------------------------------------------------------------------------
@@ -13523,7 +14576,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_LOCAL_FIELD_FREE,
-                                FIELD_SPACE_VIRTUAL_CHANNEL, true/*flush*/);
+                                DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -13531,7 +14584,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_LOCAL_FIELD_UPDATE,
-                                FIELD_SPACE_VIRTUAL_CHANNEL, true/*flush*/);
+                                DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -13540,7 +14593,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_TOP_LEVEL_REGION_REQUEST,
-                                LOGICAL_TREE_VIRTUAL_CHANNEL, true/*flush*/);
+                                DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -13557,93 +14610,128 @@ namespace Legion {
                                            Serializer &rez)
     //--------------------------------------------------------------------------
     {
+      // flushed by return
       find_messenger(target)->send_message(rez, SEND_LOGICAL_REGION_NODE,
-                                  LOGICAL_TREE_VIRTUAL_CHANNEL, true/*flush*/);
+                                  LOGICAL_TREE_VIRTUAL_CHANNEL, false/*flush*/);
     }
 
     //--------------------------------------------------------------------------
     void Runtime::send_index_space_destruction(IndexSpace handle, 
-                                               AddressSpaceID target)
+                                               AddressSpaceID target,
+                                               std::set<RtEvent> &applied)
     //--------------------------------------------------------------------------
     {
       Serializer rez;
       {
         RezCheck z(rez);
         rez.serialize(handle);
+        const RtUserEvent done = create_rt_user_event();
+        rez.serialize(done);
+        applied.insert(done);
       }
+      // Put this message on the same virtual channel as the unregister
+      // messages for distributed collectables to make sure that they 
+      // are properly ordered
       find_messenger(target)->send_message(rez, INDEX_SPACE_DESTRUCTION_MESSAGE,
-                               INDEX_SPACE_VIRTUAL_CHANNEL, true/*flush*/);
+                                      REFERENCE_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
     void Runtime::send_index_partition_destruction(IndexPartition handle, 
-                                                   AddressSpaceID target)
+                                                   AddressSpaceID target,
+                                                   std::set<RtEvent> &applied)
     //--------------------------------------------------------------------------
     {
       Serializer rez;
       {
         RezCheck z(rez);
         rez.serialize(handle);
+        const RtUserEvent done = create_rt_user_event();
+        rez.serialize(done);
+        applied.insert(done);
       }
+      // Put this message on the same virtual channel as the unregister
+      // messages for distributed collectables to make sure that they 
+      // are properly ordered
       find_messenger(target)->send_message(rez, 
-        INDEX_PARTITION_DESTRUCTION_MESSAGE, INDEX_SPACE_VIRTUAL_CHANNEL,
+        INDEX_PARTITION_DESTRUCTION_MESSAGE, REFERENCE_VIRTUAL_CHANNEL,
                                                              true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
     void Runtime::send_field_space_destruction(FieldSpace handle, 
-                                               AddressSpaceID target)
+                                               AddressSpaceID target,
+                                               std::set<RtEvent> &applied)
     //--------------------------------------------------------------------------
     {
       Serializer rez;
       {
         RezCheck z(rez);
         rez.serialize(handle);
+        const RtUserEvent done = create_rt_user_event();
+        rez.serialize(done);
+        applied.insert(done);
       }
+      // Put this message on the same virtual channel as the unregister
+      // messages for distributed collectables to make sure that they 
+      // are properly ordered
       find_messenger(target)->send_message(rez, 
-          FIELD_SPACE_DESTRUCTION_MESSAGE, FIELD_SPACE_VIRTUAL_CHANNEL,
+          FIELD_SPACE_DESTRUCTION_MESSAGE, REFERENCE_VIRTUAL_CHANNEL,
                                                               true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
     void Runtime::send_logical_region_destruction(LogicalRegion handle, 
-                                                  AddressSpaceID target)
+                                                  AddressSpaceID target,
+                                                  std::set<RtEvent> *applied)
     //--------------------------------------------------------------------------
     {
       Serializer rez;
       {
         RezCheck z(rez);
         rez.serialize(handle);
+        if (applied != NULL)
+        {
+          const RtUserEvent done = create_rt_user_event();
+          rez.serialize(done);
+          applied->insert(done);
+        }
+        else
+          rez.serialize(RtUserEvent::NO_RT_USER_EVENT);
       }
+      // Put this message on the same virtual channel as the unregister
+      // messages for distributed collectables to make sure that they 
+      // are properly ordered
       find_messenger(target)->send_message(rez, 
-          LOGICAL_REGION_DESTRUCTION_MESSAGE, LOGICAL_TREE_VIRTUAL_CHANNEL,
+          LOGICAL_REGION_DESTRUCTION_MESSAGE, REFERENCE_VIRTUAL_CHANNEL,
                                                               true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
     void Runtime::send_logical_partition_destruction(
-                              LogicalPartition handle, AddressSpaceID target)
+                              LogicalPartition handle, AddressSpaceID target,
+                              std::set<RtEvent> *applied)
     //--------------------------------------------------------------------------
     {
       Serializer rez;
       {
         RezCheck z(rez);
         rez.serialize(handle);
+        if (applied != NULL)
+        {
+          const RtUserEvent done = create_rt_user_event();
+          rez.serialize(done);
+          applied->insert(done);
+        }
+        else
+          rez.serialize(RtUserEvent::NO_RT_USER_EVENT);
       }
+      // Put this message on the same virtual channel as the unregister
+      // messages for distributed collectables to make sure that they 
+      // are properly ordered
       find_messenger(target)->send_message(rez, 
-          LOGICAL_PARTITION_DESTRUCTION_MESSAGE, LOGICAL_TREE_VIRTUAL_CHANNEL,
+          LOGICAL_PARTITION_DESTRUCTION_MESSAGE, REFERENCE_VIRTUAL_CHANNEL,
                                                                 true/*flush*/);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::send_individual_remote_mapped(Processor target,
-                                        Serializer &rez, bool flush /*= true*/)
-    //--------------------------------------------------------------------------
-    {
-      // Very important that this goes on the physical state channel
-      // so that it is properly serialized with state updates
-      find_messenger(target)->send_message(rez, INDIVIDUAL_REMOTE_MAPPED,
-                       DEFAULT_VIRTUAL_CHANNEL, flush, true/*response*/);
     }
 
     //--------------------------------------------------------------------------
@@ -13654,7 +14742,7 @@ namespace Legion {
       // Very important that this goes on the physical state channel
       // so that it is properly serialized with state updates
       find_messenger(target)->send_message(rez, INDIVIDUAL_REMOTE_COMPLETE,
-                  DEFAULT_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
+                  TASK_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
     }
 
     //--------------------------------------------------------------------------
@@ -13662,20 +14750,16 @@ namespace Legion {
                                                       Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      // Very important that this goes on the physical state channel
-      // so that it is properly serialized with state updates
       find_messenger(target)->send_message(rez, INDIVIDUAL_REMOTE_COMMIT,
-                DEFAULT_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
+                TASK_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
     }
 
     //--------------------------------------------------------------------------
     void Runtime::send_slice_remote_mapped(Processor target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      // Very important that this goes on the physical state channel
-      // so that it is properly serialized with state updates
       find_messenger(target)->send_message(rez, SLICE_REMOTE_MAPPED,
-           DEFAULT_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
+                TASK_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
     }
 
     //--------------------------------------------------------------------------
@@ -13685,17 +14769,15 @@ namespace Legion {
       // Very important that this goes on the physical state channel
       // so that it is properly serialized with state updates
       find_messenger(target)->send_message(rez, SLICE_REMOTE_COMPLETE,
-             DEFAULT_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
+                TASK_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
     }
 
     //--------------------------------------------------------------------------
     void Runtime::send_slice_remote_commit(Processor target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      // Very important that this goes on the physical state channel
-      // so that it is properly serialized with state updates
       find_messenger(target)->send_message(rez, SLICE_REMOTE_COMMIT,
-           DEFAULT_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
+                TASK_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
     }
 
     //--------------------------------------------------------------------------
@@ -13722,33 +14804,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, DISTRIBUTED_GC_UPDATE,
-                                    REFERENCE_VIRTUAL_CHANNEL, true/*flush*/);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::send_did_remote_resource_update(AddressSpaceID target,
-                                                  Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message(rez, DISTRIBUTED_RESOURCE_UPDATE,
-                                    REFERENCE_VIRTUAL_CHANNEL, true/*flush*/);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::send_did_remote_invalidate(AddressSpaceID target,
-                                             Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message(rez, DISTRIBUTED_INVALIDATE,
-                                    REFERENCE_VIRTUAL_CHANNEL, true/*flush*/);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::send_did_remote_deactivate(AddressSpaceID target,
-                                             Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message(rez, DISTRIBUTED_DEACTIVATE,
                                     REFERENCE_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
@@ -13785,7 +14840,7 @@ namespace Legion {
     {
       // No need to flush, it will get flushed by the remote map return
       find_messenger(target)->send_message(rez, SEND_BACK_LOGICAL_STATE,
-                                        DEFAULT_VIRTUAL_CHANNEL,false/*flush*/);
+                                        TASK_VIRTUAL_CHANNEL, false/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -13794,7 +14849,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_ATOMIC_RESERVATION_REQUEST,
-                                        VIEW_VIRTUAL_CHANNEL, true/*flush*/);
+                                        DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -13803,7 +14858,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez,SEND_ATOMIC_RESERVATION_RESPONSE,
-                         VIEW_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
+                         DEFAULT_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
     }
 
     //--------------------------------------------------------------------------
@@ -13811,23 +14866,15 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_MATERIALIZED_VIEW,
-                                        VIEW_VIRTUAL_CHANNEL, true/*flush*/);
+                                        DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
     }
-
-    //--------------------------------------------------------------------------
-    void Runtime::send_composite_view(AddressSpaceID target, Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message(rez, SEND_COMPOSITE_VIEW,
-                                       VIEW_VIRTUAL_CHANNEL, true/*flush*/);
-    } 
 
     //--------------------------------------------------------------------------
     void Runtime::send_fill_view(AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_FILL_VIEW,
-                                       VIEW_VIRTUAL_CHANNEL, true/*flush*/);
+                                       DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -13835,7 +14882,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_PHI_VIEW,
-                                        VIEW_VIRTUAL_CHANNEL, true/*flush*/); 
+                                        DEFAULT_VIRTUAL_CHANNEL, true/*flush*/); 
     }
 
     //--------------------------------------------------------------------------
@@ -13843,7 +14890,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_REDUCTION_VIEW,
-                                       VIEW_VIRTUAL_CHANNEL, true/*flush*/);
+                                       DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -13851,7 +14898,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_INSTANCE_MANAGER,
-                                       MANAGER_VIRTUAL_CHANNEL, true/*flush*/);
+                                       DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -13859,7 +14906,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_REDUCTION_MANAGER,
-                                       MANAGER_VIRTUAL_CHANNEL, true/*flush*/);
+                                       DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -13868,7 +14915,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_CREATE_TOP_VIEW_REQUEST,
-                                        VIEW_VIRTUAL_CHANNEL, true/*flush*/);
+                                        DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -13877,69 +14924,81 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_CREATE_TOP_VIEW_RESPONSE,
-                        VIEW_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
+                      DEFAULT_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_subview_did_request(AddressSpaceID target, 
-                                           Serializer &rez)
+    void Runtime::send_view_register_user(AddressSpaceID target,Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      find_messenger(target)->send_message(rez, SEND_SUBVIEW_DID_REQUEST,
-                                        VIEW_VIRTUAL_CHANNEL, true/*flush*/);
+      find_messenger(target)->send_message(rez, SEND_VIEW_REGISTER_USER,
+                                         UPDATE_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_subview_did_response(AddressSpaceID target,
-                                            Serializer &rez)
+    void Runtime::send_view_find_copy_preconditions_request(
+                                         AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      find_messenger(target)->send_message(rez, SEND_SUBVIEW_DID_RESPONSE,
-                    VIEW_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
+      find_messenger(target)->send_message(rez, SEND_VIEW_FIND_COPY_PRE_REQUEST,
+                                         UPDATE_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_view_update_request(AddressSpaceID target,
-                                           Serializer &rez)
+    void Runtime::send_view_find_copy_preconditions_response(
+                                         AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      find_messenger(target)->send_message(rez, SEND_VIEW_UPDATE_REQUEST,
-                                        UPDATE_VIRTUAL_CHANNEL, true/*flush*/);
+      find_messenger(target)->send_message(rez,SEND_VIEW_FIND_COPY_PRE_RESPONSE,
+                      DEFAULT_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
+    }
+    
+    //--------------------------------------------------------------------------
+    void Runtime::send_view_add_copy_user(AddressSpaceID target,Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_VIEW_ADD_COPY_USER,
+                                         UPDATE_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+#ifdef ENABLE_VIEW_REPLICATION
+    //--------------------------------------------------------------------------
+    void Runtime::send_view_replication_request(AddressSpaceID target,
+                                                Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_VIEW_REPLICATION_REQUEST,
+                                       UPDATE_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_view_update_response(AddressSpaceID target,
-                                            Serializer &rez)
+    void Runtime::send_view_replication_response(AddressSpaceID target,
+                                                 Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      find_messenger(target)->send_message(rez, SEND_VIEW_UPDATE_RESPONSE,
-                  UPDATE_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
+      find_messenger(target)->send_message(rez, SEND_VIEW_REPLICATION_RESPONSE,
+                       UPDATE_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_view_remote_update(AddressSpaceID target, 
-                                          Serializer &rez)
+    void Runtime::send_view_replication_removal(AddressSpaceID target,
+                                                Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      find_messenger(target)->send_message(rez, SEND_VIEW_REMOTE_UPDATE,
-                                        UPDATE_VIRTUAL_CHANNEL, true/*flush*/);
+      find_messenger(target)->send_message(rez, SEND_VIEW_REPLICATION_REMOVAL,
+                                       UPDATE_VIRTUAL_CHANNEL, true/*flush*/);
     }
-
-    //--------------------------------------------------------------------------
-    void Runtime::send_view_remote_invalidate(AddressSpaceID target,
-                                              Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message(rez, SEND_VIEW_REMOTE_INVALIDATE,
-                                        UPDATE_VIRTUAL_CHANNEL, true/*flush*/);
-    }
+#endif
 
     //--------------------------------------------------------------------------
     void Runtime::send_future_result(AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
+      // This has to go on the same channel as the reference updates
+      // so that we can make sure it's handled before any references
+      // are removed on the destination node
       find_messenger(target)->send_message(rez, SEND_FUTURE_RESULT,
-            FUTURE_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
+            REFERENCE_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
     }
 
     //--------------------------------------------------------------------------
@@ -13947,8 +15006,11 @@ namespace Legion {
                                            Serializer &rez)
     //--------------------------------------------------------------------------
     {
+      // Since this message is fused with doing the remote registration for
+      // the future it also needs to go on the same virtual channel as 
+      // send_did_remote_registration which is the REFERENCE_VIRTUAL_CHANNEL 
       find_messenger(target)->send_message(rez, SEND_FUTURE_SUBSCRIPTION,
-                                        FUTURE_VIRTUAL_CHANNEL, true/*flush*/);
+                                REFERENCE_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -13957,7 +15019,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_FUTURE_MAP_REQUEST,
-                                        FUTURE_VIRTUAL_CHANNEL, true/*flush*/);
+                                        DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -13966,7 +15028,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_FUTURE_MAP_RESPONSE,
-                  FUTURE_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
+                  DEFAULT_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
     }
 
     //--------------------------------------------------------------------------
@@ -13991,7 +15053,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_TASK_IMPL_SEMANTIC_REQ,
-                                  SEMANTIC_INFO_VIRTUAL_CHANNEL, true/*flush*/);
+                                  DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -14000,7 +15062,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_INDEX_SPACE_SEMANTIC_REQ,
-                                 SEMANTIC_INFO_VIRTUAL_CHANNEL, true/*flush*/);
+                                 DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -14009,8 +15071,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, 
-          SEND_INDEX_PARTITION_SEMANTIC_REQ, SEMANTIC_INFO_VIRTUAL_CHANNEL,
-                                                                 true/*flush*/);
+          SEND_INDEX_PARTITION_SEMANTIC_REQ, 
+          DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -14019,7 +15081,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_FIELD_SPACE_SEMANTIC_REQ,
-                                  SEMANTIC_INFO_VIRTUAL_CHANNEL, true/*flush*/);
+                                  DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -14028,7 +15090,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_FIELD_SEMANTIC_REQ,
-                                SEMANTIC_INFO_VIRTUAL_CHANNEL, true/*flush*/);
+                                DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -14037,8 +15099,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, 
-              SEND_LOGICAL_REGION_SEMANTIC_REQ, SEMANTIC_INFO_VIRTUAL_CHANNEL,
-                                                                true/*flush*/);
+              SEND_LOGICAL_REGION_SEMANTIC_REQ, 
+              DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -14047,8 +15109,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez,
-            SEND_LOGICAL_PARTITION_SEMANTIC_REQ, SEMANTIC_INFO_VIRTUAL_CHANNEL,
-                                                                 true/*flush*/);
+            SEND_LOGICAL_PARTITION_SEMANTIC_REQ, 
+            DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -14057,7 +15119,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_TASK_IMPL_SEMANTIC_INFO,
-              SEMANTIC_INFO_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
+              DEFAULT_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
     }
 
     //--------------------------------------------------------------------------
@@ -14066,7 +15128,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_INDEX_SPACE_SEMANTIC_INFO,
-               SEMANTIC_INFO_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
+               DEFAULT_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
     }
 
     //--------------------------------------------------------------------------
@@ -14075,7 +15137,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, 
-          SEND_INDEX_PARTITION_SEMANTIC_INFO, SEMANTIC_INFO_VIRTUAL_CHANNEL,
+          SEND_INDEX_PARTITION_SEMANTIC_INFO, DEFAULT_VIRTUAL_CHANNEL,
                                              true/*flush*/, true/*response*/);
     }
 
@@ -14085,7 +15147,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_FIELD_SPACE_SEMANTIC_INFO,
-                SEMANTIC_INFO_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
+                DEFAULT_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
     }
 
     //--------------------------------------------------------------------------
@@ -14094,7 +15156,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_FIELD_SEMANTIC_INFO,
-          SEMANTIC_INFO_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
+          DEFAULT_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
     }
 
     //--------------------------------------------------------------------------
@@ -14103,7 +15165,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, 
-              SEND_LOGICAL_REGION_SEMANTIC_INFO, SEMANTIC_INFO_VIRTUAL_CHANNEL,
+              SEND_LOGICAL_REGION_SEMANTIC_INFO, DEFAULT_VIRTUAL_CHANNEL,
                                               true/*flush*/, true/*response*/);
     }
 
@@ -14113,8 +15175,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez,
-            SEND_LOGICAL_PARTITION_SEMANTIC_INFO, SEMANTIC_INFO_VIRTUAL_CHANNEL,
-                                               true/*flush*/, true/*response*/);
+            SEND_LOGICAL_PARTITION_SEMANTIC_INFO, 
+            DEFAULT_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
     }
 
     //--------------------------------------------------------------------------
@@ -14174,125 +15236,195 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_version_owner_request(AddressSpaceID target,
-                                             Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message(rez, SEND_VERSION_OWNER_REQUEST,
-                            VERSION_MANAGER_VIRTUAL_CHANNEL, true/*flush*/);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::send_version_owner_response(AddressSpaceID target,
-                                              Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message(rez, SEND_VERSION_OWNER_RESPONSE,
-            VERSION_MANAGER_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::send_version_state_response(AddressSpaceID target,
-                                              Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message(rez, SEND_VERSION_STATE_RESPONSE,
-                    VERSION_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::send_version_state_update_request(AddressSpaceID target,
-                                                    Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message(rez,
-                               SEND_VERSION_STATE_UPDATE_REQUEST,
-                               ANALYSIS_VIRTUAL_CHANNEL, true/*flush*/);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::send_version_state_update_response(AddressSpaceID target,
-                                                     Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message(rez, 
-                                SEND_VERSION_STATE_UPDATE_RESPONSE,
-                                ANALYSIS_VIRTUAL_CHANNEL, 
-                                true/*flush*/, true/*response*/);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::send_version_state_valid_notification(AddressSpaceID target,
+    void Runtime::send_compute_equivalence_sets_request(AddressSpaceID target,
                                                         Serializer &rez)
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, 
-                                SEND_VERSION_STATE_VALID_NOTIFICATION,
-                                ANALYSIS_VIRTUAL_CHANNEL, true/*flush*/);
+          SEND_COMPUTE_EQUIVALENCE_SETS_REQUEST,
+          DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_version_manager_advance(AddressSpaceID target,
-                                               Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message(rez, SEND_VERSION_MANAGER_ADVANCE,
-                                      ANALYSIS_VIRTUAL_CHANNEL, true/*flush*/);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::send_version_manager_invalidate(AddressSpaceID target,
-                                                  Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      // This comes back on the version manager channel so that it is 
-      // properly ordered with respect to the version manager responses
-      find_messenger(target)->send_message(rez, SEND_VERSION_MANAGER_INVALIDATE,
-                                VERSION_MANAGER_VIRTUAL_CHANNEL, true/*flush*/);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::send_version_manager_request(AddressSpaceID target,
-                                               Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      // This goes on the analysis virtual channel so that it can 
-      // be ordered with respect to advances
-      find_messenger(target)->send_message(rez, SEND_VERSION_MANAGER_REQUEST,
-                                       ANALYSIS_VIRTUAL_CHANNEL, true/*flush*/);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::send_version_manager_response(AddressSpaceID target,
+    void Runtime::send_equivalence_set_response(AddressSpaceID target,
                                                 Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      // This comes back on the version manager channel in case we need to page
-      // in any version managers from remote nodes
-      find_messenger(target)->send_message(rez, SEND_VERSION_MANAGER_RESPONSE,
-             VERSION_MANAGER_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
+      find_messenger(target)->send_message(rez, SEND_EQUIVALENCE_SET_RESPONSE,
+                    DEFAULT_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_version_manager_unversioned_request(
-                                         AddressSpaceID target, Serializer &rez)
+    void Runtime::send_equivalence_set_subset_request(AddressSpaceID target,
+                                                      Serializer &rez)
     //--------------------------------------------------------------------------
-    {
+    { 
       find_messenger(target)->send_message(rez, 
-          SEND_VERSION_MANAGER_UNVERSIONED_REQUEST, 
-          VERSION_MANAGER_VIRTUAL_CHANNEL, true/*flush*/);
+          SEND_EQUIVALENCE_SET_SUBSET_REQUEST, 
+          DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_version_manager_unversioned_response(
-                                         AddressSpaceID target, Serializer &rez)
+    void Runtime::send_equivalence_set_subset_response(AddressSpaceID target,
+                                                       Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      // This also goes on the subset virtual channel so that it is
+      // ordered (always before) any update messages
+      find_messenger(target)->send_message(rez, 
+          SEND_EQUIVALENCE_SET_SUBSET_RESPONSE, 
+          SUBSET_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_equivalence_set_subset_update(AddressSpaceID target, 
+                                                     Serializer &rez)
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, 
-          SEND_VERSION_MANAGER_UNVERSIONED_RESPONSE, 
-          VERSION_MANAGER_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
+          SEND_EQUIVALENCE_SET_SUBSET_UPDATE, 
+          SUBSET_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
     }
-    
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_equivalence_set_ray_trace_request(AddressSpaceID target,
+                                                         Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, 
+          SEND_EQUIVALENCE_SET_RAY_TRACE_REQUEST, 
+          THROUGHPUT_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_equivalence_set_ray_trace_response(AddressSpaceID target,
+                                                          Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez,
+          SEND_EQUIVALENCE_SET_RAY_TRACE_RESPONSE,
+          DEFAULT_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_equivalence_set_migration(AddressSpaceID target,
+                                                 Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_EQUIVALENCE_SET_MIGRATION,
+          MIGRATION_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_equivalence_set_owner_update(AddressSpaceID target,
+                                                    Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, 
+          SEND_EQUIVALENCE_SET_OWNER_UPDATE,
+          MIGRATION_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_equivalence_set_remote_refinement(AddressSpaceID target,
+                                                         Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez,
+          SEND_EQUIVALENCE_SET_REMOTE_REFINEMENT, 
+          MIGRATION_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_equivalence_set_remote_request_instances(
+                                         AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez,
+          SEND_EQUIVALENCE_SET_REMOTE_REQUEST_INSTANCES, 
+          DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_equivalence_set_remote_request_invalid(
+                                         AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez,
+          SEND_EQUIVALENCE_SET_REMOTE_REQUEST_INVALID,
+          DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_equivalence_set_remote_updates(AddressSpaceID target,
+                                                      Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez,
+          SEND_EQUIVALENCE_SET_REMOTE_UPDATES, 
+          THROUGHPUT_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_equivalence_set_remote_acquires(AddressSpaceID target,
+                                                       Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez,
+          SEND_EQUIVALENCE_SET_REMOTE_ACQUIRES, 
+          THROUGHPUT_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_equivalence_set_remote_releases(AddressSpaceID target,
+                                                       Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez,
+          SEND_EQUIVALENCE_SET_REMOTE_RELEASES, 
+          THROUGHPUT_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_equivalence_set_remote_copies_across(
+                                         AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez,
+          SEND_EQUIVALENCE_SET_REMOTE_COPIES_ACROSS, 
+          THROUGHPUT_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_equivalence_set_remote_overwrites(AddressSpaceID target,
+                                                         Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez,
+          SEND_EQUIVALENCE_SET_REMOTE_OVERWRITES, 
+          THROUGHPUT_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_equivalence_set_remote_filters(AddressSpaceID target,
+                                                      Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez,
+          SEND_EQUIVALENCE_SET_REMOTE_FILTERS, 
+          THROUGHPUT_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_equivalence_set_remote_instances(AddressSpaceID target,
+                                                        Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez,
+          SEND_EQUIVALENCE_SET_REMOTE_INSTANCES, 
+          DEFAULT_VIRTUAL_CHANNEL, true/*flush*/, true/*return*/);
+    }
+
     //--------------------------------------------------------------------------
     void Runtime::send_instance_request(AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
@@ -14307,6 +15439,32 @@ namespace Legion {
     {
       find_messenger(target)->send_message(rez, SEND_INSTANCE_RESPONSE,
               DEFAULT_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_external_create_request(AddressSpaceID target,
+                                               Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_EXTERNAL_CREATE_REQUEST,
+                                DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_external_create_response(AddressSpaceID target,
+                                                Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_EXTERNAL_CREATE_RESPONSE,
+                    DEFAULT_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_external_attach(AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_EXTERNAL_ATTACH,
+                                DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -14350,22 +15508,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_variant_request(AddressSpaceID target, Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message(rez, SEND_VARIANT_REQUEST,
-                                        VARIANT_VIRTUAL_CHANNEL, true/*flush*/);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::send_variant_response(AddressSpaceID target, Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message(rez, SEND_VARIANT_RESPONSE,
-              VARIANT_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
-    }
-
-    //--------------------------------------------------------------------------
     void Runtime::send_variant_broadcast(AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
@@ -14378,7 +15520,6 @@ namespace Legion {
                                            Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      // This is paging in constraints so it needs its own virtual channel
       find_messenger(target)->send_message(rez, SEND_CONSTRAINT_REQUEST,
                               LAYOUT_CONSTRAINT_VIRTUAL_CHANNEL, true/*flush*/);
     }
@@ -14399,7 +15540,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_CONSTRAINT_RELEASE,
-                                        DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+                      LAYOUT_CONSTRAINT_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -14465,12 +15606,111 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_library_redop_request(AddressSpaceID target, 
+                                             Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_LIBRARY_REDOP_REQUEST,
+                                     DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_library_redop_response(AddressSpaceID target,
+                                              Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_LIBRARY_REDOP_RESPONSE,
+                   DEFAULT_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_library_serdez_request(AddressSpaceID target, 
+                                              Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_LIBRARY_SERDEZ_REQUEST,
+                                     DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_library_serdez_response(AddressSpaceID target,
+                                               Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_LIBRARY_SERDEZ_RESPONSE,
+                   DEFAULT_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
+    } 
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_remote_op_report_uninitialized(AddressSpaceID target,
+                                                      Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_REMOTE_OP_REPORT_UNINIT,
+                                      DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_remote_op_profiling_count_update(AddressSpaceID target,
+                                                        Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, 
+          SEND_REMOTE_OP_PROFILING_COUNT_UPDATE, 
+          DEFAULT_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_remote_trace_update(AddressSpaceID target, 
+                                           Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      // All these messages must be on the same ordered virtual channel
+      // so that they are ordered in their program order and handled on
+      // the target node in this order as they would have been if they
+      // were being handled directly on the owner node
+      find_messenger(target)->send_message(rez, SEND_REMOTE_TRACE_UPDATE,
+                                  TRACING_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_remote_trace_response(AddressSpaceID target, 
+                                             Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      // No need for responses to be ordered so they can be handled on
+      // the default virtual channel in whatever order
+      find_messenger(target)->send_message(rez, SEND_REMOTE_TRACE_RESPONSE,
+                  DEFAULT_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_remote_trace_equivalence_sets_request(
+                                         AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      // We're paging in these eq sets so there is no need for order
+      find_messenger(target)->send_message(rez, SEND_REMOTE_TRACE_EQ_REQUEST,
+                                      DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_remote_trace_equivalence_sets_response(
+                                         AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      // Same as above for why we don't need order
+      find_messenger(target)->send_message(rez, SEND_REMOTE_TRACE_EQ_RESPONSE,
+                    DEFAULT_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_shutdown_notification(AddressSpaceID target, 
                                              Serializer &rez)
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_SHUTDOWN_NOTIFICATION,
-                                    DEFAULT_VIRTUAL_CHANNEL, true/*flush*/, 
+                                    THROUGHPUT_VIRTUAL_CHANNEL, true/*flush*/, 
                                     false/*response*/, true/*shutdown*/);
     }
 
@@ -14479,7 +15719,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_SHUTDOWN_RESPONSE,
-                                DEFAULT_VIRTUAL_CHANNEL, true/*flush*/,
+                                THROUGHPUT_VIRTUAL_CHANNEL, true/*flush*/,
                                 false/*response*/, true/*shutdown*/);
     }
 
@@ -14525,6 +15765,13 @@ namespace Legion {
       {
         it->second->process_advertisement(source, map_id);
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_remote_task_replay(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      TaskOp::process_remote_replay(this, derez);
     }
 
     //--------------------------------------------------------------------------
@@ -14589,6 +15836,30 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::handle_index_space_remote_expression_request(
+                                     Deserializer &derez, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      forest->handle_remote_expression_request(derez, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_index_space_remote_expression_response(
+                                     Deserializer &derez, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      forest->handle_remote_expression_response(derez, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_index_space_remote_expression_invalidation(
+                                                            Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      forest->handle_remote_expression_invalidation(derez);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::handle_index_partition_notification(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
@@ -14631,6 +15902,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       IndexPartNode::handle_node_child_response(derez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_index_partition_disjoint_update(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      IndexPartNode::handle_node_disjoint_update(forest, derez);
     }
 
     //--------------------------------------------------------------------------
@@ -14745,7 +16023,17 @@ namespace Legion {
       DerezCheck z(derez);
       IndexSpace handle;
       derez.deserialize(handle);
-      forest->destroy_index_space(handle, source);
+      RtUserEvent done;
+      derez.deserialize(done);
+#ifdef DEBUG_LEGION
+      assert(done.exists());
+#endif
+      std::set<RtEvent> applied;
+      forest->destroy_index_space(handle, source, applied);
+      if (!applied.empty())
+        Runtime::trigger_event(done, Runtime::merge_events(applied));
+      else
+        Runtime::trigger_event(done);
     }
 
     //--------------------------------------------------------------------------
@@ -14756,7 +16044,17 @@ namespace Legion {
       DerezCheck z(derez);
       IndexPartition handle;
       derez.deserialize(handle);
-      forest->destroy_index_partition(handle, source);
+      RtUserEvent done;
+      derez.deserialize(done);
+#ifdef DEBUG_LEGION
+      assert(done.exists());
+#endif
+      std::set<RtEvent> applied;
+      forest->destroy_index_partition(handle, source, applied);
+      if (!applied.empty())
+        Runtime::trigger_event(done, Runtime::merge_events(applied));
+      else
+        Runtime::trigger_event(done);
     }
 
     //--------------------------------------------------------------------------
@@ -14767,7 +16065,17 @@ namespace Legion {
       DerezCheck z(derez);
       FieldSpace handle;
       derez.deserialize(handle);
-      forest->destroy_field_space(handle, source);
+      RtUserEvent done;
+      derez.deserialize(done);
+#ifdef DEBUG_LEGION
+      assert(done.exists());
+#endif
+      std::set<RtEvent> applied;
+      forest->destroy_field_space(handle, source, applied);
+      if (!applied.empty())
+        Runtime::trigger_event(done, Runtime::merge_events(applied));
+      else
+        Runtime::trigger_event(done);
     }
 
     //--------------------------------------------------------------------------
@@ -14778,7 +16086,17 @@ namespace Legion {
       DerezCheck z(derez);
       LogicalRegion handle;
       derez.deserialize(handle);
-      forest->destroy_logical_region(handle, source);
+      RtUserEvent done;
+      derez.deserialize(done);
+      std::set<RtEvent> applied;
+      forest->destroy_logical_region(handle, source, applied);
+      if (done.exists())
+      {
+        if (!applied.empty())
+          Runtime::trigger_event(done, Runtime::merge_events(applied));
+        else
+          Runtime::trigger_event(done);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -14789,14 +16107,17 @@ namespace Legion {
       DerezCheck z(derez);
       LogicalPartition handle;
       derez.deserialize(handle);
-      forest->destroy_logical_partition(handle, source);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_individual_remote_mapped(Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      IndividualTask::process_unpack_remote_mapped(derez);
+      RtUserEvent done;
+      derez.deserialize(done);
+      std::set<RtEvent> applied;
+      forest->destroy_logical_partition(handle, source, applied);
+      if (done.exists())
+      {
+        if (!applied.empty())
+          Runtime::trigger_event(done, Runtime::merge_events(applied));
+        else
+          Runtime::trigger_event(done);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -14858,27 +16179,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_did_remote_resource_update(Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      DistributedCollectable::handle_did_remote_resource_update(this, derez); 
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_did_remote_invalidate(Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      DistributedCollectable::handle_did_remote_invalidate(this, derez);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_did_remote_deactivate(Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      DistributedCollectable::handle_did_remote_deactivate(this, derez);
-    }
-
-    //--------------------------------------------------------------------------
     void Runtime::handle_did_create_add(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
@@ -14900,10 +16200,11 @@ namespace Legion {
     }
     
     //--------------------------------------------------------------------------
-    void Runtime::handle_send_back_logical_state(Deserializer &derez)
+    void Runtime::handle_send_back_logical_state(Deserializer &derez,
+                                                 AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      RegionTreeNode::handle_logical_state_return(this, derez); 
+      RegionTreeNode::handle_logical_state_return(this, derez, source); 
     }
 
     //--------------------------------------------------------------------------
@@ -14928,14 +16229,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       MaterializedView::handle_send_materialized_view(this, derez, source); 
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_send_composite_view(Deserializer &derez,
-                                             AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      CompositeView::handle_send_composite_view(this, derez, source);
     }
 
     //--------------------------------------------------------------------------
@@ -14994,21 +16287,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_subview_did_request(Deserializer &derez,
-                                             AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      MaterializedView::handle_subview_did_request(derez, this, source);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_subview_did_response(Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      MaterializedView::handle_subview_did_response(derez);
-    }
-
-    //--------------------------------------------------------------------------
     void Runtime::handle_view_request(Deserializer &derez, 
                                       AddressSpaceID source)
     //--------------------------------------------------------------------------
@@ -15017,34 +16295,61 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_view_update_request(Deserializer &derez,
-                                             AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      InstanceView::handle_view_update_request(derez, this, source);
-    }
-    
-    //--------------------------------------------------------------------------
-    void Runtime::handle_view_update_response(Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      InstanceView::handle_view_update_response(derez, this);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_view_remote_update(Deserializer &derez,
+    void Runtime::handle_view_register_user(Deserializer &derez,
                                             AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      InstanceView::handle_view_remote_update(derez, this, source);
+      InstanceView::handle_view_register_user(derez, this, source);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_view_remote_invalidate(Deserializer &derez)
+    void Runtime::handle_view_copy_pre_request(Deserializer &derez,
+                                               AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      InstanceView::handle_view_remote_invalidate(derez, this);
+      InstanceView::handle_view_find_copy_pre_request(derez, this, source);
     }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_view_copy_pre_response(Deserializer &derez,
+                                                AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      InstanceView::handle_view_find_copy_pre_response(derez, this, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_view_add_copy_user(Deserializer &derez,
+                                            AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      InstanceView::handle_view_add_copy_user(derez, this, source);
+    }
+
+#ifdef ENABLE_VIEW_REPLICATION
+    //--------------------------------------------------------------------------
+    void Runtime::handle_view_replication_request(Deserializer &derez,
+                                                  AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      InstanceView::handle_view_replication_request(derez, this, source);
+    }
+    
+    //--------------------------------------------------------------------------
+    void Runtime::handle_view_replication_response(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      InstanceView::handle_view_replication_response(derez, this);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_view_replication_removal(Deserializer &derez,
+                                                  AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      InstanceView::handle_view_replication_removal(derez, this, source);
+    }
+#endif // ENABLE_VIEW_REPLICATION
 
     //--------------------------------------------------------------------------
     void Runtime::handle_manager_request(Deserializer &derez, 
@@ -15062,10 +16367,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_future_subscription(Deserializer &derez)
+    void Runtime::handle_future_subscription(Deserializer &derez, 
+                                             AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      FutureImpl::handle_future_subscription(derez, this);
+      FutureImpl::handle_future_subscription(derez, this, source);
     }
 
     //--------------------------------------------------------------------------
@@ -15305,103 +16611,158 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_version_owner_request(Deserializer &derez,
-                                               AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      InnerContext::handle_version_owner_request(derez, this, source);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_version_owner_response(Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      InnerContext::handle_version_owner_response(derez, this);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_version_state_request(Deserializer &derez,
-                                               AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      VersionState::handle_version_state_request(derez, this, source);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_version_state_response(Deserializer &derez,
-                                                AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      VersionState::handle_version_state_response(derez, this, source);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_version_state_update_request(Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      VersionState::process_version_state_update_request(this, derez);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_version_state_update_response(Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      VersionState::process_version_state_update_response(this, derez);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_version_state_valid_notification(Deserializer &derez,
+    void Runtime::handle_compute_equivalence_sets_request(Deserializer &derez,
                                                           AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      VersionState::process_version_state_valid_notification(derez,this,source);
+      InnerContext::handle_compute_equivalence_sets_request(derez, this,source);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_version_manager_advance(Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      VersionManager::handle_remote_advance(derez, this);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_version_manager_invalidate(Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      VersionManager::handle_remote_invalidate(derez, this);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_version_manager_request(Deserializer &derez,
+    void Runtime::handle_equivalence_set_request(Deserializer &derez,
                                                  AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      VersionManager::handle_request(derez, this, source);
+      EquivalenceSet::handle_equivalence_set_request(derez, this, source);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_version_manager_response(Deserializer &derez)
+    void Runtime::handle_equivalence_set_response(Deserializer &derez,
+                                                  AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      VersionManager::handle_response(derez);
+      EquivalenceSet::handle_equivalence_set_response(derez, this, source);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_version_manager_unversioned_request(
+    void Runtime::handle_equivalence_set_subset_request(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      EquivalenceSet::handle_subset_request(derez, this);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_equivalence_set_subset_response(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      EquivalenceSet::handle_subset_response(derez, this);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_equivalence_set_subset_update(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      EquivalenceSet::handle_subset_update(derez, this);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_equivalence_set_ray_trace_request(Deserializer &derez,
+                                                         AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      EquivalenceSet::handle_ray_trace_request(derez, this, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_equivalence_set_ray_trace_response(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      EquivalenceSet::handle_ray_trace_response(derez, this);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_equivalence_set_migration(Deserializer &derez,
+                                                   AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      EquivalenceSet::handle_migration(derez, this, source); 
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_equivalence_set_owner_update(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      EquivalenceSet::handle_owner_update(derez, this);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_equivalence_set_remote_refinement(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      EquivalenceSet::handle_remote_refinement(derez, this);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_equivalence_set_remote_request_instances(
                                      Deserializer &derez, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      VersionManager::handle_unversioned_request(derez, this, source);
+      ValidInstAnalysis::handle_remote_request_instances(derez, this, source);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_version_manager_unversioned_response(
-                                                            Deserializer &derez)
+    void Runtime::handle_equivalence_set_remote_request_invalid(
+                                     Deserializer &derez, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      VersionManager::handle_unversioned_response(derez, this);
+      InvalidInstAnalysis::handle_remote_request_invalid(derez, this, source);
     }
-    
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_equivalence_set_remote_updates(Deserializer &derez,
+                                                        AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      UpdateAnalysis::handle_remote_updates(derez, this, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_equivalence_set_remote_acquires(Deserializer &derez,
+                                                          AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      AcquireAnalysis::handle_remote_acquires(derez, this, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_equivalence_set_remote_releases(Deserializer &derez,
+                                                          AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      ReleaseAnalysis::handle_remote_releases(derez, this, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_equivalence_set_remote_copies_across(
+                                     Deserializer &derez, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      CopyAcrossAnalysis::handle_remote_copies_across(derez, this, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_equivalence_set_remote_overwrites(Deserializer &derez,
+                                                          AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      OverwriteAnalysis::handle_remote_overwrites(derez, this, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_equivalence_set_remote_filters(Deserializer &derez,
+                                                        AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      FilterAnalysis::handle_remote_filters(derez, this, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_equivalence_set_remote_instances(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      PhysicalAnalysis::handle_remote_instances(derez, this);
+    }
+
     //--------------------------------------------------------------------------
     void Runtime::handle_instance_request(Deserializer &derez, 
                                           AddressSpaceID source)
@@ -15424,6 +16785,42 @@ namespace Legion {
       derez.deserialize(target_memory);
       MemoryManager *manager = find_memory_manager(target_memory);
       manager->process_instance_response(derez, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_external_create_request(Deserializer &derez,
+                                                 AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      FieldSpaceNode::handle_external_create_request(derez, this, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_external_create_response(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      FieldSpaceNode::handle_external_create_response(derez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_external_attach(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      Memory target_memory;
+      derez.deserialize(target_memory);
+      DistributedID did;
+      derez.deserialize(did);
+      RtEvent manager_ready;
+      PhysicalManager *manager = 
+        find_or_request_physical_manager(did, manager_ready);
+      RtUserEvent done_event;
+      derez.deserialize(done_event);
+      MemoryManager *memory_manager = find_memory_manager(target_memory);
+      if (manager_ready.exists() && !manager_ready.has_triggered())
+        manager_ready.wait();
+      RtEvent local_done = memory_manager->attach_external_instance(manager);
+      Runtime::trigger_event(done_event, local_done);
     }
 
     //--------------------------------------------------------------------------
@@ -15495,21 +16892,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_variant_request(Deserializer &derez, 
-                                          AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      TaskImpl::handle_variant_request(this, derez, source);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_variant_response(Deserializer &derez) 
-    //--------------------------------------------------------------------------
-    {
-      VariantImpl::handle_variant_response(this, derez);
-    }
-
-    //--------------------------------------------------------------------------
     void Runtime::handle_variant_broadcast(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
@@ -15529,11 +16911,7 @@ namespace Legion {
                                              AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      LayoutConstraintID to_remove = 
-        LayoutConstraints::process_response(this, derez, source);
-      // Remove the done event from our set of pending events
-      AutoLock l_lock(layout_constraints_lock);
-      pending_constraint_requests.erase(to_remove);
+      LayoutConstraints::process_response(this, derez, source);
     }
 
     //--------------------------------------------------------------------------
@@ -15751,6 +17129,120 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::handle_library_redop_request(Deserializer &derez,
+                                               AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      size_t string_length;
+      derez.deserialize(string_length);
+      const char *name = (const char*)derez.get_current_pointer();
+      derez.advance_pointer(string_length);
+      size_t count;
+      derez.deserialize(count);
+      RtUserEvent done;
+      derez.deserialize(done);
+      
+      ReductionOpID result = generate_library_reduction_ids(name, count);
+      Serializer rez;
+      {
+        RezCheck z2(rez);
+        rez.serialize(string_length);
+        rez.serialize(name, string_length);
+        rez.serialize(result);
+        rez.serialize(done);
+      }
+      send_library_redop_response(source, rez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_library_redop_response(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      size_t string_length;
+      derez.deserialize(string_length);
+      const char *name = (const char*)derez.get_current_pointer();
+      derez.advance_pointer(string_length);
+      ReductionOpID result;
+      derez.deserialize(result);
+      RtUserEvent done;
+      derez.deserialize(done);
+
+      const std::string library_name(name);
+      {
+        AutoLock l_lock(library_lock); 
+        std::map<std::string,LibraryRedopIDs>::iterator finder = 
+          library_redop_ids.find(library_name);
+#ifdef DEBUG_LEGION
+        assert(finder != library_redop_ids.end());
+        assert(!finder->second.result_set);
+        assert(finder->second.ready == done);
+#endif
+        finder->second.result = result;
+        finder->second.result_set = true;
+      }
+      Runtime::trigger_event(done);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_library_serdez_request(Deserializer &derez,
+                                                AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      size_t string_length;
+      derez.deserialize(string_length);
+      const char *name = (const char*)derez.get_current_pointer();
+      derez.advance_pointer(string_length);
+      size_t count;
+      derez.deserialize(count);
+      RtUserEvent done;
+      derez.deserialize(done);
+      
+      CustomSerdezID result = generate_library_serdez_ids(name, count);
+      Serializer rez;
+      {
+        RezCheck z2(rez);
+        rez.serialize(string_length);
+        rez.serialize(name, string_length);
+        rez.serialize(result);
+        rez.serialize(done);
+      }
+      send_library_serdez_response(source, rez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_library_serdez_response(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      size_t string_length;
+      derez.deserialize(string_length);
+      const char *name = (const char*)derez.get_current_pointer();
+      derez.advance_pointer(string_length);
+      CustomSerdezID result;
+      derez.deserialize(result);
+      RtUserEvent done;
+      derez.deserialize(done);
+
+      const std::string library_name(name);
+      {
+        AutoLock l_lock(library_lock); 
+        std::map<std::string,LibrarySerdezIDs>::iterator finder = 
+          library_serdez_ids.find(library_name);
+#ifdef DEBUG_LEGION
+        assert(finder != library_serdez_ids.end());
+        assert(!finder->second.result_set);
+        assert(finder->second.ready == done);
+#endif
+        finder->second.result = result;
+        finder->second.result_set = true;
+      }
+      Runtime::trigger_event(done);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::handle_shutdown_notification(Deserializer &derez,
                                                AddressSpaceID source)
     //--------------------------------------------------------------------------
@@ -15772,12 +17264,14 @@ namespace Legion {
                                      MappingInstance &result,
                                      MapperID mapper_id, Processor processor, 
                                      bool acquire, GCPriority priority,
+                                     bool tight_bounds, size_t *footprint,
                                      UniqueID creator_id)
     //--------------------------------------------------------------------------
     {
       MemoryManager *manager = find_memory_manager(target_memory);
       return manager->create_physical_instance(constraints, regions, result,
-                       mapper_id, processor, acquire, priority, creator_id);
+                       mapper_id, processor, acquire, priority, tight_bounds,
+                       footprint, creator_id);
     }
 
     //--------------------------------------------------------------------------
@@ -15787,13 +17281,15 @@ namespace Legion {
                                      MappingInstance &result,
                                      MapperID mapper_id, Processor processor,
                                      bool acquire, GCPriority priority,
+                                     bool tight_bounds, size_t *footprint,
                                      UniqueID creator_id)
     //--------------------------------------------------------------------------
     {
       LayoutConstraints *constraints = find_layout_constraints(layout_id);
       MemoryManager *manager = find_memory_manager(target_memory);
       return manager->create_physical_instance(constraints, regions, result,
-                       mapper_id, processor, acquire, priority, creator_id);
+                       mapper_id, processor, acquire, priority, tight_bounds,
+                       footprint, creator_id);
     }
 
     //--------------------------------------------------------------------------
@@ -15803,13 +17299,14 @@ namespace Legion {
                                      MappingInstance &result, bool &created, 
                                      MapperID mapper_id, Processor processor,
                                      bool acquire, GCPriority priority,
-                                     bool tight_bounds, UniqueID creator_id)
+                                     bool tight_bounds, size_t *footprint,
+                                     UniqueID creator_id)
     //--------------------------------------------------------------------------
     {
       MemoryManager *manager = find_memory_manager(target_memory);
       return manager->find_or_create_physical_instance(constraints, regions, 
                              result, created, mapper_id, processor, acquire, 
-                             priority, tight_bounds, creator_id);
+                             priority, tight_bounds, footprint, creator_id);
     }
 
     //--------------------------------------------------------------------------
@@ -15819,14 +17316,15 @@ namespace Legion {
                                     MappingInstance &result, bool &created, 
                                     MapperID mapper_id, Processor processor,
                                     bool acquire, GCPriority priority,
-                                    bool tight_bounds, UniqueID creator_id)
+                                    bool tight_bounds, size_t *footprint,
+                                    UniqueID creator_id)
     //--------------------------------------------------------------------------
     {
       LayoutConstraints *constraints = find_layout_constraints(layout_id);
       MemoryManager *manager = find_memory_manager(target_memory);
       return manager->find_or_create_physical_instance(constraints, regions,
                              result, created, mapper_id, processor, acquire, 
-                             priority, tight_bounds, creator_id);
+                             priority, tight_bounds, footprint, creator_id);
     }
 
     //--------------------------------------------------------------------------
@@ -15857,7 +17355,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::release_tree_instances(RegionTreeID tree_id)
+    void Runtime::release_tree_instances(RegionTreeID tid)
     //--------------------------------------------------------------------------
     {
       std::map<Memory,MemoryManager*> copy_managers;
@@ -15867,7 +17365,7 @@ namespace Legion {
       }
       for (std::map<Memory,MemoryManager*>::const_iterator it = 
             copy_managers.begin(); it != copy_managers.end(); it++)
-        it->second->release_tree_instances(tree_id);
+        it->second->release_tree_instances(tid);
     }
 
     //--------------------------------------------------------------------------
@@ -15883,7 +17381,7 @@ namespace Legion {
 #ifdef TRACE_ALLOCATION
       unsigned long long trace_count = 
         __sync_fetch_and_add(&allocation_tracing_count,1); 
-      if ((trace_count % TRACE_ALLOCATION_FREQUENCY) == 0)
+      if ((trace_count % LEGION_TRACE_ALLOCATION_FREQUENCY) == 0)
         dump_allocation_info();
 #endif
     }
@@ -15922,8 +17420,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::add_to_dependence_queue(TaskContext *ctx,
-                                          Processor p, Operation *op)
+    void Runtime::add_to_dependence_queue(TaskContext *ctx, Processor p, 
+                                          Operation *op, const bool unordered)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -15932,16 +17430,16 @@ namespace Legion {
       // Launch the task to perform the prepipeline stage for the operation
       if (op->has_prepipeline_stage())
         ctx->add_to_prepipeline_queue(op);
-      if (program_order_execution)
+      if (program_order_execution && !unordered)
       {
         ApEvent term_event = op->get_completion_event();
-        ctx->add_to_dependence_queue(op);
+        ctx->add_to_dependence_queue(op, false/*unordered*/);
         ctx->begin_task_wait(true/*from runtime*/);
         term_event.wait();
         ctx->end_task_wait();
       }
       else
-        ctx->add_to_dependence_queue(op);
+        ctx->add_to_dependence_queue(op, unordered);
     }
     
     //--------------------------------------------------------------------------
@@ -16042,7 +17540,7 @@ namespace Legion {
         }
         unsigned next_index = processor_mapping.size();
 #ifdef DEBUG_LEGION
-        assert(next_index < MAX_NUM_PROCS);
+        assert(next_index < LEGION_MAX_NUM_PROCS);
 #endif
         processor_mapping[*it] = next_index;
         result.set_bit(next_index);
@@ -16261,16 +17759,13 @@ namespace Legion {
       DistributedCollectable *dc = NULL;
       if (LogicalView::is_materialized_did(did))
         dc = find_or_request_distributed_collectable<
-         MaterializedView, SEND_VIEW_REQUEST, VIEW_VIRTUAL_CHANNEL>(did, ready);
+         MaterializedView,SEND_VIEW_REQUEST,DEFAULT_VIRTUAL_CHANNEL>(did,ready);
       else if (LogicalView::is_reduction_did(did))
         dc = find_or_request_distributed_collectable<
-          ReductionView, SEND_VIEW_REQUEST, VIEW_VIRTUAL_CHANNEL>(did, ready);
-      else if (LogicalView::is_composite_did(did))
-        dc = find_or_request_distributed_collectable<
-          CompositeView, SEND_VIEW_REQUEST, VIEW_VIRTUAL_CHANNEL>(did, ready);
+          ReductionView, SEND_VIEW_REQUEST, DEFAULT_VIRTUAL_CHANNEL>(did,ready);
       else if (LogicalView::is_fill_did(did))
         dc = find_or_request_distributed_collectable<
-          FillView, SEND_VIEW_REQUEST, VIEW_VIRTUAL_CHANNEL>(did, ready);
+          FillView, SEND_VIEW_REQUEST, DEFAULT_VIRTUAL_CHANNEL>(did, ready);
       else
         assert(false);
       // Have to static cast since the memory might not have been initialized
@@ -16285,15 +17780,15 @@ namespace Legion {
       DistributedCollectable *dc = NULL;
       if (PhysicalManager::is_instance_did(did))
         dc = find_or_request_distributed_collectable<
-          InstanceManager, SEND_MANAGER_REQUEST, MANAGER_VIRTUAL_CHANNEL>(did, 
+          InstanceManager, SEND_MANAGER_REQUEST, DEFAULT_VIRTUAL_CHANNEL>(did, 
                                                                         ready);
       else if (PhysicalManager::is_reduction_fold_did(did))
         dc = find_or_request_distributed_collectable<
-          FoldReductionManager, SEND_MANAGER_REQUEST, MANAGER_VIRTUAL_CHANNEL>(
+          FoldReductionManager, SEND_MANAGER_REQUEST, DEFAULT_VIRTUAL_CHANNEL>(
                                                                     did, ready);
       else if (PhysicalManager::is_reduction_list_did(did))
         dc = find_or_request_distributed_collectable<
-          ListReductionManager, SEND_MANAGER_REQUEST, MANAGER_VIRTUAL_CHANNEL>(
+          ListReductionManager, SEND_MANAGER_REQUEST, DEFAULT_VIRTUAL_CHANNEL>(
                                                                     did, ready);
       else
         assert(false);
@@ -16302,15 +17797,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    VersionState* Runtime::find_or_request_version_state(DistributedID did,
-                                                         RtEvent &ready)
+    EquivalenceSet* Runtime::find_or_request_equivalence_set(DistributedID did,
+                                                             RtEvent &ready)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(LEGION_DISTRIBUTED_HELP_DECODE(did) == EQUIVALENCE_SET_DC);
+#endif
       DistributedCollectable *dc = find_or_request_distributed_collectable<
-        VersionState, SEND_VERSION_STATE_REQUEST, VERSION_VIRTUAL_CHANNEL>(did,
-                                                                        ready);
+        EquivalenceSet, SEND_EQUIVALENCE_SET_REQUEST, DEFAULT_VIRTUAL_CHANNEL>(
+                                                                    did, ready);
       // Have to static cast since the memory might not have been initialized
-      return static_cast<VersionState*>(dc);
+      return static_cast<EquivalenceSet*>(dc);
     }
 
     //--------------------------------------------------------------------------
@@ -16393,7 +17891,9 @@ namespace Legion {
         if (finder != dist_collectables.end())
         {
           // We lost the race
-          delete (result);
+          if (!result->is_owner() && 
+              result->remove_base_resource_ref(REMOTE_DID_REF))
+            delete (result);
 #ifdef DEBUG_LEGION
           result = dynamic_cast<FutureImpl*>(finder->second);
           assert(result != NULL);
@@ -16402,9 +17902,12 @@ namespace Legion {
 #endif
           return result;
         }
+        result->record_future_registered();
         dist_collectables[did] = result;
       }
-      result->record_future_registered(mutator);
+      // If we're not the owner send the subscription message
+      if (!result->is_owner())
+        result->register_waiter(address_space, mutator);
       return result;
     }
 
@@ -16440,7 +17943,9 @@ namespace Legion {
         if (finder != dist_collectables.end())
         {
           // We lost the race
-          delete (result);
+          if (!result->is_owner() &&
+              result->remove_base_resource_ref(REMOTE_DID_REF))
+            delete (result);
 #ifdef DEBUG_LEGION
           result = dynamic_cast<FutureMapImpl*>(finder->second);
           assert(result != NULL);
@@ -16449,36 +17954,27 @@ namespace Legion {
 #endif
           return result;
         }
+        result->record_future_map_registered(mutator);
         dist_collectables[did] = result;
       }
-      result->record_future_map_registered(mutator);
       return result;
     }
 
     //--------------------------------------------------------------------------
-    IndexSpace Runtime::find_or_create_index_launch_space(const Domain &dom)
+    IndexSpace Runtime::find_or_create_index_slice_space(const Domain &dom)
     //--------------------------------------------------------------------------
     {
       switch (dom.get_dim())
       {
-        case 1:
-          {
-            DomainT<1,coord_t> is = dom;
-            return find_or_create_index_launch_space(dom, &is,
-                  NT_TemplateHelper::encode_tag<1,coord_t>());
+#define DIMFUNC(DIM) \
+        case DIM: \
+          { \
+            DomainT<DIM,coord_t> is = dom; \
+            return find_or_create_index_slice_space(dom, &is, \
+                NT_TemplateHelper::encode_tag<DIM,coord_t>()); \
           }
-        case 2:
-          {
-            DomainT<2,coord_t> is = dom;
-            return find_or_create_index_launch_space(dom, &is,
-                  NT_TemplateHelper::encode_tag<2,coord_t>());
-          }
-        case 3:
-          {
-            DomainT<3,coord_t> is = dom;
-            return find_or_create_index_launch_space(dom, &is,
-                  NT_TemplateHelper::encode_tag<3,coord_t>());
-          }
+        LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
         default:
           assert(false);
       }
@@ -16486,17 +17982,17 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
-    IndexSpace Runtime::find_or_create_index_launch_space(const Domain &dom,
-                                                          const void *realm_is,
-                                                          TypeTag type_tag)
+    IndexSpace Runtime::find_or_create_index_slice_space(const Domain &dom,
+                                                         const void *realm_is,
+                                                         TypeTag type_tag)
     //--------------------------------------------------------------------------
     {
       const std::pair<Domain,TypeTag> key(dom, type_tag);
       {
-        AutoLock is_lock(is_launch_lock,1,false/*exclusive*/);
+        AutoLock is_lock(is_slice_lock,1,false/*exclusive*/);
         std::map<std::pair<Domain,TypeTag>,IndexSpace>::const_iterator finder =
-          index_launch_spaces.find(key);
-        if (finder != index_launch_spaces.end())
+          index_slice_spaces.find(key);
+        if (finder != index_slice_spaces.end())
           return finder->second;
       }
       IndexSpace result(get_unique_index_space_id(),
@@ -16507,46 +18003,9 @@ namespace Legion {
         LegionSpy::log_top_index_space(result.id);
       // Overwrite and leak for now, don't care too much as this 
       // should occur infrequently
-      AutoLock is_lock(is_launch_lock);
-      index_launch_spaces[key] = result;
+      AutoLock is_lock(is_slice_lock);
+      index_slice_spaces[key] = result;
       return result;
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::defer_collect_user(LogicalView *view, ApEvent term_event,
-                                     ReferenceMutator *mutator)
-    //--------------------------------------------------------------------------
-    {
-      GarbageCollectionEpoch *to_trigger = NULL;
-      {
-        AutoLock gc(gc_epoch_lock);
-        current_gc_epoch->add_collection(view, term_event, mutator);
-        gc_epoch_counter++;
-        if (gc_epoch_counter == Runtime::gc_epoch_size)
-        {
-          to_trigger = current_gc_epoch;
-          current_gc_epoch = new GarbageCollectionEpoch(this);
-          pending_gc_epochs.insert(current_gc_epoch);
-          gc_epoch_counter = 0;
-        }
-      }
-      if ((to_trigger != NULL) && to_trigger->launch())
-        delete to_trigger;
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::complete_gc_epoch(GarbageCollectionEpoch *epoch)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock gc(gc_epoch_lock);
-#ifdef DEBUG_LEGION
-      std::set<GarbageCollectionEpoch*>::iterator finder = 
-        pending_gc_epochs.find(epoch);
-      assert(finder != pending_gc_epochs.end());
-      pending_gc_epochs.erase(finder);
-#else
-      pending_gc_epochs.erase(epoch);
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -16563,7 +18022,7 @@ namespace Legion {
         Serializer rez;
         rez.serialize(grant_event);
         find_messenger(0)->send_message(rez, SEND_TOP_LEVEL_TASK_REQUEST,
-                                        DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+                                THROUGHPUT_VIRTUAL_CHANNEL, true/*flush*/);
         grant_event.wait();
       }
       else
@@ -16583,7 +18042,7 @@ namespace Legion {
         // executing a top-level task
         Serializer rez;
         find_messenger(0)->send_message(rez, SEND_TOP_LEVEL_TASK_COMPLETE,
-                                        DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+                                THROUGHPUT_VIRTUAL_CHANNEL, true/*flush*/);
       }
       else
       {
@@ -16620,22 +18079,23 @@ namespace Legion {
       // If this is the first phase, do all our normal stuff
       if (phase == ShutdownManager::CHECK_TERMINATION)
       {
-        // Launch our last garbage collection epoch and wait for it to
-        // finish so we can try to have no outstanding tasks
-        RtEvent gc_done;
-        GarbageCollectionEpoch *to_delete = NULL;
+        // Get the preconditions for any outstanding operations still
+        // available for garabage collection and wait on them to 
+        // try and get close to when there are no more outstanding tasks
+        std::map<Memory,MemoryManager*> copy_managers;
         {
-          AutoLock gc(gc_epoch_lock);
-          if (current_gc_epoch != NULL)
-          {
-            if (current_gc_epoch->launch(&gc_done))
-              to_delete = current_gc_epoch;
-            current_gc_epoch = NULL;
-          }
+          AutoLock m_lock(memory_manager_lock,1,false/*exclusive*/);
+          copy_managers = memory_managers;
         }
-        if (to_delete != NULL)
-          delete to_delete;
-        gc_done.wait();
+        std::set<ApEvent> wait_events;
+        for (std::map<Memory,MemoryManager*>::const_iterator it = 
+              copy_managers.begin(); it != copy_managers.end(); it++)
+          it->second->find_shutdown_preconditions(wait_events);
+        if (!wait_events.empty())
+        {
+          RtEvent wait_on = Runtime::protect_merge_events(wait_events);
+          wait_on.wait();
+        }
       }
       else if ((phase == ShutdownManager::CHECK_SHUTDOWN) && 
                 !prepared_for_shutdown)
@@ -16678,7 +18138,7 @@ namespace Legion {
 #endif
       }
       // Check all our message managers for outstanding messages
-      for (unsigned idx = 0; idx < MAX_NUM_NODES; idx++)
+      for (unsigned idx = 0; idx < LEGION_MAX_NUM_NODES; idx++)
       {
         if (message_managers[idx] != NULL)
           message_managers[idx]->confirm_shutdown(shutdown_manager, phase_one);
@@ -16698,7 +18158,40 @@ namespace Legion {
       for (std::map<Memory,MemoryManager*>::const_iterator it = 
             memory_managers.begin(); it != memory_managers.end(); it++)
         it->second->prepare_for_shutdown();
-      forest->prepare_for_shutdown();
+      // Destroy any index slice spaces that we made during execution
+      std::set<RtEvent> applied;
+      for (std::map<std::pair<Domain,TypeTag>,IndexSpace>::const_iterator it =
+            index_slice_spaces.begin(); it != index_slice_spaces.end(); it++)
+        forest->destroy_index_space(it->second, address_space, applied);
+      // If there are still any layout constraints that the application
+      // failed to remove its references to then we can remove the reference
+      // for them and make sure it's effects propagate
+      if (!separate_runtime_instances)
+      {
+        std::vector<LayoutConstraints*> to_remove;
+        {
+          AutoLock l_lock(layout_constraints_lock,1,false/*exclusive*/);
+          for (std::map<LayoutConstraintID,LayoutConstraints*>::const_iterator
+                it = layout_constraints_table.begin(); it !=
+                layout_constraints_table.end(); it++)
+            if (it->second->is_owner() && !it->second->internal)
+              to_remove.push_back(it->second);
+        }
+        if (!to_remove.empty())
+        {
+          WrapperReferenceMutator mutator(applied); 
+          for (std::vector<LayoutConstraints*>::const_iterator it = 
+                to_remove.begin(); it != to_remove.end(); it++)
+            if ((*it)->remove_base_gc_ref(APPLICATION_REF, &mutator))
+              delete (*it);
+        }
+      }
+      if (!applied.empty())
+      {
+        const RtEvent wait_on = Runtime::merge_events(applied);
+        if (wait_on.exists() && !wait_on.has_triggered())
+          wait_on.wait();
+      }
       prepared_for_shutdown = true;
     }
 
@@ -16740,6 +18233,10 @@ namespace Legion {
           }
         }
       }
+      // One last really crazy precondition on shutdown, we actually need to
+      // make sure that this task itself is done executing before trying to
+      // shutdown so add our own completion event as a precondition
+      shutdown_events.insert(RtEvent(Processor::get_current_finish_event()));
       // Then tell Realm to shutdown when they are all done
       RtEvent shutdown_precondition = Runtime::merge_events(shutdown_events);
       RealmRuntime realm = RealmRuntime::get_runtime();
@@ -16892,31 +18389,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    OpenOp* Runtime::get_available_open_op(void)
+    MergeCloseOp* Runtime::get_available_merge_close_op(void)
     //--------------------------------------------------------------------------
     {
-      return get_available(open_op_lock, available_open_ops);
-    }
-
-    //--------------------------------------------------------------------------
-    AdvanceOp* Runtime::get_available_advance_op(void)
-    //--------------------------------------------------------------------------
-    {
-      return get_available(advance_op_lock, available_advance_ops);
-    }
-
-    //--------------------------------------------------------------------------
-    InterCloseOp* Runtime::get_available_inter_close_op(void)
-    //--------------------------------------------------------------------------
-    {
-      return get_available(inter_close_op_lock, available_inter_close_ops);
-    }
-
-    //--------------------------------------------------------------------------
-    ReadCloseOp* Runtime::get_available_read_close_op(void)
-    //--------------------------------------------------------------------------
-    {
-      return get_available(read_close_op_lock, available_read_close_ops);
+      return get_available(merge_close_op_lock, available_merge_close_ops);
     }
 
     //--------------------------------------------------------------------------
@@ -17205,35 +18681,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::free_open_op(OpenOp *op)
+    void Runtime::free_merge_close_op(MergeCloseOp *op)
     //--------------------------------------------------------------------------
     {
-      AutoLock o_lock(open_op_lock);
-      release_operation<false>(available_open_ops, op);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::free_advance_op(AdvanceOp *op)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock a_lock(advance_op_lock);
-      release_operation<false>(available_advance_ops, op);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::free_inter_close_op(InterCloseOp *op)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock i_lock(inter_close_op_lock);
-      release_operation<false>(available_inter_close_ops, op);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::free_read_close_op(ReadCloseOp *op)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock r_lock(read_close_op_lock);
-      release_operation<false>(available_read_close_ops, op);
+      AutoLock i_lock(merge_close_op_lock);
+      release_operation<false>(available_merge_close_ops, op);
     }
 
     //--------------------------------------------------------------------------
@@ -17512,13 +18964,13 @@ namespace Legion {
       RtUserEvent to_trigger;
       {
         AutoLock ctx_lock(context_lock);
-        std::map<UniqueID,RtUserEvent>::iterator finder = 
-          pending_remote_contexts.find(context_uid);
+        std::map<UniqueID,std::pair<RtUserEvent,RemoteContext*> >::iterator 
+          finder = pending_remote_contexts.find(context_uid);
 #ifdef DEBUG_LEGION
         assert(remote_contexts.find(context_uid) == remote_contexts.end());
         assert(finder != pending_remote_contexts.end());
 #endif
-        to_trigger = finder->second;
+        to_trigger = finder->second.first;
         pending_remote_contexts.erase(finder);
         remote_contexts[context_uid] = context; 
       }
@@ -17553,14 +19005,16 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     InnerContext* Runtime::find_context(UniqueID context_uid,
-                                      bool return_null_if_not_found /*=false*/)
+                                      bool return_null_if_not_found /*=false*/,
+                                      RtEvent *wait_for /*=NULL*/)
     //--------------------------------------------------------------------------
     {
       RtEvent wait_on;
       RtUserEvent ready_event;
+      RemoteContext *result = NULL;
       {
         // Need exclusive permission since we might mutate stuff
-        AutoLock ctx_lock(context_lock);
+        AutoLock ctx_lock(context_lock,1,false/*exclusive*/);
         // See if it is local first
         std::map<UniqueID,InnerContext*>::const_iterator
           local_finder = local_contexts.find(context_uid);
@@ -17572,20 +19026,98 @@ namespace Legion {
         if (remote_finder != remote_contexts.end())
           return remote_finder->second;
         // If we don't have it, see if we should send the response or not
-        std::map<UniqueID,RtUserEvent>::const_iterator pending_finder = 
-          pending_remote_contexts.find(context_uid);
-        if (pending_finder == pending_remote_contexts.end())
+        std::map<UniqueID,
+                 std::pair<RtUserEvent,RemoteContext*> >::const_iterator 
+          pending_finder = pending_remote_contexts.find(context_uid);
+        if (pending_finder != pending_remote_contexts.end())
         {
+          if (wait_for != NULL)
+          {
+            *wait_for = pending_finder->second.first;
+            return pending_finder->second.second;
+          }
+          else
+          {
+            wait_on = pending_finder->second.first;
+            result = pending_finder->second.second;
+          }
+        } else if (return_null_if_not_found)
           // If its not here and we are supposed to return null do that
-          if (return_null_if_not_found)
-            return NULL;
-          // Make an event to trigger for when we are done
-          ready_event = Runtime::create_rt_user_event();
-          pending_remote_contexts[context_uid] = ready_event; 
-        }
-        else // if we're going to have it we might as well wait
-          wait_on = pending_finder->second;
+          return NULL;
       }
+      if (result == NULL)
+      {
+        // Make a remote context here in case we need to request it, 
+        // we can't make it while holding the lock
+        RemoteContext *temp = new RemoteContext(this, context_uid);
+        // Add a reference to the newly created context
+        temp->add_reference();
+        InnerContext *local_result = NULL;
+        // Use a do while (false) loop here for easy breaks
+        do 
+        { 
+          // Retake the lock in exclusive mode and see if we lost the race
+          AutoLock ctx_lock(context_lock);
+          // See if it is local first
+          std::map<UniqueID,InnerContext*>::const_iterator
+            local_finder = local_contexts.find(context_uid);
+          if (local_finder != local_contexts.end())
+          {
+            // Need to jump to end to avoid leaking memory with temp
+            local_result = local_finder->second;
+            break;
+          }
+          // Now see if it is remote
+          std::map<UniqueID,RemoteContext*>::const_iterator
+            remote_finder = remote_contexts.find(context_uid);
+          if (remote_finder != remote_contexts.end())
+          {
+            // Need to jump to end to avoid leaking memory with temp
+            local_result = remote_finder->second;
+            break;
+          }
+          // If we don't have it, see if we should send the response or not
+          std::map<UniqueID,
+                   std::pair<RtUserEvent,RemoteContext*> >::const_iterator 
+            pending_finder = pending_remote_contexts.find(context_uid);
+          if (pending_finder == pending_remote_contexts.end())
+          {
+#ifdef DEBUG_LEGION
+            assert(!return_null_if_not_found);
+#endif
+            // Make an event to trigger for when we are done
+            ready_event = Runtime::create_rt_user_event();
+            pending_remote_contexts[context_uid] = 
+              std::pair<RtUserEvent,RemoteContext*>(ready_event, temp); 
+            result = temp;
+            // Add a result that will be removed when the response
+            // message comes back from the owner, this also prevents
+            // temp from being deleted at the end of this block
+            result->add_reference();
+          }
+          else // if we're going to have it we might as well wait
+          {
+            if (wait_for != NULL)
+            {
+              *wait_for = pending_finder->second.first;
+              local_result = pending_finder->second.second;
+              // Need to continue to end to avoid leaking memory with temp
+            }
+            else
+            {
+              wait_on = pending_finder->second.first;
+              result = pending_finder->second.second;
+            }
+          }
+        } while (false); // only go through this block once
+        if (temp->remove_reference())
+          delete temp;
+        if (local_result != NULL)
+          return local_result;
+      }
+#ifdef DEBUG_LEGION
+      assert(result != NULL);
+#endif
       // If there is no wait event, we have to send the message
       if (!wait_on.exists())
       {
@@ -17594,12 +19126,10 @@ namespace Legion {
 #endif
         // We have to send the message
         // Figure out the target
-        AddressSpaceID target = get_runtime_owner(context_uid);
+        const AddressSpaceID target = get_runtime_owner(context_uid);
 #ifdef DEBUG_LEGION
         assert(target != address_space);
 #endif
-        // Make the result
-        RemoteContext *result = new RemoteContext(this, context_uid);
         // Send the message
         Serializer rez;
         {
@@ -17607,27 +19137,29 @@ namespace Legion {
           rez.serialize(context_uid);
           rez.serialize(result);
         }
-        send_remote_context_request(target, rez);
-        // Add a reference to the newly created context
-        result->add_reference();
-        // Wait for it to be ready
-        ready_event.wait();
-        // We already know the answer cause we sent the message
+        send_remote_context_request(target, rez); 
+        if (wait_for != NULL)
+        {
+          *wait_for = ready_event;
+          return result;
+        }
+        else
+        {
+          // Wait for it to be ready
+          ready_event.wait();
+          // We already know the answer cause we sent the message
+          return result;
+        }
+      }
+      else
+      {
+        // Can't wait in some cases
+        if (return_null_if_not_found && !wait_on.has_triggered())
+          return NULL;
+        // We wait for the results to be ready
+        wait_on.wait();
         return result;
       }
-      // Can't wait in some cases
-      if (return_null_if_not_found && !wait_on.has_triggered())
-        return NULL;
-      // We wait for the results to be ready
-      wait_on.wait();
-      // When we wake up the context should be here
-      AutoLock ctx_lock(context_lock,1,false/*exclusive*/);
-      std::map<UniqueID,RemoteContext*>::const_iterator finder = 
-        remote_contexts.find(context_uid);
-#ifdef DEBUG_LEGION
-      assert(finder != remote_contexts.end());
-#endif
-      return finder->second;
     }
 
     //--------------------------------------------------------------------------
@@ -17797,6 +19329,19 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    IndexSpaceExprID Runtime::get_unique_index_space_expr_id(void)
+    //--------------------------------------------------------------------------
+    {
+      IndexSpaceExprID result = __sync_fetch_and_add(&unique_is_expr_id,
+                                                     runtime_stride);
+#ifdef DEBUG_LEGION
+      // check for overflow
+      assert(result <= unique_is_expr_id);
+#endif
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
     LegionErrorType Runtime::verify_requirement(
                                const RegionRequirement &req, FieldID &bad_field)
     //--------------------------------------------------------------------------
@@ -17868,9 +19413,14 @@ namespace Legion {
     Future Runtime::help_create_future(Operation *op /*= NULL*/)
     //--------------------------------------------------------------------------
     {
-      return Future(new FutureImpl(this, true/*register*/,
+      if ((op == NULL) && (implicit_context != NULL))
+        return Future(new FutureImpl(this, true/*register*/,
                                    get_available_distributed_id(),
-                                   address_space, op));
+                                   address_space,implicit_context->owner_task));
+      else
+        return Future(new FutureImpl(this, true/*register*/,
+                                     get_available_distributed_id(),
+                                     address_space, op));
     }
 
     //--------------------------------------------------------------------------
@@ -17888,6 +19438,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    IndexSpace Runtime::help_create_index_space_handle(TypeTag type_tag)
+    //--------------------------------------------------------------------------
+    {
+      IndexSpace handle(get_unique_index_space_id(),
+                        get_unique_index_tree_id(), type_tag);
+      return handle;
+    }
+
+    //--------------------------------------------------------------------------
     unsigned Runtime::generate_random_integer(void)
     //--------------------------------------------------------------------------
     {
@@ -17901,6 +19460,8 @@ namespace Legion {
     void Runtime::trace_allocation(AllocationType type, size_t size, int elems)
     //--------------------------------------------------------------------------
     {
+      if (prepared_for_shutdown)
+        return;
       AutoLock a_lock(allocation_lock);
       std::map<AllocationType,AllocationTracker>::iterator finder = 
         allocation_manager.find(type);
@@ -17915,6 +19476,8 @@ namespace Legion {
     void Runtime::trace_free(AllocationType type, size_t size, int elems)
     //--------------------------------------------------------------------------
     {
+      if (prepared_for_shutdown)
+        return;
       AutoLock a_lock(allocation_lock);
       std::map<AllocationType,AllocationTracker>::iterator finder = 
         allocation_manager.find(type);
@@ -17994,8 +19557,6 @@ namespace Legion {
           return "List Reduction Manager";
         case FOLD_MANAGER_ALLOC:
           return "Fold Reduction Manager";
-        case COMPOSITE_NODE_ALLOC:
-          return "Composite Node";
         case TREE_CLOSE_ALLOC:
           return "Tree Close List";
         case TREE_CLOSE_IMPL_ALLOC:
@@ -18004,8 +19565,6 @@ namespace Legion {
           return "Materialized View";
         case REDUCTION_VIEW_ALLOC:
           return "Reduction View";
-        case COMPOSITE_VIEW_ALLOC:
-          return "Composite View";
         case FILL_VIEW_ALLOC:
           return "Fill View";
         case PHI_VIEW_ALLOC:
@@ -18034,10 +19593,6 @@ namespace Legion {
           return "Frame Op";
         case DELETION_OP_ALLOC:
           return "Deletion Op";
-        case OPEN_OP_ALLOC:
-          return "Open Op";
-        case ADVANCE_OP_ALLOC:
-          return "Advance Op";
         case CLOSE_OP_ALLOC:
           return "Close Op";
         case DYNAMIC_COLLECTIVE_OP_ALLOC:
@@ -18146,8 +19701,8 @@ namespace Legion {
           return "Version Manager";
         case PHYSICAL_STATE_ALLOC:
           return "Physical State";
-        case VERSION_STATE_ALLOC:
-          return "Version State";
+        case EQUIVALENCE_SET_ALLOC:
+          return "Equivalence Set";
         case AGGREGATE_VERSION_ALLOC:
           return "Aggregate Version";
         case TASK_IMPL_ALLOC:
@@ -18156,6 +19711,8 @@ namespace Legion {
           return "Variant Implementation";
         case LAYOUT_CONSTRAINTS_ALLOC:
           return "Layout Constraints";
+        case COPY_FILL_AGGREGATOR_ALLOC:
+          return "Copy Fill Aggregator";
         default:
           assert(false); // should never get here
       }
@@ -18374,7 +19931,9 @@ namespace Legion {
       // Now make our entry and then return the result
       LayoutConstraints *constraints = 
         new LayoutConstraints(layout_id, this, registrar,false/*internal*/,did);
-      register_layout(constraints);
+      // If someone else already registered this ID then we delete our object
+      if (!register_layout(constraints, NULL/*mutator*/))
+        delete constraints;
       return layout_id;
     }
 
@@ -18385,12 +19944,13 @@ namespace Legion {
     {
       LayoutConstraints *constraints = new LayoutConstraints(
           get_unique_constraint_id(), this, cons, handle, internal);
-      register_layout(constraints);
+      register_layout(constraints, NULL/*mutator*/);
       return constraints;
     }
 
     //--------------------------------------------------------------------------
-    bool Runtime::register_layout(LayoutConstraints *new_constraints)
+    bool Runtime::register_layout(LayoutConstraints *new_constraints,
+                                  ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
       new_constraints->add_base_resource_ref(RUNTIME_REF);
@@ -18404,6 +19964,10 @@ namespace Legion {
       if (finder != layout_constraints_table.end())
         return false;
       layout_constraints_table[new_constraints->layout_id] = new_constraints;
+      // Remove any pending requests
+      pending_constraint_requests.erase(new_constraints->layout_id);
+      // Now we can do the registration with the runtime
+      new_constraints->register_with_runtime(mutator);
       return true;
     }
 
@@ -18528,7 +20092,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     LayoutConstraints* Runtime::find_layout_constraints(
-                        LayoutConstraintID layout_id, bool can_fail /*= false*/)
+                      LayoutConstraintID layout_id, bool can_fail /*= false*/, 
+                      RtEvent *wait_for /*=NULL*/)
     //--------------------------------------------------------------------------
     {
       // See if we can find it first
@@ -18571,6 +20136,12 @@ namespace Legion {
             wait_on = wait_on_finder->second;
         }
       }
+      // If we want the wait event, just return
+      if (wait_for != NULL)
+      {
+        *wait_for = wait_on;
+        return NULL;
+      }
       // If we didn't find it send a remote request for the constraints
       wait_on.wait();
       // When we wake up, the result should be there
@@ -18588,45 +20159,42 @@ namespace Legion {
       return finder->second;
     }
 
-    /*static*/ Processor::TaskFuncID Runtime::legion_main_id = 0;
-    /*static*/ std::vector<RegistrationCallbackFnptr> 
-                                             Runtime::registration_callbacks;
+    /*static*/ TaskID Runtime::legion_main_id = 0;
+    /*static*/ MapperID Runtime::legion_main_mapper_id = 0;
     /*static*/ bool Runtime::runtime_initialized = false;
     /*static*/ bool Runtime::runtime_started = false;
     /*static*/ bool Runtime::runtime_backgrounded = false;
     /*static*/ Runtime* Runtime::the_runtime = NULL;
+    /*static*/ RtUserEvent Runtime::runtime_started_event = 
+                                              RtUserEvent::NO_RT_USER_EVENT;
     /*static*/ int Runtime::mpi_rank = -1;
-    /*static*/ std::vector<MPILegionHandshake>* 
-                      Runtime::pending_handshakes = NULL;
 
     //--------------------------------------------------------------------------
     /*static*/ int Runtime::start(int argc, char **argv, bool background)
     //--------------------------------------------------------------------------
     {
       // Some static asserts that need to hold true for the runtime to work
-      LEGION_STATIC_ASSERT(MAX_RETURN_SIZE > 0);
-      LEGION_STATIC_ASSERT((1 << LEGION_FIELD_LOG2) == MAX_FIELDS);
-      LEGION_STATIC_ASSERT(MAX_NUM_NODES > 0);
-      LEGION_STATIC_ASSERT(MAX_NUM_PROCS > 0);
-      LEGION_STATIC_ASSERT(DEFAULT_MAX_TASK_WINDOW > 0);
-      LEGION_STATIC_ASSERT(DEFAULT_MIN_TASKS_TO_SCHEDULE > 0);
-      LEGION_STATIC_ASSERT(DEFAULT_MAX_MESSAGE_SIZE > 0); 
+      LEGION_STATIC_ASSERT(LEGION_MAX_RETURN_SIZE > 0);
+      LEGION_STATIC_ASSERT((1 << LEGION_FIELD_LOG2) == LEGION_MAX_FIELDS);
+      LEGION_STATIC_ASSERT(LEGION_MAX_NUM_NODES > 0);
+      LEGION_STATIC_ASSERT(LEGION_MAX_NUM_PROCS > 0);
+      LEGION_STATIC_ASSERT(LEGION_DEFAULT_MAX_TASK_WINDOW > 0);
+      LEGION_STATIC_ASSERT(LEGION_DEFAULT_MIN_TASKS_TO_SCHEDULE > 0);
+      LEGION_STATIC_ASSERT(LEGION_DEFAULT_MAX_MESSAGE_SIZE > 0); 
 
 #ifndef DISABLE_PARTITION_SHIM
       // Preregister any partition shim task variants we need 
-      PartitionShim::ColorPoints<1>::register_task();
-      PartitionShim::ColorPoints<2>::register_task();
-      PartitionShim::ColorPoints<3>::register_task();
-      PartitionShim::ColorRects<1,1>::register_task();
-      PartitionShim::ColorRects<1,2>::register_task();
-      PartitionShim::ColorRects<1,3>::register_task();
-      PartitionShim::ColorRects<2,1>::register_task();
-      PartitionShim::ColorRects<2,2>::register_task();
-      PartitionShim::ColorRects<2,3>::register_task();
-      PartitionShim::ColorRects<3,1>::register_task();
-      PartitionShim::ColorRects<3,2>::register_task();
-      PartitionShim::ColorRects<3,3>::register_task();
+#define COLOR_POINTS(DIM) \
+      PartitionShim::ColorPoints<DIM>::register_task();
+      LEGION_FOREACH_N(COLOR_POINTS)
+#undef COLOR_POINTS
+#define COLOR_RECTS(D1,D2) \
+      PartitionShim::ColorRects<D1,D2>::register_task();
+      LEGION_FOREACH_NN(COLOR_RECTS)
+#undef COLOR_RECTS
 #endif
+      // Register builtin reduction operators
+      register_builtin_reduction_operators();
 
       // Need to pass argc and argv to low-level runtime before we can record 
       // their values as they might be changed by GASNet or MPI or whatever.
@@ -18647,7 +20215,9 @@ namespace Legion {
       if (config.legion_spy_enabled)
         LegionSpy::log_legion_spy_config();
       // Configure MPI Interoperability
-      if ((mpi_rank >= 0) || (pending_handshakes != NULL))
+      const std::vector<MPILegionHandshake> &pending_handshakes =
+        get_pending_handshake_table();
+      if ((mpi_rank >= 0) || (!pending_handshakes.empty()))
         configure_mpi_interoperability(config.separate_runtime_instances);
       // Construct our runtime objects 
       Processor::Kind startup_kind = Processor::NO_KIND;
@@ -18663,6 +20233,10 @@ namespace Legion {
       // the same values for these static variables
       runtime_started = true;
       runtime_backgrounded = background;
+      // Make a user event that we will trigger once we the 
+      // startup task is done. If we're node 0 then we will use this
+      // as the precondition for launching the top-level task
+      runtime_started_event = Runtime::create_rt_user_event();
 
       // Now that we have everything setup we can tell Realm to
       // start the processors. It is at this point which fork
@@ -18682,24 +20256,22 @@ namespace Legion {
             (config.separate_runtime_instances ? Processor::NO_KIND :
              startup_kind), LG_INITIALIZE_TASK_ID, NULL, 0,
             !config.separate_runtime_instances, tasks_registered)); 
-      // Make a user event that we will trigger once we the 
-      // startup task is done. If we're node 0 then we will use this
-      // as the precondition for launching the top-level task
-      RtUserEvent start_event = Runtime::create_rt_user_event();
       // Now we can do one more spawn call to startup the runtime 
       // across the machine since we know everything is initialized
       const RtEvent runtime_started(realm.collective_spawn_by_kind(
               (config.separate_runtime_instances ? Processor::NO_KIND : 
                startup_kind), LG_STARTUP_TASK_ID, 
-              &start_event, sizeof(start_event),
+              &runtime_started_event, sizeof(runtime_started_event),
               !config.separate_runtime_instances, 
               Runtime::merge_events(realm_initialized, legion_initialized)));
       // Trigger the start event when the runtime is ready
-      Runtime::trigger_event(start_event, runtime_started);
+      Runtime::trigger_event(runtime_started_event, runtime_started);
       // If we are supposed to background this thread, then we wait
       // for the runtime to shutdown, otherwise we can now return
-      if (!background)
-        realm.wait_for_shutdown();
+      if (implicit_top_level_task) // wait for the runtime to be started
+        runtime_started_event.external_wait(); 
+      else if (!background)
+        return realm.wait_for_shutdown();
       return 0;
     }
 
@@ -18729,11 +20301,108 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    /*static*/ Context Runtime::start_implicit(int argc, char **argv,
+                                               TaskID top_task_id,
+                                               Processor::Kind proc_kind,
+                                               const char *task_name,
+                                               bool control_replicable)
+    //--------------------------------------------------------------------------
+    {
+      // Mark that this is going to be an implicit top-level task
+      implicit_top_level_task = true;
+      // Set the top-level task ID before starting the runtime
+      set_top_level_task_id(top_task_id);
+      // Start the runtime up, this will wait until that start-up 
+      // process is completed across all the nodes
+      start(argc, argv, false/*background*/);
+      InnerContext *execution_context = NULL;
+      // Now that the runtime is started we can make our context
+      if (the_runtime->total_address_spaces > 1)
+      {
+        if (control_replicable)
+          REPORT_LEGION_ERROR(ERROR_ILLEGAL_IMPLICIT_TOP_LEVEL_TASK,
+              "Implicit top-level tasks are only supported on multiple "
+              "nodes in the control_replication and later branches.")
+        else
+          REPORT_LEGION_ERROR(ERROR_ILLEGAL_IMPLICIT_TOP_LEVEL_TASK,
+              "Implicit top-level tasks are only permitted to be run "
+              "on multiple nodes if they are guaranteed to be control "
+              "replicated. Please make any changes to your top-level "
+              "task to make it control-replicable")
+      }
+      else
+      {
+        if (the_runtime->legion_spy_enabled)
+          the_runtime->log_machine(the_runtime->machine);
+        // Save the top-level task name if necessary
+        if (task_name != NULL)
+          the_runtime->attach_semantic_information(top_task_id, 
+              NAME_SEMANTIC_TAG, task_name, 
+              strlen(task_name) + 1, true/*mutable*/);
+        // Get an individual task to be the top-level task
+        IndividualTask *top_task = the_runtime->get_available_individual_task();
+        // Get a remote task to serve as the top of the top-level task
+        TopLevelContext *top_context = new TopLevelContext(the_runtime, 
+                                        the_runtime->get_unique_operation_id());
+        // Save the context in the implicit context
+        implicit_context = top_context;
+        // Add a reference to the top level context
+        top_context->add_reference();
+        // Set the executing processor
+#ifdef DEBUG_LEGION
+        assert(!the_runtime->local_procs.empty());
+#endif 
+        // Find a proxy processor, we'll prefer a CPU processor for
+        // backwards compatibility, but will take anything we get
+        Processor proxy = Processor::NO_PROC;
+        for (std::set<Processor>::const_iterator it =
+              the_runtime->local_procs.begin(); it !=
+              the_runtime->local_procs.end(); it++)
+        {
+          if (it->kind() == proc_kind)
+          {
+            proxy = *it;
+            break;
+          }
+        }
+#ifdef DEBUG_LEGION
+        // TODO: remove this once realm supports drafting this thread
+        // as a new kind of processor to use
+        assert(proxy.exists());
+#endif
+        top_context->set_executing_processor(proxy);
+        TaskLauncher launcher(legion_main_id, TaskArgument(),
+                              Predicate::TRUE_PRED, legion_main_mapper_id);
+        // Mark that this task is the top-level task
+        top_task->initialize_task(top_context, launcher, 
+                                  false/*track parent*/,true/*top level task*/);
+        the_runtime->increment_outstanding_top_level_tasks();
+        top_context->increment_pending();
+#ifdef DEBUG_LEGION
+        the_runtime->increment_total_outstanding_tasks(legion_main_id, false);
+#else
+        the_runtime->increment_total_outstanding_tasks();
+#endif
+        // Launch a task to deactivate the top-level context
+        // when the top-level task is done
+        TopFinishArgs args(top_context);
+        ApEvent pre = top_task->get_task_completion();
+        the_runtime->issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY,
+                                             Runtime::protect_event(pre));
+        execution_context = top_task->create_implicit_context();
+        Legion::Runtime *dummy_rt;
+        execution_context->begin_task(dummy_rt);
+        execution_context->set_executing_processor(proxy);
+      }
+      return execution_context;
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ Runtime::LegionConfiguration Runtime::parse_arguments(int argc,
                                                                     char **argv)
     //--------------------------------------------------------------------------
     {
-      LegionConfiguration config;
+      LegionConfiguration config(implicit_top_level_task);
 #define INT_ARG(argname, varname) do {    \
       if(!strcmp((argv)[i], argname)) {	  \
         varname = atoi((argv)[++i]);	  \
@@ -18747,7 +20416,9 @@ namespace Legion {
       } } while(0)
       for (int i = 1; i < argc; i++)
       {
+        BOOL_ARG("-lg:warn_backtrace",config.warnings_backtrace);
         BOOL_ARG("-lg:warn",config.runtime_warnings);
+        BOOL_ARG("-lg:leaks",config.report_leaks);
         BOOL_ARG("-lg:separate",config.separate_runtime_instances);
         BOOL_ARG("-lg:registration",config.record_registration);
         BOOL_ARG("-lg:nosteal",config.stealing_disabled);
@@ -18898,7 +20569,7 @@ namespace Legion {
 #undef BOOL_ARG
 #ifdef DEBUG_LEGION
       assert(config.initial_task_window_hysteresis <= 100);
-      assert(config.max_local_fields <= MAX_FIELDS);
+      assert(config.max_local_fields <= LEGION_MAX_FIELDS);
 #endif
       return config;
     }
@@ -19048,13 +20719,13 @@ namespace Legion {
             "Legion detected the presence of Legion-MPI handshake objects "
             "without a set MPI rank. An MPI rank must be set to use any "
             "Legion-MPI handhshake objects")
-      if (pending_handshakes != NULL)
+      const std::vector<MPILegionHandshake> &pending_handshakes = 
+        get_pending_handshake_table();
+      if (!pending_handshakes.empty())
       {
         for (std::vector<MPILegionHandshake>::const_iterator it = 
-             pending_handshakes->begin(); it != pending_handshakes->end(); it++)
+              pending_handshakes.begin(); it != pending_handshakes.end(); it++)
           it->impl->initialize();
-        delete pending_handshakes;
-        pending_handshakes = NULL;
       }
     }
 
@@ -19074,12 +20745,12 @@ namespace Legion {
         Machine::ProcessorQuery local_proc_query(machine);
         local_proc_query.local_address_space();
         // Check for exceeding the local number of processors
-        if (local_proc_query.count() > MAX_NUM_PROCS)
+        if (local_proc_query.count() > LEGION_MAX_NUM_PROCS)
           REPORT_LEGION_ERROR(ERROR_MAXIMUM_PROCS_EXCEEDED, 
                         "Maximum number of local processors %zd exceeds "
-                        "compile time maximum of %d.  Change the value "
-                        "in legion_config.h and recompile.",
-                        local_proc_query.count(), MAX_NUM_PROCS)
+                        "compile-time maximum of %d.  Change the value "
+                        "LEGION_MAX_NUM_PROCS in legion_config.h and recompile."
+                        , local_proc_query.count(), LEGION_MAX_NUM_PROCS)
         for (Machine::ProcessorQuery::iterator it = 
               local_proc_query.begin(); it != local_proc_query.end(); it++)
         {
@@ -19196,6 +20867,7 @@ namespace Legion {
       CodeDescriptor lg_task(Runtime::legion_runtime_task);
       CodeDescriptor rt_profiling_task(Runtime::profiling_runtime_task);
       CodeDescriptor startup_task(Runtime::startup_runtime_task);
+      CodeDescriptor endpoint_task(Runtime::endpoint_runtime_task);
       Realm::ProfilingRequestSet no_requests;
       // Keep track of all the registration events
       std::set<RtEvent> registered_events;
@@ -19217,18 +20889,30 @@ namespace Legion {
         if ((!local_util_procs.empty() && 
               (it->first.kind() == Processor::UTIL_PROC)) ||
             ((local_util_procs.empty() || config.replay_on_cpus) &&
-              (it->first.kind() == Processor::LOC_PROC ||
-               it->first.kind() == Processor::IO_PROC)))
+              ((it->first.kind() == Processor::LOC_PROC) ||
+               (it->first.kind() == Processor::TOC_PROC) ||
+               (it->first.kind() == Processor::IO_PROC))))
         {
           registered_events.insert(RtEvent(
                 it->first.register_task(LG_SHUTDOWN_TASK_ID, shutdown_task,
                   no_requests, &it->second, sizeof(it->second))));
+#ifdef LEGION_SEPARATE_META_TASKS
+          for (unsigned idx = 0; idx < LG_LAST_TASK_ID; idx++)
+            registered_events.insert(RtEvent(
+                  it->first.register_task(LG_TASK_ID+idx, lg_task,
+                    no_requests, &it->second, sizeof(it->second))));
+#else
           registered_events.insert(RtEvent(
                 it->first.register_task(LG_TASK_ID, lg_task,
+                  no_requests, &it->second, sizeof(it->second))));
+#endif
+          registered_events.insert(RtEvent(
+                it->first.register_task(LG_ENDPOINT_TASK_ID, endpoint_task,
                   no_requests, &it->second, sizeof(it->second))));
         }
         // Profiling tasks get registered on CPUs and utility processors
         if ((it->first.kind() == Processor::LOC_PROC) ||
+            (it->first.kind() == Processor::TOC_PROC) ||
             (it->first.kind() == Processor::UTIL_PROC) ||
             (it->first.kind() == Processor::IO_PROC))
           registered_events.insert(RtEvent(
@@ -19237,13 +20921,13 @@ namespace Legion {
       }
 
       // Lastly do any other registrations we might have
-      const ReductionOpTable& red_table = get_reduction_table();
+      const ReductionOpTable& red_table = get_reduction_table(true/*safe*/);
       for(ReductionOpTable::const_iterator it = red_table.begin();
           it != red_table.end();
           it++)
         realm.register_reduction(it->first, it->second);
 
-      const SerdezOpTable &serdez_table = get_serdez_table();
+      const SerdezOpTable &serdez_table = get_serdez_table(true/*safe*/);
       for (SerdezOpTable::const_iterator it = serdez_table.begin();
             it != serdez_table.end(); it++)
         realm.register_custom_serdez(it->first, it->second);
@@ -19260,27 +20944,35 @@ namespace Legion {
                       LG_LEGION_PROFILING_ID);
         log_run.print("Legion startup task has Realm ID %d",
                       LG_STARTUP_TASK_ID);
+        log_run.print("Legion endpoint task has Realm ID %d",
+                      LG_ENDPOINT_TASK_ID);
       }
       return Runtime::merge_events(registered_events);
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void Runtime::wait_for_shutdown(void)
+    /*static*/ int Runtime::wait_for_shutdown(void)
     //--------------------------------------------------------------------------
     {
-      if (!runtime_backgrounded)
+      if (!runtime_backgrounded && !implicit_top_level_task)
         REPORT_LEGION_ERROR(ERROR_ILLEGAL_WAIT_FOR_SHUTDOWN, 
                       "Illegal call to wait_for_shutdown when runtime was "
                       "not launched in background mode!");
-      RealmRuntime::get_runtime().wait_for_shutdown();
+      return RealmRuntime::get_runtime().wait_for_shutdown();
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void Runtime::set_top_level_task_id(
-                                                  Processor::TaskFuncID top_id)
+    /*static*/ void Runtime::set_top_level_task_id(TaskID top_id)
     //--------------------------------------------------------------------------
     {
       legion_main_id = top_id;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void Runtime::set_top_level_task_mapper_id(MapperID mapper_id)
+    //--------------------------------------------------------------------------
+    {
+      legion_main_mapper_id = mapper_id;
     }
 
     //--------------------------------------------------------------------------
@@ -19322,55 +21014,98 @@ namespace Legion {
       }
       else
       {
-        if (pending_handshakes == NULL)
-          pending_handshakes = new std::vector<MPILegionHandshake>();
-        pending_handshakes->push_back(handshake);
+        std::vector<MPILegionHandshake> &pending_handshakes = 
+          get_pending_handshake_table();
+        pending_handshakes.push_back(handshake);
       }
     }
 
     //--------------------------------------------------------------------------
     /*static*/ const ReductionOp* Runtime::get_reduction_op(
-                                                        ReductionOpID redop_id)
+                                                        ReductionOpID redop_id,
+                                                        bool has_lock/*=false*/)
     //--------------------------------------------------------------------------
     {
       if (redop_id == 0)
         REPORT_LEGION_ERROR(ERROR_RESERVED_REDOP_ID, 
                       "ReductionOpID zero is reserved.")
-      ReductionOpTable &red_table = Runtime::get_reduction_table();
+      if (!runtime_started || has_lock)
+      {
+        ReductionOpTable &red_table = 
+          Runtime::get_reduction_table(true/*safe*/);
 #ifdef DEBUG_LEGION
-      if (red_table.find(redop_id) == red_table.end())
-        REPORT_LEGION_ERROR(ERROR_INVALID_REDOP_ID, 
-                      "Invalid ReductionOpID %d",redop_id)
+        if (red_table.find(redop_id) == red_table.end())
+          REPORT_LEGION_ERROR(ERROR_INVALID_REDOP_ID, 
+                        "Invalid ReductionOpID %d",redop_id)
 #endif
-      return red_table[redop_id];
+        return red_table[redop_id];
+      }
+      else
+        return the_runtime->get_reduction(redop_id);
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ const SerdezOp* Runtime::get_serdez_op(CustomSerdezID serdez_id)
+    const ReductionOp* Runtime::get_reduction(ReductionOpID redop_id)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock r_lock(redop_lock);
+      return get_reduction_op(redop_id, true/*has lock*/); 
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ const SerdezOp* Runtime::get_serdez_op(CustomSerdezID serdez_id,
+                                                      bool has_lock/*=false*/)
     //--------------------------------------------------------------------------
     {
       if (serdez_id == 0)
         REPORT_LEGION_ERROR(ERROR_RESERVED_SERDEZ_ID, 
                       "CustomSerdezID zero is reserved.")
-      SerdezOpTable &serdez_table = Runtime::get_serdez_table();
+      if (!runtime_started || has_lock)
+      {
+        SerdezOpTable &serdez_table = Runtime::get_serdez_table(true/*safe*/);
 #ifdef DEBUG_LEGION
-      if (serdez_table.find(serdez_id) == serdez_table.end())
-        REPORT_LEGION_ERROR(ERROR_INVALID_SERDEZ_ID, 
-                      "Invalid CustomSerdezOpID %d", serdez_id)
+        if (serdez_table.find(serdez_id) == serdez_table.end())
+          REPORT_LEGION_ERROR(ERROR_INVALID_SERDEZ_ID, 
+                        "Invalid CustomSerdezOpID %d", serdez_id)
 #endif
-      return serdez_table[serdez_id];
+        return serdez_table[serdez_id];
+      }
+      else
+        return the_runtime->get_serdez(serdez_id);
+    }
+
+    //--------------------------------------------------------------------------
+    const SerdezOp* Runtime::get_serdez(CustomSerdezID serdez_id)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock s_lock(serdez_lock);
+      return get_serdez_op(serdez_id, true/*has lock*/);
     }
 
     //--------------------------------------------------------------------------
     /*static*/ const SerdezRedopFns* Runtime::get_serdez_redop_fns(
-                                                         ReductionOpID redop_id)
+                                                       ReductionOpID redop_id,
+                                                       bool has_lock/*= false*/)
     //--------------------------------------------------------------------------
     {
-      SerdezRedopTable &serdez_table = get_serdez_redop_table(); 
-      SerdezRedopTable::const_iterator finder = serdez_table.find(redop_id);
-      if (finder != serdez_table.end())
-        return &(finder->second);
-      return NULL;
+      if (!runtime_started || has_lock)
+      {
+        SerdezRedopTable &serdez_table = get_serdez_redop_table(true/*safe*/); 
+        SerdezRedopTable::const_iterator finder = serdez_table.find(redop_id);
+        if (finder != serdez_table.end())
+          return &(finder->second);
+        return NULL;
+      }
+      else
+        return the_runtime->get_serdez_redop(redop_id);
+    }
+
+    //--------------------------------------------------------------------------
+    const SerdezRedopFns* Runtime::get_serdez_redop(ReductionOpID redop_id)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock r_lock(redop_lock);
+      return get_serdez_redop_fns(redop_id, true/*has lock*/);
     }
 
     //--------------------------------------------------------------------------
@@ -19378,31 +21113,142 @@ namespace Legion {
                                             RegistrationCallbackFnptr callback)
     //--------------------------------------------------------------------------
     {
+      std::vector<RegistrationCallbackFnptr> &registration_callbacks = 
+        get_pending_registration_callbacks();
       registration_callbacks.push_back(callback);
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ ReductionOpTable& Runtime::get_reduction_table(void)
+    /*static*/ ReductionOpTable& Runtime::get_reduction_table(bool safe)
     //--------------------------------------------------------------------------
     {
       static ReductionOpTable table;
+      if (!safe && runtime_started)
+        assert(false);
       return table;
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ SerdezOpTable& Runtime::get_serdez_table(void)
+    /*static*/ SerdezOpTable& Runtime::get_serdez_table(bool safe)
     //--------------------------------------------------------------------------
     {
       static SerdezOpTable table;
+      if (!safe && runtime_started)
+        assert(false);
       return table;
     }
     
     //--------------------------------------------------------------------------
-    /*static*/ SerdezRedopTable& Runtime::get_serdez_redop_table(void)
+    /*static*/ SerdezRedopTable& Runtime::get_serdez_redop_table(bool safe)
     //--------------------------------------------------------------------------
     {
       static SerdezRedopTable table;
+      if (!safe && runtime_started)
+        assert(false);
       return table;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void Runtime::register_reduction_op(ReductionOpID redop_id,
+                                                   ReductionOp *redop,
+                                                   SerdezInitFnptr init_fnptr,
+                                                   SerdezFoldFnptr fold_fnptr,
+                                                   bool permit_duplicates,
+                                                   bool has_lock/*= false*/)
+    //--------------------------------------------------------------------------
+    {
+      if (!runtime_started || has_lock)
+      {
+        if (redop_id == 0)
+          REPORT_LEGION_ERROR(ERROR_RESERVED_REDOP_ID, 
+                              "ERROR: ReductionOpID zero is reserved.")
+        ReductionOpTable &red_table = 
+          Runtime::get_reduction_table(true/*safe*/);
+        // Check to make sure we're not overwriting a prior reduction op 
+        if (!permit_duplicates &&
+            (red_table.find(redop_id) != red_table.end()))
+          REPORT_LEGION_ERROR(ERROR_DUPLICATE_REDOP_ID, "ERROR: ReductionOpID "
+              "%d has already been used in the reduction table\n",redop_id)
+        red_table[redop_id] = redop;
+        if ((init_fnptr != NULL) || (fold_fnptr != NULL))
+        {
+#ifdef DEBUG_LEGION
+          assert((init_fnptr != NULL) && (fold_fnptr != NULL));
+#endif
+          SerdezRedopTable &serdez_red_table = 
+            Runtime::get_serdez_redop_table(true/*safe*/);
+          SerdezRedopFns &fns = serdez_red_table[redop_id];
+          fns.init_fn = init_fnptr;
+          fns.fold_fn = fold_fnptr;
+        }
+      }
+      else
+        the_runtime->register_reduction(redop_id, redop, init_fnptr,
+                                        fold_fnptr, permit_duplicates);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::register_reduction(ReductionOpID redop_id,
+                                     ReductionOp *redop,
+                                     SerdezInitFnptr init_fnptr,
+                                     SerdezFoldFnptr fold_fnptr,
+                                     bool permit_duplicates)
+    //--------------------------------------------------------------------------
+    {
+      // Dynamic registration so do it with realm too
+      RealmRuntime realm = RealmRuntime::get_runtime();
+      realm.register_reduction(redop_id, redop);
+      AutoLock r_lock(redop_lock);
+      Runtime::register_reduction_op(redop_id, redop, init_fnptr,
+                fold_fnptr, permit_duplicates, true/*has locks*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::register_serdez(CustomSerdezID serdez_id,
+                                  SerdezOp *serdez_op, bool permit_duplicates)
+    //--------------------------------------------------------------------------
+    {
+      // Dynamic registration so do it with realm too
+      RealmRuntime realm = RealmRuntime::get_runtime();
+      realm.register_custom_serdez(serdez_id, serdez_op);
+      AutoLock s_lock(serdez_lock);
+      Runtime::register_serdez_op(serdez_id, serdez_op, 
+                                  permit_duplicates, true/*has lock*/);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void Runtime::register_serdez_op(CustomSerdezID serdez_id,
+                                                SerdezOp *serdez_op,
+                                                bool permit_duplicates,
+                                                bool has_lock/*= false*/)
+    //--------------------------------------------------------------------------
+    {
+      if (!runtime_started || has_lock)
+      {
+        if (serdez_id == 0)
+        {
+          fprintf(stderr,"ERROR: Custom Serdez ID zero is reserved.\n");
+#ifdef DEBUG_LEGION
+          assert(false);
+#endif
+          exit(ERROR_RESERVED_SERDEZ_ID);
+        }
+        SerdezOpTable &serdez_table = Runtime::get_serdez_table(true/*safe*/);
+        // Check to make sure we're not overwriting a prior serdez op
+        if (!permit_duplicates &&
+            (serdez_table.find(serdez_id) != serdez_table.end()))
+        {
+          fprintf(stderr,"ERROR: CustomSerdezID %d has already been used "
+                         "in the serdez operation table\n", serdez_id);
+#ifdef DEBUG_LEGION
+          assert(false);
+#endif
+          exit(ERROR_DUPLICATE_SERDEZ_ID);
+        }
+        serdez_table[serdez_id] = serdez_op;
+      }
+      else
+        the_runtime->register_serdez(serdez_id, serdez_op, permit_duplicates);
     }
 
     //--------------------------------------------------------------------------
@@ -19434,10 +21280,28 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    /*static*/ std::vector<MPILegionHandshake>& 
+                                      Runtime::get_pending_handshake_table(void)
+    //--------------------------------------------------------------------------
+    {
+      static std::vector<MPILegionHandshake> pending_handshakes_table;
+      return pending_handshakes_table;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ std::vector<RegistrationCallbackFnptr>&
+                               Runtime::get_pending_registration_callbacks(void)
+    //--------------------------------------------------------------------------
+    {
+      static std::vector<RegistrationCallbackFnptr> pending_callbacks;
+      return pending_callbacks;
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ TaskID& Runtime::get_current_static_task_id(void)
     //--------------------------------------------------------------------------
     {
-      static TaskID current_task_id = MAX_APPLICATION_TASK_ID;
+      static TaskID current_task_id = LEGION_MAX_APPLICATION_TASK_ID;
       return current_task_id;
     }
 
@@ -19451,6 +21315,46 @@ namespace Legion {
                       "Illegal call to 'generate_static_task_id' after "
                       "the runtime has been started!")
       return next_task++;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ ReductionOpID& Runtime::get_current_static_reduction_id(void)
+    //--------------------------------------------------------------------------
+    {
+      static ReductionOpID current_redop_id = LEGION_MAX_APPLICATION_REDOP_ID;
+      return current_redop_id;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ ReductionOpID Runtime::generate_static_reduction_id(void)
+    //--------------------------------------------------------------------------
+    {
+      ReductionOpID &next_redop = get_current_static_reduction_id();
+      if (runtime_started)
+        REPORT_LEGION_ERROR(ERROR_STATIC_CALL_POST_RUNTIME_START, 
+                      "Illegal call to 'generate_static_reduction_id' after "
+                      "the runtime has been started!")
+      return next_redop++;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ CustomSerdezID& Runtime::get_current_static_serdez_id(void)
+    //--------------------------------------------------------------------------
+    {
+      static CustomSerdezID current_serdez_id =LEGION_MAX_APPLICATION_SERDEZ_ID;
+      return current_serdez_id;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ CustomSerdezID Runtime::generate_static_serdez_id(void)
+    //--------------------------------------------------------------------------
+    {
+      CustomSerdezID &next_serdez = get_current_static_serdez_id();
+      if (runtime_started)
+        REPORT_LEGION_ERROR(ERROR_STATIC_CALL_POST_RUNTIME_START, 
+                      "Illegal call to 'generate_static_serdez_id' after "
+                      "the runtime has been started!")
+      return next_serdez++;
     }
 
     //--------------------------------------------------------------------------
@@ -19471,8 +21375,8 @@ namespace Legion {
                       "Error preregistering task with ID %d. Exceeds the "
                       "statically set bounds on application task IDs of %d. "
                       "See %s in legion_config.h.", 
-                      registrar.task_id, MAX_APPLICATION_TASK_ID, 
-                      LEGION_MACRO_TO_STRING(MAX_APPLICATION_TASK_ID))
+                      registrar.task_id, LEGION_MAX_APPLICATION_TASK_ID, 
+                      LEGION_MACRO_TO_STRING(LEGION_MAX_APPLICATION_TASK_ID))
       std::deque<PendingVariantRegistration*> &pending_table = 
         get_pending_variant_table();
       // See if we need to pick a variant
@@ -19527,6 +21431,13 @@ namespace Legion {
     {
       log_run.warning(id, "LEGION WARNING: %s (from file %s:%d)",
                       message, file_name, line);
+      if (Runtime::the_runtime && Runtime::the_runtime->warnings_backtrace)
+      {
+        Realm::Backtrace bt;
+        bt.capture_backtrace();
+        bt.lookup_symbols();
+        log_run.warning() << bt;
+      }
     }
 
 #if defined(PRIVILEGE_CHECKS) || defined(BOUNDS_CHECKS)
@@ -19568,16 +21479,77 @@ namespace Legion {
                            "1D point (%lld)\n", region->get_task_name(),
                             dp.point_data[0]);
             break;
+#if LEGION_MAX_DIM >= 2
           case 2:
             fprintf(stderr,"BOUNDS CHECK ERROR IN TASK %s: Accessing invalid "
                            "2D point (%lld,%lld)\n", region->get_task_name(),
                             dp.point_data[0], dp.point_data[1]);
             break;
+#endif
+#if LEGION_MAX_DIM >= 3
           case 3:
             fprintf(stderr,"BOUNDS CHECK ERROR IN TASK %s: Accessing invalid "
                          "3D point (%lld,%lld,%lld)\n", region->get_task_name(),
                           dp.point_data[0], dp.point_data[1], dp.point_data[2]);
             break;
+#endif
+#if LEGION_MAX_DIM >= 4
+          case 4:
+            fprintf(stderr,"BOUNDS CHECK ERROR IN TASK %s: Accessing invalid "
+                         "4D point (%lld,%lld,%lld,%lld)\n", 
+                          region->get_task_name(),
+                          dp.point_data[0], dp.point_data[1], dp.point_data[2],
+                          dp.point_data[3]);
+            break;
+#endif
+#if LEGION_MAX_DIM >= 5
+          case 5:
+            fprintf(stderr,"BOUNDS CHECK ERROR IN TASK %s: Accessing invalid "
+                         "5D point (%lld,%lld,%lld,%lld,%lld)\n", 
+                          region->get_task_name(),
+                          dp.point_data[0], dp.point_data[1], dp.point_data[2],
+                          dp.point_data[3], dp.point_data[4]);
+            break;
+#endif
+#if LEGION_MAX_DIM >= 6
+          case 6:
+            fprintf(stderr,"BOUNDS CHECK ERROR IN TASK %s: Accessing invalid "
+                         "6D point (%lld,%lld,%lld,%lld,%lld,%lld)\n", 
+                          region->get_task_name(),
+                          dp.point_data[0], dp.point_data[1], dp.point_data[2],
+                          dp.point_data[3], dp.point_data[4], dp.point_data[5]);
+            break;
+#endif
+#if LEGION_MAX_DIM >= 7
+          case 7:
+            fprintf(stderr,"BOUNDS CHECK ERROR IN TASK %s: Accessing invalid "
+                         "7D point (%lld,%lld,%lld,%lld,%lld,%lld,%lld)\n", 
+                          region->get_task_name(),
+                          dp.point_data[0], dp.point_data[1], dp.point_data[2],
+                          dp.point_data[3], dp.point_data[4], dp.point_data[5],
+                          dp.point_data[6]);
+            break;
+#endif
+#if LEGION_MAX_DIM >= 8
+          case 8:
+            fprintf(stderr,"BOUNDS CHECK ERROR IN TASK %s: Accessing invalid "
+                         "8D point (%lld,%lld,%lld,%lld,%lld,%lld,%lld,%lld)\n",
+                          region->get_task_name(),
+                          dp.point_data[0], dp.point_data[1], dp.point_data[2],
+                          dp.point_data[3], dp.point_data[4], dp.point_data[5],
+                          dp.point_data[6], dp.point_data[7]);
+            break;
+#endif
+#if LEGION_MAX_DIM >= 9
+          case 9:
+            fprintf(stderr,"BOUNDS CHECK ERROR IN TASK %s: Accessing invalid "
+                   "9D point (%lld,%lld,%lld,%lld,%lld,%lld,%lld,%lld,%lld)\n",
+                          region->get_task_name(),
+                          dp.point_data[0], dp.point_data[1], dp.point_data[2],
+                          dp.point_data[3], dp.point_data[4], dp.point_data[5],
+                          dp.point_data[6], dp.point_data[7], dp.point_data[8]);
+            break;
+#endif
           default:
             assert(false);
         }
@@ -19612,6 +21584,11 @@ namespace Legion {
       // Finalize the runtime and then delete it
       runtime->finalize_runtime();
       delete runtime;
+      // Handle a little shutdown race condition here where the 
+      // runtime_startup_event on nodes other than zero may not 
+      // have triggered yet before shutdown
+      if (!runtime_started_event.has_triggered())
+        runtime_started_event.wait();
     }
 
     //--------------------------------------------------------------------------
@@ -19634,12 +21611,12 @@ namespace Legion {
       // up to the highest level to ensure that they drain once they begin
       Processor::set_current_task_priority(LG_RUNNING_PRIORITY);
       const char *data = (const char*)args;
-      LgTaskID tid = *((const LgTaskID*)data);
-      data += sizeof(tid);
-      arglen -= sizeof(tid);
       implicit_provenance = *((const UniqueID*)data);
       data += sizeof(implicit_provenance);
       arglen -= sizeof(implicit_provenance);
+      LgTaskID tid = *((const LgTaskID*)data);
+      data += sizeof(tid);
+      arglen -= sizeof(tid);
       switch (tid)
       {
         case LG_SCHEDULER_ID:
@@ -19657,11 +21634,6 @@ namespace Legion {
         case LG_POST_END_ID:
           {
             InnerContext::handle_post_end_task(args); 
-            break;
-          }
-        case LG_DEFERRED_POST_END_ID:
-          {
-            InnerContext::handle_deferred_post_end_task(args);
             break;
           }
         case LG_DEFERRED_READY_TRIGGER_ID:
@@ -19684,13 +21656,6 @@ namespace Legion {
               (const Operation::DeferredCommitTriggerArgs*)args;
             deferred_commit_args->proxy_this->deferred_commit_trigger(
                 deferred_commit_args->gen);
-            break;
-          }
-        case LG_DEFERRED_POST_MAPPED_ID:
-          {
-            const SingleTask::DeferredPostMappedArgs *post_mapped_args = 
-              (const SingleTask::DeferredPostMappedArgs*)args;
-            post_mapped_args->task->handle_post_mapped();
             break;
           }
         case LG_DEFERRED_EXECUTE_ID:
@@ -19724,11 +21689,11 @@ namespace Legion {
           }
         case LG_DEFERRED_COLLECT_ID:
           {
-            const GarbageCollectionEpoch::GarbageCollectionArgs *collect_args =
-              (const GarbageCollectionEpoch::GarbageCollectionArgs*)args;
-            bool done = collect_args->epoch->handle_collection(collect_args);
-            if (done)
-              delete collect_args->epoch;
+            const PhysicalManager::GarbageCollectionArgs *collect_args =
+              (const PhysicalManager::GarbageCollectionArgs*)args;
+            CollectableView::handle_deferred_collect(collect_args->view,
+                                                    *collect_args->to_collect);
+            delete collect_args->to_collect;
             break;
           }
         case LG_PRE_PIPELINE_ID:
@@ -19888,6 +21853,11 @@ namespace Legion {
                                                             dargs->ready);
             break;
           }
+        case LG_DEFER_PHYSICAL_REGISTRATION_TASK_ID:
+          {
+            runtime->forest->handle_defer_registration(args);
+            break;
+          }
         case LG_PART_INDEPENDENCE_TASK_ID:
           {
             IndexSpaceNode::DynamicIndependenceArgs *dargs = 
@@ -19914,18 +21884,6 @@ namespace Legion {
             InnerContext::PostDecrementArgs *dargs = 
               (InnerContext::PostDecrementArgs*)args;
             runtime->activate_context(dargs->parent_ctx);
-            break;
-          }
-        case LG_SEND_VERSION_STATE_UPDATE_TASK_ID:
-          {
-            VersionState::SendVersionStateArgs *vargs = 
-              (VersionState::SendVersionStateArgs*)args;
-            vargs->proxy_this->send_version_state_update(vargs->target, 
-                                                  vargs->context,
-                                                  *(vargs->request_mask),
-                                                  vargs->request_kind,
-                                                  vargs->to_trigger);
-            delete (vargs->request_mask);
             break;
           }
         case LG_ISSUE_FRAME_TASK_ID:
@@ -20022,6 +21980,8 @@ namespace Legion {
             // Remove the reference that we added
             if (tunable_args->result->remove_base_gc_ref(FUTURE_HANDLE_REF)) 
               delete (tunable_args->result);
+            if (tunable_args->args != NULL)
+              free(tunable_args->args);
             break;
           }
         case LG_DEFERRED_ENQUEUE_OP_ID:
@@ -20044,51 +22004,6 @@ namespace Legion {
             MapperManager::handle_deferred_message(args);
             break;
           }
-        case LG_DEFER_COMPOSITE_VIEW_REF_TASK_ID:
-          {
-            CompositeView::handle_deferred_view_ref(args);
-            break;
-          }
-        case LG_DEFER_COMPOSITE_VIEW_REGISTRATION_TASK_ID:
-          {
-            CompositeView::handle_deferred_view_registration(args);
-            break;
-          }
-        case LG_DEFER_COMPOSITE_NODE_REF_TASK_ID:
-          {
-            CompositeNode::handle_deferred_node_ref(args);
-            break;
-          }
-        case LG_DEFER_COMPOSITE_NODE_CAPTURE_TASK_ID:
-          {
-            CompositeNode::handle_deferred_capture(args);
-            break;
-          }
-        case LG_CONVERT_VIEW_TASK_ID:
-          {
-            VersionState::process_convert_view(args);
-            break;
-          }
-        case LG_UPDATE_VIEW_REFERENCES_TASK_ID:
-          {
-            VersionState::process_view_references(args);
-            break;
-          }
-        case LG_UPDATE_VERSION_STATE_REDUCE_TASK_ID:
-          {
-            VersionState::process_version_state_reduction(args);
-            break;
-          }
-        case LG_REMOVE_VERSION_STATE_REF_TASK_ID:
-          {
-            VersionState::process_remove_version_state_ref(args);
-            break;
-          }
-        case LG_DEFER_RESTRICTED_MANAGER_TASK_ID:
-          {
-            RestrictInfo::handle_deferred_reference(args);
-            break;
-          }
         case LG_REMOTE_VIEW_CREATION_TASK_ID:
           {
             InnerContext::handle_remote_view_creation(args);
@@ -20105,10 +22020,12 @@ namespace Legion {
           {
             const TaskOp::DeferMappingArgs *margs = 
               (const TaskOp::DeferMappingArgs*)args;
-            RtEvent wait_on = margs->proxy_this->perform_mapping(
-                                                    margs->must_op);
-            if (wait_on.exists())
-              wait_on.wait();
+            const RtEvent deferred = 
+              margs->proxy_this->perform_mapping(margs->must_op, margs);
+            // Once we've no longer been deferred then we can trigger
+            // the done event to signal we are done
+            if (!deferred.exists())
+              Runtime::trigger_event(margs->done_event);
             break;
           }
         case LG_DEFER_LAUNCH_TASK_ID:
@@ -20118,46 +22035,26 @@ namespace Legion {
             largs->proxy_this->launch_task();
             break;
           }
-        case LG_DEFER_MAP_AND_LAUNCH_TASK_ID:
-          {
-            const SliceTask::DeferMapAndLaunchArgs *margs = 
-              (const SliceTask::DeferMapAndLaunchArgs*)args;
-            margs->proxy_this->map_and_launch();
-            break;
-          }
-        case LG_ADD_VERSIONING_SET_REF_TASK_ID:
-          {
-            const VersioningSetRefArgs *ref_args = 
-              (const VersioningSetRefArgs*)args;
-            LocalReferenceMutator mutator;
-            ref_args->state->add_base_valid_ref(ref_args->kind, &mutator);
-            break;
-          }
-        case LG_VERSION_STATE_CAPTURE_DIRTY_TASK_ID:
-          {
-            VersionManager::process_capture_dirty(args);
-            break;
-          }
-        case LG_VERSION_STATE_PENDING_ADVANCE_TASK_ID:
-          {
-            VersionManager::process_pending_advance(args);
-            break;
-          }
-        case LG_DISJOINT_CLOSE_TASK_ID:
-          {
-            InterCloseOp::handle_disjoint_close(args);
-            break;
-          }
-        case LG_DEFER_MATERIALIZED_VIEW_TASK_ID:
-          {
-            MaterializedView::handle_deferred_materialized_view(runtime, args);
-            break;
-          }
         case LG_MISSPECULATE_TASK_ID:
           {
             const SingleTask::MisspeculationTaskArgs *targs = 
               (const SingleTask::MisspeculationTaskArgs*)args;
             targs->task->handle_misspeculation();
+            break;
+          }
+        case LG_DEFER_FIND_COPY_PRE_TASK_ID:
+          {
+            InstanceView::handle_view_find_copy_pre_request(args, runtime);
+            break;
+          }
+        case LG_DEFER_MATERIALIZED_VIEW_TASK_ID:
+          {
+            MaterializedView::handle_defer_materialized_view(args, runtime);
+            break;
+          }
+        case LG_DEFER_REDUCTION_VIEW_TASK_ID:
+          {
+            ReductionView::handle_defer_reduction_view(args, runtime);
             break;
           }
         case LG_DEFER_PHI_VIEW_REF_TASK_ID:
@@ -20172,12 +22069,12 @@ namespace Legion {
           }
         case LG_TIGHTEN_INDEX_SPACE_TASK_ID:
           {
-            IndexSpaceNode::handle_tighten_index_space(args);
+            IndexSpaceExpression::handle_tighten_index_space(args);
             break;
           }
         case LG_REMOTE_PHYSICAL_REQUEST_TASK_ID:
           {
-            RemoteContext::defer_physical_request(args);
+            RemoteContext::defer_physical_request(args, runtime);
             break;
           }
         case LG_REMOTE_PHYSICAL_RESPONSE_TASK_ID:
@@ -20193,6 +22090,106 @@ namespace Legion {
         case LG_DELETE_TEMPLATE_ID:
           {
             PhysicalTemplate::handle_delete_template(args);
+            break;
+          }
+        case LG_REFINEMENT_TASK_ID:
+          {
+            EquivalenceSet::handle_refinement(args);
+            break;
+          }
+        case LG_REMOTE_REF_TASK_ID:
+          {
+            EquivalenceSet::handle_remote_references(args);
+            break;
+          }
+        case LG_DEFER_RAY_TRACE_TASK_ID:
+          {
+            EquivalenceSet::handle_ray_trace(args, runtime);
+            break;
+          }
+        case LG_DEFER_RAY_TRACE_FINISH_TASK_ID:
+          {
+            EquivalenceSet::handle_ray_trace_finish(args);
+            break;
+          }
+        case LG_DEFER_SUBSET_REQUEST_TASK_ID:
+          {
+            EquivalenceSet::handle_subset_request(args);
+            break;
+          }
+        case LG_DEFER_MAKE_OWNER_TASK_ID:
+          {
+            EquivalenceSet::handle_make_owner(args);
+            break;
+          }
+        case LG_DEFER_MERGE_OR_FORWARD_TASK_ID:
+          {
+            EquivalenceSet::handle_merge_or_forward(args);
+            break;
+          }
+        case LG_DEFER_EQ_RESPONSE_TASK_ID:
+          {
+            EquivalenceSet::handle_deferred_response(args, runtime);
+            break;
+          }
+        case LG_DEFER_REMOTE_DECREMENT_TASK_ID:
+          {
+            DistributedCollectable::handle_defer_remote_decrement(args);
+            break;
+          }
+        case LG_COPY_FILL_AGGREGATION_TASK_ID:
+          {
+            CopyFillAggregator::handle_aggregation(args);
+            break;
+          }
+        case LG_COPY_FILL_DELETION_TASK_ID:
+          {
+            CopyFillGuard::handle_deletion(args);
+            break;
+          }
+        case LG_FINALIZE_EQ_SETS_TASK_ID:
+          {
+            VersionManager::handle_finalize_eq_sets(args);
+            break;
+          }
+        case LG_DEFERRED_COPY_ACROSS_TASK_ID:
+          {
+            CopyOp::handle_deferred_across(args);
+            break;
+          }
+        case LG_DEFER_REMOTE_OP_DELETION_TASK_ID:
+          {
+            RemoteOp::handle_deferred_deletion(args);
+            break;
+          }
+        case LG_DEFER_PERFORM_TRAVERSAL_TASK_ID:
+          {
+            PhysicalAnalysis::handle_deferred_traversal(args);
+            break;
+          }
+        case LG_DEFER_PERFORM_REMOTE_TASK_ID:
+          {
+            PhysicalAnalysis::handle_deferred_remote(args);
+            break;
+          }
+        case LG_DEFER_PERFORM_UPDATE_TASK_ID:
+          {
+            PhysicalAnalysis::handle_deferred_update(args);
+            break;
+          }
+        case LG_DEFER_PERFORM_OUTPUT_TASK_ID:
+          {
+            PhysicalAnalysis::handle_deferred_output(args);
+            break;
+          }
+        case LG_DEFER_INSTANCE_MANAGER_TASK_ID:
+          {
+            InstanceManager::handle_defer_manager(args, runtime);
+            break;
+          }
+        case LG_DEFER_REDUCTION_MANAGER_TASK_ID:
+          {
+            ReductionManager::handle_defer_manager(args, runtime);
             break;
           }
         case LG_RETRY_SHUTDOWN_TASK_ID:
@@ -20258,6 +22255,21 @@ namespace Legion {
       Runtime *runtime = *((Runtime**)userdata);
       implicit_runtime = runtime;
       runtime->startup_runtime(top_level_precondition);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void Runtime::endpoint_runtime_task(
+                                   const void *args, size_t arglen, 
+				   const void *userdata, size_t userlen,
+				   Processor p)
+    //--------------------------------------------------------------------------
+    {
+      Runtime *runtime = *((Runtime**)userdata);
+#ifdef DEBUG_LEGION
+      assert(userlen == sizeof(Runtime**));
+#endif
+      Deserializer derez(args, arglen);
+      runtime->handle_endpoint_creation(derez);
     }
 
     //--------------------------------------------------------------------------
@@ -20370,32 +22382,7 @@ namespace Legion {
       }
       runtime->trace_free(a, size, elems);
     }
-#endif
-
-    //--------------------------------------------------------------------------
-    /*static*/ char* BitMaskHelper::to_string(const uint64_t *bits, int count)
-    //--------------------------------------------------------------------------
-    {
-      char *result = (char*)malloc(((((count + 63) >> 6) << 4) + 1)*sizeof(char));
-      assert(result != 0);
-      char *p = result;
-      // special case for non-multiple-of-64
-      if((count & 63) != 0 && bits[count >> 6]) {
-        // each nibble (4 bits) takes one character
-        int nibbles = ((count & 63) + 3) >> 2;
-        sprintf(p, "%*.*" MASK_FMT, nibbles, nibbles, bits[count >> 6]);
-        p += nibbles;
-      }
-      // rest are whole words
-      int idx = (count >> 6);
-      while(idx > 0) {
-        if (bits[--idx] || idx == 0) {
-          sprintf(p, "%16.16" MASK_FMT, bits[idx]);
-          p += 16;
-        }
-      }
-      return result;
-    }
+#endif 
 
   }; // namespace Internal 
 }; // namespace Legion 

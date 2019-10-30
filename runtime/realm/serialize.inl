@@ -1,4 +1,4 @@
-/* Copyright 2018 Stanford University, NVIDIA Corporation
+/* Copyright 2019 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -505,6 +505,22 @@ namespace Realm {
     //
     // STL container helpers
     //
+
+    template <typename S, typename T, size_t N>
+    bool serialize(S& s, T (&a)[N])
+    {
+      for(size_t i = 0; i < N; i++)
+	if(!(s << a[i])) return false;
+      return true;
+    }
+
+    template <typename S, typename T, size_t N>
+    bool deserialize(S& s, T (&a)[N])
+    {
+      for(size_t i = 0; i < N; i++)
+	if(!(s >> a[i])) return false;
+      return true;
+    }
 
     template <typename S, typename T1, typename T2>
     bool serialize(S& s, const std::pair<T1, T2>& p)

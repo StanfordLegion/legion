@@ -1,4 +1,4 @@
-/* Copyright 2018 Stanford University, NVIDIA Corporation
+/* Copyright 2019 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -42,9 +42,9 @@
 #endif
 
 #if !USE_TLS
-#include "realm/activemsg.h"
+#include "realm/mutex.h"
 
-typedef GASNetHSL ImmovableLock;
+typedef Realm::Mutex ImmovableLock;
 class AutoImmovableLock {
 public:
   AutoImmovableLock(ImmovableLock& _lock)

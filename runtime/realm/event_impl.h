@@ -1,4 +1,4 @@
-/* Copyright 2018 Stanford University, NVIDIA Corporation
+/* Copyright 2019 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,7 +23,12 @@
 #include "realm/nodeset.h"
 #include "realm/faults.h"
 
-#include "realm/activemsg.h"
+#include "realm/network.h"
+
+#include "realm/lists.h"
+#include "realm/threads.h"
+#include "realm/logging.h"
+#include "realm/redop.h"
 
 #include <vector>
 #include <map>
@@ -50,9 +55,12 @@ namespace Realm {
     class EventWaiter {
     public:
       virtual ~EventWaiter(void) {}
-      virtual bool event_triggered(Event e, bool poisoned) = 0;
+      virtual void event_triggered(bool poisoned) = 0;
       virtual void print(std::ostream& os) const = 0;
       virtual Event get_finish_event(void) const = 0;
+
+      IntrusiveListLink<EventWaiter> ew_list_link;
+      typedef IntrusiveList<EventWaiter, &EventWaiter::ew_list_link, DummyLock> EventWaiterList;
     };
 
     // parent class of GenEventImpl and BarrierImpl
@@ -60,19 +68,74 @@ namespace Realm {
     public:
       typedef unsigned gen_t;
 
+      EventImpl(void);
+      virtual ~EventImpl(void);
+
       // test whether an event has triggered without waiting
       virtual bool has_triggered(gen_t needed_gen, bool& poisoned) = 0;
+
+      virtual void subscribe(gen_t subscribe_gen) = 0;
 
       // causes calling thread to block until event has occurred
       //void wait(Event::gen_t needed_gen);
 
       virtual void external_wait(gen_t needed_gen, bool& poisoned) = 0;
+      virtual bool external_timedwait(gen_t needed_gen, bool& poisoned,
+				      long long max_ns) = 0;
+
+      // helper to create the Event for an arbitrary generation
+      Event make_event(gen_t gen) const;
 
       virtual bool add_waiter(gen_t needed_gen, EventWaiter *waiter/*, bool pre_subscribed = false*/) = 0;
 
       static bool add_waiter(Event needed, EventWaiter *waiter);
 
       static bool detect_event_chain(Event search_from, Event target, int max_depth, bool print_chain);
+
+    public:
+      ID me;
+      NodeID owner;
+    };
+
+    class GenEventImpl;
+
+    class EventMerger {
+    public:
+      EventMerger(GenEventImpl *_event_impl);
+      ~EventMerger(void);
+
+      bool is_active(void) const;
+
+      void prepare_merger(Event _finish_event, bool _ignore_faults, unsigned _max_preconditions);
+
+      void add_precondition(Event wait_for);
+
+      void arm_merger(void);
+
+    protected:
+      void precondition_triggered(bool poisoned);
+
+      friend class MergeEventPrecondition;
+
+      class MergeEventPrecondition : public EventWaiter {
+      public:
+	EventMerger *merger;
+
+	virtual void event_triggered(bool poisoned);
+	virtual void print(std::ostream& os) const;
+	virtual Event get_finish_event(void) const;
+      };
+
+      GenEventImpl *event_impl;
+      EventImpl::gen_t finish_gen;
+      bool ignore_faults;
+      atomic<int> count_needed;
+      int faults_observed;
+
+      static const size_t MAX_INLINE_PRECONDITIONS = 6;
+      MergeEventPrecondition inline_preconditions[MAX_INLINE_PRECONDITIONS];
+      MergeEventPrecondition *preconditions;
+      unsigned num_preconditions, max_preconditions;
     };
 
     class GenEventImpl : public EventImpl {
@@ -80,6 +143,7 @@ namespace Realm {
       static const ID::ID_Types ID_TYPE = ID::ID_EVENT;
 
       GenEventImpl(void);
+      ~GenEventImpl(void);
 
       void init(ID _me, unsigned _init_owner);
 
@@ -88,13 +152,14 @@ namespace Realm {
       // get the Event (id+generation) for the current (i.e. untriggered) generation
       Event current_event(void) const;
 
-      // helper to create the Event for an arbitrary generation
-      Event make_event(gen_t gen) const;
-
       // test whether an event has triggered without waiting
       virtual bool has_triggered(gen_t needed_gen, bool& poisoned);
 
+      virtual void subscribe(gen_t subscribe_gen);
+
       virtual void external_wait(gen_t needed_gen, bool& poisoned);
+      virtual bool external_timedwait(gen_t needed_gen, bool& poisoned,
+				      long long max_ns);
 
       virtual bool add_waiter(gen_t needed_gen, EventWaiter *waiter);
 
@@ -120,13 +185,11 @@ namespace Realm {
 			  int new_poisoned_count);
 
     public: //protected:
-      ID me;
-      NodeID owner;
-      
       // these state variables are monotonic, so can be checked without a lock for
       //  early-out conditions
-      gen_t generation, gen_subscribed;
-      int num_poisoned_generations;
+      atomic<gen_t> generation;
+      atomic<gen_t> gen_subscribed;
+      atomic<int> num_poisoned_generations;
       bool has_local_triggers;
 
       bool is_generation_poisoned(gen_t gen) const; // helper function - linear search
@@ -134,15 +197,22 @@ namespace Realm {
       // this is only manipulated when the event is "idle"
       GenEventImpl *next_free;
 
+      // used for merge_events and delayed UserEvent triggers
+      EventMerger merger;
+
       // everything below here protected by this mutex
-      GASNetHSL mutex;
+      Mutex mutex;
 
       // local waiters are tracked by generation - an easily-accessed list is used
       //  for the "current" generation, whereas a map-by-generation-id is used for
       //  "future" generations (i.e. ones ahead of what we've heard about if we're
       //  not the owner)
-      std::vector<EventWaiter *> current_local_waiters;
-      std::map<gen_t, std::vector<EventWaiter *> > future_local_waiters;
+      EventWaiter::EventWaiterList current_local_waiters;
+      std::map<gen_t, EventWaiter::EventWaiterList> future_local_waiters;
+
+      // external waiters on this node are notifies via a condition variable
+      bool has_external_waiters;
+      CondVar external_waiter_condvar;
 
       // remote waiters are kept in a bitmask for the current generation - this is
       //  only maintained on the owner, who never has to worry about more than one
@@ -165,6 +235,12 @@ namespace Realm {
       //  done until our view of the distributed event catches up
       // value stored in map is whether generation was poisoned
       std::map<gen_t, bool> local_triggers;
+
+      // these resolve a race condition between the early trigger of a
+      //  poisoned merge and the last precondition
+      bool free_list_insertion_delayed;
+      friend class EventMerger;
+      void perform_delayed_free_list_insertion(void);
     };
 
     class BarrierImpl : public EventImpl {
@@ -190,7 +266,12 @@ namespace Realm {
 
       // test whether an event has triggered without waiting
       virtual bool has_triggered(gen_t needed_gen, bool& poisoned);
+
+      virtual void subscribe(gen_t subscribe_gen);
+
       virtual void external_wait(gen_t needed_gen, bool& poisoned);
+      virtual bool external_timedwait(gen_t needed_gen, bool& poisoned,
+				      long long max_ns);
 
       virtual bool add_waiter(gen_t needed_gen, EventWaiter *waiter/*, bool pre_subscribed = false*/);
 
@@ -205,13 +286,11 @@ namespace Realm {
       bool get_result(gen_t result_gen, void *value, size_t value_size);
 
     public: //protected:
-      ID me;
-      NodeID owner;
       gen_t generation, gen_subscribed;
       gen_t first_generation;
       BarrierImpl *next_free;
 
-      GASNetHSL mutex; // controls which local thread has access to internal data (not runtime-visible event)
+      Mutex mutex; // controls which local thread has access to internal data (not runtime-visible event)
 
       // class to track per-generation status
       class Generation {
@@ -222,7 +301,7 @@ namespace Realm {
 	};
 
 	int unguarded_delta;
-	std::vector<EventWaiter *> local_waiters;
+	EventWaiter::EventWaiterList local_waiters;
 	std::map<int, PerNodeUpdates *> pernode;
       
 	
@@ -233,6 +312,10 @@ namespace Realm {
       };
 
       std::map<gen_t, Generation *> generations;
+
+      // external waiters on this node are notifies via a condition variable
+      bool has_external_waiters;
+      CondVar external_waiter_condvar;
 
       // a list of remote waiters and the latest generation they're interested in
       // also the latest generation that each node (that has ever subscribed) has been told about
@@ -248,142 +331,219 @@ namespace Realm {
       char *final_values;   // results of completed reductions
     };
 
+    class CompQueueImpl {
+    public:
+      CompQueueImpl(void);
+      ~CompQueueImpl(void);
+
+      void init(CompletionQueue _me, int _owner);
+
+      void set_capacity(size_t _max_size, bool _resizable);
+
+      void destroy(void);
+
+      void add_event(Event event, bool faultaware);
+
+      Event get_local_progress_event(void);
+      void add_remote_progress_event(Event event);
+
+      size_t pop_events(Event *events, size_t max_to_pop);
+
+      CompletionQueue me;
+      int owner;
+      CompQueueImpl *next_free;
+
+      class DeferredDestroy : public EventWaiter {
+      public:
+	void defer(CompQueueImpl *_cq, Event wait_on);
+	virtual void event_triggered(bool poisoned);
+	virtual void print(std::ostream& os) const;
+	virtual Event get_finish_event(void) const;
+
+      protected:
+	CompQueueImpl *cq;
+      };
+      DeferredDestroy deferred_destroy;
+
+      // used to track pending remote pop requests
+      class RemotePopRequest {
+      public:
+	RemotePopRequest(Event *_events, size_t _capacity);
+
+	Mutex mutex;
+	CondVar condvar;
+	bool completed;
+	size_t count, capacity;
+	Event *events;
+      };
+
+    protected:
+      void add_completed_event(Event event, bool was_pending);
+
+      class CompQueueWaiter : public EventWaiter {
+      public:
+	virtual void event_triggered(bool poisoned);
+	virtual void print(std::ostream& os) const;
+	virtual Event get_finish_event(void) const;
+
+	CompQueueImpl *cq;
+	Event wait_on;
+	bool faultaware;
+	CompQueueWaiter *next_free;
+      };
+
+      static const size_t CQWAITER_BATCH_SIZE = 16;
+      class CompQueueWaiterBatch {
+      public:
+	CompQueueWaiterBatch(CompQueueImpl *cq, CompQueueWaiterBatch *_next);
+	~CompQueueWaiterBatch(void);
+
+	CompQueueWaiter waiters[CQWAITER_BATCH_SIZE];
+	CompQueueWaiterBatch *next_batch;
+      };
+
+      Mutex mutex; // protects everything below here
+
+      size_t wr_ptr, rd_ptr, cur_events, pending_events, max_events;
+      bool resizable;
+      Event *completed_events;
+      GenEventImpl *local_progress_event;
+      EventImpl::gen_t local_progress_event_gen;
+      // TODO: small vector
+      std::vector<Event> remote_progress_events;
+      CompQueueWaiter *first_free_waiter;
+      CompQueueWaiterBatch *batches;
+    };
+
   // active messages
 
   struct EventSubscribeMessage {
-    struct RequestArgs {
-      NodeID node;
-      Event event;
-      EventImpl::gen_t previous_subscribe_gen;
-    };
+    Event event;
+    EventImpl::gen_t previous_subscribe_gen;
 
-    static void handle_request(RequestArgs args);
+    static void handle_message(NodeID sender, const EventSubscribeMessage &msg,
+			       const void *data, size_t datalen);
 
-    typedef ActiveMessageShortNoReply<EVENT_SUBSCRIBE_MSGID,
-				      RequestArgs,
-				      handle_request> Message;
-
-    static void send_request(NodeID target, Event event, EventImpl::gen_t previous_gen);
   };
 
-  // EventTriggerMessage is used by non-owner nodes to trigger an event
-  // EventUpdateMessage is used by the owner node to tell non-owner nodes about one or
-  //   more triggerings of an event
-
   struct EventTriggerMessage {
-    struct RequestArgs {
-      NodeID node;
-      Event event;
-      bool poisoned;
-    };
+    Event event;
+    bool poisoned;
 
-    static void handle_request(RequestArgs args);
+    static void handle_message(NodeID sender, const EventTriggerMessage &msg,
+			       const void *data, size_t datalen);
 
-    typedef ActiveMessageShortNoReply<EVENT_TRIGGER_MSGID,
-				       RequestArgs,
-				       handle_request> Message;
-
-    static void send_request(NodeID target, Event event, bool poisoned);
   };
 
   struct EventUpdateMessage {
-    struct RequestArgs : public BaseMedium {
-      Event event;
+    Event event;
 
-      void apply(NodeID target);
-    };
+    static void handle_message(NodeID sender, const EventUpdateMessage &msg,
+			       const void *data, size_t datalen);
 
-    static void handle_request(RequestArgs args, const void *data, size_t datalen);
-
-    typedef ActiveMessageMediumNoReply<EVENT_UPDATE_MSGID,
-				       RequestArgs,
-				       handle_request> Message;
-
-    static void send_request(NodeID target, Event event,
-			     int num_poisoned, const EventImpl::gen_t *poisoned_generations);
-    static void broadcast_request(const NodeSet& targets, Event event,
-				  int num_poisoned, const EventImpl::gen_t *poisoned_generations);
   };
 
-    struct BarrierAdjustMessage {
-      struct RequestArgs : public BaseMedium {
-	int sender;
-	//bool forwarded;  no room to store this, so encoded as: sender < 0
-	int delta;
-	Barrier barrier;
-        Event wait_on;
-      };
+  struct BarrierAdjustMessage {
+    NodeID sender;
+    int forwarded;
+    int delta;
+    Barrier barrier;
+    Event wait_on;
 
-      static void handle_request(RequestArgs args, const void *data, size_t datalen);
-
-      typedef ActiveMessageMediumNoReply<BARRIER_ADJUST_MSGID,
-					 RequestArgs,
-					 handle_request> Message;
-
-      static void send_request(NodeID target, Barrier barrier, int delta, Event wait_on,
-			       NodeID sender, bool forwarded,
+    static void handle_message(NodeID sender, const BarrierAdjustMessage &msg,
 			       const void *data, size_t datalen);
+    static void send_request(NodeID target, Barrier barrier, int delta, Event wait_on,
+			     NodeID sender, bool forwarded,
+			     const void *data, size_t datalen);
     };
 
-    struct BarrierSubscribeMessage {
-      struct RequestArgs {
-	NodeID subscriber;
-	ID::IDType barrier_id;
-	EventImpl::gen_t subscribe_gen;
-	bool forwarded;
-      };
+  struct BarrierSubscribeMessage {
+    NodeID subscriber;
+    ID::IDType barrier_id;
+    EventImpl::gen_t subscribe_gen;
+    bool forwarded;
 
-      static void handle_request(RequestArgs args);
-
-      typedef ActiveMessageShortNoReply<BARRIER_SUBSCRIBE_MSGID,
-					RequestArgs,
-					handle_request> Message;
-
-      static void send_request(NodeID target, ID::IDType barrier_id,
-			       EventImpl::gen_t subscribe_gen,
-			       NodeID subscriber, bool forwarded);
-    };
-
-    struct BarrierTriggerMessage {
-      struct RequestArgs : public BaseMedium {
-	NodeID node;
-	ID::IDType barrier_id;
-	EventImpl::gen_t trigger_gen;
-	EventImpl::gen_t previous_gen;
-	EventImpl::gen_t first_generation;
-	ReductionOpID redop_id;
-	NodeID migration_target;
-	unsigned base_arrival_count;
-      };
-
-      static void handle_request(RequestArgs args, const void *data, size_t datalen);
-
-      typedef ActiveMessageMediumNoReply<BARRIER_TRIGGER_MSGID,
-					 RequestArgs,
-					 handle_request> Message;
-
-      static void send_request(NodeID target, ID::IDType barrier_id,
-			       EventImpl::gen_t trigger_gen, EventImpl::gen_t previous_gen,
-			       EventImpl::gen_t first_generation, ReductionOpID redop_id,
-			       NodeID migration_target, unsigned base_arrival_count,
+    static void handle_message(NodeID sender, const BarrierSubscribeMessage &msg,
 			       const void *data, size_t datalen);
-    };
 
-    struct BarrierMigrationMessage {
-      struct RequestArgs {
-	Barrier barrier;
-	NodeID current_owner;
-      };
+    static void send_request(NodeID target, ID::IDType barrier_id,
+			     EventImpl::gen_t subscribe_gen,
+			     NodeID subscriber, bool forwarded);
+  };
 
-      static void handle_request(RequestArgs args);
+  struct BarrierTriggerMessage {
+    ID::IDType barrier_id;
+    EventImpl::gen_t trigger_gen;
+    EventImpl::gen_t previous_gen;
+    EventImpl::gen_t first_generation;
+    ReductionOpID redop_id;
+    NodeID migration_target;
+    unsigned base_arrival_count;
 
-      typedef ActiveMessageShortNoReply<BARRIER_MIGRATE_MSGID,
-					RequestArgs,
-					handle_request> Message;
+    static void handle_message(NodeID sender, const BarrierTriggerMessage &msg,
+			       const void *data, size_t datalen);
 
-      static void send_request(NodeID target, Barrier barrier, NodeID owner);
-    };
-	
+    static void send_request(NodeID target, ID::IDType barrier_id,
+			     EventImpl::gen_t trigger_gen, EventImpl::gen_t previous_gen,
+			     EventImpl::gen_t first_generation, ReductionOpID redop_id,
+			     NodeID migration_target, unsigned base_arrival_count,
+			     const void *data, size_t datalen);
+  };
+
+  struct BarrierMigrationMessage {
+    Barrier barrier;
+    NodeID current_owner;
+
+    static void handle_message(NodeID sender, const BarrierMigrationMessage &msg,
+			       const void *data, size_t datalen);
+    static void send_request(NodeID target, Barrier barrier, NodeID owner);
+  };
+
+  struct CompQueueDestroyMessage {
+    CompletionQueue comp_queue;
+    Event wait_on;
+
+    static void handle_message(NodeID sender, const CompQueueDestroyMessage &msg,
+			       const void *data, size_t datalen);
+  };
+
+  struct CompQueueAddEventMessage {
+    CompletionQueue comp_queue;
+    Event event;
+    bool faultaware;
+
+    static void handle_message(NodeID sender, const CompQueueAddEventMessage &msg,
+			       const void *data, size_t datalen);
+  };
+
+  struct CompQueueRemoteProgressMessage {
+    CompletionQueue comp_queue;
+    Event progress;
+
+    static void handle_message(NodeID sender, const CompQueueRemoteProgressMessage &msg,
+			       const void *data, size_t datalen);
+  };
+
+  struct CompQueuePopRequestMessage {
+    CompletionQueue comp_queue;
+    size_t max_to_pop;
+    bool discard_events;
+    intptr_t request;
+
+    static void handle_message(NodeID sender,
+			       const CompQueuePopRequestMessage &msg,
+			       const void *data, size_t datalen);
+  };
+
+  struct CompQueuePopResponseMessage {
+    size_t count;
+    intptr_t request;
+
+    static void handle_message(NodeID sender,
+			       const CompQueuePopResponseMessage &msg,
+			       const void *data, size_t datalen);
+  };
+
 }; // namespace Realm
 
 #include "realm/event_impl.inl"

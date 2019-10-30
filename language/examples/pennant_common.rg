@@ -1,4 +1,4 @@
--- Copyright 2018 Stanford University
+-- Copyright 2019 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -24,7 +24,17 @@ local parallel = rawget(_G, "pennant_parallel") ~= false
 -- Compile and link pennant.cc
 do
   local root_dir = arg[0]:match(".*/") or "./"
-  local runtime_dir = os.getenv('LG_RT_DIR') .. "/"
+
+  local include_path = ""
+  local include_dirs = terralib.newlist()
+  include_dirs:insert("-I")
+  include_dirs:insert(root_dir)
+  for path in string.gmatch(os.getenv("INCLUDE_PATH"), "[^;]+") do
+    include_path = include_path .. " -I " .. path
+    include_dirs:insert("-I")
+    include_dirs:insert(path)
+  end
+
   local pennant_cc = root_dir .. "pennant.cc"
   if os.getenv('OBJNAME') then
     local out_dir = os.getenv('OBJNAME'):match('.*/') or './'
@@ -45,18 +55,18 @@ do
     cxx_flags = cxx_flags .. " -shared -fPIC"
   end
 
-  local cmd = (cxx .. " " .. cxx_flags .. " -I " .. runtime_dir .. " " ..
+  local cmd = (cxx .. " " .. cxx_flags .. " " .. include_path .. " " ..
                 pennant_cc .. " -o " .. pennant_so)
   if os.execute(cmd) ~= 0 then
     print("Error: failed to compile " .. pennant_cc)
     assert(false)
   end
   terralib.linklibrary(pennant_so)
-  cpennant = terralib.includec("pennant.h", {"-I", root_dir, "-I", runtime_dir})
+  cpennant = terralib.includec("pennant.h", include_dirs)
 end
 
 -- Also copy input files into the destination directory.
-if os.getenv('OBJNAME') then
+if os.getenv('STANDALONE') == '1' and os.getenv('OBJNAME') then
   local root_dir = arg[0]:match(".*/") or "./"
   local out_dir = os.getenv('OBJNAME'):match('.*/')
   if out_dir then
@@ -708,6 +718,11 @@ terra read_config()
 
   return conf
 end
+
+-- This is in a task so that it can be called from Python.
+task read_config_task()
+  return read_config()
+end
 end
 
 -- #####################################
@@ -724,6 +739,17 @@ struct mesh_colorings {
   rp_spans_c : c.legion_coloring_t,
   rs_all_c : c.legion_coloring_t,
   rs_spans_c : c.legion_coloring_t,
+  nspans_zones : int64,
+  nspans_points : int64,
+}
+
+struct mesh_partitions {
+  rz_all_p : c.legion_logical_partition_t,
+  rp_all_p : c.legion_logical_partition_t,
+  rp_all_private_p : c.legion_logical_partition_t,
+  rp_all_ghost_p : c.legion_logical_partition_t,
+  rp_all_shared_p : c.legion_logical_partition_t,
+  rs_all_p : c.legion_logical_partition_t,
   nspans_zones : int64,
   nspans_points : int64,
 }
@@ -1379,6 +1405,59 @@ terra read_partitions(conf : config) : mesh_colorings
 end
 read_partitions:compile()
 
+-- This is in a task so that it can be called from Python.
+task read_partitions_task2(rz_all : region(zone),
+                           rp_all : region(point),
+                           rs_all : region(side(wild, wild, wild, wild)),
+                           conf : config) : mesh_partitions
+  var colorings = read_partitions(conf)
+
+  var rz_all_p = partition(disjoint, rz_all, colorings.rz_all_c)
+
+  -- Partition points into private and ghost regions.
+  var rp_all_p = partition(disjoint, rp_all, colorings.rp_all_c)
+  var rp_all_private = rp_all_p[0]
+  var rp_all_ghost = rp_all_p[1]
+
+  -- Partition private points into disjoint pieces by zone.
+  var rp_all_private_p = partition(
+    disjoint, rp_all_private, colorings.rp_all_private_c)
+
+  -- Partition ghost points into aliased pieces by zone.
+  var rp_all_ghost_p = partition(
+    aliased, rp_all_ghost, colorings.rp_all_ghost_c)
+
+  -- Partition ghost points into disjoint pieces, breaking ties
+  -- between zones so that each point goes into one region only.
+  var rp_all_shared_p = partition(
+    disjoint, rp_all_ghost, colorings.rp_all_shared_c)
+
+  -- Partition sides into disjoint pieces by zone.
+  var rs_all_p = partition(disjoint, rs_all, colorings.rs_all_c)
+
+  var result : mesh_partitions
+  result.rz_all_p = __raw(rz_all_p)
+  result.rp_all_p = __raw(rp_all_p)
+  result.rp_all_private_p = __raw(rp_all_private_p)
+  result.rp_all_ghost_p = __raw(rp_all_ghost_p)
+  result.rp_all_shared_p = __raw(rp_all_shared_p)
+  result.rs_all_p = __raw(rs_all_p)
+  result.nspans_zones = colorings.nspans_zones;
+  result.nspans_points = colorings.nspans_points;
+
+  c.legion_coloring_destroy(colorings.rz_all_c)
+  c.legion_coloring_destroy(colorings.rz_spans_c)
+  c.legion_coloring_destroy(colorings.rp_all_c)
+  c.legion_coloring_destroy(colorings.rp_all_private_c)
+  c.legion_coloring_destroy(colorings.rp_all_ghost_c)
+  c.legion_coloring_destroy(colorings.rp_all_shared_c)
+  c.legion_coloring_destroy(colorings.rp_spans_c)
+  c.legion_coloring_destroy(colorings.rs_all_c)
+  c.legion_coloring_destroy(colorings.rs_spans_c)
+
+  return result
+end
+
 local terra get_zone_position(conf : config, pcx : int64, pcy : int64, z : int64)
   var first_zx, last_zx, stride_zx = block_zx(conf, pcx)
   var first_zy, last_zy, stride_zy = block_zy(conf, pcy)
@@ -1543,8 +1622,7 @@ task initialize_topology(conf : config,
 where reads writes(rz.znump,
                    rpp.{px, has_bcx, has_bcy},
                    rps.{px, has_bcx, has_bcy},
-                   rs.{mapsz, mapsp1, mapsp2, mapss3, mapss4}),
-  reads(rpg.{px0}) -- Hack: Work around runtime bug with no-acccess regions.
+                   rs.{mapsz, mapsp1, mapsp2, mapss3, mapss4})
 do
   regentlib.assert(
     conf.meshtype == MESH_RECT,
@@ -1568,7 +1646,7 @@ do
     var p_ = first_p
     for y = first_zy + [int64](pcy > 0), last_zy + [int64](pcy == conf.numpcy - 1) do
       for x = first_zx + [int64](pcx > 0), last_zx + [int64](pcx == conf.numpcx - 1) do
-        var p = dynamic_cast(ptr(point, rpp), [ptr](p_))
+        var p = dynamic_cast(ptr(point, rpp), ptr(p_))
         regentlib.assert(not isnull(p), "bad pointer")
 
         var px = { x = dx*x, y = dy*y }
@@ -1602,7 +1680,7 @@ do
     var bottom_right = ghost_bottom_right_p(conf, pcx, pcy)
 
     for p_ = right._0, right._1 do
-      var p = dynamic_cast(ptr(point, rps), [ptr](p_))
+      var p = dynamic_cast(ptr(point, rps), ptr(p_))
       regentlib.assert(not isnull(p), "bad pointer")
 
       var x, y = last_zx, first_zy + (p_ - right._0 + [int64](pcy > 0))
@@ -1624,7 +1702,7 @@ do
     end
 
     for p_ = bottom._0, bottom._1 do
-      var p = dynamic_cast(ptr(point, rps), [ptr](p_))
+      var p = dynamic_cast(ptr(point, rps), ptr(p_))
       regentlib.assert(not isnull(p), "bad pointer")
 
       var x, y = first_zx + (p_ - bottom._0 + [int64](pcx > 0)), last_zy
@@ -1646,7 +1724,7 @@ do
     end
 
     for p_ = bottom_right._0, bottom_right._1 do
-      var p = dynamic_cast(ptr(point, rps), [ptr](p_))
+      var p = dynamic_cast(ptr(point, rps), ptr(p_))
       regentlib.assert(not isnull(p), "bad pointer")
 
       var x, y = last_zx, last_zy
@@ -1692,7 +1770,7 @@ do
                   (y == stride_zy - 1 and pcy < conf.numpcy - 1) or
                   (x == stride_zx - 1 and pcx < conf.numpcx - 1))
             then
-              var z = dynamic_cast(ptr(zone, rz), [ptr](z_))
+              var z = dynamic_cast(ptr(zone, rz), ptr(z_))
               regentlib.assert(not isnull(z), "bad pointer")
 
               var top_left = ghost_top_left_p(conf, pcx, pcy)
@@ -1719,7 +1797,7 @@ do
                 else -- private
                   p_ = first_p + inner_y * inner_stride_x + inner_x
                 end
-                var p = dynamic_cast(ptr(point, rpp, rpg), [ptr](p_))
+                var p = dynamic_cast(ptr(point, rpp, rpg), ptr(p_))
                 regentlib.assert(not isnull(p), "bad pointer")
                 pp[0] = p
               end
@@ -1734,7 +1812,7 @@ do
                 else -- private
                   p_ = first_p + inner_y * inner_stride_x + (inner_x + 1)
                 end
-                var p = dynamic_cast(ptr(point, rpp, rpg), [ptr](p_))
+                var p = dynamic_cast(ptr(point, rpp, rpg), ptr(p_))
                 regentlib.assert(not isnull(p), "bad pointer")
                 pp[1] = p
               end
@@ -1749,7 +1827,7 @@ do
                 else -- private
                   p_ = first_p + (inner_y + 1) * inner_stride_x + (inner_x + 1)
                 end
-                var p = dynamic_cast(ptr(point, rpp, rpg), [ptr](p_))
+                var p = dynamic_cast(ptr(point, rpp, rpg), ptr(p_))
                 regentlib.assert(not isnull(p), "bad pointer")
                 pp[2] = p
               end
@@ -1764,7 +1842,7 @@ do
                 else -- private
                   p_ = first_p + (inner_y + 1) * inner_stride_x + inner_x
                 end
-                var p = dynamic_cast(ptr(point, rpp, rpg), [ptr](p_))
+                var p = dynamic_cast(ptr(point, rpp, rpg), ptr(p_))
                 regentlib.assert(not isnull(p), "bad pointer")
                 pp[3] = p
               end
@@ -1772,7 +1850,7 @@ do
               var ss : ptr(side(rz, rpp, rpg, rs), rs)[4]
               for i = 0, znump do
                 var s_ = z_ * znump + i
-                var s = dynamic_cast(ptr(side(rz, rpp, rpg, rs), rs), [ptr](s_))
+                var s = dynamic_cast(ptr(side(rz, rpp, rpg, rs), rs), ptr(s_))
                 regentlib.assert(not isnull(s), "bad pointer")
                 ss[i] = s
               end

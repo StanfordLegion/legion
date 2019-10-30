@@ -1,4 +1,4 @@
--- Copyright 2018 Stanford University
+-- Copyright 2019 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -17,5 +17,13 @@ import "regent"
 task main()
   var x : uint = int1d(5)
   regentlib.assert(x == 5, "test failed")
+
+  var y : regentlib.c.legion_domain_point_t = int2d({2, 3})
+  regentlib.assert(int2d(y) == int2d({2, 3}), "test failed")
+
+  var z : regentlib.c.legion_point_2d_t = int2d({4, 5})
+  regentlib.assert(z.x[0] == 4, "test failed")
+  regentlib.assert(z.x[1] == 5, "test failed")
+  regentlib.assert(int2d(z) == int2d({4, 5}), "test failed")
 end
 regentlib.start(main)

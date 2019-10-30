@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-# Copyright 2018 Stanford University
+# Copyright 2019 Stanford University
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -19,6 +19,7 @@ from __future__ import print_function
 
 from collections import OrderedDict
 import legion
+from legion import task, Fspace, R, Region, RW
 
 # FIXME: Need a better way to determine task IDs.
 hello = legion.extern_task(
@@ -29,11 +30,17 @@ hello = legion.extern_task(
 
 saxpy = legion.extern_task(
     task_id=10001,
-    argument_types=[legion.Region, legion.float64],
-    privileges=[legion.RW],
+    argument_types=[Region, legion.float64],
+    privileges=[RW],
     calling_convention='regent')
 
-@legion.task(task_id=2)
+@task(privileges=[R])
+def check(r):
+    assert (r.x == 3.5).all()
+    print('results validated successfully')
+
+# This task needs an explicit ID so that Regent knows what to call.
+@task(task_id=2)
 def main():
     print('hello from Python')
     x = hello(1234, 3.14)
@@ -41,18 +48,17 @@ def main():
 
     print('creating a field space with two fields')
     # Note: Need to use OrderedDict so that the field ordering matches Regent.
-    fs = legion.Fspace.create(OrderedDict([('x', legion.float64), ('y', legion.float64)]))
+    fs = Fspace(OrderedDict([('x', legion.float64), ('y', legion.float64)]))
 
     print('creating a region with 12 elements')
-    r = legion.Region.create([12], fs)
+    r = Region([12], fs)
 
-    r.x.fill(1)
-    r.y.fill(2)
+    legion.fill(r, 'x', 1)
+    legion.fill(r, 'y', 2)
 
     a = 1.5
 
     print('calling SAXPY task in Regent')
     saxpy(r, a)
 
-    assert (r.x == 3.5).all()
-    print('results validated successfully')
+    check(r)

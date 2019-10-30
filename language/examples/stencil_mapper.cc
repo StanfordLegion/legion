@@ -1,4 +1,4 @@
-/* Copyright 2018 Stanford University
+/* Copyright 2019 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -94,18 +94,20 @@ void StencilMapper::default_policy_rank_processor_kinds(MapperContext ctx,
   const char* prefix = "shard_";
   if (strncmp(task_name, prefix, strlen(prefix)) == 0) {
     // Put shard tasks on IO processors.
-    ranking.resize(4);
+    ranking.resize(5);
     ranking[0] = Processor::TOC_PROC;
     ranking[1] = Processor::PROC_SET;
     ranking[2] = Processor::IO_PROC;
     ranking[3] = Processor::LOC_PROC;
+    ranking[4] = Processor::PY_PROC;
   } else {
 #endif
-    ranking.resize(4);
+    ranking.resize(5);
     ranking[0] = Processor::TOC_PROC;
     ranking[1] = Processor::PROC_SET;
     ranking[2] = Processor::LOC_PROC;
     ranking[3] = Processor::IO_PROC;
+    ranking[4] = Processor::PY_PROC;
 #if SPMD_SHARD_USE_IO_PROC
   }
 #endif
@@ -273,7 +275,7 @@ void StencilMapper::stencil_create_copy_instance(MapperContext ctx,
   }
 }
 
-static void create_mappers(Machine machine, HighLevelRuntime *runtime, const std::set<Processor> &local_procs)
+static void create_mappers(Machine machine, Runtime *runtime, const std::set<Processor> &local_procs)
 {
   std::vector<Processor>* procs_list = new std::vector<Processor>();
 
@@ -295,5 +297,5 @@ static void create_mappers(Machine machine, HighLevelRuntime *runtime, const std
 
 void register_mappers()
 {
-  HighLevelRuntime::add_registration_callback(create_mappers);
+  Runtime::add_registration_callback(create_mappers);
 }

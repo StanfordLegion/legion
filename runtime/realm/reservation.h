@@ -1,4 +1,4 @@
-/* Copyright 2018 Stanford University, NVIDIA Corporation
+/* Copyright 2019 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -99,6 +99,16 @@ namespace Realm {
     Event rdlock(WaitMode mode = SPIN);
     void unlock(void);
 
+    // non-blocking versions return true if the lock is granted, false if
+    //  waiting/spinning would have been required
+    // Note: when a FastReservation has a backing Reservation, these calls can
+    //  fail even if no other thread holds the FastReservation - in such cases,
+    //  the only recourse is to keep attempting the acquisition until it
+    //  succeeds (this can be problematic if the holder needs the same processor)
+    bool trylock(void); // synonym for trywrlock()
+    bool trywrlock(void);
+    bool tryrdlock(void);
+
     // in general, a thread holding a lock should not go to sleep on other
     //  events, as another thread waiting on the lock may spin and prevent the
     //  holding thread from running on that core
@@ -124,6 +134,8 @@ namespace Realm {
     Event wrlock_slow(WaitMode mode);
     Event rdlock_slow(WaitMode mode);
     void unlock_slow(void);
+    bool trywrlock_slow(void);
+    bool tryrdlock_slow(void);
 
     // we will make use of atomics for the fast path, so make sure we take
     //  a full cache line for our data to avoid false sharing

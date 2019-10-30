@@ -1,4 +1,4 @@
--- Copyright 2018 Stanford University, NVIDIA Corporation
+-- Copyright 2019 Stanford University, NVIDIA Corporation
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -59,7 +59,7 @@ task toplevel()
     c.legion_runtime_get_executing_processor(__runtime(), __context())
   var procs = c.bishop_all_processors()
   bar()
-  __demand(__parallel)
+  __demand(__index_launch)
   for i = 0, 4 do
     foo(i)
   end

@@ -1,4 +1,4 @@
--- Copyright 2018 Stanford University
+-- Copyright 2019 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -16,18 +16,18 @@
 -- [
 --   ["pennant.tests/sedovsmall/sedovsmall.pnt",
 --    "-npieces", "1", "-seq_init", "1", "-par_init", "1", "-interior", "0",
---    "-fflow-spmd", "1", "-fvectorize-unsafe", "1", "-ftrace", "0"],
+--    "-fflow-spmd", "1", "-ftrace", "0"],
 --   ["pennant.tests/sedov/sedov.pnt",
 --    "-npieces", "3", "-ll:cpu", "3", "-seq_init", "1", "-par_init", "1", "-interior", "0",
 --    "-absolute", "2e-6", "-relative", "1e-8", "-relative_absolute", "1e-10",
---    "-fflow-spmd", "1", "-fvectorize-unsafe", "1", "-ftrace", "0"],
+--    "-fflow-spmd", "1", "-ftrace", "0"],
 --   ["pennant.tests/leblanc/leblanc.pnt",
 --    "-npieces", "2", "-ll:cpu", "2", "-seq_init", "1", "-par_init", "1", "-interior", "0",
---    "-fflow-spmd", "1", "-fvectorize-unsafe", "1"],
+--    "-fflow-spmd", "1"],
 --   ["pennant.tests/sedov/sedov.pnt",
 --    "-npieces", "3", "-ll:cpu", "3", "-seq_init", "1", "-par_init", "1", "-interior", "0",
 --    "-absolute", "2e-6", "-relative", "1e-8", "-relative_absolute", "1e-10",
---    "-fflow-spmd", "1", "-fvectorize-unsafe", "1", "-dm:memoize"]
+--    "-fflow-spmd", "1", "-dm:memoize"]
 -- ]
 
 -- Inspired by https://github.com/losalamos/PENNANT
@@ -35,6 +35,8 @@
 import "regent"
 
 require("pennant_common")
+
+local use_python_main = rawget(_G, "pennant_use_python_main") == true
 
 sqrt = regentlib.sqrt(double)
 fabs = regentlib.fabs(double)
@@ -1485,12 +1487,25 @@ task read_input_sequential(rz_all : region(zone),
                            rs_all : region(side(wild, wild, wild, wild)),
                            conf : config)
 where reads writes(rz_all, rp_all, rs_all) do
-  return read_input(
+  var colorings = read_input(
     __runtime(), __context(),
     __physical(rz_all), __fields(rz_all),
     __physical(rp_all), __fields(rp_all),
     __physical(rs_all), __fields(rs_all),
     conf)
+  -- If par_init is true we don't actually need to pass this back, just free it here.
+  if conf.par_init then
+    c.legion_coloring_destroy(colorings.rz_all_c)
+    c.legion_coloring_destroy(colorings.rz_spans_c)
+    c.legion_coloring_destroy(colorings.rp_all_c)
+    c.legion_coloring_destroy(colorings.rp_all_private_c)
+    c.legion_coloring_destroy(colorings.rp_all_ghost_c)
+    c.legion_coloring_destroy(colorings.rp_all_shared_c)
+    c.legion_coloring_destroy(colorings.rp_spans_c)
+    c.legion_coloring_destroy(colorings.rs_all_c)
+    c.legion_coloring_destroy(colorings.rs_spans_c)
+  end
+  return colorings
 end
 
 terra get_raw_span(runtime : c.legion_runtime_t, ctx : c.legion_context_t,
@@ -1570,6 +1585,8 @@ where reads(rz_all, rp_all, rs_all) do
     conf)
 end
 
+if not use_python_main then
+
 task dummy(rz : region(zone), rpp : region(point)) : int
 where reads writes(rz, rpp) do
   return 1
@@ -1577,7 +1594,7 @@ end
 
 terra unwrap(x : mesh_colorings) return x end
 
-task test()
+task toplevel()
   c.printf("Running test (t=%.1f)...\n", c.legion_get_current_time_in_micros()/1.e6)
 
   var conf : config = read_config()
@@ -1595,6 +1612,7 @@ task test()
 
   if conf.seq_init then
     -- Hack: This had better run on the same node...
+    -- (if -par_init 0)
     colorings = unwrap(read_input_sequential(
       rz_all, rp_all, rs_all, conf))
   end
@@ -1604,15 +1622,6 @@ task test()
     if conf.seq_init then
       regentlib.assert(colorings.nspans_zones == colorings_.nspans_zones, "bad nspans zones")
       regentlib.assert(colorings.nspans_points == colorings_.nspans_points, "bad nspans points")
-      c.legion_coloring_destroy(colorings.rz_all_c)
-      c.legion_coloring_destroy(colorings.rz_spans_c)
-      c.legion_coloring_destroy(colorings.rp_all_c)
-      c.legion_coloring_destroy(colorings.rp_all_private_c)
-      c.legion_coloring_destroy(colorings.rp_all_ghost_c)
-      c.legion_coloring_destroy(colorings.rp_all_shared_c)
-      c.legion_coloring_destroy(colorings.rp_spans_c)
-      c.legion_coloring_destroy(colorings.rs_all_c)
-      c.legion_coloring_destroy(colorings.rs_spans_c)
     end
     colorings = colorings_
   end
@@ -1733,7 +1742,7 @@ task test()
   do
     -- Initialization
     for _ = 0, par_init do
-      -- __demand(__parallel)
+      -- __demand(__index_launch)
       for i = 0, npieces do
         initialize_topology(conf, i, rz_all_p[i],
                             rp_all_private_p[i],
@@ -1742,7 +1751,7 @@ task test()
                             rs_all_p[i])
       end
 
-      -- __demand(__parallel)
+      -- __demand(__index_launch)
       for i = 0, npieces do
         initialize_spans(
           conf, i,
@@ -1800,107 +1809,115 @@ task test()
     end
   end
 
-  __demand(__spmd)
-  do
-    -- Main Simulation Loop
-    __demand(__trace)
-    while continue_simulation(warmup, cycle, cstop, time, tstop) do
-      -- if warmup and cycle > 0 then
-      --   wait_for(dthydro)
-      --   enable = true
-      --   warmup = false
-      --   time = 0.0
-      --   cycle = 0
-      --   dt = dtmax
-      --   dthydro = dtmax
-      --   start_time = c.legion_get_current_time_in_micros()/1.e6
-      --   last_time = start_time
-      -- end
+  -- FIXME: The new normalization triggers a toposort bug in SPMD without
+  --        these copies of scalar variables, which effectively force
+  --        the version numbers to be incremented.
+  var cycle_copy = cycle
+  var time_copy = time
 
-      -- c.legion_runtime_begin_trace(__runtime(), __context(), 0, false)
+  -- Main Simulation Loop
+  __demand(__spmd, __trace)
+  while continue_simulation(warmup, cycle, cstop, time, tstop) do
+    -- if warmup and cycle > 0 then
+    --   wait_for(dthydro)
+    --   enable = true
+    --   warmup = false
+    --   time = 0.0
+    --   cycle = 0
+    --   dt = dtmax
+    --   dthydro = dtmax
+    --   start_time = c.legion_get_current_time_in_micros()/1.e6
+    --   last_time = start_time
+    -- end
 
-      dt = calc_global_dt(dt, dtfac, dtinit, dtmax, dthydro, time, tstop, cycle)
+    -- c.legion_runtime_begin_trace(__runtime(), __context(), 0, false)
 
-      -- if cycle > 0 and cycle % interval == 0 then
-      --   var current_time = c.legion_get_current_time_in_micros()/1.e6
-      --   c.printf("cycle %4ld    sim time %.3e    dt %.3e    time %.3e (per iteration) %.3e (total)\n",
-      --            cycle, time, dt, (current_time - last_time)/interval, current_time - start_time)
-      --   last_time = current_time
-      -- end
+    dt = calc_global_dt(dt, dtfac, dtinit, dtmax, dthydro, time, tstop, cycle)
 
-      print_ts = requested_print_ts and cycle == prune
+    -- if cycle > 0 and cycle % interval == 0 then
+    --   var current_time = c.legion_get_current_time_in_micros()/1.e6
+    --   c.printf("cycle %4ld    sim time %.3e    dt %.3e    time %.3e (per iteration) %.3e (total)\n",
+    --            cycle, time, dt, (current_time - last_time)/interval, current_time - start_time)
+    --   last_time = current_time
+    -- end
 
-      -- __demand(__parallel)
-      for i = 0, npieces do
-        adv_pos_half(rp_all_private_p[i],
-                     rp_spans_private_p[i],
-                     dt,
-                     enable, print_ts)
-      end
-      -- __demand(__parallel)
-      for i = 0, npieces do
-        adv_pos_half(rp_all_shared_p[i],
-                     rp_spans_shared_p[i],
-                     dt,
-                     enable, print_ts)
-      end
+    print_ts = requested_print_ts and cycle == prune
 
-      -- __demand(__parallel)
-      for i = 0, npieces do
-        calc_everything(rz_all_p[i],
-                        rp_all_private_p[i],
-                        rp_all_ghost_p[i],
-                        rs_all_p[i],
-                        rz_spans_p[i],
-                        rs_spans_p[i],
-                        alfa, gamma, ssmin, dt,
-                        q1, q2,
-                        enable)
-      end
-
-      -- __demand(__parallel)
-      for i = 0, npieces do
-        adv_pos_full(rp_all_private_p[i],
-                     rp_spans_private_p[i],
-                     dt,
-                     enable)
-      end
-      -- __demand(__parallel)
-      for i = 0, npieces do
-        adv_pos_full(rp_all_shared_p[i],
-                     rp_spans_shared_p[i],
-                     dt,
-                     enable)
-      end
-
-      -- __demand(__parallel)
-      for i = 0, npieces do
-        calc_everything_full(rz_all_p[i],
-                             rp_all_private_p[i],
-                             rp_all_ghost_p[i],
-                             rs_all_p[i],
-                             rz_spans_p[i],
-                             rs_spans_p[i],
-                             dt,
-                             enable)
-      end
-
-      print_ts = requested_print_ts and cycle == cstop - 1 - prune
-
-      dthydro = dtmax
-      -- __demand(__parallel)
-      for i = 0, npieces do
-        dthydro min= calc_dt_hydro(rz_all_p[i],
-                                   rz_spans_p[i],
-                                   dt, dtmax, cfl, cflv,
-                                   enable, print_ts)
-      end
-
-      cycle += 1
-      time += dt
-
-      -- c.legion_runtime_end_trace(__runtime(), __context(), 0)
+    -- __demand(__index_launch)
+    for i = 0, npieces do
+      adv_pos_half(rp_all_private_p[i],
+                   rp_spans_private_p[i],
+                   dt,
+                   enable, print_ts)
     end
+    -- __demand(__index_launch)
+    for i = 0, npieces do
+      adv_pos_half(rp_all_shared_p[i],
+                   rp_spans_shared_p[i],
+                   dt,
+                   enable, print_ts)
+    end
+
+    -- __demand(__index_launch)
+    for i = 0, npieces do
+      calc_everything(rz_all_p[i],
+                      rp_all_private_p[i],
+                      rp_all_ghost_p[i],
+                      rs_all_p[i],
+                      rz_spans_p[i],
+                      rs_spans_p[i],
+                      alfa, gamma, ssmin, dt,
+                      q1, q2,
+                      enable)
+    end
+
+    -- __demand(__index_launch)
+    for i = 0, npieces do
+      adv_pos_full(rp_all_private_p[i],
+                   rp_spans_private_p[i],
+                   dt,
+                   enable)
+    end
+    -- __demand(__index_launch)
+    for i = 0, npieces do
+      adv_pos_full(rp_all_shared_p[i],
+                   rp_spans_shared_p[i],
+                   dt,
+                   enable)
+    end
+
+    -- __demand(__index_launch)
+    for i = 0, npieces do
+      calc_everything_full(rz_all_p[i],
+                           rp_all_private_p[i],
+                           rp_all_ghost_p[i],
+                           rs_all_p[i],
+                           rz_spans_p[i],
+                           rs_spans_p[i],
+                           dt,
+                           enable)
+    end
+
+    print_ts = requested_print_ts and cycle == cstop - 1 - prune
+
+    dthydro = dtmax
+    -- __demand(__index_launch)
+    for i = 0, npieces do
+      dthydro min= calc_dt_hydro(rz_all_p[i],
+                                 rz_spans_p[i],
+                                 dt, dtmax, cfl, cflv,
+                                 enable, print_ts)
+    end
+
+    cycle_copy = cycle
+    time_copy = time
+
+    cycle_copy += 1
+    time_copy += dt
+
+    cycle = cycle_copy
+    time = time_copy
+
   end
 
   if conf.seq_init then
@@ -1913,16 +1930,21 @@ task test()
   -- write_output(conf, rz_all, rp_all, rs_all)
 end
 
-task toplevel()
-  test()
-end
+else -- not use_python_main
+
+extern task toplevel()
+toplevel:set_task_id(2)
+
+end -- not use_python_main
+
 if os.getenv('SAVEOBJ') == '1' then
   local root_dir = arg[0]:match(".*/") or "./"
   local out_dir = (os.getenv('OBJNAME') and os.getenv('OBJNAME'):match('.*/')) or root_dir
   local link_flags = terralib.newlist({"-L" .. out_dir, "-lpennant", "-lm"})
 
   if os.getenv('STANDALONE') == '1' then
-    os.execute('cp ' .. os.getenv('LG_RT_DIR') .. '/../bindings/regent/libregent.so ' .. out_dir)
+    os.execute('cp ' .. os.getenv('LG_RT_DIR') .. '/../bindings/regent/' ..
+        regentlib.binding_library .. ' ' .. out_dir)
   end
 
   local exe = os.getenv('OBJNAME') or "pennant"

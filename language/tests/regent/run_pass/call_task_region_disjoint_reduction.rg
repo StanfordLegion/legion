@@ -1,4 +1,4 @@
--- Copyright 2018 Stanford University, NVIDIA Corporation
+-- Copyright 2019 Stanford University, NVIDIA Corporation
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -46,25 +46,25 @@ task toplevel()
   --        hence the nested instances should not be pruned.
   --        However, Legion Spy cannot handle this case properly.
   --        Put back the following code once Legion Spy gets fixed.
-  --__demand(__parallel)
+  --__demand(__index_launch)
   --for c in ld1 do foo(p1[c]) end
 
-  --__demand(__parallel)
+  --__demand(__index_launch)
   --for c in ld2 do foo(p2[c]) end
 
-  --__demand(__parallel)
+  --__demand(__index_launch)
   --for c in ld1 do bar(p2[c]) end
 
-  --__demand(__parallel)
+  --__demand(__index_launch)
   --for c in ld1 do bar(p3[c]) end
 
-  __demand(__parallel)
+  __demand(__index_launch)
   for c in ld1 do foo(p1[c]) end
 
-  __demand(__parallel)
+  __demand(__index_launch)
   for c in ld1 do bar(p2[c]) end
 
-  __demand(__parallel)
+  __demand(__index_launch)
   for c in ld1 do foo(p3[c]) end
 end
 

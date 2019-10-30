@@ -1,4 +1,4 @@
--- Copyright 2018 Stanford University, Los Alamos National Laboratory
+-- Copyright 2019 Stanford University, Los Alamos National Laboratory
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -33,8 +33,14 @@ where
   reads writes(r, s)
 do
   for p in is do
-    r[p].{c, d}.{a, b} = p.x * 3 + p.y * 11
-    s[p].{c, d}.{a, b} = p.x * 7 + p.y * 13
+    r[p].c.a = p.x * 3 + p.y * 11
+    r[p].c.b = p.x * 3 + p.y * 11
+    r[p].d.a = p.x * 3 + p.y * 11
+    r[p].d.b = p.x * 3 + p.y * 11
+    s[p].c.a = p.x * 7 + p.y * 13
+    s[p].c.b = p.x * 7 + p.y * 13
+    s[p].d.a = p.x * 7 + p.y * 13
+    s[p].d.b = p.x * 7 + p.y * 13
   end
 end
 
@@ -45,8 +51,14 @@ where
   reads writes(r, s)
 do
   for p in is do
-    r[p].{c, d}.{a, b} = p.x * 3 + p.y * 11
-    s[p].{c, d}.{a, b} = p.x * 7 + p.y * 13
+    r[p].c.a = p.x * 3 + p.y * 11
+    r[p].c.b = p.x * 3 + p.y * 11
+    r[p].d.a = p.x * 3 + p.y * 11
+    r[p].d.b = p.x * 3 + p.y * 11
+    s[p].c.a = p.x * 7 + p.y * 13
+    s[p].c.b = p.x * 7 + p.y * 13
+    s[p].d.a = p.x * 7 + p.y * 13
+    s[p].d.b = p.x * 7 + p.y * 13
   end
 end
 
@@ -88,8 +100,8 @@ foo_primary_variant:add_layout_constraint(
     regentlib.layout.field_constraint(
       "r",
       terralib.newlist {
-        regentlib.layout.field_path("d", "a"),
-        regentlib.layout.field_path("c", "b"),
+        regentlib.field_path("d", "a"),
+        regentlib.field_path("c", "b"),
       }
     ),
     regentlib.layout.dimy,
@@ -103,8 +115,8 @@ foo_primary_variant:add_layout_constraint(
     regentlib.layout.field_constraint(
       "r",
       terralib.newlist {
-        regentlib.layout.field_path("d", "b"),
-        regentlib.layout.field_path("c", "a"),
+        regentlib.field_path("d", "b"),
+        regentlib.field_path("c", "a"),
       }
     ),
   })
@@ -114,8 +126,8 @@ foo_primary_variant:add_layout_constraint(
     regentlib.layout.field_constraint(
       "s",
       terralib.newlist {
-        regentlib.layout.field_path("c"),
-        regentlib.layout.field_path("d", "b"),
+        regentlib.field_path("c"),
+        regentlib.field_path("d", "b"),
       }
     ),
     regentlib.layout.dimx,
@@ -129,7 +141,7 @@ foo_primary_variant:add_layout_constraint(
     regentlib.layout.field_constraint(
       "s",
       terralib.newlist {
-        regentlib.layout.field_path("d", "a"),
+        regentlib.field_path("d", "a"),
       }
     ),
   })

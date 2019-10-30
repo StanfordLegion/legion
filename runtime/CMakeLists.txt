@@ -1,5 +1,5 @@
 #------------------------------------------------------------------------------#
-# Copyright 2018 Kitware, Inc.
+# Copyright 2019 Kitware, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -114,9 +114,19 @@ if (Legion_USE_Python)
   )
 endif()
 
+if(Legion_USE_GASNet)
+  list(APPEND REALM_SRC
+    realm/gasnet1/gasnet1_module.h
+    realm/gasnet1/gasnet1_module.cc
+    realm/gasnet1/gasnetmsg.h
+    realm/gasnet1/gasnetmsg.cc
+  )
+endif()
+
 list(APPEND REALM_SRC
   realm.h
   realm/activemsg.h realm/activemsg.cc
+  realm/network.h          realm/network.cc
   realm/bytearray.h
   realm/bytearray.inl
   realm/circ_queue.h
@@ -139,6 +149,7 @@ list(APPEND REALM_SRC
   realm/machine.h
   realm/machine.inl
   realm/memory.h
+  realm/mutex.h     realm/mutex.inl     realm/mutex.cc
   realm/pri_queue.h
   realm/pri_queue.inl
   realm/processor.h
@@ -158,11 +169,28 @@ list(APPEND REALM_SRC
   realm/timers.inl
   realm/utils.h
 )
+
+# generate per-dimension object files for deppart stuff
+foreach(N1 RANGE 1 ${REALM_MAX_DIM})
+  foreach(N2 RANGE 1 ${REALM_MAX_DIM})
+    foreach(SRC image preimage byfield)
+      add_custom_command(
+	COMMAND /bin/echo -e "\\#define INST_N1 ${N1}\\\\n\\#define INST_N2 ${N2}\\\\n\\#include \\\"realm/deppart/${SRC}_tmpl.cc\\\"" > ${SRC}_${N1}_${N2}.cc
+	OUTPUT ${SRC}_${N1}_${N2}.cc
+	)
+      list(APPEND REALM_SRC ${SRC}_${N1}_${N2}.cc)
+    endforeach()
+  endforeach()
+endforeach()
+
 find_package(Threads REQUIRED)
 add_library(RealmRuntime ${REALM_SRC})
 target_compile_definitions(RealmRuntime PUBLIC REALM_USE_CMAKE)
 if(Legion_USE_LIBDL)
   target_link_libraries(RealmRuntime PRIVATE ${CMAKE_DL_LIBS})
+  if(APPLE)
+    target_link_libraries(RealmRuntime PRIVATE "-undefined dynamic_lookup")
+  endif()
 endif()
 target_link_libraries(RealmRuntime PRIVATE ${CMAKE_THREAD_LIBS_INIT})
 if(UNIX AND NOT APPLE)
@@ -177,11 +205,17 @@ if(Legion_USE_HWLOC)
 endif()
 
 if(Legion_USE_GASNet)
-  target_link_libraries(RealmRuntime PUBLIC GASNet::GASNet)
+  target_link_libraries(RealmRuntime PRIVATE GASNet::GASNet)
 endif()
 
 if(Legion_USE_LLVM)
-  target_link_libraries(RealmRuntime PRIVATE LLVM::LLVM)
+  if(Legion_LINK_LLVM_LIBS)
+    target_link_libraries(RealmRuntime PRIVATE LLVM::LLVM)
+  else()
+    # even if we dont link, we still need the LLVM include directories
+    get_target_property(llvm_incdir LLVM::LLVM INTERFACE_INCLUDE_DIRECTORIES)
+    target_include_directories(RealmRuntime PRIVATE ${llvm_incdir})
+  endif()
 endif()
 
 if(Legion_USE_CUDA)
@@ -228,6 +262,7 @@ list(APPEND MAPPER_SRC
   mappers/replay_mapper.h      mappers/replay_mapper.cc
   mappers/shim_mapper.h        mappers/shim_mapper.cc
   mappers/test_mapper.h        mappers/test_mapper.cc
+  mappers/null_mapper.h        mappers/null_mapper.cc
 )
 
 # Legion runtime
@@ -261,14 +296,35 @@ list(APPEND LEGION_SRC
   legion/legion_types.h                 
   legion/legion_utilities.h             
   legion/legion_views.h                   legion/legion_views.cc
+  legion/legion_redop.h                   legion/legion_redop.cc
   legion/mapper_manager.h                 legion/mapper_manager.cc
   legion/rectangle_set.h                
   legion/region_tree.h                    legion/region_tree.cc
   legion/runtime.h                        legion/runtime.cc
 )
 
+# generate per-dimension object files for deppart stuff
+foreach(N1 RANGE 1 ${LEGION_MAX_DIM})
+  add_custom_command(
+    COMMAND /bin/echo -e "\\#define INST_N1 ${N1}\\\\n\\#include \\\"legion/region_tree_tmpl.cc\\\"" > region_tree_${N1}.cc
+    OUTPUT region_tree_${N1}.cc
+    )
+  list(APPEND LEGION_SRC region_tree_${N1}.cc)
+  
+  foreach(N2 RANGE 1 ${LEGION_MAX_DIM})
+    add_custom_command(
+      COMMAND /bin/echo -e "\\#define INST_N1 ${N1}\\\\n\\#define INST_N2 ${N2}\\\\n\\#include \\\"legion/region_tree_tmpl.cc\\\"" > region_tree_${N1}_${N2}.cc
+      OUTPUT region_tree_${N1}_${N2}.cc
+      )
+    list(APPEND LEGION_SRC region_tree_${N1}_${N2}.cc)
+  endforeach()
+endforeach()
+
 add_library(LegionRuntime ${MAPPER_SRC} ${LEGION_SRC})
-target_link_libraries(LegionRuntime RealmRuntime)
+target_link_libraries(LegionRuntime PUBLIC RealmRuntime)
+if(Legion_USE_ZLIB)
+  target_link_libraries(LegionRuntime PRIVATE ZLIB::ZLIB)
+endif()
 set_target_properties(LegionRuntime PROPERTIES POSITION_INDEPENDENT_CODE ON)
 set_target_properties(LegionRuntime PROPERTIES OUTPUT_NAME "legion${INSTALL_SUFFIX}")
 set_target_properties(LegionRuntime PROPERTIES SOVERSION ${SOVERSION})

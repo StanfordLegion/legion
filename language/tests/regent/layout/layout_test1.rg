@@ -1,4 +1,4 @@
--- Copyright 2018 Stanford University, Los Alamos National Laboratory
+-- Copyright 2019 Stanford University, Los Alamos National Laboratory
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -18,7 +18,17 @@ import "regent"
 local clayout_test
 do
   local root_dir = arg[0]:match(".*/") or "./"
-  local runtime_dir = os.getenv('LG_RT_DIR') .. "/"
+
+  local include_path = ""
+  local include_dirs = terralib.newlist()
+  include_dirs:insert("-I")
+  include_dirs:insert(root_dir)
+  for path in string.gmatch(os.getenv("INCLUDE_PATH"), "[^;]+") do
+    include_path = include_path .. " -I " .. path
+    include_dirs:insert("-I")
+    include_dirs:insert(path)
+  end
+
   local layout_test_cc = root_dir .. "layout_test.cc"
   local layout_test_so
   if os.getenv('OBJNAME') then
@@ -32,7 +42,8 @@ do
   local cxx = os.getenv('CXX') or 'c++'
 
   local cxx_flags = os.getenv('CC_FLAGS') or ''
-  cxx_flags = cxx_flags .. " -O2 -Wall -Werror"
+  --cxx_flags = cxx_flags .. " -O2 -Wall -Werror"
+  cxx_flags = cxx_flags .. " -g -O0"
   if os.execute('test "$(uname)" = Darwin') == 0 then
     cxx_flags =
       (cxx_flags ..
@@ -41,14 +52,14 @@ do
     cxx_flags = cxx_flags .. " -shared -fPIC"
   end
 
-  local cmd = (cxx .. " " .. cxx_flags .. " -I " .. runtime_dir .. " " ..
+  local cmd = (cxx .. " " .. cxx_flags .. " " .. include_path .. " " ..
                  layout_test_cc .. " -o " .. layout_test_so)
   if os.execute(cmd) ~= 0 then
     print("Error: failed to compile " .. layout_test_cc)
     assert(false)
   end
   terralib.linklibrary(layout_test_so)
-  clayout_test = terralib.includec("layout_test.h", {"-I", root_dir, "-I", runtime_dir})
+  clayout_test = terralib.includec("layout_test.h", include_dirs)
 end
 
 fspace fs
@@ -66,8 +77,14 @@ where
   reads writes(r, s)
 do
   for p in is do
-    r[p].{x, y, z, w} = p.x * 3 + p.y * 11
-    s[p].{x, y, z, w} = p.x * 7 + p.y * 13
+    r[p].x = p.x * 3 + p.y * 11
+    r[p].y = p.x * 3 + p.y * 11
+    r[p].z = p.x * 3 + p.y * 11
+    r[p].w = p.x * 3 + p.y * 11
+    s[p].x = p.x * 7 + p.y * 13
+    s[p].y = p.x * 7 + p.y * 13
+    s[p].z = p.x * 7 + p.y * 13
+    s[p].w = p.x * 7 + p.y * 13
   end
 end
 
@@ -78,8 +95,14 @@ where
   reads writes(r, s)
 do
   for p in is do
-    r[p].{x, y, z, w} = p.x * 3 + p.y * 11
-    s[p].{x, y, z, w} = p.x * 7 + p.y * 13
+    r[p].x = p.x * 3 + p.y * 11
+    r[p].y = p.x * 3 + p.y * 11
+    r[p].z = p.x * 3 + p.y * 11
+    r[p].w = p.x * 3 + p.y * 11
+    s[p].x = p.x * 7 + p.y * 13
+    s[p].y = p.x * 7 + p.y * 13
+    s[p].z = p.x * 7 + p.y * 13
+    s[p].w = p.x * 7 + p.y * 13
   end
 end
 
@@ -121,8 +144,8 @@ foo_hybrid1:add_layout_constraint(
     regentlib.layout.field_constraint(
       "r",
       terralib.newlist {
-        regentlib.layout.field_path("x"),
-        regentlib.layout.field_path("z"),
+        regentlib.field_path("x"),
+        regentlib.field_path("z"),
       }
     ),
     regentlib.layout.dimy,
@@ -136,8 +159,8 @@ foo_hybrid1:add_layout_constraint(
     regentlib.layout.field_constraint(
       "r",
       terralib.newlist {
-        regentlib.layout.field_path("y"),
-        regentlib.layout.field_path("w"),
+        regentlib.field_path("y"),
+        regentlib.field_path("w"),
       }
     ),
   })
@@ -147,9 +170,9 @@ foo_hybrid1:add_layout_constraint(
     regentlib.layout.field_constraint(
       "s",
       terralib.newlist {
-        regentlib.layout.field_path("x"),
-        regentlib.layout.field_path("y"),
-        regentlib.layout.field_path("z"),
+        regentlib.field_path("x"),
+        regentlib.field_path("y"),
+        regentlib.field_path("z"),
       }
     ),
     regentlib.layout.dimx,
@@ -163,7 +186,7 @@ foo_hybrid1:add_layout_constraint(
     regentlib.layout.field_constraint(
       "s",
       terralib.newlist {
-        regentlib.layout.field_path("w"),
+        regentlib.field_path("w"),
       }
     ),
   })

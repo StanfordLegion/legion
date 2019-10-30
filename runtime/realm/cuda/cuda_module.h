@@ -1,4 +1,4 @@
-/* Copyright 2018 Stanford University, NVIDIA Corporation
+/* Copyright 2019 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -105,8 +105,8 @@ namespace Realm {
       virtual void cleanup(void);
 
     public:
-      size_t cfg_zc_mem_size_in_mb, cfg_zc_ib_size_in_mb;
-      size_t cfg_fb_mem_size_in_mb;
+      size_t cfg_zc_mem_size, cfg_zc_ib_size;
+      size_t cfg_fb_mem_size;
       unsigned cfg_num_gpus, cfg_gpu_streams;
       bool cfg_use_background_workers, cfg_use_shared_worker, cfg_pin_sysmem;
       bool cfg_fences_use_callbacks;
@@ -197,6 +197,20 @@ namespace Realm {
 
     protected:
       static void cuda_callback(CUstream stream, CUresult res, void *data);
+    };
+
+    class GPUWorkStart : public Realm::Operation::AsyncWorkItem {
+    public:
+      GPUWorkStart(Realm::Operation *op);
+
+      virtual void request_cancellation(void) { return; };
+
+      void enqueue_on_stream(GPUStream *stream);
+
+      virtual void print(std::ostream& os) const;
+
+    protected:
+      static void cuda_start_callback(CUstream stream, CUresult res, void *data);
     };
 
     class GPUMemcpyFence : public GPUMemcpy {
@@ -337,6 +351,7 @@ namespace Realm {
       // may be called by anybody to enqueue a copy or an event
       void add_copy(GPUMemcpy *copy);
       void add_fence(GPUWorkFence *fence);
+      void add_start_event(GPUWorkStart *start);
       void add_notification(GPUCompletionNotification *notification);
 
       // to be called by a worker (that should already have the GPU context
@@ -346,14 +361,14 @@ namespace Realm {
 
     protected:
       void add_event(CUevent event, GPUWorkFence *fence, 
-		     GPUCompletionNotification *notification);
+		     GPUCompletionNotification *notification=NULL, GPUWorkStart *start=NULL);
 
       GPU *gpu;
       GPUWorker *worker;
 
       CUstream stream;
 
-      GASNetHSL mutex;
+      Mutex mutex;
 
 #define USE_CQ
 #ifdef USE_CQ
@@ -365,6 +380,7 @@ namespace Realm {
       struct PendingEvent {
 	CUevent event;
 	GPUWorkFence *fence;
+	GPUWorkStart *start;
 	GPUCompletionNotification* notification;
       };
 #ifdef USE_CQ
@@ -397,8 +413,8 @@ namespace Realm {
       void thread_main(void);
 
     protected:
-      GASNetHSL lock;
-      GASNetCondVar condvar;
+      Mutex lock;
+      CondVar condvar;
       std::set<GPUStream *> active_streams;
 
       // used by the background thread (if any)
@@ -423,7 +439,7 @@ namespace Realm {
       void return_event(CUevent e);
 
     protected:
-      GASNetHSL mutex;
+      Mutex mutex;
       int batch_size, current_size, total_size;
       std::vector<CUevent> available_events;
     };
@@ -657,10 +673,6 @@ namespace Realm {
 
       virtual ~GPUFBMemory(void);
 
-      virtual off_t alloc_bytes(size_t size);
-
-      virtual void free_bytes(off_t offset, size_t size);
-
       // these work, but they are SLOW
       virtual void get_bytes(off_t offset, void *dst, size_t size);
       virtual void put_bytes(off_t offset, const void *src, size_t size);
@@ -680,10 +692,6 @@ namespace Realm {
 
       virtual ~GPUZCMemory(void);
 
-      virtual off_t alloc_bytes(size_t size);
-
-      virtual void free_bytes(off_t offset, size_t size);
-
       virtual void get_bytes(off_t offset, void *dst, size_t size);
 
       virtual void put_bytes(off_t offset, const void *src, size_t size);
@@ -697,7 +705,7 @@ namespace Realm {
       char *cpu_base;
     };
 
-  }; // namespace LowLevel
-}; // namespace LegionRuntime
+  }; // namespace Cuda
+}; // namespace Realm 
 
 #endif

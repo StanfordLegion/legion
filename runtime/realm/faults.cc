@@ -1,4 +1,4 @@
-/* Copyright 2018 Stanford University, NVIDIA Corporation
+/* Copyright 2019 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,11 +18,14 @@
 #include "realm/faults.h"
 #include "realm/profiling.h"
 
+#include <stdlib.h>
+#ifndef __FreeBSD__
+// FreeBSD defines alloca() in stdlib.h
 #include <alloca.h>
+#endif
 #include <assert.h>
 #include <execinfo.h>
 #include <cxxabi.h>
-#include <stdlib.h>
 #include <iomanip>
 
 namespace Realm {

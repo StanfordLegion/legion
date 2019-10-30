@@ -1,4 +1,4 @@
-/* Copyright 2018 Stanford University, NVIDIA Corporation
+/* Copyright 2019 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -104,16 +104,6 @@ namespace Realm {
     template <int N, typename T>
     void sparsity_map_ready(SparsityMapImpl<N,T> *sparsity, bool precise);
 
-    enum Opcode {
-      UOPCODE_INVALID,
-      UOPCODE_BY_FIELD,
-      UOPCODE_IMAGE,
-      UOPCODE_PREIMAGE,
-      UOPCODE_UNION,
-      UOPCODE_INTERSECTION,
-      UOPCODE_DIFFERENCE,
-    };
-
   protected:
     PartitioningMicroOp(NodeID _requestor, AsyncMicroOp *_async_microop);
 
@@ -122,6 +112,11 @@ namespace Realm {
     int wait_count;  // how many sparsity maps are we still waiting for?
     NodeID requestor;
     AsyncMicroOp *async_microop;
+
+    // helper code to ship a microop to another node
+    template <typename T>
+    static void forward_microop(NodeID target,
+				PartitioningOperation *op, T *microop);
   };
 
   template <int N, typename T>
@@ -150,19 +145,33 @@ namespace Realm {
   class PartitioningOperation : public Operation {
   public:
     PartitioningOperation(const ProfilingRequestSet &reqs,
-			  Event _finish_event);
+			  GenEventImpl *_finish_event,
+			  EventImpl::gen_t _finish_gen);
 
     virtual void execute(void) = 0;
 
     // the type of 'tester' depends on which operation it is, so erase the type here...
     virtual void set_overlap_tester(void *tester);
 
-    void deferred_launch(Event wait_for);
+    void launch(Event wait_for);
 
     // some partitioning operations are handled inline for simple cases
     // these cases must still supply all the requested profiling responses
     static void do_inline_profiling(const ProfilingRequestSet &reqs,
 				    long long inline_start_time);
+
+    class DeferredLaunch : public EventWaiter {
+    public:
+      void defer(PartitioningOperation *_op, Event wait_on);
+
+      virtual void event_triggered(bool poisoned);
+      virtual void print(std::ostream& os) const;
+      virtual Event get_finish_event(void) const;
+
+    protected:
+      PartitioningOperation *op;
+    };
+    DeferredLaunch deferred_launch;
   };
 
 
@@ -189,11 +198,11 @@ namespace Realm {
     void worker_thread_loop(void);
 
   protected:
-    bool shutdown_flag;
+    atomic<bool> shutdown_flag;
     CoreReservation *rsrv;
     PriorityQueue<void *, DummyLock> queued_ops;
-    GASNetHSL mutex;
-    GASNetCondVar condvar;
+    Mutex mutex;
+    CondVar condvar;
     std::vector<Thread *> workers;
   };
 
@@ -203,90 +212,36 @@ namespace Realm {
   // active messages
 
 
+  template <typename T>
   struct RemoteMicroOpMessage {
-    struct RequestArgs : public BaseMedium {
-      NodeID sender;
-      DynamicTemplates::TagType type_tag;
-      PartitioningMicroOp::Opcode opcode;
-      PartitioningOperation *operation;
-      AsyncMicroOp *async_microop;
-    };
+    PartitioningOperation *operation;
+    AsyncMicroOp *async_microop;
 
-    // each different type of microop needs a different demux helper because they
-    //  use differing numbers of template arguments
-    struct ByFieldDecoder {
-      template <typename NT, typename T, typename FT>
-      static void demux(const RequestArgs *args, const void *data, size_t datalen);
-    };
-    struct ImageDecoder {
-      template <typename NT, typename T, typename N2T, typename T2>
-      static void demux(const RequestArgs *args, const void *data, size_t datalen);
-    };
-    struct PreimageDecoder {
-      template <typename NT, typename T, typename N2T, typename T2>
-      static void demux(const RequestArgs *args, const void *data, size_t datalen);
-    };
-    struct UnionDecoder {
-      template <typename NT, typename T>
-      static void demux(const RequestArgs *args, const void *data, size_t datalen);
-    };
-    struct IntersectionDecoder {
-      template <typename NT, typename T>
-      static void demux(const RequestArgs *args, const void *data, size_t datalen);
-    };
-    struct DifferenceDecoder {
-      template <typename NT, typename T>
-      static void demux(const RequestArgs *args, const void *data, size_t datalen);
-    };
-
-    static void handle_request(RequestArgs args, const void *data, size_t datalen);
-
-    typedef ActiveMessageMediumNoReply<REMOTE_MICROOP_MSGID,
-                                       RequestArgs,
-                                       handle_request> Message;
-
-    template <typename T>
-    static void send_request(NodeID target, PartitioningOperation *operation,
-			     const T& microop);
+    static void handle_message(NodeID sender,
+			       const RemoteMicroOpMessage<T> &msg,
+			       const void *data, size_t datalen)
+    {
+      Serialization::FixedBufferDeserializer fbd(data, datalen);
+      T *uop = new T(sender, msg.async_microop, fbd);
+      uop->dispatch(msg.operation, false /*not ok to run in this thread*/);
+    }
   };
 
-  template <typename T>
-  /*static*/ void RemoteMicroOpMessage::send_request(NodeID target, 
-						     PartitioningOperation *operation,
-						     const T& microop)
-  {
-    RequestArgs args;
-
-    args.sender = my_node_id;
-    args.type_tag = T::type_tag();
-    args.opcode = T::OPCODE;
-    args.operation = operation;
-    args.async_microop = microop.async_microop;
-
-    Serialization::DynamicBufferSerializer dbs(256);
-    microop.serialize_params(dbs);
-    ByteArray b = dbs.detach_bytearray();
-
-    Message::request(target, args, b.base(), b.size(), PAYLOAD_FREE);
-    b.detach();
-  }
 
   struct RemoteMicroOpCompleteMessage {
-    struct RequestArgs {
-      AsyncMicroOp *async_microop;
-    };
+    AsyncMicroOp *async_microop;
 
-    static void handle_request(RequestArgs args);
+    static void handle_message(NodeID sender,
+			       const RemoteMicroOpCompleteMessage &msg,
+			       const void *data, size_t datalen);
 
-    typedef ActiveMessageShortNoReply<REMOTE_MICROOP_COMPLETE_MSGID,
-                                      RequestArgs,
-                                      handle_request> Message;
-
-    static void send_request(NodeID target, AsyncMicroOp *async_microop);
+    static ActiveMessageHandlerReg<RemoteMicroOpCompleteMessage> areg;
   };
 
 
 };
+
+#include "partitions.inl"
 
 #endif // REALM_PARTITIONS_H
 

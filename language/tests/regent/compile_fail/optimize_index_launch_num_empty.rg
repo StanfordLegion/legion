@@ -1,4 +1,4 @@
--- Copyright 2018 Stanford University
+-- Copyright 2019 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -13,14 +13,16 @@
 -- limitations under the License.
 
 -- fails-with:
--- optimize_index_launch_num_empty.rg:24: loop optimization failed: body is empty
+-- optimize_index_launch_num_empty.rg:26: loop optimization failed: body is empty
 --   for i = 0, 4 do
 --     ^
 
 import "regent"
 
+__forbid(__leaf)
+__demand(__inner)
 task main()
-  __demand(__parallel)
+  __demand(__index_launch)
   for i = 0, 4 do
   end
 end

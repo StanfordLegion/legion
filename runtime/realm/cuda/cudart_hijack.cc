@@ -44,6 +44,17 @@ namespace Realm {
 	return handle;
       }
 
+      // This method was added with CUDA 10, not sure what it does yet
+      void __cudaRegisterFatBinaryEnd(void **fat_bin)
+      {
+        // mark that the hijack code is active
+	cudart_hijack_active = true;
+        // For now we don't actually do anything in here
+        // since it's not immediately obvious what else
+        // we might need to do for this cubin since we
+        // already registered it using the method above
+      }
+
       void __cudaUnregisterFatBinary(void **handle)
       {
 	// mark that the hijack code is active
@@ -201,6 +212,16 @@ namespace Realm {
       cudaError_t cudaStreamCreate(cudaStream_t *stream)
       {
 	GPUProcessor *p = get_gpu_or_die("cudaStreamCreate");
+        // For now we always return the stream for this task in case the user actually uses it
+	// TODO: actually create sub-streams and connect them up
+	*stream = p->gpu->get_current_task_stream()->get_stream();
+	return cudaSuccess;
+      }
+
+      cudaError_t cudaStreamCreateWithFlags(cudaStream_t *stream, unsigned int flags)
+      {
+        GPUProcessor *p = get_gpu_or_die("cudaStreamCreateWithFlags");
+        // Ignore the flags for now
         // For now we always return the stream for this task in case the user actually uses it
 	// TODO: actually create sub-streams and connect them up
 	*stream = p->gpu->get_current_task_stream()->get_stream();
@@ -410,12 +431,6 @@ namespace Realm {
 	return cudaSuccess;
       }
       
-      const char* cudaGetErrorString(cudaError_t error)
-      {
-	// device and driver error strings don't match up...
-	return "cudaGetErrorString() not supported";
-      }
-
       cudaError_t cudaGetDevice(int *device)
       {
 	GPUProcessor *p = get_gpu_or_die("cudaGetDevice");
@@ -519,6 +534,77 @@ namespace Realm {
 	GET_FUNC_ATTR(sharedSizeBytes, SHARED_SIZE_BYTES);
 #undef GET_FUNC_ATTR
 	return cudaSuccess;
+      }
+
+      cudaError_t cudaOccupancyMaxActiveBlocksPerMultiprocessor(int *numBlocks,
+                                                                const void *func,
+                                                                int blockSize,
+                                                                size_t dynamicSMemSize)
+      {
+        GPUProcessor *p = get_gpu_or_die("cudaOccupancyMaxActiveBlocksPerMultiprocessor");
+        CUfunction handle = p->gpu->lookup_function(func);
+        CHECK_CU( cuOccupancyMaxActiveBlocksPerMultiprocessor(numBlocks, handle,
+                                                         blockSize, dynamicSMemSize) );
+        return cudaSuccess;
+      }
+
+      cudaError_t cudaOccupancyMaxActiveBlocksPerMultiprocessorWithFlags(int *numBlocks, 
+                                                                         const void *func, 
+                                                                         int blockSize, 
+                                                                         size_t dynamicSMemSize,
+                                                                         unsigned int flags)
+      {
+        GPUProcessor *p = get_gpu_or_die("cudaOccupancyMaxActiveBlocksPerMultiprocessorWithFlags");
+        CUfunction handle = p->gpu->lookup_function(func);
+        CHECK_CU( cuOccupancyMaxActiveBlocksPerMultiprocessorWithFlags(numBlocks, handle,
+                                                       blockSize, dynamicSMemSize, flags) );
+        return cudaSuccess;
+      }
+
+      cudaError_t cudaGetLastError(void)
+      {
+        get_gpu_or_die("cudaGetLastError");
+        // For now we're not tracking this so if we were
+        // going to die we already would have
+        return cudaSuccess;
+      }
+
+      cudaError_t cudaPeekAtLastError(void)
+      {
+        get_gpu_or_die("cudaPeekAtLastError");
+        // For now we're not tracking this so if we were
+        // going to die we already would have
+        return cudaSuccess;
+      }
+
+      const char* cudaGetErrorName(cudaError_t error)
+      {
+        get_gpu_or_die("cudaGetErrorName");
+        const char *result = NULL;
+        // It wasn't always the case the cuda runtime errors
+        // and cuda driver errors had the same enum scheme
+        // but it appears that they do now
+        CHECK_CU( cuGetErrorName((CUresult)error, &result) );
+        return result;
+      }
+
+      const char* cudaGetErrorString(cudaError_t error)
+      {
+        get_gpu_or_die("cudaGetErrorString");
+        const char *result = NULL;
+        // It wasn't always the case the cuda runtime errors
+        // and cuda driver errors had the same enum scheme
+        // but it appears that they do now
+        CHECK_CU( cuGetErrorString((CUresult)error, &result) );
+        return result;
+      }
+
+      cudaError_t cudaSetDevice(int device)
+      {
+        get_gpu_or_die("cudaSetDevice");
+        // Ignore calls to set the device here since we already
+        // know which device we are running on
+        return cudaSuccess;
       }
 
     }; // extern "C"

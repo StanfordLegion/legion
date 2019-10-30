@@ -1,5 +1,5 @@
-/* Copyright 2018 Stanford University
- * Copyright 2018 Los Alamos National Laboratory
+/* Copyright 2019 Stanford University
+ * Copyright 2019 Los Alamos National Laboratory
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -41,11 +41,13 @@
 
 #ifdef USE_HDF
 #include "realm/hdf5/hdf5_internal.h"
+#include "realm/hdf5/hdf5_access.h"
 #endif
 
 namespace Realm {
 
     class XferDes;
+    class XferDesQueue;
     class Channel;
 
     extern Logger log_new_dma;
@@ -200,7 +202,7 @@ namespace Realm {
       size_t add_span(size_t pos, size_t count);
 
     protected:
-      GASNetHSL mutex;
+      Mutex mutex;
       size_t contig_amount;  // everything from [0, contig_amount) is covered
       size_t first_noncontig; // nothing in [contig_amount, first_noncontig) 
       std::map<size_t, size_t> spans;  // noncontiguous spans
@@ -342,7 +344,7 @@ namespace Realm {
       // xd_lock is designed to provide thread-safety for
       // SIMULTANEOUS invocation to get_requests,
       // notify_request_read_done, and notify_request_write_done
-      pthread_mutex_t xd_lock, update_read_lock, update_write_lock;
+      Mutex xd_lock, update_read_lock, update_write_lock;
       // default iterators provided to generate requests
       //Layouts::GenericLayoutIterator<DIM>* li;
       unsigned offset_idx;
@@ -382,25 +384,25 @@ namespace Realm {
 
 #if 0
       void update_pre_bytes_write(size_t new_val) {
-        pthread_mutex_lock(&update_write_lock);
+	update_write_lock.lock();
         if (pre_bytes_write < new_val)
           pre_bytes_write = new_val;
         /*uint64_t old_val = pre_bytes_write;
         while (old_val < new_val) {
           pre_bytes_write.compare_exchange_strong(old_val, new_val);
         }*/
-        pthread_mutex_unlock(&update_write_lock);
+	update_write_lock.unlock();
       }
 
       void update_next_bytes_read(size_t new_val) {
-        pthread_mutex_lock(&update_read_lock);
+	update_read_lock.lock();
         if (next_bytes_read < new_val)
           next_bytes_read = new_val;
         /*uint64_t old_val = next_bytes_read;
         while (old_val < new_val) {
           next_bytes_read.compare_exchange_strong(old_val, new_val);
         }*/
-        pthread_mutex_unlock(&update_read_lock);
+	update_read_lock.unlock();
       }
 #endif
 
@@ -416,6 +418,20 @@ namespace Realm {
         available_reqs.push(req);
       }
 
+      class DeferredXDEnqueue : public Realm::EventWaiter {
+      public:
+	void defer(XferDesQueue *_xferDes_queue,
+		   XferDes *_xd, Event wait_on);
+
+	virtual void event_triggered(bool poisoned);
+	virtual void print(std::ostream& os) const;
+	virtual Event get_finish_event(void) const;
+
+      protected:
+	XferDesQueue *xferDes_queue;
+	XferDes *xd; // TODO: eliminate this based on a known offset
+      };
+      DeferredXDEnqueue deferred_enqueue;
     };
 
     class MemcpyXferDes : public XferDes {
@@ -560,14 +576,9 @@ namespace Realm {
       void notify_request_write_done(Request* req);
       void flush();
 
-      struct HDFFileInfo {
-	hid_t file_id;
-	std::map<std::string, hid_t> dset_ids;
-      };
-
     private:
       HDFRequest* hdf_reqs;
-      std::map<std::string, HDFFileInfo *> file_infos;
+      std::map<FieldID, HDF5::HDF5Dataset *> datasets;
       //char *buf_base;
       //const HDF5Memory::HDFMetadata *hdf_metadata;
       //std::vector<OffsetsAndSize>::iterator fit;
@@ -580,7 +591,7 @@ namespace Realm {
     class Channel {
     public:
       Channel(XferDes::XferKind _kind)
-	: node(my_node_id), kind(_kind) {}
+	: node(Network::my_node_id), kind(_kind) {}
       virtual ~Channel() {};
     public:
       // which node manages this channel
@@ -752,8 +763,8 @@ namespace Realm {
       bool is_stopped;
     private:
       std::deque<MemcpyRequest*> pending_queue, finished_queue;
-      pthread_mutex_t pending_lock, finished_lock;
-      pthread_cond_t pending_cond;
+      Mutex pending_lock, finished_lock;
+      CondVar pending_cond;
       long capacity;
       bool sleep_threads;
       //std::vector<MemcpyRequest*> available_cb;
@@ -928,7 +939,7 @@ namespace Realm {
 
     class CompareXferDes {
     public:
-      bool operator() (XferDes* a, XferDes* b) {
+      bool operator() (XferDes* a, XferDes* b) const {
         if(a->priority == b->priority)
           return (a < b);
         else 
@@ -938,10 +949,11 @@ namespace Realm {
     //typedef std::priority_queue<XferDes*, std::vector<XferDes*>, CompareXferDes> PriorityXferDesQueue;
     typedef std::set<XferDes*, CompareXferDes> PriorityXferDesQueue;
 
-    class XferDesQueue;
     class DMAThread {
     public:
-      DMAThread(long _max_nr, XferDesQueue* _xd_queue, std::vector<Channel*>& _channels) {
+      DMAThread(long _max_nr, XferDesQueue* _xd_queue, std::vector<Channel*>& _channels)
+	: enqueue_cond(enqueue_lock)
+      {
         for (std::vector<Channel*>::iterator it = _channels.begin(); it != _channels.end(); it ++) {
           channel_to_xd_pool[*it] = new PriorityXferDesQueue;
         }
@@ -950,18 +962,16 @@ namespace Realm {
         is_stopped = false;
         requests = (Request**) calloc(max_nr, sizeof(Request*));
         sleep = false;
-        pthread_mutex_init(&enqueue_lock, NULL);
-        pthread_cond_init(&enqueue_cond, NULL);
       }
-      DMAThread(long _max_nr, XferDesQueue* _xd_queue, Channel* _channel) {
+      DMAThread(long _max_nr, XferDesQueue* _xd_queue, Channel* _channel) 
+	: enqueue_cond(enqueue_lock)
+      {
         channel_to_xd_pool[_channel] = new PriorityXferDesQueue;
         xd_queue = _xd_queue;
         max_nr = _max_nr;
         is_stopped = false;
         requests = (Request**) calloc(max_nr, sizeof(Request*));
         sleep = false;
-        pthread_mutex_init(&enqueue_lock, NULL);
-        pthread_cond_init(&enqueue_cond, NULL);
       }
       ~DMAThread() {
         std::map<Channel*, PriorityXferDesQueue*>::iterator it;
@@ -969,8 +979,6 @@ namespace Realm {
           delete it->second;
         }
         free(requests);
-        pthread_mutex_destroy(&enqueue_lock);
-        pthread_cond_destroy(&enqueue_cond);
       }
       void dma_thread_loop();
       // Thread start function that takes an input of DMAThread
@@ -983,14 +991,14 @@ namespace Realm {
       }
 
       void stop() {
-        pthread_mutex_lock(&enqueue_lock);
+	enqueue_lock.lock();
         is_stopped = true;
-        pthread_cond_signal(&enqueue_cond);
-        pthread_mutex_unlock(&enqueue_lock);
+	enqueue_cond.signal();
+	enqueue_lock.unlock();
       }
     public:
-      pthread_mutex_t enqueue_lock;
-      pthread_cond_t enqueue_cond;
+      Mutex enqueue_lock;
+      CondVar enqueue_cond;
       std::map<Channel*, PriorityXferDesQueue*> channel_to_xd_pool;
       bool sleep;
       bool is_stopped;
@@ -1002,41 +1010,32 @@ namespace Realm {
     };
 
     struct NotifyXferDesCompleteMessage {
-      struct RequestArgs {
-        XferDesFence* fence;
-      };
+      XferDesFence* fence;
 
-      static void handle_request(RequestArgs args)
+      static void handle_message(NodeID sender,
+				 const NotifyXferDesCompleteMessage &args,
+				 const void *data,
+				 size_t datalen)
       {
         args.fence->mark_finished(true/*successful*/);
       }
-
-      typedef ActiveMessageShortNoReply<XFERDES_NOTIFY_COMPLETION_MSGID,
-                                        RequestArgs,
-                                        handle_request> Message;
-
       static void send_request(NodeID target, XferDesFence* fence)
       {
-        RequestArgs args;
-        args.fence = fence;
-        Message::request(target, args);
+	ActiveMessage<NotifyXferDesCompleteMessage> amsg(target);
+	amsg->fence = fence;
+	amsg.commit();
       }
     };
 
     struct XferDesRemoteWriteMessage {
-      struct RequestArgs : public BaseMedium {
-        //void *dst_buf;
-        RemoteWriteRequest *req;
-        NodeID sender;
-	XferDesID next_xd_guid;
-	size_t span_start, span_size, pre_bytes_total;
-      };
+      RemoteWriteRequest *req;
+      XferDesID next_xd_guid;
+      size_t span_start, span_size, pre_bytes_total;
 
-      static void handle_request(RequestArgs args, const void *data, size_t datalen);
-
-      typedef ActiveMessageMediumNoReply<XFERDES_REMOTEWRITE_MSGID,
-                                         RequestArgs,
-                                         handle_request> Message;
+      static void handle_message(NodeID sender,
+				 const XferDesRemoteWriteMessage &args,
+				 const void *data,
+				 size_t datalen);
 
       static void send_request(NodeID target, void *dst_buf,
                                const void *src_buf, size_t nbytes,
@@ -1046,16 +1045,15 @@ namespace Realm {
 			       size_t span_size,
 			       size_t pre_bytes_total) 
       {
-        RequestArgs args;
-        //args.dst_buf = dst_buf;
-        args.req = req;
-	args.next_xd_guid = next_xd_guid;
-	args.span_start = span_start;
-	args.span_size = span_size;
-	args.pre_bytes_total = pre_bytes_total;
-        args.sender = my_node_id;
+	ActiveMessage<XferDesRemoteWriteMessage> amsg(target, nbytes, dst_buf);
+	amsg->req = req;
+	amsg->next_xd_guid = next_xd_guid;
+	amsg->span_start = span_start;
+	amsg->span_size = span_size;
+	amsg->pre_bytes_total = pre_bytes_total;
         //TODO: need to ask Sean what payload mode we should use
-        Message::request(target, args, src_buf, nbytes, PAYLOAD_KEEP, dst_buf);
+	amsg.add_payload(src_buf, nbytes, PAYLOAD_KEEP);
+	amsg.commit();
       }
 
       static void send_request(NodeID target,  void *dst_buf,
@@ -1066,44 +1064,39 @@ namespace Realm {
 			       size_t span_size,
 			       size_t pre_bytes_total) 
       {
-        RequestArgs args;
-	//args.dst_buf = dst_buf;
-	args.req = req;
-	args.next_xd_guid = next_xd_guid;
-	args.span_start = span_start;
-	args.span_size = span_size;
-	args.pre_bytes_total = pre_bytes_total;
-	args.sender = my_node_id;
+	size_t payload_size = nbytes*nlines;
+	ActiveMessage<XferDesRemoteWriteMessage> amsg(target, payload_size, dst_buf);
+	amsg->req = req;
+	amsg->next_xd_guid = next_xd_guid;
+	amsg->span_start = span_start;
+	amsg->span_size = span_size;
+	amsg->pre_bytes_total = pre_bytes_total;
         //TODO: need to ask Sean what payload mode we should use
-        Message::request(target, args, src_buf, nbytes, src_str, nlines,
-                         PAYLOAD_KEEP, dst_buf);
+	PayloadSource *payload_src = new TwoDPayload(src_buf, nbytes, nlines, src_str, PAYLOAD_KEEP);
+	payload_src->copy_data(amsg.payload_ptr(payload_size));
+	amsg.commit();
       }
     };
 
     struct XferDesRemoteWriteAckMessage {
-      struct RequestArgs {
-        RemoteWriteRequest* req;
-      };
+      RemoteWriteRequest* req;
 
-      static void handle_request(RequestArgs args);
-      typedef ActiveMessageShortNoReply<XFERDES_REMOTEWRITE_ACK_MSGID,
-                                        RequestArgs,
-                                        handle_request> Message;
-
+      static void handle_message(NodeID sender,
+				 const XferDesRemoteWriteAckMessage &args,
+				 const void *data,
+				 size_t datalen);
       static void send_request(NodeID target, RemoteWriteRequest* req)
       {
-        RequestArgs args;
-        args.req = req;
-        Message::request(target, args);
+	ActiveMessage<XferDesRemoteWriteAckMessage> amsg(target);
+        amsg->req = req;
+	amsg.commit();
       }
     };
 
     struct XferDesCreateMessage {
-      struct RequestArgs : public BaseMedium {
         RegionInstance inst;
         Memory src_mem, dst_mem;
         XferDesFence* fence;
-      };
 
       // TODO: replace with new serialization stuff
       struct Payload {
@@ -1124,11 +1117,10 @@ namespace Realm {
         OffsetsAndSize &oas_vec(int idx) { return *((&oas_vec_start)+idx); }
       };
 
-      static void handle_request(RequestArgs args, const void *data, size_t datalen);
-
-      typedef ActiveMessageMediumNoReply<XFERDES_CREATE_MSGID,
-                                         RequestArgs,
-                                         handle_request> Message;
+      static void handle_message(NodeID sender,
+				 const XferDesCreateMessage &args,
+				 const void *data,
+				 size_t datalen);
 
       static void send_request(NodeID target, DmaRequest* dma_request, NodeID launch_node,
                                XferDesID guid, XferDesID pre_xd_guid, XferDesID next_xd_guid,
@@ -1143,69 +1135,54 @@ namespace Realm {
     };
 
     struct XferDesDestroyMessage {
-      struct RequestArgs {
-        XferDesID guid;
-      };
-
-      static void handle_request(RequestArgs args);
-
-      typedef ActiveMessageShortNoReply<XFERDES_DESTROY_MSGID,
-                                        RequestArgs,
-                                        handle_request> Message;
-
+      XferDesID guid;
+      static void handle_message(NodeID sender,
+				 const XferDesDestroyMessage &args,
+				 const void *data,
+				 size_t datalen);
       static void send_request(NodeID target, XferDesID guid)
       {
-        RequestArgs args;
-        args.guid = guid;
-        Message::request(target, args);
+	ActiveMessage<XferDesDestroyMessage> amsg(target);
+        amsg->guid = guid;
+	amsg.commit();
       }
     };
 
     struct UpdateBytesWriteMessage {
-      struct RequestArgs {
-        XferDesID guid;
-	size_t span_start, span_size, pre_bytes_total;
-      };
-
-      static void handle_request(RequestArgs args);
-
-      typedef ActiveMessageShortNoReply<XFERDES_UPDATE_BYTES_WRITE_MSGID,
-                                        RequestArgs,
-                                        handle_request> Message;
-
+      XferDesID guid;
+      size_t span_start, span_size, pre_bytes_total;
+      static void handle_message(NodeID sender,
+				 const UpdateBytesWriteMessage &args,
+				 const void *data,
+				 size_t datalen);
       static void send_request(NodeID target, XferDesID guid,
 			       size_t span_start, size_t span_size,
 			       size_t pre_bytes_total)
       {
-        RequestArgs args;
-        args.guid = guid;
-	args.span_start = span_start;
-	args.span_size = span_size;
-	args.pre_bytes_total = pre_bytes_total;
-        Message::request(target, args);
+	ActiveMessage<UpdateBytesWriteMessage> amsg(target);
+        amsg->guid = guid;
+	amsg->span_start = span_start;
+	amsg->span_size = span_size;
+	amsg->pre_bytes_total = pre_bytes_total;
+	amsg.commit();
       }
     };
 
     struct UpdateBytesReadMessage {
-      struct RequestArgs {
-        XferDesID guid;
-	size_t span_start, span_size;
-      };
-
-      static void handle_request(RequestArgs args);
-
-      typedef ActiveMessageShortNoReply<XFERDES_UPDATE_BYTES_READ_MSGID,
-                                        RequestArgs,
-                                        handle_request> Message;
-
+      XferDesID guid;
+      size_t span_start, span_size;
+      static void handle_message(NodeID sender,
+				 const UpdateBytesReadMessage &args,
+				 const void *data,
+				 size_t datalen);
       static void send_request(NodeID target, XferDesID guid,
 			       size_t span_start, size_t span_size)
       {
-        RequestArgs args;
-        args.guid = guid;
-	args.span_start = span_start;
-	args.span_size = span_size;
-        Message::request(target, args);
+	ActiveMessage<UpdateBytesReadMessage> amsg(target);
+        amsg->guid = guid;
+	amsg->span_start = span_start;
+	amsg->span_size = span_size;
+	amsg.commit();
       }
     };
 
@@ -1234,8 +1211,9 @@ namespace Realm {
         } else {
           core_rsrv = new CoreReservation("DMA threads", crs, CoreReservationParameters());
         }
-        pthread_mutex_init(&queues_lock, NULL);
+#ifndef REALM_USE_SUBPROCESSES
         pthread_rwlock_init(&guid_lock, NULL);
+#endif
         // reserve the first several guid
         next_to_assign_idx = 10;
         num_threads = 0;
@@ -1246,14 +1224,15 @@ namespace Realm {
       ~XferDesQueue() {
         delete core_rsrv;
         // clean up the priority queues
-        pthread_mutex_lock(&queues_lock);
+	queues_lock.lock();  // probably don't need lock here
         std::map<Channel*, PriorityXferDesQueue*>::iterator it2;
         for (it2 = queues.begin(); it2 != queues.end(); it2++) {
           delete it2->second;
         }
-        pthread_mutex_unlock(&queues_lock);
-        pthread_mutex_destroy(&queues_lock);
+	queues_lock.unlock();
+#ifndef REALM_USE_SUBPROCESSES
         pthread_rwlock_destroy(&guid_lock);
+#endif
       }
 
       XferDesID get_guid(NodeID execution_node)
@@ -1263,7 +1242,7 @@ namespace Realm {
         // Next NODE_BITS indicates on which node this xd is generated
         // Last INDEX_BITS means a unique idx, which is used to resolve conflicts
         XferDesID idx = __sync_fetch_and_add(&next_to_assign_idx, 1);
-        return (((XferDesID)execution_node << (NODE_BITS + INDEX_BITS)) | ((XferDesID)my_node_id << INDEX_BITS) | idx);
+        return (((XferDesID)execution_node << (NODE_BITS + INDEX_BITS)) | ((XferDesID)Network::my_node_id << INDEX_BITS) | idx);
       }
 
       void update_pre_bytes_write(XferDesID xd_guid,
@@ -1271,8 +1250,12 @@ namespace Realm {
 				  size_t pre_bytes_total)
       {
         NodeID execution_node = xd_guid >> (NODE_BITS + INDEX_BITS);
-        if (execution_node == my_node_id) {
+        if (execution_node == Network::my_node_id) {
+#ifdef REALM_USE_SUBPROCESSES
+	  guid_lock.lock();
+#else
           pthread_rwlock_wrlock(&guid_lock);
+#endif
           std::map<XferDesID, XferDesWithUpdates>::iterator it = guid_to_xd.find(xd_guid);
           if (it != guid_to_xd.end()) {
             if (it->second.xd != NULL) {
@@ -1293,7 +1276,11 @@ namespace Realm {
 	    xdup.seq_pre_write.add_span(span_start, span_size);
 	    xdup.pre_bytes_total = pre_bytes_total;
           }
+#ifdef REALM_USE_SUBPROCESSES
+	  guid_lock.unlock();
+#else
           pthread_rwlock_unlock(&guid_lock);
+#endif
         }
         else {
           // send a active message to remote node
@@ -1307,8 +1294,12 @@ namespace Realm {
 				  size_t span_start, size_t span_size)
       {
         NodeID execution_node = xd_guid >> (NODE_BITS + INDEX_BITS);
-        if (execution_node == my_node_id) {
+        if (execution_node == Network::my_node_id) {
+#ifdef REALM_USE_SUBPROCESSES
+	  guid_lock.lock();
+#else
           pthread_rwlock_rdlock(&guid_lock);
+#endif
           std::map<XferDesID, XferDesWithUpdates>::iterator it = guid_to_xd.find(xd_guid);
           if (it != guid_to_xd.end()) {
 	    assert(it->second.xd != NULL);
@@ -1317,7 +1308,11 @@ namespace Realm {
             // This means this update goes slower than future updates, which marks
             // completion of xfer des (ID = xd_guid). In this case, it is safe to drop the update
 	  }
+#ifdef REALM_USE_SUBPROCESSES
+	  guid_lock.unlock();
+#else
           pthread_rwlock_unlock(&guid_lock);
+#endif
         }
         else {
           // send a active message to remote node
@@ -1329,27 +1324,39 @@ namespace Realm {
       void register_dma_thread(DMAThread* dma_thread)
       {
         std::map<Channel*, PriorityXferDesQueue*>::iterator it;
-        pthread_mutex_lock(&queues_lock);
+        queues_lock.lock();
         for(it = dma_thread->channel_to_xd_pool.begin(); it != dma_thread->channel_to_xd_pool.end(); it++) {
           channel_to_dma_thread[it->first] = dma_thread;
           queues[it->first] = new PriorityXferDesQueue;
         }
-        pthread_mutex_unlock(&queues_lock);
+	queues_lock.unlock();
       }
 
       void destroy_xferDes(XferDesID guid) {
+#ifdef REALM_USE_SUBPROCESSES
+	guid_lock.lock();
+#else
         pthread_rwlock_wrlock(&guid_lock);
+#endif
         std::map<XferDesID, XferDesWithUpdates>::iterator it = guid_to_xd.find(guid);
         assert(it != guid_to_xd.end());
         assert(it->second.xd != NULL);
         XferDes* xd = it->second.xd;
         guid_to_xd.erase(it);
+#ifdef REALM_USE_SUBPROCESSES
+	guid_lock.unlock();
+#else
         pthread_rwlock_unlock(&guid_lock);
+#endif
         delete xd;
       }
 
       void enqueue_xferDes_local(XferDes* xd) {
+#ifdef REALM_USE_SUBPROCESSES
+	guid_lock.lock();
+#else
         pthread_rwlock_wrlock(&guid_lock);
+#endif
         std::map<XferDesID, XferDesWithUpdates>::iterator git = guid_to_xd.find(xd->guid);
         if (git != guid_to_xd.end()) {
           // xerDes_queue has received updates of this xferdes
@@ -1362,57 +1369,61 @@ namespace Realm {
 	  XferDesWithUpdates& xdup = guid_to_xd[xd->guid];
 	  xdup.xd = xd;
         }
+#ifdef REALM_USE_SUBPROCESSES
+	guid_lock.unlock();
+#else
         pthread_rwlock_unlock(&guid_lock);
+#endif
         std::map<Channel*, DMAThread*>::iterator it;
         it = channel_to_dma_thread.find(xd->channel);
         assert(it != channel_to_dma_thread.end());
         DMAThread* dma_thread = it->second;
-        pthread_mutex_lock(&dma_thread->enqueue_lock);
-        pthread_mutex_lock(&queues_lock);
+	dma_thread->enqueue_lock.lock();
+	queues_lock.lock();
         std::map<Channel*, PriorityXferDesQueue*>::iterator it2;
         it2 = queues.find(xd->channel);
         assert(it2 != queues.end());
         // push ourself into the priority queue
         it2->second->insert(xd);
-        pthread_mutex_unlock(&queues_lock);
+	queues_lock.unlock();
         if (dma_thread->sleep) {
           dma_thread->sleep = false;
-          pthread_cond_signal(&dma_thread->enqueue_cond);
+	  dma_thread->enqueue_cond.signal();
         }
-        pthread_mutex_unlock(&dma_thread->enqueue_lock);
+	dma_thread->enqueue_lock.unlock();
       }
 
       bool dequeue_xferDes(DMAThread* dma_thread, bool wait_on_empty) {
-        pthread_mutex_lock(&dma_thread->enqueue_lock);
+	dma_thread->enqueue_lock.lock();
         std::map<Channel*, PriorityXferDesQueue*>::iterator it;
         if (wait_on_empty) {
           bool empty = true;
           for(it = dma_thread->channel_to_xd_pool.begin(); it != dma_thread->channel_to_xd_pool.end(); it++) {
-            pthread_mutex_lock(&queues_lock);
+	    queues_lock.lock();
             std::map<Channel*, PriorityXferDesQueue*>::iterator it2;
             it2 = queues.find(it->first);
             assert(it2 != queues.end());
             if (it2->second->size() > 0)
               empty = false;
-            pthread_mutex_unlock(&queues_lock);
+	    queues_lock.unlock();
           }
 
           if (empty && !dma_thread->is_stopped) {
             dma_thread->sleep = true;
-            pthread_cond_wait(&dma_thread->enqueue_cond, &dma_thread->enqueue_lock);
+	    dma_thread->enqueue_cond.wait();
           }
         }
 
         for(it = dma_thread->channel_to_xd_pool.begin(); it != dma_thread->channel_to_xd_pool.end(); it++) {
-          pthread_mutex_lock(&queues_lock);
+	  queues_lock.lock();
           std::map<Channel*, PriorityXferDesQueue*>::iterator it2;
           it2 = queues.find(it->first);
           assert(it2 != queues.end());
           it->second->insert(it2->second->begin(), it2->second->end());
           it2->second->clear();
-          pthread_mutex_unlock(&queues_lock);
+	  queues_lock.unlock();
         }
-        pthread_mutex_unlock(&dma_thread->enqueue_lock);
+	dma_thread->enqueue_lock.unlock();
         return true;
       }
 
@@ -1424,8 +1435,13 @@ namespace Realm {
       std::map<Channel*, DMAThread*> channel_to_dma_thread;
       std::map<Channel*, PriorityXferDesQueue*> queues;
       std::map<XferDesID, XferDesWithUpdates> guid_to_xd;
-      pthread_mutex_t queues_lock;
+      Mutex queues_lock;
+#ifdef REALM_USE_SUBPROCESSES
+      // TODO: gasnet-friendly rwlock?
+      Mutex guid_lock;
+#else
       pthread_rwlock_t guid_lock;
+#endif
       XferDesID next_to_assign_idx;
       CoreReservation* core_rsrv;
       int num_threads, num_memcpy_threads;

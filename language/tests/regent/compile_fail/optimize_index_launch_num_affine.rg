@@ -1,4 +1,4 @@
--- Copyright 2018 Stanford University
+-- Copyright 2019 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -14,7 +14,7 @@
 
 -- fails-with:
 -- optimize_index_launch_num_affine.rg:39: loop optimization failed: argument 1 interferes with itself
---     g(p[i * 2])
+--     g(p[i * 2 - i - i])
 --      ^
 
 import "regent"
@@ -34,9 +34,9 @@ task main()
   var r = region(ispace(ptr, n), int)
   var p = partition(equal, r, ispace(int1d, 5))
 
-  __demand(__parallel)
+  __demand(__index_launch)
   for i = 0, 2 do
-    g(p[i * 2])
+    g(p[i * 2 - i - i])
   end
 end
 regentlib.start(main)

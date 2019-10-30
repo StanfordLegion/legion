@@ -1,4 +1,4 @@
-/* Copyright 2018 Stanford University, NVIDIA Corporation
+/* Copyright 2019 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -219,6 +219,13 @@ namespace Realm {
       template <typename S>
       static bool deserialize_vector(S& s, std::vector<T>& v);
     };
+
+    // support for static arrays
+    template <typename S, typename T, size_t N>
+      bool serialize(S& s, T (&a)[N]);
+
+    template <typename S, typename T, size_t N>
+      bool deserialize(S& s, T (&a)[N]);
 
     // support for some STL containers
     template <typename S, typename T1, typename T2>

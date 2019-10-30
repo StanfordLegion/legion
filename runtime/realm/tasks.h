@@ -1,4 +1,4 @@
-/* Copyright 2018 Stanford University, NVIDIA Corporation
+/* Copyright 2019 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -27,9 +27,13 @@
 #include "realm/threads.h"
 #include "realm/pri_queue.h"
 #include "realm/bytearray.h"
+#include "realm/atomics.h"
+#include "realm/mutex.h"
 
 namespace Realm {
 
+    class ProcessorImpl;
+  
     // information for a task launch
     class Task : public Operation {
     public:
@@ -38,7 +42,8 @@ namespace Realm {
 	   const void *_args, size_t _arglen,
            const ProfilingRequestSet &reqs,
 	   Event _before_event,
-	   Event _finish_event, int _priority);
+	   GenEventImpl *_finish_event, EventImpl::gen_t _finish_gen,
+	   int _priority);
 
     protected:
       // deletion performed when reference count goes to zero
@@ -58,14 +63,86 @@ namespace Realm {
 
       Processor proc;
       Processor::TaskFuncID func_id;
-      ByteArray args;
+
+      // "small-vector" optimization for task args
+      char *argdata;
+      size_t arglen;
+      static const size_t SHORT_ARGLEN_MAX = 64;
+      char short_argdata[SHORT_ARGLEN_MAX];
+      bool free_argdata;
+      //ByteArray args;
+
       Event before_event;
       int priority;
 
+      // intrusive task list - used for pending, ready, and suspended tasks
+      IntrusivePriorityListLink<Task> tl_link;
+      typedef IntrusivePriorityList<Task, int, &Task::tl_link, &Task::priority, DummyLock> TaskList;
+
+      class DeferredSpawn : public EventWaiter {
+      public:
+	DeferredSpawn(void);
+	void setup(ProcessorImpl *_proc, Task *_task, Event _wait_on);
+        void defer(EventImpl *_wait_impl, EventImpl::gen_t _wait_gen);
+	virtual void event_triggered(bool poisoned);
+	virtual void print(std::ostream& os) const;
+	virtual Event get_finish_event(void) const;
+
+	// attempts to add another task to the this deferred spawn group -
+	// returns true on success, or false if the event has already
+	//  triggered, in which case 'poisoned' is set appropriately
+	bool add_task(Task *to_add, bool& poisoned);
+
+      protected:
+	ProcessorImpl *proc;
+	Task *task;
+	Event wait_on;
+	Mutex pending_list_mutex;
+	TaskList pending_list;
+	bool is_triggered, is_poisoned;
+      };
+      DeferredSpawn deferred_spawn;
+      
     protected:
       virtual void mark_completed(void);
 
       Thread *executing_thread;
+    };
+
+    class TaskQueue {
+    public:
+      TaskQueue(void);
+
+      // we used most of the signed integer range for priorities - we do borrow a 
+      //  few of the extreme values to make sure we have "infinity" and "negative infinity"
+      //  and that we don't run into problems with -INT_MIN
+      typedef int priority_t;
+      static const priority_t PRI_MAX_FINITE = INT_MAX - 1;
+      static const priority_t PRI_MIN_FINITE = -(INT_MAX - 1);
+      static const priority_t PRI_POS_INF = PRI_MAX_FINITE + 1;
+      static const priority_t PRI_NEG_INF = PRI_MIN_FINITE - 1;
+
+      class NotificationCallback {
+      public:
+	virtual void item_available(priority_t item_priority) = 0;
+      };
+
+      Mutex mutex;
+      Task::TaskList ready_task_list;
+      std::vector<NotificationCallback *> callbacks;
+      std::vector<priority_t> callback_priorities;
+      ProfilingGauges::AbsoluteRangeGauge<int> *task_count_gauge;
+
+      void add_subscription(NotificationCallback *callback, priority_t higher_than = PRI_NEG_INF);
+
+      void set_gauge(ProfilingGauges::AbsoluteRangeGauge<int> *new_gauge);
+
+      // gets highest priority task available from any task queue in list
+      static Task *get_best_task(const std::vector<TaskQueue *>& queues,
+				 int& task_priority);
+
+      void enqueue_task(Task *task);
+      void enqueue_tasks(Task::TaskList& tasks);
     };
 
     // a task scheduler in which one or more worker threads execute tasks from one
@@ -79,8 +156,6 @@ namespace Realm {
       ThreadedTaskScheduler(void);
 
       virtual ~ThreadedTaskScheduler(void);
-
-      typedef PriorityQueue<Task *, GASNetHSL> TaskQueue;
 
       virtual void add_task_queue(TaskQueue *queue);
 
@@ -109,10 +184,15 @@ namespace Realm {
       virtual void worker_wake(Thread *to_wake) = 0;
       virtual void worker_terminate(Thread *switch_to) = 0;
 
-      GASNetHSL lock;
+      // gets highest priority task available from any task queue
+      Task *get_best_ready_task(int& task_priority);
+
+      Mutex lock;
       std::vector<TaskQueue *> task_queues;
       std::vector<Thread *> idle_workers;
       std::set<Thread *> blocked_workers;
+      // threads that block while holding a scheduler lock go here instead
+      std::set<Thread *> spinning_workers;
 
       typedef PriorityQueue<Thread *, DummyLock> ResumableQueue;
       ResumableQueue resumable_workers;
@@ -152,10 +232,10 @@ namespace Realm {
 
       protected:
 	// 64-bit counters are used to avoid dealing with wrap-around cases
-	volatile long long counter;
-	volatile long long wait_value;
-	GASNetHSL mutex;
-	GASNetCondVar condvar;
+	// consider trying to fit in 32 to use futexes?
+	atomic<long long> counter, wait_value;
+	Mutex mutex;
+	CondVar condvar;
       };
 	
       WorkCounter work_counter;
@@ -167,14 +247,24 @@ namespace Realm {
       template <typename PQ>
       class WorkCounterUpdater : public PQ::NotificationCallback {
       public:
-        WorkCounterUpdater(ThreadedTaskScheduler *_sched) : sched(_sched) {}
-	virtual bool item_available(typename PQ::ITEMTYPE, typename PQ::priority_t) 
+        WorkCounterUpdater(ThreadedTaskScheduler *sched)
+	  : work_counter(&sched->work_counter)
+	{}
+
+	// TaskQueue-style
+	virtual void item_available(typename PQ::priority_t)
+	{
+	  work_counter->increment_counter();
+	}
+
+	// PriorityQueue-style
+	virtual bool item_available(Thread *, typename PQ::priority_t) 
 	{ 
-	  sched->work_counter.increment_counter();
+	  work_counter->increment_counter();
 	  return false;  // never consumes the work
 	}
       protected:
-	ThreadedTaskScheduler *sched;
+	WorkCounter *work_counter;
       };
 
       WorkCounterUpdater<TaskQueue> wcu_task_queues;
@@ -191,7 +281,7 @@ namespace Realm {
     inline long long ThreadedTaskScheduler::WorkCounter::read_counter(void) const
     {
       // just return the counter value
-      return counter;
+      return counter.load_acquire();
     }
 
     // returns true if there is new work since the old_counter value was read
@@ -199,7 +289,7 @@ namespace Realm {
     inline bool ThreadedTaskScheduler::WorkCounter::check_for_work(long long old_counter)
     {
       // test the counter value without synchronization
-      return (counter > old_counter);
+      return (counter.load_acquire() > old_counter);
     }
 
 
@@ -236,8 +326,8 @@ namespace Realm {
       std::set<Thread *> all_workers;
       std::set<Thread *> active_workers;
       std::set<Thread *> terminating_workers;
-      std::map<Thread *, GASNetCondVar *> sleeping_threads;
-      GASNetCondVar shutdown_condvar;
+      std::map<Thread *, CondVar *> sleeping_threads;
+      CondVar shutdown_condvar;
     };
 
 #ifdef REALM_USE_USER_THREADS
@@ -282,7 +372,7 @@ namespace Realm {
       std::set<Thread *> all_workers;
 
       int host_startups_remaining;
-      GASNetCondVar host_startup_condvar;
+      CondVar host_startup_condvar;
 
     public:
       int cfg_num_host_threads;

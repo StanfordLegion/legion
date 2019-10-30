@@ -1,4 +1,4 @@
-/* Copyright 2018 Stanford University, NVIDIA Corporation
+/* Copyright 2019 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -98,9 +98,9 @@ namespace Legion {
                                       Mapper::SelectTaskSrcInput *input,
                                       Mapper::SelectTaskSrcOutput *output,
                                       MappingCallInfo *info = NULL);
-      void invoke_task_create_temporary(TaskOp *task,
-                                      Mapper::CreateTaskTemporaryInput *input,
-                                      Mapper::CreateTaskTemporaryOutput *output,
+      void invoke_select_task_sources(RemoteTaskOp *task, 
+                                      Mapper::SelectTaskSrcInput *input,
+                                      Mapper::SelectTaskSrcOutput *output,
                                       MappingCallInfo *info = NULL);
       void invoke_task_speculate(TaskOp *task, 
                                  Mapper::SpeculativeOutput *output,
@@ -116,10 +116,10 @@ namespace Legion {
                                         Mapper::SelectInlineSrcInput *input,
                                         Mapper::SelectInlineSrcOutput *output,
                                         MappingCallInfo *info = NULL);
-      void invoke_inline_create_temporary(MapOp *op,
-                                    Mapper::CreateInlineTemporaryInput *input,
-                                    Mapper::CreateInlineTemporaryOutput *output,
-                                    MappingCallInfo *info = NULL);
+      void invoke_select_inline_sources(RemoteMapOp *op, 
+                                        Mapper::SelectInlineSrcInput *input,
+                                        Mapper::SelectInlineSrcOutput *output,
+                                        MappingCallInfo *info = NULL);
       void invoke_inline_report_profiling(MapOp *op, 
                                           Mapper::InlineProfilingInfo *input,
                                           MappingCallInfo *info = NULL);
@@ -132,28 +132,24 @@ namespace Legion {
                                       Mapper::SelectCopySrcInput *input,
                                       Mapper::SelectCopySrcOutput *output,
                                       MappingCallInfo *info = NULL);
-      void invoke_copy_create_temporary(CopyOp *op,
-                                  Mapper::CreateCopyTemporaryInput *input,
-                                  Mapper::CreateCopyTemporaryOutput *output,
-                                  MappingCallInfo *info = NULL);
+      void invoke_select_copy_sources(RemoteCopyOp *op,
+                                      Mapper::SelectCopySrcInput *input,
+                                      Mapper::SelectCopySrcOutput *output,
+                                      MappingCallInfo *info = NULL);
       void invoke_copy_speculate(CopyOp *op, Mapper::SpeculativeOutput *output,
                                  MappingCallInfo *info = NULL);
       void invoke_copy_report_profiling(CopyOp *op,
                                         Mapper::CopyProfilingInfo *input,
                                         MappingCallInfo *info = NULL);
     public: // Close mapper calls
-      void invoke_map_close(CloseOp *op,
-                            Mapper::MapCloseInput *input,
-                            Mapper::MapCloseOutput *output,
-                            MappingCallInfo *info = NULL);
       void invoke_select_close_sources(CloseOp *op,
                                        Mapper::SelectCloseSrcInput *input,
                                        Mapper::SelectCloseSrcOutput *output,
                                        MappingCallInfo *info = NULL);
-      void invoke_close_create_temporary(CloseOp *op,
-                                     Mapper::CreateCloseTemporaryInput *input,
-                                     Mapper::CreateCloseTemporaryOutput *output,
-                                     MappingCallInfo *info = NULL);
+      void invoke_select_close_sources(RemoteCloseOp *op,
+                                       Mapper::SelectCloseSrcInput *input,
+                                       Mapper::SelectCloseSrcOutput *output,
+                                       MappingCallInfo *info = NULL);
       void invoke_close_report_profiling(CloseOp *op,
                                          Mapper::CloseProfilingInfo *input,
                                          MappingCallInfo *info = NULL);
@@ -177,10 +173,10 @@ namespace Legion {
                                          Mapper::SelectReleaseSrcInput *input,
                                          Mapper::SelectReleaseSrcOutput *output,
                                          MappingCallInfo *info = NULL);
-      void invoke_release_create_temporary(ReleaseOp *op,
-                                  Mapper::CreateReleaseTemporaryInput *input,
-                                  Mapper::CreateReleaseTemporaryOutput *output,
-                                  MappingCallInfo *info = NULL);
+      void invoke_select_release_sources(RemoteReleaseOp *op,
+                                         Mapper::SelectReleaseSrcInput *input,
+                                         Mapper::SelectReleaseSrcOutput *output,
+                                         MappingCallInfo *info = NULL);
       void invoke_release_speculate(ReleaseOp *op,
                                     Mapper::SpeculativeOutput *output,
                                     MappingCallInfo *info = NULL);
@@ -200,9 +196,9 @@ namespace Legion {
                           Mapper::SelectPartitionSrcInput *input,
                           Mapper::SelectPartitionSrcOutput *output,
                           MappingCallInfo *info = NULL);
-      void invoke_partition_create_temporary(DependentPartitionOp *op,
-                          Mapper::CreatePartitionTemporaryInput *input,
-                          Mapper::CreatePartitionTemporaryOutput *output,
+      void invoke_select_partition_sources(RemotePartitionOp *op,
+                          Mapper::SelectPartitionSrcInput *input,
+                          Mapper::SelectPartitionSrcOutput *output,
                           MappingCallInfo *info = NULL);
       void invoke_partition_report_profiling(DependentPartitionOp *op,
                           Mapper::PartitionProfilingInfo *input,
@@ -293,9 +289,11 @@ namespace Legion {
                                 FieldSpace handle);
       void release_layout(MappingCallInfo *ctx, LayoutConstraintID layout_id);
       bool do_constraints_conflict(MappingCallInfo *ctx, 
-                    LayoutConstraintID set1, LayoutConstraintID set2);
+                    LayoutConstraintID set1, LayoutConstraintID set2,
+                    const LayoutConstraint **conflict_constraint);
       bool do_constraints_entail(MappingCallInfo *ctx,
-                    LayoutConstraintID source, LayoutConstraintID target);
+                    LayoutConstraintID source, LayoutConstraintID target,
+                    const LayoutConstraint **failed_constraint);
     public:
       void find_valid_variants(MappingCallInfo *ctx, TaskID task_id,
                                std::vector<VariantID> &valid_variants,
@@ -308,6 +306,13 @@ namespace Legion {
                             VariantID variant_id);
       bool is_idempotent_variant(MappingCallInfo *ctx,
                                  TaskID task_id, VariantID variant_id);
+    public:
+      VariantID register_task_variant(MappingCallInfo *ctx,
+                                      const TaskVariantRegistrar &registrar,
+				      const CodeDescriptor &codedesc,
+				      const void *user_data,
+				      size_t user_len,
+                                      bool has_return_type);
     public:
       void filter_variants(MappingCallInfo *ctx, const Task &task,
             const std::vector<std::vector<MappingInstance> > &chosen_instances,
@@ -325,26 +330,28 @@ namespace Legion {
                                     const LayoutConstraintSet &constraints, 
                                     const std::vector<LogicalRegion> &regions,
                                     MappingInstance &result, 
-                                    bool acquire, GCPriority priority);
+                                    bool acquire, GCPriority priority,
+                                    bool tight_region_bounds,size_t *footprint);
       bool create_physical_instance(MappingCallInfo *ctx, Memory target_memory,
                                     LayoutConstraintID layout_id,
                                     const std::vector<LogicalRegion> &regions,
                                     MappingInstance &result,
-                                    bool acquire, GCPriority priority);
+                                    bool acquire, GCPriority priority,
+                                    bool tight_region_bounds,size_t *footprint);
       bool find_or_create_physical_instance(
                                     MappingCallInfo *ctx, Memory target_memory,
                                     const LayoutConstraintSet &constraints, 
                                     const std::vector<LogicalRegion> &regions,
                                     MappingInstance &result, bool &created, 
                                     bool acquire, GCPriority priority,
-                                    bool tight_region_bounds);
+                                    bool tight_region_bounds,size_t *footprint);
       bool find_or_create_physical_instance(
                                     MappingCallInfo *ctx, Memory target_memory,
                                     LayoutConstraintID layout_id,
                                     const std::vector<LogicalRegion> &regions,
                                     MappingInstance &result, bool &created, 
                                     bool acquire, GCPriority priority,
-                                    bool tight_region_bounds);
+                                    bool tight_region_bounds,size_t *footprint);
       bool find_physical_instance(  MappingCallInfo *ctx, Memory target_memory,
                                     const LayoutConstraintSet &constraints,
                                     const std::vector<LogicalRegion> &regions,
@@ -390,6 +397,17 @@ namespace Legion {
     public:
       IndexSpace create_index_space(MappingCallInfo *info, const Domain &domain,
                                     const void *realm_is, TypeTag type_tag);
+      IndexSpace union_index_spaces(MappingCallInfo *info, 
+                                    const std::vector<IndexSpace> &sources);
+      IndexSpace intersect_index_spaces(MappingCallInfo *info,
+                                        const std::vector<IndexSpace> &sources);
+      IndexSpace subtract_index_spaces(MappingCallInfo *info,
+                                       IndexSpace left, IndexSpace right);
+      bool is_index_space_empty(MappingCallInfo *info, IndexSpace handle);
+      bool index_spaces_overlap(MappingCallInfo *info, 
+                                IndexSpace one, IndexSpace two);
+      bool index_space_dominates(MappingCallInfo *info,
+                                 IndexSpace left, IndexSpace right);
       bool has_index_partition(MappingCallInfo *info,
                                IndexSpace parent, Color color);
       IndexPartition get_index_partition(MappingCallInfo *info,
@@ -529,6 +547,7 @@ namespace Legion {
       const MapperID mapper_id;
       const Processor processor;
       const bool profile_mapper;
+      const bool request_valid_instances;
     protected:
       mutable LocalLock mapper_lock;
     protected:

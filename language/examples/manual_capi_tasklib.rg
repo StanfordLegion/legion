@@ -1,4 +1,4 @@
--- Copyright 2018 Stanford University
+-- Copyright 2019 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -19,7 +19,11 @@
 
 local tasklib = {}
 
-terralib.linklibrary("libregent.so")
+if os.execute("bash -c \"[ `uname` == 'Darwin' ]\"") == 0 then
+  terralib.linklibrary("libregent.dylib")
+else
+  terralib.linklibrary("libregent.so")
+end
 
 local c = terralib.includecstring([[
 #include "legion.h"
@@ -73,6 +77,7 @@ function tasklib.preregister_task(terrafunc)
     -- if we can register llvmir, ask Terra to generate that
     local ir = terralib.saveobj(nil, "llvmir", { entry=wrapped } )
     local rfunc = terra(id : c.legion_task_id_t,
+                        variant_id : c.legion_variant_id_t,
                         task_name : &int8,
                         variant_name : &int8,
                         execution_constraints : c.legion_execution_constraint_set_t,
@@ -81,7 +86,7 @@ function tasklib.preregister_task(terrafunc)
                         userdata : &opaque,
                         userlen : c.size_t)
       return c.legion_runtime_preregister_task_variant_llvmir(
-        id, task_name,
+        id, variant_id, task_name,
         execution_constraints, layout_constraints, options,
         ir, "entry", userdata, userlen)
     end
@@ -89,6 +94,7 @@ function tasklib.preregister_task(terrafunc)
   else
     -- use the terra function directly, which ffi will convert to a (non-portable) function pointer
     local rfunc = terra(id : c.legion_task_id_t,
+                        variant_id : c.legion_variant_id_t,
                         task_name : &int8,
                         variant_name : &int8,
                         execution_constraints : c.legion_execution_constraint_set_t,
@@ -97,7 +103,7 @@ function tasklib.preregister_task(terrafunc)
                         userdata : &opaque,
                         userlen : c.size_t)
       return c.legion_runtime_preregister_task_variant_fnptr(
-        id, task_name, variant_name,
+        id, variant_id, task_name, variant_name,
         execution_constraints, layout_constraints, options,
         wrapped, userdata, userlen)
     end

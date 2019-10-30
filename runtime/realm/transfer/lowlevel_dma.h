@@ -1,4 +1,4 @@
-/* Copyright 2018 Stanford University, NVIDIA Corporation
+/* Copyright 2019 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,7 +16,7 @@
 #ifndef LOWLEVEL_DMA_H
 #define LOWLEVEL_DMA_H
 
-#include "realm/activemsg.h"
+#include "realm/network.h"
 #include "realm/id.h"
 #include "realm/memory.h"
 #include "realm/redop.h"
@@ -29,90 +29,58 @@ namespace Realm {
   class CoreReservationSet;
 
     struct RemoteIBAllocRequestAsync {
-      struct RequestArgs {
-        int node;
-        Memory memory;
-        void* req;
-        int idx;
-        ID::IDType src_inst_id, dst_inst_id;
-        size_t size;
-      };
+      Memory memory;
+      void* req;
+      int idx;
+      ID::IDType src_inst_id, dst_inst_id;
 
-      static void handle_request(RequestArgs args);
+      static void handle_message(NodeID sender, const RemoteIBAllocRequestAsync &args,
+				 const void *data, size_t msglen);
 
-      typedef ActiveMessageShortNoReply<REMOTE_IB_ALLOC_REQUEST_MSGID,
-                                        RequestArgs,
-                                        handle_request> Message;
-
-      static void send_request(NodeID target, Memory tgt_mem, void* req,
-                               int idx, ID::IDType src_id, ID::IDType dst_id, size_t size);
     };
 
     struct RemoteIBAllocResponseAsync {
-      struct RequestArgs {
-        void* req;
-        int idx;
-        ID::IDType src_inst_id, dst_inst_id;
-        size_t size;
-        off_t offset;
-      };
+      void* req;
+      int idx;
+      ID::IDType src_inst_id, dst_inst_id;
+      off_t offset;
 
-      static void handle_request(RequestArgs args);
-
-      typedef ActiveMessageShortNoReply<REMOTE_IB_ALLOC_RESPONSE_MSGID,
-                                        RequestArgs,
-                                        handle_request> Message;
-
-      static void send_request(NodeID target, void* req, int idx, ID::IDType src_id,
-                               ID::IDType dst_id, size_t ib_size, off_t ib_offset);
+      static void handle_message(NodeID sender, const RemoteIBAllocResponseAsync &args,
+				 const void *data, size_t msglen);
     };
 
     struct RemoteIBFreeRequestAsync {
-      struct RequestArgs {
-        Memory memory;
-        off_t ib_offset;
-        size_t ib_size;
-      };
+      Memory memory;
+      off_t ib_offset;
+      size_t ib_size;
 
-      static void handle_request(RequestArgs args);
-
-      typedef ActiveMessageShortNoReply<REMOTE_IB_FREE_REQUEST_MSGID,
-                                        RequestArgs,
-                                        handle_request> Message;
-
-      static void send_request(NodeID target, Memory tgt_mem,
-                               off_t ib_offset, size_t ib_size);
+      static void handle_message(NodeID sender, const RemoteIBFreeRequestAsync &args,
+				 const void *data, size_t msglen);
     };
 
     void find_shortest_path(Memory src_mem, Memory dst_mem,
 			    CustomSerdezID serdez_id, std::vector<Memory>& path);
 
-    struct RemoteCopyArgs : public BaseMedium {
+    struct RemoteCopyMessage {
       ReductionOpID redop_id;
       bool red_fold;
       Event before_copy, after_copy;
       int priority;
+
+      static void handle_message(NodeID sender, const RemoteCopyMessage &args,
+				 const void *data, size_t msglen);
     };
 
-    struct RemoteFillArgs : public BaseMedium {
+    struct RemoteFillMessage {
       RegionInstance inst;
       FieldID field_id;
       unsigned size;
       Event before_fill, after_fill;
       //int priority;
+
+      static void handle_message(NodeID sender, const RemoteFillMessage &args,
+				 const void *data, size_t msglen);
     };
-
-    extern void handle_remote_copy(RemoteCopyArgs args, const void *data, size_t msglen);
-
-    extern void handle_remote_fill(RemoteFillArgs args, const void *data, size_t msglen);
-
-    typedef ActiveMessageMediumNoReply<REMOTE_COPY_MSGID,
-				       RemoteCopyArgs,
-				       handle_remote_copy> RemoteCopyMessage;
-
-    typedef ActiveMessageMediumNoReply<REMOTE_FILL_MSGID,
-                                       RemoteFillArgs,
-                                       handle_remote_fill> RemoteFillMessage;
 
     extern void init_dma_handler(void);
 
@@ -153,9 +121,11 @@ namespace Realm {
     typedef unsigned long long XferDesID;
     class DmaRequest : public Realm::Operation {
     public:
-      DmaRequest(int _priority, Event _after_copy);
+      DmaRequest(int _priority,
+		 GenEventImpl *_after_copy, EventImpl::gen_t _after_gen);
 
-      DmaRequest(int _priority, Event _after_copy,
+      DmaRequest(int _priority,
+		 GenEventImpl *_after_copy, EventImpl::gen_t _after_gen,
                  const Realm::ProfilingRequestSet &reqs);
 
     protected:
@@ -187,7 +157,7 @@ namespace Realm {
       State state;
       int priority;
       // <NEWDMA>
-      pthread_mutex_t request_lock;
+      Mutex request_lock;
       std::vector<XferDesID> path;
       std::set<XferDesID> complete_xd;
 
@@ -196,10 +166,10 @@ namespace Realm {
       // This return val is a signal for delete this DmaRequest
       bool notify_xfer_des_completion(XferDesID guid)
       {
-        pthread_mutex_lock(&request_lock);
+	request_lock.lock();
         complete_xd.insert(guid);
         bool all_completed = (complete_xd.size() == path.size());
-        pthread_mutex_unlock(&request_lock);
+	request_lock.unlock();
         return all_completed;
       }
       Event tgt_fetch_completion;
@@ -213,10 +183,11 @@ namespace Realm {
 	Reservation current_lock;
 	DmaRequestQueue *queue;
 	DmaRequest *req;
+	Event wait_on;
 
 	void sleep_on_event(Event e, Reservation l = Reservation::NO_RESERVATION);
 
-	virtual bool event_triggered(Event e, bool poisoned);
+	virtual void event_triggered(bool poisoned);
 	virtual void print(std::ostream& os) const;
 	virtual Event get_finish_event(void) const;
       };
@@ -246,7 +217,7 @@ namespace Realm {
 
     class ComparePendingIBInfo {
     public:
-      bool operator() (const PendingIBInfo& a, const PendingIBInfo& b) {
+      bool operator() (const PendingIBInfo& a, const PendingIBInfo& b) const {
         if (a.memory.id == b.memory.id) {
           assert(a.idx != b.idx);
           return a.idx < b.idx;
@@ -285,13 +256,13 @@ namespace Realm {
     public:
       CopyRequest(const void *data, size_t datalen,
 		  Event _before_copy,
-		  Event _after_copy,
+		  GenEventImpl *_after_copy, EventImpl::gen_t _after_gen,
 		  int _priority);
 
       CopyRequest(const TransferDomain *_domain, //const Domain& _domain,
 		  OASByInst *_oas_by_inst,
 		  Event _before_copy,
-		  Event _after_copy,
+		  GenEventImpl *_after_copy, EventImpl::gen_t _after_gen,
 		  int _priority,
                   const Realm::ProfilingRequestSet &reqs);
 
@@ -322,14 +293,7 @@ namespace Realm {
       PriorityIBQueue priority_ib_queue;
       // operations on ib_by_inst are protected by ib_mutex
       IBByInst ib_by_inst;
-      GASNetHSL ib_mutex;
-      class IBAllocOp : public Realm::Operation {
-      public:
-        IBAllocOp(Event _completion) : Operation(_completion, Realm::ProfilingRequestSet()) {};
-        ~IBAllocOp() {};
-        void print(std::ostream& os) const {os << "IBAllocOp"; };
-      };
-
+      Mutex ib_mutex;
       std::vector<Memory> mem_path;
       // </NEW_DMA>
 
@@ -343,7 +307,7 @@ namespace Realm {
 		    ReductionOpID _redop_id,
 		    bool _red_fold,
 		    Event _before_copy,
-		    Event _after_copy,
+		    GenEventImpl *_after_copy, EventImpl::gen_t _after_gen,
 		    int _priority);
 
       ReduceRequest(const TransferDomain *_domain, //const Domain& _domain,
@@ -353,7 +317,7 @@ namespace Realm {
 		    ReductionOpID _redop_id,
 		    bool _red_fold,
 		    Event _before_copy,
-		    Event _after_copy,
+		    GenEventImpl *_after_copy, EventImpl::gen_t _after_gen,
 		    int _priority,
                     const Realm::ProfilingRequestSet &reqs);
 
@@ -388,13 +352,13 @@ namespace Realm {
                   RegionInstance inst,
                   FieldID field_id, unsigned size,
                   Event _before_fill, 
-                  Event _after_fill,
+		  GenEventImpl *_after_fill, EventImpl::gen_t _after_gen,
                   int priority);
       FillRequest(const TransferDomain *_domain, //const Domain &_domain,
                   const CopySrcDstField &_dst,
                   const void *fill_value, size_t fill_size,
                   Event _before_fill,
-                  Event _after_fill,
+		  GenEventImpl *_after_fill, EventImpl::gen_t _after_gen,
                   int priority,
                   const Realm::ProfilingRequestSet &reqs);
 
@@ -479,7 +443,7 @@ namespace Realm {
 
       int max_depth;
       std::deque<AIOOperation *> launched_operations, pending_operations;
-      GASNetHSL mutex;
+      Mutex mutex;
 #ifdef REALM_USE_KERNEL_AIO
       aio_context_t aio_ctx;
 #endif

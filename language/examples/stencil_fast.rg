@@ -1,4 +1,4 @@
--- Copyright 2018 Stanford University
+-- Copyright 2019 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -14,6 +14,7 @@
 
 -- runs-with:
 -- [["-ll:cpu", "4", "-ntx", "2", "-nty", "2", "-dm:memoize", "-tsteps", "2", "-tprune", "2"],
+--  ["-ll:cpu", "4", "-ntx", "2", "-nty", "2", "-dm:memoize", "-tsteps", "2", "-tprune", "2", "-ffuture", "0"],
 --  ["-ll:cpu", "4", "-fflow-spmd", "1", "-fflow-spmd-shardsize", "4", "-ftrace", "0"],
 --  ["-ll:cpu", "4", "-fflow-spmd", "1", "-fflow-spmd-shardsize", "4", "-tsteps", "2", "-tprune", "2", "-dm:memoize"],
 --  ["-ll:cpu", "2", "-fflow-spmd", "1", "-fflow-spmd-shardsize", "8", "-map_locally", "-ftrace", "0"]]
@@ -27,6 +28,8 @@ local common = require("stencil_common")
 local DTYPE = double
 local RADIUS = 2
 local USE_FOREIGN = (os.getenv('USE_FOREIGN') or '1') == '1'
+
+local use_python_main = rawget(_G, "stencil_use_python_main") == true
 
 local c = regentlib.c
 
@@ -87,7 +90,17 @@ end
 
 do
   local root_dir = arg[0]:match(".*/") or "./"
-  local runtime_dir = os.getenv('LG_RT_DIR') .. "/"
+
+  local include_path = ""
+  local include_dirs = terralib.newlist()
+  include_dirs:insert("-I")
+  include_dirs:insert(root_dir)
+  for path in string.gmatch(os.getenv("INCLUDE_PATH"), "[^;]+") do
+    include_path = include_path .. " -I " .. path
+    include_dirs:insert("-I")
+    include_dirs:insert(path)
+  end
+
   local mapper_cc = root_dir .. "stencil_mapper.cc"
   if os.getenv('OBJNAME') then
     local out_dir = os.getenv('OBJNAME'):match('.*/') or './'
@@ -110,14 +123,14 @@ do
     cxx_flags = cxx_flags .. " -shared -fPIC"
   end
 
-  local cmd = (cxx .. " " .. cxx_flags .. " -I " .. runtime_dir .. " " ..
+  local cmd = (cxx .. " " .. cxx_flags .. " " .. include_path .. " " ..
                  mapper_cc .. " -o " .. mapper_so)
   if os.execute(cmd) ~= 0 then
     print("Error: failed to compile " .. mapper_cc)
     assert(false)
   end
   terralib.linklibrary(mapper_so)
-  cmapper = terralib.includec("stencil_mapper.h", {"-I", root_dir, "-I", runtime_dir})
+  cmapper = terralib.includec("stencil_mapper.h", include_dirs)
 end
 
 local min = regentlib.fmin
@@ -127,6 +140,8 @@ fspace point {
   input : DTYPE,
   output : DTYPE,
 }
+
+if not use_python_main then
 
 terra to_rect(lo : int2d, hi : int2d) : c.legion_rect_2d_t
   return c.legion_rect_2d_t {
@@ -275,6 +290,8 @@ function make_ghost_y_partition(is_complete)
   return ghost_y_partition
 end
 
+end -- not use_python_main
+
 local function off(i, x, y)
   return rexpr int2d { x = i.x + x, y = i.y + y } end
 end
@@ -345,7 +362,7 @@ local function make_stencil_interior(private, interior, radius)
 end
 
 local function make_stencil(radius)
-  local __demand(__cuda)
+  local --__demand(__cuda)
         task stencil(private : region(ispace(int2d), point),
                      interior : region(ispace(int2d), point),
                      xm : region(ispace(int2d), point),
@@ -465,6 +482,8 @@ where reads writes(r.{input, output}) do
   for x in r do x.output = v end
 end
 
+if not use_python_main then
+
 task main()
   var conf = common.read_config()
 
@@ -531,11 +550,11 @@ task main()
 
     __demand(__trace)
     for t = 0, tsteps do
-      -- __demand(__parallel)
+      -- __demand(__index_launch)
       for i = 0, nt2 do
         stencil(private[i], interior[i], pxm_in[i], pxp_in[i], pym_in[i], pyp_in[i], t == tprune)
       end
-      -- __demand(__parallel)
+      -- __demand(__index_launch)
       for i = 0, nt2 do
         increment(private[i], exterior[i], pxm_out[i], pxp_out[i], pym_out[i], pyp_out[i], t == tsteps - tprune - 1)
       end
@@ -546,6 +565,14 @@ task main()
     end
   end
 end
+
+else -- not use_python_main
+
+extern task main()
+main:set_task_id(2)
+
+end -- not use_python_main
+
 if os.getenv('SAVEOBJ') == '1' then
   local root_dir = arg[0]:match(".*/") or "./"
   local out_dir = (os.getenv('OBJNAME') and os.getenv('OBJNAME'):match('.*/')) or root_dir
@@ -555,7 +582,8 @@ if os.getenv('SAVEOBJ') == '1' then
   end
 
   if os.getenv('STANDALONE') == '1' then
-    os.execute('cp ' .. os.getenv('LG_RT_DIR') .. '/../bindings/regent/libregent.so ' .. out_dir)
+    os.execute('cp ' .. os.getenv('LG_RT_DIR') .. '/../bindings/regent/' ..
+        regentlib.binding_library .. ' ' .. out_dir)
   end
 
   local exe = os.getenv('OBJNAME') or "stencil"

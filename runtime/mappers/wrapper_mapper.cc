@@ -1,4 +1,4 @@
-/* Copyright 2018 Stanford University, NVIDIA Corporation
+/* Copyright 2019 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -1361,14 +1361,6 @@ namespace Legion {
       dmapper->select_task_sources(ctx, task, input, output);
     }
 
-    void WrapperMapper::create_task_temporary_instance(
-	const MapperContext              ctx,
-	const Task&                      task,
-	const CreateTaskTemporaryInput&  input,
-	CreateTaskTemporaryOutput& output){
-      dmapper->create_task_temporary_instance(ctx, task, input, output);
-    }
-
     void WrapperMapper::speculate(const MapperContext      ctx,
 	const Task&              task,
 	SpeculativeOutput& output){
@@ -1395,14 +1387,6 @@ namespace Legion {
       dmapper->select_inline_sources(ctx, inline_op, input, output);
     }
 
-    void WrapperMapper::create_inline_temporary_instance(
-	const MapperContext                ctx,
-	const InlineMapping&               inline_op,
-	const CreateInlineTemporaryInput&  input,
-	CreateInlineTemporaryOutput& output){
-      dmapper->create_inline_temporary_instance(ctx, inline_op, input, output);
-    }
-
     void WrapperMapper::report_profiling(const MapperContext         ctx,
 	const InlineMapping&        inline_op,
 	const InlineProfilingInfo&  input){
@@ -1423,14 +1407,6 @@ namespace Legion {
       dmapper->select_copy_sources(ctx, copy, input, output);
     }
 
-    void WrapperMapper::create_copy_temporary_instance(
-	const MapperContext              ctx,
-	const Copy&                      copy,
-	const CreateCopyTemporaryInput&  input,
-	CreateCopyTemporaryOutput& output){
-      dmapper->create_copy_temporary_instance(ctx, copy, input, output);
-    }
-
     void WrapperMapper::speculate(const MapperContext      ctx,
 	const Copy& copy,
 	SpeculativeOutput& output){
@@ -1443,26 +1419,11 @@ namespace Legion {
       dmapper->report_profiling(ctx, copy, input);
     }
 
-    void WrapperMapper::map_close(const MapperContext       ctx,
-	const Close&              close,
-	const MapCloseInput&      input,
-	MapCloseOutput&     output){
-      dmapper->map_close(ctx, close, input, output);
-    }
-
     void WrapperMapper::select_close_sources(const MapperContext        ctx,
 	const Close&               close,
 	const SelectCloseSrcInput&  input,
 	SelectCloseSrcOutput& output){
       dmapper->select_close_sources(ctx, close, input, output);
-    }
-
-    void WrapperMapper::create_close_temporary_instance(
-	const MapperContext               ctx,
-	const Close&                      close,
-	const CreateCloseTemporaryInput&  input,
-	CreateCloseTemporaryOutput& output){
-      dmapper->create_close_temporary_instance(ctx, close, input, output);
     }
 
     void WrapperMapper::report_profiling(const MapperContext       ctx,
@@ -1502,14 +1463,6 @@ namespace Legion {
 	const SelectReleaseSrcInput&   input,
 	SelectReleaseSrcOutput&  output){
       dmapper->select_release_sources(ctx, release, input, output);
-    }
-
-    void WrapperMapper::create_release_temporary_instance(
-	const MapperContext                 ctx,
-	const Release&                      release,
-	const CreateReleaseTemporaryInput&  input,
-	CreateReleaseTemporaryOutput& output){
-      dmapper->create_release_temporary_instance(ctx, release, input, output);
     }
 
     void WrapperMapper::speculate(const MapperContext         ctx,

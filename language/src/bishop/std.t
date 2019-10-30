@@ -1,4 +1,4 @@
--- Copyright 2018 Stanford University, NVIDIA Corporation
+-- Copyright 2019 Stanford University, NVIDIA Corporation
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -18,17 +18,18 @@
 local config = require("bishop/config")
 local log = require("bishop/log")
 
-local c = terralib.includecstring [[
+local std = {}
+
+std.config, std.args = config.args()
+
+local c = terralib.includecstring ([[
 #include "legion.h"
 #include "bishop_c.h"
 #include <stdio.h>
 #include <stdlib.h>
-]]
+]], {"-DLEGION_REDOP_COMPLEX"})
 
-local std = {}
 std.c = c
-
-std.config, std.args = config.args()
 
 function std.curry(f, a)
   return function(...) return f(a, ...) end

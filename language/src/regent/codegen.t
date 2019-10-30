@@ -1,4 +1,4 @@
--- Copyright 2018 Stanford University, NVIDIA Corporation
+-- Copyright 2019 Stanford University, NVIDIA Corporation
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -26,6 +26,7 @@ local std = require("regent/std")
 local symbol_table = require("regent/symbol_table")
 
 local log_codegen = log.make_logger("codegen")
+local log_privileges = log.make_logger("privileges")
 
 -- Configuration Variables
 
@@ -109,6 +110,7 @@ function context:new_local_scope(divergence, must_epoch, must_epoch_point, break
     break_label = break_label,
     context = self.context,
     runtime = self.runtime,
+    result  = self.result,
     ispaces = self.ispaces:new_local_scope(),
     regions = self.regions:new_local_scope(),
     lists_of_regions = self.lists_of_regions:new_local_scope(),
@@ -116,8 +118,8 @@ function context:new_local_scope(divergence, must_epoch, must_epoch_point, break
   }, context)
 end
 
-function context:new_task_scope(expected_return_type, constraints, orderings, leaf, task_meta, task, ctx, runtime)
-  assert(expected_return_type and task and ctx and runtime)
+function context:new_task_scope(expected_return_type, constraints, orderings, leaf, task_meta, task, ctx, runtime, result)
+  assert(expected_return_type and task and ctx and runtime and result)
   return setmetatable({
     variant = self.variant,
     expected_return_type = expected_return_type,
@@ -133,6 +135,7 @@ function context:new_task_scope(expected_return_type, constraints, orderings, le
     break_label = false,
     context = ctx,
     runtime = runtime,
+    result = result,
     ispaces = symbol_table.new_global_scope({}),
     regions = symbol_table.new_global_scope({}),
     lists_of_regions = symbol_table.new_global_scope({}),
@@ -256,7 +259,7 @@ end
 
 function context:add_region_root(region_type, logical_region, field_paths,
                                  privilege_field_paths, field_privileges, field_types,
-                                 field_ids, fields_are_scratch, physical_regions,
+                                 field_ids, field_id_array, fields_are_scratch, physical_regions,
                                  base_pointers, strides)
   if not self.regions then
     error("not in task context", 2)
@@ -278,6 +281,7 @@ function context:add_region_root(region_type, logical_region, field_paths,
         field_privileges = field_privileges,
         field_types = field_types,
         field_ids = field_ids,
+        field_id_array = field_id_array,
         fields_are_scratch = fields_are_scratch,
         physical_regions = physical_regions,
         base_pointers = base_pointers,
@@ -311,6 +315,7 @@ function context:add_region_subregion(region_type, logical_region,
         field_privileges = self:region(parent_region_type).field_privileges,
         field_types = self:region(parent_region_type).field_types,
         field_ids = self:region(parent_region_type).field_ids,
+        field_id_array = self:region(parent_region_type).field_id_array,
         fields_are_scratch = self:region(parent_region_type).fields_are_scratch,
         physical_regions = self:region(parent_region_type).physical_regions,
         base_pointers = self:region(parent_region_type).base_pointers,
@@ -374,7 +379,8 @@ end
 
 function context:add_list_of_regions(list_type, list_of_logical_regions,
                                      field_paths, privilege_field_paths,
-                                     field_privileges, field_types, field_ids, fields_are_scratch)
+                                     field_privileges, field_types,
+                                     field_ids, field_id_array, fields_are_scratch)
   if not self.lists_of_regions then
     error("not in task context", 2)
   end
@@ -383,7 +389,7 @@ function context:add_list_of_regions(list_type, list_of_logical_regions,
   end
   assert(list_of_logical_regions and
            field_paths and privilege_field_paths and
-           field_privileges and field_types and field_ids)
+           field_privileges and field_types and field_ids and field_id_array)
   self.lists_of_regions:insert(
     nil,
     list_type,
@@ -395,6 +401,7 @@ function context:add_list_of_regions(list_type, list_of_logical_regions,
         field_privileges = field_privileges,
         field_types = field_types,
         field_ids = field_ids,
+        field_id_array = field_id_array,
         fields_are_scratch = fields_are_scratch,
       }, list_of_regions))
 end
@@ -801,6 +808,76 @@ local function unpack_region(cx, region_expr, region_type, static_region_type)
   return expr.just(actions, r)
 end
 
+-- Utilities for importing raw C/C++ handles to Regent
+
+-- == sha256sum("import")[0:7]
+local IMPORT_SEMANTIC_TAG   = 0x68e67653
+-- == sha256sum("import")[8:15]
+local IMPORT_SEMANTIC_VALUE = 0xd93a28e2
+
+local function tag_imported(cx, handle)
+  local attach = nil
+  local handle_type = handle.type
+  if handle_type == std.c.legion_index_space_t then
+    attach = std.c.legion_index_space_attach_semantic_information
+  elseif handle_type == std.c.legion_logical_region_t then
+    attach = std.c.legion_logical_region_attach_semantic_information
+  elseif handle_type == std.c.legion_logical_partition_t then
+    attach = std.c.legion_logical_partition_attach_semantic_information
+  else
+    assert(false, "unreachable")
+  end
+  return quote
+    do
+      var result : uint32 = [IMPORT_SEMANTIC_VALUE]
+      var result_size : uint64 = [sizeof(uint32)]
+      [attach]([cx.runtime], [handle], [IMPORT_SEMANTIC_TAG],
+        [&opaque](&result), result_size, false)
+    end
+  end
+end
+
+local function check_imported(cx, node, handle)
+  local retrieve = nil
+  local handle_type = handle.type
+  if handle_type == std.c.legion_index_space_t then
+    retrieve = std.c.legion_index_space_retrieve_semantic_information
+  elseif handle_type == std.c.legion_logical_region_t then
+    retrieve = std.c.legion_logical_region_retrieve_semantic_information
+  elseif handle_type == std.c.legion_logical_partition_t then
+    retrieve = std.c.legion_logical_partition_retrieve_semantic_information
+  else
+    assert(false, "unreachable")
+  end
+  return quote
+    do
+      var result : &opaque
+      var result_size : uint64 = 0
+      [retrieve]([cx.runtime], [handle], [IMPORT_SEMANTIC_TAG],
+        &result, &result_size, true, true)
+      std.assert_error(result_size == 0,
+        [get_source_location(node) ..
+          ": cannot import a handle that is already imported"])
+    end
+  end
+end
+
+local function eq_struct(st, a, b)
+  local expr = `(true)
+  local entries = st:getentries()
+  for _, entry in ipairs(entries) do
+    local entry_name = entry[1] or entry.field
+    assert(type(entry_name) == "string")
+    local entry_type = entry[2] or entry.type
+    if entry_type:isstruct() then
+      expr = `([expr] and [eq_struct(entry_type, `([a].[entry_name]), `([b].[entry_name]))])
+    else
+      expr = `([expr] and ([a].[entry_name] == [b].[entry_name]))
+    end
+  end
+  return expr
+end
+
 local value = {}
 value.__index = value
 
@@ -835,6 +912,10 @@ function value:new(node, value_expr, value_type, field_path)
   return values.value(node, value_expr, value_type, field_path)
 end
 
+function value:address()
+  assert(false)
+end
+
 function value:read(cx)
   local actions = self.expr.actions
   local result = self.expr.value
@@ -855,7 +936,7 @@ end
 function value:__get_field(cx, node, value_type, field_name)
   if value_type:ispointer() then
     return values.rawptr(node, self:read(cx), value_type, data.newtuple(field_name))
-  elseif std.is_index_type(value_type) then
+  elseif std.is_index_type(std.as_read(value_type)) then
     return self:new(node, self.expr, self.value_type, self.field_path .. data.newtuple("__ptr", field_name))
   elseif std.is_bounded_type(value_type) then
     assert(std.get_field(value_type.index_type.base_type, field_name))
@@ -1191,7 +1272,8 @@ function ref:__ref(cx, expr_type)
         local field_type, base_pointer, stride, field_path = unpack(field)
         local vec
         if std.type_eq(field_type, std.ptr) then
-          vec = expr_type.impl_type
+          assert(std.is_vptr(expr_type))
+          vec = expr_type.vec_type
         else
           vec = vector(field_type, std.as_read(expr_type).N)
         end
@@ -1201,6 +1283,10 @@ function ref:__ref(cx, expr_type)
   end
 
   return actions, values, value_type, field_paths, field_types
+end
+
+function ref:address()
+  return values.value(self.node, self.expr, self.value_type)
 end
 
 function ref:read(cx, expr_type)
@@ -1227,6 +1313,9 @@ function ref:read(cx, expr_type)
            local align = sizeof(field_type)
            if aligned_instances then
              align = sizeof(vector(field_type, expr_type.N))
+           end
+           if std.is_vptr(expr_type) and std.type_eq(field_type, std.ptr) then
+            result = `([result].value)
            end
            return quote
              [result] = terralib.attrload(&[field_value], {align = [align]})
@@ -1256,7 +1345,6 @@ function ref:write(cx, value, expr_type)
            result = `([result].[field_name])
          end
          if std.is_vptr(expr_type) and std.type_eq(field_type, std.ptr) then
-           field_value = `([field_value].value)
            result = `([result].__ptr.value)
          end
          if expr_type and
@@ -1283,12 +1371,12 @@ local reduction_fold = {
   ["+"] = "+",
   ["-"] = "-",
   ["*"] = "*",
-  ["/"] = "*", -- FIXME: Need to fold with "/" for RW instances.
+  ["/"] = "/", -- FIXME: Need to fold with "/" for RW instances.
   ["max"] = "max",
   ["min"] = "min",
 }
 
-function ref:reduce(cx, value, op, expr_type)
+function ref:reduce(cx, value, op, expr_type, atomic)
   if expr_type and (std.is_ref(expr_type) or std.is_rawref(expr_type)) then
     expr_type = std.as_read(expr_type)
   end
@@ -1334,10 +1422,41 @@ function ref:reduce(cx, value, op, expr_type)
                [quote_vector_binary_op(fold_op, sym, result, expr_type)],
                {align = [align]})
            end
+         -- TODO: Users should be able to override atomic reduction operator for non-primitive types
+         elseif expr_type:isarray() then
+           local N = expr_type.N
+           if cx.variant:is_openmp() and atomic then
+             return quote
+               for i = 0, N do
+                 [openmphelper.generate_atomic_update(fold_op, expr_type.type)](&([field_value][i]), result[i])
+               end
+             end
+           elseif cx.variant:is_cuda() and atomic then
+             return quote
+               for i = 0, N do
+                 [cudahelper.generate_atomic_update(fold_op, expr_type.type)](&([field_value][i]), result[i])
+               end
+             end
+           else
+             return quote
+               for i = 0, N do
+                 [field_value][i] = [std.quote_binary_op(fold_op, `(field_value[i]), `(result[i]))]
+               end
+             end
+           end
          else
-           return quote
-             [field_value] = [std.quote_binary_op(
-                                fold_op, field_value, result)]
+           if cx.variant:is_openmp() and atomic then
+             return quote
+               [openmphelper.generate_atomic_update(fold_op, value_type)](&[field_value], result)
+             end
+           elseif cx.variant:is_cuda() and atomic then
+             return quote
+               [cudahelper.generate_atomic_update(fold_op, value_type)](&[field_value], result)
+             end
+           else
+             return quote
+               [field_value] = [std.quote_binary_op(fold_op, field_value, result)]
+             end
            end
          end
       end)]
@@ -1350,6 +1469,11 @@ function ref:get_field(cx, node, field_name, field_type, value_type)
   value_type = std.as_read(value_type)
 
   local result = self:unpack(cx, value_type, field_name, field_type)
+  if value_type:isstruct() and value_type.__no_field_slicing then
+    local value_actions, value = result:__ref(cx)
+    assert(#value == 1)
+    result = values.rawref(result.node, expr.just(value_actions, value[1]), &value_type)
+  end
   return result:__get_field(cx, node, value_type, field_name)
 end
 
@@ -1465,6 +1589,10 @@ function aref:get_index(cx, node, index, result_type)
   return values.rawref(node, result, &result_type, data.newtuple())
 end
 
+function aref:address()
+  return values.value(self.node, self.expr, self.value_type)
+end
+
 function aref:read(cx, expr_type)
   local value_type = std.as_read(self.node.expr_type)
   assert(std.type_eq(value_type, std.as_read(expr_type)))
@@ -1536,6 +1664,10 @@ function vref:__unpack(cx)
     end)
 
   return field_paths, field_types, region_types, base_pointers_by_region
+end
+
+function vref:address()
+  assert(false)
 end
 
 function vref:read(cx, expr_type)
@@ -1863,6 +1995,12 @@ function rawref:__ref(cx)
   return expr.just(actions, result)
 end
 
+function rawref:address()
+  local actions = self.expr.actions
+  local result = `(&[self.expr.value])
+  return values.value(self.node, expr.just(actions, result), self.value_type)
+end
+
 function rawref:read(cx)
   return self:__ref(cx)
 end
@@ -1880,7 +2018,7 @@ function rawref:write(cx, value)
   return expr.just(actions, quote end)
 end
 
-function rawref:reduce(cx, value, op)
+function rawref:reduce(cx, value, op, expr_type, atomic)
   local ref_expr = self:__ref(cx)
   local cleanup = make_cleanup_item(cx, ref_expr.value, self.value_type.type)
   local value_expr = value:read(cx)
@@ -1888,33 +2026,53 @@ function rawref:reduce(cx, value, op)
   local ref_type = std.get_field_path(self.value_type.type, self.field_path)
   local value_type = std.as_read(value.value_type)
 
-  local reduce = ast.typed.expr.Binary {
-    op = op,
-    lhs = ast.typed.expr.Internal {
-      value = values.value(self.node, expr.just(quote end, ref_expr.value), ref_type),
-      expr_type = ref_type,
-      annotations = ast.default_annotations(),
-      span = ast.trivial_span(),
-    },
-    rhs = ast.typed.expr.Internal {
-      value = values.value(value.node, expr.just(quote end, value_expr.value), value_type),
-      expr_type = value_type,
-      annotations = ast.default_annotations(),
-      span = ast.trivial_span(),
-    },
-    expr_type = ref_type,
-    annotations = ast.default_annotations(),
-    span = ast.trivial_span(),
-  }
-
-  local reduce_expr = codegen.expr(cx, reduce):read(cx, ref_type)
-
   local actions = quote
     [value_expr.actions];
     [ref_expr.actions];
-    [reduce_expr.actions];
-    [cleanup];
-    [ref_expr.value] = [reduce_expr.value]
+  end
+
+  local fold_op = reduction_fold[op]
+
+  if cx.variant:is_openmp() and atomic then
+    actions = quote
+      [actions];
+      [openmphelper.generate_atomic_update(fold_op, self.value_type.type)](&[ref_expr.value], [value_expr.value])
+      [cleanup];
+    end
+  elseif cx.variant:is_cuda() and atomic then
+    actions = quote
+      [actions];
+      [cudahelper.generate_atomic_update(fold_op, self.value_type.type)](&[ref_expr.value], [value_expr.value])
+      [cleanup];
+    end
+  else
+    local reduce = ast.typed.expr.Binary {
+      op = op,
+      lhs = ast.typed.expr.Internal {
+        value = values.value(self.node, expr.just(quote end, ref_expr.value), ref_type),
+        expr_type = ref_type,
+        annotations = ast.default_annotations(),
+        span = ast.trivial_span(),
+      },
+      rhs = ast.typed.expr.Internal {
+        value = values.value(value.node, expr.just(quote end, value_expr.value), value_type),
+        expr_type = value_type,
+        annotations = ast.default_annotations(),
+        span = ast.trivial_span(),
+      },
+      expr_type = ref_type,
+      annotations = ast.default_annotations(),
+      span = ast.trivial_span(),
+    }
+
+    local reduce_expr = codegen.expr(cx, reduce):read(cx, ref_type)
+
+    actions = quote
+      [actions];
+      [reduce_expr.actions];
+      [cleanup];
+      [ref_expr.value] = [reduce_expr.value]
+    end
   end
   return expr.just(actions, quote end)
 end
@@ -2011,6 +2169,19 @@ function codegen.expr_constant(cx, node)
   else
     value = terralib.constant(value_type, value)
   end
+
+  return values.value(
+    node,
+    expr.just(emit_debuginfo(node), value),
+    value_type)
+end
+
+function codegen.expr_global(cx, node)
+  local value = node.value
+  local value_type = std.as_read(node.expr_type)
+
+  assert(terralib.isglobalvar(value))
+  assert(std.type_eq(value.type, value_type))
 
   return values.value(
     node,
@@ -2307,6 +2478,7 @@ function codegen.expr_index_access(cx, node)
             cx:list_of_regions(value_type).field_privileges,
             cx:list_of_regions(value_type).field_types,
             cx:list_of_regions(value_type).field_ids,
+            cx:list_of_regions(value_type).field_id_array,
             cx:list_of_regions(value_type).fields_are_scratch,
             false,
             false,
@@ -2319,6 +2491,7 @@ function codegen.expr_index_access(cx, node)
             cx:list_of_regions(value_type).field_privileges,
             cx:list_of_regions(value_type).field_types,
             cx:list_of_regions(value_type).field_ids,
+            cx:list_of_regions(value_type).field_id_array,
             cx:list_of_regions(value_type).fields_are_scratch)
         else
           assert(false)
@@ -2361,11 +2534,14 @@ function codegen.expr_index_access(cx, node)
           cx:list_of_regions(value_type).field_privileges,
           cx:list_of_regions(value_type).field_types,
           cx:list_of_regions(value_type).field_ids,
+          cx:list_of_regions(value_type).field_id_array,
           cx:list_of_regions(value_type).fields_are_scratch)
       end
       return values.value(node, expr.just(actions, list), list_type)
     end
   elseif std.is_region(value_type) then
+    -- We still need to do codegen for the value to get the metadata correct
+    local value = codegen.expr(cx, node.value)
     local index = codegen.expr(cx, node.index):read(cx, index_type)
 
     local pointer_type = node.expr_type.pointer_type
@@ -2379,7 +2555,26 @@ function codegen.expr_index_access(cx, node)
         index.actions,
         `([pointer_type] { __ptr = [pointer_type.index_type] { __ptr = [point].__ptr }}))
     end
-    return values.ref(node, pointer, pointer_type)
+    return values.ref(node, pointer, pointer_type, nil, std.is_bounded_type(index_type))
+  elseif std.is_transform_type(value_type) then
+    local value = codegen.expr(cx, node.value):read(cx, value_type)
+    local index = codegen.expr(cx, node.index):read(cx, index_type)
+    local actions = quote
+      [value.actions];
+      [index.actions];
+      [emit_debuginfo(node)]
+    end
+    if bounds_checks then
+      actions = quote
+        [actions];
+        std.assert_error([index].value.__ptr.x >= 0 and [index].value.__ptr.x < [value_type.M],
+          [get_source_location(node) .. ": array access to " .. tostring(value_type) .. " is out-of-bounds"])
+        std.assert_error([index].value.__ptr.y >= 0 and [index].value.__ptr.y < [value_type.N],
+          [get_source_location(node) .. ": array access to " .. tostring(value_type) .. " is out-of-bounds"])
+      end
+    end
+    return values.rawref(node, expr.just(actions,
+          `([value].value.impl.trans[ [index].value.__ptr.x ][ [index].value.__ptr.y ])), &expr_type)
   else
     local index = codegen.expr(cx, node.index):read(cx)
     return codegen.expr(cx, node.value):get_index(cx, node, index, expr_type)
@@ -2425,8 +2620,10 @@ local function expr_call_setup_task_args(
       local param_type = param_types[i] -- arg has already been cast to param_type
       local size_actions, size_value = std.compute_serialized_size(
         param_type, arg)
-      task_args_setup:insert(size_actions)
-      task_args_setup:insert(quote [size] = [size] + [size_value] end)
+      if size_actions then
+        task_args_setup:insert(size_actions)
+        task_args_setup:insert(quote [size] = [size] + [size_value] end)
+      end
    end
   end
 
@@ -2453,8 +2650,8 @@ local function expr_call_setup_task_args(
          function(i, arg_type)
            if std.is_future(arg_type) then
              return quote
-               params_map_value[ [math.floor((i-1)/64)] ] =
-                 params_map_value[ [math.floor((i-1)/64)] ] + [2ULL ^ math.fmod(i-1, 64)]
+               params_map_value[(uint64([i])-1)/64] =
+                 params_map_value[(uint64([i])-1)/64] + (uint64(1) << ((uint64([i])-1)%64))
              end
            end
            return quote end
@@ -2491,12 +2688,40 @@ local function expr_call_setup_task_args(
     local arg_type = arg_types[i]
     local param_type = param_types[i]
 
-    local field_paths, _ = std.flatten_struct_fields(param_type:fspace())
-    for j, field_path in pairs(field_paths) do
-      local arg_field_id = cx:region_or_list(arg_type):field_id(field_path)
-      local param_field_id = param_field_ids[i][j]
+    local arg_field_id_array = cx:region_or_list(arg_type).field_id_array
+    local param_field_id_array = param_field_ids[i]
+
+    local arg_fs_type = arg_type:fspace()
+    local param_fs_type = param_type:fspace()
+
+    if std.type_eq(arg_fs_type, param_fs_type) then
       task_args_setup:insert(
-        quote [fixed_ptr].[param_field_id] = [arg_field_id] end)
+        quote [fixed_ptr].[param_field_id_array] = [arg_field_id_array] end)
+    else
+      -- If we hit this branch, it means that the region argument was created by
+      -- a projection, so we need to copy field ids individually due to potential
+      -- field reordering.
+
+      local arg_field_paths = std.flatten_struct_fields(arg_fs_type)
+      local field_id_index = data.dict(data.zip(arg_field_paths:map(data.hash),
+                                                data.range(0, #arg_field_paths)))
+      local param_field_paths = std.flatten_struct_fields(param_fs_type)
+      assert(#param_field_paths == #arg_field_paths)
+      local field_id_array_type = std.get_field(params_struct_type, param_field_id_array)
+      assert(field_id_array_type.N == #arg_field_paths)
+      local terra copy_field_ids([fixed_ptr], arg_field_id_array : &field_id_array_type)
+        [data.zip(param_field_paths, data.range(0, #param_field_paths)):map(
+            function(pair)
+              local param_field_path, param_i = unpack(pair)
+              local arg_i = field_id_index[param_field_path:hash()]
+              return
+                quote [fixed_ptr].[param_field_id_array][ [param_i] ] =
+                      (@arg_field_id_array)[ [arg_i] ]
+                end
+            end)]
+      end
+      copy_field_ids:setinlined(false)
+      task_args_setup:insert(quote [copy_field_ids]([fixed_ptr], &[arg_field_id_array]) end)
     end
   end
 
@@ -2654,17 +2879,25 @@ local function strip_casts(node)
   return node
 end
 
-local function make_partition_projection_functor(cx, expr, loop_index, color_space)
-  -- We assume that there's only one variable, and that it's the loop index.
-
+local function make_partition_projection_functor(cx, expr, loop_index, color_space,
+                                                 free_vars_setup, requirement)
+  if expr:is(ast.typed.expr.Projection) then
+    expr = expr.region
+  end
   assert(expr:is(ast.typed.expr.IndexAccess))
 
-  local index = strip_casts(expr.index)
-
-  if index:is(ast.typed.expr.ID) then
-    assert(index.value == loop_index)
+  -- Strip the index for the purpose of checking if this is the
+  -- identity projection functor.
+  local stripped_index = strip_casts(expr.index)
+  if stripped_index:is(ast.typed.expr.ID) and
+    stripped_index.value == loop_index
+  then
     return 0 -- Identity projection functor.
   end
+
+  -- But keep the unstripped index for all other purposes...
+  local index = expr.index
+  local index_type = std.as_read(index.expr_type)
 
   local point = terralib.newsymbol(c.legion_domain_point_t, "point")
 
@@ -2675,6 +2908,10 @@ local function make_partition_projection_functor(cx, expr, loop_index, color_spa
     symbol_setup = quote
       var [symbol] = [symbol_type]({ __ptr = [symbol_type.index_type]([point]) })
     end
+  elseif std.is_index_type(symbol_type) then
+    symbol_setup = quote
+      var [symbol] = [symbol_type]([point])
+    end
   else
     -- Otherwise symbol_type has to be some simple integral type.
     assert(symbol_type:isintegral())
@@ -2683,27 +2920,116 @@ local function make_partition_projection_functor(cx, expr, loop_index, color_spa
     end
   end
 
-  -- Again, if it's a number it has to be converted back through an index type.
-  local index_type = std.as_read(index.expr_type)
-  if index_type:isintegral() then
-    index_type = int1d
-  end
-
   -- Generate a projection functor that evaluates `expr`.
   local value = codegen.expr(cx, index):read(cx)
-  local terra partition_functor(runtime : c.legion_runtime_t,
-                                parent : c.legion_logical_partition_t,
-                                [point],
-                                launch : c.legion_domain_t)
-    [symbol_setup];
-    [value.actions];
-    var index : index_type = [value.value];
-    var subregion = c.legion_logical_partition_get_logical_subregion_by_color_domain_point(
-      runtime, parent, index)
-    return subregion
+
+  if requirement and free_vars_setup then
+    free_vars_setup:insert(quote
+      [value.actions];
+    end)
+
+    local terra partition_functor(runtime : c.legion_runtime_t,
+                                  mappable : c.legion_mappable_t,
+                                  idx : uint,
+                                  parent : c.legion_logical_partition_t,
+                                  [point])
+      var [requirement];
+      var mappable_type = c.legion_mappable_get_type(mappable)
+      if mappable_type == c.TASK_MAPPABLE then
+        var task = c.legion_mappable_as_task(mappable)
+        [requirement] = c.legion_task_get_requirement(task, idx)
+      elseif mappable_type == c.COPY_MAPPABLE then
+        var copy = c.legion_mappable_as_copy(mappable)
+        [requirement] = c.legion_copy_get_requirement(copy, idx)
+      elseif mappable_type == c.FILL_MAPPABLE then
+        var fill = c.legion_mappable_as_fill(mappable)
+        std.assert(idx == 0, "projection index for fill is not zero")
+        [requirement] = c.legion_fill_get_requirement(fill) 
+      elseif mappable_type == c.INLINE_MAPPABLE then
+        var mapping = c.legion_mappable_as_inline_mapping(mappable)
+        std.assert(idx == 0, "projection index for inline mapping is not zero")
+        [requirement] = c.legion_inline_get_requirement(mapping)
+      else
+        std.assert(false, "unhandled mappable type")
+      end
+      [symbol_setup];
+      [free_vars_setup];
+      var index : index_type = [value.value];
+      var subregion = c.legion_logical_partition_get_logical_subregion_by_color_domain_point(
+        runtime, parent, index)
+      return subregion
+    end
+
+    return std.register_projection_functor(false, false, 0, nil, partition_functor)
+
+  -- create fill projection functor without mappable
+  -- create projection functors with no preamble or free variables without mappable
+  else
+    local terra partition_functor(runtime : c.legion_runtime_t,
+                                  parent : c.legion_logical_partition_t,
+                                  [point],
+                                  launch : c.legion_domain_t)
+      [symbol_setup];
+      [value.actions];
+      var index : index_type = [value.value];
+      var subregion = c.legion_logical_partition_get_logical_subregion_by_color_domain_point(
+        runtime, parent, index)
+      return subregion
+    end
+
+    return std.register_projection_functor(false, true, 0, nil, partition_functor)
+  end
+end
+
+local function is_identity_projection(expr, loop_index)
+  if expr:is(ast.typed.expr.Projection) then
+    expr = expr.region
+  end
+  assert(expr:is(ast.typed.expr.IndexAccess))
+
+  -- Strip the index for the purpose of checking if this is the
+  -- identity projection functor.
+  local stripped_index = strip_casts(expr.index)
+  return stripped_index:is(ast.typed.expr.ID) and stripped_index.value == loop_index
+end
+
+local function add_region_fields(cx, arg_type, field_paths, field_types, launcher, index)
+  local add_field = c.legion_task_launcher_add_field
+  if index then
+    add_field = c.legion_index_launcher_add_field
   end
 
-  return std.register_projection_functor(false, true, 0, nil, partition_functor)
+  local field_id_index = data.newmap()
+  for i, f in ipairs(cx:region(arg_type).field_paths) do
+    field_id_index[f] = i - 1
+  end
+
+  -- TODO: Would be good to take field_id_array by pointer, but that
+  -- would require that the field ID array always be stored in memory
+  -- (i.e. not a constant or r-value expression).
+  local terra add_fields([launcher], requirement : uint, field_id_array : &c.legion_field_id_t[#cx:region(arg_type).field_paths])
+    [data.zip(field_paths, field_types):map(
+       function(field)
+         local field_path, field_type = unpack(field)
+         local field_id = `(@field_id_array)[ [field_id_index[field_path:hash()] ] ]
+         if std.is_regent_array(field_type) then
+           return quote
+             for idx = 0, [field_type.N] do
+               add_field(
+                 [launcher], requirement, [field_id] + idx, true)
+             end
+           end
+         else
+           return quote
+             add_field(
+               [launcher], requirement, [field_id], true)
+           end
+         end
+       end)]
+  end
+  add_fields:setinlined(false)
+
+  return add_fields
 end
 
 local function expr_call_setup_region_arg(
@@ -2712,11 +3038,6 @@ local function expr_call_setup_region_arg(
     std.find_task_privileges(param_type, task)
   local privilege_modes = privileges:map(std.privilege_mode)
   local coherence_modes = coherences:map(std.coherence_mode)
-
-  local add_field = c.legion_task_launcher_add_field
-  if index then
-    add_field = c.legion_index_launcher_add_field
-  end
 
   local add_flags = c.legion_task_launcher_add_flags
   if index then
@@ -2777,27 +3098,12 @@ local function expr_call_setup_region_arg(
     requirement_args:insertall(
       {coherence_mode, parent_region, 0, false})
 
+    local add_fields = add_region_fields(cx, arg_type, field_paths, field_types, launcher, index)
+
     args_setup:insert(
       quote
         var [requirement] = [add_requirement]([requirement_args])
-        [data.zip(field_paths, field_types):map(
-           function(field)
-             local field_path, field_type = unpack(field)
-             local field_id = cx:region(arg_type):field_id(field_path)
-             if std.is_regent_array(field_type) then
-               return quote
-                 for idx = 0, [field_type.N] do
-                   add_field(
-                     [launcher], [requirement], [field_id] + idx, true)
-                 end
-               end
-             else
-               return quote
-                 add_field(
-                   [launcher], [requirement], [field_id], true)
-               end
-             end
-           end)]
+        [add_fields]([launcher], [requirement], &[cx:region(arg_type).field_id_array])
         [add_flags]([launcher], [requirement], [flag])
       end)
   end
@@ -2962,13 +3268,63 @@ local function expr_call_setup_list_of_regions_arg(
   end
 end
 
+local function index_launch_free_var_setup(free_vars)
+  local free_vars_struct = terralib.types.newstruct()
+  free_vars_struct.entries = terralib.newlist()
+  for i, symbol in ipairs(free_vars) do
+    free_vars_struct.entries:insert({
+      field = tostring(symbol),
+      type = symbol:gettype(),
+    })
+  end
+
+  local free_vars_setup = terralib.newlist()
+  local get_args = c.legion_index_launcher_get_projection_args
+  local proj_args_get = terralib.newsymbol(free_vars_struct, "proj_args")
+  local reg_requirement = terralib.newsymbol(c.legion_region_requirement_t, "requirement")
+  free_vars_setup:insert(
+    quote
+      var [proj_args_get] = @[&free_vars_struct]([get_args]([reg_requirement], nil))
+    end)
+  for i, symbol in ipairs(free_vars) do
+    free_vars_setup:insert(
+      quote
+        var [symbol:getsymbol()] = [proj_args_get].[tostring(symbol)]
+      end)
+  end
+  return free_vars_setup, free_vars_struct, reg_requirement
+end
+
 local function expr_call_setup_partition_arg(
-    cx, task, arg_value, arg_type, param_type, partition, loop_index, launcher, index, args_setup)
+    cx, task, arg_value, arg_type, param_type, partition, loop_index, launcher, index, args_setup, free_vars, loop_vars_setup)
   assert(index)
   local privileges, privilege_field_paths, privilege_field_types, coherences, flags =
     std.find_task_privileges(param_type, task)
   local privilege_modes = privileges:map(std.privilege_mode)
   local coherence_modes = coherences:map(std.coherence_mode)
+
+  local set_args = c.legion_index_launcher_set_projection_args
+  local free_vars_setup, free_vars_struct, reg_requirement =
+    index_launch_free_var_setup(free_vars)
+
+  free_vars_setup:insertall(loop_vars_setup)
+
+  local needs_non_identity_functor = not is_identity_projection(arg_value, loop_index)
+  local proj_args_set = nil
+  if needs_non_identity_functor and #free_vars > 0 then
+    proj_args_set = terralib.newsymbol(free_vars_struct, "proj_args")
+    args_setup:insert(
+      quote
+        var [proj_args_set]
+      end)
+    for i, symbol in ipairs(free_vars) do
+      args_setup:insert(
+        quote
+          [proj_args_set].[tostring(symbol)] = [symbol:getsymbol()]
+        end)
+    end
+  end
+
   local parent_region =
     cx:region(cx:region(arg_type).root_region_type).logical_region
 
@@ -2999,7 +3355,7 @@ local function expr_call_setup_partition_arg(
     end
     assert(add_requirement)
 
-    local projection_functor = make_partition_projection_functor(cx, arg_value, loop_index)
+    local projection_functor = make_partition_projection_functor(cx, arg_value, loop_index, false, free_vars_setup, reg_requirement)
 
     local requirement = terralib.newsymbol(uint, "requirement")
     local requirement_args = terralib.newlist({
@@ -3013,30 +3369,20 @@ local function expr_call_setup_partition_arg(
     requirement_args:insertall(
       {coherence_mode, `([parent_region].impl), 0, false})
 
+    local add_fields = add_region_fields(cx, arg_type, field_paths, field_types, launcher, true)
+
     args_setup:insert(
       quote
-      var [requirement] =
-        [add_requirement]([requirement_args])
-        [data.zip(field_paths, field_types):map(
-           function(field)
-             local field_path, field_type = unpack(field)
-             local field_id = cx:region(arg_type):field_id(field_path)
-             if std.is_regent_array(field_type) then
-               return quote
-                 for idx = 0, [field_type.N] do
-                   c.legion_index_launcher_add_field(
-                     [launcher], [requirement], [field_id] + idx, true)
-                 end
-               end
-             else
-               return quote
-                 c.legion_index_launcher_add_field(
-                   [launcher], [requirement], [field_id], true)
-               end
-             end
-           end)]
-      c.legion_index_launcher_add_flags([launcher], [requirement], [flag])
+        var [requirement] = [add_requirement]([requirement_args])
+        [add_fields]([launcher], [requirement], &[cx:region(arg_type).field_id_array])
+        c.legion_index_launcher_add_flags([launcher], [requirement], [flag])
       end)
+    if proj_args_set ~= nil then
+      args_setup:insert(
+        quote
+          [set_args]([launcher], [requirement], [&opaque](&[proj_args_set]), terralib.sizeof(free_vars_struct), false)
+        end)
+    end
   end
 end
 
@@ -3316,6 +3662,7 @@ local lift_cast_to_futures = terralib.memoize(
         replicable = false, 
       },
       region_divergence = false,
+      metadata = false,
       prototype = task,
       annotations = ast.default_annotations(),
       span = ast.trivial_span(),
@@ -3423,7 +3770,7 @@ function codegen.expr_raw_context(cx, node)
 end
 
 function codegen.expr_raw_fields(cx, node)
-  local region = codegen.expr(cx, node.region):read(cx)
+  local region = codegen.expr_region_root(cx, node.region):read(cx)
   local region_type = std.as_read(node.region.expr_type)
   local expr_type = std.as_read(node.expr_type)
 
@@ -3451,7 +3798,7 @@ function codegen.expr_raw_fields(cx, node)
 end
 
 function codegen.expr_raw_physical(cx, node)
-  local region = codegen.expr(cx, node.region):read(cx)
+  local region = codegen.expr_region_root(cx, node.region):read(cx)
   local region_type = std.as_read(node.region.expr_type)
   local expr_type = std.as_read(node.expr_type)
 
@@ -3483,6 +3830,14 @@ function codegen.expr_raw_runtime(cx, node)
   return values.value(
     node,
     expr.just(emit_debuginfo(node), cx.runtime),
+    value_type)
+end
+
+function codegen.expr_raw_task(cx, node)
+  local value_type = std.as_read(node.expr_type)
+  return values.value(
+    node,
+    expr.just(emit_debuginfo(node), cx.task),
     value_type)
 end
 
@@ -3690,6 +4045,14 @@ function codegen.expr_static_cast(cx, node)
   local actions = quote
     [value.actions];
     [emit_debuginfo(node)]
+  end
+  if std.is_partition(expr_type) then
+    local result = terralib.newsymbol(expr_type)
+    actions = quote
+      [actions];
+      var [result] = [expr_type] { impl = [value.value].impl }
+    end
+    return values.value(node, expr.just(actions, result), expr_type)
   end
   local input = value.value
   local result
@@ -3924,6 +4287,7 @@ function codegen.expr_ispace(cx, node)
   actions = quote
     [actions]
     var [i] = [ispace_type]{ impl = [is] }
+    [tag_imported(cx, is)]
     [bounds_actions]
   end
 
@@ -3959,6 +4323,13 @@ function codegen.expr_region(cx, node)
       end
       return my_field_id
     end)
+
+  -- Hack: allocate a buffer here, because we don't want these to live
+  -- on the stack and we can't take an address to constant memory.
+  local field_id_array_buffer = terralib.newsymbol(&c.legion_field_id_t[#field_ids], "field_ids")
+  local field_id_array = `(@[field_id_array_buffer])
+  local field_id_array_initializer = terralib.constant(`arrayof(c.legion_field_id_t, [field_ids]))
+
   local fields_are_scratch = field_paths:map(function(_) return false end)
   local physical_regions = field_paths:map(function(_) return pr end)
 
@@ -3979,15 +4350,18 @@ function codegen.expr_region(cx, node)
                      data.dict(data.zip(field_paths:map(data.hash), field_privileges)),
                      data.dict(data.zip(field_paths:map(data.hash), field_types)),
                      data.dict(data.zip(field_paths:map(data.hash), field_ids)),
+                     field_id_array,
                      data.dict(data.zip(field_paths:map(data.hash), fields_are_scratch)),
                      data.dict(data.zip(field_paths:map(data.hash), physical_regions)),
                      data.dict(data.zip(field_paths:map(data.hash), base_pointers)),
                      data.dict(data.zip(field_paths:map(data.hash), strides)))
 
-  local fs_naming_actions
+  local fs_naming_actions = quote
+    c.legion_field_space_attach_name([cx.runtime], [fs], [tostring(fspace_type)], false)
+  end
   if fspace_type:isstruct() then
     fs_naming_actions = quote
-      c.legion_field_space_attach_name([cx.runtime], [fs], [fspace_type.name], false)
+      [fs_naming_actions]
       [data.flatmap(
          function(field)
            local field_path, field_type, field_id = unpack(field)
@@ -4008,7 +4382,12 @@ function codegen.expr_region(cx, node)
          data.zip(field_paths, field_types, field_ids))]
     end
   else
-    fs_naming_actions = quote end
+    assert(#field_ids == 1)
+    fs_naming_actions = quote
+      [fs_naming_actions]
+      c.legion_field_id_attach_name(
+        [cx.runtime], [fs], [field_ids[1]], "__value", false)
+    end
   end
 
   actions = quote
@@ -4017,6 +4396,9 @@ function codegen.expr_region(cx, node)
     var [is] = [ispace.value].impl
     var [fs] = c.legion_field_space_create([cx.runtime], [cx.context])
     var fsa = c.legion_field_allocator_create([cx.runtime], [cx.context],  [fs]);
+    var [field_id_array_buffer] = [&c.legion_field_id_t[#field_ids]](c.malloc([#field_ids] * [terralib.sizeof(c.legion_field_id_t)]))
+    regentlib.assert([#field_ids] == 0 or [field_id_array_buffer] ~= nil, "failed allocation in field ID array buffer")
+    [field_id_array] = [field_id_array_initializer]
     [data.flatmap(
        function(field)
          local field_type, field_id = unpack(field)
@@ -4038,6 +4420,7 @@ function codegen.expr_region(cx, node)
     c.legion_field_allocator_destroy(fsa)
     var [lr] = c.legion_logical_region_create([cx.runtime], [cx.context], [is], [fs], true)
     var [r] = [region_type]{ impl = [lr] }
+    [tag_imported(cx, lr)]
   end
   local tag = terralib.newsymbol(c.legion_mapping_tag_id_t, "tag")
   if not cx.variant:get_config_options().inner then
@@ -4153,6 +4536,7 @@ function codegen.expr_partition(cx, node)
     var [ip] = [index_partition_create]([args])
     var [lp] = c.legion_logical_partition_create(
       [cx.runtime], [cx.context], [region.value].impl, [ip])
+    [tag_imported(cx, lp)]
   end
 
   return values.value(
@@ -4202,42 +4586,53 @@ function codegen.expr_partition_equal(cx, node)
 
     actions = quote
       [actions]
+      var [ip]
       var region_domain = c.legion_index_space_get_domain(
         [cx.runtime], [region.value].impl.index_space)
-      var region_rect = [domain_get_rect](region_domain)
       var color_domain = c.legion_index_space_get_domain(
         [cx.runtime], [colors.value].impl)
-      var color_rect = [domain_get_rect](color_domain)
+      if c.legion_domain_is_dense(region_domain) and c.legion_domain_is_dense(color_domain) then
+        var region_rect = [domain_get_rect](region_domain)
+        var color_rect = [domain_get_rect](color_domain)
 
-      var [transform]
-      var [extent]
-      [data.range(dim):map(
-         function(i)
-           local block = `(region_rect.hi.x[ [i] ] - region_rect.lo.x[ [i] ] + 1)
-           local colors = `(color_rect.hi.x[ [i] ] - color_rect.lo.x[ [i] ] + 1)
-           return quote
-             var block_size = ([block] + [colors] - 1) / [colors]
-             for j = 0, dim do
-               if i == j then
-                 [transform].trans[i][j] = block_size
-               else
-                 [transform].trans[i][j] = 0
+        var [transform]
+        var [extent]
+        [data.range(dim):map(
+           function(i)
+             local block = `(region_rect.hi.x[ [i] ] - region_rect.lo.x[ [i] ] + 1)
+             local colors = `(color_rect.hi.x[ [i] ] - color_rect.lo.x[ [i] ] + 1)
+             return quote
+               var block_size = ([block] + [colors] - 1) / [colors]
+               for j = 0, dim do
+                 if i == j then
+                   [transform].trans[i][j] = block_size
+                 else
+                   [transform].trans[i][j] = 0
+                 end
                end
-             end
 
-             [extent].lo.x[ [i] ] = region_rect.lo.x[ [i] ]
-             [extent].hi.x[ [i] ] = region_rect.lo.x[ [i] ] + block_size - 1
-           end
-         end)]
-      var dtransform = [create_domain_transform]([transform])
-      var dextent = [create_domain]([extent])
-      var [ip] = c.legion_index_partition_create_by_restriction(
-        [cx.runtime], [cx.context], [region.value].impl.index_space,
-        [colors.value].impl,
-        dtransform, dextent, c.DISJOINT_KIND,
-        -1 --[[ AUTO_GENERATE_ID ]])
+               [extent].lo.x[ [i] ] =
+                 region_rect.lo.x[ [i] ] - color_rect.lo.x[ [i] ] * block_size
+               [extent].hi.x[ [i] ] =
+                 region_rect.lo.x[ [i] ] - color_rect.lo.x[ [i] ] * block_size + block_size - 1
+             end
+           end)]
+        var dtransform = [create_domain_transform]([transform])
+        var dextent = [create_domain]([extent])
+        [ip] = c.legion_index_partition_create_by_restriction(
+          [cx.runtime], [cx.context], [region.value].impl.index_space,
+          [colors.value].impl,
+          dtransform, dextent, c.DISJOINT_KIND,
+          -1 --[[ AUTO_GENERATE_ID ]])
+      else
+        [ip] = c.legion_index_partition_create_equal(
+          [cx.runtime], [cx.context], [region.value].impl.index_space,
+          [colors.value].impl, 1,
+          -1 --[[ AUTO_GENERATE_ID ]])
+      end
       var [lp] = c.legion_logical_partition_create(
         [cx.runtime], [cx.context], [region.value].impl, [ip])
+      [tag_imported(cx, lp)]
     end
   end
 
@@ -4280,6 +4675,51 @@ function codegen.expr_partition_by_field(cx, node)
       field_id, [colors.value].impl, -1)
     var [lp] = c.legion_logical_partition_create(
       [cx.runtime], [cx.context], [region.value].impl, [ip])
+    [tag_imported(cx, lp)]
+  end
+
+  return values.value(
+    node,
+    expr.once_only(actions, `(partition_type { impl = [lp] }), partition_type),
+    partition_type)
+end
+
+function codegen.expr_partition_by_restriction(cx, node)
+  local region_type = std.as_read(node.region.expr_type)
+  local region = codegen.expr(cx, node.region):read(cx)
+  local transform_type = std.as_read(node.transform.expr_type)
+  local transform = codegen.expr(cx, node.transform):read(cx)
+  local extent_type = std.as_read(node.extent.expr_type)
+  local extent = codegen.expr(cx, node.extent):read(cx)
+  local colors_type = std.as_read(node.colors.expr_type)
+  local colors = codegen.expr(cx, node.colors):read(cx)
+  local partition_type = std.as_read(node.expr_type)
+  local actions = quote
+    [region.actions];
+    [transform.actions];
+    [extent.actions];
+    [colors.actions];
+    [emit_debuginfo(node)]
+  end
+
+  assert(cx:has_region(region_type))
+
+  local ip = terralib.newsymbol(c.legion_index_partition_t, "ip")
+  local lp = terralib.newsymbol(c.legion_logical_partition_t, "lp")
+  actions = quote
+    [actions]
+    var disjointness = [(node.disjointness and
+      ((node.disjointness:is(ast.disjointness_kind.Disjoint) and c.DISJOINT_KIND)
+       or c.ALIASED_KIND))
+      or c.COMPUTE_KIND]
+    var [ip] = c.legion_index_partition_create_by_restriction(
+      [cx.runtime], [cx.context],
+      [region.value].impl.index_space,
+      [colors.value].impl,
+      [transform.value], [extent.value], disjointness, -1)
+    var [lp] = c.legion_logical_partition_create(
+      [cx.runtime], [cx.context], [region.value].impl, [ip])
+    [tag_imported(cx, lp)]
   end
 
   return values.value(
@@ -4337,13 +4777,18 @@ function codegen.expr_image(cx, node)
     [actions]
     var colors = c.legion_index_partition_get_color_space(
       [cx.runtime], [partition.value].impl.index_partition)
+    var disjointness = [(node.disjointness and
+      ((node.disjointness:is(ast.disjointness_kind.Disjoint) and c.DISJOINT_KIND)
+       or c.ALIASED_KIND))
+      or c.COMPUTE_KIND]
     var [ip] = [create_partition](
       [cx.runtime], [cx.context],
       [parent.value].impl.index_space,
       [partition.value].impl, [region_parent].impl, field_id,
-      colors, c.COMPUTE_KIND, -1)
+      colors, disjointness, -1)
     var [lp] = c.legion_logical_partition_create(
       [cx.runtime], [cx.context], [parent.value].impl, [ip])
+    [tag_imported(cx, lp)]
   end
 
   return values.value(
@@ -4401,16 +4846,17 @@ function codegen.expr_preimage(cx, node)
     [actions]
     var colors = c.legion_index_partition_get_color_space(
       [cx.runtime], [partition.value].impl.index_partition)
+    var disjointness = [(node.disjointness and
+      ((node.disjointness:is(ast.disjointness_kind.Disjoint) and c.DISJOINT_KIND)
+       or c.ALIASED_KIND))
+      or c.COMPUTE_KIND]
     var [ip] = [create_partition](
       [cx.runtime], [cx.context], [partition.value].impl.index_partition,
       [parent.value].impl, [region_parent].impl, field_id, colors,
-      [(result_type:is_disjoint() and
-        result_type:parent_region():is_opaque() and
-        c.DISJOINT_KIND) or
-       c.COMPUTE_KIND],
-      -1)
+      disjointness, -1)
     var [lp] = c.legion_logical_partition_create(
       [cx.runtime], [cx.context], [region.value].impl, [ip])
+    [tag_imported(cx, lp)]
   end
 
   return values.value(
@@ -4448,6 +4894,7 @@ function codegen.expr_cross_product(cx, node)
     var ip = c.legion_terra_index_cross_product_get_partition([product])
     var [lp] = c.legion_logical_partition_create(
       [cx.runtime], [cx.context], lr.impl, ip)
+    [tag_imported(cx, lp)]
   end
 
   return values.value(
@@ -4520,6 +4967,7 @@ function codegen.expr_cross_product_array(cx, node)
     [product].other_color = other_color
     var stop : double = c.legion_get_current_time_in_micros()/double(1e6)
     c.printf("codegen: cross_product_array %e\n", stop - start)
+    [tag_imported(cx, lp)]
   end
 
   return values.value(
@@ -4568,6 +5016,7 @@ function codegen.expr_list_slice_partition(cx, node)
     cx:region(parent_region).field_privileges,
     cx:region(parent_region).field_types,
     cx:region(parent_region).field_ids,
+    cx:region(parent_region).field_id_array,
     cx:region(parent_region).fields_are_scratch)
 
   actions = quote
@@ -4617,6 +5066,7 @@ function codegen.expr_list_duplicate_partition(cx, node)
     cx:region(parent_region).field_privileges,
     cx:region(parent_region).field_types,
     cx:region(parent_region).field_ids,
+    cx:region(parent_region).field_id_array,
     cx:region(parent_region).fields_are_scratch)
 
   actions = quote
@@ -4730,6 +5180,7 @@ function codegen.expr_list_cross_product(cx, node)
     cx:list_of_regions(lhs_type).field_privileges,
     cx:list_of_regions(lhs_type).field_types,
     cx:list_of_regions(lhs_type).field_ids,
+    cx:list_of_regions(lhs_type).field_id_array,
     cx:list_of_regions(lhs_type).fields_are_scratch)
 
   local cross_product_create = c.legion_terra_index_cross_product_create_list
@@ -4798,6 +5249,7 @@ function codegen.expr_list_cross_product_complete(cx, node)
     cx:list_of_regions(lhs_type).field_privileges,
     cx:list_of_regions(lhs_type).field_types,
     cx:list_of_regions(lhs_type).field_ids,
+    cx:list_of_regions(lhs_type).field_id_array,
     cx:list_of_regions(lhs_type).fields_are_scratch)
 
   actions = quote
@@ -5250,6 +5702,7 @@ function codegen.expr_list_ispace(cx, node)
       stats = terralib.newlist({loop_body}),
       span = node.span,
     },
+    metadata = false,
     annotations = ast.default_annotations(),
     span = node.span,
   }
@@ -6277,35 +6730,31 @@ local function expr_acquire_setup_region(
   assert(std.is_region(dst_type))
   assert(std.type_supports_privileges(dst_container_type))
 
-  local dst_all_fields = std.flatten_struct_fields(dst_type:fspace())
-
   local actions = terralib.newlist()
-  for i, dst_field in ipairs(dst_fields) do
-    local dst_copy_fields = data.filter(
-      function(field) return field:starts_with(dst_field) end,
-      dst_all_fields)
+  local dst_copy_fields = std.get_absolute_field_paths(
+    dst_type:fspace(), dst_fields)
+  local dst_parent = get_container_root(
+    cx, `([dst_value].impl), dst_container_type, dst_copy_fields)
+  local launcher = terralib.newsymbol(c.legion_acquire_launcher_t, "launcher")
+  actions:insert(quote
+    var tag = 0
+    [codegen_hooks.gen_update_mapping_tag(tag, cx.task)]
+    var [launcher] = c.legion_acquire_launcher_create(
+      [dst_value].impl, [dst_parent],
+      c.legion_predicate_true(), 0, tag)
+  end)
+  for j, dst_copy_field in ipairs(dst_copy_fields) do
+    local dst_field_id = cx:region_or_list(dst_container_type):field_id(dst_copy_field)
+    local dst_field_type = cx:region_or_list(dst_container_type):field_type(dst_copy_field)
 
-    local dst_parent = get_container_root(
-      cx, `([dst_value].impl), dst_container_type, dst_copy_fields)
-
-    for j, dst_copy_field in ipairs(dst_copy_fields) do
-      local dst_field_id = cx:region_or_list(dst_container_type):field_id(dst_copy_field)
-      local dst_field_type = cx:region_or_list(dst_container_type):field_type(dst_copy_field)
-
-      local tag = terralib.newsymbol(c.legion_mapping_tag_id_t, "tag")
-      actions:insert(quote
-        var [tag] = 0
-        [codegen_hooks.gen_update_mapping_tag(tag, cx.task)]
-        var launcher = c.legion_acquire_launcher_create(
-          [dst_value].impl, [dst_parent],
-          c.legion_predicate_true(), 0, [tag])
-        c.legion_acquire_launcher_add_field(
-          launcher, dst_field_id)
-        [expr_acquire_issue_phase_barriers(condition_values, condition_kinds, launcher)]
-        c.legion_acquire_launcher_execute([cx.runtime], [cx.context], [launcher])
-      end)
-    end
+    actions:insert(quote
+      c.legion_acquire_launcher_add_field([launcher], dst_field_id)
+    end)
   end
+  actions:insert(quote
+    [expr_acquire_issue_phase_barriers(condition_values, condition_kinds, launcher)]
+    c.legion_acquire_launcher_execute([cx.runtime], [cx.context], [launcher])
+  end)
   return actions
 end
 
@@ -6405,35 +6854,31 @@ local function expr_release_setup_region(
   assert(std.is_region(dst_type))
   assert(std.type_supports_privileges(dst_container_type))
 
-  local dst_all_fields = std.flatten_struct_fields(dst_type:fspace())
-
   local actions = terralib.newlist()
-  for i, dst_field in ipairs(dst_fields) do
-    local dst_copy_fields = data.filter(
-      function(field) return field:starts_with(dst_field) end,
-      dst_all_fields)
+  local dst_copy_fields = std.get_absolute_field_paths(
+    dst_type:fspace(), dst_fields)
+  local dst_parent = get_container_root(
+    cx, `([dst_value].impl), dst_container_type, dst_copy_fields)
+  local launcher = terralib.newsymbol(c.legion_release_launcher_t, "launcher")
+  actions:insert(quote
+    var tag = 0
+    [codegen_hooks.gen_update_mapping_tag(tag, cx.task)]
+    var [launcher] = c.legion_release_launcher_create(
+      [dst_value].impl, [dst_parent],
+      c.legion_predicate_true(), 0, tag)
+  end)
+  for j, dst_copy_field in ipairs(dst_copy_fields) do
+    local dst_field_id = cx:region_or_list(dst_container_type):field_id(dst_copy_field)
+    local dst_field_type = cx:region_or_list(dst_container_type):field_type(dst_copy_field)
 
-    local dst_parent = get_container_root(
-      cx, `([dst_value].impl), dst_container_type, dst_copy_fields)
-
-    for j, dst_copy_field in ipairs(dst_copy_fields) do
-      local dst_field_id = cx:region_or_list(dst_container_type):field_id(dst_copy_field)
-      local dst_field_type = cx:region_or_list(dst_container_type):field_type(dst_copy_field)
-
-      local tag = terralib.newsymbol(c.legion_mapping_tag_id_t, "tag")
-      actions:insert(quote
-        var [tag] = 0
-        [codegen_hooks.gen_update_mapping_tag(tag, cx.task)]
-        var launcher = c.legion_release_launcher_create(
-          [dst_value].impl, [dst_parent],
-          c.legion_predicate_true(), 0, [tag])
-        c.legion_release_launcher_add_field(
-          launcher, dst_field_id)
-        [expr_release_issue_phase_barriers(condition_values, condition_kinds, launcher)]
-        c.legion_release_launcher_execute([cx.runtime], [cx.context], [launcher])
-      end)
-    end
+    actions:insert(quote
+      c.legion_release_launcher_add_field([launcher], dst_field_id)
+    end)
   end
+  actions:insert(quote
+    [expr_release_issue_phase_barriers(condition_values, condition_kinds, launcher)]
+    c.legion_release_launcher_execute([cx.runtime], [cx.context], [launcher])
+  end)
   return actions
 end
 
@@ -6496,6 +6941,8 @@ function codegen.expr_attach_hdf5(cx, node)
   local filename = codegen.expr(cx, node.filename):read(cx, filename_type)
   local mode_type = std.as_read(node.mode.expr_type)
   local mode = codegen.expr(cx, node.mode):read(cx, mode_type)
+  local field_map_type = node.field_map and std.as_read(node.field_map.expr_type)
+  local field_map = node.field_map and codegen.expr(cx, node.field_map):read(cx, field_map_type)
 
   if not cx.variant:get_config_options().inner then
     report.warn(node, "WARNING: Attach invalidates region contents. DO NOT attempt to access region after using attach.")
@@ -6503,34 +6950,26 @@ function codegen.expr_attach_hdf5(cx, node)
 
   assert(cx:has_region(region_type))
 
-  local all_fields = std.flatten_struct_fields(region_type:fspace())
-  local full_fields = terralib.newlist()
-  for i, region_field in ipairs(node.region.fields) do
-    local region_full_fields = data.filter(
-      function(field) return field:starts_with(region_field) end,
-      all_fields)
-    full_fields:insertall(region_full_fields)
-  end
-
-  local field_map = terralib.newsymbol(c.legion_field_map_t, "field_map")
-  local field_map_setup = quote
-    var [field_map] = c.legion_field_map_create()
-    [full_fields:map(
-       function(field_path)
+  local fm = terralib.newsymbol(c.legion_field_map_t, "fm")
+  local fm_setup = quote
+    var [fm] = c.legion_field_map_create()
+    [data.mapi(
+       function(i, field_path)
          return quote
            c.legion_field_map_insert(
-               [field_map],
+               [fm],
                [cx:region(region_type):field_id(field_path)],
-               [field_path:concat(".")])
+               [(field_map and `([field_map.value][ [i-1] ])) or field_path:concat(".")])
          end
-       end)]
+       end,
+       node.region.fields)]
   end
-  local field_map_teardown = quote
-    c.legion_field_map_destroy([field_map])
+  local fm_teardown = quote
+    c.legion_field_map_destroy([fm])
   end
 
   local parent = get_container_root(
-    cx, `([region.value].impl), region_type, full_fields)
+    cx, `([region.value].impl), region_type, node.region.fields)
 
   local new_pr = terralib.newsymbol(c.legion_physical_region_t, "new_pr")
 
@@ -6538,15 +6977,16 @@ function codegen.expr_attach_hdf5(cx, node)
     [region.actions]
     [filename.actions]
     [mode.actions]
+    [field_map and field_map.actions or quote end]
     [emit_debuginfo(node)]
 
-    [field_map_setup]
+    [fm_setup]
     var [new_pr] = c.legion_runtime_attach_hdf5(
       [cx.runtime], [cx.context],
-      [filename.value], [region.value].impl, [parent], [field_map], [mode.value])
-    [field_map_teardown]
+      [filename.value], [region.value].impl, [parent], [fm], [mode.value])
+    [fm_teardown]
 
-    [full_fields:map(
+    [node.region.fields:map(
        function(field_path)
          return quote
            -- FIXME: This is redundant (since the same physical region
@@ -6642,7 +7082,7 @@ function codegen.expr_allocate_scratch_fields(cx, node)
          local field_type = cx:region_or_list(region_type):field_type(field_path)
          return quote
            [field_ids][i] = c.legion_field_allocator_allocate_local_field(
-             fsa, terralib.sizeof(field_type), -1ULL)
+             fsa, terralib.sizeof(field_type), [uint64](-1))
            c.legion_field_id_attach_name(
              [cx.runtime], [field_space], [field_ids][i], field_name, false)
          end
@@ -6665,12 +7105,6 @@ function codegen.expr_with_scratch_fields(cx, node)
     [field_ids.actions]
     [emit_debuginfo(node)]
   end
-
-  local value = expr.once_only(
-    actions,
-    std.implicit_cast(region_type, expr_type, region.value),
-    expr_type)
-
   assert(cx:has_region_or_list(region_type))
 
   local old_field_ids = cx:region_or_list(region_type).field_ids
@@ -6682,6 +7116,16 @@ function codegen.expr_with_scratch_fields(cx, node)
     new_field_ids[field_path:hash()] = `([field_ids.value][ [i-1] ])
   end
 
+  local field_paths, field_types = std.flatten_struct_fields(region_type:fspace())
+
+  local new_field_id_array = terralib.newsymbol(c.legion_field_id_t[#field_paths], "new_field_ids")
+  actions = quote
+    [actions]
+    var [new_field_id_array] = arrayof(
+      c.legion_field_id_t,
+      [field_paths:map(function(field_path) return new_field_ids[field_path:hash()] end)])
+  end
+
   local old_fields_are_scratch = cx:region_or_list(region_type).fields_are_scratch
   local new_fields_are_scratch = {}
   for k, v in pairs(old_fields_are_scratch) do
@@ -6691,6 +7135,11 @@ function codegen.expr_with_scratch_fields(cx, node)
     new_fields_are_scratch[field_path:hash()] = true
   end
 
+  local value = expr.once_only(
+    actions,
+    std.implicit_cast(region_type, expr_type, region.value),
+    expr_type)
+
   if std.is_region(region_type) then
     cx:add_region_root(
       expr_type, value.value,
@@ -6699,6 +7148,7 @@ function codegen.expr_with_scratch_fields(cx, node)
       cx:region(region_type).field_privileges,
       cx:region(region_type).field_types,
       new_field_ids,
+      new_field_id_array,
       new_fields_are_scratch,
       false,
       false,
@@ -6711,6 +7161,7 @@ function codegen.expr_with_scratch_fields(cx, node)
       cx:list_of_regions(region_type).field_privileges,
       cx:list_of_regions(region_type).field_types,
       new_field_ids,
+      new_field_id_array,
       new_fields_are_scratch)
   else
     assert(false)
@@ -6781,6 +7232,7 @@ local lift_unary_op_to_futures = terralib.memoize(
         replicable = false,
       },
       region_divergence = false,
+      metadata = false,
       prototype = task,
       annotations = ast.default_annotations(),
       span = ast.trivial_span(),
@@ -6879,6 +7331,7 @@ local lift_binary_op_to_futures = terralib.memoize(
         replicable = false,
       },
       region_divergence = false,
+      metadata = false,
       prototype = task,
       annotations = ast.default_annotations(),
       span = ast.trivial_span(),
@@ -6923,10 +7376,25 @@ function codegen.expr_unary(cx, node)
       [rhs.actions];
       [emit_debuginfo(node)]
     end
-    return values.value(
-      node,
-      expr.once_only(actions, std.quote_unary_op(node.op, rhs.value), expr_type),
-      expr_type)
+    if std.as_read(node.rhs.expr_type):isarray() then
+      local result = terralib.newsymbol(expr_type, "result")
+      actions = quote
+        [actions];
+        var [result]
+        for i = 0, [expr_type.N] do
+          [result][i] = [std.quote_unary_op(node.op, `([rhs.value][i]))]
+        end
+      end
+      return values.value(
+        node,
+        expr.just(actions, result),
+        expr_type)
+    else
+      return values.value(
+        node,
+        expr.once_only(actions, std.quote_unary_op(node.op, rhs.value), expr_type),
+        expr_type)
+    end
   end
 end
 
@@ -6941,11 +7409,17 @@ function codegen.expr_binary(cx, node)
       [emit_debuginfo(node)]
     end
 
+    local lhs_type = std.as_read(node.lhs.expr_type)
+    local rhs_type = std.as_read(node.rhs.expr_type)
     local create_partition
     if node.op == "-" then
       create_partition = c.legion_index_partition_create_by_difference
     elseif node.op == "&" then
-      create_partition = c.legion_index_partition_create_by_intersection
+      if std.is_region(lhs_type) then
+        create_partition = c.legion_index_partition_create_by_intersection_mirror
+      else
+        create_partition = c.legion_index_partition_create_by_intersection
+      end
     elseif node.op == "|" then
       create_partition = c.legion_index_partition_create_by_union
     else
@@ -6955,33 +7429,51 @@ function codegen.expr_binary(cx, node)
     local partition_type = std.as_read(node.expr_type)
     local ip = terralib.newsymbol(c.legion_index_partition_t, "ip")
     local lp = terralib.newsymbol(c.legion_logical_partition_t, "lp")
-    actions = quote
-      [actions]
-      var is = c.legion_index_partition_get_parent_index_space(
-        [cx.runtime], [lhs.value].impl.index_partition)
-      var lhs_colors = c.legion_index_partition_get_color_space(
-        [cx.runtime], [lhs.value].impl.index_partition)
-      var rhs_colors = c.legion_index_partition_get_color_space(
-        [cx.runtime], [rhs.value].impl.index_partition)
-      var colors : c.legion_index_space_t
-      if lhs_colors.tid ~= rhs_colors.tid or lhs_colors.id ~= rhs_colors.id then
-        var color_spaces : c.legion_index_space_t[2]
-        color_spaces[0] = lhs_colors
-        color_spaces[1] = rhs_colors
-        colors = c.legion_index_space_union(
-          [cx.runtime], [cx.context], &(color_spaces[0]), 2) -- FIXME: Leaks
-      else
-        colors = lhs_colors
+
+    if std.is_region(lhs_type) then
+      actions = quote
+        [actions]
+        var is = [lhs.value].impl.index_space
+        var [ip] = [create_partition](
+          [cx.runtime], [cx.context],
+          is, [rhs.value].impl.index_partition,
+          [(partition_type:is_disjoint() and c.DISJOINT_KIND) or c.COMPUTE_KIND],
+          -1, false)
+        var [lp] = c.legion_logical_partition_create_by_tree(
+          [cx.runtime], [cx.context],
+          [ip], [lhs.value].impl.field_space, [lhs.value].impl.tree_id)
+        [tag_imported(cx, lp)]
       end
-      var [ip] = [create_partition](
-        [cx.runtime], [cx.context],
-        is, [lhs.value].impl.index_partition, [rhs.value].impl.index_partition,
-        colors,
-        [(partition_type:is_disjoint() and c.DISJOINT_KIND) or c.COMPUTE_KIND],
-        -1)
-      var [lp] = c.legion_logical_partition_create_by_tree(
-        [cx.runtime], [cx.context],
-        [ip], [lhs.value].impl.field_space, [lhs.value].impl.tree_id)
+    else
+      actions = quote
+        [actions]
+        var is = c.legion_index_partition_get_parent_index_space(
+          [cx.runtime], [lhs.value].impl.index_partition)
+        var lhs_colors = c.legion_index_partition_get_color_space(
+          [cx.runtime], [lhs.value].impl.index_partition)
+        var rhs_colors = c.legion_index_partition_get_color_space(
+          [cx.runtime], [rhs.value].impl.index_partition)
+        var colors : c.legion_index_space_t
+        if lhs_colors.tid ~= rhs_colors.tid or lhs_colors.id ~= rhs_colors.id then
+          var color_spaces : c.legion_index_space_t[2]
+          color_spaces[0] = lhs_colors
+          color_spaces[1] = rhs_colors
+          colors = c.legion_index_space_union(
+            [cx.runtime], [cx.context], &(color_spaces[0]), 2) -- FIXME: Leaks
+        else
+          colors = lhs_colors
+        end
+        var [ip] = [create_partition](
+          [cx.runtime], [cx.context],
+          is, [lhs.value].impl.index_partition, [rhs.value].impl.index_partition,
+          colors,
+          [(partition_type:is_disjoint() and c.DISJOINT_KIND) or c.COMPUTE_KIND],
+          -1)
+        var [lp] = c.legion_logical_partition_create_by_tree(
+          [cx.runtime], [cx.context],
+          [ip], [lhs.value].impl.field_space, [lhs.value].impl.tree_id)
+        [tag_imported(cx, lp)]
+      end
     end
 
     return values.value(
@@ -7009,6 +7501,40 @@ function codegen.expr_binary(cx, node)
       span = node.span,
     }
     return codegen.expr(cx, call)
+  elseif std.is_ispace(expr_type) then
+    local ispace_op = nil
+
+    if node.op == "&" then
+      ispace_op = c.legion_index_space_intersection
+    elseif node.op == "|" then
+      ispace_op = c.legion_index_space_union
+    else
+      assert(false, "unreachable")
+    end
+
+    local lhs = codegen.expr(cx, node.lhs):read(cx, node.lhs.expr_type)
+    local rhs = codegen.expr(cx, node.rhs):read(cx, node.rhs.expr_type)
+    local result = terralib.newsymbol(expr_type)
+    local bounds_actions, domain, bounds = index_space_bounds(cx, `([result].impl), expr_type)
+    local actions = quote
+      [lhs.actions];
+      [rhs.actions];
+      [emit_debuginfo(node)]
+      var [result]
+      do
+        var args : c.legion_index_space_t[2]
+        args[0] = [lhs.value].impl
+        args[1] = [rhs.value].impl
+        [result] = [expr_type] { impl = [ispace_op]([cx.runtime], [cx.context], args, 2) }
+      end
+      [bounds_actions]
+    end
+    cx:add_ispace_root(expr_type, `([result].impl), false, domain, bounds)
+
+    return values.value(
+      node,
+      expr.just(actions, result),
+      expr_type)
   else
     local lhs = codegen.expr(cx, node.lhs):read(cx, node.lhs.expr_type)
     local rhs = codegen.expr(cx, node.rhs):read(cx, node.rhs.expr_type)
@@ -7041,10 +7567,29 @@ function codegen.expr_binary(cx, node)
         expr_type)
     else
     end
-    return values.value(
-      node,
-      expr.once_only(actions, std.quote_binary_op(node.op, lhs.value, rhs.value), expr_type),
-      expr_type)
+    if std.as_read(lhs_type):isarray() and
+       std.as_read(rhs_type):isarray() and
+       node.op ~= "-"
+    then
+      assert(expr_type:isarray())
+      local result = terralib.newsymbol(expr_type, "result")
+      actions = quote
+        [actions];
+        var [result]
+        for i = 0, [expr_type.N] do
+          [result][i] = [std.quote_binary_op(node.op, `([lhs.value][i]), `([rhs.value][i]))]
+        end
+      end
+      return values.value(
+        node,
+        expr.just(actions, result),
+        expr_type)
+    else
+      return values.value(
+        node,
+        expr.once_only(actions, std.quote_binary_op(node.op, lhs.value, rhs.value), expr_type),
+        expr_type)
+    end
   end
 end
 
@@ -7062,6 +7607,11 @@ function codegen.expr_deref(cx, node)
   else
     assert(false)
   end
+end
+
+function codegen.expr_address_of(cx, node)
+  local value = codegen.expr(cx, node.value)
+  return value:address()
 end
 
 function codegen.expr_future(cx, node)
@@ -7086,6 +7636,10 @@ function codegen.expr_future(cx, node)
 
     local size_actions, size_value = std.compute_serialized_size(
       content_type, content_value)
+    if not size_actions then
+      size_actions = quote end
+      size_value = 0
+    end
     local ser_actions = std.serialize(
       content_type, content_value, buffer, `(&[data_ptr]))
     local actions = quote
@@ -7148,6 +7702,326 @@ function codegen.expr_future_get_result(cx, node)
   end
 end
 
+function codegen.expr_import_ispace(cx, node)
+  local ispace_type = node.expr_type
+  local value = codegen.expr(cx, node.value):read(cx)
+  local is = terralib.newsymbol(c.legion_index_space_t, "is")
+  local i = terralib.newsymbol(ispace_type, "i")
+
+  local it = false
+  if cache_index_iterator then
+    it = terralib.newsymbol(c.legion_terra_cached_index_iterator_t, "it")
+  end
+
+  local bounds_actions, domain, bounds = index_space_bounds(cx, is, ispace_type)
+  cx:add_ispace_root(ispace_type, is, it, domain, bounds)
+
+  local actions = quote
+    [value.actions];
+    [emit_debuginfo(node)];
+    var [is] = [value.value]
+    var [i] = [ispace_type] { impl = [is] }
+    [bounds_actions];
+    -- Consistency check on the imported index space
+    do
+      std.assert_error([domain].dim == [ispace_type.dim],
+        [get_source_location(node) .. ": " .. pretty.entry_expr(node.value) ..
+          " is not a " ..  ispace_type.dim .. "D index space"])
+      std.assert_error(not
+        std.c.legion_index_space_has_parent_index_partition([cx.runtime], [is]),
+        [get_source_location(node) .. ": cannot import a subspace"])
+    end
+    [check_imported(cx, node, is)]
+    [tag_imported(cx, is)]
+  end
+  if cache_index_iterator then
+    actions = quote
+      [actions];
+      var [it] = c.legion_terra_cached_index_iterator_create(
+        [cx.runtime], [cx.context], [is])
+    end
+  end
+  return values.value(
+    node,
+    expr.just(actions, i),
+    ispace_type)
+end
+
+function codegen.expr_import_region(cx, node)
+  local region_type = std.as_read(node.expr_type)
+  local fspace_type = region_type:fspace()
+  local index_type = region_type:ispace().index_type
+
+  local ispace = codegen.expr(cx, node.ispace):read(cx)
+  local value = codegen.expr(cx, node.value):read(cx)
+  local src_field_ids = codegen.expr(cx, node.field_ids):read(cx)
+
+  local actions = quote
+    [ispace.actions];
+    [value.actions];
+    [src_field_ids.actions];
+    [emit_debuginfo(node)];
+  end
+
+  local r = terralib.newsymbol(region_type, "r")
+  local lr = terralib.newsymbol(c.legion_logical_region_t, "lr")
+  local pr = terralib.newsymbol(c.legion_physical_region_t, "pr")
+
+  local field_ids_type = std.as_read(node.field_ids.expr_type)
+  assert(field_ids_type:isarray())
+
+  local field_id_array = terralib.newsymbol(c.legion_field_id_t[field_ids_type.N], "field_ids")
+  actions = quote
+    [actions];
+    var [field_id_array]
+    for i = 0, [field_ids_type.N] do
+      [field_id_array][i] = [src_field_ids.value][i]
+    end
+  end
+
+  local field_paths, field_types = std.flatten_struct_fields(fspace_type)
+  local field_privileges = field_paths:map(function(_) return "reads_writes" end)
+  local field_id_offset = 0
+  local field_ids = field_paths:map(function(_)
+    local field_id = `([field_id_array][ [field_id_offset] ])
+    field_id_offset = field_id_offset + 1
+    return field_id
+  end)
+  local fields_are_scratch = field_paths:map(function(_) return false end)
+  local physical_regions = field_paths:map(function(_) return pr end)
+  local pr_actions, base_pointers, strides = unpack(data.zip(unpack(
+    data.zip(field_types, field_paths, field_ids, field_privileges):map(
+      function(field)
+        local field_type, field_path, field_id, field_privilege = unpack(field)
+        return terralib.newlist({
+          physical_region_get_base_pointer(cx, region_type, index_type, field_type, field_path, pr, field_id)})
+  end))))
+  pr_actions = pr_actions or terralib.newlist()
+  base_pointers = base_pointers or terralib.newlist()
+  strides = strides or terralib.newlist()
+
+  cx:add_region_root(region_type, r,
+                     field_paths,
+                     terralib.newlist({field_paths}),
+                     data.dict(data.zip(field_paths:map(data.hash), field_privileges)),
+                     data.dict(data.zip(field_paths:map(data.hash), field_types)),
+                     data.dict(data.zip(field_paths:map(data.hash), field_ids)),
+                     field_id_array,
+                     data.dict(data.zip(field_paths:map(data.hash), fields_are_scratch)),
+                     data.dict(data.zip(field_paths:map(data.hash), physical_regions)),
+                     data.dict(data.zip(field_paths:map(data.hash), base_pointers)),
+                     data.dict(data.zip(field_paths:map(data.hash), strides)))
+
+  -- Consistency check on the imported logical region handle
+  local check_actions = quote
+    std.assert_error(
+      [eq_struct(c.legion_index_space_t, `([ispace.value].impl), `([lr].index_space))],
+      [get_source_location(node) .. ": " .. pretty.entry_expr(node.ispace) ..
+      " is not the index space of " .. pretty.entry_expr(node.value)])
+    std.assert_error(not
+      std.c.legion_logical_region_has_parent_logical_partition([cx.runtime], [lr]),
+      [get_source_location(node) .. ": cannot import a subregion"])
+    std.assert_error(
+      std.c.legion_field_space_has_fields([cx.runtime], [cx.context], [lr].field_space,
+        [field_id_array], [field_ids_type.N]),
+      [get_source_location(node) .. ": found an invalid field id"])
+    [data.zip(field_ids, field_types):map(
+      function(pair)
+        local field_id, field_type = unpack(pair)
+        return quote
+          std.assert_error(
+            std.c.legion_field_id_get_size([cx.runtime], [cx.context], [lr].field_space, [field_id]) ==
+            [sizeof(field_type)],
+            [get_source_location(node) .. ": field size does not match"])
+        end
+      end)]
+  end
+
+  actions = quote
+    [actions];
+    var [lr] = [value.value]
+    var [r] = [region_type] { impl = [lr] }
+    [check_actions];
+    [check_imported(cx, node, lr)];
+    [tag_imported(cx, lr)]
+  end
+
+  local tag = terralib.newsymbol(c.legion_mapping_tag_id_t, "tag")
+  if not cx.variant:get_config_options().inner then
+    actions = quote
+      [actions];
+      var [tag] = 0
+      [codegen_hooks.gen_update_mapping_tag(tag, cx.task)]
+      var il = c.legion_inline_launcher_create_logical_region(
+        [lr], c.READ_WRITE, c.EXCLUSIVE, [lr], 0, false, 0, [tag]);
+      [data.zip(field_ids, field_types):map(
+         function(field)
+           local field_id, field_type = unpack(field)
+           if std.is_regent_array(field_type) then
+             return quote
+               for idx = 0, [field_type.N] do
+                 c.legion_inline_launcher_add_field(il, [field_id] + idx, true)
+               end
+             end
+           else
+             return `(c.legion_inline_launcher_add_field(il, [field_id], true))
+           end
+         end)]
+      var [pr] = c.legion_inline_launcher_execute([cx.runtime], [cx.context], il)
+      c.legion_inline_launcher_destroy(il)
+      c.legion_physical_region_wait_until_valid([pr])
+      [pr_actions]
+    end
+  else
+    actions = quote
+      [actions];
+      c.legion_runtime_unmap_all_regions([cx.runtime], [cx.context])
+      var [pr]
+    end
+  end
+
+  return values.value(
+    node,
+    expr.just(actions, r),
+    region_type)
+end
+
+function codegen.expr_import_partition(cx, node)
+  local partition_type = std.as_read(node.expr_type)
+  local region = codegen.expr(cx, node.region):read(cx)
+  local colors = codegen.expr(cx, node.colors):read(cx)
+  local colors_type = std.as_read(node.colors.expr_type)
+  local value = codegen.expr(cx, node.value):read(cx)
+
+  local actions = quote
+    [region.actions];
+    [colors.actions];
+    [value.actions];
+    [emit_debuginfo(node)];
+  end
+
+  local lp = terralib.newsymbol(c.legion_logical_partition_t, "lp")
+
+  local check_actions = quote end
+  if partition_type:is_disjoint() then
+    check_actions = quote
+      std.assert_error(
+        c.legion_index_partition_is_disjoint([cx.runtime], [lp].index_partition),
+        [get_source_location(node) .. ": " .. pretty.entry_expr(node.value) ..
+        " is not a disjoint partition"])
+    end
+  end
+  local dim = math.max(colors_type.dim, 1)
+  check_actions = quote
+    [check_actions];
+    do
+      var parent = std.c.legion_logical_partition_get_parent_logical_region([cx.runtime], [lp])
+      std.assert_error([eq_struct(c.legion_logical_region_t, `([region.value].impl), parent)],
+        [get_source_location(node) .. ": " .. pretty.entry_expr(node.value) ..
+        " is not a logical partition of " .. pretty.entry_expr(node.region)])
+    end
+    do
+      var cs = std.c.legion_index_partition_get_color_space([cx.runtime], [lp].index_partition)
+      var domain = std.c.legion_index_space_get_domain([cx.runtime], cs)
+      std.assert_error(domain.dim == [dim],
+        [get_source_location(node) .. ": " .. pretty.entry_expr(node.value) ..
+        " does not have a " .. tostring(dim) .. "D color space"])
+    end
+  end
+
+  actions = quote
+    [actions];
+    var [lp] = [value.value]
+    [check_actions];
+    [check_imported(cx, node, lp)];
+    [tag_imported(cx, lp)]
+  end
+
+  return values.value(
+    node,
+    expr.once_only(actions, `([partition_type] { impl = [lp] }), partition_type),
+    partition_type)
+end
+
+function codegen.expr_projection(cx, node)
+  local orig_region_value = codegen.expr(cx, node.region):read(cx)
+  local orig_region_type = std.as_read(node.region.expr_type)
+
+  local region_type = std.as_read(node.expr_type)
+
+  local orig_field_paths = std.get_absolute_field_paths(orig_region_type:fspace(),
+      node.field_mapping:map(function(entry) return entry[1] end))
+  local field_paths = std.get_absolute_field_paths(region_type:fspace(),
+      node.field_mapping:map(function(entry) return entry[2] end))
+
+  local orig_region = cx:region(orig_region_type)
+  local result = terralib.newsymbol(region_type, "r")
+  local field_id_array_buffer =
+    terralib.newsymbol(&c.legion_field_id_t[#orig_field_paths], "field_ids")
+  local field_id_array = `(@[field_id_array_buffer])
+  local index_mapping = data.dict(data.zip(orig_region.field_paths:map(data.hash),
+                                           data.range(0, #orig_region.field_paths)))
+  local actions = quote
+    [orig_region_value.actions]
+    var [result] = [region_type] { impl = [orig_region_value.value].impl }
+    var [field_id_array_buffer] =
+      [&c.legion_field_id_t[#orig_field_paths]](c.malloc([#orig_field_paths] *
+                                                         [terralib.sizeof(c.legion_field_id_t)]))
+    [data.zip(data.range(0, #orig_field_paths), orig_field_paths):map(function(pair)
+      local idx, orig_field_path = unpack(pair)
+      local orig_idx = index_mapping[orig_field_path:hash()]
+      assert(orig_idx ~= nil)
+      return quote
+        [field_id_array][ [idx] ] = [orig_region.field_id_array][ [orig_idx] ]
+      end
+    end)]
+  end
+
+  local field_mapping = data.map_from_table(data.dict(data.zip(field_paths, orig_field_paths)))
+  local function map_dict(dict)
+    return data.dict(data.zip(field_paths:map(data.hash),
+                              field_paths:map(function(field_path)
+                                return dict[field_mapping[field_path]:hash()]
+                              end)))
+  end
+
+  if std.type_eq(orig_region.root_region_type, orig_region_type) then
+    cx:add_region_root(region_type, result,
+                       field_paths,
+                       terralib.newlist({field_paths}),
+                       map_dict(orig_region.field_privileges),
+                       map_dict(orig_region.field_types),
+                       map_dict(orig_region.field_ids),
+                       field_id_array,
+                       map_dict(orig_region.fields_are_scratch),
+                       map_dict(orig_region.physical_regions),
+                       map_dict(orig_region.base_pointers),
+                       map_dict(orig_region.strides))
+  else
+    local root_region_type = orig_region.root_region_type
+    local parent_region_type =
+      std.region(root_region_type.ispace_symbol, region_type:fspace())
+    cx:add_region_root(parent_region_type,
+                       cx:region(root_region_type).logical_region,
+                       field_paths,
+                       terralib.newlist({field_paths}),
+                       map_dict(orig_region.field_privileges),
+                       map_dict(orig_region.field_types),
+                       map_dict(orig_region.field_ids),
+                       field_id_array,
+                       map_dict(orig_region.fields_are_scratch),
+                       map_dict(orig_region.physical_regions),
+                       map_dict(orig_region.base_pointers),
+                       map_dict(orig_region.strides))
+    cx:add_region_subregion(region_type, result, parent_region_type)
+  end
+
+  return values.value(
+    node,
+    expr.once_only(actions, result, region_type),
+    region_type)
+end
+
 function codegen.expr(cx, node)
   if node:is(ast.typed.expr.Internal) then
     return codegen.expr_internal(cx, node)
@@ -7157,6 +8031,9 @@ function codegen.expr(cx, node)
 
   elseif node:is(ast.typed.expr.Constant) then
     return codegen.expr_constant(cx, node)
+
+  elseif node:is(ast.typed.expr.Global) then
+    return codegen.expr_global(cx, node)
 
   elseif node:is(ast.typed.expr.Function) then
     return codegen.expr_function(cx, node)
@@ -7191,6 +8068,9 @@ function codegen.expr(cx, node)
   elseif node:is(ast.typed.expr.RawRuntime) then
     return codegen.expr_raw_runtime(cx, node)
 
+  elseif node:is(ast.typed.expr.RawTask) then
+    return codegen.expr_raw_task(cx, node)
+
   elseif node:is(ast.typed.expr.RawValue) then
     return codegen.expr_raw_value(cx, node)
 
@@ -7223,6 +8103,9 @@ function codegen.expr(cx, node)
 
   elseif node:is(ast.typed.expr.PartitionByField) then
     return codegen.expr_partition_by_field(cx, node)
+
+  elseif node:is(ast.typed.expr.PartitionByRestriction) then
+    return codegen.expr_partition_by_restriction(cx, node)
 
   elseif node:is(ast.typed.expr.Image) then
     return codegen.expr_image(cx, node)
@@ -7320,11 +8203,26 @@ function codegen.expr(cx, node)
   elseif node:is(ast.typed.expr.Deref) then
     return codegen.expr_deref(cx, node)
 
+  elseif node:is(ast.typed.expr.AddressOf) then
+    return codegen.expr_address_of(cx, node)
+
   elseif node:is(ast.typed.expr.Future) then
     return codegen.expr_future(cx, node)
 
   elseif node:is(ast.typed.expr.FutureGetResult) then
     return codegen.expr_future_get_result(cx, node)
+
+  elseif node:is(ast.typed.expr.ImportIspace) then
+    return codegen.expr_import_ispace(cx, node)
+
+  elseif node:is(ast.typed.expr.ImportRegion) then
+    return codegen.expr_import_region(cx, node)
+
+  elseif node:is(ast.typed.expr.ImportPartition) then
+    return codegen.expr_import_partition(cx, node)
+
+  elseif node:is(ast.typed.expr.Projection) then
+    return codegen.expr_projection(cx, node)
 
   else
     assert(false, "unexpected node type " .. tostring(node.node_type))
@@ -7518,6 +8416,7 @@ local function collect_symbols(cx, node)
   -- Base pointers need a special treatment to find them
   local base_pointers = data.newmap()
   local strides = data.newmap()
+  local lrs = data.newmap()
   for node, _ in accesses:items() do
     local value_type = std.as_read(node.expr_type)
     node.expr_type:bounds():map(function(region)
@@ -7529,6 +8428,7 @@ local function collect_symbols(cx, node)
         base_pointers[cx:region(region):base_pointer(field_path)] = true
         local stride = cx:region(region):stride(field_path)
         for idx = 2, #stride do strides[stride[idx]] = true end
+        lrs[cx:region(region).logical_region] = true
       end)
     end)
   end
@@ -7542,8 +8442,15 @@ local function collect_symbols(cx, node)
     if std.is_symbol(symbol) then symbol = symbol:getsymbol() end
     result:insert(symbol)
   end
+  if std.config["bounds-checks"] then
+    result:insert(cx.runtime)
+    result:insert(cx.context)
+    for lr, _ in lrs:items() do
+      result:insert(lr)
+    end
+  end
 
-  return result, reduction_variables
+  return result, reduction_variables, lrs
 end
 
 function codegen.stat_for_list(cx, node)
@@ -7554,16 +8461,8 @@ function codegen.stat_for_list(cx, node)
   local break_label = terralib.newlabel()
   local cx = cx:new_local_scope(nil, nil, nil, break_label)
 
-  local ispace_type, is, it
-  if std.is_ispace(value_type) then
-    ispace_type = value_type
-    is = `([value.value].impl)
-  elseif std.is_region(value_type) then
-    ispace_type = value_type:ispace()
-    assert(cx:has_ispace(ispace_type))
-    is = `([value.value].impl.index_space)
-    it = cx:ispace(ispace_type).index_iterator
-  elseif std.is_list(value_type) then
+  -- Exit early when the iteration space is a regent list
+  if std.is_list(value_type) then
     local block = cleanup_after(cx, codegen.block(cx, node.block))
     return quote
       for i = 0, [value.value].__size do
@@ -7574,65 +8473,87 @@ function codegen.stat_for_list(cx, node)
       end
       ::[break_label]::
     end
+  -- or a rectangle
+  elseif std.is_rect_type(value_type) then
+    local index_type = value_type.index_type
+    local dim = index_type.dim
+    local indices = terralib.newlist()
+    for idx = 1, dim do
+      indices:insert(terralib.newsymbol(int64, "x" .. tostring(idx)))
+    end
+    local body
+    if dim == 1 then
+      body = quote
+        for [ indices[1] ] = [value.value].lo.__ptr,
+                             [value.value].hi.__ptr + 1
+        do
+          var [symbol] = [index_type]({ __ptr = [ indices[1] ] })
+          [cleanup_after(cx, codegen.block(cx, node.block))]
+        end
+      end
+    else
+      local fields = index_type.fields
+      body = quote
+        var [symbol] =
+          [index_type]({ __ptr = [index_type.base_type]{ [indices] } })
+        [cleanup_after(cx, codegen.block(cx, node.block))]
+      end
+      for idx = 1, dim do
+        body = quote
+          for [ indices[idx] ] = [value.value].lo.__ptr.[ fields[idx] ],
+                                 [value.value].hi.__ptr.[ fields[idx] ] + 1
+          do
+            [body]
+          end
+        end
+      end
+    end
+    return quote
+      [body]
+      ::[break_label]::
+    end
+  end
+
+  local ispace_type, is
+  if std.is_ispace(value_type) then
+    ispace_type = value_type
+    is = `([value.value].impl)
+  elseif std.is_region(value_type) then
+    ispace_type = value_type:ispace()
+    assert(cx:has_ispace(ispace_type))
+    is = `([value.value].impl.index_space)
   else
     assert(false)
   end
+  local index_type = ispace_type.index_type
 
-  local actions = quote
-    [value.actions]
-  end
-  local cleanup_actions = quote end
+  -- Retrieve dimension-specific handle types and functions from the C API
+  local dim = data.max(ispace_type.dim, 1)
+  local rect_type = c["legion_rect_" .. tostring(dim) .. "d_t"]
+  local rect_it_type =
+    c["legion_rect_in_domain_iterator_" .. tostring(dim) .. "d_t"]
+  local rect_it_create =
+    c["legion_rect_in_domain_iterator_create_" .. tostring(dim) .. "d"]
+  local rect_it_destroy =
+    c["legion_rect_in_domain_iterator_destroy_" .. tostring(dim) .. "d"]
+  local rect_it_valid =
+    c["legion_rect_in_domain_iterator_valid_" .. tostring(dim) .. "d"]
+  local rect_it_step =
+    c["legion_rect_in_domain_iterator_step_" .. tostring(dim) .. "d"]
+  local rect_it_get =
+    c["legion_rect_in_domain_iterator_get_rect_" .. tostring(dim) .. "d"]
 
-  local iterator_has_next, iterator_next_span -- For unstructured
-  local rect_it, rect_it_create, rect_it_destroy -- For structured
-  local rect_it_valid, rect_it_step, rect_it_get, domain -- For structured
-  if ispace_type.dim == 0 then
-    if it and cache_index_iterator then
-      iterator_has_next = c.legion_terra_cached_index_iterator_has_next
-      iterator_next_span = c.legion_terra_cached_index_iterator_next_span
-      actions = quote
-        [actions]
-        c.legion_terra_cached_index_iterator_reset(it)
-      end
-    else
-      iterator_has_next = c.legion_index_iterator_has_next
-      iterator_next_span = c.legion_index_iterator_next_span
-      it = terralib.newsymbol(c.legion_index_iterator_t, "it")
-      actions = quote
-        [actions]
-        var [it] = c.legion_index_iterator_create([cx.runtime], [cx.context], [is])
-      end
-      cleanup_actions = quote
-        c.legion_index_iterator_destroy([it])
-      end
-    end
-  else
-    domain = terralib.newsymbol(c.legion_domain_t, "domain")
-    local rect_it_type =
-      c["legion_rect_in_domain_iterator_" .. tostring(ispace_type.dim) .. "d_t"]
-    rect_it = terralib.newsymbol(rect_it_type, "rect_it")
-    rect_it_create =
-      c["legion_rect_in_domain_iterator_create_" .. tostring(ispace_type.dim) .. "d"]
-    rect_it_destroy =
-      c["legion_rect_in_domain_iterator_destroy_" .. tostring(ispace_type.dim) .. "d"]
-    rect_it_valid =
-      c["legion_rect_in_domain_iterator_valid_" .. tostring(ispace_type.dim) .. "d"]
-    rect_it_step =
-      c["legion_rect_in_domain_iterator_step_" .. tostring(ispace_type.dim) .. "d"]
-    rect_it_get =
-      c["legion_rect_in_domain_iterator_get_rect_" .. tostring(ispace_type.dim) .. "d"]
-    actions = quote
-      [actions]
-      var [domain] = c.legion_index_space_get_domain([cx.runtime], [is])
-      var [rect_it] = [rect_it_create]([domain])
-    end
-    cleanup_actions = quote
-      [rect_it_destroy]([rect_it])
-    end
-  end
+  -- Create variables for the outer loop that iterates over rectangles in a domain
+  local domain = terralib.newsymbol(c.legion_domain_t, "domain")
+  local rect = terralib.newsymbol(rect_type, "rect")
+  local rect_it = terralib.newsymbol(rect_it_type, "rect_it")
 
-  local cuda = cx.variant:is_cuda() and not node.annotations.cuda:is(ast.annotation.Forbid)
-  local openmp = node.annotations.openmp:is(ast.annotation.Demand) and
+  -- Check if the loop needs the CUDA or OpenMP code generation
+  local cuda = cx.variant:is_cuda() and
+               (node.metadata and node.metadata.parallelizable) and
+               not node.annotations.cuda:is(ast.annotation.Forbid)
+  local openmp = not cx.variant:is_cuda() and
+                 node.annotations.openmp:is(ast.annotation.Demand) and
                  openmphelper.check_openmp_available()
   if node.annotations.openmp:is(ast.annotation.Demand) and
      not openmphelper.check_openmp_available() then
@@ -7642,409 +8563,245 @@ function codegen.stat_for_list(cx, node)
       " since the OpenMP module is unavailable")
   end
 
-  if not cuda then
-    local block = cleanup_after(cx, codegen.block(cx, node.block))
-    if ispace_type.dim == 0 then
-      if not openmp then
-        return quote
-          [actions]
-          while iterator_has_next([it]) do
-            var count : c.size_t = 0
-            var base = iterator_next_span([it], &count, -1).value
-            for i = 0, count do
-              var [symbol] = [symbol.type]{
-                __ptr = ptr {
-                  __ptr = c.legion_ptr_t {
-                    value = base + i
-                  }
-                }
-              }
-              do
-                [block]
-              end
-            end
-          end
-          ::[break_label]::
-          [cleanup_actions]
-        end
-      else
-        local count = terralib.newsymbol(uint64, "count")
-        local base = terralib.newsymbol(int64, "base")
-        local symbols, reductions = collect_symbols(cx, node)
-        symbols:insert(count)
-        symbols:insert(base)
-        local arg_type, mapping = openmphelper.generate_argument_type(symbols, reductions)
-        local arg = terralib.newsymbol(&arg_type, "arg")
-        local worker_init, launch_init =
-          openmphelper.generate_argument_init(arg, arg_type, mapping, reductions)
-        local worker_cleanup =
-          openmphelper.generate_worker_cleanup(arg, arg_type, mapping, reductions)
-        local launcher_cleanup =
-          openmphelper.generate_launcher_cleanup(arg, arg_type, mapping, reductions)
+  -- Code generation for the loop body
+  local block = node.block
 
-        local terra omp_worker(data : &opaque)
-          var [arg] = [&arg_type](data)
-          [worker_init]
-          var num_threads = [openmphelper.get_num_threads]()
-          var thread_id = [openmphelper.get_thread_num]()
-          var chunk = (count + num_threads - 1) / num_threads
-          if chunk == 0 then chunk = 1 end
-          var start_idx = thread_id * chunk + base
-          var end_idx = (thread_id + 1) * chunk + base
-          if end_idx > base + count then end_idx = base + count end
-          for i = start_idx, end_idx do
-            var [symbol] = [symbol.type]{ __ptr = ptr { __ptr = c.legion_ptr_t { value = i } } }
-            do
-              [block]
-            end
-          end
-          [worker_cleanup]
-        end
-
-        return quote
-          [actions]
-          while iterator_has_next([it]) do
-            var [count] = 0
-            var [base] = iterator_next_span([it], &count, -1).value
-            var arg_obj : arg_type
-            var [arg] = &arg_obj
-            [launch_init]
-            [openmphelper.launch]([omp_worker], [arg], [openmphelper.get_max_threads](), 0)
-            [launcher_cleanup]
-          end
-          ::[break_label]::
-          [cleanup_actions]
-        end
-      end
-    else
-      local fields = ispace_type.index_type.fields
-      if fields then
-        local domain_get_rect = c["legion_domain_get_rect_" .. tostring(ispace_type.dim) .. "d"]
-        local index = fields:map(function(field) return terralib.newsymbol(c.coord_t, tostring(field)) end)
-        local body = quote
-          var [symbol] = [symbol.type] { __ptr = [symbol.type.index_type.impl_type]{ index } }
-          do
-            [block]
-          end
-        end
-        if not openmp then
-          local rect_type = c["legion_rect_" .. tostring(ispace_type.dim) .. "d_t"]
-          local rect = terralib.newsymbol(rect_type, "rect")
-          for i = 1, ispace_type.dim do
-            local rect_i = i - 1 -- C is zero-based, Lua is one-based
-            body = quote
-              for [ index[i] ] = [rect].lo.x[rect_i], [rect].hi.x[rect_i] + 1 do
-                [body]
-              end
-            end
-          end
-          return quote
-            [actions]
-            while [rect_it_valid]([rect_it]) do
-              var [rect] = [rect_it_get]([rect_it])
-              [body]
-              [rect_it_step]([rect_it])
-            end
-            ::[break_label]::
-            [cleanup_actions]
-          end
-        else
-          local rect_type = c["legion_rect_" .. tostring(ispace_type.dim) .. "d_t"]
-          local rect = terralib.newsymbol(&rect_type, "rect")
-          for i = 1, ispace_type.dim do
-            local rect_i = i - 1 -- C is zero-based, Lua is one-based
-            if i ~= ispace_type.dim then
-              body = quote
-                for [ index[i] ] = [rect].lo.x[rect_i], [rect].hi.x[rect_i] + 1 do
-                  [body]
-                end
-              end
-            else
-              local start_idx = terralib.newsymbol(int64, "start_idx")
-              local end_idx = terralib.newsymbol(int64, "end_idx")
-              body = quote
-                [openmphelper.generate_preamble_structured(rect, rect_i, start_idx, end_idx)]
-                for [ index[i] ] = [start_idx], [end_idx] do
-                  [body]
-                end
-              end
-            end
-          end
-          local symbols, reductions = collect_symbols(cx, node)
-          symbols:insert(rect)
-          local arg_type, mapping = openmphelper.generate_argument_type(symbols, reductions)
-          local arg = terralib.newsymbol(&arg_type, "arg")
-          local worker_init, launch_init =
-            openmphelper.generate_argument_init(arg, arg_type, mapping, reductions)
-          local worker_cleanup =
-            openmphelper.generate_worker_cleanup(arg, arg_type, mapping, reductions)
-          local launcher_cleanup =
-            openmphelper.generate_launcher_cleanup(arg, arg_type, mapping, reductions)
-          local terra omp_worker(data : &opaque)
-            var [arg] = [&arg_type](data)
-            [worker_init]
-            [body]
-            [worker_cleanup]
-          end
-          return quote
-            [actions]
-            var r = [domain_get_rect]([domain])
-            var [rect] = &r
-            var arg_obj : arg_type
-            var [arg] = &arg_obj
-            [launch_init]
-            [openmphelper.launch]([omp_worker], [arg], [openmphelper.get_max_threads](), 0)
-            [launcher_cleanup]
-            ::[break_label]::
-            [cleanup_actions]
-          end
-        end
-      else
-        if not openmp then
-          return quote
-            [actions]
-            while [rect_it_valid]([rect_it]) do
-              var rect = [rect_it_get]([rect_it])
-              for i = rect.lo.x[0], rect.hi.x[0] + 1 do
-                var [symbol] = [symbol.type]{ __ptr = i }
-                do
-                  [block]
-                end
-              end
-              [rect_it_step]([rect_it])
-            end
-            ::[break_label]::
-            [cleanup_actions]
-          end
-        else
-          local start_idx = terralib.newsymbol(int64, "start_idx")
-          local end_idx = terralib.newsymbol(int64, "end_idx")
-          local rect_type = c.legion_rect_1d_t
-          local rect = terralib.newsymbol(&rect_type, "rect")
-          local symbols, reductions = collect_symbols(cx, node)
-          symbols:insert(rect)
-          local arg_type, mapping = openmphelper.generate_argument_type(symbols, reductions)
-          local arg = terralib.newsymbol(&arg_type, "arg")
-          local worker_init, launch_init =
-            openmphelper.generate_argument_init(arg, arg_type, mapping, reductions)
-          local worker_cleanup =
-            openmphelper.generate_worker_cleanup(arg, arg_type, mapping, reductions)
-          local launcher_cleanup =
-            openmphelper.generate_launcher_cleanup(arg, arg_type, mapping, reductions)
-          local terra omp_worker(data : &opaque)
-            var [arg] = [&arg_type](data)
-            [worker_init]
-            [openmphelper.generate_preamble_structured(rect, 0, start_idx, end_idx)]
-            for i = [start_idx], [end_idx] do
-              var [symbol] = [symbol.type]{ __ptr = i }
-              do
-                [block]
-              end
-            end
-            [worker_cleanup]
-          end
-          return quote
-            [actions]
-            var r = c.legion_domain_get_rect_1d([domain])
-            var [rect] = &r
-            var arg_obj : arg_type
-            var [arg] = &arg_obj
-            [launch_init]
-            [openmphelper.launch]([omp_worker], [arg], [openmphelper.get_max_threads](), 0)
-            [launcher_cleanup]
-            ::[break_label]::
-            [cleanup_actions]
-          end
-        end
-      end
-    end
-  else
-    -- Before we do codegen on the body, we replace all math functions with the GPU variants.
-    -- We also check if the body has any task launches or external function calls.
-    local block = ast.map_node_postorder(function(node)
+  -- If the loop needs the CUDA code generation, we replace calls to CPU math functions
+  -- with their GPU counterparts.
+  if cuda then
+    block = ast.map_node_postorder(function(node)
       if node:is(ast.typed.expr.Call) then
         local value = node.fn.value
         if std.is_math_fn(value) then
           return node { fn = node.fn { value = cudahelper.get_cuda_variant(value) } }
-        elseif value == array then
+        elseif value == array or value == arrayof then
           return node
         else
-          if std.is_task(value) then
-            report.error(node, "CUDA task cannot launch other tasks in a for loop")
-          else
-            report.error(node, "CUDA task cannot call external functions in a for loop")
-          end
+          assert(false, "this case should have been catched by the checker")
         end
-      elseif node:is(ast.typed.expr.IndexAccess) and std.is_region(node.expr_type) then
-        report.error(node, "CUDA task cannot access partitions in a for loop")
       else
         return node
       end
     end, node.block)
+  end
 
+  local fields = index_type.fields
+  local indices = terralib.newlist()
+  if fields then
+    indices:insertall(fields:map(function(field)
+      return terralib.newsymbol(c.coord_t, tostring(field))
+    end))
+  else
+    indices:insert(terralib.newsymbol(c.coord_t, "x"))
+  end
 
-    -- Now wrap the body as a terra function
-    block = cleanup_after(cx, codegen.block(cx, block))
+  local symbol_setup = nil
+  if ispace_type.dim == 0 then
+    symbol_setup = quote
+      var [symbol] = [symbol.type]{
+        __ptr = ptr { __ptr = c.legion_ptr_t { value = [ indices[1] ] } }
+      }
+    end
+  elseif ispace_type.dim == 1 then
+    symbol_setup = quote
+      var [symbol] = [symbol.type]{ __ptr = [ indices[1] ] }
+    end
+  else
+    symbol_setup = quote
+      var [symbol] = [symbol.type] { __ptr = [index_type.impl_type]{ [indices] } }
+    end
+  end
+  local body = quote
+    [symbol_setup]
+    do
+      [cleanup_after(cx, codegen.block(cx, block))]
+    end
+  end
+  local preamble = quote end
+  local postamble = quote end
 
-    local indices = terralib.newlist()
-    local lower_bounds = terralib.newlist()
-    local upper_bounds = terralib.newlist()
-    local body
-    if ispace_type:is_opaque() then
-      indices:insert(terralib.newsymbol(c.coord_t, "ptr"))
-      lower_bounds:insert(terralib.newsymbol(c.coord_t, "lo1"))
-      upper_bounds:insert(terralib.newsymbol(c.coord_t, "hi1"))
+  if not (cuda or openmp) then
+    -- TODO: Need to codegen these dimension loops in the right order
+    --       based on the instance layout
+    for i = 1, dim do
+      local rect_i = i - 1 -- C is zero-based, Lua is one-based
       body = quote
-        var [symbol] = [symbol.type]{
-          __ptr = [ptr]{ __ptr = c.legion_ptr_t { value = [ indices[1] ] } }
-        }
-        do
-          [block]
+        for [ indices[i] ] = [rect].lo.x[rect_i], [rect].hi.x[rect_i] + 1 do
+          [body]
         end
       end
-    else
-      for i = 1, ispace_type.dim do
-        lower_bounds:insert(terralib.newsymbol(c.coord_t, "lo" .. tostring(i)))
-        upper_bounds:insert(terralib.newsymbol(c.coord_t, "hi" .. tostring(i)))
-      end
-      local fields = ispace_type.index_type.fields
-      if fields then
-        indices:insertall(
-          fields:map(function(field) return terralib.newsymbol(c.coord_t, tostring(field)) end))
-        body = quote
-          var [symbol] = [symbol.type] { __ptr = [symbol.type.index_type.impl_type]{ [indices] } }
-          do
-            [block]
+    end
+
+  else
+    local symbols, reductions, lrs = collect_symbols(cx, node)
+    if openmp then
+      symbols:insert(rect)
+      local can_change = { [rect] = true }
+      local arg_type, mapping = openmphelper.generate_argument_type(symbols, reductions)
+      local arg = terralib.newsymbol(&arg_type, "arg")
+      local worker_init, launch_init, launch_update =
+        openmphelper.generate_argument_init(arg, arg_type, mapping, can_change, reductions)
+      local worker_cleanup =
+        openmphelper.generate_worker_cleanup(arg, arg_type, mapping, reductions)
+      local launcher_cleanup =
+        openmphelper.generate_launcher_cleanup(arg, arg_type, mapping, reductions)
+
+      -- TODO: Need to codegen these dimension loops in the right order
+      --       based on the instance layout
+      for i = 1, dim do
+        local rect_i = i - 1 -- C is zero-based, Lua is one-based
+        if i ~= dim then
+          body = quote
+            for [ indices[i] ] = [rect].lo.x[rect_i], [rect].hi.x[rect_i] + 1 do
+              [body]
+            end
+          end
+        else
+          local start_idx = terralib.newsymbol(int64, "start_idx")
+          local end_idx = terralib.newsymbol(int64, "end_idx")
+          body = quote
+            [openmphelper.generate_preamble(rect, rect_i, start_idx, end_idx)]
+            for [ indices[i] ] = [start_idx], [end_idx] do
+              [body]
+            end
           end
         end
-      else
-        indices:insert(terralib.newsymbol(c.coord_t, "idx"))
-        body = quote
-          var [symbol] = [symbol.type]{ __ptr = [ indices[1] ] }
-          do
-            [block]
-          end
+      end
+
+      local terra omp_worker(data : &opaque)
+        var [arg] = [&arg_type](data)
+        [worker_init]
+        [body]
+        [worker_cleanup]
+      end
+
+      body = quote
+        [launch_update]
+        [openmphelper.launch]([omp_worker], [arg], [openmphelper.get_max_threads](), 0)
+      end
+      preamble = launch_init
+      postamble = launcher_cleanup
+
+      -- Legion's safe cast is not thread-safe, because it might update the internal cache
+      -- Here we force the cache to get initialized so all OpenMP worker threads would only
+      -- read the cache.
+      if std.config["bounds-checks"] then
+        preamble = quote
+          [preamble];
+          [lrs:map_list(function(lr) return
+            quote
+              var p = [lr.type:ispace().index_type:zero()]
+              c.legion_domain_point_safe_cast([cx.runtime], [cx.context],
+                p:to_domain_point(), [lr].impl)
+            end
+          end)]
         end
       end
-    end
-
-    local index_inits = terralib.newlist()
-    local tid = terralib.newsymbol(c.size_t, "tid")
-    local offsets = terralib.newlist()
-    local counts = terralib.newlist()
-    for idx = 1, #indices do
-      offsets:insert(terralib.newsymbol(c.size_t, "offset" .. tostring(idx)))
-      counts:insert(terralib.newsymbol(c.size_t, "dim_size_" .. tostring(idx)))
-    end
-    local count = counts[1]
-    for idx = 2, #indices do
-      count = `([count] * [ counts[idx] ])
-    end
-
-    -- Compute a global tid
-    index_inits:insert(quote
-      var [tid] = [cudahelper.global_thread_id()]
-      if [tid] >= [count] then
-        return
-      end
-    end)
-
-    -- Convert the global tid into a point in an index space
-    index_inits:insert(quote var [ offsets[1] ] = 1 end)
-    for idx = 2, #indices do
-      index_inits:insert(quote
-        var [ offsets[idx] ] = [ offsets[idx - 1] ] * [ counts[idx - 1] ]
+    else -- if openmp then
+      assert(cuda)
+      assert(not std.config["bounds-checks"], "bounds checks with CUDA are unsupported")
+      local lower_bounds = indices:map(function(symbol)
+        return terralib.newsymbol(c.coord_t, "lo_" .. symbol.id)
       end)
-    end
-
-    for idx = #indices, 1, -1 do
-      index_inits:insert(quote
-        var [ indices[idx] ] = [ lower_bounds[idx] ] + [tid] / [ offsets[idx] ]
-        [tid] = [tid] % [ offsets[idx] ]
+      local counts = indices:map(function(symbol)
+        return terralib.newsymbol(c.coord_t, "cnt_" .. symbol.id)
       end)
-    end
+      local args = data.filter(function(arg) return reductions[arg] == nil end, symbols)
+      local shared_mem_size = cudahelper.compute_reduction_buffer_size(node, reductions)
+      local device_ptrs, device_ptrs_map, host_ptrs_map, host_preamble =
+        cudahelper.generate_reduction_preamble(reductions)
+      local kernel_preamble, kernel_postamble =
+        cudahelper.generate_reduction_kernel(reductions, device_ptrs_map)
+      local host_postamble =
+        cudahelper.generate_reduction_postamble(reductions, device_ptrs_map, host_ptrs_map)
+      args:insertall(lower_bounds)
+      args:insertall(counts)
+      args:insertall(device_ptrs)
 
-    body = quote
-      [index_inits]
-      [body]
-    end
+      -- Sort arguments in descending order of sizes to avoid misalignment
+      -- (which causes a segfault inside the driver API)
+      args:sort(function(s1, s2)
+          local t1 = s1.type
+          if t1:isarray() then t1 = t1.type end
+          local t2 = s2.type
+          if t2:isarray() then t2 = t2.type end
+          return sizeof(t1) > sizeof(t2)
+      end)
 
-    local args, reductions = collect_symbols(cx, node)
-    -- Remove reduction variables from kernel argument list as
-    -- we will define them in the kernel
-    args = data.filter(function(arg) return reductions[arg] == nil end, args)
-    local shared_mem_size = cudahelper.compute_reduction_buffer_size(node, reductions)
-    local device_ptrs, device_ptrs_map, host_preamble =
-      cudahelper.generate_reduction_preamble(reductions)
-    local kernel_preamble, kernel_postamble =
-      cudahelper.generate_reduction_kernel(reductions, device_ptrs_map)
-    local host_postamble =
-      cudahelper.generate_reduction_postamble(reductions, device_ptrs_map)
-    args:insertall(lower_bounds)
-    args:insertall(counts)
-    args:insertall(device_ptrs)
-    args:sort(function(s1, s2)
-        local t1 = s1.type
-        if t1:isarray() then t1 = t1.type end
-        local t2 = s2.type
-        if t2:isarray() then t2 = t2.type end
-        return sizeof(t1) > sizeof(t2)
-    end)
-
-    local terra kernel([args])
-      [kernel_preamble]
-      [body]
-      [kernel_postamble]
-    end
-
-    -- Register the kernel function to JIT
-    local kernel_id = cx.task_meta:get_cuda_variant():add_cuda_kernel(kernel)
-
-    ---- kernel launch
-    local count = terralib.newsymbol(c.size_t, "count")
-    local kernel_call =
-      cudahelper.codegen_kernel_call(kernel_id, count, args, shared_mem_size, false)
-
-    if ispace_type:is_opaque() then
-      return quote
-        [actions]
-        [host_preamble]
-        while iterator_has_next([it]) do
-          var [ counts[1] ] = 0
-          var [ lower_bounds[1] ] = iterator_next_span([it], &[ counts[1] ], -1).value
-          var [count] = [ counts[1] ]
-          [kernel_call]
-        end
-        [host_postamble]
-        [cleanup_actions]
+      -- Reconstruct indices from the global thread id
+      local index_inits = terralib.newlist()
+      local tid = terralib.newsymbol(c.size_t, "tid")
+      local offsets = indices:map(function(symbol)
+        return terralib.newsymbol(c.coord_t, "off_" .. symbol.id)
+      end)
+      local count = counts[1]
+      for idx = 2, #indices do
+        count = `([count] * [ counts[idx] ])
       end
-    else
-      local rect_type = c["legion_rect_" .. tostring(ispace_type.dim) .. "d_t"]
-      local domain_get_rect = c["legion_domain_get_rect_" .. tostring(ispace_type.dim) .. "d"]
-      local rect = terralib.newsymbol(rect_type, "rect")
+      index_inits:insert(quote
+        var [tid] = [cudahelper.global_thread_id()]
+        if [tid] >= [count] then return end
+      end)
+      index_inits:insert(quote var [ offsets[1] ] = 1 end)
+      for idx = 2, #indices do
+        index_inits:insert(quote
+          var [ offsets[idx] ] = [ offsets[idx - 1] ] * [ counts[idx - 1] ]
+        end)
+      end
+      for idx = #indices, 1, -1 do
+        index_inits:insert(quote
+          var [ indices[idx] ] = [ lower_bounds[idx] ] + [tid] / [ offsets[idx] ]
+          [tid] = [tid] % [ offsets[idx] ]
+        end)
+      end
+      local terra kernel([args])
+        [kernel_preamble]
+        [index_inits]
+        [body]
+        [kernel_postamble]
+      end
+
+      -- Register the kernel function to JIT
+      local kernel_id = cx.task_meta:get_cuda_variant():add_cuda_kernel(kernel)
+      local count = terralib.newsymbol(c.size_t, "count")
+      local kernel_call =
+        cudahelper.codegen_kernel_call(kernel_id, count, args, shared_mem_size, false)
+
       local bounds_setup = terralib.newlist()
       bounds_setup:insert(quote var [count] = 1 end)
-      for idx = 1, ispace_type.dim do
+      for idx = 1, dim do
         bounds_setup:insert(quote
           var [ lower_bounds[idx] ], [ counts[idx] ] =
             [rect].lo.x[ [idx - 1] ], [rect].hi.x[ [idx - 1] ] - [rect].lo.x[ [idx - 1] ] + 1
           [count] = [count] * [ counts[idx] ]
         end)
       end
-      kernel_call = quote
-        if [ count ] > 0 then [kernel_call] end
-      end
-      return quote
-        [actions]
-        [host_preamble]
-        var [rect] = [domain_get_rect]([domain])
+
+      body = quote
         [bounds_setup]
         [kernel_call]
-        [host_postamble]
-        [cleanup_actions]
       end
-    end
+
+      preamble = host_preamble
+      postamble = host_postamble
+    end  -- if openmp then
   end
+
+  return quote
+    [value.actions]
+    var [domain] = c.legion_index_space_get_domain([cx.runtime], [is])
+    var [rect_it] = [rect_it_create]([domain])
+    [preamble]
+    while [rect_it_valid]([rect_it]) do
+      var [rect] = [rect_it_get]([rect_it])
+      [body]
+      [rect_it_step]([rect_it])
+    end
+    ::[break_label]::
+    [rect_it_destroy]([rect_it]) 
+    [postamble]
+  end
+
 end
 
 function codegen.stat_for_list_vectorized(cx, node)
@@ -8054,6 +8811,7 @@ function codegen.stat_for_list_vectorized(cx, node)
         symbol = node.symbol,
         value = node.value,
         block = node.orig_block,
+        metadata = node.orig_metadata,
         span = node.span,
         annotations = node.annotations,
       })
@@ -8303,6 +9061,8 @@ local function stat_index_launch_setup(cx, node, domain, actions)
   local symbol = node.symbol:getsymbol()
   local cx = cx:new_local_scope()
   local preamble = node.preamble:map(function(stat) return codegen.stat(cx, stat) end)
+  local loop_vars = node.loop_vars:map(function(stat) return codegen.stat(cx, stat) end)
+  local has_preamble = #preamble > 0
 
   local fn = codegen.expr(cx, node.call.fn):read(cx)
   assert(std.is_task(fn.value))
@@ -8315,13 +9075,39 @@ local function stat_index_launch_setup(cx, node, domain, actions)
     else
       -- Run codegen halfway to get the partition. Note: Remember to
       -- splice the actions back in later.
-      partition = codegen.expr(cx, arg.value):read(cx)
+      local partition_expr = nil
+      local partition_type = nil
+      if arg:is(ast.typed.expr.Projection) then
+        partition_expr = arg.region.value
+        partition_type = std.as_read(arg.region.value.expr_type)
+      else
+        partition_expr = arg.value
+        partition_type = std.as_read(arg.value.expr_type)
+      end
+      partition = codegen.expr(cx, partition_expr):read(cx)
 
       -- Now run codegen the rest of the way to get the region.
-      local partition_type = std.as_read(arg.value.expr_type)
-      local region = codegen.expr(
-        cx,
-        ast.typed.expr.IndexAccess {
+      local region_expr = nil
+      if arg:is(ast.typed.expr.Projection) then
+        region_expr = arg {
+          region = ast.typed.expr.IndexAccess {
+            value = ast.typed.expr.Internal {
+              value = values.value(
+                node,
+                expr.just(quote end, partition.value),
+                partition_type),
+              expr_type = partition_type,
+              annotations = node.annotations,
+              span = node.span,
+            },
+            index = arg.region.index,
+            expr_type = arg.region.expr_type,
+            annotations = node.annotations,
+            span = node.span,
+          }
+        }
+      else
+        region_expr = ast.typed.expr.IndexAccess {
           value = ast.typed.expr.Internal {
             value = values.value(
               node,
@@ -8335,7 +9121,9 @@ local function stat_index_launch_setup(cx, node, domain, actions)
           expr_type = arg.expr_type,
           annotations = node.annotations,
           span = node.span,
-        }):read(cx)
+        }
+      end
+      local region = codegen.expr(cx, region_expr):read(cx)
       args:insert(region)
     end
     args_partitions:insert(partition)
@@ -8344,6 +9132,9 @@ local function stat_index_launch_setup(cx, node, domain, actions)
     function(condition)
       return codegen.expr_condition(cx, condition)
     end)
+
+  local symbol_type = node.symbol:gettype()
+  local symbol = node.symbol:getsymbol()
 
   local actions = quote
     [actions]
@@ -8359,7 +9150,7 @@ local function stat_index_launch_setup(cx, node, domain, actions)
          end
 
          -- Normal invariant arg actions.
-         if invariant then
+         if not has_preamble and invariant then
            arg_actions = quote [arg_actions]; [arg.actions] end
          end
 
@@ -8395,7 +9186,7 @@ local function stat_index_launch_setup(cx, node, domain, actions)
   task_args_setup:insertall(preamble)
   for i, arg in ipairs(args) do
     local invariant = node.args_provably.invariant[i]
-    if not invariant then
+    if has_preamble or not invariant then
       task_args_setup:insert(arg.actions)
     end
   end
@@ -8475,7 +9266,7 @@ local function stat_index_launch_setup(cx, node, domain, actions)
       assert(partition)
       expr_call_setup_partition_arg(
         cx, fn.value, node.call.args[i], arg_type, param_type, partition.value, node.symbol, launcher, true,
-        args_setup)
+        args_setup, node.free_vars[i], loop_vars)
     end
   end
 
@@ -8493,12 +9284,14 @@ local function stat_index_launch_setup(cx, node, domain, actions)
 
   local point = terralib.newsymbol(c.legion_domain_point_t, "point")
 
-  local symbol_type = node.symbol:gettype()
-  local symbol = node.symbol:getsymbol()
   local symbol_setup
   if std.is_bounded_type(symbol_type) then
     symbol_setup = quote
       var [symbol] = [symbol_type]({ __ptr = [symbol_type.index_type]([point]) })
+    end
+  elseif std.is_index_type(symbol_type) then
+    symbol_setup = quote
+      var [symbol] = [symbol_type]([point])
     end
   else
     -- Otherwise symbol_type has to be some simple integral type.
@@ -8513,21 +9306,6 @@ local function stat_index_launch_setup(cx, node, domain, actions)
   local launcher_setup = quote
     [must_epoch_setup]
     var [argument_map] = c.legion_argument_map_create()
-    do
-      var it = c.legion_domain_point_iterator_create([domain])
-      while c.legion_domain_point_iterator_has_next(it) do
-        var [point] = c.legion_domain_point_iterator_next(it)
-        [symbol_setup]
-
-        var [task_args]
-        [task_args_setup]
-        c.legion_argument_map_set_point(
-          [argument_map], [point], [task_args], true)
-        [task_args_cleanup]
-      end
-      c.legion_domain_point_iterator_destroy(it)
-    end
-
     var g_args : c.legion_task_argument_t
     g_args.args = nil
     g_args.arglen = 0
@@ -8537,7 +9315,27 @@ local function stat_index_launch_setup(cx, node, domain, actions)
       [fn.value:get_task_id()],
       [domain], g_args, [argument_map],
       c.legion_predicate_true(), false, 0, [tag])
-    [args_setup]
+    do
+      var it = c.legion_domain_point_iterator_create([domain])
+      var args_uninitialized = true
+      while c.legion_domain_point_iterator_has_next(it) do
+        var [point] = c.legion_domain_point_iterator_next(it)
+        [symbol_setup]
+
+        var [task_args]
+        [task_args_setup]
+        c.legion_argument_map_set_point(
+          [argument_map], [point], [task_args], true)
+
+        if args_uninitialized then
+          [args_setup];
+          args_uninitialized = false
+        end
+
+        [task_args_cleanup]
+      end
+      c.legion_domain_point_iterator_destroy(it)
+    end
   end
 
   local execute_fn = c.legion_index_launcher_execute
@@ -8601,6 +9399,7 @@ local function stat_index_launch_setup(cx, node, domain, actions)
       op = node.reduce_op,
       lhs = node.reduce_lhs,
       rhs = rhs,
+      metadata = false,
       annotations = node.annotations,
       span = node.span,
     }
@@ -8639,6 +9438,42 @@ local function stat_index_launch_setup(cx, node, domain, actions)
   return actions
 end
 
+local function stat_index_fill_setup(cx, node, domain, actions)
+  local fill = node.call
+  local value = codegen.expr(cx, fill.value):read(cx)
+  local value_type = std.as_read(fill.value.expr_type)
+  local region = fill.dst.region
+  local region_type = std.as_read(region.expr_type)
+  local partition = region.value
+  local partition_value = codegen.expr(cx, partition):read(cx)
+  local partition_type = std.as_read(partition.expr_type)
+  -- We need a complete codegen for the destination so we can access the metadata
+  local _ = codegen.expr(cx, region)
+  local parent_region =
+    cx:region(cx:region(region_type).root_region_type).logical_region
+  local projection_functor =
+    make_partition_projection_functor(cx, region, node.symbol)
+
+  local launcher_actions = fill.dst.fields:map(function(field_path)
+    local field_id = cx:region(region_type):field_id(field_path)
+    return quote
+      do
+        var value : value_type = [value.value]
+        c.legion_runtime_index_fill_field_with_domain([cx.runtime], [cx.context], [domain],
+          [partition_value.value].impl, [parent_region].impl, [field_id], [&opaque](&value), [sizeof(value_type)],
+          [projection_functor], c.legion_predicate_true(), 0, 0)
+      end
+    end
+  end)
+
+  return quote
+    [actions]
+    [value.actions]
+    [partition_value.actions]
+    [launcher_actions]
+  end
+end
+
 function codegen.stat_index_launch_num(cx, node)
   local values = codegen.expr_list(cx, node.values):map(function(value) return value:read(cx) end)
 
@@ -8652,7 +9487,13 @@ function codegen.stat_index_launch_num(cx, node)
       })
   end
 
-  return stat_index_launch_setup(cx, node, domain, actions)
+  if node.call:is(ast.typed.expr.Call) then
+    return stat_index_launch_setup(cx, node, domain, actions)
+  elseif node.call:is(ast.typed.expr.Fill) then
+    return stat_index_fill_setup(cx, node, domain, actions)
+  else
+    assert(false)
+  end
 end
 
 function codegen.stat_index_launch_list(cx, node)
@@ -8673,11 +9514,22 @@ function codegen.stat_index_launch_list(cx, node)
       var [domain] = c.legion_index_space_get_domain(
         [cx.runtime], [value.value].impl.index_space)
     end
+  elseif std.is_rect_type(value_type) then
+    actions = quote
+      [value.actions]
+      var [domain] = [value.value]:to_domain()
+    end
   else
     assert(false)
   end
 
-  return stat_index_launch_setup(cx, node, domain, actions)
+  if node.call:is(ast.typed.expr.Call) then
+    return stat_index_launch_setup(cx, node, domain, actions)
+  elseif node.call:is(ast.typed.expr.Fill) then
+    return stat_index_fill_setup(cx, node, domain, actions)
+  else
+    assert(false)
+  end
 end
 
 function codegen.stat_var(cx, node)
@@ -8812,10 +9664,11 @@ function codegen.stat_return(cx, node)
       terralib.attrstore(
         [&result_type](buffer), result,
         { align = [result_type_alignment] })
-      return std.serialized_value {
+      @[cx.result] = std.serialized_value {
         value = buffer,
         size = buffer_size,
       }
+      return
       -- Task wrapper is responsible for calling free.
     end
   end
@@ -8859,6 +9712,7 @@ function codegen.stat_reduce(cx, node)
   local actions = terralib.newlist()
   local lhs = codegen.expr(cx, node.lhs)
   local rhs = codegen.expr(cx, node.rhs)
+  local atomic = node.metadata and node.metadata.atomic
 
   local rhs_expr = rhs:read(cx, node.rhs.expr_type)
 
@@ -8868,7 +9722,7 @@ function codegen.stat_reduce(cx, node)
     expr.just(quote end, rhs_expr.value),
     std.as_read(node.rhs.expr_type))
 
-  actions:insert(lhs:reduce(cx, rhs, node.op, node.lhs.expr_type).actions)
+  actions:insert(lhs:reduce(cx, rhs, node.op, node.lhs.expr_type, atomic).actions)
 
   return quote [actions] end
 end
@@ -9033,6 +9887,7 @@ local make_dummy_task = terralib.memoize(
         replicable = false,
       },
       region_divergence = false,
+      metadata = false,
       prototype = task,
       annotations = ast.default_annotations(),
       span = ast.trivial_span(),
@@ -9100,23 +9955,33 @@ local function generate_parallel_prefix_bounds_checks(cx, node, lhs_region, rhs_
   if not bounds_checks then
     return quote end
   else
-    local lhs_ispace = cx:ispace(lhs_region:ispace())
-    local rhs_ispace = cx:ispace(rhs_region:ispace())
-    local ispaces = terralib.newlist({lhs_ispace, rhs_ispace})
-    local dense_checks = ispaces:map(function(is)
-      return quote
-        do
-          var domain = c.legion_index_space_get_domain([cx.runtime], [is.index_space])
-          std.assert_error(c.legion_domain_is_dense(domain),
-              [get_source_location(node) .. ": parallel prefix operator supports only dense regions"])
-        end
+    local lhs_r = cx:region(lhs_region)
+    local rhs_r = cx:region(rhs_region)
+    local lhs_is = terralib.newsymbol(c.legion_index_space_t, "lhs_is")
+    local rhs_is = terralib.newsymbol(c.legion_index_space_t, "rhs_is")
+    local region_types = terralib.newlist({lhs_region, rhs_region})
+    local regions = terralib.newlist({lhs_r, rhs_r})
+    local ispaces = terralib.newlist({lhs_is, rhs_is})
+    local dense_checks = quote end
+    local bounds = data.zip(region_types, regions, ispaces):map(function(tuple)
+      local region, r, is = unpack(tuple)
+      local bounds_actions, domain, bounds = index_space_bounds(cx, is, region:ispace())
+      dense_checks = quote
+        [dense_checks];
+        var [is] = [r.logical_region].impl.index_space
+        [bounds_actions];
+        std.assert_error(c.legion_domain_is_dense([domain]),
+            [get_source_location(node) .. ": parallel prefix operator supports only dense regions"])
       end
+      return bounds
     end)
     return quote
-      [dense_checks];
-      std.assert_error([lhs_ispace.bounds] == [rhs_ispace.bounds],
-          [get_source_location(node) ..
-          ": the source and the target of a parallel prefix operator must have the same size"])
+      do
+        [dense_checks];
+        std.assert_error([bounds[1]] == [bounds[2]],
+            [get_source_location(node) ..
+            ": the source and the target of a parallel prefix operator must have the same size"])
+      end
     end
   end
 end
@@ -9550,14 +10415,25 @@ local function filter_fields(fields, privileges)
   return fields
 end
 
-local function unpack_param_helper(cx, node, param_type, params_map_type, i)
+local unpack_param_helper = terralib.memoize(function(param_type)
+  local cx = context.new_global_scope()
+
   -- Inputs/outputs:
   local c_task = terralib.newsymbol(c.legion_task_t, "task")
-  local params_map = terralib.newsymbol(params_map_type, "params_map_type")
+  local params_map = terralib.newsymbol(&uint64, "params_map")
+  local param_i = terralib.newsymbol(uint64, "param_i")
   local fixed_ptr = terralib.newsymbol(&opaque, "fixed_ptr")
   local data_ptr = terralib.newsymbol(&&uint8, "data_ptr")
   local future_count = terralib.newsymbol(int32, "future_count")
   local future_i = terralib.newsymbol(&int32, "future_i")
+
+  -- Hack: this isn't used, but some APIs require nodes so we have to provide one.
+  local dummy_node = ast.typed.expr.Internal {
+    value = false,
+    expr_type = opaque,
+    annotations = ast.default_annotations(),
+    span = ast.trivial_span(),
+  }
 
   -- Generate code to unpack a future.
   local future = terralib.newsymbol(c.legion_future_t, "future")
@@ -9567,25 +10443,25 @@ local function unpack_param_helper(cx, node, param_type, params_map_type, i)
     ast.typed.expr.FutureGetResult {
       value = ast.typed.expr.Internal {
         value = values.value(
-          node,
+          dummy_node,
           expr.just(quote end, `([future_type]{ __result = [future] })),
           future_type),
         expr_type = future_type,
-        annotations = node.annotations,
-        span = node.span,
+        annotations = ast.default_annotations(),
+        span = ast.trivial_span(),
       },
       expr_type = param_type,
-      annotations = node.annotations,
-      span = node.span,
+      annotations = ast.default_annotations(),
+      span = ast.trivial_span(),
   }):read(cx)
 
   -- Generate code to unpack a non-future.
   local deser_actions, deser_value = std.deserialize(
     param_type, fixed_ptr, data_ptr)
 
-  local terra unpack_param([c_task], [params_map], [fixed_ptr], [data_ptr],
+  local terra unpack_param([c_task], [params_map], [param_i], [fixed_ptr], [data_ptr],
                            [future_count], [future_i])
-    if ([params_map][ [math.floor((i-1)/64)] ] and [2ULL ^ math.fmod(i-1, 64)]) == 0 then
+    if ([params_map][([param_i])/64] and (uint64(1) << ([param_i]%64))) == 0 then
       [deser_actions]
       return [deser_value]
     else
@@ -9600,7 +10476,7 @@ local function unpack_param_helper(cx, node, param_type, params_map_type, i)
   end
   unpack_param:setinlined(false)
   return unpack_param
-end
+end)
 
 local function setup_regent_calling_convention_metadata(node, task)
   local params_struct_type = terralib.types.newstruct()
@@ -9640,34 +10516,22 @@ local function setup_regent_calling_convention_metadata(node, task)
   local fn_type = task:get_type()
   local param_types = task:get_type().parameters
   local param_field_id_labels = data.newmap()
-  local param_field_id_symbols = data.newmap()
   for _, region_i in pairs(std.fn_params_with_privileges_by_index(fn_type)) do
     local region = param_types[region_i]
     local field_paths, field_types =
       std.flatten_struct_fields(region:fspace())
-    local field_id_labels = field_paths:map(
-      function(field_path)
-        return terralib.newlabel("field_" .. field_path:hash())
-      end)
-    local field_id_symbols = field_paths:map(
-      function(field_path)
-        return terralib.newsymbol(c.legion_field_id_t, "field_" .. field_path:hash())
-      end)
-    param_field_id_labels[region_i] = field_id_labels
-    param_field_id_symbols[region_i] = field_id_symbols
-    params_struct_type.entries:insertall(
-      data.zip(field_id_labels, field_types):map(
-        function(field)
-          local field_id, field_type = unpack(field)
-          return { field = field_id, type = c.legion_field_id_t }
-        end))
+    local field_label = terralib.newlabel(tostring(region) .. "_fields")
+    param_field_id_labels[region_i] = field_label
+    params_struct_type.entries:insert({
+      field = field_label,
+      type = c.legion_field_id_t[#field_types]
+    })
   end
   task:set_field_id_param_labels(param_field_id_labels)
-  task:set_field_id_param_symbols(param_field_id_symbols)
 end
 
 function codegen.top_task(cx, node)
-  log_codegen:info("Starting codegen for task " .. tostring(node.name))
+  log_codegen:info("%s", "Starting codegen for task " .. tostring(node.name))
 
   local task = node.prototype
   local variant = cx.variant
@@ -9686,8 +10550,9 @@ function codegen.top_task(cx, node)
   local c_num_regions = terralib.newsymbol(uint32, "num_regions")
   local c_context = terralib.newsymbol(c.legion_context_t, "context")
   local c_runtime = terralib.newsymbol(c.legion_runtime_t, "runtime")
+  local c_result = terralib.newsymbol(&std.serialized_value, "result")
   local c_params = terralib.newlist({
-      c_task, c_regions, c_num_regions, c_context, c_runtime })
+      c_task, c_regions, c_num_regions, c_context, c_runtime, c_result })
 
   local params = node.params:map(
     function(param) return param.symbol end)
@@ -9756,7 +10621,7 @@ function codegen.top_task(cx, node)
                                task:get_constraints(),
                                orderings,
                                variant:get_config_options().leaf,
-                               task, c_task, c_context, c_runtime)
+                               task, c_task, c_context, c_runtime, c_result)
 
   -- FIXME: This code should be deduplicated with type_check, no
   -- reason to do it twice....
@@ -9814,11 +10679,11 @@ function codegen.top_task(cx, node)
       local param_type = node.params[i].param_type
       local param_symbol = param:getsymbol()
 
-      local helper = unpack_param_helper(cx, node, param_type, params_map_type, i)
+      local helper = unpack_param_helper(param_type)
 
       local actions = quote
         var [param_symbol] = [helper](
-          [c_task], [params_map_symbol], &args.[param:getlabel()], &[data_ptr],
+          [c_task], [params_map_symbol], [i-1], &args.[param:getlabel()], &[data_ptr],
           [future_count], &[future_i])
       end
       if std.is_ispace(param_type) and not cx:has_ispace(param_type) then
@@ -9841,15 +10706,8 @@ function codegen.top_task(cx, node)
 
   -- Unpack field IDs passed by-value to the task.
   local param_field_id_labels = task:get_field_id_param_labels()
-  local param_field_id_symbols = task:get_field_id_param_symbols()
-  for region, param_fields in param_field_id_labels:items() do
-    for i, param_field in ipairs(param_fields) do
-      local param_symbol = param_field_id_symbols[region][i]
-      task_setup:insert(quote
-        var [param_symbol] = args.[param_field]
-      end)
-    end
-  end
+
+  log_privileges:info('%s', 'task ' .. tostring(task.name))
 
   -- Unpack the region requirements.
   local physical_region_i = 0
@@ -9867,13 +10725,23 @@ function codegen.top_task(cx, node)
     local privileges, privilege_field_paths, privilege_field_types, coherences, flags =
       std.find_task_privileges(region_type, task)
 
+    log_privileges:info('  region ' .. tostring(region_i))
+    for i, field_paths in ipairs(privilege_field_paths) do
+      local privilege = privileges[i]
+      log_privileges:info('    physical region ' .. tostring(physical_region_i) .. ' (privilege ' .. tostring(privilege) .. ')')
+      for _, field_path in ipairs(field_paths) do
+        log_privileges:info('      ' .. tostring(field_path))
+      end
+    end
+
     local privileges_by_field_path = std.group_task_privileges_by_field_path(
       privileges, privilege_field_paths)
 
     local field_paths, field_types =
       std.flatten_struct_fields(region_type:fspace())
+    local field_id_array = `(args.[param_field_id_labels[region_i]])
     local field_ids_by_field_path = data.dict(
-      data.zip(field_paths:map(data.hash), param_field_id_symbols[region_i]))
+      data.zip(field_paths:map(data.hash), data.mapi(function(field_i, _) return `([field_id_array][field_i - 1]) end, field_paths)))
 
     local physical_regions = terralib.newlist()
     local physical_regions_by_field_path = {}
@@ -10000,6 +10868,7 @@ function codegen.top_task(cx, node)
                          privileges_by_field_path,
                          data.dict(data.zip(field_paths:map(data.hash), field_types)),
                          field_ids_by_field_path,
+                         field_id_array,
                          data.dict(data.zip(field_paths:map(data.hash), field_types:map(function(_) return false end))),
                          physical_regions_by_field_path,
                          base_pointers_by_field_path,
@@ -10019,8 +10888,9 @@ function codegen.top_task(cx, node)
 
     local field_paths, field_types =
       std.flatten_struct_fields(list_type:fspace())
+    local field_id_array = `(args.[param_field_id_labels[list_i]])
     local field_ids_by_field_path = data.dict(
-      data.zip(field_paths:map(data.hash), param_field_id_symbols[list_i]))
+      data.zip(field_paths:map(data.hash), data.mapi(function(field_i, _) return `([field_id_array][field_i - 1]) end, field_paths)))
 
     -- We never actually access physical instances for lists, so don't
     -- build any accessors here.
@@ -10031,6 +10901,7 @@ function codegen.top_task(cx, node)
                            privileges_by_field_path,
                            data.dict(data.zip(field_paths:map(data.hash), field_types)),
                            field_ids_by_field_path,
+                           field_id_array,
                            data.dict(data.zip(field_paths:map(data.hash), field_types:map(function(_) return false end))))
   end
 
@@ -10132,14 +11003,13 @@ function codegen.top_task(cx, node)
     body = cleanup_after(cx, codegen.block(cx, node.body))
   end
 
-  local result_type = std.type_size_bucket_type(return_type)
   local guard = quote end
-  if result_type ~= terralib.types.unit then
+  if return_type ~= terralib.types.unit then
     guard = quote
       std.assert_error(false, [get_source_location(node) .. ": missing return statement in task that is expected to return " .. tostring(return_type)])
     end
   end
-  local terra proto([c_params]): result_type
+  local terra proto([c_params])
     do
       [preamble]; -- Semicolon required. This is not an array access.
       [body]
@@ -10188,6 +11058,18 @@ function codegen.top(cx, node)
     cpu_variant:set_ast(node)
     std.register_variant(cpu_variant)
 
+    -- Mark the variant as OpenMP variant when at least one OpenMP loop exists
+    if std.config["openmp"] then
+      ast.traverse_node_postorder(
+        function(node)
+          if node:is(ast.typed.stat) and
+             node.annotations.openmp:is(ast.annotation.Demand)
+          then
+            cpu_variant:set_is_openmp(true)
+          end
+        end, node)
+    end
+
     if node.annotations.cuda:is(ast.annotation.Demand) then 
       if not cudahelper.check_cuda_available() then
         report.warn(node,
@@ -10205,12 +11087,6 @@ function codegen.top(cx, node)
 
   elseif node:is(ast.typed.top.Fspace) then
     return codegen.top_fspace(cx, node)
-
-  elseif node:is(ast.specialized.top.QuoteExpr) then
-    return codegen.top_quote_expr(cx, node)
-
-  elseif node:is(ast.specialized.top.QuoteStat) then
-    return codegen.top_quote_stat(cx, node)
 
   else
     assert(false, "unexpected node type " .. tostring(node:type()))

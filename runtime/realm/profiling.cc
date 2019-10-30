@@ -1,4 +1,4 @@
-/* Copyright 2018 Stanford University, NVIDIA Corporation
+/* Copyright 2019 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -26,15 +26,18 @@ namespace Realm {
 
   ProfilingRequest::ProfilingRequest(Processor _response_proc, 
 				     Processor::TaskFuncID _response_task_id,
-				     int _priority /*= 0*/)
+				     int _priority /*= 0*/,
+				     bool _report_if_empty /*= false*/)
     : response_proc(_response_proc), response_task_id(_response_task_id)
     , priority(_priority)
+    , report_if_empty(_report_if_empty)
   {}
 
   ProfilingRequest::ProfilingRequest(const ProfilingRequest& to_copy)
     : response_proc(to_copy.response_proc)
     , response_task_id(to_copy.response_task_id)
     , priority(to_copy.priority)
+    , report_if_empty(to_copy.report_if_empty)
     , user_data(to_copy.user_data)
     , requested_measurements(to_copy.requested_measurements)
   {
@@ -49,6 +52,7 @@ namespace Realm {
     response_proc = rhs.response_proc;
     response_task_id = rhs.response_task_id;
     priority = rhs.priority;
+    report_if_empty = rhs.report_if_empty;
     requested_measurements = rhs.requested_measurements;
     user_data = rhs.user_data;
     return *this;
@@ -174,6 +178,11 @@ namespace Realm {
 
   void ProfilingMeasurementCollection::send_response(const ProfilingRequest& pr) const
   {
+    // a task ID of 0 means that the measurement is being ignored - don't even
+    //  bother forming it
+    if(pr.response_task_id == Processor::TASK_ID_PROCESSOR_NOP)
+      return;
+    
     // for each request, find the intersection of the measurements it wants and the ones we have
     std::set<ProfilingMeasurementID> ids;
 
@@ -195,10 +204,13 @@ namespace Realm {
       bytes_needed += msize_padded;     // to store actual data
     }
 
+    int count = ids.size();
+    // not everybody wants an empty report
+    if((count == 0) && !pr.report_if_empty)
+      return;
+
     char *payload = (char *)malloc(bytes_needed);
     assert(payload != 0);
-
-    int count = ids.size();
 
     int *header = (int *)payload;  // first bunch of stuff is a big int array
     char *data = payload + (2 + 2 * count) * sizeof(int);

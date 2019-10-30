@@ -1,4 +1,4 @@
--- Copyright 2018 Stanford University, NVIDIA Corporation
+-- Copyright 2019 Stanford University, NVIDIA Corporation
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -54,7 +54,7 @@ task main()
   var r = region(ispace(int2d, {4, 4}), fs)
   var p = partition(equal, r, ispace(int2d, {2, 2}))
   for c in p.colors do init(p[c]) end
-  __forbid(__parallel)
+  __forbid(__index_launch)
   for c in p.colors do reduce(p[c]) end
   for c in p.colors do reduce(p[c]) end
   for c in p.colors do check(p[c]) end

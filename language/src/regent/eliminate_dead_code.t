@@ -1,4 +1,4 @@
--- Copyright 2018 Stanford University
+-- Copyright 2019 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -18,22 +18,57 @@ local ast = require("regent/ast")
 
 local eliminate_dead_code = {}
 
-function eliminate_dead_code.stat(node)
-  if node:is(ast.typed.stat.If) and
-     node.cond:is(ast.typed.expr.Constant) and
+local function eliminate_dead_if_node(node, continuation)
+  if node.cond:is(ast.typed.expr.Constant) and
      not node.cond.value and #node.elseif_blocks == 0
   then
     return node.else_block.stats
+
   else
-    return node
+    return continuation(node, true)
   end
 end
 
+local function apply_dce_block_stat(node, continuation)
+  return node { block = continuation(node.block) }
+end
+
+local function apply_dce_block(node, continuation)
+  return node { stats = continuation(node.stats) }
+end
+
+local function do_nothing(node, continuation) return node end
+
+local dce_table = {
+  [ast.typed.stat.If]              = eliminate_dead_if_node,
+  [ast.typed.stat.Elseif]          = apply_dce_block_stat,
+  [ast.typed.stat.While]           = apply_dce_block_stat,
+  [ast.typed.stat.ForNum]          = apply_dce_block_stat,
+  [ast.typed.stat.ForList]         = apply_dce_block_stat,
+  [ast.typed.stat.Repeat]          = apply_dce_block_stat,
+  [ast.typed.stat.MustEpoch]       = apply_dce_block_stat,
+  [ast.typed.stat.Block]           = apply_dce_block_stat,
+  [ast.typed.stat.ParallelizeWith] = apply_dce_block_stat,
+
+  [ast.typed.expr] = do_nothing,
+  [ast.typed.stat] = do_nothing,
+
+  [ast.typed.Block]             = apply_dce_block,
+  [ast.IndexLaunchArgsProvably] = do_nothing,
+  [ast.location]                = do_nothing,
+  [ast.annotation]              = do_nothing,
+  [ast.condition_kind]          = do_nothing,
+  [ast.disjointness_kind]       = do_nothing,
+  [ast.fence_kind]              = do_nothing,
+}
+
+local apply_dce_node = ast.make_single_dispatch(
+  dce_table,
+  {})
+
 function eliminate_dead_code.top(node)
   if node:is(ast.typed.top.Task) then
-    return node {
-      body = ast.flatmap_node_postorder(eliminate_dead_code.stat, node.body),
-    }
+    return node { body = ast.flatmap_node_continuation(apply_dce_node(), node.body) }
   else
     return node
   end

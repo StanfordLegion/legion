@@ -76,16 +76,12 @@ void top_level_task(const void *args, size_t arglen,
 
   Machine machine = Machine::get_machine();
   std::vector<Processor> all_cpus;
-  {
-    std::set<Processor> all_processors;
-    machine.get_all_processors(all_processors);
-    for(std::set<Processor>::const_iterator it = all_processors.begin();
-	it != all_processors.end();
-	it++) {
-      // try not to use the processor that the top level task is running on
-      if(((*it).kind() == Processor::LOC_PROC) && ((*it) != p))
-	all_cpus.push_back(*it);
-    }
+  Machine::ProcessorQuery pq(machine);
+  pq.same_address_space_as(p).only_kind(Processor::LOC_PROC);
+  for(Machine::ProcessorQuery::iterator it = pq.begin(); it != pq.end(); ++it) {
+    // try not to use the processor that the top level task is running on
+    if(*it != p)
+      all_cpus.push_back(*it);
   }
   // if this is the ONLY processor, go ahead and add it back in
   if(all_cpus.empty()) {

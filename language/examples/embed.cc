@@ -1,4 +1,4 @@
-/* Copyright 2018 Stanford University
+/* Copyright 2019 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -48,10 +48,15 @@ void top_level_task(const Task *task,
     falloc.allocate_field(sizeof(int), FID_Z);
   }
   LogicalRegion region = runtime->create_logical_region(ctx, ispace, fspace);
+  LogicalRegion other_region = runtime->create_logical_region(ctx, ispace, fspace);
 
   runtime->fill_field<int>(ctx, region, region, FID_X, 0);
   runtime->fill_field<int>(ctx, region, region, FID_Y, 0);
   runtime->fill_field<int>(ctx, region, region, FID_Z, 0);
+
+  runtime->fill_field<int>(ctx, other_region, other_region, FID_X, 0);
+  runtime->fill_field<int>(ctx, other_region, other_region, FID_Y, 0);
+  runtime->fill_field<int>(ctx, other_region, other_region, FID_Z, 0);
 
   legion_field_id_t c_fields[3] = {FID_X, FID_Y, FID_Z};
   std::vector<FieldID> fields(c_fields, c_fields+3);
@@ -62,6 +67,8 @@ void top_level_task(const Task *task,
     my_regent_task_launcher launcher;
     launcher.add_argument_r(region, region, fields);
     launcher.add_argument_x(12345);
+    launcher.add_argument_y(3.14);
+    launcher.add_argument_z(true);
     launcher.execute(runtime, ctx);
   }
 
@@ -76,10 +83,30 @@ void top_level_task(const Task *task,
     my_regent_task_launcher_t launcher = my_regent_task_launcher_create(legion_predicate_true(), 0, 0);
     my_regent_task_launcher_add_argument_r(launcher, c_region, c_region, c_fields, 3, false);
     my_regent_task_launcher_add_argument_x(launcher, 67890, false);
+    my_regent_task_launcher_add_argument_y(launcher, 4.56, false);
+    my_regent_task_launcher_add_argument_z(launcher, false, false);
     legion_future_t f = my_regent_task_launcher_execute(c_runtime, c_context, launcher);
     my_regent_task_launcher_destroy(launcher);
     legion_future_destroy(f);
   }
+
+
+  // Arguments can be passed in any order
+
+  {
+    other_regent_task_launcher launcher;
+    launcher.add_argument_r(region, region, fields);
+    launcher.add_argument_s(other_region, other_region, fields);
+    launcher.execute(runtime, ctx);
+  }
+
+  {
+    other_regent_task_launcher launcher;
+    launcher.add_argument_s(other_region, other_region, fields);
+    launcher.add_argument_r(region, region, fields);
+    launcher.execute(runtime, ctx);
+  }
+
 }
 
 int main(int argc, char **argv)
@@ -92,7 +119,7 @@ int main(int argc, char **argv)
     Runtime::preregister_task_variant<top_level_task>(registrar, "top_level");
   }
 
-  embed_tasks_h_register();
+  embed_tasks_register();
 
   return Runtime::start(argc, argv);
 }

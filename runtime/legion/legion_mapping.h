@@ -1,4 +1,4 @@
-/* Copyright 2018 Stanford University, NVIDIA Corporation
+/* Copyright 2019 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -55,11 +55,12 @@ namespace Legion {
       Memory get_location(void) const;
       unsigned long get_instance_id(void) const;
       size_t get_instance_size(void) const;
+      Domain get_instance_domain(void) const;
       // Adds all fields that exist in instance to 'fields', unless
       //  instance is virtual
       void get_fields(std::set<FieldID> &fields) const;
     public:
-      LogicalRegion get_logical_region(void) const;
+      FieldSpace get_field_space(void) const;
       LayoutConstraintID get_layout_id(void) const;
     public:
       // See if our instance still exists or if it has been
@@ -85,17 +86,8 @@ namespace Legion {
       void add_use_fields(const std::set<FieldID> &fids);
     public:
       // Check to see if a whole set of constraints are satisfied
-      bool entails(const LayoutConstraintSet &constraint_set) const;
-      // Check to see if individual constraints are satisfied
-      bool entails(const SpecializedConstraint &constraint) const;   
-      bool entails(const MemoryConstraint &constraint) const;
-      bool entails(const OrderingConstraint &constraint) const;
-      bool entails(const SplittingConstraint &constraint) const;
-      bool entails(const FieldConstraint &constraint) const;
-      bool entails(const DimensionConstraint &constraint) const;
-      bool entails(const AlignmentConstraint &constraint) const;
-      bool entails(const OffsetConstraint &constraint) const;
-      bool entails(const PointerConstraint &constraint) const;
+      bool entails(const LayoutConstraintSet &constraint_set,
+                   const LayoutConstraint **failed_constraint = NULL) const;
     public:
       static PhysicalInstance get_virtual_instance(void);
     protected:
@@ -268,6 +260,23 @@ namespace Legion {
         SERIALIZED_NON_REENTRANT_MAPPER_MODEL,
       };
       virtual MapperSyncModel get_mapper_sync_model(void) const = 0;
+    public:
+      /**
+       * ----------------------------------------------------------------------
+       *  Request Valid Instances
+       * ----------------------------------------------------------------------
+       * Indicate whether the runtime should populate the valid instances as
+       * inputs for mapping operations. This will control the setting for all
+       * operations that are not tasks. For tasks, this will just set the 
+       * initial value of 'valid_instances' in the select_task_options struct
+       * as we give mappers more control over needing valid inputs for tasks
+       * than generic operations at the moment. We provide a default 
+       * implementation of this method because older versions of the runtime
+       * would always fill in this data structure, however, we now allow
+       * mappers to disable this in order to reduce the cost of physical
+       * analysis done for mapping operations.
+       */
+      virtual bool request_valid_instances(void) const { return true; }
     public: // Task mapping calls
       /**
        * ----------------------------------------------------------------------
@@ -318,7 +327,7 @@ namespace Legion {
        *     from being stolen as it will have already been mapped
        *     once it enters the ready queue.
        *
-       * valid_instance default:true
+       * valid_instance default:result of request_valid_instances
        *     When calls to map_task are performed, it's often the 
        *     case that the mapper will want to know the currently valid
        *     instances are for that region. There is some overhead to
@@ -456,48 +465,60 @@ namespace Legion {
        * ----------------------------------------------------------------------
        * The map task call is performed on every task which is eagerly
        * (as opposed to lazily) executed and has all its input already
-       * eagerly executed. The call provides a set of physical instances
-       * which can be used for each of the different region requirements
-       * for the task. The mapper has the repsonsibility of filling in a
-       * ranking of physical instances to re-use for each region requirement
-       * in 'chosen_ranking'. The mapper can also specify what layout
-       * constraints to use in creating a new physical instance in the 
-       * 'layout_constraints' set for each region requirement. Finally,
-       * the mapper can see if the write-after-read optimization should
-       * be enforced on each individual region requirement by using the
-       * 'enable_WAR_optimization' vector.
+       * eagerly executed. The input to map_task consists of the names
+       * of any valid instances that the runtime knows about for each
+       * of the individual region requirements stored in 'valid_instances'
+       * (if the user requested them by setting 'valid_instances' to 'true'
+       * in the select_task_options mapper call), and the indexes of any
+       * regions which were premapped in 'premapped_regions'.
        *
-       * The runtime will then attempt to map physical regions for each
-       * region requirement based on these constraints. If the runtime
-       * succeeds it will progress through the ranking of task variant
-       * IDs in 'variant_ranking' in order to find a variant of the task
-       * to run. If no variant can be found in the 'target_ranking'
-       * that has all its constraints satisfied, the runtime will also
-       * proceed ot check any other variants for the given task kind.
-       * If none succeed the mapping will fail. The mapper can also
-       * request that it be notified of the ultimate mapping results
-       * of the task by setting the 'report_mapping' flag to true.
+       * The mapper must first select a set of 'chosen_instances' to use
+       * for each region requirement of the task. Multiple instances can
+       * be chosen for each region requirement (hence the vector of vectors)
+       * but the runtime will use the first instance that has space for each
+       * field in the vector of instances for all the fields in the region
+       * requirement. For read-only region requirements, the mapper can 
+       * optionally request that the runtime not track the instances used
+       * for read-only region requirements with the 'untracked_valid_regions'.
+       * This will ensure that read-only instances are not considered a 
+       * long-term valid copy of the data and make them immediately eligible
+       * for garbage collection after the task is done mapping. Only the
+       * indexes of read-only region requirements should be specified.
        *
-       * The 'additional_procs' field allows the mapper to indicate that
-       * this task can actually be executed on one of a set of processors
-       * in addition to the target processor. All the processors in 
-       * 'additional_procs' must be of the same kind as the target
-       * processor as the target processor and be capable of seeing the
-       * memories where the physical instances of the mapped task are
-       * located or the runtime will silently omit these processors
-       * from consideration. The task will be run on the first of these
-       * processors or the target processor that become available.
-       * The mapper can influence the priority of the task by setting
-       * the 'task_priority' field. Negative priorities are lower and
-       * positive priorities are higher.
+       * The mapper must also select a set of 'target_procs'
+       * that specifies the target processor(s) on which the task can run.
+       * If a single processor is chosen then the task is guaranteed to 
+       * run on that processor. If multiple processors are specified, 
+       * the runtime will run the task on the first procoessor that becomes
+       * available. All of the processors must be on the same node and of 
+       * the same kind for now. 
        *
-       * The mapper can also request profiling information about this
+       * The mapper must further select a task variant to use to execute
+       * the task and specify its VariantID in 'chosen_variant'. This variant
+       * must have execution constraints consistent with all the 'target_procs'.
+       * All of the instances specified by 'chosen_instances' must be in 
+       * memories visible to all the target processors or the variant must speicfy
+       * 'no_access' specialized constraints for such region requirements.
+       * The mapper can specify a priority for the task with the 'task_priority'
+       * field. This will allow the task to be re-ordered ahead of lower
+       * priority tasks and behind higher priority tasks by the runtime
+       * as it's being dynamically scheduled. Negative priorities are lower
+       * and positive priorities are higher.
+       *
+       * The mapper can request profiling information about this
        * task as part of its execution. The mapper can specify a task
        * profiling request set in 'task_prof_requests' for profiling
        * statistics about the execution of the task. The mapper can
        * also ask for profiling information for the copies generated
        * as part of the mapping of the task through the 
-       * 'copy_prof_requests' field.
+       * 'copy_prof_requests' field. The 'profiling_priority' field
+       * indicates with which priority the profiling results should
+       * be send back to the mapper.
+       *
+       * Finally, the mapper can requrest a postmap_task mapper call be
+       * performed to make additional copies of any output regions of the
+       * task for resilience purposes by setting the 'postmap_task' flag
+       * to true.
        */
       struct MapTaskInput {
         std::vector<std::vector<PhysicalInstance> >     valid_instances;
@@ -505,12 +526,13 @@ namespace Legion {
       };
       struct MapTaskOutput {
         std::vector<std::vector<PhysicalInstance> >     chosen_instances; 
+        std::set<unsigned>                              untracked_valid_regions;
         std::vector<Processor>                          target_procs;
         VariantID                                       chosen_variant; // = 0 
+        TaskPriority                                    task_priority;  // = 0
+        TaskPriority                                    profiling_priority;
         ProfilingRequest                                task_prof_requests;
         ProfilingRequest                                copy_prof_requests;
-        TaskPriority                                    profiling_priority;
-        TaskPriority                                    task_priority;  // = 0
         bool                                            postmap_task; // = false
       };
       //------------------------------------------------------------------------
@@ -555,17 +577,13 @@ namespace Legion {
        * each of the different region requirements for the task in 
        * 'mapped_regions', as well of any currently valid physical instances
        * for those regions in the set of 'valid_instances' for each region
-       * requirement. The mapper then specifies the desired number of copies
-       * of each region requirement that it wants to generate in the 
-       * 'copy_count' vector. Setting this count to 0 will prevent any copies 
-       * from being made. The runtime will first walk through the list of 
-       * physical instances in 'chosen_ranking' and issue copies to the target 
-       * physical instances for each region requirement. The runtime will
-       * continue issuing copies until the copy count has been met. If the
-       * copy count has still not been satisfied, the runtime will progress
-       * through the layout constraints until either it has met the copy
-       * count or the requested number of physical instances in the target
-       * memories have been created.
+       * requirement. The mapper can then specify one or more new instances
+       * to update with the output from the task for each region requirement.
+       * Unlike map_task where the chosen_instances are filtered so that only
+       * the first instance which has space for a given field is updated, each
+       * instances specified in 'chosen_instances' will be updated for any 
+       * fields of the original region requirement for which they have 
+       * sufficient space. 
        */
       struct PostMapInput {
         std::vector<std::vector<PhysicalInstance> >     mapped_regions;
@@ -610,24 +628,8 @@ namespace Legion {
                                              SelectTaskSrcOutput& output) = 0;
       //------------------------------------------------------------------------
 
-      /**
-       * ----------------------------------------------------------------------
-       *  Create Temporary Instance
-       * ----------------------------------------------------------------------
-       * Occasionaly, the runtime may need to create a temporary instance
-       * in order to correctly create the physical instances associated with
-       * a task. When these scenarios occur (usually infrequently), this
-       * mapper call will be invoked to request that mapper create an 
-       * instance. It is required that the mapper create a new instance and
-       * not re-use an existing instance. Attempts to call 'find_instance' or
-       * 'find_or_create' runtime calls will raise an error. The mapper
-       * is told which region requirement this instance creation request is
-       * with respect to and the resulting instance must have sufficient space
-       * for all the fields. The runtime will also provide the actual target
-       * instance where the data will be ultimately copied. The mapper can
-       * use this instance as a guide for where the data will ultimately
-       * be placed and laid out.
-       */
+      // These are here for backwards compatibility
+      // The mapper call these were used by no longer exists
       struct CreateTaskTemporaryInput {
         unsigned                                region_requirement_index; 
         PhysicalInstance                        destination_instance;
@@ -635,13 +637,6 @@ namespace Legion {
       struct CreateTaskTemporaryOutput {
         PhysicalInstance                        temporary_instance;
       };
-      //------------------------------------------------------------------------
-      virtual void create_task_temporary_instance(
-                                   const MapperContext              ctx,
-                                   const Task&                      task,
-                                   const CreateTaskTemporaryInput&  input,
-                                         CreateTaskTemporaryOutput& output) = 0;
-      //------------------------------------------------------------------------
 
       /**
        * ----------------------------------------------------------------------
@@ -697,14 +692,19 @@ namespace Legion {
        * The map inline mapper call is responsible for handling the mapping
        * of an inline mapping operation to a specific physical region. The
        * mapper is given a set of valid physical instances in the 
-       * 'valid_instances' field. The mapper has the option of either ranking
-       * specifying a physical instance from the set of valid instances to 
-       * use in the 'chosen_ranking' field , or providing layout constraints 
-       * for creating a physical instance in 'layout_constraints'. The mapper
-       * can also request profiling information for any copies issued by 
-       * filling in the 'profiling_requests' set. The mapper can also ask
-       * to be notified of the chosen mapping by setting the 'report_mappint'
-       * field to true.
+       * 'valid_instances' field. The mapper must then specify a set of chosen
+       * instances to use for the inline mapping operation in 
+       * 'chosen_instances'. Multiple instances can be selected for different
+       * fields but the runtime will use the first instance that it finds that
+       * in the vector that has space for each field. If this is a read-only 
+       * inline mapping, the mapper can request that the runtime not track the 
+       * validity of the instance(s) used for the inline mapping by setting 
+       * 'track_valid_region' to 'false'. 
+       *
+       * The mapper can also request profiling information for any copies 
+       * issued by filling in the 'profiling_requests' set. The mapper can 
+       * control the priority with which this profiling information is 
+       * returned to the mapper with 'profiling priority'.
        */
       struct MapInlineInput {
         std::vector<PhysicalInstance>           valid_instances; 
@@ -713,6 +713,7 @@ namespace Legion {
         std::vector<PhysicalInstance>           chosen_instances;
         ProfilingRequest                        profiling_requests;
         TaskPriority                            profiling_priority;
+        bool                                    track_valid_region; /*=true*/
       };
       //------------------------------------------------------------------------
       virtual void map_inline(const MapperContext        ctx,
@@ -748,35 +749,14 @@ namespace Legion {
                                              SelectInlineSrcOutput& output) = 0;
       //------------------------------------------------------------------------
       
-      /**
-       * ----------------------------------------------------------------------
-       *  Create Temporary Instance
-       * ----------------------------------------------------------------------
-       * Occasionaly, the runtime may need to create a temporary instance
-       * in order to correctly create the physical instances associated with
-       * a mapping. When these scenarios occur (usually infrequently), this
-       * mapper call will be invoked to request that mapper create an 
-       * instance. It is required that the mapper create a new instance and
-       * not re-use an existing instance. Attempts to call 'find_instance' or
-       * 'find_or_create' runtime calls will raise an error. The resulting 
-       * instance must have sufficient space for all the fields. The runtime 
-       * will also provide the actual target instance where the data will be 
-       * ultimately copied. The mapper can use this instance as a guide for 
-       * where the data will ultimately be placed and laid out.
-       */
+      // These are here for backwards compatibility
+      // The mapper call these were used by no longer exists
       struct CreateInlineTemporaryInput {
         PhysicalInstance                        destination_instance;
       };
       struct CreateInlineTemporaryOutput {
         PhysicalInstance                        temporary_instance;
       };
-      //------------------------------------------------------------------------
-      virtual void create_inline_temporary_instance(
-                                 const MapperContext                ctx,
-                                 const InlineMapping&               inline_op,
-                                 const CreateInlineTemporaryInput&  input,
-                                       CreateInlineTemporaryOutput& output) = 0;
-      //------------------------------------------------------------------------
 
       // No speculation for inline mappings
 
@@ -806,24 +786,45 @@ namespace Legion {
        * instances for the copy. The mapper is provided with a set of valid
        * instances to be used for both the source and destination region
        * requirements in the 'src_instances' and 'dst_instances' fields.
-       * The mapper can specify a ranking for both the source and destination
-       * instances to use by ranking instances in the 'src_ranking' and 
-       * 'dst_ranking' fields. The mapper can also set constraints on the 
-       * layouts of the physical instances to be used in the 
+       * The mapper then picks the chosen instances for the source and
+       * destination region requirements and puts them in the corresponding
+       * vectors of the output structure. The mapper can specify multiple
+       * instances for different fields. For each field the runtime will select
+       * the instance that first has space for that field that it finds in
+       * the vector of instances. For source region requirements the mapper
+       * can optionally select to use a virtual mapping if the copy is not
+       * a reduction copy. If the copy is a gather or a scatter copy then 
+       * the mapper must also create instances for the source and/or destination
+       * indirection region requirements as well.
+       *
+       * The mapper can optionally choose not to have the runtime track any
+       * of the instances made for the copy as valid for the source or 
+       * indirection region requirements by specifying indexes of the valid
+       * region requirements in 'untracked_valid_srcs', 
+       * 'untracked_valid_ind_srcs', or 'untracked_valid_ind_dsts' respectively.
+       *
+       * The mapper can request profiling feedback on any copies performed by
+       * this copy operation by filling in the 'profiling_requests' data 
+       * structure with the kind of measurements desired. The priority
+       * with which this information is sent back to the mapper can be 
+       * set with 'profiling_priority'.
        */
       struct MapCopyInput {
-        std::vector<std::vector<PhysicalInstance> >     src_instances;
-        std::vector<std::vector<PhysicalInstance> >     dst_instances;
-        std::vector<std::vector<PhysicalInstance> >     src_indirect_instances;
-        std::vector<std::vector<PhysicalInstance> >     dst_indirect_instances;
+        std::vector<std::vector<PhysicalInstance> >   src_instances;
+        std::vector<std::vector<PhysicalInstance> >   dst_instances;
+        std::vector<std::vector<PhysicalInstance> >   src_indirect_instances;
+        std::vector<std::vector<PhysicalInstance> >   dst_indirect_instances;
       };
       struct MapCopyOutput {
-        std::vector<std::vector<PhysicalInstance> >     src_instances;
-        std::vector<std::vector<PhysicalInstance> >     dst_instances;
-        std::vector<PhysicalInstance>                   src_indirect_instances;
-        std::vector<PhysicalInstance>                   dst_indirect_instances;
-        ProfilingRequest                                profiling_requests;
-        TaskPriority                                    profiling_priority;
+        std::vector<std::vector<PhysicalInstance> >   src_instances;
+        std::vector<std::vector<PhysicalInstance> >   dst_instances;
+        std::vector<PhysicalInstance>                 src_indirect_instances;
+        std::vector<PhysicalInstance>                 dst_indirect_instances;
+        std::set<unsigned>                            untracked_valid_srcs;
+        std::set<unsigned>                            untracked_valid_ind_srcs;
+        std::set<unsigned>                            untracked_valid_ind_dsts;
+        ProfilingRequest                              profiling_requests;
+        TaskPriority                                  profiling_priority;
       };
       //------------------------------------------------------------------------
       virtual void map_copy(const MapperContext      ctx,
@@ -852,6 +853,9 @@ namespace Legion {
         PhysicalInstance                              target;
         std::vector<PhysicalInstance>                 source_instances;
         bool                                          is_src;
+        bool                                          is_dst;
+        bool                                          is_src_indirect;
+        bool                                          is_dst_indirect;
         unsigned                                      region_req_index;
       };
       struct SelectCopySrcOutput {
@@ -864,24 +868,8 @@ namespace Legion {
                                              SelectCopySrcOutput&   output) = 0;
       //------------------------------------------------------------------------
       
-      /**
-       * ----------------------------------------------------------------------
-       *  Create Temporary Instance
-       * ----------------------------------------------------------------------
-       * Occasionaly, the runtime may need to create a temporary instance
-       * in order to correctly create the physical instances associated with
-       * a copy. When these scenarios occur (usually infrequently), this
-       * mapper call will be invoked to request that mapper create an 
-       * instance. It is required that the mapper create a new instance and
-       * not re-use an existing instance. Attempts to call 'find_instance' or
-       * 'find_or_create' runtime calls will raise an error. The mapper
-       * is told which region requirement this instance creation request is
-       * with respect to and the resulting instance must have sufficient space
-       * for all the fields. The runtime will also provide the actual target
-       * instance where the data will be ultimately copied. The mapper can
-       * use this instance as a guide for where the data will ultimately
-       * be placed and laid out.
-       */
+      // These are here for backwards compatibility
+      // The mapper call these were used by no longer exists
       struct CreateCopyTemporaryInput {
         unsigned                                region_requirement_index; 
         bool                                    src_requirement;
@@ -890,13 +878,6 @@ namespace Legion {
       struct CreateCopyTemporaryOutput {
         PhysicalInstance                        temporary_instance;
       };
-      //------------------------------------------------------------------------
-      virtual void create_copy_temporary_instance(
-                                   const MapperContext              ctx,
-                                   const Copy&                      copy,
-                                   const CreateCopyTemporaryInput&  input,
-                                         CreateCopyTemporaryOutput& output) = 0;
-      //------------------------------------------------------------------------
 
       /**
        * ----------------------------------------------------------------------
@@ -931,29 +912,8 @@ namespace Legion {
                                     const CopyProfilingInfo& input)  = 0;
       //------------------------------------------------------------------------
     public: // Close operations
-      /**
-       * ----------------------------------------------------------------------
-       *  Map Close 
-       * ----------------------------------------------------------------------
-       * Close operations are never explicitly requested by the application
-       * but are created by the runtime whenever a one partition of a
-       * region tree needs to be closed in order to access another partition.
-       * As part of this process, the close operation must be mapped. This
-       * can be done in one of two ways. First, the application can choose
-       * to create an explicit physical instance to be the target of the 
-       * close operation. Alternatively, the close operation can create a
-       * composite instance by setting the 'create_composite' field to true.
-       * A composite instance defers any necessary copy operations associated
-       * with a close to a later point in time, which allows mappers to avoid
-       * creating an explicit physical instance as the target of the close.
-       * Creating a composite instance is usually higher performance unless
-       * an application needs to actually use a physical instance of the 
-       * region being closed. While composite instances are usually higher
-       * performance they are also require a more expensive dynamic analysis
-       * when being used. Usually Legion will be able to hide this cost, 
-       * but it is possible that it can show up, especially if composite
-       * instances need to be moved between different nodes.
-       */
+      // These are here for backwards compatibility
+      // The mapper call these were used by no longer exists
       struct MapCloseInput {
         std::vector<PhysicalInstance>               valid_instances;
       };
@@ -962,12 +922,6 @@ namespace Legion {
         ProfilingRequest                            profiling_requests;
         TaskPriority                                profiling_priority;
       };
-      //------------------------------------------------------------------------
-      virtual void map_close(const MapperContext       ctx,
-                             const Close&              close,
-                             const MapCloseInput&      input,
-                                   MapCloseOutput&     output) = 0;
-      //------------------------------------------------------------------------
 
       /**
        * ----------------------------------------------------------------------
@@ -994,35 +948,14 @@ namespace Legion {
                                               SelectCloseSrcOutput& output) = 0;
       //------------------------------------------------------------------------
 
-      /**
-       * ----------------------------------------------------------------------
-       *  Create Temporary Instance
-       * ----------------------------------------------------------------------
-       * Occasionaly, the runtime may need to create a temporary instance
-       * in order to correctly create the physical instances associated with
-       * a close. When these scenarios occur (usually infrequently), this
-       * mapper call will be invoked to request that mapper create an 
-       * instance. It is required that the mapper create a new instance and
-       * not re-use an existing instance. Attempts to call 'find_instance' or
-       * 'find_or_create' runtime calls will raise an error. The resulting 
-       * instance must have sufficient space for all the fields. The runtime 
-       * will also provide the actual target instance where the data will be 
-       * ultimately copied. The mapper can use this instance as a guide for 
-       * where the data will ultimately be placed and laid out.
-       */
+      // These are here for backwards compatibility
+      // The mapper call these were used by no longer exists
       struct CreateCloseTemporaryInput {
         PhysicalInstance                        destination_instance;
       };
       struct CreateCloseTemporaryOutput {
         PhysicalInstance                        temporary_instance;
       };
-      //------------------------------------------------------------------------
-      virtual void create_close_temporary_instance(
-                                  const MapperContext               ctx,
-                                  const Close&                      close,
-                                  const CreateCloseTemporaryInput&  input,
-                                        CreateCloseTemporaryOutput& output) = 0;
-      //------------------------------------------------------------------------
 
       // No speculation for close operations
 
@@ -1147,35 +1080,14 @@ namespace Legion {
                                            SelectReleaseSrcOutput&  output) = 0;
       //------------------------------------------------------------------------
       
-      /**
-       * ----------------------------------------------------------------------
-       *  Create Temporary Instance
-       * ----------------------------------------------------------------------
-       * Occasionaly, the runtime may need to create a temporary instance
-       * in order to correctly create the physical instances associated with
-       * a release. When these scenarios occur (usually infrequently), this
-       * mapper call will be invoked to request that mapper create an 
-       * instance. It is required that the mapper create a new instance and
-       * not re-use an existing instance. Attempts to call 'find_instance' or
-       * 'find_or_create' runtime calls will raise an error. The resulting 
-       * instance must have sufficient space for all the fields. The runtime 
-       * will also provide the actual target instance where the data will be 
-       * ultimately copied. The mapper can use this instance as a guide for 
-       * where the data will ultimately be placed and laid out.
-       */
+      // These are here for backwards compatibility
+      // The mapper call these were used by no longer exists
       struct CreateReleaseTemporaryInput {
         PhysicalInstance                        destination_instance;
       };
       struct CreateReleaseTemporaryOutput {
         PhysicalInstance                        temporary_instance;
       };
-      //------------------------------------------------------------------------
-      virtual void create_release_temporary_instance(
-                                const MapperContext                 ctx,
-                                const Release&                      release,
-                                const CreateReleaseTemporaryInput&  input,
-                                      CreateReleaseTemporaryOutput& output) = 0;
-      //------------------------------------------------------------------------
 
       /**
        * ----------------------------------------------------------------------
@@ -1251,14 +1163,22 @@ namespace Legion {
        *  Map Projection 
        * ----------------------------------------------------------------------
        * The map partition mapper call is responsible for handling the mapping
-       * of a dependent partition operation to a specific physical region. The
-       * mapper is given a set of valid physical instances in the 
-       * 'valid_instances' field. The mapper has the option of either ranking
-       * specifying a physical instance from the set of valid instances to 
-       * use in the 'chosen_ranking' field , or providing layout constraints 
-       * for creating a physical instance in 'layout_constraints'. The mapper
-       * can also request profiling information for any copies issued by 
-       * filling in the 'profiling_requests' set.
+       * of a dependent partitioning operation to a specific physical region. 
+       * The mapper is given a set of valid physical instances in the 
+       * 'valid_instances' field. The mapper must then specify a set of chosen
+       * instances to use for the inline mapping operation in 
+       * 'chosen_instances'. Multiple instances can be selected for different
+       * fields but the runtime will use the first instance that it finds that
+       * in the vector that has space for each field. Since all dependent
+       * partitioning operations have read-only privileges on their input
+       * regions, the mapper can request that the runtime not track the 
+       * validity of the instance(s) used for the dependent parititoning
+       * operation by setting 'track_valid_region' to 'false'. 
+       *
+       * The mapper can also request profiling information for any copies 
+       * issued by filling in the 'profiling_requests' set. The mapper can 
+       * control the priority with which this profiling information is 
+       * returned to the mapper with 'profiling priority'.
        */
       struct MapPartitionInput {
         std::vector<PhysicalInstance>           valid_instances; 
@@ -1266,6 +1186,8 @@ namespace Legion {
       struct MapPartitionOutput {
         std::vector<PhysicalInstance>           chosen_instances;
         ProfilingRequest                        profiling_requests;
+        TaskPriority                            profiling_priority;
+        bool                                    track_valid_region; /*=true*/
       };
       //------------------------------------------------------------------------
       virtual void map_partition(const MapperContext        ctx,
@@ -1302,35 +1224,14 @@ namespace Legion {
                                           SelectPartitionSrcOutput& output) = 0;
       //------------------------------------------------------------------------
 
-      /**
-       * ----------------------------------------------------------------------
-       *  Create Temporary Instance
-       * ----------------------------------------------------------------------
-       * Occasionaly, the runtime may need to create a temporary instance
-       * in order to correctly create the physical instances associated with
-       * a partition. When these scenarios occur (usually infrequently), this
-       * mapper call will be invoked to request that mapper create an 
-       * instance. It is required that the mapper create a new instance and
-       * not re-use an existing instance. Attempts to call 'find_instance' or
-       * 'find_or_create' runtime calls will raise an error. The resulting 
-       * instance must have sufficient space for all the fields. The runtime 
-       * will also provide the actual target instance where the data will be 
-       * ultimately copied. The mapper can use this instance as a guide for 
-       * where the data will ultimately be placed and laid out.
-       */
+      // These are here for backwards compatibility
+      // The mapper call these were used by no longer exists
       struct CreatePartitionTemporaryInput {
         PhysicalInstance                        destination_instance;
       };
       struct CreatePartitionTemporaryOutput {
         PhysicalInstance                        temporary_instance;
       };
-      //------------------------------------------------------------------------
-      virtual void create_partition_temporary_instance(
-                              const MapperContext                   ctx,
-                              const Partition&                      partition,
-                              const CreatePartitionTemporaryInput&  input,
-                                    CreatePartitionTemporaryOutput& output) = 0;
-      //------------------------------------------------------------------------
 
       // No speculation for dependent partition operations
 
@@ -1423,6 +1324,8 @@ namespace Legion {
       struct SelectTunableInput {
         TunableID                               tunable_id;
         MappingTagID                            mapping_tag;
+        const void*                             args;
+        size_t                                  size;
       };
       struct SelectTunableOutput {
         void*                                   value;
@@ -1773,9 +1676,11 @@ namespace Legion {
       void release_layout(MapperContext ctx, 
                                     LayoutConstraintID layout_id) const;
       bool do_constraints_conflict(MapperContext ctx,
-                       LayoutConstraintID set1, LayoutConstraintID set2) const;
+                     LayoutConstraintID set1, LayoutConstraintID set2,
+                     const LayoutConstraint **conflict_constraint = NULL) const;
       bool do_constraints_entail(MapperContext ctx,
-                   LayoutConstraintID source, LayoutConstraintID target) const;
+                   LayoutConstraintID source, LayoutConstraintID target,
+                   const LayoutConstraint **failed_constraint = NULL) const;
     public:
       //------------------------------------------------------------------------
       // Methods for manipulating variants 
@@ -1803,6 +1708,38 @@ namespace Legion {
                                       VariantID variant_id) const; 
     public:
       //------------------------------------------------------------------------
+      // Methods for registering variants 
+      //------------------------------------------------------------------------
+      template<typename T,
+        T (*TASK_PTR)(const Task*, const std::vector<PhysicalRegion>&,
+                      Context, Runtime*)>
+      VariantID register_task_variant(MapperContext ctx,
+                                      const TaskVariantRegistrar &registrar);
+      template<typename T, typename UDT,
+        T (*TASK_PTR)(const Task*, const std::vector<PhysicalRegion>&,
+                      Context, Runtime*, const UDT&)>
+      VariantID register_task_variant(MapperContext ctx,
+                                      const TaskVariantRegistrar &registrar,
+                                      const UDT &user_data);
+      template<
+        void (*TASK_PTR)(const Task*, const std::vector<PhysicalRegion>&,
+                         Context, Runtime*)>
+      VariantID register_task_variant(MapperContext ctx,
+                                      const TaskVariantRegistrar &registrar);
+      template<typename UDT,
+        void (*TASK_PTR)(const Task*, const std::vector<PhysicalRegion>&,
+                         Context, Runtime*, const UDT&)>
+      VariantID register_task_variant(MapperContext ctx,
+                                      const TaskVariantRegistrar &registrar,
+                                      const UDT &user_data);
+      VariantID register_task_variant(MapperContext ctx, 
+                                      const TaskVariantRegistrar &registrar,
+				      const CodeDescriptor &codedesc,
+				      const void *user_data = NULL,
+				      size_t user_len = 0,
+                                      bool has_return_type = false);
+    public:
+      //------------------------------------------------------------------------
       // Methods for accelerating mapping decisions
       //------------------------------------------------------------------------
       // Filter variants based on the chosen instances
@@ -1828,27 +1765,33 @@ namespace Legion {
                                     const LayoutConstraintSet &constraints, 
                                     const std::vector<LogicalRegion> &regions,
                                     PhysicalInstance &result, bool acquire=true,
-                                    GCPriority priority = 0) const;
+                                    GCPriority priority = 0,
+                                    bool tight_region_bounds = false,
+                                    size_t *footprint = NULL) const;
       bool create_physical_instance(
                                     MapperContext ctx, Memory target_memory,
                                     LayoutConstraintID layout_id,
                                     const std::vector<LogicalRegion> &regions,
                                     PhysicalInstance &result, bool acquire=true,
-                                    GCPriority priority = 0) const;
+                                    GCPriority priority = 0,
+                                    bool tight_region_bounds = false,
+                                    size_t *footprint = NULL) const;
       bool find_or_create_physical_instance(
                                     MapperContext ctx, Memory target_memory,
                                     const LayoutConstraintSet &constraints, 
                                     const std::vector<LogicalRegion> &regions,
                                     PhysicalInstance &result, bool &created, 
                                     bool acquire = true,GCPriority priority = 0,
-                                    bool tight_region_bounds = false) const;
+                                    bool tight_region_bounds = false,
+                                    size_t *footprint = NULL) const;
       bool find_or_create_physical_instance(
                                     MapperContext ctx, Memory target_memory,
                                     LayoutConstraintID layout_id,
                                     const std::vector<LogicalRegion> &regions,
                                     PhysicalInstance &result, bool &created, 
                                     bool acquire = true,GCPriority priority = 0,
-                                    bool tight_region_bounds = false) const;
+                                    bool tight_region_bounds = false,
+                                    size_t *footprint = NULL) const;
       bool find_physical_instance(
                                     MapperContext ctx, Memory target_memory,
                                     const LayoutConstraintSet &constraints,
@@ -1912,9 +1855,51 @@ namespace Legion {
       template<int DIM, typename COORD_T>
       IndexSpaceT<DIM,COORD_T> create_index_space(MapperContext ctx,
                       const std::vector<Rect<DIM,COORD_T> > &rects) const;
+
+      IndexSpace union_index_spaces(MapperContext ctx,
+                      const std::vector<IndexSpace> &sources) const;
+      // Template version
+      template<int DIM, typename COORD_T>
+      IndexSpaceT<DIM,COORD_T> union_index_spaces(MapperContext ctx,
+                const std::vector<IndexSpaceT<DIM,COORD_T> > &sources) const;
+
+      IndexSpace intersect_index_spaces(MapperContext ctx,
+                      const std::vector<IndexSpace> &sources) const;
+      // Template version
+      template<int DIM, typename COORD_T>
+      IndexSpaceT<DIM,COORD_T> intersect_index_spaces(MapperContext ctx,
+                const std::vector<IndexSpaceT<DIM,COORD_T> > &sources) const;
+
+      IndexSpace subtract_index_spaces(MapperContext ctx,
+                        IndexSpace left, IndexSpace right) const;
+      // Template version
+      template<int DIM, typename COORD_T>
+      IndexSpaceT<DIM,COORD_T> subtract_index_spaces(MapperContext ctx,
+          IndexSpaceT<DIM,COORD_T> left, IndexSpaceT<DIM,COORD_T> right) const;
     protected:
       IndexSpace create_index_space_internal(MapperContext ctx, const Domain &d,
                   const void *realm_is, TypeTag type_tag) const;
+    public:
+      //------------------------------------------------------------------------
+      // Convenience methods for introspecting index spaces
+      //------------------------------------------------------------------------
+      bool is_index_space_empty(MapperContext ctx, IndexSpace handle) const;
+      template<int DIM, typename COORD_T>
+      bool is_index_space_empty(MapperContext ctx,
+                                IndexSpaceT<DIM,COORD_T> handle) const;
+
+      bool index_spaces_overlap(MapperContext ctx,
+                                IndexSpace one, IndexSpace two) const;
+      template<int DIM, typename COORD_T>
+      bool index_spaces_overlap(MapperContext ctx, IndexSpaceT<DIM,COORD_T> one,
+                                IndexSpaceT<DIM,COORD_T> two) const;
+
+      bool index_space_dominates(MapperContext ctx,
+                                 IndexSpace test, IndexSpace dominator) const;
+      template<int DIM, typename COORD_T>
+      bool index_space_dominates(MapperContext ctx, 
+                                 IndexSpaceT<DIM,COORD_T> test,
+                                 IndexSpaceT<DIM,COORD_T> dominator) const;
     public:
       //------------------------------------------------------------------------
       // Methods for introspecting index space trees 

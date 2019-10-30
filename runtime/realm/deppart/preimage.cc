@@ -1,4 +1,4 @@
-/* Copyright 2018 Stanford University, NVIDIA Corporation
+/* Copyright 2019 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -40,8 +40,9 @@ namespace Realm {
     // output vector should start out empty
     assert(preimages.empty());
 
-    Event e = GenEventImpl::create_genevent()->current_event();
-    PreimageOperation<N,T,N2,T2> *op = new PreimageOperation<N,T,N2,T2>(*this, field_data, reqs, e);
+    GenEventImpl *finish_event = GenEventImpl::create_genevent();
+    Event e = finish_event->current_event();
+    PreimageOperation<N,T,N2,T2> *op = new PreimageOperation<N,T,N2,T2>(*this, field_data, reqs, finish_event, ID(e).event_generation());
 
     size_t n = targets.size();
     preimages.resize(n);
@@ -50,13 +51,12 @@ namespace Realm {
       log_dpops.info() << "preimage: " << *this << " tgt=" << targets[i] << " -> " << preimages[i] << " (" << e << ")";
     }
 
-    op->deferred_launch(wait_on);
+    op->launch(wait_on);
     return e;
   }
 
   template <int N, typename T>
   template <int N2, typename T2>
-  __attribute__ ((noinline))
   Event IndexSpace<N,T>::create_subspaces_by_preimage(const std::vector<FieldDataDescriptor<IndexSpace<N,T>,Rect<N2,T2> > >& field_data,
 						       const std::vector<IndexSpace<N2,T2> >& targets,
 						       std::vector<IndexSpace<N,T> >& preimages,
@@ -66,8 +66,9 @@ namespace Realm {
     // output vector should start out empty
     assert(preimages.empty());
 
-    Event e = GenEventImpl::create_genevent()->current_event();
-    PreimageOperation<N,T,N2,T2> *op = new PreimageOperation<N,T,N2,T2>(*this, field_data, reqs, e);
+    GenEventImpl *finish_event = GenEventImpl::create_genevent();
+    Event e = finish_event->current_event();
+    PreimageOperation<N,T,N2,T2> *op = new PreimageOperation<N,T,N2,T2>(*this, field_data, reqs, finish_event, ID(e).event_generation());
 
     size_t n = targets.size();
     preimages.resize(n);
@@ -76,7 +77,7 @@ namespace Realm {
       log_dpops.info() << "preimage: " << *this << " tgt=" << targets[i] << " -> " << preimages[i] << " (" << e << ")";
     }
 
-    op->deferred_launch(wait_on);
+    op->launch(wait_on);
     return e;
   }
 
@@ -84,12 +85,6 @@ namespace Realm {
   ////////////////////////////////////////////////////////////////////////
   //
   // class PreimageMicroOp<N,T,N2,T2>
-
-  template <int N, typename T, int N2, typename T2>
-  inline /*static*/ DynamicTemplates::TagType PreimageMicroOp<N,T,N2,T2>::type_tag(void)
-  {
-    return NTNT_TemplateHelper::encode_tag<N,T,N2,T2>();
-  }
 
   template <int N, typename T, int N2, typename T2>
   PreimageMicroOp<N,T,N2,T2>::PreimageMicroOp(IndexSpace<N,T> _parent_space,
@@ -102,7 +97,9 @@ namespace Realm {
     , inst(_inst)
     , field_offset(_field_offset)
     , is_ranged(_is_ranged)
-  {}
+  {
+    areg.force_instantiation();
+  }
 
   template <int N, typename T, int N2, typename T2>
   PreimageMicroOp<N,T,N2,T2>::~PreimageMicroOp(void)
@@ -209,16 +206,10 @@ namespace Realm {
   void PreimageMicroOp<N,T,N2,T2>::dispatch(PartitioningOperation *op, bool inline_ok)
   {
     // a PreimageMicroOp should always be executed on whichever node the field data lives
-    NodeID exec_node = ID(inst).instance.owner_node;
+    NodeID exec_node = ID(inst).instance_owner_node();
 
-    if(exec_node != my_node_id) {
-      // we're going to ship it elsewhere, which means we always need an AsyncMicroOp to
-      //  track it
-      async_microop = new AsyncMicroOp(op, this);
-      op->add_async_work_item(async_microop);
-
-      RemoteMicroOpMessage::send_request(exec_node, op, *this);
-      delete this;
+    if(exec_node != Network::my_node_id) {
+      forward_microop<PreimageMicroOp<N,T,N2,T2> >(exec_node, op, this);
       return;
     }
 
@@ -277,6 +268,9 @@ namespace Realm {
     assert(ok);
   }
 
+  template <int N, typename T, int N2, typename T2>
+  ActiveMessageHandlerReg<RemoteMicroOpMessage<PreimageMicroOp<N,T,N2,T2> > > PreimageMicroOp<N,T,N2,T2>::areg;
+
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -286,20 +280,24 @@ namespace Realm {
   PreimageOperation<N,T,N2,T2>::PreimageOperation(const IndexSpace<N,T>& _parent,
 						  const std::vector<FieldDataDescriptor<IndexSpace<N,T>,Point<N2,T2> > >& _field_data,
 						  const ProfilingRequestSet &reqs,
-						  Event _finish_event)
-    : PartitioningOperation(reqs, _finish_event)
+						  GenEventImpl *_finish_event,
+						  EventImpl::gen_t _finish_gen)
+    : PartitioningOperation(reqs, _finish_event, _finish_gen)
     , parent(_parent)
     , ptr_data(_field_data)
     , overlap_tester(0)
     , dummy_overlap_uop(0)
-  {}
+  {
+    areg.force_instantiation();
+  }
 
   template <int N, typename T, int N2, typename T2>
   PreimageOperation<N,T,N2,T2>::PreimageOperation(const IndexSpace<N,T>& _parent,
 						  const std::vector<FieldDataDescriptor<IndexSpace<N,T>,Rect<N2,T2> > >& _field_data,
 						  const ProfilingRequestSet &reqs,
-						  Event _finish_event)
-    : PartitioningOperation(reqs, _finish_event)
+						  GenEventImpl *_finish_event,
+						  EventImpl::gen_t _finish_gen)
+    : PartitioningOperation(reqs, _finish_event, _finish_gen)
     , parent(_parent)
     , range_data(_field_data)
     , overlap_tester(0)
@@ -325,12 +323,12 @@ namespace Realm {
     // get a sparsity ID by round-robin'ing across the nodes that have field data
     int target_node;
     if(!target.dense())
-      target_node = ID(target.sparsity).sparsity.creator_node;
+      target_node = ID(target.sparsity).sparsity_creator_node();
     else
       if(!ptr_data.empty())
-	target_node = ID(ptr_data[targets.size() % ptr_data.size()].inst).instance.owner_node;
+	target_node = ID(ptr_data[targets.size() % ptr_data.size()].inst).instance_owner_node();
       else
-	target_node = ID(range_data[targets.size() % range_data.size()].inst).instance.owner_node;
+	target_node = ID(range_data[targets.size() % range_data.size()].inst).instance_owner_node();
     SparsityMap<N,T> sparsity = get_runtime()->get_available_sparsity_impl(target_node)->me.convert<SparsityMap<N,T> >();
     preimage.sparsity = sparsity;
 
@@ -424,7 +422,7 @@ namespace Realm {
     // atomically check the overlap tester's readiness and queue us if not
     bool tester_ready = false;
     {
-      AutoHSLLock al(mutex);
+      AutoLock<> al(mutex);
       if(overlap_tester != 0) {
 	tester_ready = true;
       } else {
@@ -489,7 +487,7 @@ namespace Realm {
     // atomically set the overlap tester and see if there are any pending entries
     std::map<int, std::vector<Rect<N2,T2> > > pending;
     {
-      AutoHSLLock al(mutex);
+      AutoLock<> al(mutex);
       assert(overlap_tester == 0);
       overlap_tester = static_cast<OverlapTester<N2,T2> *>(tester);
       pending.swap(pending_sparse_images);
@@ -558,62 +556,26 @@ namespace Realm {
     os << "PreimageOperation(" << parent << ")";
   }
 
+  template <int N, typename T, int N2, typename T2>
+  ActiveMessageHandlerReg<ApproxImageResponseMessage<PreimageOperation<N,T,N2,T2> > > PreimageOperation<N,T,N2,T2>::areg;
+
 
   ////////////////////////////////////////////////////////////////////////
   //
-  // class ApproxImageResponseMessage
-  
-  template <typename NT, typename T, typename N2T, typename T2>
-  inline /*static*/ void ApproxImageResponseMessage::DecodeHelper::demux(const RequestArgs *args,
-									 const void *data, size_t datalen)
+  // class ApproxImageResponseMessage<T>
+
+  template <typename T>
+  /*static*/ void ApproxImageResponseMessage<T>::handle_message(NodeID sender,
+								const ApproxImageResponseMessage<T> &msg,
+								const void *data, size_t datalen)
   {
-    PreimageOperation<NT::N,T,N2T::N,T2> *op = reinterpret_cast<PreimageOperation<NT::N,T,N2T::N,T2> *>(args->approx_output_op);
-    op->provide_sparse_image(args->approx_output_index,
-			     static_cast<const Rect<N2T::N,T2> *>(data),
-			     datalen / sizeof(Rect<N2T::N,T2>));
+    T *op = reinterpret_cast<T *>(msg.approx_output_op);
+    op->provide_sparse_image(msg.approx_output_index,
+			     static_cast<const Rect<T::DIM2, typename T::IDXTYPE2> *>(data),
+			     datalen / sizeof(Rect<T::DIM2, typename T::IDXTYPE2>));
   }
 
-  /*static*/ void ApproxImageResponseMessage::handle_request(RequestArgs args,
-							     const void *data, size_t datalen)
-  {
-    log_part.info() << "received approx image response: tag=" << std::hex << args.type_tag << std::dec
-		    << " op=" << args.approx_output_op;
 
-    NTNT_TemplateHelper::demux<DecodeHelper>(args.type_tag, &args, data, datalen);
-  }
-
-#if 0  
-  template <int N, typename T, int N2, typename T2>
-  /*static*/ void ApproxImageResponseMessage::send_request(NodeID target, 
-							   intptr_t output_op, int output_index,
-							   const Rect<N2,T2> *rects, size_t count)
-  {
-    RequestArgs args;
-
-    args.type_tag = NTNT_TemplateHelper::encode_tag<N,T,N2,T2>();
-    args.approx_output_op = output_op;
-    args.approx_output_index = output_index;
-
-    Message::request(target, args, rects, count * sizeof(Rect<N2,T2>), PAYLOAD_COPY);
-  }
-#endif
-
-
-#define DOIT(N1,T1,N2,T2) \
-  template class PreimageMicroOp<N1,T1,N2,T2>; \
-  template class PreimageOperation<N1,T1,N2,T2>; \
-  template PreimageMicroOp<N1,T1,N2,T2>::PreimageMicroOp(NodeID, AsyncMicroOp *, Serialization::FixedBufferDeserializer&); \
-  template Event IndexSpace<N1,T1>::create_subspaces_by_preimage(const std::vector<FieldDataDescriptor<IndexSpace<N1,T1>,Point<N2,T2> > >&, \
-								  const std::vector<IndexSpace<N2,T2> >&, \
-								  std::vector<IndexSpace<N1,T1> >&, \
-								  const ProfilingRequestSet &, \
-								  Event) const; \
-  template Event IndexSpace<N1,T1>::create_subspaces_by_preimage(const std::vector<FieldDataDescriptor<IndexSpace<N1,T1>,Rect<N2,T2> > >&, \
-								  const std::vector<IndexSpace<N2,T2> >&, \
-								  std::vector<IndexSpace<N1,T1> >&, \
-								  const ProfilingRequestSet &, \
-								  Event) const;
-
-  FOREACH_NTNT(DOIT)
+  // instantiations of templates handled in preimage_tmpl.cc
 
 }; // namespace Realm

@@ -1,7 +1,7 @@
 // Some of the constants are read in from load_scale_json
 var constants = {
-  margin_left: 250,
-  margin_right: 50,
+  margin_left: 350,
+  margin_right: 75,
   margin_bottom: 50,
   margin_top: 50,
   min_feature_width: 3,
@@ -205,13 +205,14 @@ function getLineColor(elem) {
     "Registered Memory": "darkmagenta",
     "Socket Memory": "orangered",
     "Zero-Copy Memory": "crimson",
-    "Framebuffer Memory": "",
+    "Framebuffer Memory": "blue",
     "Disk Memory": "darkgoldenrod",
     "HDF5 Memory": "olivedrab",
     "File Memory": "orangered",
     "L3 Cache Memory": "crimson",
     "L2 Cache Memory": "darkmagenta",
-    "L1 Cache Memory": "olivedrab"
+    "L1 Cache Memory": "olivedrab",
+    "Channel": "orangered"
   };
   return colorMap[kind];
 }
@@ -394,8 +395,14 @@ function getMouseOver() {
     if ((d.initiation != undefined) && d.initiation != "") {
       descTexts.push("Initiator: " + state.operations[d.initiation].desc);
     } 
-    descTexts.push(d.title);
 
+   // split d.title
+    var titles =  d.title.split("$");
+      if (titles.length > 0) {
+	  for (var i = titles.length-1; i >= 0; --i) {
+	      descTexts.push(titles[i]);
+	  }
+      }
     var title = text.append("tspan")
       .attr("x", x)
       .attr("dy", -12)
@@ -436,12 +443,370 @@ var currentPos;
 var nextPos;
 var searchRegex = null;
 
+function showSlider() {
+    $('#lowerLimit').text($('#node_slider').slider("values", 0));
+    $('#upperLimit').text($('#node_slider').slider("values", 1));
+}
+
+function createMenuList1() {
+    var memory_kinds = [];
+    var num_nodes = state.num_nodes;
+    var num_mems = 0;
+    var dropdown_options = [
+			    { value: "memories",
+			      id: "memories_all",
+			      text: "Memories",
+			      count: num_mems,
+			      low_range: 0,
+			      high_range: num_mems -1
+			    }
+			    ];
+
+    // memories list
+    dropdown_options_memories = [];
+
+    // create the remaining entries
+    function appendKind(elem) {
+	var value = state.processor_kinds[elem];
+	if (elem.includes("Memory") && (value.count >= 0))
+	    {
+		num_mems = num_mems+1;
+		dropdown_options_memories.push(value);
+	    }
+	if ((value.count >= 0) && (value.low_range != -1)) {
+	    dropdown_options.push(value);
+	}
+    }
+    Object.keys(state.processor_kinds).forEach(appendKind);
+
+    // main menu
+    d3.select("#dropdown").selectAll("optgroup")
+	.data(dropdown_options)
+	.enter()
+	.append("optgroup")
+	.attr('label', function(d) { return d.text;})
+	.attr("id", function(d) { return d.id;})
+	.attr("value", function(d) { return d.value;});
+
+    for (var j=0; j<dropdown_options.length; j++) {
+	var num_nodes_options = [];
+	var num_vals=dropdown_options[j].count;
+	val = dropdown_options[j].low_range;
+	if (dropdown_options[j].id == "memories_all")
+	    num_nodes_options = dropdown_options_memories;
+
+	else {
+	    for (var i=0; i<num_vals; i++)
+		{
+		    var el = {
+			value: dropdown_options[j].text + val.toString(),
+			id_lo: "node_low" + j.toString() +  i,
+			id_hi: "node_hi" + j.toString() + i,
+			text: val.toString()
+		    };
+		    val = val+1;
+		    num_nodes_options[i] = el;
+		}
+	}
+	d3.select("#" + dropdown_options[j].id).selectAll("option")
+	    .data(num_nodes_options)
+	    .enter()
+	    .append("option")
+	    .text(function(d) { return d.text;})
+	    .attr("id", function(d) { return d.id_lo; })
+	    .attr("value", function(d) { return d.value; });
+    }
+    var node_range1 = num_nodes-1;
+    $("#node_slider").slider({
+	        values: [0,node_range1],
+		range: true,
+		create: showSlider,
+		min: 0,
+		max: node_range1,
+		step: 1,
+		});
+
+    $('#dropdown').multiselect({
+      maxHeight:200,
+      includeSelectAllOption: true,
+	buttonText: function(options) {
+	    return 'Profiling Options';
+	}
+    });
+}
+
+function flattenLayoutProfileView() {
+    state.flattenedLayoutData = [];
+    function appendElem(elem) {
+	if (elem.selected) {
+	    state.flattenedLayoutData.push(elem);
+	    elem.children.forEach(appendElem);
+	}
+    }
+    state.layoutData.forEach(appendElem);
+}
+
+function printSelected() {
+    function printElem(elem) {
+	if (elem.selected)
+	    console.log("Element Selected:");
+	else
+	    console.log("Element Not Selected:");
+	console.log(elem.text, elem.full_text);
+	elem.children.forEach(printElem);
+    }
+    state.layoutData.forEach(printElem);
+}
+
+
+function countSelected() {
+    function count(elem) {
+	var count = 0;
+	function countChildren(child_elem) {
+	if (child_elem.selected)
+	    count = count+1;
+	}
+	elem.children.forEach(countChildren);
+	if ((count == 0) && (elem.children.length != 0))
+	    elem.selected = false;
+	if (elem.children.length == 0)
+	    elem.selected = elem.selected;
+    }
+    state.layoutData.forEach(count);
+}
+
+function in_channel_node_id(text) {
+    var node_regex = /n(\d+)/;
+    var match = node_regex.exec(text);
+    var node_id;
+    if (match) {
+	node_id = parseInt(match[1]);
+    }
+    return node_id;
+}
+
+function out_channel_node_id(text) {
+    var node_regex = /to\s+\[n(\d+)/;
+    var match = node_regex.exec(text);
+    var node_id;
+    if (match) {
+	node_id = parseInt(match[1]);
+    }
+    return node_id;
+}
+
+function in_channel_node(text) {
+    var node_regex = /n(\d+)/;
+    var match = node_regex.exec(text);
+    var node_id;
+    if (match) {
+	node_id = "Nodes" + parseInt(match[1]);
+    }
+    return node_id;
+}
+
+function out_channel_node(text) {
+    var node_regex = /to\s+\[n(\d+)/;
+    var match = node_regex.exec(text);
+    var node_id;
+    if (match) {
+	node_id = "Nodes" + parseInt(match[1]);
+    }
+    return node_id;
+}
+
+function in_channel_proc(text) {
+    var node_regex = /^\s+\[n\d+\]\[(\w+)\s+(\d+)/;
+    var match = node_regex.exec(text);
+    var node_id;
+    if (match) {
+	node_id = match[1] + parseInt(match[2]);
+    }
+    return node_id;
+}
+
+function out_channel_proc(text) {
+    // [n...] to [n...][proc m]
+    var node_regex = /to\s+\[n\d+\]\[(\w+)\s+(\d+)/;
+    var match = node_regex.exec(text);
+    var node_id;
+    if (match) {
+	node_id = match[1] + parseInt(match[2]);
+    }
+    return node_id;
+}
+
+function  in_channel_mem_processor(full_text) {
+    var node_regex = /^(\D+Memory)/;
+    var match = node_regex.exec(full_text);
+    if (match) {
+	return match[1];
+    }
+    return match;
+}
+
+function  out_channel_mem_processor(full_text) {
+    var node_regex = /to\s+(\D+Memory)/;
+    var match = node_regex.exec(full_text);
+    if (match) {
+	return match[1];
+    }
+    return undefined;
+}
+
+function all_selected(in_node, out_node, in_proc, out_proc, in_mem, out_mem, map_selected) {
+    if (in_node != undefined) {
+	if (!(in_node in map_selected))
+	    return false;
+    }
+    if (out_node != undefined) {
+	if (!(out_node in map_selected))
+	    return false;
+    }
+    if (in_proc != undefined) {
+	if (!(in_proc in map_selected))
+	    return false;
+    }
+    if (out_proc != undefined) {
+	if (!(out_proc in map_selected))
+	    return false;
+    }
+    if (in_mem != undefined) {
+	if (!(in_mem in map_selected))
+	    return false;
+    }
+    if (out_mem != undefined) {
+	if (!(out_mem in map_selected))
+	    return false;
+    }
+    return true;
+}
+
+function profileSelect(event) {
+    if (event.target.id == "node_slider") {
+	$('#lowerLimit').text($('#node_slider').slider("values", 0));
+	$('#upperLimit').text($('#node_slider').slider("values", 1));
+    }
+    if (event.target.id == "submit-order") {
+	var map_selected = {};
+	var count = 0;
+	$('#dropdown option:selected').each(function() {
+		map_selected[$(this).val()] = true;
+		count = 1;
+	    });
+	if (count == 0){
+	    text = "Must select at least one option";
+	    alert(text);
+	}
+	else {
+	    var lower_range =  $('#node_slider').slider("values", 0);
+	    var upper_range =  $('#node_slider').slider("values", 1);
+	    for (var i=parseInt(lower_range); i<=parseInt(upper_range); i++) {
+		var node_val = "Nodes" + i.toString();
+		map_selected[node_val] = true;
+	    }
+	    updateProfileView(map_selected);
+	}
+    }
+}
+
+function redoProfileView() {
+  state.timelineSvg.select("g.dependencies").remove();
+  state.timelineSvg.selectAll("g.critical_path_lines").remove();
+  calculateBases();
+  filterAndMergeBlocks(state);
+  constants.max_level = calculateVisibileLevels();
+  recalculateHeight();
+  drawTimeline();
+  drawLayout();
+}
+
+function updateProfileView(map_selected) {
+    // rebuild FlattenedLayoutData
+    // update the layoutData element selected field
+    function updateSelect(elem) {
+	var selected=true;
+	var val = get_node_val(elem.text);
+	var node_val;
+	if (val != undefined)
+	    node_val = "Nodes" + val.toString();
+	if ((elem.type == "util") && (val != undefined)) {
+	    // nodes
+	    if (elem.text.includes("node")) {
+		if (!(node_val in map_selected))
+		    selected=false;
+	    }
+	    // memories
+	    else if (elem.text.includes("Memory")) {
+		var kind = get_kind(elem.text);
+		var node_id = get_node_val(elem.text);
+		if (!(kind in map_selected) || (!(node_val in map_selected)))
+		    selected=false;
+	    }
+	    // channels
+	    else if (elem.text.includes("Channel")) {
+		if (!(node_val in map_selected))
+		    selected=false;
+	    }
+	}
+	// processors
+	else if ((elem.type == "proc") && (elem.parent != undefined)) {
+	    var kind = get_kind(elem.parent.text);
+	    var node_id = get_node_id(elem.full_text);
+	    var node_val = "Nodes" + node_id.toString();
+	    if (kind in state.processor_kinds) {
+		var r = /\d+/;
+		var kind_proc = state.processor_kinds[kind];
+		// processors
+		if (is_proc_string(elem.full_text)) {
+		    var val = parseInt(elem.text.match(r));
+		    var proc_val = kind + val.toString();
+		    if ((!(proc_val in map_selected)) || (!(node_val in map_selected))) {
+			selected = false;
+		    }
+		}
+		// add channels that are relevent to the selected nodes and processors
+		if (kind == "Channel") {
+		    // all have to be included for us to show this
+		    // [node n][proc m] to [node p][proc q]
+		    var in_node, in_proc, out_node, out_proc, in_mem, out_mem;
+		    in_node = in_channel_node(elem.text);
+		    out_node = out_channel_node(elem.text);
+		    in_proc = in_channel_proc(elem.text);
+		    out_proc = out_channel_proc(elem.text);
+		    in_mem = in_channel_mem_processor(elem.full_text);
+		    out_mem = out_channel_mem_processor(elem.full_text);
+		    if (!all_selected(in_node, out_node, in_proc, out_proc, in_mem, out_mem, map_selected))
+			selected=false;
+		}
+		// memory
+		if (kind.includes("Memory") && is_mem_string(elem.full_text)) {
+		    if ((!(kind in map_selected)) || (!(node_val in map_selected))) {
+			selected=false;
+		    }
+		}
+	    }
+	}
+	elem.selected = selected;
+	elem.children.forEach(updateSelect);
+    }
+    state.layoutData.forEach(updateSelect);
+    countSelected();
+    //    printSelected();
+    flattenLayout();
+    redoProfileView();
+}
+
+
+
 function flattenLayout() {
   state.flattenedLayoutData = [];
 
   function appendElem(elem) {
-    state.flattenedLayoutData.push(elem);
-    elem.children.forEach(appendElem);
+      if (elem.selected) {
+	  state.flattenedLayoutData.push(elem);
+	  elem.children.forEach(appendElem);
+      }
   }
   state.layoutData.forEach(appendElem);
 }
@@ -457,23 +822,32 @@ function getProcessors(util_name) {
     var util_node_id = parseInt(util_match[2], 10);
     var util_type = util_match[3];
     var proc_regex;
-    if (util_type.includes("Memory")) {
-      proc_regex = /(\w+ Memory) 0x1e([a-fA-f0-9]{4})[a-fA-f0-9]{10}$/;
+    if (util_type.includes("Channel")) {
+      proc_regex = /(\D+ Memory) 0x1e([a-fA-f0-9]{4})[a-fA-f0-9]{10}.*(Channel)/;
+    }
+    else if (util_type.includes("Memory")) {
+      proc_regex = /(\D+ Memory) 0x1e([a-fA-f0-9]{4})[a-fA-f0-9]{10}$/;
     } else {
-      proc_regex = /(\w+) Processor 0x1d([a-fA-f0-9]{4})/;
+      proc_regex = /(\D+) Processor 0x1d([a-fA-f0-9]{4})/;
     }
     state.processors.forEach(function(proc) {
       var proc_match = proc_regex.exec(proc.full_text);
       if (proc_match) {
         var proc_type = proc_match[1];
         var proc_node_id = parseInt(proc_match[2], 16);
-        if ((proc_node_id == util_node_id)   &&
-            (proc_type    == util_type)) {
-          matched_procs.push(proc);
-        }
+        //  record in and out channels
+        if (util_type.includes("Channel")) {
+	    proc_type = proc_match[3];
+	    var in_node = in_channel_node_id(proc.text);
+	    var out_node = out_channel_node_id(proc.text);
+	    if (in_node == util_node_id || (out_node == util_node_id) && (proc_type  == util_type))
+		matched_procs.push(proc);
+	}
+	  else if ((proc_node_id == util_node_id) && (proc_type == util_type))
+	      matched_procs.push(proc);
       }
-    });
-  }
+      });
+    }
   return matched_procs;
 }
 
@@ -497,9 +871,9 @@ function getElement(depth, text, full_text, type, num_levels, loader,
     full_text: full_text,
     type: type,
     tsv: tsv,
-    visible: visible
+    visible: visible,
+    selected: true
   };
-
   // Create child elements. Child elements will be enabled, but they will be
   // invisible and unloaded. They will be loaded in when expanded
   if (children != undefined) {
@@ -512,11 +886,43 @@ function getElement(depth, text, full_text, type, num_levels, loader,
       element.children.push(child_element);
     });
   }
+  if ((type == "proc") && (_parent != undefined)) {
+      var kind = get_kind(_parent.text);
+      if (kind in state.processor_kinds) {
+	  var r = /\d+/;
+	  if (is_proc_string(full_text) && text.match(r)) {
+	      var kind_proc = state.processor_kinds[kind];
+	      var val = parseInt(text.match(r));
+	      if ((kind_proc.low_range < 0) || (kind_proc.low_range > val))
+		  kind_proc.low_range = val;
+	      if (kind_proc.high_range < val)
+		  kind_proc.high_range = val;
+	  }
+      }
+  }
 
   // Util graphs will have processors as their children as well.
   if (type == "util") {
-    // get the children for the util view 
-    var proc_children = getProcessors(text); 
+    // get the children for the util view
+    var proc_children = getProcessors(text);
+    var count = 1;
+    var node_id = get_node_id(text);
+    var kind = get_kind(text);
+    // add to processor kinds: union of all processor kinds
+    if (!(kind in state.processor_kinds)) {
+      var pkind = {
+      id: kind,
+      value: kind,
+      count: proc_children.length,
+      low_range: -1,
+      high_range: -1,
+      text: kind
+      };
+      state.processor_kinds[kind] = pkind;
+    }
+    if (state.processor_kinds[kind].count < proc_children.length)
+      state.processor_kinds[kind].count = proc_children.length;
+
     proc_children.forEach(function(proc_child) {
       var child_element = getElement(depth + 1, proc_child.text,
                                      proc_child.full_text, "proc", 
@@ -550,34 +956,41 @@ function calculateLayout() {
     });
   }
   
-  var seen_nodes = {};
+  var seen_nodes = [];
   state.processors.forEach(function(proc) {
     // PROCESSOR:   tag:8 = 0x1d, owner_node:16,   (unused):28, proc_idx: 12
     var proc_regex = /(Processor|Memory) 0x1(e|d)([a-fA-f0-9]{4})[a-fA-f0-9]{10}$/;
+    // Memory Channel
+    var proc_channel_regex = /(Memory) 0x1(e)([a-fA-f0-9]{4})[a-fA-f0-9]{10}.*Channel/;
+    var proc_channel_match  = proc_channel_regex.exec(proc.full_text);
     var proc_match = proc_regex.exec(proc.full_text);
+    proc_match = proc_match || proc_channel_match;
     if (proc_match) {
       var node_id = parseInt(proc_match[3], 16);
       if (!(node_id in seen_nodes)) {
         seen_nodes[node_id] = 1;
-        var proc_kinds = util_files[node_id];
-
-        proc_kinds.forEach(function(kind) {
-          var util_name = "node " + kind;
-          var kind_element = getElement(0, util_name, undefined, "util", 
-                                         constants.util_levels, load_util,
-                                         "tsv/" + kind + "_util.tsv",
-                                         undefined, util_files[kind],
-                                         false, true);
-          state.layoutData.push(kind_element);
-        });
+        if (node_id in util_files) {
+            var proc_kinds = util_files[node_id];
+            proc_kinds.forEach(function(kind) {
+		var util_name = "node " + kind;
+		var kind_element = getElement(0, util_name, undefined, "util",
+                                              constants.util_levels, load_util,
+                                              "tsv/" + kind + "_util.tsv",
+                                              undefined, util_files[kind],
+                                              false, true);
+		state.layoutData.push(kind_element);
+            });
+	}
       }
-    } else {
-      state.layoutData.push(getElement(0, proc.text, proc.full_text, "proc", 
-                                       proc.height, load_proc_timeline,
-                                       proc.tsv, undefined, undefined,
-                                       false, true));
     }
+      else {
+	  state.layoutData.push(getElement(0, proc.text, proc.full_text, "proc",
+					   proc.height, load_proc_timeline,
+					   proc.tsv, undefined, undefined,
+					   false, true));
+      }
   });
+  state.num_nodes = seen_nodes.length;
 }
 
 function getElemCoords(elems) {
@@ -680,7 +1093,7 @@ function drawCriticalPath() {
       .attr("class", "critical_path_lines");
   state.critical_path.forEach(function(op) {
     var proc = base_map[op[0] + "," + op[1]]; // set in calculateBases
-    if (proc != undefined && proc.visible && proc.enabled && proc.loaded) {
+    if (proc != undefined && proc.visible && proc.enabled && proc.loaded && proc.selected) {
       var elems = prof_uid_map[op[2]];
       if (elems != undefined) {
         var coords = getElemCoords(elems)
@@ -752,7 +1165,7 @@ function drawDependencies() {
 
   var addDependency = function(dep, dir, dashed) {
     var depProc = base_map[dep[0] + "," + dep[1]]; // set in calculateBases
-    if (depProc.visible && depProc.enabled) {
+    if (depProc.visible && depProc.enabled && depProc.selected) {
       var depElems = prof_uid_map[dep[2]];
       if (depElems != undefined) {
         console.log(dir);
@@ -876,7 +1289,7 @@ function drawTimeline() {
     })
     .attr("height", state.thickness)
     .style("opacity", function(d) {
-      if (!state.searchEnabled || searchRegex[currentPos].exec(d.title) != null) {
+      if (!state.searchEnabled || searchRegex[currentPos].exec(d.title) != null || searchRegex[currentPos].exec(d.initiation) != null) {
         return d.opacity;
       }
       else return 0.05;
@@ -950,6 +1363,24 @@ function calculateVisibileLevels() {
 function is_proc(proc) {
   // the full text of this proc should start with 0x1d to be a processor
   return /0x1d/.exec(proc.full_text) !== undefined;
+}
+
+function is_proc_string(text)
+{
+    return /0x1d/.exec(text) != undefined;
+}
+
+function is_mem_string(text) {
+    return /0x1e/.exec(text) != undefined;
+}
+
+function get_node_val(text) {
+    var match = /\d+/.exec(text);
+    if (match) {
+	var val = parseInt(text.match(/\d+/));
+	return val;
+    }
+    return match;
 }
 
 function get_node_id(text) {
@@ -1093,7 +1524,7 @@ function utilLevelCalculator(timelineElement) {
 
 
 function timelineLevelCalculator(timelineEvent) {  
-  return constants.margin_top + 
+  return constants.margin_top +
          (timelineEvent.proc.base + timelineEvent.level) * state.thickness;
 };
 
@@ -1123,7 +1554,6 @@ function drawLayout() {
 
   var thickness = state.thickness;
   var xCalculator = function(d) { return (d.depth + 1) * 15; };
-
   names.attr("text-anchor", "start")
     .attr("class", "processor")
     .text(function(d) { return d.text; })
@@ -1384,6 +1814,7 @@ function drawExpandBox() {
           + "<input class='button' type='button' value='Utilities' onclick='evalExpandRequest(\"Utility\")'></input>" 
           + "<input class='button' type='button' value='IOs' onclick='evalExpandRequest(\"IO\")'></input>" 
           + "<input class='button' type='button' value='Memories' onclick='evalExpandRequest(\"Memory\")'></input>" 
+          + "<input class='button' type='button' value='Channels' onclick='evalExpandRequest(\"Channel\")'></input>"
         + "</div>"
         );
   $("input.expand-box").focus();
@@ -1914,6 +2345,7 @@ function load_procs(callback) {
       flattenLayout();
       calculateBases();
       drawLayout();
+      createMenuList1();
       callback();
       
       // TODO: fix
@@ -2142,6 +2574,7 @@ function initializeState() {
   state.rangeZoom = true;
   state.collapseAll = false;
   state.display_critical_path = false;
+  state.processor_kinds = {};
 
   // TODO: change this
   state.x = d3.scale.linear().range([0, state.width]);
@@ -2150,14 +2583,17 @@ function initializeState() {
 
   setKeyHandler(defaultKeydown);
   $(document).on("keyup", defaultKeyUp);
-
+  state.timelineSvg = d3.select("#timeline").select("svg").remove();
   state.timelineSvg = d3.select("#timeline").append("svg")
     .attr("width", state.zoom * state.width)
     .attr("height", state.height);
 
+  state.loaderSvg = d3.select("#loader-icon").select("svg").remove();
   state.loaderSvg = d3.select("#loader-icon").append("svg")
     .attr("width", "40px")
     .attr("height", "40px");
+
+  d3.select("#processors").select("svg").remove();
 
   drawLoaderIcon();
   drawHelpBox();

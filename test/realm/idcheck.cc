@@ -1,4 +1,4 @@
-// Copyright 2018 Stanford University
+// Copyright 2019 Stanford University
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,6 +16,7 @@
 // test for Realm's IDs
 
 #include "realm/id.h"
+#include "realm/event.h"
 
 #include <iostream>
 #include <cassert>
@@ -56,6 +57,11 @@ int main(int argc, const char *argv[])
     names[lo.id] = "barrier";
     assert(lo.is_barrier());
     assert(hi.is_barrier());
+    // check over/underflow on barrier generations
+    Barrier b_lo = lo.convert<Barrier>();
+    Barrier b_hi = hi.convert<Barrier>();
+    assert(b_lo.get_previous_phase() == b_lo);
+    assert(!(b_hi.advance_barrier()).exists());
   }
 
   // reservation
@@ -78,6 +84,17 @@ int main(int argc, const char *argv[])
     names[lo.id] = "memory";
     assert(lo.is_memory());
     assert(hi.is_memory());
+  }
+
+  // ib_memory
+  {
+    ID lo = ID::make_ib_memory(0, 0);
+    ID hi = ID::make_ib_memory(-1U, -1U);
+    assert(ranges.count(lo.id) == 0);
+    ranges[lo.id] = hi.id;
+    names[lo.id] = "ib_memory";
+    assert(lo.is_ib_memory());
+    assert(hi.is_ib_memory());
   }
 
   // instance
@@ -113,17 +130,6 @@ int main(int argc, const char *argv[])
     assert(hi.is_procgroup());
   }
 
-  // idxspace
-  {
-    ID lo = ID::make_idxspace(0, 0, 0);
-    ID hi = ID::make_idxspace(-1U, -1U, -1U);
-    assert(ranges.count(lo.id) == 0);
-    ranges[lo.id] = hi.id;
-    names[lo.id] = "idxspace";
-    assert(lo.is_idxspace());
-    assert(hi.is_idxspace());
-  }
-
   // sparsity
   {
     ID lo = ID::make_sparsity(0, 0, 0);
@@ -135,15 +141,15 @@ int main(int argc, const char *argv[])
     assert(hi.is_sparsity());
   }
 
-  // allocator
+  // compqueue
   {
-    ID lo = ID::make_allocator(0, 0, 0);
-    ID hi = ID::make_allocator(-1U, -1U, -1U);
+    ID lo = ID::make_compqueue(0, 0);
+    ID hi = ID::make_compqueue(-1U, -1U);
     assert(ranges.count(lo.id) == 0);
     ranges[lo.id] = hi.id;
-    names[lo.id] = "allocator";
-    assert(lo.is_allocator());
-    assert(hi.is_allocator());
+    names[lo.id] = "compqueue";
+    assert(lo.is_compqueue());
+    assert(hi.is_compqueue());
   }
 
   ID::IDType prev = 0;

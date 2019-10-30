@@ -1,4 +1,4 @@
-/* Copyright 2018 Stanford University, NVIDIA Corporation
+/* Copyright 2019 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -111,6 +111,11 @@ namespace Realm {
     //  that are guaranteed to cover all actual entries
 
     const std::vector<Rect<N,T> >& get_approx_rects(void);
+
+    // membership test between two (presumably-different) sparsity maps are not
+    //  cheap - try bounds-based checks first (see IndexSpace::overlaps)
+    bool overlaps(SparsityMapPublicImpl<N,T> *other,
+		  const Rect<N,T>& bounds, bool approx);
 
   protected:
     bool entries_valid, approx_valid;

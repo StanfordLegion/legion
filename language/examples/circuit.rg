@@ -1,4 +1,4 @@
--- Copyright 2018 Stanford University
+-- Copyright 2019 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -592,15 +592,15 @@ task toplevel()
   for j = 0, conf.num_loops do
     --c.legion_runtime_begin_trace(__runtime(), __context(), 0, false)
 
-    __demand(__parallel)
+    __demand(__index_launch)
     for i = 0, conf.num_pieces do
       calculate_new_currents(steps, rp_private[i], rp_shared[i], rp_ghost[i], rp_all_wires[i])
     end
-    __demand(__parallel)
+    __demand(__index_launch)
     for i = 0, conf.num_pieces do
       distribute_charge(rp_private[i], rp_shared[i], rp_ghost[i], rp_all_wires[i])
     end
-    __demand(__parallel)
+    __demand(__index_launch)
     for i = 0, conf.num_pieces do
       update_voltages(rp_private[i], rp_shared[i])
     end

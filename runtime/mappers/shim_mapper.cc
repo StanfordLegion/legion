@@ -1,4 +1,4 @@
-/* Copyright 2018 Stanford University, NVIDIA Corporation
+/* Copyright 2019 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -140,7 +140,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    unsigned ShimMapper::Task::get_context_index(void) const
+    size_t ShimMapper::Task::get_context_index(void) const
     //--------------------------------------------------------------------------
     {
       return context_index;
@@ -220,7 +220,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    unsigned ShimMapper::Inline::get_context_index(void) const
+    size_t ShimMapper::Inline::get_context_index(void) const
     //--------------------------------------------------------------------------
     {
       return context_index;
@@ -293,7 +293,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    unsigned ShimMapper::Copy::get_context_index(void) const
+    size_t ShimMapper::Copy::get_context_index(void) const
     //--------------------------------------------------------------------------
     {
       return context_index;
@@ -1069,9 +1069,9 @@ namespace Legion {
       current_ctx = ctx;
       // call old version - returns int directly, but we'll store as size_t
       //  for consistency with the new DefaultMapper tunables
-      size_t *result = (size_t*)malloc(sizeof(size_t));
+      int *result = (int*)malloc(sizeof(int));
       output.value = result;
-      output.size = sizeof(size_t);
+      output.size = sizeof(int);
       *result = get_tunable_value(&local_task,
 				  input.tunable_id,
 				  input.mapping_tag);

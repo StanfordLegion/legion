@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-# Copyright 2018 Stanford University, NVIDIA Corporation
+# Copyright 2019 Stanford University, NVIDIA Corporation
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -14,16 +14,28 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from __future__ import absolute_import
+from __future__ import division
 from __future__ import print_function
+
 import inspect
 import re
 import struct
 import legion_spy
 import gzip
 import io
+import sys
 
-binary_filetype_pat = re.compile(r"FileType: BinaryLegionProf v: (?P<version>\d+(\.\d+)?)")
+# Helper methods for python 2/3 foolishness
+def iteritems(obj):
+    return obj.items() if sys.version_info > (3,) else obj.iteritems()
 
+long_type = int if sys.version_info > (3,) else eval("long")
+
+binary_filetype_pat = re.compile(b"FileType: BinaryLegionProf v: (?P<version>\d+(\.\d+)?)") \
+        if sys.version_info > (3,) else \
+                        re.compile(r"FileType: BinaryLegionProf v: (?P<version>\d+(\.\d+)?)")
+max_dim_val = 0
 def getFileObj(filename, compressed=False, buffer_size=32768):
     if compressed:
         return io.BufferedReader(gzip.open(filename, mode='rb'), buffer_size=buffer_size)
@@ -51,7 +63,17 @@ class LegionDeserializer(object):
         raise NotImplementedError
 
 def read_time(string):
-    return long(string)/1000
+    return long_type(string) // 1000
+
+def read_max_dim(string):
+    global max_dim_val
+    max_dim_val = int(string)
+    return int(string)
+
+decimal_pat = re.compile("\-?[0-9]+")
+def read_array(string):
+    values = decimal_pat.findall(string)
+    return values
 
 class LegionProfASCIIDeserializer(LegionDeserializer):
     """
@@ -69,14 +91,29 @@ class LegionProfASCIIDeserializer(LegionDeserializer):
         "OpDesc": re.compile(prefix + r'Prof Op Desc (?P<kind>[0-9]+) (?P<name>[a-zA-Z0-9_ ]+)'),
         "ProcDesc": re.compile(prefix + r'Prof Proc Desc (?P<proc_id>[a-f0-9]+) (?P<kind>[0-9]+)'),
         "MemDesc": re.compile(prefix + r'Prof Mem Desc (?P<mem_id>[a-f0-9]+) (?P<kind>[0-9]+) (?P<capacity>[0-9]+)'),
-        "TaskKind": re.compile(prefix + r'Prof Task Kind (?P<task_id>[0-9]+) (?P<name>[$()a-zA-Z0-9_<>.]+) (?P<overwrite>[0-1])'),
-        "TaskVariant": re.compile(prefix + r'Prof Task Variant (?P<task_id>[0-9]+) (?P<variant_id>[0-9]+) (?P<name>[$()a-zA-Z0-9_<>.]+)'),
+        "ProcMDesc": re.compile(prefix + r'Prof Mem Proc Affinity Desc (?P<proc_id>[a-f0-9]+) (?P<mem_id>[a-f0-9]+)'),
+        "MaxDimDesc": re.compile(prefix + r'Max Dim Desc (?P<max_dim>[0-9]+)'),
+        "IndexSpacePointDesc": re.compile(prefix + r'Index Space Point Desc (?P<unique_id>[0-9]+) (?P<dim>[0-9]+) (?P<rem>.*)'),
+        "IndexSpaceRectDesc": re.compile(prefix + r'Index Space Rect Desc (?P<unique_id>[0-9]+) (?P<dim>[0-9]+) (?P<rem>.*)'),
+        "IndexSpaceEmptyDesc": re.compile(prefix + r'Index Space Empty Desc (?P<unique_id>[0-9]+)'),
+        "FieldDesc": re.compile(prefix + r'Field Name Desc (?P<unique_id>[0-9]+) (?P<field_id>[0-9]+) (?P<size>[0-9]+) (?P<name>[$()a-zA-Z0-9_<>.]+)'),
+        "FieldSpaceDesc": re.compile(prefix + r'Field Space Name Desc (?P<unique_id>[0-9]+) (?P<name>[$()a-zA-Z0-9_<>.]+)'),
+        "IndexSpaceDesc": re.compile(prefix + r'Index Space Name Desc (?P<unique_id>[0-9]+) (?P<name>[$()a-zA-Z0-9_<>.]+)'),
+        "PartDesc": re.compile(prefix + r'Index Part Name Desc (?P<unique_id>[0-9]+) (?P<name>[a-zA-Z0-9_ ]+)'),
+        "IndexPartitionDesc": re.compile(prefix + r'Index Partition Desc (?P<parent_id>[0-9]+) (?P<unique_id>[0-9]+) (?P<disjoint>[0-1]+) (?P<point0>[0-9]+)'),
+        "IndexSubSpaceDesc": re.compile(prefix + r'Index Sub Space Desc (?P<parent_id>[a-f0-9]+) (?P<unique_id>[0-9]+)'),
+        "LogicalRegionDesc": re.compile(prefix + r'Logical Region Desc (?P<ispace_id>[0-9]+) (?P<fspace_id>[0-9]+) (?P<tree_id>[0-9]+) (?P<name>[a-zA-Z0-9_ ]+)'),
+        "PhysicalInstRegionDesc": re.compile(prefix + r'Physical Inst Region Desc (?P<op_id>[0-9]+) (?P<inst_id>[a-f0-9]+) (?P<ispace_id>[0-9]+) (?P<fspace_id>[0-9]+) (?P<tree_id>[0-9]+)'),
+        "PhysicalInstLayoutDesc": re.compile(prefix + r'Physical Inst Layout Desc (?P<op_id>[0-9]+) (?P<inst_id>[a-f0-9]+) (?P<field_id>[0-9]+) (?P<fspace_id>[0-9]+)'),
+        "TaskKind": re.compile(prefix + r'Prof Task Kind (?P<task_id>[0-9]+) (?P<name>[$()a-zA-Z0-9_<>., ]+) (?P<overwrite>[0-1])'),
+        "TaskVariant": re.compile(prefix + r'Prof Task Variant (?P<task_id>[0-9]+) (?P<variant_id>[0-9]+) (?P<name>[$()a-zA-Z0-9_<>., ]+)'),
         "OperationInstance": re.compile(prefix + r'Prof Operation (?P<op_id>[0-9]+) (?P<kind>[0-9]+)'),
         "MultiTask": re.compile(prefix + r'Prof Multi (?P<op_id>[0-9]+) (?P<task_id>[0-9]+)'),
         "SliceOwner": re.compile(prefix + r'Prof Slice Owner (?P<parent_id>[0-9]+) (?P<op_id>[0-9]+)'),
         "TaskWaitInfo": re.compile(prefix + r'Prof Task Wait Info (?P<op_id>[0-9]+) (?P<task_id>[0-9]+) (?P<variant_id>[0-9]+) (?P<wait_start>[0-9]+) (?P<wait_ready>[0-9]+) (?P<wait_end>[0-9]+)'),
         "MetaWaitInfo": re.compile(prefix + r'Prof Meta Wait Info (?P<op_id>[0-9]+) (?P<lg_id>[0-9]+) (?P<wait_start>[0-9]+) (?P<wait_ready>[0-9]+) (?P<wait_end>[0-9]+)'),
         "TaskInfo": re.compile(prefix + r'Prof Task Info (?P<op_id>[0-9]+) (?P<task_id>[0-9]+) (?P<variant_id>[0-9]+) (?P<proc_id>[a-f0-9]+) (?P<create>[0-9]+) (?P<ready>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+)'),
+        "GPUTaskInfo": re.compile(prefix + r'Prof GPU Task Info (?P<op_id>[0-9]+) (?P<task_id>[0-9]+) (?P<variant_id>[0-9]+) (?P<proc_id>[a-f0-9]+) (?P<create>[0-9]+) (?P<ready>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+) (?P<gpu_start>[0-9]+) (?P<gpu_stop>[0-9]+)'),
         "MetaInfo": re.compile(prefix + r'Prof Meta Info (?P<op_id>[0-9]+) (?P<lg_id>[0-9]+) (?P<proc_id>[a-f0-9]+) (?P<create>[0-9]+) (?P<ready>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+)'),
         "CopyInfo": re.compile(prefix + r'Prof Copy Info (?P<op_id>[0-9]+) (?P<src>[a-f0-9]+) (?P<dst>[a-f0-9]+) (?P<size>[0-9]+) (?P<create>[0-9]+) (?P<ready>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+)'),
         "FillInfo": re.compile(prefix + r'Prof Fill Info (?P<op_id>[0-9]+) (?P<dst>[a-f0-9]+) (?P<create>[0-9]+) (?P<ready>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+)'),
@@ -91,10 +128,10 @@ class LegionProfASCIIDeserializer(LegionDeserializer):
         # "UserInfo": re.compile(prefix + r'Prof User Info (?P<proc_id>[a-f0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+) (?P<name>[$()a-zA-Z0-9_]+)')
     }
     parse_callbacks = {
-        "op_id": long,
-        "parent_id": long,
-        "size": long,
-        "capacity": long,
+        "op_id": long_type,
+        "parent_id": long_type,
+        "size": long_type,
+        "capacity": long_type,
         "variant_id": int,
         "lg_id": int,
         "uid": int,
@@ -103,6 +140,19 @@ class LegionProfASCIIDeserializer(LegionDeserializer):
         "kind": int,
         "opkind": int,
         "part_op": int,
+        "point": int,
+        "point0": long_type,
+        "point1": long_type,
+        "point2": long_type,
+        "dim": int,
+        "field_id": int,
+        "fspace_id": int,
+        "ispace_id": long_type,
+        "unique_id": long_type,
+        "disjoint": bool,
+        "tree_id": int,
+        "max_dim": read_max_dim,
+        "rem": read_array,
         "proc_id": lambda x: int(x, 16),
         "mem_id": lambda x: int(x, 16),
         "src": lambda x: int(x, 16),
@@ -114,6 +164,8 @@ class LegionProfASCIIDeserializer(LegionDeserializer):
         "ready": read_time,
         "stop": read_time,
         "end": read_time,
+        "gpu_start": read_time,
+        "gpu_stop": read_time,
         "wait_start": read_time,
         "wait_ready": read_time,
         "wait_end": read_time,
@@ -123,11 +175,9 @@ class LegionProfASCIIDeserializer(LegionDeserializer):
 
     def __init__(self, state, callbacks):
         LegionDeserializer.__init__(self, state, callbacks)
-
         assert len(callbacks) == len(LegionProfASCIIDeserializer.patterns)
-
         callbacks_valid = True
-        for callback_name, callback in callbacks.iteritems():
+        for callback_name, callback in iteritems(callbacks):
             cur_valid = callback_name in LegionProfASCIIDeserializer.patterns and \
                         callable(callback)
             callbacks_valid = callbacks_valid and cur_valid
@@ -136,7 +186,7 @@ class LegionProfASCIIDeserializer(LegionDeserializer):
     def parse_regex_matches(self, m):
         kwargs = m.groupdict()
 
-        for key, arg in kwargs.iteritems():
+        for key, arg in iteritems(kwargs):
             kwargs[key] = LegionProfASCIIDeserializer.parse_callbacks[key](arg)
         return kwargs
 
@@ -153,16 +203,17 @@ class LegionProfASCIIDeserializer(LegionDeserializer):
         with open(filename, 'rb') as log:
             matches = 0
             # Keep track of the first and last times
-            first_time = 0L
-            last_time = 0L
+            first_time = 0
+            last_time = 0
             for line in log:
+                line = line.decode('utf-8')
                 if not self.state.has_spy_data and \
                     (legion_spy.config_pat.match(line) or \
                      legion_spy.detailed_config_pat.match(line)):
                     self.state.has_spy_data = True
                 matched = False
 
-                for prof_event, pattern in LegionProfASCIIDeserializer.patterns.iteritems():
+                for prof_event, pattern in iteritems(LegionProfASCIIDeserializer.patterns):
                     m = pattern.match(line)
                     if m is not None:
                         callback = self.callbacks[prof_event]
@@ -194,12 +245,18 @@ class LegionProfBinaryDeserializer(LegionDeserializer):
         "MemID":              "Q", # unsigned long long
         "InstID":             "Q", # unsigned long long
         "UniqueID":           "Q", # unsigned long long
+        "IDType":             "Q", # unsigned long long
         "TaskID":             "I", # unsigned int
         "bool":               "?", # bool
-        "VariantID":          "L", # unsigned long
+        "VariantID":          "I", # unsigned int
         "unsigned":           "I", # unsigned int
         "timestamp_t":        "Q", # unsigned long long
+        "maxdim":             "i", # int
         "unsigned long long": "Q", # unsigned long long
+        "long long":          "q", # long long
+        "array":              "Q", # unsigned long long
+        "point":              "Q", # unsigned long long
+        "int":                "i", # int
         "ProcKind":           "i", # int (really an enum so this depends)
         "MemKind":            "i", # int (really an enum so this depends)
         "MessageKind":        "i", # int (really an enum so this depends)
@@ -217,26 +274,51 @@ class LegionProfBinaryDeserializer(LegionDeserializer):
         if param_type == "string":
             def string_reader(log):
                 string = ""
-                char = log.read(1)
+                char = log.read(1).decode('utf-8')
                 while ord(char) != 0:
                     string += char
-                    char = log.read(1)
+                    char = log.read(1).decode('utf-8')
                 return string
             return string_reader
+        if param_type == "point":
+            fmt = LegionProfBinaryDeserializer.fmt_dict[param_type]
+            def point_reader(log):
+                global max_dim_val
+                values = []
+                for index in range(max_dim_val):
+                    raw_val = log.read(num_bytes)
+                    value = struct.unpack(fmt, raw_val)[0]
+                    values.append(value)
+                return values
+            return point_reader
+        if param_type == "array":
+            fmt = LegionProfBinaryDeserializer.fmt_dict[param_type]
+            def array_reader(log):
+                global max_dim_val
+                values = []
+                for index in range(max_dim_val*2):
+                    raw_val = log.read(num_bytes)
+                    value = struct.unpack(fmt, raw_val)[0]
+                    values.append(value)
+                return values
+            return array_reader
         else:
             fmt = LegionProfBinaryDeserializer.fmt_dict[param_type]
             def reader(log):
+                global max_dim_val
                 raw_val = log.read(num_bytes)
                 val = struct.unpack(fmt, raw_val)[0]
                 if param_type == "timestamp_t":
                     val = val / 1000
+                if param_type == "maxdim":
+                    max_dim_val = val
                 return val
             return reader
 
     def parse_preamble(self, log):
         log.readline() # filetype
         while(True):
-            line = log.readline()
+            line = log.readline().decode('utf-8')
             if line == "\n":
                 break
 
@@ -256,7 +338,7 @@ class LegionProfBinaryDeserializer(LegionDeserializer):
                 param_type = param_m.group('param_type')
                 param_bytes = int(param_m.group('param_bytes'))
 
-                reader = LegionProfBinaryDeserializer.create_type_reader(param_bytes, param_type)
+                reader = LegionProfBinaryDeserializer.create_type_reader(param_bytes, param_type) 
 
                 param_data.append((param_name, reader))
 
@@ -267,14 +349,14 @@ class LegionProfBinaryDeserializer(LegionDeserializer):
         # change the callbacks to be by id
         if not self.callbacks_translated:
             new_callbacks = {LegionProfBinaryDeserializer.name_to_id[name]: callback 
-                               for name, callback in self.callbacks.iteritems()
+                               for name, callback in iteritems(self.callbacks)
                                if name in LegionProfBinaryDeserializer.name_to_id}
             self.callbacks = new_callbacks
             self.callbacks_translated = True
 
 
         # callbacks_valid = True
-        # for callback_name, callback in callbacks.iteritems():
+        # for callback_name, callback in iteritems(callbacks):
         #     cur_valid = callback_name in LegionProfASCIIDeserializer.patterns and \
         #                 callable(callback)
         #     callbacks_valid = callbacks_valid and cur_valid

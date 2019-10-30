@@ -1,4 +1,4 @@
--- Copyright 2018 Stanford University
+-- Copyright 2019 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -43,6 +43,12 @@ if os.execute("bash -c \"[ `uname` == 'Darwin' ]\"") == 0 then
   if os.execute("sysctl -a | grep machdep.cpu.features | grep AVX > /dev/null") == 0 then
     SIMD_REG_SIZE = 32
   elseif os.execute("sysctl -a | grep machdep.cpu.features | grep SSE > /dev/null") == 0 then
+    SIMD_REG_SIZE = 16
+  else
+    error("Unable to determine CPU architecture")
+  end
+elseif os.execute("bash -c \"[ `uname` == 'FreeBSD' ]\"") == 0 then
+  if os.execute("sysctl -a | grep -q 'hw.instruction_sse: 1'") == 0 then
     SIMD_REG_SIZE = 16
   else
     error("Unable to determine CPU architecture")
@@ -587,6 +593,7 @@ function vectorize.stat_for_list(cx, node)
     value = node.value,
     block = body,
     orig_block = node.block,
+    orig_metadata = node.metadata,
     vector_width = simd_width,
     annotations = node.annotations,
     span = node.span,
@@ -602,6 +609,7 @@ function vectorize.stat_for_num(cx, node)
     values = node.values,
     block = body,
     orig_block = node.block,
+    orig_metadata = node.metadata,
     vector_width = simd_width,
     annotations = node.annotations,
     span = node.span,
@@ -701,6 +709,23 @@ function check_vectorizability.has_aliasing(cx, write_set)
 end
 
 function check_vectorizability.stat(cx, node)
+  local function contains_loop_var(node)
+    if node:is(ast.typed.expr.Cast) then
+      return contains_loop_var(node.arg)
+    elseif node:is(ast.typed.expr.Binary) then
+      return contains_loop_var(node.lhs) or
+             contains_loop_var(node.rhs)
+    elseif node:is(ast.typed.expr.Unary) then
+      return contains_loop_var(node.rhs)
+    elseif node:is(ast.typed.expr.ID) then
+      return cx.loop_symbol == node.value or
+             (std.is_bounded_type(node.expr_type) and
+              std.type_eq(cx.loop_symbol:gettype(), node.expr_type))
+    else
+      return false
+    end
+  end
+
   if node:is(ast.typed.stat.Block) then
     return check_vectorizability.block(cx, node.block)
 
@@ -708,6 +733,10 @@ function check_vectorizability.stat(cx, node)
     local fact = V
     if node.value then
       if not check_vectorizability.expr(cx, node.value) then return false end
+      if not check_vectorizability.type(std.as_read(node.value.expr_type)) then
+        cx:report_error_when_demanded(node,
+          error_prefix .. "an expression of an inadmissible type")
+      end
       fact = cx:lookup_expr_type(node.value)
     end
 
@@ -722,6 +751,13 @@ function check_vectorizability.stat(cx, node)
     end
     cx:assign(node.symbol, fact)
     if node.value then
+      -- TODO: for the moment we reject declarations like
+      -- 'var x = i' where 'i' is of an index type
+      if contains_loop_var(node.value) then
+        cx:report_error_when_demanded(node, error_prefix ..
+          "a corner case statement not supported for the moment")
+        return false
+      end
       collect_bounds(node.value):map(function(pair)
         local ty, field = unpack(pair)
         local field_hash = field:hash()
@@ -756,22 +792,6 @@ function check_vectorizability.stat(cx, node)
 
     -- TODO: for the moment we reject an assignment such as
     -- 'r[i] = i' where 'i' is of an index type
-    local function contains_loop_var(node)
-      if node:is(ast.typed.expr.Cast) then
-        return contains_loop_var(node.arg)
-      elseif node:is(ast.typed.expr.Binary) then
-        return contains_loop_var(node.lhs) or
-               contains_loop_var(node.rhs)
-      elseif node:is(ast.typed.expr.Unary) then
-        return contains_loop_var(node.rhs)
-      elseif node:is(ast.typed.expr.ID) then
-        return cx.loop_symbol == node.value or
-               (std.is_bounded_type(node.expr_type) and
-                std.type_eq(cx.loop_symbol:gettype(), node.expr_type))
-      else
-        return false
-      end
-    end
     if contains_loop_var(rh) then
       cx:report_error_when_demanded(node, error_prefix ..
         "a corner case statement not supported for the moment")
@@ -963,7 +983,7 @@ function check_vectorizability.expr(cx, node)
     return true
 
   elseif node:is(ast.typed.expr.Unary) then
-    if not check_vectorizability.expr(cx, node.rhs) then return true end
+    if not check_vectorizability.expr(cx, node.rhs) then return false end
     cx:assign_expr_type(node, cx:lookup_expr_type(node.rhs))
     return true
 
@@ -1089,6 +1109,10 @@ function check_vectorizability.expr(cx, node)
       cx:report_error_when_demanded(node,
         error_prefix .. "a raw operator")
 
+    elseif node:is(ast.typed.expr.AddressOf) then
+      cx:report_error_when_demanded(node,
+        error_prefix .. "an address-of operator")
+
     elseif node:is(ast.typed.expr.Future) then
       cx:report_error_when_demanded(node,
         error_prefix .. "a future creation")
@@ -1140,7 +1164,7 @@ function check_vectorizability.type(ty)
     return ty.dim == 0
   elseif ty:isprimitive() then
     return true
-  elseif ty:isstruct() then
+  elseif ty:isstruct() and not ty.__no_field_slicing then
     for _, entry in pairs(ty.entries) do
       local entry_type = entry[2] or entry.type
       if not check_vectorizability.type(entry_type) then
@@ -1186,7 +1210,8 @@ function vectorize_loops.stat_for_num(node)
   cx.demanded = node.annotations.vectorize:is(ast.annotation.Demand)
   assert(cx.demanded)
 
-  local vectorizable = check_vectorizability.block(cx, node.block)
+  local vectorizable = node.metadata and node.metadata.parallelizable and
+                       check_vectorizability.block(cx, node.block)
   if vectorizable and not bounds_checks then
     return vectorize.stat_for_num(cx, node)
   else
@@ -1200,7 +1225,8 @@ function vectorize_loops.stat_for_list(node)
   cx:assign(node.symbol, C)
   cx.demanded = node.annotations.vectorize:is(ast.annotation.Demand)
 
-  local vectorizable = check_vectorizability.block(cx, node.block)
+  local vectorizable = node.metadata and node.metadata.parallelizable and
+                       check_vectorizability.block(cx, node.block)
   if vectorizable and not bounds_checks then
     return vectorize.stat_for_list(cx, node)
   else
@@ -1229,14 +1255,16 @@ function vectorize_loops.stat(node)
 
   elseif node:is(ast.typed.stat.ForNum) then
     if node.annotations.vectorize:is(ast.annotation.Demand) then
-      assert(std.config["vectorize-unsafe"])
       return vectorize_loops.stat_for_num(node)
     else
       return node { block = vectorize_loops.block(node.block) }
     end
 
   elseif node:is(ast.typed.stat.ForList) then
-    if std.is_bounded_type(node.symbol:gettype()) then
+    if (std.is_bounded_type(node.symbol:gettype()) or
+        std.is_index_type(node.symbol:gettype())) and
+       not std.is_rect_type(std.as_read(node.value.expr_type))
+    then
       return vectorize_loops.stat_for_list(node)
     else
       return node { block = vectorize_loops.block(node.block) }

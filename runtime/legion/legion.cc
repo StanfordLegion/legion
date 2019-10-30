@@ -1,4 +1,4 @@
-/* Copyright 2018 Stanford University, NVIDIA Corporation
+/* Copyright 2019 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -12,7 +12,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 
 #include "legion.h"
 #include "legion/runtime.h"
@@ -401,18 +400,14 @@ namespace Legion {
     }
 
     // Do the explicit instantiation
-    template class ColorPoints<1>;
-    template class ColorPoints<2>;
-    template class ColorPoints<3>;
-    template class ColorRects<1,1>;
-    template class ColorRects<1,2>;
-    template class ColorRects<1,3>;
-    template class ColorRects<2,1>;
-    template class ColorRects<2,2>;
-    template class ColorRects<2,3>;
-    template class ColorRects<3,1>;
-    template class ColorRects<3,2>;
-    template class ColorRects<3,3>;
+#define DIMFUNC(DIM) \
+    template class ColorPoints<DIM>;
+    LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
+#define DIMFUNC(D1,D2) \
+    template class ColorRects<D1,D2>;
+    LEGION_FOREACH_NN(DIMFUNC)
+#undef DIMFUNC
   };
 #endif // DISABLE_PARTITION_SHIM
 
@@ -425,12 +420,11 @@ namespace Legion {
     const Domain Domain::NO_DOMAIN = Domain();
 
     // Cache static type tags so we don't need to recompute them all the time
-    static const TypeTag TYPE_TAG_1D =
-      Internal::NT_TemplateHelper::encode_tag<1,coord_t>();
-    static const TypeTag TYPE_TAG_2D =
-      Internal::NT_TemplateHelper::encode_tag<2,coord_t>();
-    static const TypeTag TYPE_TAG_3D =
-      Internal::NT_TemplateHelper::encode_tag<3,coord_t>();
+#define DIMFUNC(DIM) \
+    static const TypeTag TYPE_TAG_##DIM##D = \
+      Internal::NT_TemplateHelper::encode_tag<DIM,coord_t>();
+    LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
 
     /////////////////////////////////////////////////////////////
     // Mappable 
@@ -668,49 +662,6 @@ namespace Legion {
         field_space(rhs.field_space)
     //--------------------------------------------------------------------------
     {
-    }
-
-    /////////////////////////////////////////////////////////////
-    // Field Allocator 
-    /////////////////////////////////////////////////////////////
-
-    //--------------------------------------------------------------------------
-    FieldAllocator::FieldAllocator(void)
-      : field_space(FieldSpace::NO_SPACE), parent(NULL), runtime(NULL)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    FieldAllocator::FieldAllocator(const FieldAllocator &allocator)
-      : field_space(allocator.field_space), parent(allocator.parent), 
-        runtime(allocator.runtime)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    FieldAllocator::FieldAllocator(FieldSpace f, Context p, 
-                                   Runtime *rt)
-      : field_space(f), parent(p), runtime(rt)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    FieldAllocator::~FieldAllocator(void)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    FieldAllocator& FieldAllocator::operator=(const FieldAllocator &rhs)
-    //--------------------------------------------------------------------------
-    {
-      field_space = rhs.field_space;
-      parent = rhs.parent;
-      runtime = rhs.runtime;
-      return *this;
     }
 
     /////////////////////////////////////////////////////////////
@@ -972,6 +923,17 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
+    // Lock Request
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    LockRequest::LockRequest(Lock l, unsigned m, bool excl)
+      : lock(l), mode(m), exclusive(excl)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    /////////////////////////////////////////////////////////////
     // Grant 
     /////////////////////////////////////////////////////////////
 
@@ -1134,6 +1096,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     RegionRequirement::RegionRequirement(void)
+      : region(LogicalRegion::NO_REGION), partition(LogicalPartition::NO_PART),
+        privilege(NO_ACCESS), prop(EXCLUSIVE), parent(LogicalRegion::NO_REGION),
+        redop(0), tag(0), flags(NO_FLAG), handle_type(SINGULAR), projection(0),
+        projection_args(NULL), projection_args_size(0)
     //--------------------------------------------------------------------------
     {
     }
@@ -1148,7 +1114,8 @@ namespace Legion {
 				        MappingTagID _tag, bool _verified)
       : region(_handle), privilege(_priv), prop(_prop), parent(_parent),
         redop(0), tag(_tag), flags(_verified ? VERIFIED_FLAG : NO_FLAG), 
-        handle_type(SINGULAR), projection(0)
+        handle_type(SINGULAR), projection(0), projection_args(NULL),
+        projection_args_size(0)
     //--------------------------------------------------------------------------
     { 
       privilege_fields = priv_fields;
@@ -1173,7 +1140,8 @@ namespace Legion {
                 LogicalRegion _parent, MappingTagID _tag, bool _verified)
       : partition(pid), privilege(_priv), prop(_prop), parent(_parent),
         redop(0), tag(_tag), flags(_verified ? VERIFIED_FLAG : NO_FLAG),
-        handle_type(PART_PROJECTION), projection(_proj)
+        handle_type(PART_PROJECTION), projection(_proj), projection_args(NULL),
+        projection_args_size(0)
     //--------------------------------------------------------------------------
     { 
       privilege_fields = priv_fields;
@@ -1198,7 +1166,8 @@ namespace Legion {
                 LogicalRegion _parent, MappingTagID _tag, bool _verified)
       : region(_handle), privilege(_priv), prop(_prop), parent(_parent),
         redop(0), tag(_tag), flags(_verified ? VERIFIED_FLAG : NO_FLAG),
-        handle_type(REG_PROJECTION), projection(_proj)
+        handle_type(REG_PROJECTION), projection(_proj), projection_args(NULL),
+        projection_args_size(0)
     //--------------------------------------------------------------------------
     {
       privilege_fields = priv_fields;
@@ -1223,7 +1192,8 @@ namespace Legion {
                                     bool _verified)
       : region(_handle), privilege(REDUCE), prop(_prop), parent(_parent),
         redop(op), tag(_tag), flags(_verified ? VERIFIED_FLAG : NO_FLAG), 
-        handle_type(SINGULAR)
+        handle_type(SINGULAR), projection(0), projection_args(NULL),
+        projection_args_size(0)
     //--------------------------------------------------------------------------
     {
       privilege_fields = priv_fields;
@@ -1245,7 +1215,8 @@ namespace Legion {
                         bool _verified)
       : partition(pid), privilege(REDUCE), prop(_prop), parent(_parent),
         redop(op), tag(_tag), flags(_verified ? VERIFIED_FLAG : NO_FLAG),
-        handle_type(PART_PROJECTION), projection(_proj)
+        handle_type(PART_PROJECTION), projection(_proj), projection_args(NULL),
+        projection_args_size(0)
     //--------------------------------------------------------------------------
     {
       privilege_fields = priv_fields;
@@ -1267,7 +1238,8 @@ namespace Legion {
                         bool _verified)
       : region(_handle), privilege(REDUCE), prop(_prop), parent(_parent),
         redop(op), tag(_tag), flags(_verified ? VERIFIED_FLAG : NO_FLAG),
-        handle_type(REG_PROJECTION), projection(_proj)
+        handle_type(REG_PROJECTION), projection(_proj), projection_args(NULL),
+        projection_args_size(0)
     //--------------------------------------------------------------------------
     {
       privilege_fields = priv_fields;
@@ -1288,7 +1260,8 @@ namespace Legion {
                                          bool _verified)
       : region(_handle), privilege(_priv), prop(_prop), parent(_parent),
         redop(0), tag(_tag), flags(_verified ? VERIFIED_FLAG : NO_FLAG), 
-        handle_type(SINGULAR)
+        handle_type(SINGULAR), projection(), projection_args(NULL),
+        projection_args_size(0)
     //--------------------------------------------------------------------------
     { 
       // For backwards compatibility with the old encoding
@@ -1312,7 +1285,8 @@ namespace Legion {
                                          bool _verified)
       : partition(pid), privilege(_priv), prop(_prop), parent(_parent),
         redop(0), tag(_tag), flags(_verified ? VERIFIED_FLAG : NO_FLAG), 
-        handle_type(PART_PROJECTION), projection(_proj)
+        handle_type(PART_PROJECTION), projection(_proj), projection_args(NULL),
+        projection_args_size(0)
     //--------------------------------------------------------------------------
     { 
       // For backwards compatibility with the old encoding
@@ -1336,7 +1310,8 @@ namespace Legion {
                                          bool _verified)
       : region(_handle), privilege(_priv), prop(_prop), parent(_parent),
         redop(0), tag(_tag), flags(_verified ? VERIFIED_FLAG : NO_FLAG), 
-        handle_type(REG_PROJECTION), projection(_proj)
+        handle_type(REG_PROJECTION), projection(_proj), projection_args(NULL),
+        projection_args_size(0)
     //--------------------------------------------------------------------------
     {
       // For backwards compatibility with the old encoding
@@ -1359,7 +1334,8 @@ namespace Legion {
                                          bool _verified)
       : region(_handle), privilege(REDUCE), prop(_prop), parent(_parent),
         redop(op), tag(_tag), flags(_verified ? VERIFIED_FLAG : NO_FLAG), 
-        handle_type(SINGULAR)
+        handle_type(SINGULAR), projection(0), projection_args(NULL),
+        projection_args_size(0)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -1379,7 +1355,8 @@ namespace Legion {
                                          bool _verified)
       : partition(pid), privilege(REDUCE), prop(_prop), parent(_parent),
         redop(op), tag(_tag), flags(_verified ? VERIFIED_FLAG : NO_FLAG), 
-        handle_type(PART_PROJECTION), projection(_proj)
+        handle_type(PART_PROJECTION), projection(_proj), projection_args(NULL),
+        projection_args_size(0)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -1399,7 +1376,8 @@ namespace Legion {
                                          bool _verified)
       : region(_handle), privilege(REDUCE), prop(_prop), parent(_parent),
         redop(op), tag(_tag), flags(_verified ? VERIFIED_FLAG : NO_FLAG), 
-        handle_type(REG_PROJECTION), projection(_proj)
+        handle_type(REG_PROJECTION), projection(_proj), projection_args(NULL),
+        projection_args_size(0)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -1407,6 +1385,63 @@ namespace Legion {
         REPORT_LEGION_ERROR(ERROR_RESERVED_REDOP_ID, 
                                    "Zero is not a valid ReductionOpID")
 #endif
+    }
+
+    //--------------------------------------------------------------------------
+    RegionRequirement::RegionRequirement(const RegionRequirement &rhs)
+      : region(rhs.region), partition(rhs.partition), 
+        privilege_fields(rhs.privilege_fields), 
+        instance_fields(rhs.instance_fields), privilege(rhs.privilege),
+        prop(rhs.prop), parent(rhs.parent), redop(rhs.redop), tag(rhs.tag),
+        flags(rhs.flags), handle_type(rhs.handle_type), 
+        projection(rhs.projection), projection_args(NULL),
+        projection_args_size(rhs.projection_args_size)
+    //--------------------------------------------------------------------------
+    {
+      if (projection_args_size > 0)
+      {
+        projection_args = malloc(projection_args_size);
+        memcpy(projection_args, rhs.projection_args, projection_args_size);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    RegionRequirement::~RegionRequirement(void)
+    //--------------------------------------------------------------------------
+    {
+      if (projection_args_size > 0)
+        free(projection_args);
+    }
+
+    //--------------------------------------------------------------------------
+    RegionRequirement& RegionRequirement::operator=(
+                                                   const RegionRequirement &rhs)
+    //--------------------------------------------------------------------------
+    {
+      region = rhs.region;
+      partition = rhs.partition;
+      privilege_fields = rhs.privilege_fields;
+      instance_fields = rhs.instance_fields;
+      privilege = rhs.privilege;
+      prop = rhs.prop;
+      parent = rhs.parent;
+      redop = rhs.redop;
+      tag = rhs.tag;
+      flags = rhs.flags;
+      handle_type = rhs.handle_type;
+      projection = rhs.projection;
+      projection_args_size = rhs.projection_args_size;
+      if (projection_args != NULL)
+      {
+        free(projection_args);
+        projection_args = NULL;
+      }
+      if (projection_args_size > 0)
+      {
+        projection_args = malloc(projection_args_size);
+        memcpy(projection_args, rhs.projection_args, projection_args_size);
+      }
+      return *this;
     }
 
     //--------------------------------------------------------------------------
@@ -1425,8 +1460,16 @@ namespace Legion {
           if ((privilege_fields.size() == rhs.privilege_fields.size()) &&
               (instance_fields.size() == rhs.instance_fields.size()))
           {
-            return ((privilege_fields == rhs.privilege_fields) 
-                && (instance_fields == rhs.instance_fields));
+            if (projection_args_size == rhs.projection_args_size)
+            {
+              if ((projection_args_size == 0) ||
+                  (memcmp(projection_args, rhs.projection_args, 
+                          projection_args_size) == 0))
+              {
+                return ((privilege_fields == rhs.privilege_fields) 
+                    && (instance_fields == rhs.instance_fields));
+              }
+            }
           }
         }
       }
@@ -1493,6 +1536,20 @@ namespace Legion {
                       {
                         if (handle_type == SINGULAR)
                           return (region < rhs.region);
+                        else if (projection_args_size < 
+                                  rhs.projection_args_size)
+                          return true;
+                        else if (projection_args_size > 
+                                  rhs.projection_args_size)
+                          return false;
+                        else if ((projection_args_size > 0) &&
+                            (memcmp(projection_args, rhs.projection_args, 
+                                    projection_args_size) < 0))
+                          return true;
+                        else if ((projection_args_size > 0) && 
+                            (memcmp(projection_args, rhs.projection_args,
+                                    projection_args_size) > 0))
+                          return false;
                         else if (handle_type == PART_PROJECTION)
                         {
                           if (partition < rhs.partition)
@@ -1551,6 +1608,38 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return (privilege_fields.find(fid) != privilege_fields.end());
+    }
+
+    //--------------------------------------------------------------------------
+    const void* RegionRequirement::get_projection_args(size_t *size) const
+    //--------------------------------------------------------------------------
+    {
+      if (size != NULL)
+        *size = projection_args_size;
+      return projection_args;
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionRequirement::set_projection_args(const void *args, size_t size,
+                                                bool own)
+    //--------------------------------------------------------------------------
+    {
+      if (projection_args_size > 0)
+      {
+        free(projection_args);
+        projection_args = NULL;
+      }
+      projection_args_size = size;
+      if (projection_args_size > 0)
+      {
+        if (!own)
+        {
+          projection_args = malloc(projection_args_size);
+          memcpy(projection_args, args, projection_args_size);
+        }
+        else
+          projection_args = const_cast<void*>(args);
+      }
     }
 
     /////////////////////////////////////////////////////////////
@@ -1697,7 +1786,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    TaskLauncher::TaskLauncher(Processor::TaskFuncID tid, TaskArgument arg,
+    TaskLauncher::TaskLauncher(TaskID tid, TaskArgument arg,
                                Predicate pred /*= Predicate::TRUE_PRED*/,
                                MapperID mid /*=0*/, MappingTagID t /*=0*/)
       : task_id(tid), argument(arg), predicate(pred), map_id(mid), tag(t), 
@@ -1724,7 +1813,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexTaskLauncher::IndexTaskLauncher(Processor::TaskFuncID tid, Domain dom,
+    IndexTaskLauncher::IndexTaskLauncher(TaskID tid, Domain dom,
                                      TaskArgument global,
                                      ArgumentMap map,
                                      Predicate pred /*= Predicate::TRUE_PRED*/,
@@ -1740,7 +1829,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexTaskLauncher::IndexTaskLauncher(Processor::TaskFuncID tid, 
+    IndexTaskLauncher::IndexTaskLauncher(TaskID tid, 
                                      IndexSpace space,
                                      TaskArgument global,
                                      ArgumentMap map,
@@ -2016,9 +2105,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     AttachLauncher::AttachLauncher(ExternalResource r, 
-                                   LogicalRegion h, LogicalRegion p)
-      : resource(r), handle(h), parent(p), 
-        file_name(NULL), mode(LEGION_FILE_READ_ONLY), static_dependences(NULL)
+                                   LogicalRegion h, LogicalRegion p,
+                                   const bool restr/*= true*/,
+                                   const bool map/*= true*/)
+      : resource(r), handle(h), parent(p), restricted(restr), mapped(map),
+        file_name(NULL), mode(LEGION_FILE_READ_ONLY), footprint(0),
+        static_dependences(NULL)
     //--------------------------------------------------------------------------
     {
     }
@@ -2295,20 +2387,22 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Future::get_void_result(bool silence_warnings) const
+    void Future::get_void_result(bool silence_warnings,
+                                 const char *warning_string) const
     //--------------------------------------------------------------------------
     {
       if (impl != NULL)
-        impl->get_void_result(silence_warnings);
+        impl->get_untyped_result(silence_warnings, warning_string);
     }
 
     //--------------------------------------------------------------------------
     bool Future::is_empty(bool block /*= true*/, 
-                          bool silence_warnings/*=false*/) const
+                          bool silence_warnings/*=false*/,
+                          const char *warning_string /*=NULL*/) const
     //--------------------------------------------------------------------------
     {
       if (impl != NULL)
-        return impl->is_empty(block, silence_warnings);
+        return impl->is_empty(block, silence_warnings, warning_string);
       return true;
     }
 
@@ -2322,17 +2416,20 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void* Future::get_untyped_result(bool silence_warnings) const
+    void* Future::get_untyped_result(bool silence_warnings,
+                                     const char *warning_string,
+                                     bool check_size, size_t future_size) const
     //--------------------------------------------------------------------------
     {
       if (impl == NULL)
         REPORT_LEGION_ERROR(ERROR_REQUEST_FOR_EMPTY_FUTURE, 
                           "Illegal request for future value from empty future")
-      return impl->get_untyped_result(silence_warnings);
+      return impl->get_untyped_result(silence_warnings, warning_string,
+                                    false/*internal*/, check_size, future_size);
     }
 
     //--------------------------------------------------------------------------
-    size_t Future::get_untyped_size(void)
+    size_t Future::get_untyped_size(void) const
     //--------------------------------------------------------------------------
     {
       if (impl == NULL)
@@ -2409,19 +2506,21 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void FutureMap::get_void_result(const DomainPoint &point, 
-                                    bool silence_warnings)
+                                    bool silence_warnings,
+                                    const char *warning_string)
     //--------------------------------------------------------------------------
     {
       if (impl != NULL)
-        impl->get_void_result(point, silence_warnings);
+        impl->get_void_result(point, silence_warnings, warning_string);
     }
 
     //--------------------------------------------------------------------------
-    void FutureMap::wait_all_results(bool silence_warnings)
+    void FutureMap::wait_all_results(bool silence_warnings,
+                                     const char *warning_string)
     //--------------------------------------------------------------------------
     {
       if (impl != NULL)
-        impl->wait_all_results(silence_warnings);
+        impl->wait_all_results(silence_warnings, warning_string);
     }
 
     /////////////////////////////////////////////////////////////
@@ -2490,13 +2589,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalRegion::wait_until_valid(bool silence_warnings)
+    void PhysicalRegion::wait_until_valid(bool silence_warnings,
+                                          const char *warning_string)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(impl != NULL);
 #endif
-      impl->wait_until_valid(silence_warnings);
+      impl->wait_until_valid(silence_warnings, warning_string);
     }
 
     //--------------------------------------------------------------------------
@@ -2568,13 +2668,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     Realm::RegionInstance PhysicalRegion::get_instance_info(PrivilegeMode mode,
                               FieldID fid, size_t field_size, void *realm_is, 
-                              TypeTag type_tag, bool silence_warnings, 
-                              bool generic_accessor, bool check_field_size,
-                              ReductionOpID redop) const
+                              TypeTag type_tag, const char *warning_string,
+                              bool silence_warnings, bool generic_accessor, 
+                              bool check_field_size, ReductionOpID redop) const
     //--------------------------------------------------------------------------
     {
       return impl->get_instance_info(mode, fid, field_size, realm_is, type_tag, 
-                   silence_warnings, generic_accessor, check_field_size, redop);
+                                     warning_string, silence_warnings, 
+                                     generic_accessor, check_field_size, redop);
     }
 
     //--------------------------------------------------------------------------
@@ -2591,6 +2692,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       impl->fail_bounds_check(d, fid, mode);
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalRegion::report_incompatible_accessor(const char *accessor_kind,
+                              Realm::RegionInstance instance, FieldID fid) const
+    //--------------------------------------------------------------------------
+    {
+      impl->report_incompatible_accessor(accessor_kind, instance, fid);
     }
 
 #ifdef __GNUC__
@@ -2750,6 +2859,141 @@ namespace Legion {
 #endif
 
     /////////////////////////////////////////////////////////////
+    // Field Allocator
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    FieldAllocator::FieldAllocator(void)
+      : impl(NULL)
+    //--------------------------------------------------------------------------
+    {
+    }
+    
+    //--------------------------------------------------------------------------
+    FieldAllocator::FieldAllocator(const FieldAllocator &rhs)
+      : impl(rhs.impl)
+    //--------------------------------------------------------------------------
+    {
+      if (impl != NULL)
+        impl->add_reference();
+    }
+
+    //--------------------------------------------------------------------------
+    FieldAllocator::~FieldAllocator(void)
+    //--------------------------------------------------------------------------
+    {
+      if (impl != NULL)
+      {
+        if (impl->remove_reference())
+          delete impl;
+        impl = NULL;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    FieldAllocator::FieldAllocator(Internal::FieldAllocatorImpl *i)
+      : impl(i)
+    //--------------------------------------------------------------------------
+    {
+      if (impl != NULL)
+        impl->add_reference();
+    }
+
+    //--------------------------------------------------------------------------
+    FieldAllocator& FieldAllocator::operator=(const FieldAllocator &rhs)
+    //--------------------------------------------------------------------------
+    {
+      if ((impl != NULL) && impl->remove_reference())
+        delete impl;
+      impl = rhs.impl;
+      if (impl != NULL)
+        impl->add_reference();
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    FieldID FieldAllocator::allocate_field(size_t field_size,
+                                           FieldID desired_fieldid,
+                                           CustomSerdezID serdez_id, bool local)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(impl != NULL);
+#endif
+      return impl->allocate_field(field_size, desired_fieldid, serdez_id,local);
+    }
+
+    //--------------------------------------------------------------------------
+    void FieldAllocator::free_field(FieldID fid, const bool unordered)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(impl != NULL);
+#endif     
+      impl->free_field(fid, unordered);
+    }
+
+    //--------------------------------------------------------------------------
+    FieldID FieldAllocator::allocate_local_field(size_t field_size,
+                                                 FieldID desired_fieldid,
+                                                 CustomSerdezID serdez_id)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(impl != NULL);
+#endif
+      return impl->allocate_field(field_size, desired_fieldid, 
+                                  serdez_id, true/*local*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void FieldAllocator::allocate_fields(const std::vector<size_t> &field_sizes,
+                                         std::vector<FieldID> &resulting_fields,
+                                         CustomSerdezID serdez_id, bool local)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(impl != NULL);
+#endif
+      impl->allocate_fields(field_sizes, resulting_fields, serdez_id, local);
+    }
+
+    //--------------------------------------------------------------------------
+    void FieldAllocator::free_fields(const std::set<FieldID> &to_free,
+                                     const bool unordered)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(impl != NULL);
+#endif
+      impl->free_fields(to_free, unordered);
+    }
+
+    //--------------------------------------------------------------------------
+    void FieldAllocator::allocate_local_fields(
+                                        const std::vector<size_t> &field_sizes,
+                                        std::vector<FieldID> &resulting_fields,
+                                        CustomSerdezID serdez_id)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(impl != NULL);
+#endif
+      impl->allocate_fields(field_sizes, resulting_fields, 
+                            serdez_id, true/*local*/); 
+    }
+
+    //--------------------------------------------------------------------------
+    FieldSpace FieldAllocator::get_field_space(void) const
+    //--------------------------------------------------------------------------
+    {
+      if (impl == NULL)
+        return FieldSpace::NO_SPACE;
+      else
+        return impl->get_field_space();
+    }
+
+    /////////////////////////////////////////////////////////////
     // Task Config Options 
     /////////////////////////////////////////////////////////////
 
@@ -2799,36 +3043,36 @@ namespace Legion {
       {
         switch (mappable->get_mappable_type())
         {
-          case Mappable::TASK_MAPPABLE:
+          case TASK_MAPPABLE:
             {
               const Task *task = mappable->as_task();
               return project(upper_bound, point, task->index_domain);
             }
-          case Mappable::COPY_MAPPABLE:
+          case COPY_MAPPABLE:
             {
               const Copy *copy = mappable->as_copy();
               return project(upper_bound, point, copy->index_domain);
             }
-          case Mappable::INLINE_MAPPABLE:
-          case Mappable::ACQUIRE_MAPPABLE:
-          case Mappable::RELEASE_MAPPABLE:
-          case Mappable::CLOSE_MAPPABLE:
-          case Mappable::DYNAMIC_COLLECTIVE_MAPPABLE:
+          case INLINE_MAPPABLE:
+          case ACQUIRE_MAPPABLE:
+          case RELEASE_MAPPABLE:
+          case CLOSE_MAPPABLE:
+          case DYNAMIC_COLLECTIVE_MAPPABLE:
             {
               const Domain launch_domain(point, point);
               return project(upper_bound, point, launch_domain);
             }
-          case Mappable::FILL_MAPPABLE:
+          case FILL_MAPPABLE:
             {
               const Fill *fill = mappable->as_fill();
               return project(upper_bound, point, fill->index_domain);
             }
-          case Mappable::PARTITION_MAPPABLE:
+          case PARTITION_MAPPABLE:
             {
               const Partition *part = mappable->as_partition();
               return project(upper_bound, point, part->index_domain);
             }
-          case Mappable::MUST_EPOCH_MAPPABLE:
+          case MUST_EPOCH_MAPPABLE:
             {
               const MustEpoch *must = mappable->as_must_epoch();
               return project(upper_bound, point, must->launch_domain);
@@ -2851,7 +3095,7 @@ namespace Legion {
 #endif
         switch (mappable->get_mappable_type())
         {
-          case Mappable::TASK_MAPPABLE:
+          case TASK_MAPPABLE:
             return project(0/*dummy ctx*/, 
                            const_cast<Task*>(mappable->as_task()),
                            index, upper_bound, point);
@@ -2880,36 +3124,36 @@ namespace Legion {
       {
         switch (mappable->get_mappable_type())
         {
-          case Mappable::TASK_MAPPABLE:
+          case TASK_MAPPABLE:
             {
               const Task *task = mappable->as_task();
               return project(upper_bound, point, task->index_domain);
             }
-          case Mappable::COPY_MAPPABLE:
+          case COPY_MAPPABLE:
             {
               const Copy *copy = mappable->as_copy();
               return project(upper_bound, point, copy->index_domain);
             }
-          case Mappable::INLINE_MAPPABLE:
-          case Mappable::ACQUIRE_MAPPABLE:
-          case Mappable::RELEASE_MAPPABLE:
-          case Mappable::CLOSE_MAPPABLE:
-          case Mappable::DYNAMIC_COLLECTIVE_MAPPABLE:
+          case INLINE_MAPPABLE:
+          case ACQUIRE_MAPPABLE:
+          case RELEASE_MAPPABLE:
+          case CLOSE_MAPPABLE:
+          case DYNAMIC_COLLECTIVE_MAPPABLE:
             {
               const Domain launch_domain(point, point);
               return project(upper_bound, point, launch_domain);
             }
-          case Mappable::FILL_MAPPABLE:
+          case FILL_MAPPABLE:
             {
               const Fill *fill = mappable->as_fill();
               return project(upper_bound, point, fill->index_domain);
             }
-          case Mappable::PARTITION_MAPPABLE:
+          case PARTITION_MAPPABLE:
             {
               const Partition *part = mappable->as_partition();
               return project(upper_bound, point, part->index_domain);
             }
-          case Mappable::MUST_EPOCH_MAPPABLE:
+          case MUST_EPOCH_MAPPABLE:
             {
               const MustEpoch *must = mappable->as_must_epoch();
               return project(upper_bound, point, must->launch_domain);
@@ -2932,7 +3176,7 @@ namespace Legion {
 #endif
         switch (mappable->get_mappable_type())
         {
-          case Mappable::TASK_MAPPABLE:
+          case TASK_MAPPABLE:
             return project(0/*dummy ctx*/, 
                            const_cast<Task*>(mappable->as_task()),
                            index, upper_bound, point);
@@ -3177,24 +3421,15 @@ namespace Legion {
     {
       switch (domain.get_dim())
       {
-        case 1:
-          {
-            Rect<1,coord_t> bounds = domain;
-            DomainT<1,coord_t> realm_is(bounds);
-            return create_index_space_internal(ctx, &realm_is, TYPE_TAG_1D);
-          }
-        case 2:
-          {
-            Rect<2,coord_t> bounds = domain;
-            DomainT<2,coord_t> realm_is(bounds);
-            return create_index_space_internal(ctx, &realm_is, TYPE_TAG_2D);
-          }
-        case 3:
-          {
-            Rect<3,coord_t> bounds = domain;
-            DomainT<3,coord_t> realm_is(bounds);
-            return create_index_space_internal(ctx, &realm_is, TYPE_TAG_3D);
-          }
+#define DIMFUNC(DIM) \
+    case DIM:                       \
+      {                             \
+        Rect<DIM,coord_t> bounds = domain; \
+        DomainT<DIM,coord_t> realm_is(bounds); \
+        return create_index_space_internal(ctx, &realm_is, TYPE_TAG_##DIM##D); \
+      }
+        LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
         default:
           assert(false);
       }
@@ -3217,33 +3452,18 @@ namespace Legion {
     {
       switch (points[0].get_dim())
       {
-        case 1:
-          {
-            std::vector<Realm::Point<1,coord_t> > realm_points(points.size());
-            for (unsigned idx = 0; idx < points.size(); idx++)
-              realm_points[idx] = Point<1,coord_t>(points[idx]);
-            DomainT<1,coord_t> realm_is(
-                (Realm::IndexSpace<1,coord_t>(realm_points)));
-            return runtime->create_index_space(ctx, &realm_is, TYPE_TAG_1D);
-          }
-        case 2:
-          {
-            std::vector<Realm::Point<2,coord_t> > realm_points(points.size());
-            for (unsigned idx = 0; idx < points.size(); idx++)
-              realm_points[idx] = Point<2,coord_t>(points[idx]);
-            DomainT<2,coord_t> realm_is(
-                (Realm::IndexSpace<2,coord_t>(realm_points)));
-            return runtime->create_index_space(ctx, &realm_is, TYPE_TAG_2D);
-          }
-        case 3:
-          {
-            std::vector<Realm::Point<3,coord_t> > realm_points(points.size());
-            for (unsigned idx = 0; idx < points.size(); idx++)
-              realm_points[idx] = Point<3,coord_t>(points[idx]);
-            DomainT<3,coord_t> realm_is(
-                (Realm::IndexSpace<3,coord_t>(realm_points)));
-            return runtime->create_index_space(ctx, &realm_is, TYPE_TAG_3D);
-          }
+#define DIMFUNC(DIM) \
+    case DIM: \
+      { \
+        std::vector<Realm::Point<DIM,coord_t> > realm_points(points.size()); \
+        for (unsigned idx = 0; idx < points.size(); idx++) \
+          realm_points[idx] = Point<DIM,coord_t>(points[idx]); \
+        DomainT<DIM,coord_t> realm_is( \
+            (Realm::IndexSpace<DIM,coord_t>(realm_points))); \
+        return runtime->create_index_space(ctx, &realm_is, TYPE_TAG_##DIM##D); \
+      }
+        LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
         default:
           assert(false);
       }
@@ -3257,33 +3477,18 @@ namespace Legion {
     {
       switch (rects[0].get_dim())
       {
-        case 1:
-          {
-            std::vector<Realm::Rect<1,coord_t> > realm_rects(rects.size());
-            for (unsigned idx = 0; idx < rects.size(); idx++)
-              realm_rects[idx] = Rect<1,coord_t>(rects[idx]);
-            DomainT<1,coord_t> realm_is(
-                (Realm::IndexSpace<1,coord_t>(realm_rects)));
-            return runtime->create_index_space(ctx, &realm_is, TYPE_TAG_1D);
-          }
-        case 2:
-          {
-            std::vector<Realm::Rect<2,coord_t> > realm_rects(rects.size());
-            for (unsigned idx = 0; idx < rects.size(); idx++)
-              realm_rects[idx] = Rect<2,coord_t>(rects[idx]);
-            DomainT<2,coord_t> realm_is(
-                (Realm::IndexSpace<2,coord_t>(realm_rects)));
-            return runtime->create_index_space(ctx, &realm_is, TYPE_TAG_2D);
-          }
-        case 3:
-          {
-            std::vector<Realm::Rect<3,coord_t> > realm_rects(rects.size());
-            for (unsigned idx = 0; idx < rects.size(); idx++)
-              realm_rects[idx] = Rect<3,coord_t>(rects[idx]);
-            DomainT<3,coord_t> realm_is(
-                (Realm::IndexSpace<3,coord_t>(realm_rects)));
-            return runtime->create_index_space(ctx, &realm_is, TYPE_TAG_3D);
-          }
+#define DIMFUNC(DIM) \
+    case DIM: \
+      { \
+        std::vector<Realm::Rect<DIM,coord_t> > realm_rects(rects.size()); \
+        for (unsigned idx = 0; idx < rects.size(); idx++) \
+          realm_rects[idx] = Rect<DIM,coord_t>(rects[idx]); \
+        DomainT<DIM,coord_t> realm_is( \
+            (Realm::IndexSpace<DIM,coord_t>(realm_rects))); \
+        return runtime->create_index_space(ctx, &realm_is, TYPE_TAG_##DIM##D); \
+      }
+        LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
         default:
           assert(false);
       }
@@ -3323,10 +3528,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::destroy_index_space(Context ctx, IndexSpace handle)
+    void Runtime::destroy_index_space(Context ctx, IndexSpace handle,
+                                      const bool unordered)
     //--------------------------------------------------------------------------
     {
-      runtime->destroy_index_space(ctx, handle);
+      runtime->destroy_index_space(ctx, handle, unordered);
     } 
 
     //--------------------------------------------------------------------------
@@ -3374,24 +3580,15 @@ namespace Legion {
         FieldAllocator allocator = create_field_allocator(ctx,temp_fs);
         switch (color_space.get_dim())
         {
-          case 1:
-            {
-              allocator.allocate_field(
-                  sizeof(Point<1,coord_t>), color_fid);
-              break;
+#define DIMFUNC(DIM) \
+          case DIM: \
+            { \
+              allocator.allocate_field( \
+                  sizeof(Point<DIM,coord_t>), color_fid); \
+              break; \
             }
-          case 2:
-            {
-              allocator.allocate_field(
-                  sizeof(Point<2,coord_t>), color_fid);
-              break;
-            }
-          case 3:
-            {
-              allocator.allocate_field(
-                  sizeof(Point<3,coord_t>), color_fid);
-              break;
-            }
+          LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
           default:
             assert(false);
         }
@@ -3408,58 +3605,29 @@ namespace Legion {
       // Do this with a task launch to maintain deferred execution
       switch (color_space.get_dim())
       {
-        case 1:
-          {
-            if (do_ranges)
-            {
-              PartitionShim::ColorRects<1,1> launcher(coloring, temp_lr,
-                                                color_fid, pointer_fid);
-              runtime->execute_task(ctx, launcher);
-            }
-            else
-            {
-              PartitionShim::ColorPoints<1> launcher(coloring, temp_lr,
-                                                color_fid, pointer_fid);
-              runtime->execute_task(ctx, launcher);
-            }
-            break;
-          }
-        case 2:
-          {
-            if (do_ranges)
-            {
-              PartitionShim::ColorRects<2,1> launcher(coloring, temp_lr,
-                                                color_fid, pointer_fid);
-              runtime->execute_task(ctx, launcher);
-            }
-            else
-            {
-              PartitionShim::ColorPoints<2> launcher(coloring, temp_lr,
-                                                color_fid, pointer_fid);
-              runtime->execute_task(ctx, launcher);
-            }
-            break;
-          }
-        case 3:
-          {
-            if (do_ranges)
-            {
-              PartitionShim::ColorRects<3,1> launcher(coloring, temp_lr,
-                                                color_fid, pointer_fid);
-              runtime->execute_task(ctx, launcher);
-            }
-            else
-            {
-              PartitionShim::ColorPoints<3> launcher(coloring, temp_lr,
-                                                color_fid, pointer_fid);
-              runtime->execute_task(ctx, launcher);
-            }
-            break;
-          }
+#define DIMFUNC(DIM) \
+    case DIM: \
+      { \
+        if (do_ranges) \
+        { \
+          PartitionShim::ColorRects<DIM,1> launcher(coloring, temp_lr, \
+                                            color_fid, pointer_fid); \
+          runtime->execute_task(ctx, launcher); \
+        } \
+        else \
+        { \
+          PartitionShim::ColorPoints<DIM> launcher(coloring, temp_lr, \
+                                            color_fid, pointer_fid); \
+          runtime->execute_task(ctx, launcher); \
+        } \
+        break; \
+      }
+        LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
         default:
           assert(false);
       }
-      // Make an index space for the color space, just leak it for now
+      // Make an index space for the color space
       IndexSpace index_color_space = create_index_space(ctx, color_space);
       // Partition the logical region by the color field
       IndexPartition temp_ip = create_partition_by_field(ctx, temp_lr, 
@@ -3561,7 +3729,7 @@ namespace Legion {
         runtime->execute_task(ctx, launcher);
       }
       
-      // Make an index space for the color space, we'll leak it for now
+      // Make an index space for the color space
       IndexSpaceT<1,coord_t> index_color_space = 
                                   create_index_space(ctx, color_space);
       // Partition the logical region by the color field
@@ -3619,47 +3787,29 @@ namespace Legion {
         FieldAllocator allocator = create_field_allocator(ctx,temp_fs);
         switch (color_dim)
         {
-          case 1:
-            {
-              allocator.allocate_field(
-                  sizeof(Point<1,coord_t>), color_fid);
-              break;
+#define DIMFUNC(DIM) \
+          case DIM: \
+            { \
+              allocator.allocate_field( \
+                  sizeof(Point<DIM,coord_t>), color_fid); \
+              break; \
             }
-          case 2:
-            {
-              allocator.allocate_field(
-                  sizeof(Point<2,coord_t>), color_fid);
-              break;
-            }
-          case 3:
-            {
-              allocator.allocate_field(
-                  sizeof(Point<3,coord_t>), color_fid);
-              break;
-            }
+          LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
           default:
             assert(false);
         }
         switch (range_dim)
         {
-          case 1:
-            {
-              allocator.allocate_field(
-                  sizeof(Rect<1,coord_t>), range_fid);
-              break;
+#define DIMFUNC(DIM) \
+          case DIM: \
+            { \
+              allocator.allocate_field( \
+                  sizeof(Rect<DIM,coord_t>), range_fid); \
+              break; \
             }
-          case 2:
-            {
-              allocator.allocate_field(
-                  sizeof(Rect<2,coord_t>), range_fid);
-              break;
-            }
-          case 3:
-            {
-              allocator.allocate_field(
-                  sizeof(Rect<3,coord_t>), range_fid);
-              break;
-            }
+          LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
           default:
             assert(false);
         }
@@ -3668,102 +3818,20 @@ namespace Legion {
                                             temp_is, temp_fs, true);
       // Fill in the logical region with the data
       // Do this with a task launch to maintain deferred execution
-      switch (color_dim)
+      switch ((color_dim-1) * LEGION_MAX_DIM + (range_dim-1))
       {
-        case 1:
-          {
-            switch (range_dim)
-            {
-              case 1:
-                {
-                  PartitionShim::ColorRects<1,1> launcher(coloring,
-                      temp_lr, color_fid, range_fid);
-                  runtime->execute_task(ctx, launcher);
-                  break;
-                }
-              case 2:
-                {
-                  PartitionShim::ColorRects<1,2> launcher(coloring,
-                      temp_lr, color_fid, range_fid);
-                  runtime->execute_task(ctx, launcher);
-                  break;
-                }
-              case 3:
-                {
-                  PartitionShim::ColorRects<1,3> launcher(coloring,
-                      temp_lr, color_fid, range_fid);
-                  runtime->execute_task(ctx, launcher);
-                  break;
-                }
-              default:
-                assert(false);
-            }
-            break;
+#define DIMFUNC(D1,D2) \
+        case ((D1-1)*LEGION_MAX_DIM+(D2-1)): \
+          { \
+            PartitionShim::ColorRects<D1,D2> launcher(coloring, \
+                temp_lr, color_fid, range_fid); \
+            runtime->execute_task(ctx, launcher); \
+            break; \
           }
-        case 2:
-          {
-            switch (range_dim)
-            {
-              case 1:
-                {
-                  PartitionShim::ColorRects<2,1> launcher(coloring,
-                      temp_lr, color_fid, range_fid);
-                  runtime->execute_task(ctx, launcher);
-                  break;
-                }
-              case 2:
-                {
-                  PartitionShim::ColorRects<2,2> launcher(coloring,
-                      temp_lr, color_fid, range_fid);
-                  runtime->execute_task(ctx, launcher);
-                  break;
-                }
-              case 3:
-                {
-                  PartitionShim::ColorRects<2,3> launcher(coloring,
-                      temp_lr, color_fid, range_fid);
-                  runtime->execute_task(ctx, launcher);
-                  break;
-                }
-              default:
-                assert(false);
-            }
-            break;
-          }
-        case 3:
-          {
-            switch (range_dim)
-            {
-              case 1:
-                {
-                  PartitionShim::ColorRects<3,1> launcher(coloring,
-                      temp_lr, color_fid, range_fid);
-                  runtime->execute_task(ctx, launcher);
-                  break;
-                }
-              case 2:
-                {
-                  PartitionShim::ColorRects<3,2> launcher(coloring,
-                      temp_lr, color_fid, range_fid);
-                  runtime->execute_task(ctx, launcher);
-                  break;
-                }
-              case 3:
-                {
-                  PartitionShim::ColorRects<3,3> launcher(coloring,
-                      temp_lr, color_fid, range_fid);
-                  runtime->execute_task(ctx, launcher);
-                  break;
-                }
-              default:
-                assert(false);
-            }
-            break;
-          }
-        default:
-          assert(false);
+        LEGION_FOREACH_NN(DIMFUNC)
+#undef DIMFUNC
       }
-      // Make an index space for the color space, just leak it for now
+      // Make an index space for the color space
       IndexSpace index_color_space = create_index_space(ctx, color_space);
       // Partition the logical region by the color field
       IndexPartition temp_ip = create_partition_by_field(ctx, temp_lr, 
@@ -3811,24 +3879,15 @@ namespace Legion {
         allocator.allocate_field(sizeof(Point<1,coord_t>), color_fid);
         switch (range_dim)
         {
-          case 1:
-            {
-              allocator.allocate_field(
-                  sizeof(Rect<1,coord_t>), range_fid);
-              break;
+#define DIMFUNC(DIM) \
+          case DIM: \
+            { \
+              allocator.allocate_field( \
+                  sizeof(Rect<DIM,coord_t>), range_fid); \
+              break; \
             }
-          case 2:
-            {
-              allocator.allocate_field(
-                  sizeof(Rect<2,coord_t>), range_fid);
-              break;
-            }
-          case 3:
-            {
-              allocator.allocate_field(
-                  sizeof(Rect<3,coord_t>), range_fid);
-              break;
-            }
+          LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
           default:
             assert(false);
         }
@@ -3839,27 +3898,16 @@ namespace Legion {
       // Do this with a task launch to maintain deferred execution
       switch (range_dim)
       {
-        case 1:
-          {
-            PartitionShim::ColorRects<1,1> launcher(coloring,
-                temp_lr, color_fid, range_fid);
-            runtime->execute_task(ctx, launcher);
-            break;
-          }
-        case 2:
-          {
-            PartitionShim::ColorRects<1,2> launcher(coloring,
-                temp_lr, color_fid, range_fid);
-            runtime->execute_task(ctx, launcher);
-            break;
-          }
-        case 3:
-          {
-            PartitionShim::ColorRects<1,3> launcher(coloring,
-                temp_lr, color_fid, range_fid);
-            runtime->execute_task(ctx, launcher);
-            break;
-          }
+#define DIMFUNC(DIM) \
+        case DIM: \
+          { \
+            PartitionShim::ColorRects<1,DIM> launcher(coloring, \
+                temp_lr, color_fid, range_fid); \
+            runtime->execute_task(ctx, launcher); \
+            break; \
+          } 
+        LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
         default:
           assert(false);
       }
@@ -3916,47 +3964,29 @@ namespace Legion {
         FieldAllocator allocator = create_field_allocator(ctx,temp_fs);
         switch (color_dim)
         {
-          case 1:
-            {
-              allocator.allocate_field(
-                  sizeof(Point<1,coord_t>), color_fid);
-              break;
+#define DIMFUNC(DIM) \
+          case DIM: \
+            { \
+              allocator.allocate_field( \
+                  sizeof(Point<DIM,coord_t>), color_fid); \
+              break; \
             }
-          case 2:
-            {
-              allocator.allocate_field(
-                  sizeof(Point<2,coord_t>), color_fid);
-              break;
-            }
-          case 3:
-            {
-              allocator.allocate_field(
-                  sizeof(Point<3,coord_t>), color_fid);
-              break;
-            }
+          LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
           default:
             assert(false);
         }
         switch (range_dim)
         {
-          case 1:
-            {
-              allocator.allocate_field(
-                  sizeof(Rect<1,coord_t>), range_fid);
-              break;
+#define DIMFUNC(DIM) \
+          case DIM: \
+            { \
+              allocator.allocate_field( \
+                  sizeof(Rect<DIM,coord_t>), range_fid); \
+              break; \
             }
-          case 2:
-            {
-              allocator.allocate_field(
-                  sizeof(Rect<2,coord_t>), range_fid);
-              break;
-            }
-          case 3:
-            {
-              allocator.allocate_field(
-                  sizeof(Rect<3,coord_t>), range_fid);
-              break;
-            }
+          LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
           default:
             assert(false);
         }
@@ -3965,102 +3995,20 @@ namespace Legion {
                                             temp_is, temp_fs, true);
       // Fill in the logical region with the data
       // Do this with a task launch to maintain deferred execution
-      switch (color_dim)
+      switch ((color_dim-1) * LEGION_MAX_DIM + (range_dim-1))
       {
-        case 1:
-          {
-            switch (range_dim)
-            {
-              case 1:
-                {
-                  PartitionShim::ColorRects<1,1> launcher(coloring,
-                      temp_lr, color_fid, range_fid);
-                  runtime->execute_task(ctx, launcher);
-                  break;
-                }
-              case 2:
-                {
-                  PartitionShim::ColorRects<1,2> launcher(coloring,
-                      temp_lr, color_fid, range_fid);
-                  runtime->execute_task(ctx, launcher);
-                  break;
-                }
-              case 3:
-                {
-                  PartitionShim::ColorRects<1,3> launcher(coloring,
-                      temp_lr, color_fid, range_fid);
-                  runtime->execute_task(ctx, launcher);
-                  break;
-                }
-              default:
-                assert(false);
-            }
-            break;
+#define DIMFUNC(D1,D2) \
+        case ((D1-1)*LEGION_MAX_DIM+(D2-1)): \
+          { \
+            PartitionShim::ColorRects<D1,D2> launcher(coloring, \
+                temp_lr, color_fid, range_fid); \
+            runtime->execute_task(ctx, launcher); \
+            break; \
           }
-        case 2:
-          {
-            switch (range_dim)
-            {
-              case 1:
-                {
-                  PartitionShim::ColorRects<2,1> launcher(coloring,
-                      temp_lr, color_fid, range_fid);
-                  runtime->execute_task(ctx, launcher);
-                  break;
-                }
-              case 2:
-                {
-                  PartitionShim::ColorRects<2,2> launcher(coloring,
-                      temp_lr, color_fid, range_fid);
-                  runtime->execute_task(ctx, launcher);
-                  break;
-                }
-              case 3:
-                {
-                  PartitionShim::ColorRects<2,3> launcher(coloring,
-                      temp_lr, color_fid, range_fid);
-                  runtime->execute_task(ctx, launcher);
-                  break;
-                }
-              default:
-                assert(false);
-            }
-            break;
-          }
-        case 3:
-          {
-            switch (range_dim)
-            {
-              case 1:
-                {
-                  PartitionShim::ColorRects<3,1> launcher(coloring,
-                      temp_lr, color_fid, range_fid);
-                  runtime->execute_task(ctx, launcher);
-                  break;
-                }
-              case 2:
-                {
-                  PartitionShim::ColorRects<3,2> launcher(coloring,
-                      temp_lr, color_fid, range_fid);
-                  runtime->execute_task(ctx, launcher);
-                  break;
-                }
-              case 3:
-                {
-                  PartitionShim::ColorRects<3,3> launcher(coloring,
-                      temp_lr, color_fid, range_fid);
-                  runtime->execute_task(ctx, launcher);
-                  break;
-                }
-              default:
-                assert(false);
-            }
-            break;
-          }
-        default:
-          assert(false);
+        LEGION_FOREACH_NN(DIMFUNC)
+#undef DIMFUNC
       }
-      // Make an index space for the color space, just leak it for now
+      // Make an index space for the color space
       IndexSpace index_color_space = create_index_space(ctx, color_space);
       // Partition the logical region by the color field
       IndexPartition temp_ip = create_partition_by_field(ctx, temp_lr, 
@@ -4111,24 +4059,15 @@ namespace Legion {
         allocator.allocate_field(sizeof(Point<1,coord_t>), color_fid);
         switch (range_dim)
         {
-          case 1:
-            {
-              allocator.allocate_field(
-                  sizeof(Rect<1,coord_t>), range_fid);
-              break;
+#define DIMFUNC(DIM) \
+          case DIM: \
+            { \
+              allocator.allocate_field( \
+                  sizeof(Rect<DIM,coord_t>), range_fid); \
+              break; \
             }
-          case 2:
-            {
-              allocator.allocate_field(
-                  sizeof(Rect<2,coord_t>), range_fid);
-              break;
-            }
-          case 3:
-            {
-              allocator.allocate_field(
-                  sizeof(Rect<3,coord_t>), range_fid);
-              break;
-            }
+          LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
           default:
             assert(false);
         }
@@ -4139,27 +4078,16 @@ namespace Legion {
       // Do this with a task launch to maintain deferred execution
       switch (range_dim)
       {
-        case 1:
-          {
-            PartitionShim::ColorRects<1,1> launcher(coloring,
-                temp_lr, color_fid, range_fid);
-            runtime->execute_task(ctx, launcher);
-            break;
+#define DIMFUNC(DIM) \
+        case DIM: \
+          { \
+            PartitionShim::ColorRects<1,DIM> launcher(coloring, \
+                temp_lr, color_fid, range_fid); \
+            runtime->execute_task(ctx, launcher); \
+            break; \
           }
-        case 2:
-          {
-            PartitionShim::ColorRects<1,2> launcher(coloring,
-                temp_lr, color_fid, range_fid);
-            runtime->execute_task(ctx, launcher);
-            break;
-          }
-        case 3:
-          {
-            PartitionShim::ColorRects<1,3> launcher(coloring,
-                temp_lr, color_fid, range_fid);
-            runtime->execute_task(ctx, launcher);
-            break;
-          }
+        LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
         default:
           assert(false);
       }
@@ -4200,14 +4128,15 @@ namespace Legion {
                     "replaced with a call to create_partition_by_field.",
                     ctx->get_task_name(), ctx->get_unique_id());
       assert(false);
+      return IndexPartition::NO_PART;
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::destroy_index_partition(Context ctx, 
-                                                   IndexPartition handle)
+    void Runtime::destroy_index_partition(Context ctx, IndexPartition handle,
+                                          const bool unordered)
     //--------------------------------------------------------------------------
     {
-      runtime->destroy_index_partition(ctx, handle);
+      runtime->destroy_index_partition(ctx, handle, unordered);
     }
 
     //--------------------------------------------------------------------------
@@ -4246,6 +4175,16 @@ namespace Legion {
       return runtime->create_partition_by_intersection(ctx, parent, handle1,
                                                        handle2, color_space,
                                                        kind, color);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition Runtime::create_partition_by_intersection(Context ctx,
+                           IndexSpace parent, IndexPartition partition,
+                           PartitionKind part_kind, Color color, bool dominates)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->create_partition_by_intersection(ctx, parent, partition,
+                                                  part_kind, color, dominates);
     }
 
     //--------------------------------------------------------------------------
@@ -4315,103 +4254,20 @@ namespace Legion {
                                                         Color color)
     //--------------------------------------------------------------------------
     {
-      switch (ext.get_dim())
+      switch ((ext.get_dim()-1) * LEGION_MAX_DIM + (tran.n-1))
       {
-        case 1:
-          {
-            const IndexSpaceT<1,coord_t> parent(par);
-            const Rect<1,coord_t> extent(ext);
-            switch (tran.n)
-            {
-              case 1:
-                {
-                  const Transform<1,1> transform(tran);
-                  const IndexSpaceT<1,coord_t> color_space(cs);
-                  return create_partition_by_restriction<1,1,coord_t>(ctx, 
-                      parent, color_space, transform, extent, part_kind, color);
-                }
-              case 2:
-                {
-                  const Transform<1,2> transform(tran);
-                  const IndexSpaceT<2,coord_t> color_space(cs);
-                  return create_partition_by_restriction<1,2,coord_t>(ctx,
-                      parent, color_space, transform, extent, part_kind, color);
-                }
-              case 3:
-                {
-                  const Transform<1,3> transform(tran);
-                  const IndexSpaceT<3,coord_t> color_space(cs);
-                  return create_partition_by_restriction<1,3,coord_t>(ctx,
-                      parent, color_space, transform, extent, part_kind, color);
-                }
-              default:
-                assert(false);
-            }
+#define DIMFUNC(D1,D2) \
+        case (D1-1)*LEGION_MAX_DIM+(D2-1): \
+          { \
+            const IndexSpaceT<D1,coord_t> parent(par); \
+            const Rect<D1,coord_t> extent(ext); \
+            const Transform<D1,D2> transform(tran); \
+            const IndexSpaceT<D2,coord_t> color_space(cs); \
+            return create_partition_by_restriction<D1,D2,coord_t>(ctx, \
+                parent, color_space, transform, extent, part_kind, color); \
           }
-        case 2:
-          {
-            const IndexSpaceT<2,coord_t> parent(par);
-            const Rect<2,coord_t> extent(ext);
-            switch (tran.n)
-            {
-              case 1:
-                {
-                  const Transform<2,1> transform(tran);
-                  const IndexSpaceT<1,coord_t> color_space(cs);
-                  return create_partition_by_restriction<2,1,coord_t>(ctx, 
-                      parent, color_space, transform, extent, part_kind, color);
-                }
-              case 2:
-                {
-                  const Transform<2,2> transform(tran);
-                  const IndexSpaceT<2,coord_t> color_space(cs);
-                  return create_partition_by_restriction<2,2,coord_t>(ctx,
-                      parent, color_space, transform, extent, part_kind, color);
-                }
-              case 3:
-                {
-                  const Transform<2,3> transform(tran);
-                  const IndexSpaceT<3,coord_t> color_space(cs);
-                  return create_partition_by_restriction<2,3,coord_t>(ctx,
-                      parent, color_space, transform, extent, part_kind, color);
-                }
-              default:
-                assert(false);
-            }
-          }
-        case 3:
-          {
-            const IndexSpaceT<3,coord_t> parent(par);
-            const Rect<3,coord_t> extent(ext);
-            switch (tran.n)
-            {
-              case 1:
-                {
-                  const Transform<3,1> transform(tran);
-                  const IndexSpaceT<1,coord_t> color_space(cs);
-                  return create_partition_by_restriction<3,1,coord_t>(ctx, 
-                      parent, color_space, transform, extent, part_kind, color);
-                }
-              case 2:
-                {
-                  const Transform<3,2> transform(tran);
-                  const IndexSpaceT<2,coord_t> color_space(cs);
-                  return create_partition_by_restriction<3,2,coord_t>(ctx,
-                      parent, color_space, transform, extent, part_kind, color);
-                }
-              case 3:
-                {
-                  const Transform<3,3> transform(tran);
-                  const IndexSpaceT<3,coord_t> color_space(cs);
-                  return create_partition_by_restriction<3,3,coord_t>(ctx,
-                      parent, color_space, transform, extent, part_kind, color);
-                }
-              default:
-                assert(false);
-            }
-          }
-        default:
-          assert(false);
+        LEGION_FOREACH_NN(DIMFUNC)
+#undef DIMFUNC
       }
       return IndexPartition::NO_PART;
     }
@@ -4425,27 +4281,16 @@ namespace Legion {
     {
       switch (bf.get_dim())
       {
-        case 1:
-          {
-            const IndexSpaceT<1,coord_t> parent(par);
-            const Point<1,coord_t> blocking_factor(bf);
-            return create_partition_by_blockify<1,coord_t>(ctx, parent, 
-                                                blocking_factor, color);
+#define DIMFUNC(DIM) \
+        case DIM: \
+          { \
+            const IndexSpaceT<DIM,coord_t> parent(par); \
+            const Point<DIM,coord_t> blocking_factor(bf); \
+            return create_partition_by_blockify<DIM,coord_t>(ctx, parent, \
+                                                blocking_factor, color); \
           }
-        case 2:
-          {
-            const IndexSpaceT<2,coord_t> parent(par);
-            const Point<2,coord_t> blocking_factor(bf);
-            return create_partition_by_blockify<2,coord_t>(ctx, parent, 
-                                                blocking_factor, color);
-          }
-        case 3:
-          {
-            const IndexSpaceT<3,coord_t> parent(par);
-            const Point<3,coord_t> blocking_factor(bf);
-            return create_partition_by_blockify<3,coord_t>(ctx, parent, 
-                                                blocking_factor, color);
-          }
+        LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
         default:
           assert(false);
       }
@@ -4462,30 +4307,17 @@ namespace Legion {
     {
       switch (bf.get_dim())
       {
-        case 1:
-          {
-            const IndexSpaceT<1,coord_t> parent(par);
-            const Point<1,coord_t> blocking_factor(bf);
-            const Point<1,coord_t> origin(orig);
-            return create_partition_by_blockify<1,coord_t>(ctx, parent, 
-                                        blocking_factor, origin, color);
+#define DIMFUNC(DIM) \
+        case DIM: \
+          { \
+            const IndexSpaceT<DIM,coord_t> parent(par); \
+            const Point<DIM,coord_t> blocking_factor(bf); \
+            const Point<DIM,coord_t> origin(orig); \
+            return create_partition_by_blockify<DIM,coord_t>(ctx, parent, \
+                                        blocking_factor, origin, color); \
           }
-        case 2:
-          {
-            const IndexSpaceT<2,coord_t> parent(par);
-            const Point<2,coord_t> blocking_factor(bf);
-            const Point<2,coord_t> origin(orig);
-            return create_partition_by_blockify<2,coord_t>(ctx, parent, 
-                                        blocking_factor, origin, color);
-          }
-        case 3:
-          {
-            const IndexSpaceT<3,coord_t> parent(par);
-            const Point<3,coord_t> blocking_factor(bf);
-            const Point<3,coord_t> origin(orig);
-            return create_partition_by_blockify<3,coord_t>(ctx, parent, 
-                                        blocking_factor, origin, color);
-          }
+        LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
         default:
           assert(false);
       }
@@ -4570,7 +4402,7 @@ namespace Legion {
       return runtime->create_partition_by_preimage_range(ctx, projection,handle,
                                                        parent, fid, color_space,
                                                        part_kind, color,id,tag);
-    }
+    } 
 
     //--------------------------------------------------------------------------
     IndexPartition Runtime::create_pending_partition(Context ctx,
@@ -4590,24 +4422,15 @@ namespace Legion {
     {
       switch (color.get_dim())
       {
-        case 1:
-          {
-            Point<1,coord_t> point = color;
-            return runtime->create_index_space_union(ctx, parent, &point,
-                                                     TYPE_TAG_1D, handles);
+#define DIMFUNC(DIM) \
+        case DIM: \
+          { \
+            Point<DIM,coord_t> point = color; \
+            return runtime->create_index_space_union(ctx, parent, &point, \
+                                             TYPE_TAG_##DIM##D, handles); \
           }
-        case 2:
-          {
-            Point<2,coord_t> point = color;
-            return runtime->create_index_space_union(ctx, parent, &point,
-                                                     TYPE_TAG_2D, handles);
-          }
-        case 3:
-          {
-            Point<3,coord_t> point = color;
-            return runtime->create_index_space_union(ctx, parent, &point,
-                                                     TYPE_TAG_3D, handles);
-          }
+        LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
         default:
           assert(false);
       }
@@ -4632,24 +4455,15 @@ namespace Legion {
     {
       switch (color.get_dim())
       {
-        case 1:
-          {
-            Point<1,coord_t> point = color;
-            return runtime->create_index_space_union(ctx, parent, &point,
-                                                     TYPE_TAG_1D, handle);
+#define DIMFUNC(DIM) \
+        case DIM: \
+          { \
+            Point<DIM,coord_t> point = color; \
+            return runtime->create_index_space_union(ctx, parent, &point, \
+                                               TYPE_TAG_##DIM##D, handle); \
           }
-        case 2:
-          {
-            Point<2,coord_t> point = color;
-            return runtime->create_index_space_union(ctx, parent, &point,
-                                                     TYPE_TAG_2D, handle);
-          }
-        case 3:
-          {
-            Point<3,coord_t> point = color;
-            return runtime->create_index_space_union(ctx, parent, &point,
-                                                     TYPE_TAG_3D, handle);
-          }
+        LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
         default:
           assert(false);
       }
@@ -4674,24 +4488,15 @@ namespace Legion {
     {
       switch (color.get_dim())
       {
-        case 1:
-          {
-            Point<1,coord_t> point = color;
-            return runtime->create_index_space_intersection(ctx, parent, &point,
-                                                          TYPE_TAG_1D, handles);
-          }
-        case 2:
-          {
-            Point<2,coord_t> point = color;
-            return runtime->create_index_space_intersection(ctx, parent, &point,
-                                                          TYPE_TAG_2D, handles);
-          }
-        case 3:
-          {
-            Point<3,coord_t> point = color;
-            return runtime->create_index_space_intersection(ctx, parent, &point,
-                                                          TYPE_TAG_3D, handles);
-          }
+#define DIMFUNC(DIM) \
+      case DIM: \
+        { \
+          Point<DIM,coord_t> point = color; \
+          return runtime->create_index_space_intersection(ctx, parent, &point, \
+                                                  TYPE_TAG_##DIM##D, handles); \
+        }
+        LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
         default:
           assert(false);
       }
@@ -4716,24 +4521,15 @@ namespace Legion {
     {
       switch (color.get_dim())
       {
-        case 1:
-          {
-            Point<1,coord_t> point = color;
-            return runtime->create_index_space_intersection(ctx, parent, &point,
-                                                           TYPE_TAG_1D, handle);
-          }
-        case 2:
-          {
-            Point<2,coord_t> point = color;
-            return runtime->create_index_space_intersection(ctx, parent, &point,
-                                                           TYPE_TAG_2D, handle);
-          }
-        case 3:
-          {
-            Point<3,coord_t> point = color;
-            return runtime->create_index_space_intersection(ctx, parent, &point,
-                                                           TYPE_TAG_3D, handle);
-          }
+#define DIMFUNC(DIM) \
+      case DIM: \
+        { \
+          Point<DIM,coord_t> point = color; \
+          return runtime->create_index_space_intersection(ctx, parent, &point, \
+                                                   TYPE_TAG_##DIM##D, handle); \
+        }
+        LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
         default:
           assert(false);
       }
@@ -4758,24 +4554,15 @@ namespace Legion {
     {
       switch (color.get_dim())
       {
-        case 1:
-          {
-            Point<1,coord_t> point = color;
-            return runtime->create_index_space_difference(ctx, parent, &point,
-                                                TYPE_TAG_1D, initial, handles);
-          }
-        case 2:
-          {
-            Point<2,coord_t> point = color;
-            return runtime->create_index_space_difference(ctx, parent, &point,
-                                                TYPE_TAG_2D, initial, handles);
-          }
-        case 3:
-          {
-            Point<3,coord_t> point = color;
-            return runtime->create_index_space_difference(ctx, parent, &point,
-                                                TYPE_TAG_3D, initial, handles);
-          }
+#define DIMFUNC(DIM) \
+      case DIM: \
+        { \
+          Point<DIM,coord_t> point = color; \
+          return runtime->create_index_space_difference(ctx, parent, &point, \
+                                        TYPE_TAG_##DIM##D, initial, handles); \
+        }
+        LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
         default:
           assert(false);
       }
@@ -4869,21 +4656,14 @@ namespace Legion {
     {
       switch (color.get_dim())
       {
-        case 1:
-          {
-            Point<1,coord_t> point = color;
-            return runtime->get_index_subspace(ctx, p, &point, TYPE_TAG_1D);
-          }
-        case 2:
-          {
-            Point<2,coord_t> point = color;
-            return runtime->get_index_subspace(ctx, p, &point, TYPE_TAG_2D);
-          }
-        case 3:
-          {
-            Point<3,coord_t> point = color;
-            return runtime->get_index_subspace(ctx, p, &point, TYPE_TAG_3D);
-          }
+#define DIMFUNC(DIM) \
+    case DIM: \
+      { \
+        Point<DIM,coord_t> point = color; \
+        return runtime->get_index_subspace(ctx, p, &point, TYPE_TAG_##DIM##D); \
+      }
+        LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
         default:
           assert(false);
       }
@@ -4905,21 +4685,14 @@ namespace Legion {
     {
       switch (color.get_dim())
       {
-        case 1:
-          {
-            Point<1,coord_t> point = color;
-            return runtime->get_index_subspace(p, &point, TYPE_TAG_1D);
+#define DIMFUNC(DIM) \
+        case DIM: \
+          { \
+            Point<DIM,coord_t> point = color; \
+            return runtime->get_index_subspace(p, &point, TYPE_TAG_##DIM##D); \
           }
-        case 2:
-          {
-            Point<2,coord_t> point = color;
-            return runtime->get_index_subspace(p, &point, TYPE_TAG_2D);
-          }
-        case 3:
-          {
-            Point<3,coord_t> point = color;
-            return runtime->get_index_subspace(p, &point, TYPE_TAG_3D);
-          }
+        LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
         default:
           assert(false);
       }
@@ -4941,21 +4714,14 @@ namespace Legion {
     {
       switch (color.get_dim())
       {
-        case 1:
-          {
-            Point<1,coord_t> point = color;
-            return runtime->has_index_subspace(ctx, p, &point, TYPE_TAG_1D);
-          }
-        case 2:
-          {
-            Point<2,coord_t> point = color;
-            return runtime->has_index_subspace(ctx, p, &point, TYPE_TAG_2D);
-          }
-        case 3:
-          {
-            Point<3,coord_t> point = color;
-            return runtime->has_index_subspace(ctx, p, &point, TYPE_TAG_3D);
-          }
+#define DIMFUNC(DIM) \
+    case DIM: \
+      { \
+        Point<DIM,coord_t> point = color; \
+        return runtime->has_index_subspace(ctx, p, &point, TYPE_TAG_##DIM##D); \
+      }
+        LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
         default:
           assert(false);
       }
@@ -4968,21 +4734,14 @@ namespace Legion {
     {
       switch (color.get_dim())
       {
-        case 1:
-          {
-            Point<1,coord_t> point = color;
-            return runtime->has_index_subspace(p, &point, TYPE_TAG_1D);
+#define DIMFUNC(DIM) \
+        case DIM: \
+          { \
+            Point<DIM,coord_t> point = color; \
+            return runtime->has_index_subspace(p, &point, TYPE_TAG_##DIM##D); \
           }
-        case 2:
-          {
-            Point<2,coord_t> point = color;
-            return runtime->has_index_subspace(p, &point, TYPE_TAG_2D);
-          }
-        case 3:
-          {
-            Point<3,coord_t> point = color;
-            return runtime->has_index_subspace(p, &point, TYPE_TAG_3D);
-          }
+        LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
         default:
           assert(false);
       }
@@ -5020,24 +4779,15 @@ namespace Legion {
       const TypeTag type_tag = handle.get_type_tag();
       switch (Internal::NT_TemplateHelper::get_dim(type_tag))
       {
-        case 1:
-          {
-            DomainT<1,coord_t> realm_is;
-            runtime->get_index_space_domain(ctx, handle, &realm_is, type_tag);
-            return Domain(realm_is);
+#define DIMFUNC(DIM) \
+        case DIM: \
+          { \
+            DomainT<DIM,coord_t> realm_is; \
+            runtime->get_index_space_domain(ctx, handle, &realm_is, type_tag); \
+            return Domain(realm_is); \
           }
-        case 2:
-          {
-            DomainT<2,coord_t> realm_is;
-            runtime->get_index_space_domain(ctx, handle, &realm_is, type_tag);
-            return Domain(realm_is);
-          }
-        case 3:
-          {
-            DomainT<3,coord_t> realm_is;
-            runtime->get_index_space_domain(ctx, handle, &realm_is, type_tag);
-            return Domain(realm_is);
-          }
+        LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
         default:
           assert(false);
       }
@@ -5051,24 +4801,15 @@ namespace Legion {
       const TypeTag type_tag = handle.get_type_tag();
       switch (Internal::NT_TemplateHelper::get_dim(type_tag))
       {
-        case 1:
-          {
-            DomainT<1,coord_t> realm_is;
-            runtime->get_index_space_domain(handle, &realm_is, type_tag);
-            return Domain(realm_is);
+#define DIMFUNC(DIM) \
+        case DIM: \
+          { \
+            DomainT<DIM,coord_t> realm_is; \
+            runtime->get_index_space_domain(handle, &realm_is, type_tag); \
+            return Domain(realm_is); \
           }
-        case 2:
-          {
-            DomainT<2,coord_t> realm_is;
-            runtime->get_index_space_domain(handle, &realm_is, type_tag);
-            return Domain(realm_is);
-          }
-        case 3:
-          {
-            DomainT<3,coord_t> realm_is;
-            runtime->get_index_space_domain(handle, &realm_is, type_tag);
-            return Domain(realm_is);
-          }
+        LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
         default:
           assert(false);
       }
@@ -5371,27 +5112,16 @@ namespace Legion {
     {
       switch (point.get_dim())
       {
-        case 1:
-          {
-            Point<1,coord_t> p(point);
-            if (runtime->safe_cast(ctx, region, &p, TYPE_TAG_1D))
-              return point;
-            break;
+#define DIMFUNC(DIM) \
+        case DIM: \
+          { \
+            Point<DIM,coord_t> p(point); \
+            if (runtime->safe_cast(ctx, region, &p, TYPE_TAG_##DIM##D)) \
+              return point; \
+            break; \
           }
-        case 2:
-          {
-            Point<2,coord_t> p(point);
-            if (runtime->safe_cast(ctx, region, &p, TYPE_TAG_2D)) 
-              return point;
-            break;
-          }
-        case 3:
-          {
-            Point<3,coord_t> p(point);
-            if (runtime->safe_cast(ctx, region, &p, TYPE_TAG_3D)) 
-              return point;
-            break;
-          }
+        LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
         default:
           assert(false);
       }
@@ -5414,10 +5144,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::destroy_field_space(Context ctx, FieldSpace handle)
+    void Runtime::destroy_field_space(Context ctx, FieldSpace handle,
+                                      const bool unordered)
     //--------------------------------------------------------------------------
     {
-      runtime->destroy_field_space(ctx, handle);
+      runtime->destroy_field_space(ctx, handle, unordered);
     }
 
     //--------------------------------------------------------------------------
@@ -5480,19 +5211,19 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::destroy_logical_region(Context ctx, 
-                                                  LogicalRegion handle)
+    void Runtime::destroy_logical_region(Context ctx, LogicalRegion handle,
+                                         const bool unordered)
     //--------------------------------------------------------------------------
     {
-      runtime->destroy_logical_region(ctx, handle);
+      runtime->destroy_logical_region(ctx, handle, unordered);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::destroy_logical_partition(Context ctx, 
-                                                     LogicalPartition handle)
+    void Runtime::destroy_logical_partition(Context ctx,LogicalPartition handle,
+                                            const bool unordered)
     //--------------------------------------------------------------------------
     {
-      runtime->destroy_logical_partition(ctx, handle);
+      runtime->destroy_logical_partition(ctx, handle, unordered);
     }
 
     //--------------------------------------------------------------------------
@@ -5610,24 +5341,15 @@ namespace Legion {
     {
       switch (c.get_dim())
       {
-        case 1:
-          {
-            Point<1,coord_t> point(c);
-            return runtime->get_logical_subregion_by_color(ctx, parent, 
-                                                           &point, TYPE_TAG_1D);
+#define DIMFUNC(DIM) \
+        case DIM: \
+          { \
+            Point<DIM,coord_t> point(c); \
+            return runtime->get_logical_subregion_by_color(ctx, parent,  \
+                                             &point, TYPE_TAG_##DIM##D); \
           }
-        case 2:
-          {
-            Point<2,coord_t> point(c);
-            return runtime->get_logical_subregion_by_color(ctx, parent, 
-                                                           &point, TYPE_TAG_2D);
-          }
-        case 3:
-          {
-            Point<3,coord_t> point(c);
-            return runtime->get_logical_subregion_by_color(ctx, parent, 
-                                                           &point, TYPE_TAG_3D);
-          }
+        LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
         default:
           assert(false);
       }
@@ -5650,24 +5372,15 @@ namespace Legion {
     {
       switch (c.get_dim())
       {
-        case 1:
-          {
-            Point<1,coord_t> point(c);
-            return runtime->get_logical_subregion_by_color(parent, &point,
-                                                           TYPE_TAG_1D);
+#define DIMFUNC(DIM) \
+        case DIM: \
+          { \
+            Point<DIM,coord_t> point(c); \
+            return runtime->get_logical_subregion_by_color(parent, &point, \
+                                                       TYPE_TAG_##DIM##D); \
           }
-        case 2:
-          {
-            Point<2,coord_t> point(c);
-            return runtime->get_logical_subregion_by_color(parent, &point,
-                                                           TYPE_TAG_2D);
-          }
-        case 3:
-          {
-            Point<3,coord_t> point(c);
-            return runtime->get_logical_subregion_by_color(parent, &point,
-                                                           TYPE_TAG_3D);
-          }
+        LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
         default:
           assert(false);
       }
@@ -5690,24 +5403,15 @@ namespace Legion {
     {
       switch (c.get_dim())
       {
-        case 1:
-          {
-            Point<1,coord_t> point(c);
-            return runtime->has_logical_subregion_by_color(ctx, parent, &point,
-                                                           TYPE_TAG_1D);
-          }
-        case 2:
-          {
-            Point<2,coord_t> point(c);
-            return runtime->has_logical_subregion_by_color(ctx, parent, &point,
-                                                           TYPE_TAG_2D);
-          }
-        case 3:
-          {
-            Point<3,coord_t> point(c);
-            return runtime->has_logical_subregion_by_color(ctx, parent, &point,
-                                                           TYPE_TAG_3D);
-          }
+#define DIMFUNC(DIM) \
+      case DIM: \
+        { \
+          Point<DIM,coord_t> point(c); \
+          return runtime->has_logical_subregion_by_color(ctx, parent, &point, \
+                                                         TYPE_TAG_##DIM##D); \
+        }
+        LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
         default:
           assert(false);
       }
@@ -5721,24 +5425,15 @@ namespace Legion {
     {
       switch (c.get_dim())
       {
-        case 1:
-          {
-            Point<1,coord_t> point(c);
-            return runtime->has_logical_subregion_by_color(parent, &point,
-                                                           TYPE_TAG_1D);
+#define DIMFUNC(DIM) \
+        case DIM: \
+          { \
+            Point<DIM,coord_t> point(c); \
+            return runtime->has_logical_subregion_by_color(parent, &point, \
+                                                       TYPE_TAG_##DIM##D); \
           }
-        case 2:
-          {
-            Point<2,coord_t> point(c);
-            return runtime->has_logical_subregion_by_color(parent, &point,
-                                                           TYPE_TAG_2D);
-          }
-        case 3:
-          {
-            Point<3,coord_t> point(c);
-            return runtime->has_logical_subregion_by_color(parent, &point,
-                                                           TYPE_TAG_3D);
-          }
+        LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
         default:
           assert(false);
       }
@@ -5937,15 +5632,15 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     Future Runtime::execute_index_space(Context ctx, 
-                         const IndexTaskLauncher &launcher, ReductionOpID redop)
+     const IndexTaskLauncher &launcher, ReductionOpID redop, bool deterministic)
     //--------------------------------------------------------------------------
     {
-      return runtime->execute_index_space(ctx, launcher, redop);
+      return runtime->execute_index_space(ctx, launcher, redop, deterministic);
     }
 
     //--------------------------------------------------------------------------
     Future Runtime::execute_task(Context ctx, 
-                        Processor::TaskFuncID task_id,
+                        TaskID task_id,
                         const std::vector<IndexSpaceRequirement> &indexes,
                         const std::vector<FieldSpaceRequirement> &fields,
                         const std::vector<RegionRequirement> &regions,
@@ -5963,7 +5658,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FutureMap Runtime::execute_index_space(Context ctx, 
-                        Processor::TaskFuncID task_id,
+                        TaskID task_id,
                         const Domain domain,
                         const std::vector<IndexSpaceRequirement> &indexes,
                         const std::vector<FieldSpaceRequirement> &fields,
@@ -5986,7 +5681,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     Future Runtime::execute_index_space(Context ctx, 
-                        Processor::TaskFuncID task_id,
+                        TaskID task_id,
                         const Domain domain,
                         const std::vector<IndexSpaceRequirement> &indexes,
                         const std::vector<FieldSpaceRequirement> &fields,
@@ -6005,7 +5700,7 @@ namespace Legion {
                                  predicate, must_parallelism, id, tag);
       launcher.index_requirements = indexes;
       launcher.region_requirements = regions;
-      return runtime->execute_index_space(ctx, launcher, reduction);
+      return runtime->execute_index_space(ctx, launcher, reduction, false);
     }
 
     //--------------------------------------------------------------------------
@@ -6127,10 +5822,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Future Runtime::detach_external_resource(Context ctx, PhysicalRegion region)
+    Future Runtime::detach_external_resource(Context ctx, PhysicalRegion region,
+                                             const bool flush /*= true*/,
+                                             const bool unordered/*= false*/)
     //--------------------------------------------------------------------------
     {
-      return runtime->detach_external_resource(ctx, region);
+      return runtime->detach_external_resource(ctx, region, flush, unordered);
     }
 
     //--------------------------------------------------------------------------
@@ -6151,7 +5848,8 @@ namespace Legion {
     void Runtime::detach_hdf5(Context ctx, PhysicalRegion region)
     //--------------------------------------------------------------------------
     {
-      runtime->detach_external_resource(ctx, region);
+      runtime->detach_external_resource(ctx, region, true/*flush*/, 
+                                        false/*unordered*/);
     }
 
     //--------------------------------------------------------------------------
@@ -6172,7 +5870,8 @@ namespace Legion {
     void Runtime::detach_file(Context ctx, PhysicalRegion region)
     //--------------------------------------------------------------------------
     {
-      runtime->detach_external_resource(ctx, region);
+      runtime->detach_external_resource(ctx, region, true/*flush*/,
+                                        false/*unordered*/);
     }
     
     //--------------------------------------------------------------------------
@@ -6427,10 +6126,11 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     Future Runtime::select_tunable_value(Context ctx, TunableID tid,
-                                         MapperID mid, MappingTagID tag)
+                                         MapperID mid, MappingTagID tag,
+                                         const void *args, size_t argsize)
     //--------------------------------------------------------------------------
     {
-      return runtime->select_tunable_value(ctx, tid, mid, tag);
+      return runtime->select_tunable_value(ctx, tid, mid, tag, args, argsize);
     }
 
     //--------------------------------------------------------------------------
@@ -6519,6 +6219,15 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return runtime->get_executing_processor(ctx);
+    }
+
+    //--------------------------------------------------------------------------
+    const Task* Runtime::get_current_task(Context ctx)
+    //--------------------------------------------------------------------------
+    {
+      if (ctx == DUMMY_CONTEXT)
+        return NULL;
+      return ctx->get_task();
     }
 
     //--------------------------------------------------------------------------
@@ -6628,11 +6337,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void Runtime::register_projection_functor(ProjectionID pid,
                                               ProjectionFunctor *func,
-                                              bool silence_warnings)
+                                              bool silence_warnings,
+                                              const char *warning_string)
     //--------------------------------------------------------------------------
     {
       runtime->register_projection_functor(pid, func, true/*need zero check*/,
-                                           silence_warnings);
+                                           silence_warnings, warning_string);
     }
 
     //--------------------------------------------------------------------------
@@ -6671,7 +6381,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void Runtime::register_sharding_functor(ShardingID sid,
                                             ShardingFunctor *functor,
-                                            bool silence_warnings)
+                                            bool silence_warnings,
+                                            const char *warning_string)
     //--------------------------------------------------------------------------
     {
       // Not implemented until control replication
@@ -6687,10 +6398,11 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void Runtime::attach_semantic_information(TaskID task_id, SemanticTag tag,
-                                   const void *buffer, size_t size, bool is_mut)
+                       const void *buffer, size_t size, bool is_mut, bool local)
     //--------------------------------------------------------------------------
     {
-      runtime->attach_semantic_information(task_id, tag, buffer, size, is_mut);
+      runtime->attach_semantic_information(task_id, tag, buffer, size, 
+                                           is_mut, !local);
     }
 
     //--------------------------------------------------------------------------
@@ -6756,11 +6468,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::attach_name(TaskID task_id, const char *name, bool is_mutable)
+    void Runtime::attach_name(TaskID task_id, const char *name, 
+                              bool is_mutable, bool local_only)
     //--------------------------------------------------------------------------
     {
       Runtime::attach_semantic_information(task_id,
-          NAME_SEMANTIC_TAG, name, strlen(name) + 1, is_mutable);
+          NAME_SEMANTIC_TAG, name, strlen(name) + 1, is_mutable, local_only);
     }
 
     //--------------------------------------------------------------------------
@@ -6992,40 +6705,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    FieldID Runtime::allocate_field(Context ctx, FieldSpace space,
-                                             size_t field_size, FieldID fid,
-                                             bool local, CustomSerdezID sd_id)
-    //--------------------------------------------------------------------------
-    {
-      return runtime->allocate_field(ctx, space, field_size, fid, local, sd_id);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::free_field(Context ctx, FieldSpace sp, FieldID fid)
-    //--------------------------------------------------------------------------
-    {
-      runtime->free_field(ctx, sp, fid);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::allocate_fields(Context ctx, FieldSpace space,
-                                           const std::vector<size_t> &sizes,
-                                         std::vector<FieldID> &resulting_fields,
-                                         bool local, CustomSerdezID _id)
-    //--------------------------------------------------------------------------
-    {
-      runtime->allocate_fields(ctx, space, sizes, resulting_fields, local, _id);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::free_fields(Context ctx, FieldSpace space,
-                                       const std::set<FieldID> &to_free)
-    //--------------------------------------------------------------------------
-    {
-      runtime->free_fields(ctx, space, to_free);
-    }
-
-    //--------------------------------------------------------------------------
     Future Runtime::from_value(const void *value, 
                                         size_t value_size, bool owned)
     //--------------------------------------------------------------------------
@@ -7053,17 +6732,51 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void Runtime::wait_for_shutdown(void)
+    /*static*/ int Runtime::wait_for_shutdown(void)
     //--------------------------------------------------------------------------
     {
-      Internal::Runtime::wait_for_shutdown();
+      return Internal::Runtime::wait_for_shutdown();
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void Runtime::set_top_level_task_id(Processor::TaskFuncID top_id)
+    /*static*/ Context Runtime::start_implicit(int argc, char **argv,
+                                               TaskID top_task_id,
+                                               Processor::Kind proc_kind,
+                                               const char *task_name,
+                                               bool control_replicable)
+    //--------------------------------------------------------------------------
+    {
+      return Internal::Runtime::start_implicit(argc, argv, top_task_id,
+                              proc_kind, task_name, control_replicable);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void Runtime::finish_implicit(Context ctx)
+    //--------------------------------------------------------------------------
+    {
+      // this is just a normal finish operation
+      ctx->end_task(NULL, 0, false/*owned*/);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void Runtime::set_top_level_task_id(TaskID top_id)
     //--------------------------------------------------------------------------
     {
       Internal::Runtime::set_top_level_task_id(top_id);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void Runtime::set_top_level_task_mapper_id(MapperID mapper_id)
+    //--------------------------------------------------------------------------
+    {
+      Internal::Runtime::set_top_level_task_mapper_id(mapper_id);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ size_t Runtime::get_maximum_dimension(void)
+    //--------------------------------------------------------------------------
+    {
+      return LEGION_MAX_DIM;
     }
 
     //--------------------------------------------------------------------------
@@ -7091,11 +6804,33 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    /*static*/ void Runtime::register_reduction_op(ReductionOpID redop_id,
+                                                   ReductionOp *redop,
+                                                   SerdezInitFnptr init_fnptr,
+                                                   SerdezFoldFnptr fold_fnptr,
+                                                   bool permit_duplicates)
+    //--------------------------------------------------------------------------
+    {
+      Internal::Runtime::register_reduction_op(redop_id, redop, init_fnptr, 
+                                               fold_fnptr, permit_duplicates);
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ const ReductionOp* Runtime::get_reduction_op(
                                                         ReductionOpID redop_id)
     //--------------------------------------------------------------------------
     {
       return Internal::Runtime::get_reduction_op(redop_id);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void Runtime::register_custom_serdez_op(CustomSerdezID serdez_id,
+                                                       SerdezOp *serdez_op,
+                                                       bool permit_duplicates)
+    //--------------------------------------------------------------------------
+    {
+      Internal::Runtime::register_serdez_op(serdez_id, serdez_op,
+                                            permit_duplicates);
     }
 
     //--------------------------------------------------------------------------
@@ -7148,27 +6883,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return Internal::implicit_context;
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ ReductionOpTable& Runtime::get_reduction_table(void)
-    //--------------------------------------------------------------------------
-    {
-      return Internal::Runtime::get_reduction_table();
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ SerdezOpTable& Runtime::get_serdez_table(void)
-    //--------------------------------------------------------------------------
-    {
-      return Internal::Runtime::get_serdez_table();
-    }
-
-    /*static*/ SerdezRedopTable& Runtime::get_serdez_redop_table(void)
-    //--------------------------------------------------------------------------
-    {
-      return Internal::Runtime::get_serdez_redop_table();
-    }
+    } 
 
     //--------------------------------------------------------------------------
     TaskID Runtime::generate_dynamic_task_id(void)
@@ -7192,18 +6907,63 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    VariantID Runtime::register_task_variant(
-                  const TaskVariantRegistrar &registrar,
-		  const CodeDescriptor &codedesc,
-		  const void *user_data /*= NULL*/,
-		  size_t user_len /*= 0*/)
+    ReductionOpID Runtime::generate_dynamic_reduction_id(void)
     //--------------------------------------------------------------------------
     {
-      // if this needs to be correct, we need two versions...
-      bool has_return = false;
+      return runtime->generate_dynamic_reduction_id();
+    }
+
+    //--------------------------------------------------------------------------
+    ReductionOpID Runtime::generate_library_reduction_ids(const char *name,
+                                                          size_t count)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->generate_library_reduction_ids(name, count);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ ReductionOpID Runtime::generate_static_reduction_id(void)
+    //--------------------------------------------------------------------------
+    {
+      return Internal::Runtime::generate_static_reduction_id();
+    }
+
+    //--------------------------------------------------------------------------
+    CustomSerdezID Runtime::generate_dynamic_serdez_id(void)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->generate_dynamic_serdez_id();
+    }
+
+    //--------------------------------------------------------------------------
+    CustomSerdezID Runtime::generate_library_serdez_ids(const char *name,
+                                                        size_t count)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->generate_library_serdez_ids(name, count);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ CustomSerdezID Runtime::generate_static_serdez_id(void)
+    //--------------------------------------------------------------------------
+    {
+      return Internal::Runtime::generate_static_serdez_id();
+    }
+
+    //--------------------------------------------------------------------------
+    VariantID Runtime::register_task_variant(
+                                    const TaskVariantRegistrar &registrar,
+                                    const CodeDescriptor &codedesc,
+                                    const void *user_data /*= NULL*/,
+                                    size_t user_len /*= 0*/,
+                                    bool has_return_type /*= false*/,
+                                    VariantID vid /*= AUTO_GENERATE_ID*/)
+    //--------------------------------------------------------------------------
+    {
+      // Make a copy of the descriptor here
       CodeDescriptor *realm_desc = new CodeDescriptor(codedesc);
-      return register_variant(registrar, has_return, user_data, user_len,
-                              realm_desc);
+      return runtime->register_variant(registrar, user_data, user_len, 
+                                       realm_desc, has_return_type, vid);
     }
 
     //--------------------------------------------------------------------------
@@ -7212,15 +6972,16 @@ namespace Legion {
 	      const CodeDescriptor &codedesc,
 	      const void *user_data /*= NULL*/,
 	      size_t user_len /*= 0*/,
-	      const char *task_name /*= NULL*/)
+	      const char *task_name /*= NULL*/,
+              VariantID vid /*=AUTO_GENERATE_ID*/,
+              bool has_return_type/*=false*/,
+              bool check_task_id/*=true*/)
     //--------------------------------------------------------------------------
     {
-      // if this needs to be correct, we need two versions...
-      bool has_return = false;
+      // Make a copy of the descriptor here
       CodeDescriptor *realm_desc = new CodeDescriptor(codedesc);
-      return preregister_variant(registrar, user_data, user_len,
-				 realm_desc, has_return, task_name,
-                                 AUTO_GENERATE_ID);
+      return Internal::Runtime::preregister_variant(registrar, user_data, 
+          user_len, realm_desc, has_return_type, task_name, vid, check_task_id);
     }
 
     //--------------------------------------------------------------------------
@@ -7249,29 +7010,6 @@ namespace Legion {
     {
       ctx->end_task(retvalptr, retvalsize, false/*owned*/);
     }
-
-    //--------------------------------------------------------------------------
-    VariantID Runtime::register_variant(const TaskVariantRegistrar &registrar,
-                  bool has_return, const void *user_data, size_t user_data_size,
-                  CodeDescriptor *realm)
-    //--------------------------------------------------------------------------
-    {
-      return runtime->register_variant(registrar, user_data, user_data_size,
-                                       realm, has_return);
-    }
-    
-    //--------------------------------------------------------------------------
-    /*static*/ VariantID Runtime::preregister_variant(
-                                  const TaskVariantRegistrar &registrar,
-                                  const void *user_data, size_t user_data_size,
-                                  CodeDescriptor *realm,
-                                  bool has_return, const char *task_name, 
-                                  VariantID vid, bool check_task_id)
-    //--------------------------------------------------------------------------
-    {
-      return Internal::Runtime::preregister_variant(registrar, user_data, 
-          user_data_size, realm, has_return, task_name, vid, check_task_id);
-    } 
 
     //--------------------------------------------------------------------------
     /*static*/ void Runtime::enable_profiling(void)

@@ -1,4 +1,4 @@
--- Copyright 2018 Stanford University, NVIDIA Corporation
+-- Copyright 2019 Stanford University, NVIDIA Corporation
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -20,8 +20,8 @@
 --   * Leaf: Task issues no sub-operations
 --   * Inner: Task does not access any regions
 --   * Idempotent: Task has no external side-effects
+--   * Replicable: Task's control flow can be replicated
 --
--- (Currently the optimization returns false for idempotent.)
 
 local ast = require("regent/ast")
 local data = require("common/data")
@@ -40,6 +40,13 @@ local function unreachable(node)
   assert(false, "unreachable")
 end
 
+local function all_with_provenance(acc, value)
+  if not value[1] then
+    return value
+  end
+  return acc
+end
+
 local context = {}
 
 function context:__index (field)
@@ -55,15 +62,21 @@ function context:__newindex (field, value)
 end
 
 function context.new_global_scope()
-  local cx = {}
+  local cx = {
+    leaf       = { true, nil },
+    inner      = { true, nil },
+    idempotent = { true, nil },
+    replicable = { true, nil },
+  }
   return setmetatable(cx, context)
 end
 
-local function all_with_provenance(acc, value)
-  if not value[1] then
-    return value
-  end
-  return acc
+function context:update(field, value)
+  self[field] = all_with_provenance(self[field], value)
+end
+
+function context:analysis_done()
+  return not (self.leaf[1] or self.inner[1] or self.idempotent[1] or self.replicable[1])
 end
 
 local node_is_leaf = {
@@ -78,6 +91,7 @@ local node_is_leaf = {
   [ast.typed.expr.Partition]                  = always_false,
   [ast.typed.expr.PartitionEqual]             = always_false,
   [ast.typed.expr.PartitionByField]           = always_false,
+  [ast.typed.expr.PartitionByRestriction]     = always_false,
   [ast.typed.expr.Image]                      = always_false,
   [ast.typed.expr.ImageByTask]                = always_false,
   [ast.typed.expr.Preimage]                   = always_false,
@@ -108,9 +122,14 @@ local node_is_leaf = {
   [ast.typed.expr.Future]                     = always_false,
   [ast.typed.expr.FutureGetResult]            = always_false,
   [ast.typed.expr.ParallelizerConstraint]     = always_false,
+  [ast.typed.expr.ImportIspace]               = always_false,
+  [ast.typed.expr.ImportRegion]               = always_false,
+  [ast.typed.expr.ImportPartition]            = always_false,
+  [ast.typed.expr.Projection]                 = always_false,
 
   [ast.typed.expr.ID]              = always_true,
   [ast.typed.expr.Constant]        = always_true,
+  [ast.typed.expr.Global]          = always_true,
   [ast.typed.expr.Function]        = always_true,
   [ast.typed.expr.FieldAccess]     = always_true,
   [ast.typed.expr.IndexAccess]     = always_true,
@@ -122,6 +141,7 @@ local node_is_leaf = {
   [ast.typed.expr.RawFields]       = always_true,
   [ast.typed.expr.RawPhysical]     = always_true,
   [ast.typed.expr.RawRuntime]      = always_true,
+  [ast.typed.expr.RawTask]         = always_true,
   [ast.typed.expr.RawValue]        = always_true,
   [ast.typed.expr.Isnull]          = always_true,
   [ast.typed.expr.Null]            = always_true,
@@ -136,6 +156,7 @@ local node_is_leaf = {
   [ast.typed.expr.Unary]           = always_true,
   [ast.typed.expr.Binary]          = always_true,
   [ast.typed.expr.Deref]           = always_true,
+  [ast.typed.expr.AddressOf]       = always_true,
 
   [ast.typed.expr.Internal]        = unreachable,
 
@@ -179,6 +200,7 @@ local node_is_leaf = {
   [ast.condition_kind]          = always_true,
   [ast.disjointness_kind]       = always_true,
   [ast.fence_kind]              = always_true,
+  [ast.metadata]                = always_true,
 }
 
 local analyze_leaf_node = ast.make_single_dispatch(
@@ -208,6 +230,7 @@ local node_is_inner = {
 
   [ast.typed.expr.ID]                         = always_true,
   [ast.typed.expr.Constant]                   = always_true,
+  [ast.typed.expr.Global]                     = always_true,
   [ast.typed.expr.Function]                   = always_true,
   [ast.typed.expr.FieldAccess]                = always_true,
   [ast.typed.expr.MethodCall]                 = always_true,
@@ -219,6 +242,7 @@ local node_is_inner = {
   [ast.typed.expr.RawContext]                 = always_true,
   [ast.typed.expr.RawFields]                  = always_true,
   [ast.typed.expr.RawRuntime]                 = always_true,
+  [ast.typed.expr.RawTask]                    = always_true,
   [ast.typed.expr.RawValue]                   = always_true,
   [ast.typed.expr.Isnull]                     = always_true,
   [ast.typed.expr.Null]                       = always_true,
@@ -231,6 +255,7 @@ local node_is_inner = {
   [ast.typed.expr.Partition]                  = always_true,
   [ast.typed.expr.PartitionEqual]             = always_true,
   [ast.typed.expr.PartitionByField]           = always_true,
+  [ast.typed.expr.PartitionByRestriction]     = always_true,
   [ast.typed.expr.Image]                      = always_true,
   [ast.typed.expr.ImageByTask]                = always_true,
   [ast.typed.expr.Preimage]                   = always_true,
@@ -262,9 +287,14 @@ local node_is_inner = {
   [ast.typed.expr.Condition]                  = always_true,
   [ast.typed.expr.Unary]                      = always_true,
   [ast.typed.expr.Binary]                     = always_true,
+  [ast.typed.expr.AddressOf]                  = always_true,
   [ast.typed.expr.Future]                     = always_true,
   [ast.typed.expr.FutureGetResult]            = always_true,
   [ast.typed.expr.ParallelizerConstraint]     = always_true,
+  [ast.typed.expr.ImportIspace]               = always_true,
+  [ast.typed.expr.ImportRegion]               = always_true,
+  [ast.typed.expr.ImportPartition]            = always_true,
+  [ast.typed.expr.Projection]                 = always_true,
 
   [ast.typed.expr.Internal]                   = unreachable,
 
@@ -308,6 +338,7 @@ local node_is_inner = {
   [ast.condition_kind]          = always_true,
   [ast.disjointness_kind]       = always_true,
   [ast.fence_kind]              = always_true,
+  [ast.metadata]                = always_true,
 }
 
 local analyze_inner_node = ast.make_single_dispatch(
@@ -338,8 +369,13 @@ local node_is_idempotent = {
   [ast.typed.expr.AttachHDF5] = always_false,
   [ast.typed.expr.DetachHDF5] = always_false,
 
+  [ast.typed.expr.ImportIspace]               = always_false,
+  [ast.typed.expr.ImportRegion]               = always_false,
+  [ast.typed.expr.ImportPartition]            = always_false,
+
   [ast.typed.expr.ID]                         = always_true,
   [ast.typed.expr.Constant]                   = always_true,
+  [ast.typed.expr.Global]                     = always_true,
   [ast.typed.expr.Deref]                      = always_true,
   [ast.typed.expr.IndexAccess]                = always_true,
   [ast.typed.expr.Function]                   = always_true,
@@ -352,6 +388,7 @@ local node_is_idempotent = {
   [ast.typed.expr.RawFields]                  = always_true,
   [ast.typed.expr.RawPhysical]                = always_true,
   [ast.typed.expr.RawRuntime]                 = always_true,
+  [ast.typed.expr.RawTask]                    = always_true,
   [ast.typed.expr.RawValue]                   = always_true,
   [ast.typed.expr.Isnull]                     = always_true,
   [ast.typed.expr.Null]                       = always_true,
@@ -364,6 +401,7 @@ local node_is_idempotent = {
   [ast.typed.expr.Partition]                  = always_true,
   [ast.typed.expr.PartitionEqual]             = always_true,
   [ast.typed.expr.PartitionByField]           = always_true,
+  [ast.typed.expr.PartitionByRestriction]     = always_true,
   [ast.typed.expr.Image]                      = always_true,
   [ast.typed.expr.ImageByTask]                = always_true,
   [ast.typed.expr.Preimage]                   = always_true,
@@ -393,9 +431,11 @@ local node_is_idempotent = {
   [ast.typed.expr.Condition]                  = always_true,
   [ast.typed.expr.Unary]                      = always_true,
   [ast.typed.expr.Binary]                     = always_true,
+  [ast.typed.expr.AddressOf]                  = always_true,
   [ast.typed.expr.Future]                     = always_true,
   [ast.typed.expr.FutureGetResult]            = always_true,
   [ast.typed.expr.ParallelizerConstraint]     = always_true,
+  [ast.typed.expr.Projection]                 = always_true,
 
   [ast.typed.expr.Internal]                   = unreachable,
 
@@ -438,6 +478,7 @@ local node_is_idempotent = {
   [ast.condition_kind]          = always_true,
   [ast.disjointness_kind]       = always_true,
   [ast.fence_kind]              = always_true,
+  [ast.metadata]                = always_true,
 }
 
 local analyze_idempotent_node = ast.make_single_dispatch(
@@ -461,11 +502,14 @@ local node_is_replicable = {
   --     inserted by compiler passes and are known to be safe)
   --   * Contained in the whitelist of known ok C functions (so no
   --     "rand", etc.)
+  --   * The user promises the function is replicable by marking the
+  --     field "replicable"
   --
   -- General C and Terra calls are not supported because there is no
   -- way to know in general if they do something non-deterministic.
   [ast.typed.expr.Call] = function(node)
-    return {std.is_task(node.fn.value) or std.is_math_fn(node.fn.value) or
+    local is_user_replicable = type(node.fn.value) == "table" and rawget(node.fn.value, "replicable")
+    return {std.is_task(node.fn.value) or std.is_math_fn(node.fn.value) or is_user_replicable or
             node.replicable or std.replicable_whitelist[node.fn.value] or false, node}
   end,
 
@@ -477,6 +521,7 @@ local node_is_replicable = {
 
   [ast.typed.expr.ID]                         = always_true,
   [ast.typed.expr.Constant]                   = always_true,
+  [ast.typed.expr.Global]                     = always_true,
   [ast.typed.expr.Deref]                      = always_true,
   [ast.typed.expr.IndexAccess]                = always_true,
   [ast.typed.expr.Function]                   = always_true,
@@ -489,6 +534,7 @@ local node_is_replicable = {
   [ast.typed.expr.RawFields]                  = always_true,
   [ast.typed.expr.RawPhysical]                = always_true,
   [ast.typed.expr.RawRuntime]                 = always_true,
+  [ast.typed.expr.RawTask]                    = always_true,
   [ast.typed.expr.RawValue]                   = always_true,
   [ast.typed.expr.Isnull]                     = always_true,
   [ast.typed.expr.Null]                       = always_true,
@@ -501,6 +547,7 @@ local node_is_replicable = {
   [ast.typed.expr.Partition]                  = always_true,
   [ast.typed.expr.PartitionEqual]             = always_true,
   [ast.typed.expr.PartitionByField]           = always_true,
+  [ast.typed.expr.PartitionByRestriction]     = always_true,
   [ast.typed.expr.Image]                      = always_true,
   [ast.typed.expr.ImageByTask]                = always_true,
   [ast.typed.expr.Preimage]                   = always_true,
@@ -531,9 +578,14 @@ local node_is_replicable = {
   [ast.typed.expr.Condition]                  = always_true,
   [ast.typed.expr.Unary]                      = always_true,
   [ast.typed.expr.Binary]                     = always_true,
+  [ast.typed.expr.AddressOf]                  = always_true,
   [ast.typed.expr.Future]                     = always_true,
   [ast.typed.expr.FutureGetResult]            = always_true,
   [ast.typed.expr.ParallelizerConstraint]     = always_true,
+  [ast.typed.expr.ImportIspace]               = always_true,
+  [ast.typed.expr.ImportRegion]               = always_true,
+  [ast.typed.expr.ImportPartition]            = always_true,
+  [ast.typed.expr.Projection]                 = always_true,
 
   [ast.typed.expr.Internal]                   = unreachable,
 
@@ -576,6 +628,7 @@ local node_is_replicable = {
   [ast.condition_kind]          = always_true,
   [ast.disjointness_kind]       = always_true,
   [ast.fence_kind]              = always_true,
+  [ast.metadata]                = always_true,
 }
 
 local analyze_replicable_node = ast.make_single_dispatch(
@@ -589,6 +642,26 @@ local function analyze_replicable(cx, node)
     node, {true})
 end
 
+local function analyze_all_node(cx)
+  local analyze_leaf_node = analyze_leaf_node()
+  local analyze_inner_node = analyze_inner_node()
+  local analyze_idempotent_node = analyze_idempotent_node()
+  local analyze_replicable_node = analyze_replicable_node()
+  return function(node, continuation)
+    if cx.leaf[1] then cx:update("leaf", analyze_leaf_node(node)) end
+    if cx.inner[1] then cx:update("inner", analyze_inner_node(node)) end
+    if cx.idempotent[1] then cx:update("idempotent", analyze_idempotent_node(node)) end
+    if cx.replicable[1] then cx:update("replicable", analyze_replicable_node(node)) end
+    if not cx:analysis_done() then continuation(node, true) end
+  end
+end
+
+local function analyze_all(cx, node)
+  return ast.traverse_node_continuation(
+    analyze_all_node(cx),
+    node)
+end
+
 local optimize_config_options = {}
 
 function optimize_config_options.top_task(cx, node)
@@ -596,10 +669,12 @@ function optimize_config_options.top_task(cx, node)
 
   -- Do the analysis first and then mask it out if the configuration
   -- is disabled. This is to ensure that the analysis always works.
-  local leaf, leaf_node = unpack(analyze_leaf(cx, node.body))
-  local inner, inner_node = unpack(analyze_inner(cx, node.body))
-  local idempotent, idempotent_node = unpack(analyze_idempotent(cx, node.body))
-  local replicable, replicable_node = unpack(analyze_replicable(cx, node.body))
+  analyze_all(cx, node.body)
+
+  local leaf, leaf_node = unpack(cx.leaf)
+  local inner, inner_node = unpack(cx.inner)
+  local idempotent, idempotent_node = unpack(cx.idempotent)
+  local replicable, replicable_node = unpack(cx.replicable)
 
   leaf = leaf and not node.annotations.leaf:is(ast.annotation.Forbid) and std.config["leaf"]
   inner = inner and not node.annotations.inner:is(ast.annotation.Forbid) and std.config["inner"] and not leaf
@@ -615,7 +690,7 @@ function optimize_config_options.top_task(cx, node)
   if std.config["inner"] and not inner and
     node.annotations.inner:is(ast.annotation.Demand)
   then
-    report.error(inner_node, "task is not a valid inner task")
+    report.error(inner_node or node, "task is not a valid inner task")
   end
 
   if std.config["idempotent"] and not idempotent and

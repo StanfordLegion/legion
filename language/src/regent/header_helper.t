@@ -1,4 +1,4 @@
--- Copyright 2018 Stanford University
+-- Copyright 2019 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -78,6 +78,12 @@ local function get_task_params(task)
         terra_type, c_type, cxx_type = uint32, "uint32_t", "uint32_t"
       elseif param_type == uint64 then
         terra_type, c_type, cxx_type = uint64, "uint64_t", "uint64_t"
+      elseif param_type == float then
+        terra_type, c_type, cxx_type = float, "float", "float"
+      elseif param_type == double then
+        terra_type, c_type, cxx_type = double, "double", "double"
+      elseif param_type == bool then
+        terra_type, c_type, cxx_type = bool, "bool", "bool"
       else
         assert(false, "unknown type " .. tostring(param_type))
       end
@@ -386,8 +392,8 @@ end
 
 local function make_add_argument(launcher_name, wrapper_type, state_type,
                                  task, params_struct_type,
-                                 param_i, param_list, task_param_symbol,
-                                 param_field_id)
+                                 param_i, first_req_i, param_list, task_param_symbol,
+                                 param_field_id_array)
   local param_name = header_helper.normalize_name(param_list[1][4])
 
   local param_symbol = param_list:map(
@@ -426,6 +432,7 @@ local function make_add_argument(launcher_name, wrapper_type, state_type,
     end)
 
   -- Pack secondary values
+  local n_reqs = 0
   if base.types.is_region(param_type) then
     -- Pack region fields
     local parent_region = param_symbol[2]
@@ -435,16 +442,17 @@ local function make_add_argument(launcher_name, wrapper_type, state_type,
     local field_paths, _ = base.types.flatten_struct_fields(param_type:fspace())
     arg_setup:insert(
       quote
-          base.assert([field_count] == [#field_paths],
-            ["wrong number of fields for region " .. tostring(arg_value) .. " (argument " .. param_i .. ")"])
+          if [field_count] ~= [#field_paths] then
+            c.printf([launcher_name .. " wrong number of fields for region " .. tostring(arg_value) .. " (argument " .. param_i
+                        .. ") expected: " .. #field_paths .. " got: %d\n"], field_count)
+            c.abort()
+          end
+        [launcher_state].task_args.[param_field_id_array] = @[&c.legion_field_id_t[#field_paths]]([field_ids])
       end)
     local field_id_by_path = data.newmap()
     for j, field_path in pairs(field_paths) do
       local arg_field_id = `([field_ids][ [j-1] ])
-      local param_field_id = param_field_id[j]
       field_id_by_path[field_path] = arg_field_id
-      arg_setup:insert(
-        quote [launcher_state].task_args.[param_field_id] = [arg_field_id] end)
     end
 
     -- Add region requirements
@@ -452,6 +460,8 @@ local function make_add_argument(launcher_name, wrapper_type, state_type,
       base.find_task_privileges(param_type, task)
     local privilege_modes = privileges:map(base.privilege_mode)
     local coherence_modes = coherences:map(base.coherence_mode)
+
+    n_reqs = #privileges
 
     for i, privilege in ipairs(privileges) do
       local field_paths = privilege_field_paths[i]
@@ -472,22 +482,24 @@ local function make_add_argument(launcher_name, wrapper_type, state_type,
         assert(reduction_op)
       end
 
-      local add_requirement
+      local set_requirement
       if reduction_op then
-        add_requirement = c.legion_task_launcher_add_region_requirement_logical_region_reduction
+        set_requirement = c.legion_task_launcher_set_region_requirement_logical_region_reduction
       else
-        add_requirement = c.legion_task_launcher_add_region_requirement_logical_region
+        set_requirement = c.legion_task_launcher_set_region_requirement_logical_region
       end
-      assert(add_requirement)
+      assert(set_requirement)
 
       local add_field = c.legion_task_launcher_add_field
 
       local add_flags = c.legion_task_launcher_add_flags
 
+      -- FIXME: the requirement number is *NOT* just the param number, it depends on how many requirements each region gets split into
+      local req_i = first_req_i + (i - 1)
 
       local requirement = terralib.newsymbol(uint, "requirement")
       local requirement_args = terralib.newlist({
-          `([launcher_state].launcher), arg_value})
+          `([launcher_state].launcher), `([uint32](req_i)), arg_value})
       if reduction_op then
         requirement_args:insert(reduction_op)
       else
@@ -498,16 +510,16 @@ local function make_add_argument(launcher_name, wrapper_type, state_type,
 
       arg_setup:insert(
         quote
-          var [requirement] = [add_requirement]([requirement_args])
+          [set_requirement]([requirement_args])
           [field_paths:map(
              function(field_path)
                local field_id = field_id_by_path[field_path]
                return quote
                  add_field(
-                   [launcher_state].launcher, [requirement], [field_id], true)
+                   [launcher_state].launcher, [req_i], [field_id], true)
                end
              end)]
-          [add_flags]([launcher_state].launcher, [requirement], [flag])
+          [add_flags]([launcher_state].launcher, [req_i], [flag])
         end)
     end
   end
@@ -534,7 +546,7 @@ local function make_add_argument(launcher_name, wrapper_type, state_type,
     [arg_setup]
   end
   helper:setname(helper_name)
-  return { helper_name, helper }
+  return { helper_name, helper, n_reqs }
 end
 
 function header_helper.generate_task_implementation(task)
@@ -556,14 +568,17 @@ function header_helper.generate_task_implementation(task)
 
   local task_param_symbols = task:get_param_symbols()
   local param_field_ids = task:get_field_id_param_labels()
+  local req_i = 0
   for i, param_list in ipairs(params) do
     local task_param_symbol = task_param_symbols[i]
-    local param_field_id = param_field_ids[i]
-    result:insert(
-      make_add_argument(
+    local param_field_id_array = param_field_ids[i]
+    local helper_name, helper, n_reqs =
+      unpack(make_add_argument(
         launcher_name, wrapper_type, state_type,
         task, params_struct_type,
-        i, param_list, task_param_symbol, param_field_id))
+        i, req_i, param_list, task_param_symbol, param_field_id_array))
+    result:insert({helper_name, helper})
+    req_i = req_i + n_reqs
   end
 
   return result
@@ -643,8 +658,11 @@ local function OLD_generate_task_implementation(task)
       local field_paths, _ = base.types.flatten_struct_fields(param_type:fspace())
       args_setup:insert(
         quote
-            base.assert([field_count] == [#field_paths],
-              ["wrong number of fields for region " .. tostring(arg_value) .. " (argument " .. i .. ")"])
+            if [field_count] ~= [#field_paths] then
+              c.printf([launcher_name .. " wrong number of fields for region " .. tostring(arg_value) .. " (argument " .. param_i
+                          .. ") expected: " .. #field_paths .. " got: %d\n"], field_count)
+              c.abort()
+            end
         end)
       local field_id_by_path = data.newmap()
       for j, field_path in pairs(field_paths) do

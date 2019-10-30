@@ -1,4 +1,4 @@
--- Copyright 2018 Stanford University
+-- Copyright 2019 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -13,7 +13,7 @@
 -- limitations under the License.
 
 -- fails-with:
--- type_mismatch_static_cast1.rg:24: static_cast requires ptr type as argument 1, got int32
+-- type_mismatch_static_cast1.rg:24: static_cast requires partition or ptr type as argument 1, got int32
 --   var y = static_cast(int, x)
 --                     ^
 

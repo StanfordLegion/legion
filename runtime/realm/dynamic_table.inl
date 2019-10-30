@@ -1,4 +1,4 @@
-/* Copyright 2018 Stanford University, NVIDIA Corporation
+/* Copyright 2019 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -58,7 +58,7 @@ namespace Realm {
 
   template <typename ALLOCATOR>
   DynamicTable<ALLOCATOR>::DynamicTable(void)
-    : root(0)
+    : root_and_level(0)
     , first_alloced_node(0)
   {}
 
@@ -67,7 +67,7 @@ namespace Realm {
   {
     // instead of a recursive deletion search from the root, we follow the
     //  list of nodes we allocated and delete directly
-    NodeBase *to_delete = first_alloced_node;
+    NodeBase *to_delete = first_alloced_node.load();
     while(to_delete) {
       NodeBase *next = to_delete->next_alloced_node;
       delete to_delete;
@@ -75,6 +75,38 @@ namespace Realm {
     }
   }
 
+  template <typename ALLOCATOR>
+  /*static*/ intptr_t DynamicTable<ALLOCATOR>::encode_root_and_level(NodeBase *root,
+								     int level)
+  {
+#ifdef DEBUG_REALM
+    assert(((reinterpret_cast<intptr_t>(root) & 7) == 0) &&
+	   (level >= 0) && (level <= 7));
+#endif
+    return (reinterpret_cast<intptr_t>(root) | level);
+  }
+
+  template <typename ALLOCATOR>
+  /*static*/ typename DynamicTable<ALLOCATOR>::NodeBase *DynamicTable<ALLOCATOR>::extract_root(intptr_t rlval)
+  {
+    return reinterpret_cast<NodeBase *>(rlval & ~intptr_t(7));
+  }
+
+  template <typename ALLOCATOR>
+  /*static*/ int DynamicTable<ALLOCATOR>::extract_level(intptr_t rlval)
+  {
+    return (rlval & 7);
+  }
+
+  template <typename ALLOCATOR>
+  void DynamicTable<ALLOCATOR>::prepend_alloced_node(NodeBase *new_node)
+  {
+    NodeBase *old_first = first_alloced_node.load();
+    do {
+      new_node->next_alloced_node = old_first;
+    } while(!first_alloced_node.compare_exchange(old_first, new_node));
+  }
+  
   template <typename ALLOCATOR>
   typename DynamicTable<ALLOCATOR>::NodeBase *DynamicTable<ALLOCATOR>::new_tree_node(int level, IT first_index, IT last_index, int owner, typename ALLOCATOR::FreeList *free_list /*= 0*/)
   {
@@ -92,11 +124,12 @@ namespace Realm {
   template<typename ALLOCATOR>
   size_t DynamicTable<ALLOCATOR>::max_entries(void) const
   {
-    if (!root)
+    intptr_t rlval = root_and_level.load();
+    if(rlval == 0)
       return 0;
     size_t elems_addressable = 1 << ALLOCATOR::LEAF_BITS;
-    for (int i = 0; i < root->level; i++)
-      elems_addressable <<= ALLOCATOR::INNER_BITS;
+    elems_addressable <<= (ALLOCATOR::INNER_BITS *
+			   extract_level(rlval));
     return elems_addressable;
   }
 
@@ -111,33 +144,50 @@ namespace Realm {
       elems_addressable <<= ALLOCATOR::INNER_BITS;
     }
 
-    NodeBase *n = root;
-    if (!n || (n->level < level_needed))
-      return false;
+    intptr_t rlval = root_and_level.load();
+    if(rlval == 0)
+      return false;  // empty tree
+#ifdef DEBUG_REALM
+    assert(extract_root(rlval)->level == extract_level(rlval));
+#endif
+    int n_level = extract_level(rlval);
+    if(n_level < level_needed)
+      return false;  // tree too short
+    NodeBase *n = extract_root(rlval);
 
+#ifdef DEBUG_REALM
     // when we get here, root is high enough
     assert((level_needed <= n->level) &&
 	   (index >= n->first_index) &&
 	   (index <= n->last_index));
+#endif
 
     // now walk tree, populating the path we need
-    while(n->level > 0) {
+    while(n_level > 0) {
+#ifdef DEBUG_REALM
+      assert(n_level == n->level);
+#endif
       // intermediate nodes
       typename ALLOCATOR::INNER_TYPE *inner = static_cast<typename ALLOCATOR::INNER_TYPE *>(n);
 
       IT i = ((index >> (ALLOCATOR::LEAF_BITS + (n->level - 1) * ALLOCATOR::INNER_BITS)) &
 	      ((((IT)1) << ALLOCATOR::INNER_BITS) - 1));
+#ifdef DEBUG_REALM
       assert((i >= 0) && (((size_t)i) < ALLOCATOR::INNER_TYPE::SIZE));
+#endif
 
       NodeBase *child = inner->elems[i];
       if(child == 0) {
 	return false;	
       }
+#ifdef DEBUG_REALM
       assert((child != 0) &&
-	     (child->level == (n->level - 1)) &&
+	     (child->level == (n_level - 1)) &&
 	     (index >= child->first_index) &&
 	     (index <= child->last_index));
+#endif
       n = child;
+      n_level--;
     }
     return true;
   }
@@ -155,58 +205,67 @@ namespace Realm {
 
     // in the common case, we won't need to add levels to the tree - grab the root (no lock)
     // and see if it covers the range that includes our index
-    NodeBase *n = root;
-    if(!n || (n->level < level_needed)) {
+    intptr_t rlval = root_and_level.load();
+    NodeBase *n = extract_root(rlval);
+    int n_level = extract_level(rlval);
+#ifdef DEBUG_REALM
+    assert(!n || (n_level == n->level));
+#endif
+    if(!n || (n_level < level_needed)) {
       // root doesn't appear to be high enough - take lock and fix it if it's really
       //  not high enough
       lock.lock();
 
-      if(!root) {
+      // reload the value from memory
+      rlval = root_and_level.load();
+      n = extract_root(rlval);
+      n_level = extract_level(rlval);
+      if(!n) {
 	// simple case - just create a root node at the level we want
-	root = new_tree_node(level_needed, 0, elems_addressable - 1, owner, free_list);
-	// we're always first to add a node, so no race conditions here
-	bool ok = __sync_bool_compare_and_swap(&first_alloced_node,
-					       0,
-					       root);
-	assert(ok);
+	n = new_tree_node(level_needed, 0, elems_addressable - 1, owner, free_list);
+	n_level = level_needed;
+	root_and_level.store_release(encode_root_and_level(n, n_level));
+
+	prepend_alloced_node(n);
       } else {
 	// some of the tree already exists - add new layers on top
-	while(root->level < level_needed) {
-	  int parent_level = root->level + 1;
+	while(n_level < level_needed) {
+	  int parent_level = n_level + 1;
 	  IT parent_first = 0;
-	  IT parent_last = (((root->last_index + 1) << ALLOCATOR::INNER_BITS) - 1);
+	  IT parent_last = (((n->last_index + 1) << ALLOCATOR::INNER_BITS) - 1);
 	  NodeBase *parent = new_tree_node(parent_level, parent_first, parent_last, owner, free_list);
 	  typename ALLOCATOR::INNER_TYPE *inner = static_cast<typename ALLOCATOR::INNER_TYPE *>(parent);
-	  inner->elems[0] = root;
-	  root = parent;
-	  // this is not synchronized against threads that might be adding
-	  //  interior/leaf nodes, so CAS loop is required
-	  while(true) {
-	    NodeBase *cur_first = first_alloced_node;
-	    parent->next_alloced_node = cur_first;
-	    if(__sync_bool_compare_and_swap(&first_alloced_node,
-					    cur_first,
-					    parent)) break;
-	  }
+	  inner->elems[0] = n;
+	  n = parent;
+	  n_level = parent_level;
+	  root_and_level.store_release(encode_root_and_level(n, n_level));
+
+	  prepend_alloced_node(n);
 	}
       }
-      n = root;
 
       lock.unlock();
     }
+#ifdef DEBUG_REALM
     // when we get here, root is high enough
     assert((level_needed <= n->level) &&
 	   (index >= n->first_index) &&
 	   (index <= n->last_index));
+#endif
 
     // now walk tree, populating the path we need
-    while(n->level > 0) {
+    while(n_level > 0) {
+#ifdef DEBUG_REALM
+      assert(n_level == n->level);
+#endif
       // intermediate nodes
       typename ALLOCATOR::INNER_TYPE *inner = static_cast<typename ALLOCATOR::INNER_TYPE *>(n);
 
       IT i = ((index >> (ALLOCATOR::LEAF_BITS + (n->level - 1) * ALLOCATOR::INNER_BITS)) &
 	      ((((IT)1) << ALLOCATOR::INNER_BITS) - 1));
+#ifdef DEBUG_REALM
       assert((i >= 0) && (((size_t)i) < ALLOCATOR::INNER_TYPE::SIZE));
+#endif
 
       NodeBase *child = inner->elems[i];
       if(child == 0) {
@@ -218,31 +277,27 @@ namespace Realm {
 	// now that lock is held, see if we really need to make new node
 	child = inner->elems[i];
 	if(child == 0) {
-	  int child_level = inner->level - 1;
+	  int child_level = n_level - 1;
 	  int child_shift = (ALLOCATOR::LEAF_BITS + child_level * ALLOCATOR::INNER_BITS);
 	  IT child_first = inner->first_index + (i << child_shift);
 	  IT child_last = inner->first_index + ((i + 1) << child_shift) - 1;
 
 	  child = new_tree_node(child_level, child_first, child_last, owner, free_list);
 	  inner->elems[i] = child;
-	  // this is not synchronized against threads that might be adding
-	  //  parent or other interior/leaf nodes, so CAS loop is required
-	  while(true) {
-	    NodeBase *cur_first = first_alloced_node;
-	    child->next_alloced_node = cur_first;
-	    if(__sync_bool_compare_and_swap(&first_alloced_node,
-					    cur_first,
-					    child)) break;
-	  }
+
+	  prepend_alloced_node(child);
 	}
 
 	inner->lock.unlock();
       }
+#ifdef DEBUG_REALM
       assert((child != 0) &&
-	     (child->level == (n->level - 1)) &&
+	     (child->level == (n_level - 1)) &&
 	     (index >= child->first_index) &&
 	     (index <= child->last_index));
+#endif
       n = child;
+      n_level--;
     }
 
     // leaf node - just return pointer to the target element

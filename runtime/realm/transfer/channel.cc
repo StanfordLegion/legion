@@ -1,5 +1,5 @@
-/* Copyright 2018 Stanford University
- * Copyright 2018 Los Alamos National Laboratory
+/* Copyright 2019 Stanford University
+ * Copyright 2019 Los Alamos National Laboratory
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -60,8 +60,8 @@ namespace Realm {
     void SequenceAssembler::swap(SequenceAssembler& other)
     {
       // need both locks
-      AutoHSLLock al1(mutex);
-      AutoHSLLock al2(other.mutex);
+      AutoLock<> al1(mutex);
+      AutoLock<> al2(other.mutex);
       std::swap(contig_amount, other.contig_amount);
       std::swap(first_noncontig, other.first_noncontig);
       spans.swap(other.spans);
@@ -88,7 +88,7 @@ namespace Realm {
 
       // general case 3: take the lock and look through spans/etc.
       {
-	AutoHSLLock al(mutex);
+	AutoLock<> al(mutex);
 
 	// first, recheck the contig_amount, in case both it and the noncontig
 	//  counters were bumped in between looking at the two of them
@@ -139,7 +139,7 @@ namespace Realm {
 	// success: check to see if there are any spans we might need to 
 	//  tack on
 	if(span_end == __sync_fetch_and_add(&first_noncontig, 0)) {
-	  AutoHSLLock al(mutex);
+	  AutoLock<> al(mutex);
 	  while(!spans.empty()) {
 	    std::map<size_t, size_t>::iterator it = spans.begin();
 	    if(it->first == span_end) {
@@ -165,7 +165,7 @@ namespace Realm {
 	// failure: have to add ourselves to the span list and possibly update
 	//  the 'first_noncontig', all while holding the lock
 	{
-	  AutoHSLLock al(mutex);
+	  AutoLock<> al(mutex);
 
 	  // the checks above were done without the lock, so it is possible
 	  //  that by the time we've got the lock here, contig_amount has
@@ -234,11 +234,11 @@ namespace Realm {
 	src_mem = get_runtime()->get_memory_impl(_src_mem);
 	dst_mem = get_runtime()->get_memory_impl(_dst_mem);
 	if(_src_serdez_id != 0) {
-	  src_serdez_op = get_runtime()->custom_serdez_table[_src_serdez_id];
+	  src_serdez_op = get_runtime()->custom_serdez_table.get(_src_serdez_id, 0);
 	  assert(src_serdez_op != 0);
 	}
 	if(_dst_serdez_id != 0) {
-	  dst_serdez_op = get_runtime()->custom_serdez_table[_dst_serdez_id];
+	  dst_serdez_op = get_runtime()->custom_serdez_table.get(_dst_serdez_id, 0);
 	  assert(dst_serdez_op != 0);
 	}
 	// if we're writing into an IB, the first 'next_max_rw_gap' byte
@@ -246,9 +246,6 @@ namespace Realm {
 	if(next_xd_guid != XFERDES_NO_GUID)
 	  seq_next_read.add_span(0, _next_max_rw_gap);
         offset_idx = 0;
-        pthread_mutex_init(&xd_lock, NULL);
-        pthread_mutex_init(&update_read_lock, NULL);
-        pthread_mutex_init(&update_write_lock, NULL);
       }
 
       XferDes::~XferDes() {
@@ -264,9 +261,6 @@ namespace Realm {
         //  get_runtime()->get_memory_impl(src_buf.memory)->free_bytes(
         //      src_buf.alloc_offset, src_buf.buf_size);
         //}
-        pthread_mutex_destroy(&xd_lock);
-        pthread_mutex_destroy(&update_read_lock);
-        pthread_mutex_destroy(&update_write_lock);
       };
 
       void XferDes::mark_completed() {
@@ -278,7 +272,7 @@ namespace Realm {
 
         // notify owning DmaRequest upon completion of this XferDes
         //printf("complete XD = %lu\n", guid);
-        if (launch_node == my_node_id) {
+        if (launch_node == Network::my_node_id) {
           complete_fence->mark_finished(true/*successful*/);
         } else {
           NotifyXferDesCompleteMessage::send_request(launch_node, complete_fence);
@@ -405,7 +399,8 @@ namespace Realm {
 
 	    size_t max_bytes = max_req_size;
 
-	    size_t src_bytes = src_iter->step(max_bytes, src_info, flags,
+	    size_t src_bytes = src_iter->step(max_bytes, src_info,
+					      flags & TransferIterator::SRC_FLAGMASK,
 					      true /*tentative*/);
 
 	    size_t num_elems = src_bytes / src_serdez_op->sizeof_field_type;
@@ -427,7 +422,8 @@ namespace Realm {
 	      dst_bytes_avail = act_elems * src_serdez_op->max_serialized_size;
 	      size_t new_src_bytes = act_elems * src_serdez_op->sizeof_field_type;
 	      src_iter->cancel_step();
-	      src_bytes = src_iter->step(new_src_bytes, src_info, flags,
+	      src_bytes = src_iter->step(new_src_bytes, src_info,
+					 flags & TransferIterator::SRC_FLAGMASK,
 					 false /*!tentative*/);
 	      // this can come up shorter than we expect if the source
 	      //  iterator is 2-D or 3-D - if that happens, re-adjust the
@@ -491,7 +487,8 @@ namespace Realm {
 
 	    size_t max_bytes = max_req_size;
 
-	    size_t dst_bytes = dst_iter->step(max_bytes, dst_info, flags,
+	    size_t dst_bytes = dst_iter->step(max_bytes, dst_info,
+					      flags & TransferIterator::DST_FLAGMASK,
 					      !input_data_done);
 
 	    size_t num_elems = dst_bytes / dst_serdez_op->sizeof_field_type;
@@ -521,7 +518,8 @@ namespace Realm {
 		src_bytes_avail = act_elems * dst_serdez_op->max_serialized_size;
 		size_t new_dst_bytes = act_elems * dst_serdez_op->sizeof_field_type;
 		dst_iter->cancel_step();
-		dst_bytes = dst_iter->step(new_dst_bytes, dst_info, flags,
+		dst_bytes = dst_iter->step(new_dst_bytes, dst_info,
+					   flags & TransferIterator::SRC_FLAGMASK,
 					   false /*!tentative*/);
 		// this can come up shorter than we expect if the destination
 		//  iterator is 2-D or 3-D - if that happens, re-adjust the
@@ -601,7 +599,7 @@ namespace Realm {
 
 	    // tentatively get as much as we can from the source iterator
 	    size_t src_bytes = src_iter->step(max_bytes, src_info,
-					      flags,
+					      flags & TransferIterator::SRC_FLAGMASK,
 					      true /*tentative*/);
 	    if(src_bytes == 0) {
 	      // not enough space for even one element
@@ -616,7 +614,7 @@ namespace Realm {
 						((flags & TransferIterator::LINES_OK) != 0));
 
 	    size_t dst_bytes = dst_iter->step(src_bytes, dst_info,
-					      flags,
+					      flags & TransferIterator::DST_FLAGMASK,
 					      dimension_mismatch_possible);
 	    if(dst_bytes == 0) {
 	      // not enough space for even one element
@@ -654,7 +652,8 @@ namespace Realm {
 	      src_iter->cancel_step();
 	      // this step must still be tentative if a dimension mismatch is
 	      //  posisble
-	      src_bytes = src_iter->step(dst_bytes, src_info, flags,
+	      src_bytes = src_iter->step(dst_bytes, src_info,
+					 flags & TransferIterator::SRC_FLAGMASK,
 					 dimension_mismatch_possible);
 	      if(src_bytes == 0) {
 		// corner case that should occur only with a destination 
@@ -688,7 +687,8 @@ namespace Realm {
 	      if(src_bytes < dst_bytes) {
 		assert(dimension_mismatch_possible);
 		dst_iter->cancel_step();
-		dst_bytes = dst_iter->step(src_bytes, dst_info, flags,
+		dst_bytes = dst_iter->step(src_bytes, dst_info,
+					   flags & TransferIterator::DST_FLAGMASK,
 					   true /*tentative*/);
 	      }
 	      // byte counts now must match
@@ -790,11 +790,13 @@ namespace Realm {
 		//log_request.info() << "dimension mismatch! " << act_bytes << " < " << src_bytes << " (" << bytes_total << ")";
 		TransferIterator::AddressInfo dummy_info;
 		src_iter->cancel_step();
-		src_bytes = src_iter->step(act_bytes, dummy_info, flags,
+		src_bytes = src_iter->step(act_bytes, dummy_info,
+					   flags & TransferIterator::SRC_FLAGMASK,
 					   false /*!tentative*/);
 		assert(src_bytes == act_bytes);
 		dst_iter->cancel_step();
-		dst_bytes = dst_iter->step(act_bytes, dummy_info, flags,
+		dst_bytes = dst_iter->step(act_bytes, dummy_info,
+					   flags & TransferIterator::DST_FLAGMASK,
 					   false /*!tentative*/);
 		assert(dst_bytes == act_bytes);
 	      }
@@ -1147,7 +1149,7 @@ namespace Realm {
         else {
           bytes_write += size;
         }
-        //printf("[%d] offset(%ld), size(%lu), bytes_writes(%lx): %ld\n", my_node_id, offset, size, guid, bytes_write);
+        //printf("[%d] offset(%ld), size(%lu), bytes_writes(%lx): %ld\n", Network::my_node_id, offset, size, guid, bytes_write);
       }
 #endif
 
@@ -1454,22 +1456,24 @@ namespace Realm {
         channel = channel_manager->get_remote_write_channel();
         //src_buf_base = (const char*) src_mem_impl->get_direct_ptr(_src_buf.alloc_offset, 0);
         // Note that we cannot use get_direct_ptr to get dst_buf_base, since it always returns 0
-        dst_buf_base = ((char *)((Realm::RemoteMemory*)dst_mem)->regbase) /*+ dst_buf.alloc_offset*/;
+	NodeID dst_node = ID(dst_mem->me).memory_owner_node();
+        RemoteMemory *remote = checked_cast<RemoteMemory *>(dst_mem);
+        dst_buf_base = static_cast<char *>(remote->get_remote_addr(0));
+        assert(dst_buf_base != 0);
         requests = (RemoteWriteRequest*) calloc(max_nr, sizeof(RemoteWriteRequest));
         for (int i = 0; i < max_nr; i++) {
           requests[i].xd = this;
-          requests[i].dst_node = ID(dst_mem->me).memory.owner_node;
+          requests[i].dst_node = dst_node;
           enqueue_request(&requests[i]);
         }
       }
 
       long RemoteWriteXferDes::get_requests(Request** requests, long nr)
       {
-        pthread_mutex_lock(&xd_lock);
+	xd_lock.lock();
         RemoteWriteRequest** reqs = (RemoteWriteRequest**) requests;
-	// remote writes allow 2D on source, but not destination - figure
-	//  out how to communicate that to the iterators?
-	unsigned flags = TransferIterator::LINES_OK;
+	// remote writes allow 2D on source, but not destination
+	unsigned flags = TransferIterator::SRC_LINES_OK;
         long new_nr = default_get_requests(requests, nr, flags);
         for (long i = 0; i < new_nr; i++)
         {
@@ -1479,28 +1483,28 @@ namespace Realm {
 	  assert(reqs[i]->src_base != 0);
           reqs[i]->dst_base = dst_buf_base + reqs[i]->dst_off;
         }
-        pthread_mutex_unlock(&xd_lock);
+	xd_lock.unlock();
         return new_nr;
       }
 
       void RemoteWriteXferDes::notify_request_read_done(Request* req)
       {
-        pthread_mutex_lock(&xd_lock);
+        xd_lock.lock();
         default_notify_request_read_done(req);
-        pthread_mutex_unlock(&xd_lock);
+        xd_lock.unlock();
       }
 
       void RemoteWriteXferDes::notify_request_write_done(Request* req)
       {
-        pthread_mutex_lock(&xd_lock);
+        xd_lock.lock();
         default_notify_request_write_done(req);
-        pthread_mutex_unlock(&xd_lock);
+        xd_lock.unlock();
       }
 
       void RemoteWriteXferDes::flush()
       {
-        //pthread_mutex_lock(&xd_lock);
-        //pthread_mutex_unlock(&xd_lock);
+        //xd_lock.lock();
+        //xd_lock.unlock();
       }
 
       // doesn't do pre_bytes_write updates, since the remote write message
@@ -1685,16 +1689,10 @@ namespace Realm {
 		  _max_req_size, _priority,
                   _order, _kind, _complete_fence)
       {
-#ifdef USE_HDF_OLD
-        HDF5Memory* hdf_mem;
-#endif
         switch (kind) {
           case XferDes::XFER_HDF_READ:
           {
 	    assert(src_mem->kind == MemoryImpl::MKIND_HDF);
-#ifdef USE_HDF_OLD
-            hdf_mem = (HDF5Memory*) src_mem;
-#endif
             //pthread_rwlock_rdlock(&hdf_mem->rwlock);
             // std::map<RegionInstance, HDFMetadata*>::iterator it;
             // it = hdf_mem->hdf_metadata.find(inst);
@@ -1710,9 +1708,6 @@ namespace Realm {
           case XferDes::XFER_HDF_WRITE:
           {
             assert(dst_mem->kind == MemoryImpl::MKIND_HDF);
-#ifdef USE_HDF_OLD
-            hdf_mem = (HDF5Memory*) dst_mem;
-#endif
             //pthread_rwlock_rdlock(&hdf_mem->rwlock);
             // std::map<RegionInstance, HDFMetadata*>::iterator it;
             // it = hdf_mem->hdf_metadata.find(inst);
@@ -1729,12 +1724,6 @@ namespace Realm {
             assert(0);
         }
 
-#ifdef USE_HDF_OLD
-	std::map<RegionInstance, HDFMetadata*>::iterator it;
-	it = hdf_mem->hdf_metadata.find(inst);
-	assert(it != hdf_mem->hdf_metadata.end());
-	hdf_metadata = it->second;
-#endif
 	// defer H5Fopen and friends so that we can call them from the correct
 	//  thread
 
@@ -1824,17 +1813,27 @@ namespace Realm {
             break;
           }
 	  // TODO: support 2D/3D for memory side of an HDF transfer?
-	  size_t mem_bytes = mem_iter->step(hdf5_bytes, mem_info, 0);
+	  size_t mem_bytes = mem_iter->step(hdf5_bytes, mem_info, 0,
+					    true /*tentative*/);
 	  if(mem_bytes == hdf5_bytes) {
-	    // looks good - confirm the hdf5 step
+	    // looks good - confirm the steps
 	    hdf5_iter->confirm_step();
+	    mem_iter->confirm_step();
 	  } else {
 	    // cancel the hdf5 step and try to just step by mem_bytes
 	    assert(mem_bytes < hdf5_bytes);  // should never be larger
 	    hdf5_iter->cancel_step();
 	    hdf5_bytes = hdf5_iter->step(mem_bytes, hdf5_info);
-	    // now must match
-	    assert(hdf5_bytes == mem_bytes);
+	    // multi-dimensional hdf5 iterators may round down the size,
+	    //  so re-check the mem bytes
+	    if(hdf5_bytes == mem_bytes) {
+	      mem_iter->confirm_step();
+	    } else {
+	      mem_iter->cancel_step();
+	      mem_bytes = mem_iter->step(hdf5_bytes, mem_info, 0);
+	      // now must match
+	      assert(hdf5_bytes == mem_bytes);
+	    }
 	  }
 
 	  HDFRequest* new_req = (HDFRequest *)(dequeue_request());
@@ -1843,55 +1842,25 @@ namespace Realm {
 			         dst_mem :
 			         src_mem)->get_direct_ptr(mem_info.base_offset,
 							  mem_info.bytes_per_chunk);
-#ifdef USE_HDF_OLD
-	  new_req->dataset_id = hdf5_info.dset_id;
-	  new_req->datatype_id = hdf5_info.dtype_id;
-
-	  // TODO: this should be based on analysis of memory strides
-	  std::vector<hsize_t> mem_dims = hdf5_info.extent;
-	  CHECK_HDF5( new_req->mem_space_id = H5Screate_simple(mem_dims.size(), mem_dims.data(), NULL) );
-	  //std::vector<hsize_t> mem_start(DIM, 0);
-	  //CHECK_HDF5( H5Sselect_hyperslab(new_req->mem_space_id, H5S_SELECT_SET, ms_start, NULL, count, NULL) );
-
-	  CHECK_HDF5( new_req->file_space_id = H5Screate_simple(hdf5_info.dset_bounds.size(), hdf5_info.dset_bounds.data(), 0) );
-	  CHECK_HDF5( H5Sselect_hyperslab(new_req->file_space_id, H5S_SELECT_SET, hdf5_info.offset.data(), 0, hdf5_info.extent.data(), 0) );
-#else
-	  HDFFileInfo *info;
+	  // we'll open datasets on the first touch in this transfer
+	  // (TODO: pre-open at instance attach time, but in thread-safe way)
+	  HDF5::HDF5Dataset *dset;
 	  {
-	    std::map<std::string, HDFFileInfo *>::const_iterator it = file_infos.find(*hdf5_info.filename);
-	    if(it != file_infos.end()) {
-	      info = it->second;
+	    std::map<FieldID, HDF5::HDF5Dataset *>::const_iterator it = datasets.find(hdf5_info.field_id);
+	    if(it != datasets.end()) {
+	      dset = it->second;
 	    } else {
-	      info = new HDFFileInfo;
-	      // have to open the file
-	      CHECK_HDF5( info->file_id = H5Fopen(hdf5_info.filename->c_str(),
-						  ((kind == XferDes::XFER_HDF_READ) ?
-					             H5F_ACC_RDONLY :
-					             H5F_ACC_RDWR),
-						  H5P_DEFAULT) );
-	      log_hdf5.info() << "H5Fopen(\"" << *hdf5_info.filename << "\") = " << info->file_id;
-	      file_infos[*hdf5_info.filename] = info;
-	    }
-	  }
-	  hid_t dset_id;
-	  {
-	    std::map<std::string, hid_t>::const_iterator it = info->dset_ids.find(*hdf5_info.dsetname);
-	    if(it != info->dset_ids.end()) {
-	      dset_id = it->second;
-	    } else {
-	      // have to open the dataset
-	      CHECK_HDF5( dset_id = H5Dopen2(info->file_id,
+	      dset = HDF5::HDF5Dataset::open(hdf5_info.filename->c_str(),
 					     hdf5_info.dsetname->c_str(),
-					     H5P_DEFAULT) );
-	      log_hdf5.info() << "H5Dopen2(" << info->file_id << ", \"" << *hdf5_info.dsetname << "\") = " << dset_id;
-	      info->dset_ids[*hdf5_info.dsetname] = dset_id;
+					     (kind == XferDes::XFER_HDF_READ));
+	      assert(dset != 0);
+	      assert(hdf5_info.extent.size() == size_t(dset->ndims));
+	      datasets[hdf5_info.field_id] = dset;
 	    }
 	  }
-	  hid_t dtype_id;
-	  CHECK_HDF5( dtype_id = H5Dget_type(dset_id) );
 
-	  new_req->dataset_id = dset_id;
-	  new_req->datatype_id = dtype_id;
+	  new_req->dataset_id = dset->dset_id;
+	  new_req->datatype_id = dset->dtype_id;
 
 	  std::vector<hsize_t> mem_dims = hdf5_info.extent;
 	  CHECK_HDF5( new_req->mem_space_id = H5Screate_simple(mem_dims.size(), mem_dims.data(), NULL) );
@@ -1900,7 +1869,6 @@ namespace Realm {
 
 	  CHECK_HDF5( new_req->file_space_id = H5Screate_simple(hdf5_info.dset_bounds.size(), hdf5_info.dset_bounds.data(), 0) );
 	  CHECK_HDF5( H5Sselect_hyperslab(new_req->file_space_id, H5S_SELECT_SET, hdf5_info.offset.data(), 0, hdf5_info.extent.data(), 0) );
-#endif
 
 	  new_req->nbytes = hdf5_bytes;
 
@@ -1913,114 +1881,15 @@ namespace Realm {
 	  write_bytes_total += hdf5_bytes;
 
 	  requests[idx++] = new_req;
+
+	  // make sure iteration_completed is set appropriately before we
+	  //  process the request (so that multi-hop successors are notified
+	  //  properly)
+	  if(hdf5_iter->done())
+	    iteration_completed = true;
 	}
 
 	return idx;
-#if 0
-        long ns = 0;
-        while (ns < nr && !available_reqs.empty() && fit != oas_vec.end()) {
-          requests[ns] = dequeue_request();
-          switch (kind) {
-            case XferDes::XFER_HDF_READ:
-            {
-              off_t hdf_ofs = fit->src_offset;
-              assert(hdf_metadata->dataset_ids.count(hdf_ofs) > 0);
-              //pthread_rwlock_rdlock(&hdf_metadata->hdf_memory->rwlock);
-              size_t elemnt_size = H5Tget_size(hdf_metadata->datatype_ids[hdf_ofs]);
-              HDFRequest* hdf_req = (HDFRequest*) requests[ns];
-              hdf_req->dataset_id = hdf_metadata->dataset_ids[hdf_ofs];
-              //hdf_req->rwlock = &hdf_metadata->dataset_rwlocks[hdf_idx];
-              hdf_req->mem_type_id = hdf_metadata->datatype_ids[hdf_ofs];
-              hsize_t count[DIM], ms_start[DIM], ds_start[DIM], ms_dims[DIM];
-              // assume SOA for now
-              assert(dst_buf.block_size >= lsi->image_lo[0] + domain.get_volume());
-              assert(lsi->strides[0][0] == 1);
-              ms_dims[DIM - 1] = lsi->strides[1][0];
-              for (unsigned i = 1; i < DIM - 1; i++)
-                ms_dims[DIM - 1 - i] = lsi->strides[i+1][0] / lsi->strides[i][0];
-              ms_dims[0] = lsi->subrect.hi[DIM - 1] - lsi->subrect.lo[DIM - 1] + 1;
-              size_t todo = 1;
-              for (unsigned i = 0; i < DIM; i++) {
-                ms_start[i] = 0;
-                count[i] = lsi->subrect.hi[DIM - 1 - i] - lsi->subrect.lo[DIM - 1 - i] + 1;
-                todo *= count[i];
-                ds_start[i] = lsi->subrect.lo[DIM - 1 - i] - hdf_metadata->lo[DIM - 1 - i];
-              }
-              hdf_req->file_space_id = H5Dget_space(hdf_metadata->dataset_ids[hdf_ofs]);
-              // HDF dimension always start with zero, but Legion::Domain may start with any integer
-              // We need to deal with the offset between them here
-              herr_t ret = H5Sselect_hyperslab(hdf_req->file_space_id, H5S_SELECT_SET, ds_start, NULL, count, NULL);
-              assert(ret >= 0);
-              //pthread_rwlock_unlock(&hdf_metadata->hdf_memory->rwlock);
-              //pthread_rwlock_wrlock(&hdf_metadata->hdf_memory->rwlock);
-              hdf_req->mem_space_id = H5Screate_simple(DIM, ms_dims, NULL);
-              ret = H5Sselect_hyperslab(hdf_req->mem_space_id, H5S_SELECT_SET, ms_start, NULL, count, NULL);
-              assert(ret >= 0);
-              //pthread_rwlock_unlock(&hdf_metadata->hdf_memory->rwlock);
-              off_t dst_offset = Realm::calc_mem_loc(0, fit->dst_offset, fit->size,
-                                              dst_buf.elmt_size, dst_buf.block_size, lsi->image_lo[0]);
-              hdf_req->mem_base = buf_base + dst_offset;
-              hdf_req->nbytes = todo * elemnt_size;
-              break;
-            }
-            case XferDes::XFER_HDF_WRITE:
-            {
-              off_t hdf_ofs = fit->dst_offset;
-              assert(hdf_metadata->dataset_ids.count(hdf_ofs) > 0);
-              //pthread_rwlock_rdlock(&hdf_metadata->hdf_memory->rwlock);
-              size_t elemnt_size = H5Tget_size(hdf_metadata->datatype_ids[hdf_ofs]);
-              HDFRequest* hdf_req = (HDFRequest*) requests[ns];
-              hdf_req->dataset_id = hdf_metadata->dataset_ids[hdf_ofs];
-              //hdf_req->rwlock = &hdf_metadata->dataset_rwlocks[hdf_idx];
-              hdf_req->mem_type_id = hdf_metadata->datatype_ids[hdf_ofs];
-              hsize_t count[DIM], ms_start[DIM], ds_start[DIM], ms_dims[DIM];
-              //assume SOA for now
-              assert(src_buf.block_size >= lsi->image_lo[0] + domain.get_volume());
-              assert(lsi->strides[0][0] == 1);
-              ms_dims[DIM - 1] = lsi->strides[1][0];
-              for (unsigned i = 1; i < DIM - 1; i++)
-                ms_dims[DIM - 1 - i] = lsi->strides[i+1][0] / lsi->strides[i][0];
-              ms_dims[0] = lsi->subrect.hi[DIM - 1] - lsi->subrect.lo[DIM - 1] + 1;
-              size_t todo = 1;
-              for (unsigned i = 0; i < DIM; i++) {
-                ms_start[i] = 0;
-                count[i] = lsi->subrect.hi[DIM - 1 - i] - lsi->subrect.lo[DIM - 1 - i] + 1;
-                todo *= count[i];
-                ds_start[i] = lsi->subrect.lo[DIM - 1 - i] - hdf_metadata->lo[DIM - 1 - i];
-              }
-              hdf_req->file_space_id = H5Dget_space(hdf_metadata->dataset_ids[hdf_ofs]);
-              // HDF dimension always start with zero, but Legion::Domain may start with any integer
-              // We need to deal with the offset between them here
-              herr_t ret = H5Sselect_hyperslab(hdf_req->file_space_id, H5S_SELECT_SET, ds_start, NULL, count, NULL);
-              assert(ret >= 0);
-              //pthread_rwlock_unlock(&hdf_metadata->hdf_memory->rwlock);
-              //pthread_rwlock_wrlock(&hdf_metadata->hdf_memory->rwlock);
-              hdf_req->mem_space_id = H5Screate_simple(DIM, ms_dims, NULL);
-              ret = H5Sselect_hyperslab(hdf_req->mem_space_id, H5S_SELECT_SET, ms_start, NULL, count, NULL);
-              assert(ret >= 0);
-              //pthread_rwlock_unlock(&hdf_metadata->hdf_memory->rwlock);
-              off_t src_offset = Realm::calc_mem_loc(0, fit->src_offset, fit->size,
-                                              src_buf.elmt_size, src_buf.block_size, lsi->image_lo[0]);
-              hdf_req->mem_base = buf_base + src_offset;
-              hdf_req->nbytes = todo * elemnt_size;
-              break;
-            }
-            default:
-              assert(0);
-          }
-          lsi->step();
-          if (!lsi->any_left) {
-            fit++;
-            delete lsi;
-            if (kind == XferDes::XFER_HDF_READ)
-              lsi = new GenericLinearSubrectIterator<Mapping<DIM, 1> >(domain.get_rect<DIM>(), (*dst_buf.linearization.get_mapping<DIM>()));
-            else
-              lsi = new GenericLinearSubrectIterator<Mapping<DIM, 1> >(domain.get_rect<DIM>(), (*src_buf.linearization.get_mapping<DIM>()));
-          }
-          ns ++;
-        }
-        return ns;
-#endif
       }
 
       void HDFXferDes::notify_request_read_done(Request* req)
@@ -2053,19 +1922,11 @@ namespace Realm {
           // }
         }
 
-	for(std::map<std::string, HDFFileInfo *>::const_iterator it = file_infos.begin();
-	    it != file_infos.end();
-	    ++it) {
-	  for(std::map<std::string, hid_t>::const_iterator it2 = it->second->dset_ids.begin();
-	      it2 != it->second->dset_ids.end();
-	      ++it2) {
-	    log_hdf5.info() << "H5Dclose(" << it2->second << " /* \"" << it2->first << "\" */)";
-	    CHECK_HDF5( H5Dclose(it2->second) );
-	  }
-	  log_hdf5.info() << "H5Fclose(" << it->second->file_id << " /* \"" << it->first << "\" */)";
-	  CHECK_HDF5( H5Fclose(it->second->file_id) );
-	  delete it->second;
-	}
+	for(std::map<FieldID, HDF5::HDF5Dataset *>::const_iterator it = datasets.begin();
+	    it != datasets.end();
+	    ++it)
+	  it->second->close();
+	datasets.clear();
       }
 #endif
 
@@ -2140,7 +2001,7 @@ namespace Realm {
 	    if(src_mem.kind() != it->src_kind)
 	      continue;
 	    if((it->src_type == SupportedPath::LOCAL_KIND) &&
-	       (ID(src_mem).memory.owner_node != node))
+	       (NodeID(ID(src_mem).memory_owner_node()) != node))
 	      continue;
 	  }
 
@@ -2151,7 +2012,7 @@ namespace Realm {
 	    if(dst_mem.kind() != it->dst_kind)
 	      continue;
 	    if((it->dst_type == SupportedPath::LOCAL_KIND) &&
-	       (ID(dst_mem).memory.owner_node != node))
+	       (NodeID(ID(dst_mem).memory_owner_node()) != node))
 	      continue;
 	  }
 	  
@@ -2290,13 +2151,11 @@ namespace Realm {
 
       MemcpyChannel::MemcpyChannel(long max_nr)
 	: Channel(XferDes::XFER_MEM_CPY)
+	, pending_cond(pending_lock)
       {
         capacity = max_nr;
         is_stopped = false;
         sleep_threads = false;
-        pthread_mutex_init(&pending_lock, NULL);
-        pthread_mutex_init(&finished_lock, NULL);
-        pthread_cond_init(&pending_cond, NULL);
         //cbs = (MemcpyRequest**) calloc(max_nr, sizeof(MemcpyRequest*));
 	unsigned bw = 0; // TODO
 	unsigned latency = 0;
@@ -2310,9 +2169,6 @@ namespace Realm {
 
       MemcpyChannel::~MemcpyChannel()
       {
-        pthread_mutex_destroy(&pending_lock);
-        pthread_mutex_destroy(&finished_lock);
-        pthread_cond_destroy(&pending_cond);
         //free(cbs);
       }
 
@@ -2337,19 +2193,19 @@ namespace Realm {
 
       void MemcpyChannel::stop()
       {
-        pthread_mutex_lock(&pending_lock);
+	pending_lock.lock();
         if (!is_stopped)
-          pthread_cond_broadcast(&pending_cond);
+	  pending_cond.broadcast();
         is_stopped = true;
-        pthread_mutex_unlock(&pending_lock);
+	pending_lock.unlock();
       }
 
       void MemcpyChannel::get_request(std::deque<MemcpyRequest*>& thread_queue)
       {
-        pthread_mutex_lock(&pending_lock);
+        pending_lock.lock();
         while (pending_queue.empty() && !is_stopped) {
           sleep_threads = true;
-          pthread_cond_wait(&pending_cond, &pending_lock);
+	  pending_cond.wait();
         }
         if (!is_stopped) {
           // TODO: enable the following optimization
@@ -2359,14 +2215,14 @@ namespace Realm {
           //fprintf(stderr, "[%d] thread_queue.size = %lu\n", gettid(), thread_queue.size());
           //pending_queue.clear();
         }
-        pthread_mutex_unlock(&pending_lock);
+        pending_lock.unlock();
       }
 
       void MemcpyChannel::return_request(std::deque<MemcpyRequest*>& thread_queue)
       {
-        pthread_mutex_lock(&finished_lock);
+        finished_lock.lock();
         finished_queue.insert(finished_queue.end(), thread_queue.begin(), thread_queue.end());
-        pthread_mutex_unlock(&finished_lock);
+        finished_lock.unlock();
       }
 
       long MemcpyChannel::submit(Request** requests, long nr)
@@ -2799,7 +2655,7 @@ namespace Realm {
         }
         return nr;
         /*
-        pthread_mutex_lock(&pending_lock);
+        pending_lock.lock();
         //if (nr > 0)
           //printf("MemcpyChannel::submit[nr = %ld]\n", nr);
         for (long i = 0; i < nr; i++) {
@@ -2809,7 +2665,7 @@ namespace Realm {
           pthread_cond_broadcast(&pending_cond);
           sleep_threads = false;
         }
-        pthread_mutex_unlock(&pending_lock);
+        pending_lock.unlock();
         return nr;
         */
         /*
@@ -2825,14 +2681,14 @@ namespace Realm {
 
       void MemcpyChannel::pull()
       {
-        pthread_mutex_lock(&finished_lock);
+        finished_lock.lock();
         while (!finished_queue.empty()) {
           MemcpyRequest* req = finished_queue.front();
           finished_queue.pop_front();
           req->xd->notify_request_read_done(req);
           req->xd->notify_request_write_done(req);
         }
-        pthread_mutex_unlock(&finished_lock);
+        finished_lock.unlock();
         /*
         while (true) {
           long np = worker->pull(cbs, capacity);
@@ -2882,16 +2738,16 @@ namespace Realm {
           switch (kind) {
             case XferDes::XFER_GASNET_READ:
             {
-              get_runtime()->global_memory->get_bytes(req->gas_off,
-                                                      req->mem_base,
-                                                      req->nbytes);
+              req->xd->src_mem->get_bytes(req->gas_off,
+					  req->mem_base,
+					  req->nbytes);
               break;
             }
             case XferDes::XFER_GASNET_WRITE:
             {
-              get_runtime()->global_memory->put_bytes(req->gas_off,
-                                                      req->mem_base,
-                                                      req->nbytes);
+              req->xd->dst_mem->put_bytes(req->gas_off,
+					  req->mem_base,
+					  req->nbytes);
               break;
             }
             default:
@@ -2967,7 +2823,7 @@ namespace Realm {
           args.mem = req->dst_mem;
           args.offset = req->dst_offset;
           args.event = req->complete_event;
-          args.sender = my_node_id;
+          args.sender = Network::my_node_id;
           args.sequence_id = 0;
 
           Realm::RemoteWriteMessage::Message::request(ID(args.mem).node(), args,
@@ -3205,9 +3061,10 @@ namespace Realm {
 #endif
 
       /*static*/
-      void XferDesRemoteWriteMessage::handle_request(RequestArgs args,
-                                                     const void *data,
-                                                     size_t datalen)
+      void XferDesRemoteWriteMessage::handle_message(NodeID sender,
+						     const XferDesRemoteWriteMessage &args,
+						     const void *data,
+						     size_t datalen)
       {
         // assert data copy is in right position
         //assert(data == args.dst_buf);
@@ -3221,11 +3078,14 @@ namespace Realm {
 
 	// don't ack empty requests
 	if(datalen > 0)
-	  XferDesRemoteWriteAckMessage::send_request(args.sender, args.req);
+	  XferDesRemoteWriteAckMessage::send_request(sender, args.req);
       }
 
       /*static*/
-      void XferDesRemoteWriteAckMessage::handle_request(RequestArgs args)
+      void XferDesRemoteWriteAckMessage::handle_message(NodeID sender,
+							const XferDesRemoteWriteAckMessage &args,
+							const void *data,
+							size_t datalen)
       {
         RemoteWriteRequest* req = args.req;
         req->xd->notify_request_read_done(req);
@@ -3234,21 +3094,11 @@ namespace Realm {
       }
 
       /*static*/
-      void XferDesCreateMessage::handle_request(RequestArgs args,
-                                                const void *msgdata,
-                                                size_t msglen)
+      void XferDesCreateMessage::handle_message(NodeID sender,
+						const XferDesCreateMessage &args,
+						const void *msgdata,
+						size_t msglen)
       {
-#if 0
-        const Payload *payload = (const Payload *)msgdata;
-        std::vector<OffsetsAndSize> oas_vec(payload->oas_vec_size);
-        for(size_t i = 0; i < payload->oas_vec_size; i++)
-          oas_vec[i] = payload->oas_vec(i);
-        Buffer src_buf, dst_buf;
-        src_buf.deserialize(payload->src_buf_bits);
-        src_buf.memory = args.src_mem;
-        dst_buf.deserialize(payload->dst_buf_bits);
-        dst_buf.memory = args.dst_mem;
-#else
 	intptr_t dma_req_as_intptr = 0;
 	NodeID launch_node = 0;
 	XferDesID guid = XferDes::XFERDES_NO_GUID;
@@ -3294,7 +3144,7 @@ namespace Realm {
 
 	DmaRequest* dma_request = reinterpret_cast<DmaRequest *>(dma_req_as_intptr);
 
-	create_xfer_des(dma_request, launch_node, my_node_id,
+	create_xfer_des(dma_request, launch_node, Network::my_node_id,
 			guid, pre_xd_guid, next_xd_guid,
 			next_max_rw_gap, src_ib_offset, src_ib_size,
 			mark_started,
@@ -3303,41 +3153,6 @@ namespace Realm {
 			src_serdez_id, dst_serdez_id,
 			max_req_size, max_nr, priority,
 			order, kind, args.fence, args.inst);
-#endif
-#if 0
-        switch(payload->domain.dim) {
-        case 0:
-          create_xfer_des<0>(payload->dma_request, payload->launch_node,
-                             payload->guid, payload->pre_xd_guid, payload->next_xd_guid,
-                             payload->mark_started, src_buf, dst_buf, payload->domain, oas_vec,
-                             payload->max_req_size, payload->max_nr, payload->priority,
-                             payload->order, payload->kind, args.fence, args.inst);
-          break;
-        case 1:
-          create_xfer_des<1>(payload->dma_request, payload->launch_node,
-                             payload->guid, payload->pre_xd_guid, payload->next_xd_guid,
-                             payload->mark_started, src_buf, dst_buf, payload->domain, oas_vec,
-                             payload->max_req_size, payload->max_nr, payload->priority,
-                             payload->order, payload->kind, args.fence, args.inst);
-          break;
-        case 2:
-          create_xfer_des<2>(payload->dma_request, payload->launch_node,
-                             payload->guid, payload->pre_xd_guid, payload->next_xd_guid,
-                             payload->mark_started, src_buf, dst_buf, payload->domain, oas_vec,
-                             payload->max_req_size, payload->max_nr, payload->priority,
-                             payload->order, payload->kind, args.fence, args.inst);
-          break;
-        case 3:
-          create_xfer_des<3>(payload->dma_request, payload->launch_node,
-                             payload->guid, payload->pre_xd_guid, payload->next_xd_guid,
-                             payload->mark_started, src_buf, dst_buf, payload->domain, oas_vec,
-                             payload->max_req_size, payload->max_nr, payload->priority,
-                             payload->order, payload->kind, args.fence, args.inst);
-          break;
-        default:
-          assert(0);
-        }
-#endif
       }
 
       /*static*/
@@ -3355,66 +3170,45 @@ namespace Realm {
                                XferDesFence* fence,
 			       RegionInstance inst /*= RegionInstance::NO_INST*/)
       {
-#if 0
-        size_t payload_size = sizeof(Payload);// + sizeof(OffsetsAndSize) * oas_vec.size();
-        Payload *payload = (Payload*) malloc(payload_size);
-        payload->dma_request = dma_request;
-        payload->launch_node = launch_node;
-        payload->guid = guid;
-        payload->pre_xd_guid = pre_xd_guid;
-        payload->next_xd_guid = next_xd_guid;
-        payload->mark_started = mark_started;
-        payload->max_req_size = max_req_size;
-        payload->max_nr = max_nr;
-        payload->priority = priority;
-        payload->order = order;
-        payload->kind = kind;
-        //payload->domain = domain;
-        //src_buf.serialize(payload->src_buf_bits);
-        //dst_buf.serialize(payload->dst_buf_bits);
-        //payload->oas_vec_size = oas_vec.size();
-        //for (unsigned i = 0; i < oas_vec.size(); i++)
-        //  payload->oas_vec(i) = oas_vec[i];
-#else
-	Realm::Serialization::DynamicBufferSerializer dbs(128);
-	bool ok = ((dbs << reinterpret_cast<intptr_t>(dma_request)) &&
-		   (dbs << launch_node) &&
-		   (dbs << guid) &&
-		   (dbs << pre_xd_guid) &&
-		   (dbs << next_xd_guid) &&
-		   (dbs << next_max_rw_gap) &&
-		   (dbs << src_ib_offset) &&
-		   (dbs << src_ib_size) &&
-		   (dbs << mark_started) &&
-		   (dbs << max_req_size) &&
-		   (dbs << max_nr) &&
-		   (dbs << priority) &&
-		   (dbs << order) &&
-		   (dbs << kind) &&
-		   (dbs << _src_serdez_id) &&
-		   (dbs << _dst_serdez_id) &&
-		   (dbs << *_src_iter) &&
-		   (dbs << *_dst_iter));
+	ActiveMessage<XferDesCreateMessage> amsg(target, 65536);
+	bool ok = ((amsg << reinterpret_cast<intptr_t>(dma_request)) &&
+		   (amsg << launch_node) &&
+		   (amsg << guid) &&
+		   (amsg << pre_xd_guid) &&
+		   (amsg << next_xd_guid) &&
+		   (amsg << next_max_rw_gap) &&
+		   (amsg << src_ib_offset) &&
+		   (amsg << src_ib_size) &&
+		   (amsg << mark_started) &&
+		   (amsg << max_req_size) &&
+		   (amsg << max_nr) &&
+		   (amsg << priority) &&
+		   (amsg << order) &&
+		   (amsg << kind) &&
+		   (amsg << _src_serdez_id) &&
+		   (amsg << _dst_serdez_id) &&
+		   (amsg << *_src_iter) &&
+		   (amsg << *_dst_iter));
 	assert(ok);
-	
-	size_t payload_size = dbs.bytes_used();
-	void *payload = dbs.detach_buffer(-1 /*no trim*/);
-#endif
-
-        RequestArgs args;
-        args.inst = inst;
-        args.src_mem = _src_mem; //src_buf.memory;
-        args.dst_mem = _dst_mem; //dst_buf.memory;
-        args.fence = fence;
-        Message::request(target, args, payload, payload_size, PAYLOAD_FREE);
+	amsg->inst = inst;
+	amsg->src_mem = _src_mem;
+	amsg->dst_mem = _dst_mem;
+	amsg->fence = fence;
+	amsg.commit();
       }
 
-      /*static*/ void XferDesDestroyMessage::handle_request(RequestArgs args)
+      /*static*/ void XferDesDestroyMessage::handle_message(NodeID sender,
+							    const XferDesDestroyMessage &args,
+							    const void *msgdata,
+							    size_t msglen)
       {
         xferDes_queue->destroy_xferDes(args.guid);
       }
 
-      /*static*/ void UpdateBytesWriteMessage::handle_request(RequestArgs args)
+      /*static*/ void UpdateBytesWriteMessage::handle_message(NodeID sender,
+							      const UpdateBytesWriteMessage &args,
+							      const void *msgdata,
+							      size_t msglen)
       {
         xferDes_queue->update_pre_bytes_write(args.guid,
 					      args.span_start,
@@ -3422,7 +3216,10 @@ namespace Realm {
 					      args.pre_bytes_total);
       }
 
-      /*static*/ void UpdateBytesReadMessage::handle_request(RequestArgs args)
+      /*static*/ void UpdateBytesReadMessage::handle_message(NodeID sender,
+							    const UpdateBytesReadMessage &args,
+							    const void *msgdata,
+							    size_t msglen)
       {
         xferDes_queue->update_next_bytes_read(args.guid,
 					      args.span_start,
@@ -3504,40 +3301,6 @@ namespace Realm {
       }
 
       ChannelManager::~ChannelManager(void) {
-	// these are deleted by runtime now
-#if 0
-        if (memcpy_channel)
-          delete memcpy_channel;
-        if (gasnet_read_channel)
-          delete gasnet_read_channel;
-        if (gasnet_write_channel)
-          delete gasnet_write_channel;
-        if (remote_write_channel)
-          delete remote_write_channel;
-        if (file_read_channel)
-          delete file_read_channel;
-        if (file_write_channel)
-          delete file_write_channel;
-        if (disk_read_channel)
-          delete disk_read_channel;
-        if (disk_write_channel)
-          delete disk_write_channel;
-#ifdef USE_CUDA
-        std::map<Cuda::GPU*, GPUChannel*>::iterator it;
-        for (it = gpu_to_fb_channels.begin(); it != gpu_to_fb_channels.end(); it++) {
-          delete it->second;
-        }
-        for (it = gpu_from_fb_channels.begin(); it != gpu_from_fb_channels.end(); it++) {
-          delete it->second;
-        }
-        for (it = gpu_in_fb_channels.begin(); it != gpu_in_fb_channels.end(); it++) {
-          delete it->second;
-        }
-        for (it = gpu_peer_fb_channels.begin(); it != gpu_peer_fb_channels.end(); it++) {
-          delete it->second;
-        }
-#endif
-#endif
       }
 
       MemcpyChannel* ChannelManager::create_memcpy_channel(long max_nr)
@@ -3769,37 +3532,32 @@ namespace Realm {
 #endif
       }
 
-      class DeferredXDEnqueue : public Realm::EventWaiter {
-      public:
-	DeferredXDEnqueue(XferDesQueue *_xferDes_queue,
-			  XferDes *_xd)
-	  : xferDes_queue(_xferDes_queue), xd(_xd)
-	{}
+      void XferDes::DeferredXDEnqueue::defer(XferDesQueue *_xferDes_queue,
+					     XferDes *_xd, Event wait_on)
+      {
+	xferDes_queue = _xferDes_queue;
+	xd = _xd;
+	Realm::EventImpl::add_waiter(wait_on, this);
+      }
 
-	virtual bool event_triggered(Event e, bool poisoned)
-	{
-	  // TODO: handle poisoning
-	  assert(!poisoned);
-	  log_new_dma.info() << "xd metadata ready: xd=" << xd->guid;
-	  xferDes_queue->enqueue_xferDes_local(xd);
-	  return true; // delete us
-	}
+      void XferDes::DeferredXDEnqueue::event_triggered(bool poisoned)
+      {
+	// TODO: handle poisoning
+	assert(!poisoned);
+	log_new_dma.info() << "xd metadata ready: xd=" << xd->guid;
+	xferDes_queue->enqueue_xferDes_local(xd);
+      }
 
-	virtual void print(std::ostream& os) const
-	{
-	  os << "deferred xd enqueue: xd=" << xd->guid;
-	}
+      void XferDes::DeferredXDEnqueue::print(std::ostream& os) const
+      {
+	os << "deferred xd enqueue: xd=" << xd->guid;
+      }
 
-	virtual Event get_finish_event(void) const
-	{
-	  // TODO: would be nice to provide dma op's finish event here
-	  return Event::NO_EVENT;
-	}
-
-      protected:
-	XferDesQueue *xferDes_queue;
-	XferDes *xd;
-      };
+      Event XferDes::DeferredXDEnqueue::get_finish_event(void) const
+      {
+	// TODO: would be nice to provide dma op's finish event here
+	return Event::NO_EVENT;
+      }
 
       void create_xfer_des(DmaRequest* _dma_request,
                            NodeID _launch_node,
@@ -3823,8 +3581,8 @@ namespace Realm {
                            XferDesFence* _complete_fence,
                            RegionInstance inst)
       {
-	//if (ID(_src_buf.memory).memory.owner_node == my_node_id) {
-	if(_target_node == my_node_id) {
+	//if (ID(_src_buf.memory).memory_owner_node() == Network::my_node_id) {
+	if(_target_node == Network::my_node_id) {
           // size_t total_field_size = 0;
           // for (unsigned i = 0; i < _oas_vec.size(); i++) {
           //   total_field_size += _oas_vec[i].size;
@@ -3947,8 +3705,10 @@ namespace Realm {
 	if(!src_iter_ready.has_triggered() || !dst_iter_ready.has_triggered()) {
 	  Event wait_on = Event::merge_events(src_iter_ready, dst_iter_ready);
 	  log_new_dma.info() << "xd metadata wait: xd=" << _guid << " ready=" << wait_on;
-	  Realm::EventImpl::add_waiter(wait_on, new DeferredXDEnqueue(xferDes_queue,
-								      xd));
+          if (wait_on.exists())
+	    xd->deferred_enqueue.defer(xferDes_queue, xd, wait_on);
+          else
+            xferDes_queue->enqueue_xferDes_local(xd);
 	} else
 	  xferDes_queue->enqueue_xferDes_local(xd);
       } else {
@@ -3977,7 +3737,7 @@ namespace Realm {
     {
       log_new_dma.info("Destroy XferDes: id(" IDFMT ")", _guid);
       NodeID execution_node = _guid >> (XferDesQueue::NODE_BITS + XferDesQueue::INDEX_BITS);
-      if (execution_node == my_node_id) {
+      if (execution_node == Network::my_node_id) {
         xferDes_queue->destroy_xferDes(_guid);
       }
       else {
@@ -3985,6 +3745,13 @@ namespace Realm {
       }
     }
 
+ActiveMessageHandlerReg<NotifyXferDesCompleteMessage> notify_xfer_des_complete_handler;
+ActiveMessageHandlerReg<XferDesRemoteWriteMessage> xfer_des_remote_write_handler;
+ActiveMessageHandlerReg<XferDesRemoteWriteAckMessage> xfer_des_remote_write_ack_handler;
+ActiveMessageHandlerReg<XferDesCreateMessage> xfer_des_create_message_handler;
+ActiveMessageHandlerReg<XferDesDestroyMessage> xfer_des_destroy_message_handler;
+ActiveMessageHandlerReg<UpdateBytesWriteMessage> update_bytes_write_message_handler;
+ActiveMessageHandlerReg<UpdateBytesReadMessage> update_bytes_read_message_handler;
 }; // namespace Realm
 
 

@@ -1,4 +1,4 @@
--- Copyright 2018 Stanford University, NVIDIA Corporation
+-- Copyright 2019 Stanford University, NVIDIA Corporation
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -61,6 +61,8 @@ function parser.annotation_name(p, required)
     return "external"
   elseif p:nextif("__idempotent") then
     return "idempotent"
+  elseif p:nextif("__index_launch") then
+    return "index_launch"
   elseif p:nextif("__inline") then
     return "inline"
   elseif p:nextif("__inner") then
@@ -530,7 +532,7 @@ function parser.expr_prefix(p)
 
   elseif p:nextif("__fields") then
     p:expect("(")
-    local region = p:expr()
+    local region = p:expr_region_root()
     p:expect(")")
     return ast.unspecialized.expr.RawFields {
       region = region,
@@ -540,7 +542,7 @@ function parser.expr_prefix(p)
 
   elseif p:nextif("__physical") then
     p:expect("(")
-    local region = p:expr()
+    local region = p:expr_region_root()
     p:expect(")")
     return ast.unspecialized.expr.RawPhysical {
       region = region,
@@ -572,6 +574,14 @@ function parser.expr_prefix(p)
     p:expect(")")
     return ast.unspecialized.expr.RawValue {
       value = value,
+      annotations = ast.default_annotations(),
+      span = ast.span(start, p),
+    }
+
+  elseif p:nextif("__task") then
+    p:expect("(")
+    p:expect(")")
+    return ast.unspecialized.expr.RawTask {
       annotations = ast.default_annotations(),
       span = ast.span(start, p),
     }
@@ -730,6 +740,11 @@ function parser.expr_prefix(p)
 
   elseif p:nextif("image") then
     p:expect("(")
+    local disjointness = false
+    if p:is_disjointness_kind() then
+       disjointness = p:disjointness_kind()
+       p:expect(",")
+    end
     local parent = p:expr()
     p:expect(",")
     local partition = p:expr()
@@ -737,6 +752,7 @@ function parser.expr_prefix(p)
     local region = p:expr_region_root()
     p:expect(")")
     return ast.unspecialized.expr.Image {
+      disjointness = disjointness,
       parent = parent,
       partition = partition,
       region = region,
@@ -746,6 +762,11 @@ function parser.expr_prefix(p)
 
   elseif p:nextif("preimage") then
     p:expect("(")
+    local disjointness = false
+    if p:is_disjointness_kind() then
+       disjointness = p:disjointness_kind()
+       p:expect(",")
+    end
     local parent = p:expr()
     p:expect(",")
     local partition = p:expr()
@@ -753,9 +774,35 @@ function parser.expr_prefix(p)
     local region = p:expr_region_root()
     p:expect(")")
     return ast.unspecialized.expr.Preimage {
+      disjointness = disjointness,
       parent = parent,
       partition = partition,
       region = region,
+      annotations = ast.default_annotations(),
+      span = ast.span(start, p),
+    }
+
+  elseif p:nextif("restrict") then
+    p:expect("(")
+    local disjointness = false
+    if p:is_disjointness_kind() then
+       disjointness = p:disjointness_kind()
+       p:expect(",")
+    end
+    local region = p:expr()
+    p:expect(",")
+    local transform = p:expr()
+    p:expect(",")
+    local extent = p:expr()
+    p:expect(",")
+    local colors = p:expr()
+    p:expect(")")
+    return ast.unspecialized.expr.PartitionByRestriction {
+      disjointness = disjointness,
+      region = region,
+      transform = transform,
+      extent = extent,
+      colors = colors,
       annotations = ast.default_annotations(),
       span = ast.span(start, p),
     }
@@ -1084,11 +1131,16 @@ function parser.expr_prefix(p)
     local filename = p:expr()
     p:expect(",")
     local mode = p:expr()
+    local field_map = false
+    if p:nextif(",") then
+      field_map = p:expr()
+    end
     p:expect(")")
     return ast.unspecialized.expr.AttachHDF5 {
       region = region,
       filename = filename,
       mode = mode,
+      field_map = field_map,
       annotations = ast.default_annotations(),
       span = ast.span(start, p),
     }
@@ -1124,6 +1176,60 @@ function parser.expr_prefix(p)
     return ast.unspecialized.expr.WithScratchFields {
       region = region,
       field_ids = field_ids,
+      annotations = ast.default_annotations(),
+      span = ast.span(start, p),
+    }
+
+  elseif p:nextif("__import_ispace") then
+    local start = ast.save(p)
+    p:expect("(")
+    local index_type_expr = p:luaexpr()
+    p:expect(",")
+    local value = p:expr()
+    p:expect(")")
+    return ast.unspecialized.expr.ImportIspace {
+      index_type_expr = index_type_expr,
+      value = value,
+      annotations = ast.default_annotations(),
+      span = ast.span(start, p),
+    }
+
+  elseif p:nextif("__import_region") then
+    local start = ast.save(p)
+    p:expect("(")
+    local ispace = p:expr()
+    p:expect(",")
+    local fspace_type_expr = p:luaexpr()
+    p:expect(",")
+    local value = p:expr()
+    p:expect(",")
+    local field_ids = p:expr()
+    p:expect(")")
+    return ast.unspecialized.expr.ImportRegion {
+      ispace = ispace,
+      fspace_type_expr = fspace_type_expr,
+      value = value,
+      field_ids = field_ids,
+      annotations = ast.default_annotations(),
+      span = ast.span(start, p),
+    }
+
+  elseif p:nextif("__import_partition") then
+    local start = ast.save(p)
+    p:expect("(")
+    local disjointness = p:disjointness_kind()
+    p:expect(",")
+    local region = p:expr()
+    p:expect(",")
+    local colors = p:expr()
+    p:expect(",")
+    local value = p:expr()
+    p:expect(")")
+    return ast.unspecialized.expr.ImportPartition {
+      disjointness = disjointness,
+      region = region,
+      colors = colors,
+      value = value,
       annotations = ast.default_annotations(),
       span = ast.span(start, p),
     }
@@ -1236,27 +1342,81 @@ function parser.fnargs(p)
   end
 end
 
+function parser.projection_field(p)
+  local start = ast.save(p)
+  local rename = false
+  local field_name = p:field_names()
+  if p:matches("=") then
+    p:expect("=")
+    rename = field_name
+    field_name = p:field_names()
+  end
+  local fields = false -- sentinel for all fields
+  if p:nextif(".") then
+    fields = p:projection_fields()
+  end
+  return ast.unspecialized.projection.Field {
+    rename = rename,
+    field_name = field_name,
+    fields = fields,
+    span = ast.span(start, p),
+  }
+end
+
+function parser.projection_fields(p)
+  local fields = terralib.newlist()
+  if p:nextif("{") then
+    repeat
+      if p:matches("}") then break end
+      fields:insert(p:projection_field())
+    until not p:sep()
+    p:expect("}")
+  else
+    fields:insert(p:projection_field())
+  end
+  return fields
+end
+
 function parser.expr_primary_continuation(p, expr)
   local start = ast.save(p)
 
   while true do
     if p:nextif(".") then
-      local field_names = terralib.newlist()
-      if p:nextif("{") then
-        repeat
-          if p:matches("}") then break end
+      local field_names = nil
+      if std.config["allow-multi-field-expansion"] then
+        field_names = terralib.newlist()
+        if p:nextif("{") then
+          repeat
+            if p:matches("}") then break end
+            field_names:insert(p:field_names())
+          until not p:sep()
+          p:expect("}")
+        else
           field_names:insert(p:field_names())
-        until not p:sep()
-        p:expect("}")
+        end
+        expr = ast.unspecialized.expr.FieldAccess {
+          value = expr,
+          field_names = field_names,
+          annotations = ast.default_annotations(),
+          span = ast.span(start, p),
+        }
       else
-        field_names:insert(p:field_names())
+        if p:matches("{") then
+          expr = ast.unspecialized.expr.Projection {
+            region = expr,
+            fields = p:projection_fields(),
+            annotations = ast.default_annotations(),
+            span = ast.span(start, p),
+          }
+        else
+          expr = ast.unspecialized.expr.FieldAccess {
+            value = expr,
+            field_names = terralib.newlist({p:field_names()}),
+            annotations = ast.default_annotations(),
+            span = ast.span(start, p),
+          }
+        end
       end
-      expr = ast.unspecialized.expr.FieldAccess {
-        value = expr,
-        field_names = field_names,
-        annotations = ast.default_annotations(),
-        span = ast.span(start, p),
-      }
 
     elseif p:nextif("[") then
       local index = p:expr()
@@ -1365,6 +1525,12 @@ parser.expr_unary = function(precedence)
         annotations = ast.default_annotations(),
         span = ast.span(start, p),
       }
+    elseif op == "&" then
+      return ast.unspecialized.expr.AddressOf {
+        value = rhs,
+        annotations = ast.default_annotations(),
+        span = ast.span(start, p),
+      }
     end
     return ast.unspecialized.expr.Unary {
       op = op,
@@ -1390,6 +1556,7 @@ end
 
 parser.expr = parsing.Pratt()
   :prefix("@", parser.expr_unary(50))
+  :prefix("&", parser.expr_unary(50))
   :prefix("-", parser.expr_unary(50))
   :prefix("not", parser.expr_unary(50))
   :infix("*", 40, parser.expr_binary_left)

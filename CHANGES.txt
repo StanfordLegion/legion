@@ -1,6 +1,124 @@
 This file lists the major changes as they appear in the stable branch.  No
 attempt is made to keep this list accurate for the master branch.
 
+Version ??.??.? (?? ??, ????)
+  * Regent
+    - __demand(__index_launch) has been added as an alternative to
+        __demand(__parallel) on for loops that avoids confusion with the
+        auto-parallelizer. __demand(__parallel) on for loops is deprecated and
+        now issues an error; this error can be temporarily downgraded to a
+        warning via the flag -fallow-loop-demand-parallel 1. In a future
+        release the error will become permanent. For details, see:
+        https://github.com/StanfordLegion/legion/issues/520
+    - Substantially improved the generality of the index launch
+      optimization. Task arguments of the form p[i+k] may now be used,
+      where k is a variable defined outside of the loop.
+
+Version 19.09.0 (September 9, 2019)
+  * Regent
+    - __demand(__index_launch) has been added as an alternative to
+        __demand(__parallel) on for loops that avoids confusion with the
+        auto-parallelizer. __demand(__parallel) on for loops is deprecated and
+        now issues a warning; in a future release this warning will be
+        upgraded to an error. For details, see:
+        https://github.com/StanfordLegion/legion/issues/520
+    - Multi-field expasion is deprecated and now issues an error. The error
+        can be temporarily downgraded to a warning, but it is advised that
+        users migrate codes away from this syntax as it will become a hard
+        error in a future release. For details, see:
+        https://github.com/StanfordLegion/legion/issues/501
+  * Legion
+    - Support for a built-in collection of reduction operators including
+        sum, product, max, and min over a variety of types for CPUs and GPUs
+  * Realm
+    - assorted bug, performance, and memory leak fixes
+    - fills to attached HDF5 instances are orders of magnitude faster
+    - support for reusing HDF5 file handles with `-hdf5:openfiles` option
+    - control which rank opens an HDF5 file with a `rank=nnn:` filename prefix
+  * Build System
+    - Makefile-based flow attempts to detect CUDA location and GASNet conduit
+        if they are not specified
+    - Makefile-based flow defaults to building CUDA fat binaries, but can still
+        be overridden with the `GPU_ARCH` setting, which now accepts SM arch
+	numbers (e.g. "70") as well as names (e.g. "volta")
+
+Version 19.06.0 (June 27, 2019)
+  * Legion
+    - All tools (Legion Prof, Legion Spy, etc.) now support Python 2 and 3
+    - The flag -lg:warn_backtrace prints a backtrace on each warning
+        to allow easier pinpointing of problematic code
+  * Realm
+    - Support for building against debug versions of GASNet
+    - Significantly reduced runtime overhead for small Realm tasks
+    - External HDF5 instances work with datasets in groups
+    - Scheduler locking allows spin-waiting for non-reentrant
+        operations (e.g. Python module imports)
+    - Memory size (e.g. "-ll:csize") arguments accept k/m/g/t
+        size suffixes
+    - Better error messages when Realm memory sizes are too large
+  * Regent
+    - The image, preimage and restrict partitioning operators now
+        accept an optional disjoint or aliased keyword to specify the
+        disjointness of the resulting partition
+    - The address of operator (&) is now supported
+    - Support for explicit field maps for HDF5
+  * Legion Prof
+    - Menu option to select a subset of the profile information
+        for viewing
+    - Grouping of memory channels, utilization and additional details
+        such as source and destination nodes/processors associated with
+        the channels
+    - Physical instances contain additional information about the regions
+        they belong to
+  * Python
+    - Support for partitioning operators equal and restriction
+    - Support for bool and complex types
+    - Support for must epoch launches
+    - Support for returning a future out of a fence
+    - Fixes for macOS
+
+Version 19.04.0 (April 30, 2019)
+  * Legion
+    - Support for dimensions > 3. Set MAX_DIM at build time
+        (or -DLegion_MAX_DIM in CMake) to build with any number of
+        dimensions up to 9.
+    - Change VariantID to 32 bits to match AUTO_GENERATE_ID
+    - Improved mapper interfaces for instance allocation and 
+      failed instance allocation due to layout constraint conflicts
+  * Regent
+    - Support for index fills
+    - Support for disabling structure-slicing on structs by setting
+        __no_field_slicing on the struc type
+    - Substantial improvements to the auto-parallelizer, CUDA and
+      OpenMP code generators
+    - Substantial improvements in compile time for tasks with large
+      numbers of fields
+    - Build fixes for macOS
+    - setup_env.py now works on macOS
+  * Realm
+    - support for #pragma omp single sections in OpenMP processors
+    - Realm IDs uses explicit bit packing instead of fragile C bit fields
+    - numerous fixes for create_equal_subspace deppart operations
+    - Support for CUDA 10
+  * Legion Prof
+    - Added support for recording GPU processor times
+
+
+Version 18.12.0 (December 27, 2018)
+  * Realm
+    - More assorted bug fixes
+    - Minor performance improvements in logging and accessor code
+    - Handle signals on an alternate stack for better debugging/backtraces
+  * Regent
+    - Added a new built-in complex type
+    - Experimental support for building with PUC Lua
+    - Multiple fixes to CUDA code generation, vectorization,
+        auto-parallelization, and mapping optimization
+    - Better error messages for __demand(__leaf) and so on
+  * Python
+    - Use PyGILState for threading for compatibility with modules (e.g. numpy)
+    - Support for calling tasks written in Regent
+
 Version 18.09.0 (September 19, 2018)
   * Legion
     - Support for physical tracing, which can provide up to 7x improvement in

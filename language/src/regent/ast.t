@@ -1,4 +1,4 @@
--- Copyright 2018 Stanford University, NVIDIA Corporation
+-- Copyright 2019 Stanford University, NVIDIA Corporation
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -105,9 +105,10 @@ ast.annotation:leaf("Forbid", {"value"}, true)
 ast.annotation:leaf("Unroll", {"value"}, true)
 
 -- Annotation: Sets
-ast.annotation:leaf("Set", {"cuda", "external", "idempotent", "inline",
-                            "inner", "leaf", "openmp", "optimize", "parallel", 
-                            "replicable", "spmd", "trace", "vectorize"},
+ast.annotation:leaf("Set", {"cuda", "external", "idempotent", "index_launch",
+                            "inline", "inner", "leaf", "openmp", "optimize",
+                            "parallel", "replicable", "spmd", "trace",
+                            "vectorize"},
                     false, true)
 
 function ast.default_annotations()
@@ -116,6 +117,7 @@ function ast.default_annotations()
     cuda = allow,
     external = allow,
     idempotent = allow,
+    index_launch = allow,
     inline = allow,
     inner = allow,
     leaf = allow,
@@ -192,6 +194,7 @@ ast:inner("layout")
 ast.layout:leaf("Dim", {"index"}):set_memoize()
 ast.layout:leaf("Field", {"region_name", "field_paths"})
 ast.layout:leaf("Ordering", {"dimensions"})
+ast.layout:leaf("Colocation", {"fields"})
 
 -- Node Types (Unspecialized)
 
@@ -203,6 +206,9 @@ ast.unspecialized:inner("region")
 ast.unspecialized.region:leaf("Bare", {"region_name"})
 ast.unspecialized.region:leaf("Root", {"region_name", "fields"})
 ast.unspecialized.region:leaf("Field", {"field_name", "fields"})
+
+ast.unspecialized:inner("projection")
+ast.unspecialized.projection:leaf("Field", {"rename", "field_name", "fields"})
 
 ast.unspecialized:leaf("Constraint", {"lhs", "op", "rhs"})
 
@@ -228,10 +234,12 @@ ast.unspecialized.expr:leaf("Ctor", {"fields"})
 ast.unspecialized.expr:leaf("CtorListField", {"value"})
 ast.unspecialized.expr:leaf("CtorRecField", {"name_expr", "value"})
 ast.unspecialized.expr:leaf("Constant", {"value", "expr_type"})
+ast.unspecialized.expr:leaf("Global", {"value", "expr_type"})
 ast.unspecialized.expr:leaf("RawContext")
 ast.unspecialized.expr:leaf("RawFields", {"region"})
 ast.unspecialized.expr:leaf("RawPhysical", {"region"})
 ast.unspecialized.expr:leaf("RawRuntime")
+ast.unspecialized.expr:leaf("RawTask")
 ast.unspecialized.expr:leaf("RawValue", {"value"})
 ast.unspecialized.expr:leaf("Isnull", {"pointer"})
 ast.unspecialized.expr:leaf("New", {"pointer_type_expr", "extent"})
@@ -245,8 +253,9 @@ ast.unspecialized.expr:leaf("Partition", {"disjointness", "region", "coloring",
                                           "colors"})
 ast.unspecialized.expr:leaf("PartitionEqual", {"region", "colors"})
 ast.unspecialized.expr:leaf("PartitionByField", {"region", "colors"})
-ast.unspecialized.expr:leaf("Image", {"parent", "partition", "region"})
-ast.unspecialized.expr:leaf("Preimage", {"parent", "partition", "region"})
+ast.unspecialized.expr:leaf("PartitionByRestriction", {"disjointness", "region", "transform", "extent", "colors"})
+ast.unspecialized.expr:leaf("Image", {"disjointness", "parent", "partition", "region"})
+ast.unspecialized.expr:leaf("Preimage", {"disjointness", "parent", "partition", "region"})
 ast.unspecialized.expr:leaf("CrossProduct", {"args"})
 ast.unspecialized.expr:leaf("CrossProductArray", {"lhs", "disjointness", "colorings"})
 ast.unspecialized.expr:leaf("ListSlicePartition", {"partition", "indices"})
@@ -269,7 +278,7 @@ ast.unspecialized.expr:leaf("Copy", {"src", "dst", "op", "conditions"})
 ast.unspecialized.expr:leaf("Fill", {"dst", "value", "conditions"})
 ast.unspecialized.expr:leaf("Acquire", {"region", "conditions"})
 ast.unspecialized.expr:leaf("Release", {"region", "conditions"})
-ast.unspecialized.expr:leaf("AttachHDF5", {"region", "filename", "mode"})
+ast.unspecialized.expr:leaf("AttachHDF5", {"region", "filename", "mode", "field_map"})
 ast.unspecialized.expr:leaf("DetachHDF5", {"region"})
 ast.unspecialized.expr:leaf("AllocateScratchFields", {"region"})
 ast.unspecialized.expr:leaf("WithScratchFields", {"region", "field_ids"})
@@ -278,6 +287,11 @@ ast.unspecialized.expr:leaf("Condition", {"conditions", "values"})
 ast.unspecialized.expr:leaf("Unary", {"op", "rhs"})
 ast.unspecialized.expr:leaf("Binary", {"op", "lhs", "rhs"})
 ast.unspecialized.expr:leaf("Deref", {"value"})
+ast.unspecialized.expr:leaf("AddressOf", {"value"})
+ast.unspecialized.expr:leaf("ImportIspace", {"index_type_expr", "value"})
+ast.unspecialized.expr:leaf("ImportRegion", {"ispace", "fspace_type_expr", "value", "field_ids"})
+ast.unspecialized.expr:leaf("ImportPartition", {"disjointness", "region", "colors", "value"})
+ast.unspecialized.expr:leaf("Projection", {"region", "fields"})
 
 ast.unspecialized:leaf("Block", {"stats"})
 
@@ -325,6 +339,9 @@ ast.specialized.region:leaf("Bare", {"symbol"})
 ast.specialized.region:leaf("Root", {"symbol", "fields"})
 ast.specialized.region:leaf("Field", {"field_name", "fields"})
 
+ast.specialized:inner("projection")
+ast.specialized.projection:leaf("Field", {"rename", "field_name", "fields"})
+
 ast.specialized:leaf("Constraint", {"lhs", "op", "rhs"})
 
 ast.specialized:leaf("Privilege", {"privileges", "regions"})
@@ -347,10 +364,12 @@ ast.specialized.expr:leaf("Ctor", {"fields", "named"})
 ast.specialized.expr:leaf("CtorListField", {"value"})
 ast.specialized.expr:leaf("CtorRecField", {"name", "value"})
 ast.specialized.expr:leaf("Constant", {"value", "expr_type"})
+ast.specialized.expr:leaf("Global", {"value", "expr_type"})
 ast.specialized.expr:leaf("RawContext")
 ast.specialized.expr:leaf("RawFields", {"region"})
 ast.specialized.expr:leaf("RawPhysical", {"region"})
 ast.specialized.expr:leaf("RawRuntime")
+ast.specialized.expr:leaf("RawTask")
 ast.specialized.expr:leaf("RawValue", {"value"})
 ast.specialized.expr:leaf("Isnull", {"pointer"})
 ast.specialized.expr:leaf("New", {"pointer_type", "region", "extent"})
@@ -364,8 +383,9 @@ ast.specialized.expr:leaf("Partition", {"disjointness", "region", "coloring",
                                         "colors"})
 ast.specialized.expr:leaf("PartitionEqual", {"region", "colors"})
 ast.specialized.expr:leaf("PartitionByField", {"region", "colors"})
-ast.specialized.expr:leaf("Image", {"parent", "partition", "region"})
-ast.specialized.expr:leaf("Preimage", {"parent", "partition", "region"})
+ast.specialized.expr:leaf("PartitionByRestriction", {"disjointness", "region", "transform", "extent", "colors"})
+ast.specialized.expr:leaf("Image", {"disjointness", "parent", "partition", "region"})
+ast.specialized.expr:leaf("Preimage", {"disjointness", "parent", "partition", "region"})
 ast.specialized.expr:leaf("CrossProduct", {"args"})
 ast.specialized.expr:leaf("CrossProductArray", {"lhs", "disjointness", "colorings"})
 ast.specialized.expr:leaf("ListSlicePartition", {"partition", "indices"})
@@ -388,7 +408,7 @@ ast.specialized.expr:leaf("Copy", {"src", "dst", "op", "conditions"})
 ast.specialized.expr:leaf("Fill", {"dst", "value", "conditions"})
 ast.specialized.expr:leaf("Acquire", {"region", "conditions"})
 ast.specialized.expr:leaf("Release", {"region", "conditions"})
-ast.specialized.expr:leaf("AttachHDF5", {"region", "filename", "mode"})
+ast.specialized.expr:leaf("AttachHDF5", {"region", "filename", "mode", "field_map"})
 ast.specialized.expr:leaf("DetachHDF5", {"region"})
 ast.specialized.expr:leaf("AllocateScratchFields", {"region"})
 ast.specialized.expr:leaf("WithScratchFields", {"region", "field_ids"})
@@ -398,7 +418,12 @@ ast.specialized.expr:leaf("Function", {"value"})
 ast.specialized.expr:leaf("Unary", {"op", "rhs"})
 ast.specialized.expr:leaf("Binary", {"op", "lhs", "rhs"})
 ast.specialized.expr:leaf("Deref", {"value"})
+ast.specialized.expr:leaf("AddressOf", {"value"})
 ast.specialized.expr:leaf("LuaTable", {"value"})
+ast.specialized.expr:leaf("ImportIspace", {"index_type", "value"})
+ast.specialized.expr:leaf("ImportRegion", {"ispace", "fspace_type", "value", "field_ids"})
+ast.specialized.expr:leaf("ImportPartition", {"disjointness", "region", "colors", "value"})
+ast.specialized.expr:leaf("Projection", {"region", "fields"})
 
 ast.specialized:leaf("Block", {"stats"})
 
@@ -455,6 +480,7 @@ ast.typed.expr:leaf("RawContext")
 ast.typed.expr:leaf("RawFields", {"region", "fields"})
 ast.typed.expr:leaf("RawPhysical", {"region", "fields"})
 ast.typed.expr:leaf("RawRuntime")
+ast.typed.expr:leaf("RawTask")
 ast.typed.expr:leaf("RawValue", {"value"})
 ast.typed.expr:leaf("Isnull", {"pointer"})
 ast.typed.expr:leaf("Null", {"pointer_type"})
@@ -467,9 +493,10 @@ ast.typed.expr:leaf("Partition", {"disjointness", "region", "coloring",
                                   "colors"})
 ast.typed.expr:leaf("PartitionEqual", {"region", "colors"})
 ast.typed.expr:leaf("PartitionByField", {"region", "colors"})
-ast.typed.expr:leaf("Image", {"parent", "partition", "region"})
+ast.typed.expr:leaf("PartitionByRestriction", {"disjointness", "region", "transform", "extent", "colors"})
+ast.typed.expr:leaf("Image", {"disjointness", "parent", "partition", "region"})
 ast.typed.expr:leaf("ImageByTask", {"parent", "partition", "task"})
-ast.typed.expr:leaf("Preimage", {"parent", "partition", "region"})
+ast.typed.expr:leaf("Preimage", {"disjointness", "parent", "partition", "region"})
 ast.typed.expr:leaf("CrossProduct", {"args"})
 ast.typed.expr:leaf("CrossProductArray", {"lhs", "disjointness", "colorings"})
 ast.typed.expr:leaf("ListSlicePartition", {"partition", "indices"})
@@ -493,20 +520,26 @@ ast.typed.expr:leaf("Copy", {"src", "dst", "op", "conditions"})
 ast.typed.expr:leaf("Fill", {"dst", "value", "conditions"})
 ast.typed.expr:leaf("Acquire", {"region", "conditions"})
 ast.typed.expr:leaf("Release", {"region", "conditions"})
-ast.typed.expr:leaf("AttachHDF5", {"region", "filename", "mode"})
+ast.typed.expr:leaf("AttachHDF5", {"region", "filename", "mode", "field_map"})
 ast.typed.expr:leaf("DetachHDF5", {"region"})
 ast.typed.expr:leaf("AllocateScratchFields", {"region"})
 ast.typed.expr:leaf("WithScratchFields", {"region", "field_ids"})
 ast.typed.expr:leaf("RegionRoot", {"region", "fields"})
 ast.typed.expr:leaf("Condition", {"conditions", "value"})
 ast.typed.expr:leaf("Constant", {"value"})
+ast.typed.expr:leaf("Global", {"value"})
 ast.typed.expr:leaf("Function", {"value"})
 ast.typed.expr:leaf("Unary", {"op", "rhs"})
 ast.typed.expr:leaf("Binary", {"op", "lhs", "rhs"})
 ast.typed.expr:leaf("Deref", {"value"})
+ast.typed.expr:leaf("AddressOf", {"value"})
 ast.typed.expr:leaf("Future", {"value"})
 ast.typed.expr:leaf("FutureGetResult", {"value"})
 ast.typed.expr:leaf("ParallelizerConstraint", {"lhs", "op", "rhs"})
+ast.typed.expr:leaf("ImportIspace", {"value"})
+ast.typed.expr:leaf("ImportRegion", {"ispace", "value", "field_ids"})
+ast.typed.expr:leaf("ImportPartition", {"region", "colors", "value"})
+ast.typed.expr:leaf("Projection", {"region", "field_mapping"})
 
 ast.typed:leaf("Block", {"stats"})
 
@@ -515,28 +548,28 @@ ast.typed.stat:leaf("Internal", {"actions"}) -- internal use only
 ast.typed.stat:leaf("If", {"cond", "then_block", "elseif_blocks", "else_block"})
 ast.typed.stat:leaf("Elseif", {"cond", "block"})
 ast.typed.stat:leaf("While", {"cond", "block"})
-ast.typed.stat:leaf("ForNum", {"symbol", "values", "block"})
+ast.typed.stat:leaf("ForNum", {"symbol", "values", "block", "metadata"})
 ast.typed.stat:leaf("ForNumVectorized", {"symbol", "values", "block",
-                                         "orig_block", "vector_width"})
-ast.typed.stat:leaf("ForList", {"symbol", "value", "block"})
+                                         "orig_block", "orig_metadata", "vector_width"})
+ast.typed.stat:leaf("ForList", {"symbol", "value", "block", "metadata"})
 ast.typed.stat:leaf("ForListVectorized", {"symbol", "value", "block",
-                                          "orig_block", "vector_width"})
+                                          "orig_block", "orig_metadata", "vector_width"})
 ast.typed.stat:leaf("Repeat", {"block", "until_cond"})
 ast.typed.stat:leaf("MustEpoch", {"block"})
 ast.typed.stat:leaf("Block", {"block"})
 ast.typed.stat:leaf("IndexLaunchNum", {"symbol", "values", "preamble", "call",
                                        "reduce_lhs", "reduce_op",
-                                       "args_provably"})
+                                       "args_provably", "free_vars", "loop_vars"})
 ast.typed.stat:leaf("IndexLaunchList", {"symbol", "value", "preamble", "call",
                                         "reduce_lhs", "reduce_op",
-                                        "args_provably"})
+                                        "args_provably", "free_vars", "loop_vars"})
 ast:leaf("IndexLaunchArgsProvably", {"invariant", "projectable"})
 ast.typed.stat:leaf("Var", {"symbol", "type", "value"})
 ast.typed.stat:leaf("VarUnpack", {"symbols", "fields", "field_types", "value"})
 ast.typed.stat:leaf("Return", {"value"})
 ast.typed.stat:leaf("Break")
-ast.typed.stat:leaf("Assignment", {"lhs", "rhs"})
-ast.typed.stat:leaf("Reduce", {"op", "lhs", "rhs"})
+ast.typed.stat:leaf("Assignment", {"lhs", "rhs", "metadata"})
+ast.typed.stat:leaf("Reduce", {"op", "lhs", "rhs", "metadata"})
 ast.typed.stat:leaf("Expr", {"expr"})
 ast.typed.stat:leaf("RawDelete", {"value"})
 ast.typed.stat:leaf("Fence", {"kind", "blocking"})
@@ -554,7 +587,14 @@ ast.typed.top:leaf("Fspace", {"name", "fspace"})
 ast.typed.top:leaf("Task", {"name", "params", "return_type", "privileges",
                              "coherence_modes", "flags", "conditions",
                              "constraints", "body", "config_options",
-                             "region_divergence", "prototype"})
+                             "region_divergence", "metadata", "prototype"})
 ast.typed.top:leaf("TaskParam", {"symbol", "param_type", "future"})
+
+-- Metadata for Parallel Code Generation
+
+ast:inner("metadata")
+ast.metadata:leaf("Task", {"reduction", "op"})
+ast.metadata:leaf("Loop", {"parallelizable", "reductions"})
+ast.metadata:leaf("Stat", {"atomic", "scalar"})
 
 return ast

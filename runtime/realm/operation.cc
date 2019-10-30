@@ -1,4 +1,4 @@
-/* Copyright 2018 Stanford University, NVIDIA Corporation
+/* Copyright 2019 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -48,7 +48,8 @@ namespace Realm {
     case Status::WAITING:
       {
 	// normal behavior
-	timeline.record_ready_time();
+	if(wants_timeline)
+	  timeline.record_ready_time();
 	return true;
       }
 
@@ -76,7 +77,8 @@ namespace Realm {
     case Status::READY:
       {
 	// normal behavior
-	timeline.record_start_time();
+	if(wants_timeline)
+	  timeline.record_start_time();
 	return true;
       }
 
@@ -96,7 +98,8 @@ namespace Realm {
 
   void Operation::mark_finished(bool successful)
   {
-    timeline.record_end_time();
+    if(wants_timeline)
+      timeline.record_end_time();
 
     // update this count first
     if(!successful)
@@ -130,7 +133,8 @@ namespace Realm {
       // don't update error_code/details - that was already provided in the interrupt request
     }
 
-    timeline.record_complete_time();
+    if(wants_timeline)
+      timeline.record_complete_time();
 
     __sync_fetch_and_add(&failed_work_items, 1);
 
@@ -165,8 +169,10 @@ namespace Realm {
 	   (prev == Status::TERMINATED_EARLY) ||
 	   (prev == Status::CANCELLED));
 
-    timeline.record_complete_time();
-
+    if(wants_timeline) {
+      timeline.record_complete_time();
+      timeline_gpu.record_end_time();
+    }
     send_profiling_data();
 
     // trigger the finish event last - the OperationTable will delete us shortly after we do
@@ -229,11 +235,18 @@ namespace Realm {
       if(measurements.wants_measurement<ProfilingMeasurements::OperationStatus>())
 	measurements.add_measurement(status);
 
+      if(measurements.wants_measurement<ProfilingMeasurements::OperationAbnormalStatus>() &&
+	 (status.result != ProfilingMeasurements::OperationStatus::COMPLETED_SUCCESSFULLY))
+	measurements.add_measurement(reinterpret_cast<ProfilingMeasurements::OperationAbnormalStatus&>(status));
+
       if(measurements.wants_measurement<ProfilingMeasurements::OperationTimeline>())
 	measurements.add_measurement(timeline);
 
       if(measurements.wants_measurement<ProfilingMeasurements::OperationEventWaits>())
 	measurements.add_measurement(waits);
+
+      if (measurements.wants_measurement<ProfilingMeasurements::OperationTimelineGPU>())
+	measurements.add_measurement(timeline_gpu);
 
       measurements.send_responses(requests);
     }
@@ -241,8 +254,8 @@ namespace Realm {
 
   void Operation::trigger_finish_event(bool poisoned)
   {
-    if(finish_event.exists())
-      GenEventImpl::trigger(finish_event, poisoned);
+    if(finish_event)
+      finish_event->trigger(finish_gen, Network::my_node_id, poisoned);
 #ifndef REALM_USE_OPERATION_TABLE
     // no operation table to decrement the refcount, so do it ourselves
     // SJT: should this always be done for operations without finish events?
@@ -259,7 +272,11 @@ namespace Realm {
   void Operation::reconstruct_measurements()
   {
     measurements.import_requests(requests);
-    timeline.record_create_time();
+    wants_timeline = (measurements.wants_measurement<ProfilingMeasurements::OperationTimeline>() ||
+		      measurements.wants_measurement<ProfilingMeasurements::OperationTimelineGPU>());
+    wants_event_waits = measurements.wants_measurement<ProfilingMeasurements::OperationEventWaits>();
+    if(wants_timeline)
+      timeline.record_create_time();
   }
 
   std::ostream& operator<<(std::ostream& os, const Operation *op)
@@ -297,6 +314,23 @@ namespace Realm {
   {}
 #endif
 
+  void OperationTable::TableEntry::event_triggered(bool poisoned)
+  {
+    table->event_triggered(finish_event);
+  }
+
+  void OperationTable::TableEntry::print(std::ostream& os) const
+  {
+    os << "operation table entry (table=" << table << ")";
+  }
+
+  Event OperationTable::TableEntry::get_finish_event(void) const
+  {
+    return finish_event;
+  }
+
+
+#if 0
   ////////////////////////////////////////////////////////////////////////
   //
   // class OperationTable::TableCleaner
@@ -321,6 +355,7 @@ namespace Realm {
   {
     return Event::NO_EVENT;
   }
+#endif
 
 
   ////////////////////////////////////////////////////////////////////////
@@ -330,7 +365,9 @@ namespace Realm {
 
   OperationTable::OperationTable(void)
 #ifdef REALM_USE_OPERATION_TABLE
+#if 0
     : cleaner(this)
+#endif
 #endif
   {}
 
@@ -347,14 +384,15 @@ namespace Realm {
 
     // "hash" the id to figure out which subtable to use
     int subtable = finish_event.id % NUM_TABLES;
-    GASNetHSL& mutex = mutexes[subtable];
+    Mutex& mutex = mutexes[subtable];
     Table& table = tables[subtable];
 
     bool cancel_immediately = false;
     void *reason_data = 0;
     size_t reason_size = 0;
+    TableEntry *entry = 0;
     {
-      AutoHSLLock al(mutex);
+      AutoLock<> al(mutex);
 
       // see if we have any info for this event?
       Table::iterator it = table.find(finish_event);
@@ -366,16 +404,22 @@ namespace Realm {
 	e.pending_cancellation = false;
 	e.reason_data = 0;
 	e.reason_size = 0;
+	e.table = this;
+	e.finish_event = finish_event;
+	entry = &e;
       } else {
 	// existing entry should only occur if there's a pending cancellation
 	TableEntry& e = it->second;
 	assert(e.local_op == 0);
 	assert(e.remote_node == -1);
 	assert(e.pending_cancellation);
+	assert(e.table == this);
+	assert(e.finish_event == finish_event);
 
 	// put the operation in the table in case anybody else comes along while we're trying to
 	//  cancel it - add a reference since we're keeping one
 	e.local_op = local_op;
+	entry = &e;
 	local_op->add_reference();
 	cancel_immediately = true;
 	reason_data = e.reason_data;
@@ -385,7 +429,7 @@ namespace Realm {
 
     // either way there's an entry in the table for this now, so make sure our cleaner knows
     //  to clean it up
-    EventImpl::add_waiter(finish_event, &cleaner);
+    EventImpl::add_waiter(finish_event, entry/*&cleaner*/);
 
     // and finally, perform a delayed cancellation if requested
     if(cancel_immediately) {
@@ -406,11 +450,12 @@ namespace Realm {
 
     // "hash" the id to figure out which subtable to use
     int subtable = finish_event.id % NUM_TABLES;
-    GASNetHSL& mutex = mutexes[subtable];
+    Mutex& mutex = mutexes[subtable];
     Table& table = tables[subtable];
+    TableEntry *entry = 0;
 
     {
-      AutoHSLLock al(mutex);
+      AutoLock<> al(mutex);
 
       // no duplicates allowed here - a local cancellation request cannot occur until we
       //  return
@@ -422,10 +467,13 @@ namespace Realm {
       e.pending_cancellation = false;
       e.reason_data = 0;
       e.reason_size = 0;
+      e.table = this;
+      e.finish_event = finish_event;
+      entry = &e;
     }
 
     // we can remove this entry once we know the operation is complete
-    EventImpl::add_waiter(finish_event, &cleaner);
+    EventImpl::add_waiter(finish_event, entry/*&cleaner*/);
 #endif
   }
 
@@ -434,12 +482,12 @@ namespace Realm {
 #ifdef REALM_USE_OPERATION_TABLE
     // "hash" the id to figure out which subtable to use
     int subtable = finish_event.id % NUM_TABLES;
-    GASNetHSL& mutex = mutexes[subtable];
+    Mutex& mutex = mutexes[subtable];
     Table& table = tables[subtable];
 
     Operation *local_op = 0;
     {
-      AutoHSLLock al(mutex);
+      AutoLock<> al(mutex);
 
       // get the entry - it must exist
       Table::iterator it = table.find(finish_event);
@@ -466,14 +514,14 @@ namespace Realm {
 #ifdef REALM_USE_OPERATION_TABLE
     // "hash" the id to figure out which subtable to use
     int subtable = finish_event.id % NUM_TABLES;
-    GASNetHSL& mutex = mutexes[subtable];
+    Mutex& mutex = mutexes[subtable];
     Table& table = tables[subtable];
 
     bool found = false;
     Operation *local_op = 0;
     int remote_node = -1;
     {
-      AutoHSLLock al(mutex);
+      AutoLock<> al(mutex);
 
       Table::iterator it = table.find(finish_event);
 
@@ -493,9 +541,9 @@ namespace Realm {
 
     if(!found) {
       // not found - who owns this event?
-      int owner = ID(finish_event).event.creator_node;
+      int owner = ID(finish_event).event_creator_node();
 
-      if(owner == my_node_id) {
+      if(owner == Network::my_node_id) {
 	// if we're the owner, it's probably for an event that already completed successfully,
 	//  so ignore the request
 	log_optable.info() << "event " << finish_event << " cancellation ignored - not in table";
@@ -506,8 +554,11 @@ namespace Realm {
     }
 
     if(remote_node != -1) {
-      // TODO: active message
-      assert(false);
+      log_optable.info() << "event " << finish_event << " - requesting remote cancellation on node " << remote_node;
+      ActiveMessage<CancelOperationMessage> amsg(remote_node, reason_size);
+      amsg->finish_event = finish_event;
+      amsg << ByteArrayRef(reason_data, reason_size);
+      amsg.commit();
     }
 
     if(local_op) {
@@ -526,14 +577,14 @@ namespace Realm {
 #ifdef REALM_USE_OPERATION_TABLE
     // "hash" the id to figure out which subtable to use
     int subtable = finish_event.id % NUM_TABLES;
-    GASNetHSL& mutex = mutexes[subtable];
+    Mutex& mutex = mutexes[subtable];
     Table& table = tables[subtable];
 
     bool found = false;
     Operation *local_op = 0;
     int remote_node = -1;
     {
-      AutoHSLLock al(mutex);
+      AutoLock<> al(mutex);
 
       Table::iterator it = table.find(finish_event);
 
@@ -552,9 +603,9 @@ namespace Realm {
 
     if(!found) {
       // not found - who owns this event?
-      int owner = ID(finish_event).event.creator_node;
+      int owner = ID(finish_event).event_creator_node();
 
-      if(owner == my_node_id) {
+      if(owner == Network::my_node_id) {
 	// if we're the owner, it's probably for an event that already completed successfully,
 	//  so ignore the request
 	log_optable.info() << "event " << finish_event << " priority change ignored - not in table";
@@ -586,15 +637,15 @@ namespace Realm {
   void OperationTable::print_operations(std::ostream& os)
   {
 #ifdef REALM_USE_OPERATION_TABLE
-    os << "OperationTable(node=" << my_node_id << ") {\n";
+    os << "OperationTable(node=" << Network::my_node_id << ") {\n";
 
     for(int subtable = 0; subtable < NUM_TABLES; subtable++) {
-      GASNetHSL& mutex = mutexes[subtable];
+      Mutex& mutex = mutexes[subtable];
       Table& table = tables[subtable];
 
       // taking the lock on the subtable also guarantees that none of the
       //  operations in the subtable will be deleted during our iteration
-      AutoHSLLock al(mutex);
+      AutoLock<> al(mutex);
 
       for(Table::const_iterator it = table.begin();
 	  it != table.end();
@@ -610,6 +661,80 @@ namespace Realm {
     os << "}\n";
 #endif
   }
+
+  void OperationTable::shutdown_check(void)
+  {
+#ifdef REALM_USE_OPERATION_TABLE
+    std::vector<Event> remote_completions;
+    int errors = 0;
+
+    for(int subtable = 0; subtable < NUM_TABLES; subtable++) {
+      Mutex& mutex = mutexes[subtable];
+      Table& table = tables[subtable];
+
+      // taking the lock on the subtable also guarantees that none of the
+      //  operations in the subtable will be deleted during our iteration
+      AutoLock<> al(mutex);
+
+      if(!table.empty())
+	for(Table::const_iterator it = table.begin();
+	    it != table.end();
+	    ++it) {
+	  // tolerate races between shutdown and table cleaners - this is
+	  //  safe because we won't destroy the operation table until all the
+	  //  threads running cleaners are stopped
+	  if(it->second.finish_event.has_triggered()) continue;
+
+	  if(it->second.local_op) {
+	    log_optable.error() << "operation pending during shutdown: "
+				<< it->first << " = " << it->second.local_op;
+	    errors++;
+	  } else {
+	    log_optable.info() << "awaiting remote op completion during shutdown: node=" << it->second.remote_node << " event=" << it->second.finish_event;
+	    remote_completions.push_back(it->second.finish_event);
+	  }
+	}
+    }
+
+    if(errors > 0) {
+      log_optable.fatal() << "shutdown with " << errors << " operations pending - aborting";
+      abort();
+    }
+
+    if(!remote_completions.empty()) {
+      long long deadline = (Clock::current_time_in_nanoseconds() +
+			    5000000000LL); // 5 seconds before we assume a hang
+      for(std::vector<Event>::const_iterator it = remote_completions.begin();
+	  it != remote_completions.end();
+	  ++it) {
+	bool poison_dontcare = false;
+	long long max_ns = (deadline - Clock::current_time_in_nanoseconds());
+	bool ok = (*it).external_timedwait_faultaware(poison_dontcare, max_ns);
+	if(!ok) {
+	  log_optable.fatal() << "remote completion timeout: event=" << *it;
+	  abort();
+	}
+      }
+    }
+#endif
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // struct CancelOperationMessage
+  //
+
+  /*static*/ void CancelOperationMessage::handle_message(NodeID sender,
+							 const CancelOperationMessage &args,
+							 const void *data,
+							 size_t datalen)
+  {
+    get_runtime()->optable.request_cancellation(args.finish_event,
+						data, datalen);
+  }
+
+  ActiveMessageHandlerReg<CancelOperationMessage> cancel_operation_message_handler;
 
 
 }; // namespace Realm

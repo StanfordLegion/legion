@@ -1,4 +1,4 @@
-# Copyright 2018 Stanford University
+# Copyright 2019 Stanford University
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -53,31 +53,20 @@ override CC_FLAGS := $(filter-out -DBOUNDS_CHECKS, \
                        $(CC_FLAGS))))
 
 TESTS := serializing test_profiling ctxswitch barrier_reduce taskreg memspeed idcheck inst_reuse transpose
-TESTS_SINGLENODE := proc_group
+TESTS += proc_group
 TESTS += deppart
 TESTS += scatter
-
-ifeq ($(strip $(USE_GASNET)),1)
-  ifdef NODECOUNT
-    ifeq ($(CONDUIT),ibv)
-      LAUNCHER = mpirun -H localhost -n $(NODECOUNT) $(1)
-    else
-      $(error unsupported conduit $(CONDUIT))
-    endif
-  else
-    LAUNCHER = $(1)
-    TESTS += $(TESTS_SINGLENODE)
-  endif
-else
-  LAUNCHER = $(1)
-  TESTS += $(TESTS_SINGLENODE)
-endif
+TESTS += compqueue
+TESTS += event_subscribe
 
 # can set arguments to be passed to a test when running
 TESTARGS_ctxswitch := -ll:io 1 -t 20 -i 10000
 TESTARGS_proc_group := -ll:cpu 4
+TESTARGS_compqueue := -ll:cpu 4
+TESTARGS_event_subscribe := -ll:cpu 4
 
 REALM_OBJS := $(patsubst %.cc,%.o,$(notdir $(REALM_SRC))) \
+              $(patsubst %.cc.o,%.o,$(notdir $(REALM_INST_OBJS))) \
               $(patsubst %.S,%.o,$(notdir $(ASM_SRC)))
 EMPTY :=
 SPACE := $(EMPTY) $(EMPTY)
@@ -92,8 +81,8 @@ run_all : $(TESTS:%=run_%)
 
 run_% : %
 	@# this echos exactly once, even if -s was specified
-	@echo $(call LAUNCHER, ./$*) $(TESTARGS_$*)
-	@$(call LAUNCHER, ./$*) $(TESTARGS_$*)
+	@echo $(LAUNCHER) ./$* $(TESTARGS_$*)
+	@$(LAUNCHER) ./$* $(TESTARGS_$*)
 
 build : $(TESTS)
 
@@ -111,12 +100,23 @@ ifeq ($(strip $(USE_CUDA)),1)
 EXTRAOBJS_memspeed := memspeed_gpu.o
 memspeed : memspeed_gpu.o
 
-%.o : %.cu
+%.o : %.cu $(REALM_DEFINES_HEADER) $(LEGION_DEFINES_HEADER)
 	$(NVCC) -o $@ -c $< $(INC_FLAGS) $(NVCC_FLAGS)
 endif
 
-%.o : %.cc
+%.o : %.cc $(REALM_DEFINES_HEADER) $(LEGION_DEFINES_HEADER)
 	$(CXX) -fPIC -o $@ -c $< $(INC_FLAGS) $(CC_FLAGS)
 
 %.o : %.S
 	$(CXX) -fPIC -o $@ -c $< $(INC_FLAGS) $(CC_FLAGS)
+
+# deppart-related stuff
+image_%.o : image_tmpl.cc $(REALM_DEFINES_HEADER) $(LEGION_DEFINES_HEADER)
+	$(CXX) -fPIC -o $@ -c $< $(INC_FLAGS) $(CC_FLAGS) -DINST_N1=$(word 1,$(subst _, ,$*)) -DINST_N2=$(word 2,$(subst _, ,$*))
+
+preimage_%.o : preimage_tmpl.cc $(REALM_DEFINES_HEADER) $(LEGION_DEFINES_HEADER)
+	$(CXX) -fPIC -o $@ -c $< $(INC_FLAGS) $(CC_FLAGS) -DINST_N1=$(word 1,$(subst _, ,$*)) -DINST_N2=$(word 2,$(subst _, ,$*))
+
+byfield_%.o : byfield_tmpl.cc $(REALM_DEFINES_HEADER) $(LEGION_DEFINES_HEADER)
+	$(CXX) -fPIC -o $@ -c $< $(INC_FLAGS) $(CC_FLAGS) -DINST_N1=$(word 1,$(subst _, ,$*)) -DINST_N2=$(word 2,$(subst _, ,$*))
+

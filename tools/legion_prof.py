@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-# Copyright 2018 Stanford University, NVIDIA Corporation
+# Copyright 2019 Stanford University, NVIDIA Corporation
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -14,6 +14,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from __future__ import absolute_import
+from __future__ import division
 from __future__ import print_function
 
 import tempfile
@@ -60,6 +62,36 @@ memory_kinds = {
     9 : 'L3 Cache',
     10 : 'L2 Cache',
     11 : 'L1 Cache',
+}
+# Make sure this is up to date with memory_kinds
+memory_node_proc = {
+    'GASNet Global': 'None',
+    'System': 'Node_id',
+    'Registered': 'Node_id',
+    'Socket': 'Node_id',
+    'Zero-Copy': 'Node_id',
+    'Framebuffer': 'GPU_proc_id',
+    'Disk': 'Node_id',
+    'HDF5': 'Node_id',
+    'File': 'Node_id',
+    'L3 Cache': 'Node_id',
+    'L2 Cache': 'Proc_id',
+    'L1 Cache': 'Proc_id',
+}
+
+memory_kinds_abbr = {
+    'GASNet Global': ' glob',
+    'System': ' sys',
+    'Registered': ' reg',
+    'Socket': ' sock',
+    'Zero-Copy': ' zcpy',
+    'Framebuffer': ' fb',
+    'Disk': ' disk',
+    'HDF5': ' hdf5',
+    'File': ' file',
+    'L3 Cache': ' l3',
+    'L2 Cache': ' l2',
+    'L1 Cache': ' l1',
 }
 
 # Make sure this is up to date with legion_types.h
@@ -109,8 +141,13 @@ def data_tsv_str(level, start, end, color, opacity, title,
 def slugify(filename):
     # convert spaces to underscores
     slugified = filename.replace(" ", "_")
+    # remove 'L" for hex
+    if (slugified[-1] == "L"):
+        slugified = slugified[:-1]
     # remove special characters
-    slugified = slugified.translate(None, "!@#$%^&*(),/?<>\"':;{}[]|/+=`~")
+    slugified = slugified.translate("!@#$%^&*(),/?<>\"':;{}[]|/+=`~") if \
+            sys.version_info > (3,) else \
+            slugified.translate(None, "!@#$%^&*(),/?<>\"':;{}[]|/+=`~")
     return slugified
 
 # Helper function for computing nice colors
@@ -158,6 +195,15 @@ def color_helper(step, num_steps):
     b = "%02x" % b
     return ("#"+r+g+b)
 
+# Helper methods for python 2/3 foolishness
+def iteritems(obj):
+    return obj.items() if sys.version_info > (3,) else obj.viewitems()
+
+def iterkeys(obj):
+    return obj.keys() if sys.version_info > (3,) else obj.viewkeys()
+
+def itervalues(obj):
+    return obj.values() if sys.version_info > (3,) else obj.viewvalues()
 
 class PathRange(object):
     def __init__(self, start, stop, path):
@@ -169,9 +215,18 @@ class PathRange(object):
         self_elapsed = self.elapsed()
         other_elapsed = other.elapsed()
         if self_elapsed == other_elapsed:
-            return cmp(len(self.path), len(other.path))
+            return len(self.path) - len(other.path)
         else:
-            return cmp(self_elapsed, other_elapsed)
+            if self_elapsed < other_elapsed:
+                return -1
+            elif self_elapsed == other_elapsed:
+                return 0
+            else:
+                return 1
+    def __lt__(self, other):
+        return self.__cmp__(other) < 0
+    def __gt__(self, other):
+        return self.__cmp__(other) > 0
     def clone(self):
         return PathRange(self.start, self.stop, self.path)
     def elapsed(self):
@@ -260,13 +315,15 @@ class HasNoDependencies(HasDependencies):
 
 class TimeRange(object):
     def __init__(self, create, ready, start, stop):
-        assert create <= ready
-        assert ready <= start
-        assert start <= stop
+        assert create is None or create <= ready
+        assert ready is None or ready <= start
+        assert start is None or start <= stop
         self.create = create
         self.ready = ready
         self.start = start
         self.stop = stop
+        self.trimmed = False
+        self.was_removed = False
 
     def __cmp__(self, other):
         # The order chosen here is critical for sort_range. Ranges are
@@ -284,10 +341,15 @@ class TimeRange(object):
             return 1
         return 0
 
+    def __lt__(self, other):
+        return self.__cmp__(other) < 0
+
+    def __gt__(self, other):
+        return self.__cmp__(other) > 0
+
     def __repr__(self):
         return "Start: %d us  Stop: %d us  Total: %d us" % (
                 self.start, self.end, self.total_time())
-
 
     def total_time(self):
         return self.stop - self.start
@@ -304,6 +366,130 @@ class TimeRange(object):
 
     def meta_time(self):
         pass
+
+    def is_trimmed(self):
+        return self.was_removed
+
+    def trim_time_range(self, start, stop):
+        if self.trimmed:
+            return not self.was_removed
+        self.trimmed = True
+        if start is not None and stop is not None:
+            if self.stop < start:
+                self.was_removed = True
+                return False
+            if self.start > stop:
+                self.was_removed = True
+                return False
+            # Either we span or we're contained inside
+            # Clip our boundaries down to the border
+            if self.start < start:
+                self.start = 0
+            else:
+                self.start -= start
+            if self.stop > stop:
+                self.stop = stop - start
+            else:
+                self.stop -= start
+            if self.create is not None:
+                if self.create < start:
+                    self.create = 0
+                elif self.create > stop:
+                    self.create = stop - start
+                else:
+                    self.create -= start
+            if self.ready is not None:
+                if self.ready < start:
+                    self.ready = 0
+                elif self.ready > stop:
+                    self.ready = stop - start
+                else:
+                    self.ready -= start
+            # See if we need to filter the waits
+            if isinstance(self, HasWaiters):
+                trimmed_intervals = list()
+                for wait_interval in self.wait_intervals:
+                    if wait_interval.end < start:
+                        continue
+                    if wait_interval.start > stop:
+                        continue
+                    # Adjust the start location
+                    if wait_interval.start < start:
+                        wait_interval.start = 0
+                    else:
+                        wait_interval.start -= start
+                    # Adjust the ready location
+                    if wait_interval.ready < start:
+                        wait_interval.ready = 0
+                    elif wait_interval.ready > stop:
+                        wait_interval.ready = stop - start
+                    else:
+                        wait_interval.ready -= start
+                    # Adjust the end location
+                    if wait_interval.end > stop:
+                        wait_interval.end = stop - start
+                    else:
+                        wait_interval.end -= start
+                    trimmed_intervals.append(wait_interval)
+                self.wait_intervals = trimmed_intervals
+        elif start is not None:
+            if self.stop < start:
+                self.was_removed = True
+                return False
+            if self.start < start:
+                self.start = 0
+            else:
+                self.start -= start
+            self.stop -= start
+            if self.create is not None:
+                if self.create < start:
+                    self.create = 0
+                else:
+                    self.create -= start
+            if self.ready is not None:
+                if self.ready < start:
+                    self.ready = 0
+                else:
+                    self.ready -= start
+            if isinstance(self, HasWaiters):
+                trimmed_intervals = list()
+                for wait_interval in self.wait_intervals:
+                    if wait_interval.end < start:
+                        continue
+                    if wait_interval.start < start:
+                        wait_interval.start = 0
+                    else:
+                        wait_interval.start -= start
+                    if wait_interval.ready < start:
+                        wait_interval.ready = 0
+                    else:
+                        wait_interval.ready -= start
+                    wait_interval.end -= start
+                    trimmed_intervals.append(wait_interval)
+                self.wait_intervals = trimmed_intervals
+        else:
+            assert stop is not None
+            if self.start > stop:
+                self.was_removed = True
+                return False
+            if self.stop > stop:
+                self.stop = stop
+            if self.create is not None and self.create > stop:
+                self.create = stop
+            if self.ready is not None and self.ready > stop:
+                self.ready = stop
+            if isinstance(self, HasWaiters):
+                trimmed_intervals = list()
+                for wait_interval in self.wait_intervals:
+                    if wait_interval.start > stop:
+                        continue
+                    if wait_interval.ready > stop:
+                        wait_interval.ready = stop
+                    if wait_interval.end > stop:
+                        wait_interval.end = stop
+                    trimmed_intervals.append(wait_interval)
+                self.wait_intervals = trimmed_intervals
+        return True
 
 class Processor(object):
     def __init__(self, proc_id, kind):
@@ -342,6 +528,13 @@ class Processor(object):
         # treating runtime calls like any other task
         call.proc = self
         self.tasks.append(call)
+
+    def trim_time_range(self, start, stop):
+        trimmed_tasks = list()
+        for task in self.tasks:
+            if task.trim_time_range(start, stop):
+                trimmed_tasks.append(task)
+        self.tasks = trimmed_tasks 
 
     def sort_time_range(self):
         for task in self.tasks:
@@ -453,8 +646,13 @@ class Processor(object):
         return '%s Processor %s' % (self.kind, hex(self.proc_id))
 
     def __cmp__(a, b):
-        return cmp(a.proc_id, b.proc_id)
+        return a.proc_id - b.proc_id;
 
+    def __lt__(self, other):
+        return self.__cmp__(other) < 0
+
+    def __gt__(self, other):
+        return self.__cmp__(other) > 0
 
 class TimePoint(object):
     def __init__(self, time, thing, first):
@@ -464,7 +662,16 @@ class TimePoint(object):
         self.first = first
         self.time_key = 2*time + (0 if first is True else 1)
     def __cmp__(a, b):
-        return cmp(a.time_key, b.time_key)
+        if a.time_key < b.time_key:
+            return -1
+        elif a.time_key > b.time_key:
+            return 1
+        else:
+            return 0
+    def __lt__(self, other):
+        return self.__cmp__(other) < 0
+    def __gt__(self, other):
+        return self.__cmp__(other) > 0
 
 class Memory(object):
     def __init__(self, mem_id, kind, capacity):
@@ -479,13 +686,20 @@ class Memory(object):
         self.time_points = list()
         self.max_live_instances = None
         self.last_time = None
+        self.affinity = None
 
     def get_short_text(self):
-        return self.kind + " Memory " + str(self.mem_in_node)
+        if self.affinity is not None:
+            return self.affinity.get_short_text()
+        else:
+            return " [n" + str(self.node_id) + "]" + memory_kinds_abbr[self.kind]
 
     def add_instance(self, inst):
         self.instances.add(inst)
         inst.mem = self
+
+    def add_affinity(self, affinity):
+        self.affinity = affinity
 
     def init_time_range(self, last_time):
         # Fill in any of our instances that are not complete with the last time
@@ -493,6 +707,13 @@ class Memory(object):
             if inst.stop is None:
                 inst.stop = last_time
         self.last_time = last_time 
+
+    def trim_time_range(self, start, stop):
+        trimmed_instances = set()
+        for inst in self.instances:
+            if inst.trim_time_range(start, stop):
+                trimmed_instances.add(inst)
+        self.instances = trimmed_instances
 
     def sort_time_range(self):
         self.max_live_instances = 0
@@ -549,7 +770,7 @@ class Memory(object):
         previous_time = 0
         for point in sorted(self.time_points,key=lambda p: p.time_key):
             # First do the math for the previous interval
-            usage = float(current_size)/float(self.capacity) if self.capacity <> 0 else 0
+            usage = float(current_size)/float(self.capacity) if self.capacity != 0 else 0
             if usage > max_usage:
                 max_usage = usage
             duration = point.time - previous_time
@@ -575,7 +796,33 @@ class Memory(object):
         return '%s Memory %s' % (self.kind, hex(self.mem_id))
 
     def __cmp__(a, b):
-        return cmp(a.mem_id, b.mem_id)
+        return a.mem_id - b.mem_id
+
+    def __lt__(self, other):
+        return self.__cmp__(other) < 0
+
+    def __gt__(self, other):
+        return self.__cmp__(other) > 0
+
+class MemProcAffinity(object):
+    def __init__(self, mem, proc):
+        self.mem = mem
+        self.proc = list()
+
+    def add_proc_id(self, proc):
+        self.proc.append(proc)
+
+    def get_short_text(self):
+        if memory_node_proc[self.mem.kind] == "None":
+            return "[all n]"
+        elif memory_node_proc[self.mem.kind] == "Node_id":
+            return " [n" + str(self.mem.node_id) + "]" + memory_kinds_abbr[self.mem.kind]
+        elif memory_node_proc[self.mem.kind] == "GPU_proc_id":
+            return " [n" + str(self.proc[0].node_id) + "][gpu" + str(self.proc[0].proc_in_node) + "]" + memory_kinds_abbr[self.mem.kind]
+        elif memory_node_proc[self.mem.kind] == "Proc_id":
+            return " [n" + str(self.proc[0].node_id) + "][cpu" + str(self.proc[0].proc_in_node) + "]" + memory_kinds_abbr[self.mem.kind]
+        else:
+            return ""
 
 class Channel(object):
     def __init__(self, src, dst):
@@ -586,11 +833,46 @@ class Channel(object):
         self.max_live_copies = None 
         self.last_time = None
 
-    def get_short_text(self):
+    def node_id(self):
+        if self.src is not None:
+            # MEMORY:      tag:8 = 0x1e, owner_node:16,   (unused):28, mem_idx: 12
+            # owner_node = mem_id[55:40]
+            # (mem_id >> 40) & ((1 << 16) - 1)
+            return (self.src.mem_id >> 40) & ((1 << 16) - 1)
+        elif self.dst is not None:
+            return (self.dst.mem_id >> 40) & ((1 << 16) - 1)
+        else:
+            return None
+
+    def node_id_src(self):
+        if self.src is not None:
+            # MEMORY:      tag:8 = 0x1e, owner_node:16,   (unused):28, mem_idx: 12
+            # owner_node = mem_id[55:40]
+            # (mem_id >> 40) & ((1 << 16) - 1)
+            return (self.src.mem_id >> 40) & ((1 << 16) - 1)
+        else:
+            return None
+
+    def node_id_dst(self):
         if self.dst is not None:
-            return "Mem to Mem Channel"
-        elif self.src is not None:
-            return "Fill Channel"
+            # MEMORY:      tag:8 = 0x1e, owner_node:16,   (unused):28, mem_idx: 12
+            # owner_node = mem_id[55:40]
+            # (mem_id >> 40) & ((1 << 16) - 1)
+            return (self.dst.mem_id >> 40) & ((1 << 16) - 1)
+        else:
+            return None
+
+    def get_short_text(self):
+        if self.src is not None:
+            if self.src.affinity is not None and self.dst.affinity is not None:
+                return self.src.affinity.get_short_text() + " to " + self.dst.affinity.get_short_text()
+            else:
+                return "Mem to Mem Channel"
+        elif self.dst is not None:
+            if self.dst.affinity is not None:
+                return self.dst.affinity.get_short_text()
+            else:
+                return "Fill Channel"
         else:
             return "Dependent Partition Channel"
 
@@ -600,6 +882,13 @@ class Channel(object):
 
     def init_time_range(self, last_time):
         self.last_time = last_time
+
+    def trim_time_range(self, start, stop):
+        trimmed_copies = set()
+        for copy in self.copies:
+            if copy.trim_time_range(start, stop):
+                trimmed_copies.add(copy)
+        self.copies = trimmed_copies 
 
     def sort_time_range(self):
         self.max_live_copies = 0 
@@ -682,7 +971,7 @@ class Channel(object):
     def __cmp__(a, b):
         if a.dst:
             if b.dst:
-                return cmp(a.dst, b.dst)
+                return a.dst.__cmp__(b.dst)
             else:
                 return 1
         else:
@@ -690,6 +979,12 @@ class Channel(object):
                 return -1
             else:
                 return 0
+
+    def __lt__(self, other):
+        return self.__cmp__(other) < 0
+
+    def __gt__(self, other):
+        return self.__cmp__(other) > 0
 
 class WaitInterval(object):
     def __init__(self, start, ready, end):
@@ -715,13 +1010,13 @@ class StatObject(object):
 
     def get_total_execution_time(self):
         total_execution_time = 0
-        for proc_exec_time in self.total_execution_time.itervalues():
+        for proc_exec_time in itervalues(self.total_execution_time):
             total_execution_time += proc_exec_time
         return total_execution_time
 
     def get_total_calls(self):
         total_calls = 0
-        for proc_calls in self.total_calls.itervalues():
+        for proc_calls in itervalues(self.total_calls):
             total_calls += proc_calls
         return total_calls
 
@@ -745,7 +1040,7 @@ class StatObject(object):
         print('       Minimum Time: %d us (%.3f sig)' % (min_call,min_dev))
 
     def print_stats(self, verbose):
-        procs = sorted(self.total_calls.iterkeys())
+        procs = sorted(iterkeys(self.total_calls))
         total_execution_time = self.get_total_execution_time()
         total_calls = self.get_total_calls()
 
@@ -768,7 +1063,7 @@ class StatObject(object):
         print()
 
         if verbose and len(procs) > 1:
-            for proc in sorted(self.total_calls.iterkeys()):
+            for proc in sorted(iterkeys(self.total_calls)):
                 avg = float(self.total_execution_time[proc]) / float(self.total_calls[proc]) \
                         if self.total_calls[proc] > 0 else 0
                 stddev = 0
@@ -814,7 +1109,7 @@ class Variant(StatObject):
     def __repr__(self):
         if self.task_kind:
             title = self.task_kind.name
-            if self.name <> None and self.name <> self.task_kind.name:
+            if self.name != None and self.name != self.task_kind.name:
                 title += ' ['+self.name+']'
         else:
             title = self.name
@@ -875,11 +1170,16 @@ class Operation(Base):
         info = '<'+str(self.op_id)+">"
         return info
 
+    def is_trimmed(self):
+        if isinstance(self, TimeRange):
+            return TimeRange.is_trimmed(self)
+        return False
+
     def __repr__(self):
         if self.is_task:
             assert self.variant is not None
             title = self.variant.task_kind.name if self.variant.task_kind is not None else 'unnamed'
-            if self.variant.name <> None and self.variant.name.find("unnamed") > 0:
+            if self.variant.name != None and self.variant.name.find("unnamed") > 0:
                 title += ' ['+self.variant.name+']'
             return title+' '+self.get_info()
         elif self.is_multi:
@@ -1051,10 +1351,7 @@ class Task(Operation, TimeRange, HasDependencies, HasWaiters):
 
     def __repr__(self):
         assert self.variant is not None
-        title = self.variant.task_kind.name if self.variant.task_kind is not None else 'unnamed'
-        if self.variant.name <> None and self.variant.name.find("unnamed") > 0:
-            title += ' ['+self.variant.name+']'
-        return title+' '+self.get_info()
+        return str(self.variant)+' '+self.get_info()
 
 class MetaTask(Base, TimeRange, HasInitiationDependencies, HasWaiters):
     def __init__(self, variant, initiation_op, create, ready, start, stop):
@@ -1314,6 +1611,10 @@ class Instance(Base, TimeRange, HasInitiationDependencies):
         self.inst_id = inst_id
         self.mem = None
         self.size = None
+        self.ispace = []
+        self.fspace = []
+        self.tree_id = None
+        self.fields = {}
 
     def get_owner(self):
         return self.mem
@@ -1359,24 +1660,47 @@ class Instance(Base, TimeRange, HasInitiationDependencies):
     def __repr__(self):
         # Check to see if we got a profiling callback
         if self.size is not None:
-            unit = 'B'
-            unit_size = self.size
-            if self.size > (1024*1024*1024):
-                unit = 'GB'
-                unit_size /= (1024*1024*1024)
-            elif self.size > (1024*1024):
-                unit = 'MB'
-                unit_size /= (1024*1024)
-            elif self.size > 1024:
-                unit = 'KB'
-                unit_size /= 1024
-            size_pretty = str(unit_size) + unit
+            if self.size >= (1024*1024*1024):
+                # GBs
+                size_pretty = '%.3f GiB' % (self.size / (1024.0*1024.0*1024.0))
+            elif self.size >= (1024*1024):
+                # MBs
+                size_pretty = '%.3f MiB' % (self.size / (1024.0*1024.0))
+            elif self.size >= 1024:
+                # KBs
+                size_pretty = '%.3f KiB' % (self.size / 1024.0)
+            else:
+                # Bytes
+                size_pretty = str(self.size) + ' B'
         else:
             size_pretty = 'Unknown'
+        output_str = ""
+        for pos in range(0, len(self.ispace)):
+            output_str = output_str + "Region:" + self.ispace[pos].get_short_text()
+            output_str = output_str + " x " + str(self.fspace[pos])
+            max_len = 40
+            key = self.fspace[pos]
+            fieldlist = []
+            count = 0
+            if key in self.fields:
+                fieldlist = self.fields[key]
+                for f in fieldlist:
+                    if count == 0:
+                        output_str = output_str + '[' + str(f)
+                    else:
+                        output_str = output_str + ',' + str(f)
+                    count = count + 1
+                    if len(output_str) > max_len and len(fieldlist) > 1:
+                        output_str = output_str + '$'
+                        max_len = len(output_str) + 40
+                if (count > 0):
+                    output_str = output_str + ']'
+            pend =len(self.ispace)-1
+            if (pos != pend):
+                output_str = output_str + '$'
+        output_str = output_str + " $Inst: {} $Size: {}"
+        return output_str.format(str(hex(self.inst_id)),size_pretty)
 
-        return ("Instance {} Size={}"
-                .format(str(hex(self.inst_id)),
-                        size_pretty))
 
 class MessageKind(StatObject):
     def __init__(self, message_id, name):
@@ -1520,6 +1844,168 @@ class RuntimeCallKind(StatObject):
     def __repr__(self):
         return self.name
 
+class Field(StatObject):
+    def __init__(self, unique_id, field_id, size, name):
+        StatObject.__init__(self)
+        self.unique_id = unique_id
+        self.field_id = field_id
+        self.size = size
+        self.name = name
+
+    def __repr__(self):
+        if self.name != None:
+            return self.name
+        return 'fid:' + str(self.field_id)
+
+class FieldSpace(StatObject):
+    def __init__(self, fspace_id, name):
+        StatObject.__init__(self)
+        self.fspace_id = fspace_id
+        self.name = name
+
+    def __repr__(self):
+        if self.name != None:
+            return self.name
+        return 'fspace:' + str(self.fspace_id)
+
+class LogicalRegion(StatObject):
+    def __init__(self, ispace_id, fspace_id, tree_id, name):
+        StatObject.__init__(self)
+        self.ispace_id = ispace_id
+        self.fspace_id = fspace_id
+        self.tree_id = tree_id
+        self.name = name
+
+    def __repr__(self):
+        return self.name
+
+class Partition(StatObject):
+    def __init__(self, unique_id, name):
+        StatObject.__init__(self)
+        self.unique_id = unique_id
+        self.parent = None
+        self.disjoint = None
+        self.point = None
+        self.name = name
+
+    def __repr__(self):
+        return self.name
+
+    def get_short_text(self):
+        if self.name != None:
+            return self.name
+        elif self.parent != None and self.parent.name != None:
+            return self.parent.name
+        else:
+            return str(self.point)
+
+    def set_parent(self, parent):
+        self.parent = parent
+
+    def set_disjoint(self, disjoint):
+        self.disjoint = disjoint
+
+    def set_point(self, point):
+        self.point = point
+
+class IndexSpace(StatObject):
+    def __init__(self, is_type, unique_id, dim, values, max_dim):
+        StatObject.__init__(self)
+        self.is_type = is_type
+        self.unique_id = unique_id
+        self.dim = dim
+        self.point = []
+        self.rect_lo = []
+        self.rect_hi = []
+        if (self.is_type == 0):
+            for index in range(self.dim):
+                self.point.append(int(values[index]))
+        if (self.is_type == 1):
+            for index in range(self.dim):
+                self.rect_lo.append(int(values[index]))
+                self.rect_hi.append(int(values[max_dim + index]))
+
+        self.name = None
+        self.parent = None
+
+
+    def set_vals(self, is_type, unique_id, dim, values, max_dim):
+        self.is_type = is_type
+        self.unique_id = unique_id
+        self.dim = dim
+        self.point = []
+        self.rect_lo = []
+        self.rect_hi = []
+        if (self.is_type == 0):
+            for index in range(self.dim):
+                self.point.append(int(values[index]))
+        if (self.is_type == 1):
+            for index in range(self.dim):
+                self.rect_lo.append(int(values[index]))
+                self.rect_hi.append(int(values[max_dim + index]))
+
+
+    def setPoint(self, unique_id, dim, values):
+        is_type = 0
+        self.set_vals(is_type, unique_id, dim, values,0)
+
+    def setRect(self, unique_id, dim, values, max_dim):
+        is_type = 1
+        self.set_vals(is_type, unique_id, dim, values, max_dim)
+
+    def setEmpty(self, unique_id):
+        is_type = 2
+        self.set_vals(is_type, unique_id, None, None, 0)
+
+    @classmethod
+    def forPoint(cls, unique_id, dim, values):
+        is_type = 0
+        return cls(is_type, unique_id, dim, values,0)
+
+    @classmethod
+    def forRect(cls, unique_id, dim, values, max_dim):
+        is_type = 1
+        return cls(is_type, unique_id, dim, values, max_dim)
+
+    @classmethod
+    def forEmpty(cls, unique_id):
+        is_type = 2
+        return cls(is_type, unique_id, None, None, 0)
+
+    @classmethod
+    def forUnknown(cls, unique_id):
+        return cls(None, unique_id, None, None, 0)
+
+    def set_name(self, name):
+        self.name = name
+
+    def set_parent(self, parent):
+        self.parent = parent
+
+    def __repr__(self):
+        return 'Index Space '+ str(self.name)
+
+    def get_short_text(self):
+        if self.name != None:
+            stext = self.name
+        elif self.parent != None and self.parent.parent != None and self.parent.parent.name != None:
+            stext = self.parent.parent.name
+        elif self.parent != None and self.parent.parent != None:
+            stext = 'ispace:' + str(self.parent.parent.unique_id)
+        else:
+            stext = 'ispace:' + str(self.unique_id)
+        if (self.is_type == None):
+            return stext
+        if (self.is_type == 0):
+            for index in range(self.dim):
+                stext = stext + '[' + str(self.point[index]) + ']'
+        if (self.is_type == 1):
+            for index in range(self.dim):
+                stext = stext + '[' + str(self.rect_lo[index]) + ':' + str(self.rect_hi[index]) + ']'
+        if (self.is_type == 2):
+            stext = 'empty index space'
+        return stext
+
 class RuntimeCall(Base, TimeRange, HasNoDependencies):
     def __init__(self, kind, start, stop):
         Base.__init__(self)
@@ -1616,7 +2102,7 @@ class StatGatherer(object):
         self.mapper_tasks = set()
         self.runtime_tasks = set()
         self.message_tasks = set()
-        for proc in state.processors.itervalues():
+        for proc in itervalues(state.processors):
             for task in proc.tasks:
                 if isinstance(task, Task):
                     self.application_tasks.add(task.variant)
@@ -1677,8 +2163,10 @@ class StatGatherer(object):
 
 class State(object):
     def __init__(self):
+        self.max_dim = 3
         self.processors = {}
         self.memories = {}
+        self.mem_proc_affinity = {}
         self.channels = {}
         self.task_kinds = {}
         self.variants = {}
@@ -1689,7 +2177,7 @@ class State(object):
         self.multi_tasks = {}
         self.first_times = {}
         self.last_times = {}
-        self.last_time = 0L
+        self.last_time = 0
         self.message_kinds = {}
         self.messages = {}
         self.mapper_call_kinds = {}
@@ -1697,6 +2185,11 @@ class State(object):
         self.runtime_call_kinds = {}
         self.runtime_calls = {}
         self.instances = {}
+        self.index_spaces = {}
+        self.partitions = {}
+        self.logical_regions = {}
+        self.field_spaces = {}
+        self.fields = {}
         self.has_spy_data = False
         self.spy_state = None
         self.callbacks = {
@@ -1715,6 +2208,7 @@ class State(object):
             "TaskWaitInfo": self.log_task_wait_info,
             "MetaWaitInfo": self.log_meta_wait_info,
             "TaskInfo": self.log_task_info,
+            "GPUTaskInfo": self.log_gpu_task_info,
             "MetaInfo": self.log_meta_info,
             "CopyInfo": self.log_copy_info,
             "FillInfo": self.log_fill_info,
@@ -1725,14 +2219,96 @@ class State(object):
             "MessageInfo": self.log_message_info,
             "MapperCallInfo": self.log_mapper_call_info,
             "RuntimeCallInfo": self.log_runtime_call_info,
-            "ProfTaskInfo": self.log_proftask_info
+            "ProfTaskInfo": self.log_proftask_info,
+            "ProcMDesc": self.log_mem_proc_affinity_desc,
+            "IndexSpacePointDesc": self.log_index_space_point_desc,
+            "IndexSpaceRectDesc": self.log_index_space_rect_desc,
+            "PartDesc": self.log_index_part_desc,
+            "IndexPartitionDesc": self.log_index_partition_desc,
+            "IndexSpaceEmptyDesc": self.log_index_space_empty_desc,
+            "FieldDesc": self.log_field_desc,
+            "FieldSpaceDesc": self.log_field_space_desc,
+            "IndexSpaceDesc": self.log_index_space_desc,
+            "IndexSubSpaceDesc": self.log_index_subspace_desc,
+            "LogicalRegionDesc": self.log_logical_region_desc,
+            "PhysicalInstRegionDesc": self.log_physical_inst_region_desc,
+            "PhysicalInstLayoutDesc": self.log_physical_inst_layout_desc,
+            "MaxDimDesc": self.log_max_dim
             #"UserInfo": self.log_user_info
         }
+
+    def log_max_dim(self, max_dim):
+        self.max_dim = max_dim
+
+    def log_index_space_point_desc(self, unique_id, dim, rem):
+        index_space = self.create_index_space_point(unique_id, dim, rem)
+
+    def log_index_space_rect_desc(self, unique_id, dim, rem):
+        index_space = self.create_index_space_rect(unique_id, dim, rem)
+
+    def log_index_space_empty_desc(self, unique_id):
+        index_space = self.create_index_space_empty(unique_id)
+
+    def log_index_space_desc(self, unique_id, name):
+        index_space = self.find_index_space(unique_id)
+        index_space.set_name(name)
+        repr(index_space)
+
+    def log_logical_region_desc(self, ispace_id, fspace_id, tree_id, name):
+        logical_region = self.create_logical_region(ispace_id, fspace_id, tree_id, name)
+
+    def log_field_space_desc(self, unique_id, name):
+        field_space = self.create_field_space(unique_id, name)
+
+    def log_field_desc(self, unique_id, field_id, size, name):
+        field = self.create_field(unique_id, field_id, size, name)
+
+    def log_index_part_desc(self, unique_id, name):
+        part = self.create_partition(unique_id, name)
+
+    def log_index_partition_desc(self,parent_id, unique_id, disjoint, point0):
+        part = self.find_partition(unique_id)
+        part.parent = self.find_index_space(parent_id)
+        part.disjoint = disjoint
+        part.point = point0
+
+    def log_index_subspace_desc(self, parent_id, unique_id):
+        index_space = self.find_index_space(unique_id)
+        index_part_parent = self.find_partition(parent_id)
+        index_space.set_parent(index_part_parent)
+
+    def log_physical_inst_region_desc(self, op_id, inst_id, ispace_id, fspace_id, tree_id):
+        op = self.find_op(op_id)
+        inst = self.create_instance(inst_id, op)
+        fspace = self.find_field_space(fspace_id)
+        inst.ispace.append(self.find_index_space(ispace_id))
+        inst.fspace.append(fspace)
+        if fspace not in inst.fields:
+            inst.fields[fspace] = []
+        inst.tree_id = tree_id
+
+    def log_physical_inst_layout_desc(self, op_id, inst_id, field_id, fspace_id):
+        op = self.find_op(op_id)
+        inst = self.create_instance(inst_id, op)
+        field = self.find_field(fspace_id, field_id)
+        fspace = self.find_field_space(fspace_id)
+        if fspace not in inst.fields:
+            inst.fields[fspace] = []
+        inst.fields[fspace].append(field)
 
     def log_task_info(self, op_id, task_id, variant_id, proc_id,
                       create, ready, start, stop):
         variant = self.find_variant(task_id, variant_id)
         task = self.find_task(op_id, variant, create, ready, start, stop)
+        if stop > self.last_time:
+            self.last_time = stop
+        proc = self.find_processor(proc_id)
+        proc.add_task(task)
+
+    def log_gpu_task_info(self, op_id, task_id, variant_id, proc_id,
+                          create, ready, start, stop, gpu_start, gpu_stop):
+        variant = self.find_variant(task_id, variant_id)
+        task = self.find_task(op_id, variant, create, ready, gpu_start, gpu_stop)
         if stop > self.last_time:
             self.last_time = stop
         proc = self.find_processor(proc_id)
@@ -1758,7 +2334,7 @@ class State(object):
             self.last_time = stop
         channel = self.find_channel(src, dst)
         channel.add_copy(copy)
-
+ 
     def log_fill_info(self, op_id, dst, create, ready, start, stop):
         op = self.find_op(op_id)
         dst = self.find_memory(dst)
@@ -1827,11 +2403,11 @@ class State(object):
     def log_kind(self, task_id, name, overwrite):
         if task_id not in self.task_kinds:
             self.task_kinds[task_id] = TaskKind(task_id, name)
-        elif overwrite == 1:
+        elif overwrite == 1 or self.task_kinds[task_id].name is None:
             self.task_kinds[task_id].name = name
 
     def log_variant(self, task_id, variant_id, name):
-        assert task_id in self.task_kinds
+        self.log_kind(task_id,name,0)
         task_kind = self.task_kinds[task_id]
         key = (task_id, variant_id)
         if key not in self.variants:
@@ -1882,6 +2458,12 @@ class State(object):
             self.memories[mem_id] = Memory(mem_id, kind, capacity)
         else:
             self.memories[mem_id].kind = kind
+
+    def log_mem_proc_affinity_desc(self, mem_id, proc_id):
+        if mem_id not in self.mem_proc_affinity:
+            self.mem_proc_affinity[mem_id] = MemProcAffinity(self.memories[mem_id], self.processors[proc_id])
+            self.memories[mem_id].add_affinity(self.mem_proc_affinity[mem_id])
+        self.mem_proc_affinity[mem_id].add_proc_id(self.processors[proc_id])
 
     def log_op_desc(self, kind, name):
         if kind not in self.op_kinds:
@@ -1950,6 +2532,11 @@ class State(object):
             self.memories[mem_id] = Memory(mem_id, 1, None)
         return self.memories[mem_id]
 
+    def find_mem_proc_affinity(self, mem_id):
+        if mem_id not in self.mem_proc_affinity:
+            assert False
+        return self.mem_proc_affinity[mem_id]
+
     def find_channel(self, src, dst):
         if src is not None:
             key = (src,dst)
@@ -2003,6 +2590,115 @@ class State(object):
             assert task.variant == variant
         return task
 
+    def create_index_space_point(self, unique_id, dim, values):
+        key = unique_id
+        if key not in self.index_spaces:
+            index_space = IndexSpace.forPoint(unique_id, dim, values)
+            self.index_spaces[key] = index_space
+        else:
+            index_space = self.index_spaces[key]
+            if index_space.is_type is None:
+                index_space.setPoint(unique_id, dim, values)
+        return index_space
+
+    def create_index_space_rect(self, unique_id, dim, values):
+        key = unique_id
+        if key not in self.index_spaces:
+            index_space = IndexSpace.forRect(unique_id, dim, values, self.max_dim)
+            self.index_spaces[key] = index_space
+        else:
+            index_space = self.index_spaces[key]
+            if index_space.is_type is None:
+                index_space.setRect(unique_id, dim, values, self.max_dim)
+        return index_space
+
+    def create_index_space_empty(self, unique_id):
+        key = unique_id
+        if key not in self.index_spaces:
+            index_space = IndexSpace.forEmpty(key)
+            self.index_spaces[key] = index_space
+        else:
+            index_space = self.index_spaces[key]
+            if index_space.is_type is None:
+                index_space.setEmpty(key)
+        return index_space
+
+    def find_index_space(self, unique_id):
+        key = unique_id
+        if key not in self.index_spaces:
+            index_space = IndexSpace.forUnknown(key)
+            self.index_spaces[key] = index_space
+        else:
+            index_space = self.index_spaces[key]
+        return index_space
+
+    def create_logical_region(self, ispace_id, fspace_id, tree_id, name):
+        key = (ispace_id, fspace_id)
+        if key not in self.logical_regions:
+            logical_region = LogicalRegion(ispace_id,fspace_id, tree_id, name)
+            self.logical_regions[key] = logical_region
+        else:
+            logical_region = self.logical_regions[key]
+        return logical_region
+
+    def create_field_space(self, unique_id, name):
+        key = unique_id
+        if key not in self.field_spaces:
+            field_space = FieldSpace(unique_id, name)
+            self.field_spaces[key] = field_space
+        else:
+            field_space = self.field_spaces[key]
+        field_space.name = name
+        return field_space
+
+    def create_partition(self, unique_id, name):
+        key = unique_id
+        if key not in self.partitions:
+            part = Partition(unique_id, name)
+            self.partitions[key] = part
+        else:
+            part = self.partitions[key]
+        part.name = name
+        return part
+
+    def find_partition(self, unique_id):
+        key = unique_id
+        if key not in self.partitions:
+            part = Partition(unique_id, None)
+            self.partitions[key] = part
+        else:
+            part = self.partitions[key]
+        return part
+
+    def find_field_space(self, unique_id):
+        key = unique_id
+        if key not in self.field_spaces:
+            field_space = FieldSpace(unique_id, None)
+            self.field_spaces[key] = field_space
+        else:
+            field_space = self.field_spaces[key]
+        return field_space
+
+    def create_field(self, unique_id, field_id, size, name):
+        key = (unique_id, field_id)
+        if key not in self.fields:
+            field = Field(unique_id, field_id, size, name)
+            self.fields[key] = field
+        else:
+            field = self.fields[key]
+            field.size = size;
+            field.name = name;
+        return field
+
+    def find_field(self, unique_id, field_id):
+        key = (unique_id, field_id)
+        if key not in self.fields:
+            field = Field(unique_id, field_id, None, None)
+            self.fields[key] = field
+        else:
+            field = self.fields[key]
+        return field
+
     def create_meta(self, variant, op, create, ready, start, stop):
         meta = MetaTask(variant, op, create, ready, start, stop)
         variant.op[op.op_id] = meta
@@ -2046,16 +2742,37 @@ class State(object):
         self.prof_uid_map[user.prof_uid] = user
         return user
 
+    def trim_time_ranges(self, start, stop):
+        assert self.last_time is not None
+        if start < 0:
+            start = None
+        if stop > self.last_time:
+            stop = None
+        if start is None and stop is None:
+            return
+        for proc in itervalues(self.processors):
+            proc.trim_time_range(start, stop)
+        for mem in itervalues(self.memories):
+            mem.trim_time_range(start, stop)
+        for channel in itervalues(self.channels):
+            channel.trim_time_range(start, stop)
+        if start is not None and stop is not None:
+            self.last_time = stop - start
+        elif stop is not None:
+            self.last_time = stop
+        else:
+            self.last_time -= start
+
     def sort_time_ranges(self):
         assert self.last_time is not None 
         # Processors first
-        for proc in self.processors.itervalues():
+        for proc in itervalues(self.processors):
             proc.last_time = self.last_time
             proc.sort_time_range()
-        for mem in self.memories.itervalues():
+        for mem in itervalues(self.memories):
             mem.init_time_range(self.last_time)
             mem.sort_time_range()
-        for channel in self.channels.itervalues():
+        for channel in itervalues(self.channels):
             channel.init_time_range(self.last_time)
             channel.sort_time_range()
 
@@ -2063,7 +2780,7 @@ class State(object):
         print('****************************************************')
         print('   PROCESSOR STATS')
         print('****************************************************')
-        for proc in sorted(self.processors.itervalues()):
+        for proc in sorted(itervalues(self.processors)):
             proc.print_stats(verbose)
         print
 
@@ -2071,7 +2788,7 @@ class State(object):
         print('****************************************************')
         print('   MEMORY STATS')
         print('****************************************************')
-        for mem in sorted(self.memories.itervalues()):
+        for mem in sorted(itervalues(self.memories)):
             mem.print_stats(verbose)
         print
 
@@ -2079,7 +2796,7 @@ class State(object):
         print('****************************************************')
         print('   CHANNEL STATS')
         print('****************************************************')
-        for channel in sorted(self.channels.itervalues()):
+        for channel in sorted(itervalues(self.channels)):
             channel.print_stats(verbose)
         print
 
@@ -2106,9 +2823,9 @@ class State(object):
         lsfr = LFSR(num_colors)
         num_colors = lsfr.get_max_value()
         op_colors = {}
-        for variant in self.variants.itervalues():
+        for variant in itervalues(self.variants):
             variant.compute_color(lsfr.get_next(), num_colors)
-        for variant in self.meta_variants.itervalues():
+        for variant in itervalues(self.meta_variants):
             if variant.variant_id == 1: # Remote message
                 variant.assign_color('#006600') # Evergreen
             elif variant.variant_id == 2: # Post-Execution
@@ -2123,16 +2840,16 @@ class State(object):
                 variant.assign_color('#009900') #Green
             else:
                 variant.compute_color(lsfr.get_next(), num_colors)
-        for kind in self.op_kinds.iterkeys():
+        for kind in iterkeys(self.op_kinds):
             op_colors[kind] = color_helper(lsfr.get_next(), num_colors)
         # Now we need to assign all the operations colors
-        for op in self.operations.itervalues():
+        for op in itervalues(self.operations):
             op.assign_color(op_colors)
         # Assign all the message kinds different colors
         for kinds in (self.message_kinds,
                       self.mapper_call_kinds,
                       self.runtime_call_kinds):
-            for kind in kinds.itervalues():
+            for kind in itervalues(kinds):
                 kind.assign_color(color_helper(lsfr.get_next(), num_colors))
 
     def show_copy_matrix(self, output_prefix):
@@ -2143,7 +2860,7 @@ class State(object):
 
         def node_id(memory):
             return (memory.mem_id >> 23) & ((1 << 5) - 1)
-        memories = sorted(self.memories.itervalues())
+        memories = sorted(itervalues(self.memories))
 
         tsv_file = open(tsv_file_name, "w")
         tsv_file.write("source\ttarget\tremote\ttotal\tcount\taverage\tbandwidth\n")
@@ -2151,7 +2868,7 @@ class State(object):
             for j in range(0, len(memories)):
                 src = memories[i]
                 dst = memories[j]
-                is_remote = node_id(src) <> node_id(dst) or \
+                is_remote = node_id(src) != node_id(dst) or \
                     src.kind == memory_kinds[0] or \
                     dst.kind == memory_kinds[0]
                 sum = 0.0
@@ -2197,9 +2914,12 @@ class State(object):
         # (time, count) pair.
 
         assert len(owners) > 0
-        
+
         isMemory = False
+        isChannel = False
         max_count = 0
+        if isinstance(owners[0], Channel):
+            isChannel = True
         if isinstance(owners[0], Memory):
             isMemory = True
             for mem in owners:
@@ -2224,10 +2944,18 @@ class State(object):
                     count += 1
                 else:
                     count -= 1
+
+
             if point.time == last_time:
-                utilization[-1] = (point.time, count / max_count) # update the count
+                if isChannel and count > 0:
+                    utilization[-1] = (point.time, 1)
+                else:
+                    utilization[-1] = (point.time, count / max_count) # update the count
             else:
-                utilization.append((point.time, count / max_count))
+                if isChannel and count > 0:
+                    utilization.append((point.time, 1))
+                else:
+                    utilization.append((point.time, count / max_count))
             last_time = point.time
         return utilization
 
@@ -2256,7 +2984,7 @@ class State(object):
     def convert_to_utilization(self, timepoints, owner):
         proc_utilization = []
         count = 0
-        if isinstance(owner, Processor):
+        if isinstance(owner, Processor) or isinstance(owner, Channel):
             for point in timepoints:
                 if point.first:
                     count += 1
@@ -2273,7 +3001,7 @@ class State(object):
     # group by processor kind per node. Also compute the children relationships
     def group_node_proc_kind_timepoints(self, timepoints_dict):
         # procs
-        for proc in self.processors.itervalues():
+        for proc in itervalues(self.processors):
             if len(proc.tasks) > 0:
                 # add this processor kind to both all and the node group
                 groups = [str(proc.node_id), "all"]
@@ -2284,7 +3012,7 @@ class State(object):
                     else:
                         timepoints_dict[group].append(proc.util_time_points)
         # memories
-        for mem in self.memories.itervalues():
+        for mem in itervalues(self.memories):
             if len(mem.time_points) > 0:
                 # add this memory kind to both the all and the node group
                 groups = [str(mem.node_id), "all"]
@@ -2294,10 +3022,27 @@ class State(object):
                         timepoints_dict[group] = [mem.time_points]
                     else:
                         timepoints_dict[group].append(mem.time_points)
+        # channels
+        for channel in itervalues(self.channels):
+            if len(channel.time_points) > 0:
+                # add this channel to both the all and the node group
+                if (channel.node_id() != None):
+                    groups = [str(channel.node_id()), "all"]
+                    if channel.node_id_dst() != channel.node_id() and channel.node_id_dst() != None:
+                        groups.append(str(channel.node_id_dst()))
+                    if channel.node_id_src() != channel.node_id() and channel.node_id_src() != None:
+                        groups.append(str(channel.node_id_src()))
+                    for node in groups:
+                        group = node + " (" + "Channel)"
+                        if group not in timepoints_dict:
+                            timepoints_dict[group] = [channel.time_points]
+                        else:
+                            timepoints_dict[group].append(channel.time_points)
+
 
     def get_nodes(self):
         nodes = {}
-        for proc in self.processors.itervalues():
+        for proc in itervalues(self.processors):
             if len(proc.tasks) > 0:
                 nodes[str(proc.node_id)] = 1
         if (len(nodes) > 1):
@@ -2321,13 +3066,16 @@ class State(object):
 
         # for each node grouping, add all the subtypes of processors
         for node in nodes:
-            for kind in processor_kinds.itervalues():
+            for kind in itervalues(processor_kinds):
                 group = str(node) + " (" + kind + ")"
                 if group in timepoints_dict:
                     stats_structure[node].append(group)
-            for kind in memory_kinds.itervalues():
+            for kind in itervalues(memory_kinds):
                 group = str(node) + " (" + kind + " Memory)"
                 if group in timepoints_dict:
+                    stats_structure[node].append(group)
+            group = node + " (" + "Channel)"
+            if group in timepoints_dict:
                     stats_structure[node].append(group)
 
         json_file_name = os.path.join(output_dirname, "json", "utils.json")
@@ -2385,14 +3133,14 @@ class State(object):
         # pointers until we get to an existing op
         transitive_map = {"in": {}, "out": {}, "parents": {}, "children": {}}
 
-        for _dir in transitive_map.iterkeys():
-            for op_id in op_dependencies.iterkeys():
+        for _dir in iterkeys(transitive_map):
+            for op_id in iterkeys(op_dependencies):
                 if not op_id in transitive_map[_dir]:
                     self.simplify_op(op_dependencies, op_existence_set,
                                      transitive_map, [op_id], _dir)
 
-        for op_id in op_dependencies.iterkeys():
-            for _dir in transitive_map.iterkeys():
+        for op_id in iterkeys(op_dependencies):
+            for _dir in iterkeys(transitive_map):
                 if len(op_dependencies[op_id][_dir]) > 0:
                     # replace each op with the transitive map
                     transformed_dependencies = [transitive_map[_dir][op]
@@ -2427,7 +3175,7 @@ class State(object):
         # compute the slice_index, slice_slice, and point_slice dependencies
         # (which legion_spy throws away). We just need to copy this data over
         # before legion spy throws it away
-        for _slice, index in self.spy_state.slice_index.iteritems():
+        for _slice, index in iteritems(self.spy_state.slice_index):
             while _slice in self.spy_state.slice_slice:
                 _slice = self.spy_state.slice_slice[_slice]
             if index.uid not in op_dependencies:
@@ -2447,7 +3195,7 @@ class State(object):
             op_dependencies[index.uid]["out"].add(_slice)
             op_dependencies[_slice]["in"].add(index.uid)
 
-        for _slice1, _slice2 in self.spy_state.slice_slice.iteritems():
+        for _slice1, _slice2 in iteritems(self.spy_state.slice_slice):
             if _slice1 not in op_dependencies:
                 op_dependencies[_slice1] = {
                     "in" : set(), 
@@ -2465,7 +3213,7 @@ class State(object):
             op_dependencies[_slice1]["out"].add(_slice2)
             op_dependencies[_slice2]["in"].add(_slice1)
 
-        for point, _slice in self.spy_state.point_slice.iteritems():
+        for point, _slice in iteritems(self.spy_state.point_slice):
             while _slice in self.spy_state.slice_slice:
                 _slice = self.spy_state.slice_slice[_slice]
             if _slice not in op_dependencies:
@@ -2526,7 +3274,7 @@ class State(object):
 
 
         # compute implicit dependencies
-        for op in self.spy_state.ops.itervalues():
+        for op in itervalues(self.spy_state.ops):
             if op.context is not None:
                 child_uid = op.uid
                 parent_uid = op.context.op.uid
@@ -2552,7 +3300,7 @@ class State(object):
         # actually executed
         op_existence_set = set()
 
-        for op_id, operation in self.operations.iteritems():
+        for op_id, operation in iteritems(self.operations):
             if operation.proc is not None:
                 op_existence_set.add(op_id)
 
@@ -2575,11 +3323,11 @@ class State(object):
                                                    op_dependencies[op_id][_dir]))
 
     def add_initiation_dependencies(self, state, op_dependencies, transitive_map):
-        for proc in self.processors.itervalues():
+        for proc in itervalues(self.processors):
             proc.add_initiation_dependencies(state, op_dependencies, transitive_map)
 
     def attach_dependencies(self, op_dependencies, transitive_map):
-        for proc in self.processors.itervalues():
+        for proc in itervalues(self.processors):
             proc.attach_dependencies(self, op_dependencies, transitive_map)
 
     # traverse one op to get the max outbound path from this point
@@ -2625,7 +3373,7 @@ class State(object):
     def compute_critical_path(self):
         paths = []
         # compute the critical path for each task
-        for proc in self.processors.itervalues():
+        for proc in itervalues(self.processors):
             for task in proc.tasks:
                 if (len(task.deps["parents"]) > 0) or (len(task.deps["out"]) > 0):
                     path = self.traverse_op_for_critical_path(task)
@@ -2722,7 +3470,9 @@ class State(object):
 
         ops_file = open(ops_file_name, "w")
         ops_file.write("op_id\tdesc\tproc\tlevel\n")
-        for op_id, operation in self.operations.iteritems():
+        for op_id, operation in iteritems(self.operations):
+            if operation.is_trimmed():
+                continue
             proc = ""
             level = ""
             if (operation.proc is not None):
@@ -2733,13 +3483,13 @@ class State(object):
         ops_file.close()
 
         if show_procs:
-            for proc in self.processors.itervalues():
+            for proc in itervalues(self.processors):
                 if self.has_spy_data and len(proc.tasks) > 0:
                     proc.add_initiation_dependencies(self, op_dependencies,
                                                      transitive_map)
                     self.convert_op_ids_to_tuples(op_dependencies)
 
-            for p,proc in sorted(self.processors.iteritems(), key=lambda x: x[1]):
+            for p,proc in sorted(iteritems(self.processors), key=lambda x: x[1]):
                 if len(proc.tasks) > 0:
                     if self.has_spy_data:
                         proc.attach_dependencies(self, op_dependencies,
@@ -2758,7 +3508,7 @@ class State(object):
 
                     last_time = max(last_time, proc.last_time)
         if show_channels:
-            for c,chan in sorted(self.channels.iteritems(), key=lambda x: x[1]):
+            for c,chan in sorted(iteritems(self.channels), key=lambda x: x[1]):
                 if len(chan.copies) > 0:
                     chan_name = slugify(str(c))
                     chan_tsv_file_name = os.path.join(tsv_dir, chan_name + ".tsv")
@@ -2774,7 +3524,7 @@ class State(object):
 
                     last_time = max(last_time, chan.last_time)
         if show_instances:
-            for m,mem in sorted(self.memories.iteritems(), key=lambda x: x[1]):
+            for m,mem in sorted(iteritems(self.memories), key=lambda x: x[1]):
                 if len(mem.instances) > 0:
                     mem_name = slugify("Mem_" + str(hex(m)))
                     mem_tsv_file_name = os.path.join(tsv_dir, mem_name + ".tsv")
@@ -2868,6 +3618,14 @@ def main():
         '-f', '--force', dest='force', action='store_true',
         help='overwrite output directory if it exists')
     parser.add_argument(
+        '--start-trim', dest='start_trim', action='store',
+        type=int, default=-1,
+        help='start time in micro-seconds to trim the profile')
+    parser.add_argument(
+        '--stop-trim', dest='stop_trim', action='store',
+        type=int, default=-1,
+        help='stop time in micro-seconds to trim the profile')
+    parser.add_argument(
         dest='filenames', nargs='+',
         help='input Legion Prof log filenames')
     args = parser.parse_args()
@@ -2883,6 +3641,8 @@ def main():
     copy_output_prefix = output_dirname + "_copy"
     print_stats = args.print_stats
     verbose = args.verbose
+    start_trim = args.start_trim
+    stop_trim = args.stop_trim
 
     state = State()
     has_matches = False
@@ -2921,6 +3681,17 @@ def main():
     if not has_matches:
         print('No matches found! Exiting...')
         return
+
+    # See if we need to trim out any boxes before we build the profile
+    if not print_stats and ((start_trim > 0) or (stop_trim > 0)):
+        if start_trim > 0 and stop_trim > 0:
+            if stop_trim > start_trim:
+                state.trim_time_ranges(start_trim, stop_trim)
+            else:
+                print('WARNING: Ignoring invalid trim ranges because stop trim time ('+
+                    str(stop_trim)+') comes before start trim time ('+str(start_trim)+')')
+        else:
+            state.trim_time_ranges(start_trim, stop_trim)
 
     # Once we are done loading everything, do the sorting
     state.sort_time_ranges()

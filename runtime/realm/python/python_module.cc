@@ -1,4 +1,4 @@
-/* Copyright 2018 Stanford University, NVIDIA Corporation
+/* Copyright 2019 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,7 +25,9 @@
 #include "realm/utils.h"
 
 #include <dlfcn.h>
+#ifdef REALM_USE_DLMOPEN
 #include <link.h>
+#endif // REALM_USE_DLMOPEN
 
 #include <list>
 
@@ -216,6 +218,7 @@ namespace Realm {
     if (!module) {
       log_py.fatal() << "unable to import Python module " << psi->module_name;
       (api->PyErr_PrintEx)(0);
+      (api->Py_Finalize)(); // otherwise Python doesn't flush its buffers
       assert(0);
     }
     //(api->PyObject_Print)(module, stdout, 0); printf("\n");
@@ -228,13 +231,18 @@ namespace Realm {
     if (!function) {
       {
         LoggerMessage m = log_py.fatal();
-        m << "unable to import Python function " << psi->module_name;
+        m << "unable to import Python function ";
         for (std::vector<std::string>::const_iterator it = psi->function_name.begin(),
                ie = psi->function_name.begin(); it != ie; ++it) {
-          m << "." << *it;
+          m << *it;
+          if (it + 1 != ie) {
+            m << ".";
+          }
         }
+        m << " from module " << psi->module_name;
       }
       (api->PyErr_PrintEx)(0);
+      (api->Py_Finalize)(); // otherwise Python doesn't flush its buffers
       assert(0);
     }
     //(api->PyObject_Print)(function, stdout, 0); printf("\n");
@@ -253,6 +261,7 @@ namespace Realm {
     if (!module) {
       log_py.fatal() << "unable to import Python module " << module_name;
       (api->PyErr_PrintEx)(0);
+      (api->Py_Finalize)(); // otherwise Python doesn't flush its buffers
       assert(0);
     }
     (api->Py_DecRef)(module);
@@ -275,6 +284,7 @@ namespace Realm {
     if(!res) {
       log_py.fatal() << "unable to run python string:" << script_text;
       (api->PyErr_PrintEx)(0);
+      (api->Py_Finalize)(); // otherwise Python doesn't flush its buffers
       assert(0);
     }
     (api->Py_DecRef)(res);
@@ -296,7 +306,7 @@ namespace Realm {
 
   void PythonThreadTaskScheduler::enqueue_taskreg(LocalPythonProcessor::TaskRegistration *treg)
   {
-    AutoHSLLock al(lock);
+    AutoLock<> al(lock);
     taskreg_queue.push_back(treg);
     // we've added work to the system
     work_counter.increment_counter();
@@ -326,7 +336,7 @@ namespace Realm {
 #endif
 
     // now go into main scheduler loop, holding scheduler lock for whole thing
-    AutoHSLLock al(lock);
+    AutoLock<> al(lock);
     while(true) {
       // remember the work counter value before we start so that we don't iterate
       //   unnecessarily
@@ -372,25 +382,8 @@ namespace Realm {
       resumable_workers.peek(&resumable_priority);
 
       // try to get a new task then
-      // remember where a task has come from in case we want to put it back
-      Task *task = 0;
-      TaskQueue *task_source = 0;
       int task_priority = resumable_priority;
-      for(std::vector<TaskQueue *>::const_iterator it = task_queues.begin();
-	  it != task_queues.end();
-	  it++) {
-	int new_priority;
-	Task *new_task = (*it)->get(&new_priority, task_priority);
-	if(new_task) {
-	  // if we got something better, put back the old thing (if any)
-	  if(task)
-	    task_source->put(task, task_priority, false); // back on front of list
-	  
-	  task = new_task;
-	  task_source = *it;
-	  task_priority = new_priority;
-	}
-      }
+      Task *task = TaskQueue::get_best_task(task_queues, task_priority);
 
       // did we find work to do?
       if(task) {
@@ -522,7 +515,7 @@ namespace Realm {
     // if this gets called before we're done initializing the interpreter,
     //  we need a simple blocking wait
     if(!interpreter_ready) {
-      AutoHSLLock al(lock);
+      AutoLock<> al(lock);
 
       log_py.debug() << "waiting during initialization";
       bool really_blocked = try_update_thread_state(thread,
@@ -580,7 +573,7 @@ namespace Realm {
   {
     // handle the wakening of the initialization thread specially
     if(!interpreter_ready) {
-      AutoHSLLock al(lock);
+      AutoLock<> al(lock);
       resumable_workers.put(thread, 0);
     } else {
       KernelThreadTaskScheduler::thread_ready(thread);
@@ -647,6 +640,7 @@ namespace Realm {
     , ready_task_count(stringbuilder() << "realm/proc " << me << "/ready tasks")
   {
     task_queue.set_gauge(&ready_task_count);
+    deferred_spawn_cache.clear();
 
     CoreReservationParameters params;
     params.set_num_cores(1);
@@ -682,6 +676,7 @@ namespace Realm {
     log_py.info() << "shutting down";
 
     sched->shutdown();
+    deferred_spawn_cache.flush();
   }
 
   void LocalPythonProcessor::create_interpreter(void)
@@ -801,35 +796,28 @@ namespace Realm {
 
   void LocalPythonProcessor::enqueue_task(Task *task)
   {
-    // just jam it into the task queue, scheduler will take care of the rest
-    if(task->mark_ready())
-      task_queue.put(task, task->priority);
-    else
-      task->mark_finished(false /*!successful*/);
+    task_queue.enqueue_task(task);
+  }
+
+  void LocalPythonProcessor::enqueue_tasks(Task::TaskList& tasks)
+  {
+    task_queue.enqueue_tasks(tasks);
   }
 
   void LocalPythonProcessor::spawn_task(Processor::TaskFuncID func_id,
 					const void *args, size_t arglen,
 					const ProfilingRequestSet &reqs,
-					Event start_event, Event finish_event,
+					Event start_event,
+					GenEventImpl *finish_event,
+					EventImpl::gen_t finish_gen,
 					int priority)
   {
     // create a task object for this
     Task *task = new Task(me, func_id, args, arglen, reqs,
-			  start_event, finish_event, priority);
-    get_runtime()->optable.add_local_operation(finish_event, task);
+			  start_event, finish_event, finish_gen, priority);
+    get_runtime()->optable.add_local_operation(finish_event->make_event(finish_gen), task);
 
-    // if the start event has already triggered, we can enqueue right away
-    bool poisoned = false;
-    if (start_event.has_triggered_faultaware(poisoned)) {
-      if(poisoned) {
-	log_poison.info() << "cancelling poisoned task - task=" << task << " after=" << task->get_finish_event();
-	task->handle_poisoned_precondition(start_event);
-      } else
-	enqueue_task(task);
-    } else {
-      EventImpl::add_waiter(start_event, new DeferredTaskSpawn(this, task));
-    }
+    enqueue_or_defer_task(task, start_event, &deferred_spawn_cache);
   }
 
   void LocalPythonProcessor::add_to_group(ProcessorGroup *group)
@@ -849,7 +837,7 @@ namespace Realm {
     sched->enqueue_taskreg(treg);
 #if 0
     {
-      AutoHSLLock al(mutex);
+      AutoLock<> al(mutex);
       bool was_empty = taskreg_queue.empty() && task_queue.empty();
       taskreg_queue.push_back(treg);
       if(was_empty)
@@ -925,6 +913,7 @@ namespace Realm {
     } else {
       log_py.fatal() << "python exception occurred within task:";
       (interpreter->api->PyErr_PrintEx)(0);
+      (interpreter->api->Py_Finalize)(); // otherwise Python doesn't flush its buffers
       assert(0);
     }
   }
@@ -941,7 +930,7 @@ namespace Realm {
       : Module("python")
       , cfg_num_python_cpus(0)
       , cfg_use_numa(false)
-      , cfg_stack_size_in_mb(2)
+      , cfg_stack_size(2 << 20)
     {
     }
 
@@ -966,7 +955,7 @@ namespace Realm {
 
         cp.add_option_int("-ll:py", m->cfg_num_python_cpus)
 	  .add_option_int("-ll:pynuma", m->cfg_use_numa)
-	  .add_option_int("-ll:pystack", m->cfg_stack_size_in_mb)
+	  .add_option_int_units("-ll:pystack", m->cfg_stack_size, 'm')
 	  .add_option_stringlist("-ll:pyimport", m->cfg_import_modules)
 	  .add_option_stringlist("-ll:pyinit", m->cfg_init_scripts);
 
@@ -1053,7 +1042,7 @@ namespace Realm {
           Processor p = runtime->next_local_processor_id();
           ProcessorImpl *pi = new LocalPythonProcessor(p, cpu_node,
                                                        runtime->core_reservation_set(),
-                                                       cfg_stack_size_in_mb << 20,
+                                                       cfg_stack_size,
 						       cfg_import_modules,
 						       cfg_init_scripts);
           runtime->add_processor(pi);
@@ -1061,7 +1050,7 @@ namespace Realm {
           // create affinities between this processor and system/reg memories
           // if the memory is one we created, use the kernel-reported distance
           // to adjust the answer
-          std::vector<MemoryImpl *>& local_mems = runtime->nodes[my_node_id].memories;
+          std::vector<MemoryImpl *>& local_mems = runtime->nodes[Network::my_node_id].memories;
           for(std::vector<MemoryImpl *>::iterator it2 = local_mems.begin();
               it2 != local_mems.end();
               ++it2) {

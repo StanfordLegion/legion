@@ -1,4 +1,4 @@
--- Copyright 2018 Stanford University, NVIDIA Corporation
+-- Copyright 2019 Stanford University, NVIDIA Corporation
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -134,6 +134,7 @@ local node_vars_are_valid = {
   end,
 
   [ast.typed.expr.Constant]                   = continue,
+  [ast.typed.expr.Global]                     = continue,
   [ast.typed.expr.Function]                   = continue,
   [ast.typed.expr.IndexAccess]                = continue,
   [ast.typed.expr.MethodCall]                 = continue,
@@ -146,6 +147,7 @@ local node_vars_are_valid = {
   [ast.typed.expr.RawFields]                  = continue,
   [ast.typed.expr.RawPhysical]                = continue,
   [ast.typed.expr.RawRuntime]                 = continue,
+  [ast.typed.expr.RawTask]                    = continue,
   [ast.typed.expr.RawValue]                   = continue,
   [ast.typed.expr.Isnull]                     = continue,
   [ast.typed.expr.Null]                       = continue,
@@ -157,6 +159,7 @@ local node_vars_are_valid = {
   [ast.typed.expr.Partition]                  = continue,
   [ast.typed.expr.PartitionEqual]             = continue,
   [ast.typed.expr.PartitionByField]           = continue,
+  [ast.typed.expr.PartitionByRestriction]     = continue,
   [ast.typed.expr.Image]                      = continue,
   [ast.typed.expr.ImageByTask]                = continue,
   [ast.typed.expr.Preimage]                   = continue,
@@ -192,9 +195,14 @@ local node_vars_are_valid = {
   [ast.typed.expr.Unary]                      = continue,
   [ast.typed.expr.Binary]                     = continue,
   [ast.typed.expr.Deref]                      = continue,
+  [ast.typed.expr.AddressOf]                  = continue,
+  [ast.typed.expr.ImportIspace]               = continue,
+  [ast.typed.expr.ImportRegion]               = continue,
+  [ast.typed.expr.ImportPartition]            = continue,
   [ast.typed.expr.Future]                     = continue,
   [ast.typed.expr.FutureGetResult]            = continue,
   [ast.typed.expr.ParallelizerConstraint]     = continue,
+  [ast.typed.expr.Projection]                 = continue,
 
   [ast.typed.expr.Internal]                   = unreachable,
 
@@ -290,6 +298,7 @@ local node_vars_are_valid = {
   [ast.condition_kind]    = continue,
   [ast.disjointness_kind] = continue,
   [ast.fence_kind]        = continue,
+  [ast.metadata]          = continue,
 }
 
 local validate_vars_node = ast.make_single_dispatch(

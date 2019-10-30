@@ -1,4 +1,4 @@
--- Copyright 2018 Stanford University
+-- Copyright 2019 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -37,11 +37,11 @@ task init(r1 : region(fs1), r2 : region(fs2(r1)), size : int)
 where reads writes(r1, r2)
 do
   for e in r1 do
-    e.f = 0.3 * ([ptr](e) + 1)
-    e.g = 0.3 * ([ptr](e) + 1)
+    e.f = 0.3 * (ptr(e) + 1)
+    e.g = 0.3 * (ptr(e) + 1)
   end
   for e in r2 do
-    e.p = unsafe_cast(ptr(fs1, r1), [ptr](e))
+    e.p = unsafe_cast(ptr(fs1, r1), ptr(e))
   end
 end
 
@@ -49,23 +49,17 @@ __demand(__parallel)
 task stencil(r1 : region(fs1), r2 : region(fs2(r1)))
 where reads(r2.p), reads writes(r1.f)
 do
-  var ts_start = c.legion_get_current_time_in_micros()
   for e in r2 do
-    r1[e.p].f += 0.5 * r1[e.p].f * e.p.f
+    r1[e.p].f += 0.5
   end
-  var ts_end = c.legion_get_current_time_in_micros()
-  c.printf("parallel version: %lu us\n", ts_end - ts_start)
 end
 
 task stencil_serial(r1 : region(fs1), r2 : region(fs2(r1)))
 where reads(r2.p), reads writes(r1.g)
 do
-  var ts_start = c.legion_get_current_time_in_micros()
   for e in r2 do
-    r1[e.p].g += 0.5 * r1[e.p].g * e.p.g
+    r1[e.p].g += 0.5
   end
-  var ts_end = c.legion_get_current_time_in_micros()
-  c.printf("serial version: %lu us\n", ts_end - ts_start)
 end
 
 local cmath = terralib.includec("math.h")

@@ -1,4 +1,4 @@
--- Copyright 2018 Stanford University
+-- Copyright 2019 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -31,6 +31,10 @@ task main()
   var v = x * y
   regentlib.assert(v.real == -5.0, "test failed")
   regentlib.assert(v.imag == 10.0, "test failed")
+
+  var v2 = x / y
+  regentlib.assert((v2.real - 0.44) < 0.000001, "test failed")
+  regentlib.assert((v2.imag - 0.8)  < 0.000001, "test failed")
 
   var u = x + 2
   regentlib.assert(u.real == 3.0, "test failed")

@@ -1,4 +1,4 @@
-/* Copyright 2018 Stanford University, NVIDIA Corporation
+/* Copyright 2019 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -279,6 +279,9 @@ namespace Realm {
     // are any of the code implementations marked as "portable" (i.e.
     //  usable in another process/address space)?
     bool has_portable_implementations(void) const;
+
+    // attempt to make a portable implementation from what we have
+    bool create_portable_implementation(void);
 
     template <typename T>
     const T *find_impl(void) const;

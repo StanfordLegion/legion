@@ -1,4 +1,4 @@
-/* Copyright 2018 Stanford University, NVIDIA Corporation
+/* Copyright 2019 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,10 +19,8 @@
 #define REALM_MACHINE_IMPL_H
 
 #include "realm/machine.h"
-
-#include "legion/legion_types.h"
-#include "legion/legion_utilities.h"
-#include "realm/activemsg.h"
+#include "realm/network.h"
+#include "realm/mutex.h"
 
 #include <vector>
 #include <set>
@@ -130,7 +128,7 @@ namespace Realm {
       void add_subscription(Machine::MachineUpdateSubscriber *subscriber);
       void remove_subscription(Machine::MachineUpdateSubscriber *subscriber);
 
-      mutable GASNetHSL mutex;
+      mutable Mutex mutex;
       std::vector<Machine::ProcessorMemoryAffinity> proc_mem_affinities;
       std::vector<Machine::MemoryMemoryAffinity> mem_mem_affinities;
       std::set<Machine::MachineUpdateSubscriber *> subscribers;
@@ -377,22 +375,12 @@ namespace Realm {
   };
 
   struct NodeAnnounceMessage {
-    struct RequestArgs : public BaseMedium {
-      NodeID node_id;
-      unsigned num_procs;
-      unsigned num_memories;
-      unsigned num_ib_memories;
-    };
+    unsigned num_procs;
+    unsigned num_memories;
+    unsigned num_ib_memories;
 
-    static void handle_request(RequestArgs args, const void *data, size_t datalen);
-
-    typedef ActiveMessageMediumNoReply<NODE_ANNOUNCE_MSGID,
-				       RequestArgs,
-				       handle_request> Message;
-
-    static void send_request(NodeID target, unsigned num_procs,
-			     unsigned num_memories, unsigned num_ib_memories,
-			     const void *data, size_t datalen, int payload_mode);
+    static void handle_message(NodeID sender, const NodeAnnounceMessage &msg,
+			       const void *data, size_t datalen);
 
     static void await_all_announcements(void);
   };

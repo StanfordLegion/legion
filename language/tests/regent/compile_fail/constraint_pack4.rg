@@ -1,4 +1,4 @@
--- Copyright 2018 Stanford University
+-- Copyright 2019 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -15,7 +15,7 @@
 -- fails-with:
 -- constraint_pack4.rg:28: invalid cast missing constraint $s * $r
 --   var x = t { a = r, b = s }
---           ^
+--             ^
 
 import "regent"
 

@@ -1,4 +1,4 @@
-/* Copyright 2018 Stanford University, NVIDIA Corporation
+/* Copyright 2019 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,6 +25,9 @@
 #include <vector>
 #include <map>
 #include <cassert>
+#include <sstream>
+
+#define WARN_UNUSED __attribute__((warn_unused_result))
 
 namespace Realm {
     
@@ -90,6 +93,22 @@ namespace Realm {
     std::ostream os;
   };
 
+  // little helper class that defines a default value for a member variable
+  //  in the header rather than in the containing object's constructor
+  //  implementation
+  template <typename T, T _DEFAULT>
+  struct WithDefault {
+  public:
+    static const T DEFAULT_VALUE = _DEFAULT;
+
+    WithDefault(void) : val(_DEFAULT) {}
+    WithDefault(T _val) : val(_val) {}
+
+    operator T(void) const { return val; }
+    WithDefault<T,_DEFAULT>& operator=(T newval) { val = newval; return *this; }
+
+    T val;
+  };
 
   // behaves like static_cast, but uses dynamic_cast+assert when DEBUG_REALM
   //  is defined
@@ -106,6 +125,130 @@ namespace Realm {
   }
 
 
+  // a wrapper class that defers construction of the underlying object until
+  //  explicitly requested
+  template <typename T>
+  class DeferredConstructor {
+  public:
+    DeferredConstructor();
+    ~DeferredConstructor();
+
+    // zero and one argument constructors for now
+    T *construct();
+
+    template <typename T1>
+    T *construct(T1 arg1);
+
+    // object must have already been explicitly constructed to dereference
+    T& operator*();
+    T *operator->();
+
+    const T& operator*() const;
+    const T *operator->() const;
+
+  protected:
+    T *ptr;  // needed to avoid type-punning complaints
+    char raw_storage[sizeof(T)] __attribute((aligned(__alignof__(T))));
+  };
+
+
+  template <unsigned _BITS, unsigned _SHIFT>
+  struct bitfield {
+    static const unsigned BITS = _BITS;
+    static const unsigned SHIFT = _SHIFT;
+
+    template <typename T>
+    static T extract(T source);
+
+    template <typename T>
+    static T insert(T target, T field);
+
+    template <typename T>
+    static T bit_or(T target, T field);
+  };
+
+  template <typename T>
+  class bitpack {
+  public:
+    bitpack();  // no initialization
+    bitpack(const bitpack<T>& copy_from);
+    bitpack(T init_val);
+
+    bitpack<T>& operator=(const bitpack<T>& copy_from);
+    bitpack<T>& operator=(T new_val);
+
+    operator T() const;
+
+    template <typename BITFIELD>
+    class bitsliceref {
+    public:
+      bitsliceref(T& _target);
+
+      operator T() const;
+      bitsliceref<BITFIELD>& operator=(T field);
+      bitsliceref<BITFIELD>& operator|=(T field);
+
+      static const T MAXVAL = ~(~T(0) << BITFIELD::BITS);
+
+    protected:
+      T& target;
+    };
+
+    template <typename BITFIELD>
+    class constbitsliceref {
+    public:
+      constbitsliceref(const T& _target);
+
+      operator T() const;
+
+      static const T MAXVAL = ~(~T(0) << BITFIELD::BITS);
+
+    protected:
+      const T& target;
+    };
+
+    template <typename BITFIELD>
+    bitsliceref<BITFIELD> slice();
+    template <typename BITFIELD>
+    constbitsliceref<BITFIELD> slice() const;
+
+    template <typename BITFIELD>
+    bitsliceref<BITFIELD> operator[](const BITFIELD& bitfield);
+    template <typename BITFIELD>
+    constbitsliceref<BITFIELD> operator[](const BITFIELD& bitfield) const;
+
+  protected:
+    T value;
+  };
+
+
+  // helpers to pretty-print containers
+
+  template <typename T>
+  class PrettyVector {
+  public:
+    explicit PrettyVector(const T *_data, size_t _size,
+			  const char *_delim = ", ",
+			  const char *_pfx = "[",
+			  const char *_sfx = "]");
+    explicit PrettyVector(const std::vector<T>& _v,
+			  const char *_delim = ", ",
+			  const char *_pfx = "[",
+			  const char *_sfx = "]");
+
+    void print(std::ostream& os) const;
+
+  protected:
+    const T *data;
+    size_t size;
+    const char *delim;
+    const char *pfx;
+    const char *sfx;
+  };
+
+  template <typename T>
+  std::ostream& operator<<(std::ostream& os, const PrettyVector<T>& pv);
+  
 }; // namespace Realm
 
 #include "utils.inl"

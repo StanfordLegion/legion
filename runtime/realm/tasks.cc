@@ -1,4 +1,4 @@
-/* Copyright 2018 Stanford University, NVIDIA Corporation
+/* Copyright 2019 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -33,18 +33,40 @@ namespace Realm {
 	     const void *_args, size_t _arglen,
 	     const ProfilingRequestSet &reqs,
 	     Event _before_event,
-	     Event _finish_event, int _priority)
-    : Operation(_finish_event, reqs), proc(_proc), func_id(_func_id),
-      args(_args, _arglen), before_event(_before_event), priority(_priority),
+	     GenEventImpl *_finish_event, EventImpl::gen_t _finish_gen,
+	     int _priority)
+    : Operation(_finish_event, _finish_gen, reqs)
+    , proc(_proc), func_id(_func_id),
+      before_event(_before_event), priority(_priority),
       executing_thread(0)
   {
+    // clamp task priority to "finite" range
+    if(priority < TaskQueue::PRI_MIN_FINITE) priority = TaskQueue::PRI_MIN_FINITE;
+    if(priority > TaskQueue::PRI_MAX_FINITE) priority = TaskQueue::PRI_MAX_FINITE;
+
+    arglen = _arglen;
+    if(arglen <= SHORT_ARGLEN_MAX) {
+      if(arglen) {
+	memcpy(short_argdata, _args, arglen);
+        argdata = short_argdata;
+      } else
+	argdata = 0;
+      free_argdata = false;
+    } else {
+      argdata = static_cast<char *>(malloc(arglen));
+      assert(argdata != 0);
+      memcpy(argdata, _args, arglen);
+      free_argdata = true;
+    }
     log_task.info() << "task " << (void *)this << " created: func=" << func_id
 		    << " proc=" << _proc << " arglen=" << _arglen
-		    << " before=" << _before_event << " after=" << _finish_event;
+		    << " before=" << _before_event << " after=" << get_finish_event();
   }
 
   Task::~Task(void)
   {
+    if(free_argdata)
+      free(argdata);
   }
 
   void Task::print(std::ostream& os) const
@@ -55,24 +77,24 @@ namespace Realm {
   bool Task::mark_ready(void)
   {
     log_task.info() << "task " << (void *)this << " ready: func=" << func_id
-		    << " proc=" << proc << " arglen=" << args.size()
-		    << " before=" << before_event << " after=" << finish_event;
+		    << " proc=" << proc << " arglen=" << arglen
+		    << " before=" << before_event << " after=" << get_finish_event();
     return Operation::mark_ready();
   }
 
   bool Task::mark_started(void)
   {
     log_task.info() << "task " << (void *)this << " started: func=" << func_id
-		    << " proc=" << proc << " arglen=" << args.size()
-		    << " before=" << before_event << " after=" << finish_event;
+		    << " proc=" << proc << " arglen=" << arglen
+		    << " before=" << before_event << " after=" << get_finish_event();
     return Operation::mark_started();
   }
 
   void Task::mark_completed(void)
   {
     log_task.info() << "task " << (void *)this << " completed: func=" << func_id
-		    << " proc=" << proc << " arglen=" << args.size()
-		    << " before=" << before_event << " after=" << finish_event;
+		    << " proc=" << proc << " arglen=" << arglen
+		    << " before=" << before_event << " after=" << get_finish_event();
     Operation::mark_completed();
   }
 
@@ -152,11 +174,13 @@ namespace Realm {
 #ifdef REALM_USE_EXCEPTIONS
       // even if exceptions are enabled, we only install handlers if somebody is paying
       //  attention to the OperationStatus
-      if(measurements.wants_measurement<ProfilingMeasurements::OperationStatus>()) {
+      if(measurements.wants_measurement<ProfilingMeasurements::OperationStatus>() ||
+	 measurements.wants_measurement<ProfilingMeasurements::OperationAbnormalStatus>()) {	 
 	try {
 	  Thread::ExceptionHandlerPresence ehp;
 	  thread->start_perf_counters();
-	  get_runtime()->get_processor_impl(p)->execute_task(func_id, args);
+	  get_runtime()->get_processor_impl(p)->execute_task(func_id,
+							     ByteArrayRef(argdata, arglen));
 	  thread->stop_perf_counters();
 	  thread->stop_operation(this);
 	  thread->record_perf_counters(measurements);
@@ -172,7 +196,8 @@ namespace Realm {
       {
 	// just run the task - if it completes, we assume it was successful
 	thread->start_perf_counters();
-	get_runtime()->get_processor_impl(p)->execute_task(func_id, args);
+	get_runtime()->get_processor_impl(p)->execute_task(func_id,
+							   ByteArrayRef(argdata, arglen));
 	thread->stop_perf_counters();
 	thread->stop_operation(this);
 	thread->record_perf_counters(measurements);
@@ -200,6 +225,222 @@ namespace Realm {
 
   ////////////////////////////////////////////////////////////////////////
   //
+  // class Task::DeferredSpawn
+  //
+
+  Task::DeferredSpawn::DeferredSpawn(void)
+    : is_triggered(false)
+  {}
+
+  void Task::DeferredSpawn::setup(ProcessorImpl *_proc, Task *_task,
+				  Event _wait_on)
+  {
+    proc = _proc;
+    task = _task;
+    wait_on = _wait_on;
+  }
+
+  void Task::DeferredSpawn::defer(EventImpl *_wait_impl,
+                                  EventImpl::gen_t _wait_gen)
+  {
+    {
+      AutoLock<> al(pending_list_mutex);
+      // insert ourselves in the pending list
+      pending_list.push_back(task);
+    }
+    _wait_impl->add_waiter(_wait_gen, this);
+  }
+    
+  void Task::DeferredSpawn::event_triggered(bool poisoned)
+  {
+    // record the triggering, which closes the pending_list
+    {
+      AutoLock<> al(pending_list_mutex);
+      is_poisoned = poisoned;
+      is_triggered = true;
+    }
+    if(poisoned) {
+      // hold a reference on this task while we cancel a bunch of tasks including ourself
+      task->add_reference();
+      while(!pending_list.empty(INT_MIN)) {
+        Task *to_cancel = pending_list.pop_front(INT_MIN);
+        // cancel the task - this has to work
+        log_poison.info() << "cancelling poisoned task - task=" << to_cancel << " after=" << to_cancel->get_finish_event();
+        to_cancel->handle_poisoned_precondition(wait_on);
+      }
+      task->remove_reference();
+    } else {
+      //log_task.print() << "enqueuing " << pending_list.size() << " tasks";
+      proc->enqueue_tasks(pending_list);
+    }
+  }
+
+  void Task::DeferredSpawn::print(std::ostream& os) const
+  {
+    os << "deferred task: func=" << task->func_id << " proc=" << task->proc << " finish=" << task->get_finish_event();
+  }
+
+  Event Task::DeferredSpawn::get_finish_event(void) const
+  {
+    // TODO: change this interface to return multiple finish events
+    return task->get_finish_event();
+  }
+
+  // attempts to add another task to the this deferred spawn group -
+  // returns true on success, or false if the event has already
+  //  triggered, in which case 'poisoned' is set appropriately
+  bool Task::DeferredSpawn::add_task(Task *to_add, bool& poisoned)
+  {
+    assert(to_add->before_event == wait_on);
+    bool ok;
+    {
+      AutoLock<> al(pending_list_mutex);
+      if(is_triggered) {
+	ok = false;
+	poisoned = is_poisoned;
+      } else {
+	ok = true;
+	pending_list.push_back(to_add);
+      }
+    }
+    return ok;
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class TaskQueue
+  //
+
+  TaskQueue::TaskQueue(void)
+    : task_count_gauge(0)
+  {}
+
+  void TaskQueue::add_subscription(NotificationCallback *callback,
+				   priority_t higher_than /*= PRI_NEG_INF*/)
+  {
+    AutoLock<> al(mutex);
+    callbacks.push_back(callback);
+    callback_priorities.push_back(higher_than);
+  }
+
+  void TaskQueue::set_gauge(ProfilingGauges::AbsoluteRangeGauge<int> *new_gauge)
+  {
+    task_count_gauge = new_gauge;
+  }
+
+  // gets highest priority task available from any task queue
+  /*static*/ Task *TaskQueue::get_best_task(const std::vector<TaskQueue *>& queues,
+					    int& task_priority)
+  {
+    // remember where a task has come from in case we want to put it back
+    Task *task = 0;
+    TaskQueue *task_source = 0;
+
+    for(std::vector<TaskQueue *>::const_iterator it = queues.begin();
+	it != queues.end();
+	it++) {
+      Task *new_task;
+      {
+	AutoLock<> al((*it)->mutex);
+	new_task = (*it)->ready_task_list.pop_front(task_priority+1);
+      }
+      if(new_task) {
+	if((*it)->task_count_gauge)
+	  *((*it)->task_count_gauge) -= 1;
+
+	// if we got something better, put back the old thing (if any)
+	if(task) {
+	  {
+	    AutoLock<> al(task_source->mutex);
+	    task_source->ready_task_list.push_front(task);
+	  }
+	  if(task_source->task_count_gauge)
+	    (*task_source->task_count_gauge) += 1;
+	}
+	  
+	task = new_task;
+	task_source = *it;
+	task_priority = task->priority;
+      }
+    }
+
+    return task;
+  }
+
+  void TaskQueue::enqueue_task(Task *task)
+  {
+    priority_t notify_priority = PRI_NEG_INF;
+
+    // just jam it into the task queue
+    if(task->mark_ready()) {
+      {
+	AutoLock<> al(mutex);
+	if(ready_task_list.empty(task->priority))
+	  notify_priority = task->priority;
+	ready_task_list.push_back(task);
+      }
+
+      if(task_count_gauge)
+	*task_count_gauge += 1;
+
+      if(notify_priority > PRI_NEG_INF)
+	for(size_t i = 0; i < callbacks.size(); i++)
+	  if(notify_priority >= callback_priorities[i])
+	    callbacks[i]->item_available(notify_priority);
+    } else
+      task->mark_finished(false /*!successful*/);
+  }
+
+  class ReadyMarker {
+  public:
+    ReadyMarker() : count(0) {}
+
+    void operator()(Task *task)
+    {
+      task->mark_ready();
+      count++;
+    }
+
+    size_t count;
+  };
+
+  void TaskQueue::enqueue_tasks(Task::TaskList& tasks)
+  {
+    // early out if there are no tasks to add
+    if(tasks.empty(PRI_NEG_INF)) return;
+
+    // mark all tasks as ready - we lose the ability to filter out those
+    //  that have been cancelled, but that'll happen in mark_started too,
+    //  and it saves us from messing with the list structure
+    ReadyMarker marker;
+    tasks.foreach(marker);
+
+    // we'll tentatively notify based on the highest priority task to be
+    //  added
+    priority_t notify_priority = tasks.front()->priority;
+
+    {
+      AutoLock<> al(mutex);
+      // cancel notification if we already have equal/higher priority tasks
+      if(!ready_task_list.empty(notify_priority))
+	notify_priority = PRI_NEG_INF;
+      // absorb new list into ours
+      ready_task_list.absorb_append(tasks);
+    }
+
+    if(task_count_gauge)
+      *task_count_gauge += marker.count;
+
+    if(notify_priority > PRI_NEG_INF)
+      for(size_t i = 0; i < callbacks.size(); i++)
+	if(notify_priority >= callback_priorities[i])
+	  callbacks[i]->item_available(notify_priority);
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
   // class ThreadedTaskScheduler::WorkCounter
   //
 
@@ -212,10 +453,11 @@ namespace Realm {
 
   void ThreadedTaskScheduler::WorkCounter::increment_counter(void)
   {
-    // common case is that we'll bump the counter and nobody cares, so do this without a lock
-    // use __sync_* though to make sure memory ordering is preserved
-    long long old_value = __sync_fetch_and_add(&counter, 1);
-    long long wv_snapshot = __sync_fetch_and_add(&wait_value, 0);
+    // common case is that we'll bump the counter and nobody cares, so do
+    //  this without a lock - have to make certain order of these two loads
+    //  is preserved though
+    long long old_value = counter.fetch_add_acqrel(1);
+    long long wv_snapshot = wait_value.load();
 
 //define DEBUG_WORK_COUNTER
 #ifdef DEBUG_WORK_COUNTER
@@ -234,23 +476,32 @@ namespace Realm {
     //  the mutex - we'll use that opportunity to retest the wait value and skip the
     //  broadcast (and associated syscall) if it has changed
     {
-      AutoHSLLock al(mutex);
-      long long wv_reread = __sync_fetch_and_add(&wait_value, 0);
+      AutoLock<> al(mutex);
+      long long wv_reread = wait_value.load();
       if(old_value == wv_reread) {
 #ifdef DEBUG_WORK_COUNTER
 	printf("WC(%p) broadcast(1) %lld\n", this, old_value);
 #endif
 	condvar.broadcast();
-	__sync_bool_compare_and_swap(&wait_value, wv_reread, -1);
+#ifdef DEBUG_REALM
+	long long wv_expected = wv_reread;
+	bool ok = wait_value.compare_exchange(wv_expected, -1);
+	assert(ok);
+#else
+	// blind store - nobody's allowed to change wait_value outside the lock
+	wait_value.store(-1);
+#endif
       }
     }
 
+#ifdef DEBUG_REALM
     // sanity-check: a wait value earlier than the number we just incremented
     //  from should not be possible
 #ifndef NDEBUG
-    long long wv_check = __sync_fetch_and_add(&wait_value, 0);
+    long long wv_check = wait_value.load();
 #endif
     assert((wv_check == -1) || (wv_check > old_value));
+#endif
   }
 
   // waits until new work arrives - this will possibly take the counter lock and 
@@ -259,16 +510,16 @@ namespace Realm {
   {
     // we assume the caller tried check_for_work() before dropping
     //  their locks and calling us, so take and hold the lock the entire time
-    AutoHSLLock al(mutex);
+    AutoLock<> al(mutex);
 
     // an early out is still needed to make sure the counter hasn't moved on and somebody
     //  isn't trying to wait on a later value
-    if(counter != old_counter)
+    if(counter.load_acquire() != old_counter)
       return;
 
     // first, see if we catch anybody waiting on an older version of the counter - they can
     //  definitely be awakened
-    long long wv_read = wait_value;
+    long long wv_read = wait_value.load();
     if((wv_read >= 0) && (wv_read < old_counter)) {
 #ifdef DEBUG_WORK_COUNTER
       printf("WC(%p) broadcast(2) %lld\n", this, wv_read);
@@ -276,25 +527,46 @@ namespace Realm {
       condvar.broadcast();
     }
     assert(wv_read <= old_counter);
-#ifndef NDEBUG
-    bool ok =
+#ifdef DEBUG_REALM
+    long long wv_expected = wv_read;
+    bool ok = wait_value.compare_exchange(wv_expected, old_counter);
+    assert(ok);
+#else
+    // blind store - nobody's allowed to change wait_value outside the lock
+    wait_value.store(old_counter);
 #endif
-      __sync_bool_compare_and_swap(&wait_value, wv_read, old_counter);
-    assert(ok); // swap should never fail
+
+    // the re-load of counter below needs to happen, and c++98's version of
+    //  atomics aren't strong enough to force it, so use the big hammer here -
+    // not a huge deal since we're probably going to sleep anyway
+    __sync_synchronize();
 
     // now that people know we're waiting, wait until the counter updates - check before
     //  each wait
-    while(__sync_fetch_and_add(&counter, 0) == old_counter) {
+    while(counter.load_acquire() == old_counter) {
       // sanity-check
 #ifndef NDEBUG
-      long long wv_check =
-#endif
-	__sync_fetch_and_add(&wait_value, 0);
-#ifdef DEBUG_WORK_COUNTER
-      printf("WC(%p) wait %lld (%lld)\n", this, old_counter, wv_check);
-#endif
+      long long wv_check = wait_value.load();
       assert(wv_check == old_counter);
+#endif
+#ifdef DEBUG_WORK_COUNTER
+      printf("WC(%p) wait %lld (%lld)\n", this, old_counter, wait_value.load());
+#endif
+#define WORK_COUNTER_TIMEOUT_CHECK
+#ifdef WORK_COUNTER_TIMEOUT_CHECK
+      bool awakened = condvar.timedwait(1000000000LL);
+      if(!awakened && (counter.load_acquire() != old_counter)) {
+	static atomic<int> warncount(0);
+	static const int MAX_WARNINGS = 10;
+	int c = warncount.fetch_add(1) + 1;
+	if(c <= MAX_WARNINGS)
+	  log_task.warning() << "missed work counter wakeup?"
+			     << ((c == MAX_WARNINGS) ? " - suppressing further messages" : "");
+	break;
+      }
+#else
       condvar.wait();
+#endif
       //while(counter == old_counter) { mutex.unlock(); Thread::yield(); mutex.lock(); }
 #ifdef DEBUG_WORK_COUNTER
       printf("WC(%p) ready %lld\n", this, old_counter);
@@ -302,7 +574,7 @@ namespace Realm {
     }
 
     // once we're done, clear the wait value, but only if it's for us
-    __sync_bool_compare_and_swap(&wait_value, old_counter, -1);
+    wait_value.compare_exchange(old_counter, -1);
   }
 
 
@@ -336,7 +608,7 @@ namespace Realm {
 
   void ThreadedTaskScheduler::add_task_queue(TaskQueue *queue)
   {
-    AutoHSLLock al(lock);
+    AutoLock<> al(lock);
 
     task_queues.push_back(queue);
 
@@ -374,7 +646,7 @@ namespace Realm {
   {
     // there's a potential race between a thread blocking and being reawakened,
     //  so take the scheduler lock and THEN try to mark the thread as blocked
-    AutoHSLLock al(lock);
+    AutoLock<> al(lock);
 
     bool really_blocked = try_update_thread_state(thread,
 						  Thread::STATE_BLOCKING,
@@ -384,6 +656,50 @@ namespace Realm {
     //  higher-priority work is pending
     if(!really_blocked)
       return;
+
+    // if this thread has enabled the scheduler lock, we're not going to
+    //  yield to anybody - we'll spin until we're marked as being ready
+    //  again
+    if(ThreadLocal::scheduler_lock > 0) {
+      log_sched.debug() << "thread w/ scheduler lock spinning: " << thread;
+      spinning_workers.insert(thread);
+      while(true) {
+	long long old_work_counter = work_counter.read_counter();
+	switch(thread->get_state()) {
+	case Thread::STATE_READY:
+	  {
+	    log_sched.debug() << "thread w/ scheduler lock ready: " << thread;
+	    return;
+	  }
+
+	case Thread::STATE_ALERTED:
+	  {
+	    log_sched.debug() << "thread w/ scheduler lock alerted: " << thread;
+	    thread->process_signals();
+	    bool resuspended = try_update_thread_state(thread,
+						       Thread::STATE_ALERTED,
+						       Thread::STATE_BLOCKED);
+	    if(!resuspended) {
+	      assert(thread->get_state() == Thread::STATE_READY);
+	      return;
+	    }
+	    break;
+	  }
+
+	case Thread::STATE_BLOCKED:
+	  {
+	    // twiddle our thumbs until something happens
+	    wait_for_work(old_work_counter);
+	    break;
+	  }
+
+	default:
+	  assert(0);
+	};
+      }
+      // should never get here
+      assert(0);
+    }
 
 #ifdef DEBUG_THREAD_SCHEDULER
     assert(blocked_workers.count(thread) == 0);
@@ -477,7 +793,18 @@ namespace Realm {
 
     // TODO: might be nice to do this in a lock-free way, since this is called by
     //  some other thread
-    AutoHSLLock al(lock);
+    AutoLock<> al(lock);
+
+    // if this was a spinning thread, remove it from the list and poke the
+    //  work counter in cases its execution resource is napping
+    if(!spinning_workers.empty()) {
+      std::set<Thread *>::iterator it = spinning_workers.find(thread);
+      if(it != spinning_workers.end()) {
+	spinning_workers.erase(it);
+	work_counter.increment_counter();
+	return;
+      }
+    }
 
     // it may be that the thread has noticed that it is ready already, in
     //  which case it'll no longer be blocked and we don't want to resume it
@@ -511,7 +838,7 @@ namespace Realm {
     int old_priority;
 
     {
-      AutoHSLLock al(lock);
+      AutoLock<> al(lock);
       std::map<Thread *, int>::iterator it = worker_priorities.find(thread);
       assert(it != worker_priorities.end());
       old_priority = it->second;
@@ -527,7 +854,7 @@ namespace Realm {
     // the entire body of this method, except for when running an actual task, is
     //   a critical section - lock should be taken by caller
     {
-      //AutoHSLLock al(lock);
+      //AutoLock<> al(lock);
 
       // we're a new, and initially unassigned, worker - counters have already been updated
 
@@ -547,25 +874,8 @@ namespace Realm {
 	resumable_workers.peek(&resumable_priority);
 
 	// try to get a new task then
-	// remember where a task has come from in case we want to put it back
-	Task *task = 0;
-	TaskQueue *task_source = 0;
 	int task_priority = resumable_priority;
-	for(std::vector<TaskQueue *>::const_iterator it = task_queues.begin();
-	    it != task_queues.end();
-	    it++) {
-	  int new_priority;
-	  Task *new_task = (*it)->get(&new_priority, task_priority);
-	  if(new_task) {
-	    // if we got something better, put back the old thing (if any)
-	    if(task)
-	      task_source->put(task, task_priority, false); // back on front of list
-	  
-	    task = new_task;
-	    task_source = *it;
-	    task_priority = new_priority;
-	  }
-	}
+	Task *task = TaskQueue::get_best_task(task_queues, task_priority);
 
 	// did we find work to do?
 	if(task) {
@@ -693,7 +1003,7 @@ namespace Realm {
   // an entry point that takes the scheduler lock explicitly
   void ThreadedTaskScheduler::scheduler_loop_wlock(void)
   {
-    AutoHSLLock al(lock);
+    AutoLock<> al(lock);
     scheduler_loop();
   }
 
@@ -741,7 +1051,7 @@ namespace Realm {
   {
     // fire up the minimum number of workers
     {
-      AutoHSLLock al(lock);
+      AutoLock<> al(lock);
 
       update_worker_count(cfg_min_active_workers, cfg_min_active_workers);
 
@@ -759,7 +1069,7 @@ namespace Realm {
 
     // wait for all workers to finish
     {
-      AutoHSLLock al(lock);
+      AutoLock<> al(lock);
 
       while(!all_workers.empty() || !terminating_workers.empty())
 	shutdown_condvar.wait();
@@ -774,11 +1084,11 @@ namespace Realm {
 
     // see if we're supposed to be active yet
     {
-      AutoHSLLock al(lock);
+      AutoLock<> al(lock);
 
       if(active_workers.count(thread) == 0) {
 	// nope, sleep on a CV until we are
-	GASNetCondVar my_cv(lock);
+	CondVar my_cv(lock);
 	sleeping_threads[thread] = &my_cv;
 
 	while(active_workers.count(thread) == 0)
@@ -793,7 +1103,7 @@ namespace Realm {
   {
     log_sched.info() << "scheduler worker terminating: sched=" << this << " worker=" << thread;
 
-    AutoHSLLock al(lock);
+    AutoLock<> al(lock);
 
     // if the thread is still in our all_workers list, this was unexpected
     if(all_workers.count(thread) > 0) {
@@ -860,7 +1170,7 @@ namespace Realm {
       active_workers.erase(Thread::self());
     assert(count == 1);
 
-    GASNetCondVar my_cv(lock);
+    CondVar my_cv(lock);
     sleeping_threads[Thread::self()] = &my_cv;
 
     // with kernel threads, sleeping and waking are separable actions
@@ -882,7 +1192,7 @@ namespace Realm {
     active_workers.insert(to_wake);
 
     // if they have a CV (they might not yet), poke that
-    std::map<Thread *, GASNetCondVar *>::const_iterator it = sleeping_threads.find(to_wake);
+    std::map<Thread *, CondVar *>::const_iterator it = sleeping_threads.find(to_wake);
     if(it != sleeping_threads.end())
       it->second->signal();
   }
@@ -969,7 +1279,7 @@ namespace Realm {
 
     // fire up the host threads (which will fire up initial workers)
     {
-      AutoHSLLock al(lock);
+      AutoLock<> al(lock);
 
       update_worker_count(cfg_num_host_threads, cfg_num_host_threads);
 
@@ -993,7 +1303,7 @@ namespace Realm {
   {
     log_sched.info() << "scheduler shutdown requested: sched=" << this;
     // set the shutdown flag and wait for all the host threads to exit
-    AutoHSLLock al(lock);
+    AutoLock<> al(lock);
 
     // make sure everybody actually started before we tell them to shut down
     while(host_startups_remaining > 0) {
@@ -1041,7 +1351,7 @@ namespace Realm {
   void UserThreadTaskScheduler::host_thread_loop(void)
   {
     log_sched.debug() << "host thread started: sched=" << this << " thread=" << Thread::self();
-    AutoHSLLock al(lock);
+    AutoLock<> al(lock);
 
     // create a user worker thread - it won't start right away
     Thread *worker = worker_create(false);

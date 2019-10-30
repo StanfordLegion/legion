@@ -1,4 +1,4 @@
-/* Copyright 2018 Stanford University, NVIDIA Corporation
+/* Copyright 2019 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,6 +25,30 @@
 
 namespace Realm {
 
+  namespace HDF5 {
+
+    class HDF5Dataset {
+    public:
+      static HDF5Dataset *open(const char *filename,
+			       const char *dsetname,
+			       bool read_only);
+      void flush();
+      void close();
+
+    protected:
+      HDF5Dataset();
+      ~HDF5Dataset();
+
+    public:
+      hid_t file_id, dset_id, dtype_id;
+      int ndims;
+      static const int MAX_DIM = 16;
+      hsize_t dset_size[MAX_DIM];
+      bool read_only;
+    };
+  }; // namespace HDF5
+
+
   template <int N, typename T>
   class HDF5LayoutPiece : public InstanceLayoutPiece<N,T> {
   public:
@@ -46,6 +70,8 @@ namespace Realm {
 
     std::string filename, dsetname;
     Point<N, hsize_t> offset;
+    int dim_order[N];
+    bool read_only;
   };
 
 }; // namespace Realm

@@ -1,4 +1,4 @@
--- Copyright 2018 Stanford University
+-- Copyright 2019 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -13,9 +13,9 @@
 -- limitations under the License.
 
 -- fails-with:
--- vectorize_loops10.rg:33: vectorization failed: loop body has an array access with non-contiguous values
+-- vectorize_loops10.rg:33: vectorization failed: found a loop-carried dependence
 --     a[e.v] = 1
---         ^
+--      ^
 
 import "regent"
 
@@ -24,14 +24,12 @@ fspace fs
   v : int,
 }
 
-task toplevel()
-  var n = 8
-  var r = region(ispace(ptr, n), fs)
+task f(r : region(fs))
+where reads writes(r)
+do
   var a : int[10]
   __demand(__vectorize)
   for e in r do
     a[e.v] = 1
   end
 end
-
-regentlib.start(toplevel)

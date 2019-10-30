@@ -1,4 +1,4 @@
-/* Copyright 2018 Stanford University, NVIDIA Corporation
+/* Copyright 2019 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -66,12 +66,120 @@ namespace Realm {
   //
   // class IndexSpace<N,T>
 
+  // this is used by create_equal_subspace(s) to decompose an N-D rectangle
+  //  into bounds with roughly-even volumes in a sparse index space
+  template <int N, typename T>
+  static void recursive_decomposition(const Rect<N,T>& bounds,
+				      size_t start, size_t count, size_t volume,
+				      IndexSpace<N,T> *results,
+				      size_t first_result, size_t last_result,
+				      const std::vector<SparsityMapEntry<N,T> >& entries)
+  {
+    // should never be here with empty bounds
+    assert(!bounds.empty());
+
+    // if we have more subspaces than elements, the last subspaces will be
+    //  empty
+    if(count > volume) {
+      size_t first_empty = std::max(first_result, start + volume);
+      size_t last_empty = std::min(start + count - 1, last_result);
+      for(size_t i = first_empty; i <= last_empty; i++)
+	results[i - first_result] = IndexSpace<N,T>::make_empty();
+      if(volume == 0) {
+	// this shouldn't happen in the recursion case, but can happen on the
+	//  initial call for an empty parent space
+	return;
+      }
+      count = volume;
+    }
+
+    // base case
+    if(count == 1) {
+      //log_part.info() << "split result " << start << " = " << bounds;
+      // save these bounds if they're one we care about
+      if((start >= first_result) && (start <= last_result))
+	results[start - first_result].bounds = bounds;
+      return;
+    }
+
+    // look at half-ish splits in each dimension and choose the one that
+    //  yields the best division
+    Rect<N,T> lo_half[N];
+    for(int i = 0; i < N; i++) {
+      T split = bounds.lo[i] + ((bounds.hi[i] - bounds.lo[i]) >> 1);
+      lo_half[i] = bounds;  lo_half[i].hi[i] = split;
+    }
+    // compute the volume within each split domain
+    size_t lo_volume[N];
+    for(int i = 0; i < N; i++)
+      lo_volume[i] = 0;
+    for(typename std::vector<SparsityMapEntry<N,T> >::const_iterator it = entries.begin();
+	it != entries.end();
+	it++) {
+      for(int i = 0; i < N; i++)
+	lo_volume[i] += it->bounds.intersection(lo_half[i]).volume();
+    }
+    // now compute how many subspaces would fall in each half and the 
+    //  inefficiency of the split
+    size_t lo_count[N], inefficiency[N];
+    for(int i = 0; i < N; i++) {
+      lo_count[i] = (count * lo_volume[i] + (volume >> 1)) / volume;
+      // lo_count can't be 0 or count if the volume split is nontrivial
+      if((lo_volume[i] > 0) && (lo_count[i] == 0))
+	lo_count[i] = 1;
+      if((lo_volume[i] < volume) && (lo_count[i] == count))
+	lo_count[i] = count - 1;
+      int delta = (count * lo_volume[i]) - (lo_count[i] * volume);
+      // the high-order inefficiency comes from subspaces with extra elements
+      inefficiency[i] = 0;
+      if(delta > 0)
+	// low half has too many
+	inefficiency[i] = (delta + lo_count[i] - 1) / lo_count[i];
+      if(delta < 0)
+	// hi half has too many
+	inefficiency[i] = (-delta + (count - lo_count[i]) - 1) / (count - lo_count[i]);
+      // low-order inefficiency comes from an uneven split in the coutns
+      inefficiency[i] = inefficiency[i] * count + std::max(lo_count[i],
+							   count - lo_count[i]);
+      //log_part.info() << "dim " << i << ": half=" << lo_half[i] << " vol=" << lo_volume[i] << "/" << volume << " count=" << lo_count[i] << "/" << count << " delta=" << delta << " ineff=" << inefficiency[i];
+    }
+    int best_dim = -1;
+    for(int i = 0; i < N; i++) {
+      // can't split a dimension that was already minimal size
+      if(bounds.lo[i] == bounds.hi[i]) continue;
+      if((best_dim < 0) || (inefficiency[i] < inefficiency[best_dim]))
+	best_dim = i;
+    }
+    assert(best_dim >= 0);
+
+    //log_part.info() << "split: " << bounds << " count=" << count << " dim=" << best_dim << " half=" << lo_half[best_dim] << " count=" << lo_count[best_dim] << " ineff=" << inefficiency[best_dim];
+    // recursive split
+    if(lo_count[best_dim] > 0)
+      recursive_decomposition(lo_half[best_dim],
+			      start, lo_count[best_dim], lo_volume[best_dim],
+			      results, first_result, last_result,
+			      entries);
+    if(lo_count[best_dim] < count) {
+      Rect<N,T> hi_half = bounds;
+      hi_half.lo[best_dim] = lo_half[best_dim].hi[best_dim] + 1;
+      recursive_decomposition(hi_half,
+			      start + lo_count[best_dim],
+			      count - lo_count[best_dim],
+			      volume - lo_volume[best_dim],
+			      results, first_result, last_result,
+			      entries);
+    }
+  }
+
   template <int N, typename T>
   Event IndexSpace<N,T>::create_equal_subspace(size_t count, size_t granularity,
 						unsigned index, IndexSpace<N,T> &subspace,
 						const ProfilingRequestSet &reqs,
 						Event wait_on /*= Event::NO_EVENT*/) const
   {
+    // must always be creating at least one subspace (no "divide by zero")
+    assert(count >= 1);
+
     // record the start time of the potentially-inline operation if any
     //  profiling has been requested
     long long inline_start_time = reqs.empty() ? 0 : Clock::current_time_in_nanoseconds();
@@ -86,21 +194,28 @@ namespace Realm {
 
     // dense case is easy(er)
     if(dense()) {
-      // always split in x dimension for now
-      assert(count >= 1);
+      // split in the largest dimension available
       // avoiding over/underflow here is tricky - use unsigned math and watch
       //  out for empty subspace case
       // TODO: still not handling maximal-size input properly
+      int split_dim = 0;
       typedef typename MakeUnsigned<T>::U U;
-      U total_x = std::max(((U)bounds.hi.x -
-			    (U)bounds.lo.x + 1),
-			   U(0));
-      U rel_span_start = (total_x * index / count);
-      U rel_span_size = (total_x * (index + 1) / count) - rel_span_start;
+      U total = std::max(U(bounds.hi[0]) - U(bounds.lo[0]) + 1, U(0));
+      if(N > 1)
+	for(int i = 1; i < N; i++) {
+	  U extent = std::max(U(bounds.hi[i]) - U(bounds.lo[i]) + 1, U(0));
+	  if(extent > total) {
+	    total = extent;
+	    split_dim = i;
+	  }
+	}
+      U rel_span_start = (total * index / count);
+      U rel_span_size = (total * (index + 1) / count) - rel_span_start;
       if(rel_span_size > 0) {
 	subspace = *this;
-	subspace.bounds.lo.x = bounds.lo.x + rel_span_start;
-	subspace.bounds.hi.x = bounds.lo.x + rel_span_start + (rel_span_size - 1);
+	subspace.bounds.lo[split_dim] = bounds.lo[split_dim] + rel_span_start;
+	subspace.bounds.hi[split_dim] = (bounds.lo[split_dim] +
+					 rel_span_start + (rel_span_size - 1));
       } else {
 	subspace = IndexSpace<N,T>::make_empty();
       }
@@ -108,8 +223,17 @@ namespace Realm {
       return wait_on;
     }
 
-    // TODO: sparse case
-    assert(0);
+    // TODO: sparse case where we have to wait
+    SparsityMapPublicImpl<N,T> *impl = sparsity.impl();
+    assert(impl->is_valid());
+    const std::vector<SparsityMapEntry<N,T> >& entries = impl->get_entries();
+    // initially every subspace will be a copy of this one, and then
+    //  we'll decompose the bounds
+    subspace = *this;
+    recursive_decomposition(this->bounds, 0, count, this->volume(),
+			    &subspace, index, index,
+			    entries);
+    PartitioningOperation::do_inline_profiling(reqs, inline_start_time);
     return wait_on;
   }
 
@@ -121,6 +245,8 @@ namespace Realm {
   {
     // output vector should start out empty
     assert(subspaces.empty());
+    // must always be creating at least one subspace (no "divide by zero")
+    assert(count >= 1);
 
     // record the start time of the potentially-inline operation if any
     //  profiling has been requested
@@ -128,16 +254,24 @@ namespace Realm {
 
     // dense case is easy(er)
     if(dense()) {
-      // always split in x dimension for now
-      assert(count >= 1);
-      T total_x = std::max(bounds.hi.x - bounds.lo.x + 1, T(0));
       subspaces.reserve(count);
-      T px = bounds.lo.x;
+      // split in the largest dimension available
+      int split_dim = 0;
+      T total = std::max(bounds.hi[0] - bounds.lo[0] + 1, T(0));
+      if(N > 1)
+	for(int i = 1; i < N; i++) {
+	  T extent = std::max(bounds.hi[i] - bounds.lo[i] + 1, T(0));
+	  if(extent > total) {
+	    total = extent;
+	    split_dim = i;
+	  }
+	}
+      T px = bounds.lo[split_dim];
       for(size_t i = 0; i < count; i++) {
 	IndexSpace<N,T> ss(*this);
-	T nx = bounds.lo.x + (total_x * (i + 1) / count);
-	ss.bounds.lo.x = px;
-	ss.bounds.hi.x = nx - 1;
+	T nx = bounds.lo[split_dim] + (total * (i + 1) / count);
+	ss.bounds.lo[split_dim] = px;
+	ss.bounds.hi[split_dim] = nx - 1;
 	subspaces.push_back(ss);
 	px = nx;
       }
@@ -145,8 +279,17 @@ namespace Realm {
       return wait_on;
     }
 
-    // TODO: sparse case
-    assert(0);
+    // TODO: sparse case where we have to wait
+    SparsityMapPublicImpl<N,T> *impl = sparsity.impl();
+    assert(impl->is_valid());
+    const std::vector<SparsityMapEntry<N,T> >& entries = impl->get_entries();
+    // initially every subspace will be a copy of this one, and then
+    //  we'll decompose the bounds
+    subspaces.resize(count, *this);
+    recursive_decomposition(this->bounds, 0, count, this->volume(),
+			    subspaces.data(), 0, count-1,
+			    entries);
+    PartitioningOperation::do_inline_profiling(reqs, inline_start_time);
     return wait_on;
   }
 
@@ -384,7 +527,7 @@ namespace Realm {
   // class PartitioningMicroOp
 
   PartitioningMicroOp::PartitioningMicroOp(void)
-    : wait_count(2), requestor(my_node_id), async_microop(0)
+    : wait_count(2), requestor(Network::my_node_id), async_microop(0)
   {}
 
   PartitioningMicroOp::PartitioningMicroOp(NodeID _requestor,
@@ -401,10 +544,13 @@ namespace Realm {
   void PartitioningMicroOp::mark_finished(void)
   {
     if(async_microop) {
-      if(requestor == my_node_id)
+      if(requestor == Network::my_node_id) {
 	async_microop->mark_finished(true /*successful*/);
-      else
-	RemoteMicroOpCompleteMessage::send_request(requestor, async_microop);
+      } else {
+	ActiveMessage<RemoteMicroOpCompleteMessage> amsg(requestor);
+	amsg->async_microop = async_microop;
+	amsg.commit();
+      }
     }
   }
 
@@ -433,7 +579,7 @@ namespace Realm {
 
     // if the count was greater than 1, it probably has to be queued, so create an 
     //  AsyncMicroOp so that the op knows we're not done yet
-    if(requestor == my_node_id) {
+    if(requestor == Network::my_node_id) {
       async_microop = new AsyncMicroOp(op, this);
       op->add_async_work_item(async_microop);
     } else {
@@ -527,167 +673,44 @@ namespace Realm {
 
   ////////////////////////////////////////////////////////////////////////
   //
-  // class RemoteMicroOpMessage
+  // class RemoteMicroOpCompleteMessage
 
-  template <typename NT, typename T, typename FT>
-  inline /*static*/ void RemoteMicroOpMessage::ByFieldDecoder::demux(const RequestArgs *args,
-								     const void *data,
-								     size_t datalen)
+  /*static*/ void RemoteMicroOpCompleteMessage::handle_message(NodeID sender,
+							       const RemoteMicroOpCompleteMessage &msg,
+							       const void *data, size_t datalen)
   {
-    Serialization::FixedBufferDeserializer fbd(data, datalen);
-    ByFieldMicroOp<NT::N,T,FT> *uop = new ByFieldMicroOp<NT::N,T,FT>(args->sender,
-								     args->async_microop,
-								     fbd);
-    uop->dispatch(args->operation, false /*not ok to run in this thread*/);
+    log_part.info() << "received remote micro op complete message: " << msg.async_microop;
+    msg.async_microop->mark_finished(true /*successful*/);
   }
 
-  template <typename NT, typename T, typename N2T, typename T2>
-  inline /*static*/ void RemoteMicroOpMessage::ImageDecoder::demux(const RequestArgs *args,
-								   const void *data,
-								   size_t datalen)
-  {
-    Serialization::FixedBufferDeserializer fbd(data, datalen);
-    ImageMicroOp<NT::N,T,N2T::N,T2> *uop = new ImageMicroOp<NT::N,T,N2T::N,T2>(args->sender,
-									       args->async_microop,
-									       fbd);
-    uop->dispatch(args->operation, false /*not ok to run in this thread*/);
-  }
+  ActiveMessageHandlerReg<RemoteMicroOpCompleteMessage> RemoteMicroOpCompleteMessage::areg;
 
-  template <typename NT, typename T, typename N2T, typename T2>
-  inline /*static*/ void RemoteMicroOpMessage::PreimageDecoder::demux(const RequestArgs *args,
-								      const void *data,
-								      size_t datalen)
-  {
-    Serialization::FixedBufferDeserializer fbd(data, datalen);
-    PreimageMicroOp<NT::N,T,N2T::N,T2> *uop = new PreimageMicroOp<NT::N,T,N2T::N,T2>(args->sender,
-										     args->async_microop,
-										     fbd);
-    uop->dispatch(args->operation, false /*not ok to run in this thread*/);
-  }
-
-  template <typename NT, typename T>
-  inline /*static*/ void RemoteMicroOpMessage::UnionDecoder::demux(const RequestArgs *args,
-								   const void *data,
-								   size_t datalen)
-  {
-    Serialization::FixedBufferDeserializer fbd(data, datalen);
-    UnionMicroOp<NT::N,T> *uop = new UnionMicroOp<NT::N,T>(args->sender,
-							   args->async_microop,
-							   fbd);
-    uop->dispatch(args->operation, false /*not ok to run in this thread*/);
-  }
-
-  template <typename NT, typename T>
-  inline /*static*/ void RemoteMicroOpMessage::IntersectionDecoder::demux(const RequestArgs *args,
-								   const void *data,
-								   size_t datalen)
-  {
-    Serialization::FixedBufferDeserializer fbd(data, datalen);
-    IntersectionMicroOp<NT::N,T> *uop = new IntersectionMicroOp<NT::N,T>(args->sender,
-									 args->async_microop,
-									 fbd);
-    uop->dispatch(args->operation, false /*not ok to run in this thread*/);
-  }
-
-  template <typename NT, typename T>
-  inline /*static*/ void RemoteMicroOpMessage::DifferenceDecoder::demux(const RequestArgs *args,
-								   const void *data,
-								   size_t datalen)
-  {
-    Serialization::FixedBufferDeserializer fbd(data, datalen);
-    DifferenceMicroOp<NT::N,T> *uop = new DifferenceMicroOp<NT::N,T>(args->sender,
-								     args->async_microop,
-								     fbd);
-    uop->dispatch(args->operation, false /*not ok to run in this thread*/);
-  }
-
-  /*static*/ void RemoteMicroOpMessage::handle_request(RequestArgs args,
-						       const void *data, size_t datalen)
-  {
-    log_part.info() << "received remote micro op message: tag=" 
-		    << std::hex << args.type_tag << std::dec
-		    << " opcode=" << args.opcode;
-
-    // switch on the opcode first, since they use different numbers of template arguments
-    switch(args.opcode) {
-    case PartitioningMicroOp::UOPCODE_BY_FIELD:
-      {
-	NTF_TemplateHelper::demux<ByFieldDecoder>(args.type_tag, &args, data, datalen);
-	break;
-      }
-    case PartitioningMicroOp::UOPCODE_IMAGE:
-      {
-	NTNT_TemplateHelper::demux<ImageDecoder>(args.type_tag, &args, data, datalen);
-	break;
-      }
-    case PartitioningMicroOp::UOPCODE_PREIMAGE:
-      {
-	NTNT_TemplateHelper::demux<PreimageDecoder>(args.type_tag, &args, data, datalen);
-	break;
-      }
-    case PartitioningMicroOp::UOPCODE_UNION:
-      {
-	NT_TemplateHelper::demux<UnionDecoder>(args.type_tag, &args, data, datalen);
-	break;
-      }
-    case PartitioningMicroOp::UOPCODE_INTERSECTION:
-      {
-	NT_TemplateHelper::demux<IntersectionDecoder>(args.type_tag, &args, data, datalen);
-	break;
-      }
-    case PartitioningMicroOp::UOPCODE_DIFFERENCE:
-      {
-	NT_TemplateHelper::demux<DifferenceDecoder>(args.type_tag, &args, data, datalen);
-	break;
-      }
-    default:
-      assert(0);
-    }
-  }
-  
-#if 0
-  template <typename T>
-  /*static*/ void RemoteMicroOpMessage::send_request(NodeID target, 
-						     PartitioningOperation *operation,
-						     const T& microop)
-  {
-    RequestArgs args;
-
-    args.sender = my_node_id;
-    args.type_tag = T::type_tag();
-    args.opcode = T::OPCODE;
-    args.operation = operation;
-    args.async_microop = microop.async_microop;
-
-    Serialization::DynamicBufferSerializer dbs(256);
-    microop.serialize_params(dbs);
-    ByteArray b = dbs.detach_bytearray();
-
-    Message::request(target, args, b.base(), b.size(), PAYLOAD_FREE);
-    b.detach();
-  }
-#endif
 
   ////////////////////////////////////////////////////////////////////////
   //
-  // class RemoteMicroOpCompleteMessage
+  // class PartitioningOperation::DeferredLaunch
 
-  struct RequestArgs {
-    AsyncMicroOp *async_microop;
-  };
-  
-  /*static*/ void RemoteMicroOpCompleteMessage::handle_request(RequestArgs args)
+  void PartitioningOperation::DeferredLaunch::defer(PartitioningOperation *_op,
+						Event wait_on)
   {
-    log_part.info() << "received remote micro op complete message: " << args.async_microop;
-    args.async_microop->mark_finished(true /*successful*/);
+    op = _op;
+    EventImpl::add_waiter(wait_on, this);
   }
 
-  /*static*/ void RemoteMicroOpCompleteMessage::send_request(NodeID target,
-							     AsyncMicroOp *async_microop)
+  void PartitioningOperation::DeferredLaunch::event_triggered(bool poisoned)
   {
-    RequestArgs args;
-    args.async_microop = async_microop;
-    Message::request(target, args);
+    assert(!poisoned); // TODO: POISON_FIXME
+    op_queue->enqueue_partitioning_operation(op);
+  }
+
+  void PartitioningOperation::DeferredLaunch::print(std::ostream& os) const
+  {
+    os << "DeferredPartitioningOp(" << (void *)op << ")";
+  }
+  
+  Event PartitioningOperation::DeferredLaunch::get_finish_event(void) const
+  {
+    return op->get_finish_event();
   }
 
 
@@ -695,42 +718,18 @@ namespace Realm {
   //
   // class PartitioningOperation
 
-  class DeferredPartitioningOp : public EventWaiter {
-  public:
-    DeferredPartitioningOp(PartitioningOperation *_op) : op(_op) {}
-
-    virtual bool event_triggered(Event e, bool poisoned)
-    {
-      assert(!poisoned); // TODO: POISON_FIXME
-      op_queue->enqueue_partitioning_operation(op);
-      return true;
-    }
-
-    virtual void print(std::ostream& os) const
-    {
-      os << "DeferredPartitioningOp(" << (void *)op << ")";
-    }
-
-    virtual Event get_finish_event(void) const
-    {
-      return op->get_finish_event();
-    }
-
-  protected:
-    PartitioningOperation *op;
-  };
-
   PartitioningOperation::PartitioningOperation(const ProfilingRequestSet &reqs,
-					       Event _finish_event)
-    : Operation(_finish_event, reqs)
+					       GenEventImpl *_finish_event,
+					       EventImpl::gen_t _finish_gen)
+    : Operation(_finish_event, _finish_gen, reqs)
   {}
 
-  void PartitioningOperation::deferred_launch(Event wait_for)
+  void PartitioningOperation::launch(Event wait_for)
   {
     if(wait_for.has_triggered())
       op_queue->enqueue_partitioning_operation(this);
     else
-      EventImpl::add_waiter(wait_for, new DeferredPartitioningOp(this));
+      deferred_launch.defer(this, wait_for);
   };
 
   void PartitioningOperation::set_overlap_tester(void *tester)
@@ -774,7 +773,7 @@ namespace Realm {
   
   PartitioningOpQueue::~PartitioningOpQueue(void)
   {
-    assert(shutdown_flag);
+    assert(shutdown_flag.load());
     delete rsrv;
   }
 
@@ -809,9 +808,9 @@ namespace Realm {
   {
     assert(op_queue != 0);
 
-    op_queue->shutdown_flag = true;
+    op_queue->shutdown_flag.store(true);
     {
-      AutoHSLLock al(op_queue->mutex);
+      AutoLock<> al(op_queue->mutex);
       op_queue->condvar.broadcast();
     }
     for(size_t i = 0; i < op_queue->workers.size(); i++) {
@@ -828,7 +827,7 @@ namespace Realm {
   {
     op->mark_ready();
 
-    AutoHSLLock al(mutex);
+    AutoLock<> al(mutex);
 
     queued_ops.put(op, OPERATION_PRIORITY);
 
@@ -837,7 +836,7 @@ namespace Realm {
 
   void PartitioningOpQueue::enqueue_partitioning_microop(PartitioningMicroOp *uop)
   {
-    AutoHSLLock al(mutex);
+    AutoLock<> al(mutex);
 
     queued_ops.put(uop, MICROOP_PRIORITY);
 
@@ -848,13 +847,13 @@ namespace Realm {
   {
     log_part.info() << "worker " << Thread::self() << " started for op queue " << this;
 
-    while(!shutdown_flag) {
+    while(!shutdown_flag.load()) {
       void *op = 0;
-      int priority;
-      while(!op && !shutdown_flag) {
-	AutoHSLLock al(mutex);
+      int priority = -1; /*invalid value*/
+      while(!op && !shutdown_flag.load()) {
+	AutoLock<> al(mutex);
 	op = queued_ops.get(&priority);
-	if(!op && !shutdown_flag) {
+	if(!op && !shutdown_flag.load()) {
           if(DeppartConfig::cfg_worker_threads_sleep) {
 	    condvar.wait();
           } else {

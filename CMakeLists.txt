@@ -1,5 +1,5 @@
 #------------------------------------------------------------------------------#
-# Copyright 2018 Kitware, Inc.
+# Copyright 2019 Kitware, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -200,8 +200,12 @@ if(Legion_USE_CUDA)
     DESTINATION ${CMAKE_INSTALL_DATADIR}/Legion/cmake/newcmake
   )
 
+  # define variable for legion_defines.h
+  set(LEGION_USE_CUDA ON)
+
   # define variable for realm_defines.h
-  set(USE_CUDA ON)
+  set(REALM_USE_CUDA ON)
+  set(USE_CUDA ON) # for backwards compatibility
 endif()
 
 #------------------------------------------------------------------------------#
@@ -231,6 +235,7 @@ endif()
 #------------------------------------------------------------------------------#
 option(Legion_USE_LLVM "Use LLVM JIT operations" OFF)
 option(Legion_ALLOW_MISSING_LLVM_LIBS "Allow LLVM libraries to be missing at runtime" OFF)
+option(Legion_LINK_LLVM_LIBS "Link LLVM libraries into Realm" ON)
 if(Legion_USE_LLVM)
   set(Legion_LLVM_COMPONENTS irreader jit mcjit x86)
   find_package(LLVM REQUIRED COMPONENTS ${Legion_LLVM_COMPONENTS})
@@ -281,8 +286,26 @@ if(Legion_USE_HWLOC)
 endif()
 
 #------------------------------------------------------------------------------#
+# zlib configuration
+#------------------------------------------------------------------------------#
+option(Legion_USE_ZLIB "Enable support for zlib" ON)
+if(Legion_USE_ZLIB)
+  find_package(ZLIB REQUIRED)
+  # define variable for legion_defines.h
+  set(USE_ZLIB ON)
+endif()
+
+#------------------------------------------------------------------------------#
 # Miscelaneous other options
 #------------------------------------------------------------------------------#
+set(Legion_MAX_DIM 3 CACHE STRING "Maximum number of dimensions")
+set_property(CACHE Legion_MAX_DIM PROPERTY STRINGS 1 2 3 4 5 6 7 8 9)
+mark_as_advanced(Legion_MAX_DIM)
+
+# define variable for legion_defines.h
+set(LEGION_MAX_DIM ${Legion_MAX_DIM})
+set(REALM_MAX_DIM ${Legion_MAX_DIM})
+
 set(Legion_MAX_FIELDS 512 CACHE STRING "Maximum number of fields allocated to a single field space")
 set_property(CACHE Legion_MAX_FIELDS PROPERTY STRINGS 32 64 128 256 512 1024)
 mark_as_advanced(Legion_MAX_FIELDS)
@@ -423,18 +446,36 @@ if(Legion_BUILD_ALL OR Legion_BUILD_APPS OR Legion_BUILD_BINDINGS OR Legion_BUIL
 endif()
 
 #------------------------------------------------------------------------------#
+# Complex support
+#------------------------------------------------------------------------------#
+
+if(Legion_BUILD_ALL OR Legion_BUILD_BINDINGS)
+  option(Legion_REDOP_COMPLEX "Use reduction operators for complex types" ON)
+else()
+  option(Legion_REDOP_COMPLEX "Use reduction operators for complex types" OFF)
+endif()
+if((Legion_BUILD_ALL OR Legion_BUILD_BINDINGS) AND NOT Legion_REDOP_COMPLEX)
+  error("Bindings require Legion_REDOP_COMPLEX to be set")
+endif()
+if(Legion_REDOP_COMPLEX)
+  # define variable for legion_defines.h
+  set(LEGION_REDOP_COMPLEX ON)
+endif()
+mark_as_advanced(Legion_REDOP_COMPLEX)
+
+#------------------------------------------------------------------------------#
 # Configure definition headers
 #------------------------------------------------------------------------------#
 
 configure_file(${PROJECT_SOURCE_DIR}/cmake/legion_defines.h.in
-  ${PROJECT_BINARY_DIR}/runtime/legion/legion_defines.h @ONLY)
-install(FILES ${PROJECT_BINARY_DIR}/runtime/legion/legion_defines.h
-  DESTINATION  ${CMAKE_INSTALL_INCLUDEDIR}/legion)
+  ${PROJECT_BINARY_DIR}/runtime/legion_defines.h @ONLY)
+install(FILES ${PROJECT_BINARY_DIR}/runtime/legion_defines.h
+  DESTINATION  ${CMAKE_INSTALL_INCLUDEDIR})
 
 configure_file(${PROJECT_SOURCE_DIR}/cmake/realm_defines.h.in
-  ${PROJECT_BINARY_DIR}/runtime/realm/realm_defines.h @ONLY)
-install(FILES ${PROJECT_BINARY_DIR}/runtime/realm/realm_defines.h
-  DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/realm)
+  ${PROJECT_BINARY_DIR}/runtime/realm_defines.h @ONLY)
+install(FILES ${PROJECT_BINARY_DIR}/runtime/realm_defines.h
+  DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 
 #------------------------------------------------------------------------------#
 # vim: set tabstop=2 shiftwidth=2 expandtab :

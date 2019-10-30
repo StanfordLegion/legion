@@ -23,7 +23,6 @@
 using namespace std;
 using namespace Legion;
 using namespace Legion::Mapping;
-using namespace LegionRuntime::Arrays;
 
 enum
 {
@@ -566,6 +565,26 @@ unsigned TreeTraversingFunctor::get_depth(void) const
 // Tasks
 //------------------------------------------------------------------------------
 
+template<int DIM, typename COORD_T>
+Point<DIM, COORD_T>
+pt_max(const Point<DIM, COORD_T> &lhs, const Point<DIM, COORD_T> &rhs)
+{
+  Point<DIM, COORD_T> result;
+  for (unsigned idx = 0; idx < DIM; ++idx)
+    result[idx] = std::max(lhs[idx], rhs[idx]);
+  return result;
+}
+
+template<int DIM, typename COORD_T>
+Point<DIM, COORD_T>
+pt_min(const Point<DIM, COORD_T> &lhs, const Point<DIM, COORD_T> &rhs)
+{
+  Point<DIM, COORD_T> result;
+  for (unsigned idx = 0; idx < DIM; ++idx)
+    result[idx] = std::min(lhs[idx], rhs[idx]);
+  return result;
+}
+
 void block(const Task *task,
            const vector<PhysicalRegion> &regions,
            Context ctx, Runtime *runtime)
@@ -588,7 +607,7 @@ void create_index_partitions(Context ctx, Runtime *runtime, IndexSpace is,
 {
   if (depth == max_depth) return;
   IndexPartition ip;
-  Rect<DIM> rect = runtime->get_index_space_domain(ctx, is).get_rect<DIM>();
+  Rect<DIM> rect = runtime->get_index_space_domain(ctx, is).bounds<DIM,coord_t>();
   size_t num_elmts = rect.volume();
   assert(num_elmts > 0);
   size_t block_size = num_elmts / fanout;
@@ -596,29 +615,28 @@ void create_index_partitions(Context ctx, Runtime *runtime, IndexSpace is,
   if (alternate && (pattern[part_color % pattern.size()] & WO) == 0)
   {
     Point<DIM> colors;
-    colors.x[0] = fanout - 1;
-    for (unsigned idx = 1; idx < DIM; ++idx) colors.x[idx] = 0;
+    colors[0] = fanout - 1;
+    for (unsigned idx = 1; idx < DIM; ++idx) colors[idx] = 0;
 
-    Domain color_space =
-      Domain::from_rect<DIM>(Rect<DIM>(Point<DIM>::ZEROES(), colors));
+    Domain color_space(Rect<DIM>(Point<DIM>::ZEROES(), colors));
     DomainPointColoring coloring;
+    Point<DIM> rect_lo = rect.lo;
+    Point<DIM> rect_hi = rect.hi;
     Point<DIM> start = rect.lo;
     Point<DIM> block;
-    block.x[0] = block_size;
-    for (unsigned idx = 1; idx < DIM; ++idx) block.x[idx] = 0;
+    block[0] = block_size;
+    for (unsigned idx = 1; idx < DIM; ++idx) block[idx] = 0;
     Point<DIM> one;
-    one.x[0] = 1;
-    for (unsigned idx = 1; idx < DIM; ++idx) one.x[idx] = 0;
+    one[0] = 1;
+    for (unsigned idx = 1; idx < DIM; ++idx) one[idx] = 0;
     for (int i = 0; i < fanout; ++i)
     {
       Point<DIM> end = start + block;
       Point<DIM> color;
-      color.x[0] = i;
-      for (unsigned idx = 1; idx < DIM; ++idx) color.x[idx] = 0;
-      coloring[DomainPoint::from_point<DIM>(color)] =
-        Domain::from_rect<DIM>(Rect<DIM>(
-              Point<DIM>::max(start, rect.lo),
-              Point<DIM>::min(rect.hi, end)));
+      color[0] = i;
+      for (unsigned idx = 1; idx < DIM; ++idx) color[idx] = 0;
+      coloring[DomainPoint(color)] = Domain(Rect<DIM>(
+              pt_max(start, rect_lo), pt_min(rect_hi, end)));
       start = end - one;
     }
     ip = runtime->create_index_partition(ctx, is, color_space, coloring,
@@ -627,19 +645,18 @@ void create_index_partitions(Context ctx, Runtime *runtime, IndexSpace is,
   else
   {
     Point<DIM> block;
-    block.x[0] = num_elmts / fanout;
-    for (unsigned idx = 1; idx < DIM; ++idx) block.x[idx] = 1;
-    Blockify<DIM> blockify(block, rect.lo);
-    ip = runtime->create_index_partition(ctx, is, blockify, part_color);
+    block[0] = num_elmts / fanout;
+    for (unsigned idx = 1; idx < DIM; ++idx) block[idx] = 1;
+    Point<DIM> origin = rect.lo;
+    ip = runtime->create_partition_by_blockify(ctx, is, block, origin, part_color);
   }
 
   for (int i = 0; i < fanout; ++i)
   {
     Point<DIM> color;
-    color.x[0] = i;
-    for (unsigned idx = 1; idx < DIM; ++idx) color.x[idx] = 0;
-    IndexSpace sis = runtime->get_index_subspace(ctx, ip,
-        DomainPoint::from_point<DIM>(color));
+    color[0] = i;
+    for (unsigned idx = 1; idx < DIM; ++idx) color[idx] = 0;
+    IndexSpace sis = runtime->get_index_subspace(ctx, ip, DomainPoint(color));
     create_index_partitions<DIM>(ctx, runtime, sis, fanout, part_color,
         alternate, depth + 1, max_depth, pattern);
   }
@@ -780,22 +797,19 @@ void top_level_task(const Task *task,
     case 1 :
       {
         launch_domain =
-          Domain::from_rect<1>(Rect<1>(make_point(0),
-                                       make_point(num_tasks - 1)));
+          Domain(Rect<1>(Point<1>(0), Point<1>(num_tasks - 1)));
         break;
       }
     case 2 :
       {
         launch_domain =
-          Domain::from_rect<2>(Rect<2>(make_point(0, 0),
-                                       make_point(num_tasks - 1, 0)));
+          Domain(Rect<2>(Point<2>(0, 0), Point<2>(num_tasks - 1, 0)));
         break;
       }
     case 3 :
       {
         launch_domain =
-          Domain::from_rect<3>(Rect<3>(make_point(0, 0, 0),
-                                       make_point(num_tasks - 1, 0, 0)));
+          Domain(Rect<3>(Point<3>(0, 0, 0), Point<3>(num_tasks - 1, 0, 0)));
         break;
       }
     default:
@@ -824,22 +838,19 @@ void top_level_task(const Task *task,
       case 1 :
         {
           region_domain =
-            Domain::from_rect<1>(Rect<1>(make_point(1),
-                                         make_point(num_elmts)));
+            Domain(Rect<1>(Point<1>(1), Point<1>(num_elmts)));
           break;
         }
       case 2 :
         {
           region_domain =
-            Domain::from_rect<2>(Rect<2>(make_point(1, 1),
-                                         make_point(num_elmts, 1)));
+            Domain(Rect<2>(Point<2>(1, 1), Point<2>(num_elmts, 1)));
           break;
         }
       case 3 :
         {
           region_domain =
-            Domain::from_rect<3>(Rect<3>(make_point(1, 1, 1),
-                                         make_point(num_elmts, 1, 1)));
+            Domain(Rect<3>(Point<3>(1, 1, 1), Point<3>(num_elmts, 1, 1)));
           break;
         }
       default:

@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-# Copyright 2018 Stanford University
+# Copyright 2019 Stanford University
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -32,5 +32,5 @@ def main():
     a = A()
     a.static()
 
-if __name__ == '__legion_main__':
+if __name__ == '__main__':
     main()

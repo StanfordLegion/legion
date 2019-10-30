@@ -1,4 +1,4 @@
-/* Copyright 2018 Stanford University, NVIDIA Corporation
+/* Copyright 2019 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -84,5 +84,291 @@ namespace Realm {
     return 0;
   }
 
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class DeferredConstructor<T>
+
+  template <typename T>
+  DeferredConstructor<T>::DeferredConstructor()
+    : ptr(0)
+  {}
+
+  template <typename T>
+  DeferredConstructor<T>::~DeferredConstructor()
+  {
+    if(ptr) ptr->~T();
+  }
+
+  template <typename T>
+  T *DeferredConstructor<T>::construct()
+  {
+#ifdef DEBUG_REALM
+    assert(!ptr);
+#endif
+    ptr = new(raw_storage) T();
+    return ptr;
+  }
+
+  template <typename T>
+  template <typename T1>
+  T *DeferredConstructor<T>::construct(T1 arg1)
+  {
+#ifdef DEBUG_REALM
+    assert(!ptr);
+#endif
+    ptr = new(raw_storage) T(arg1);
+    return ptr;
+  }
+
+  template <typename T>
+  T& DeferredConstructor<T>::operator*()
+  {
+#ifdef DEBUG_REALM
+    assert(ptr != 0);
+#endif
+    return *ptr;
+  }
+
+  template <typename T>
+  T *DeferredConstructor<T>::operator->()
+  {
+#ifdef DEBUG_REALM
+    assert(ptr != 0);
+#endif
+    return ptr;
+  }
+
+  template <typename T>
+  const T& DeferredConstructor<T>::operator*() const
+  {
+#ifdef DEBUG_REALM
+    assert(ptr != 0);
+#endif
+    return *ptr;
+  }
+
+  template <typename T>
+  const T *DeferredConstructor<T>::operator->() const
+  {
+#ifdef DEBUG_REALM
+    assert(ptr != 0);
+#endif
+    return ptr;
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // struct bitfield<_BITS, _SHIFT>
+
+  template <unsigned _BITS, unsigned _SHIFT>
+  template <typename T>
+  inline /*static*/ T bitfield<_BITS, _SHIFT>::extract(T source)
+  {
+    T val = source;
+    if(_SHIFT > 0)
+      val >>= _SHIFT;
+    if(_BITS < (8 * sizeof(T)))
+      val &= ((T(1) << BITS) - 1);
+    return val;
+  }
+
+  template <unsigned _BITS, unsigned _SHIFT>
+  template <typename T>
+  inline /*static*/ T bitfield<_BITS, _SHIFT>::insert(T target, T field)
+  {
+    if(_SHIFT > 0)
+      field <<= _SHIFT;
+
+    if(_BITS < (8 * sizeof(T))) {
+      T mask = ((T(1) << _BITS) - 1);
+      if(_SHIFT > 0)
+	mask <<= _SHIFT;
+      field &= mask;
+      target &= ~mask;
+      target |= field;
+    } else
+      target = field;
+
+    return target;
+  }
+
+  template <unsigned _BITS, unsigned _SHIFT>
+  template <typename T>
+  inline /*static*/ T bitfield<_BITS, _SHIFT>::bit_or(T target, T field)
+  {
+    if(_BITS < (8 * sizeof(T))) {
+      T mask = ((T(1) << _BITS) - 1);
+      field &= mask;
+    }
+
+    if(_SHIFT > 0)
+      field <<= _SHIFT;
+
+    return (target | field);
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class bitpack<T>
+
+  template <typename T>
+  inline bitpack<T>::bitpack()
+  {
+    // no initialization
+  }
+
+  template <typename T>
+  inline bitpack<T>::bitpack(const bitpack<T>& copy_from)
+    : value(copy_from.value)
+  {}
+
+  template <typename T>
+  inline bitpack<T>::bitpack(T init_val)
+    : value(init_val)
+  {}
+
+  template <typename T>
+  inline bitpack<T>& bitpack<T>::operator=(const bitpack<T>& copy_from)
+  {
+    value = copy_from.value;
+    return *this;
+  }
+
+  template <typename T>
+  inline bitpack<T>& bitpack<T>::operator=(T new_val)
+  {
+    value = new_val;
+    return *this;
+  }
+
+  template <typename T>
+  inline bitpack<T>::operator T() const
+  {
+    return value;
+  }
+
+  template <typename T>
+  template <typename BITFIELD>
+  inline typename bitpack<T>::template bitsliceref<BITFIELD> bitpack<T>::slice()
+  {
+    return bitsliceref<BITFIELD>(value);
+  }
+
+  template <typename T>
+  template <typename BITFIELD>
+  inline typename bitpack<T>::template constbitsliceref<BITFIELD> bitpack<T>::slice() const
+  {
+    return constbitsliceref<BITFIELD>(value);
+  }
+
+  template <typename T>
+  template <typename BITFIELD>
+  inline typename bitpack<T>::template bitsliceref<BITFIELD> bitpack<T>::operator[](const BITFIELD& bitfield)
+  {
+    return bitsliceref<BITFIELD>(value);
+  }
+
+  template <typename T>
+  template <typename BITFIELD>
+  inline typename bitpack<T>::template constbitsliceref<BITFIELD> bitpack<T>::operator[](const BITFIELD& bitfield) const
+  {
+    return constbitsliceref<BITFIELD>(value);
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class bitpack<T>::bitsliceref<BITSLICE>
+
+  template <typename T>
+  template <typename BITFIELD>
+  inline bitpack<T>::bitsliceref<BITFIELD>::bitsliceref(T& _target)
+    : target(_target)
+  {}
+
+  template <typename T>
+  template <typename BITFIELD>
+  inline bitpack<T>::bitsliceref<BITFIELD>::operator T() const
+  {
+    return BITFIELD::extract(target);
+  }
+
+  template <typename T>
+  template <typename BITFIELD>
+  inline typename bitpack<T>::template bitsliceref<BITFIELD>& bitpack<T>::bitsliceref<BITFIELD>::operator=(T field)
+  {
+    target = BITFIELD::insert(target, field);
+    return *this;
+  }
+
+  template <typename T>
+  template <typename BITFIELD>
+  inline typename bitpack<T>::template bitsliceref<BITFIELD>& bitpack<T>::bitsliceref<BITFIELD>::operator|=(T field)
+  {
+    target = BITFIELD::bit_or(target, field);
+    return *this;
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class bitpack<T>::constbitsliceref<BITSLICE>
+
+  template <typename T>
+  template <typename BITFIELD>
+  inline bitpack<T>::constbitsliceref<BITFIELD>::constbitsliceref(const T& _target)
+    : target(_target)
+  {}
+
+  template <typename T>
+  template <typename BITFIELD>
+  inline bitpack<T>::constbitsliceref<BITFIELD>::operator T() const
+  {
+    return BITFIELD::extract(target);
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class PrettyVector<T>
+
+  template <typename T>
+  inline PrettyVector<T>::PrettyVector(const T *_data, size_t _size,
+				       const char *_delim /*= ", "*/,
+				       const char *_pfx /*= "["*/,
+				       const char *_sfx /*= "]"*/)
+    : data(_data), size(_size), delim(_delim), pfx(_pfx), sfx(_sfx)
+  {}
+
+  template <typename T>
+  inline PrettyVector<T>::PrettyVector(const std::vector<T>& _v,
+				       const char *_delim /*= ", "*/,
+				       const char *_pfx /*= "["*/,
+				       const char *_sfx /*= "]"*/)
+    : data(_v.data()), size(_v.size()), delim(_delim), pfx(_pfx), sfx(_sfx)
+  {}
+
+  template <typename T>
+  inline void PrettyVector<T>::print(std::ostream& os) const
+  {
+    os << pfx;
+    if(size > 0) {
+      os << data[0];
+      for(size_t i = 1; i < size; i++)
+	os << delim << data[i];
+    }
+    os << sfx;
+  }
+
+  template <typename T>
+  inline std::ostream& operator<<(std::ostream& os, const PrettyVector<T>& pv)
+  {
+    pv.print(os);
+    return os;
+  }
+  
 
 }; // namespace Realm

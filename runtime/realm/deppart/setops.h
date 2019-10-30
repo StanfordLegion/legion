@@ -1,4 +1,4 @@
-/* Copyright 2018 Stanford University, NVIDIA Corporation
+/* Copyright 2019 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -28,10 +28,6 @@ namespace Realm {
     static const int DIM = N;
     typedef T IDXTYPE;
 
-    static const Opcode OPCODE = UOPCODE_UNION;
-
-    static DynamicTemplates::TagType type_tag(void);
-
     UnionMicroOp(const std::vector<IndexSpace<N,T> >& _inputs);
     UnionMicroOp(IndexSpace<N,T> _lhs, IndexSpace<N,T> _rhs);
     virtual ~UnionMicroOp(void);
@@ -43,9 +39,12 @@ namespace Realm {
     void dispatch(PartitioningOperation *op, bool inline_ok);
 
   protected:
-    friend struct RemoteMicroOpMessage;
+    friend struct RemoteMicroOpMessage<UnionMicroOp<N,T> >;
+    static ActiveMessageHandlerReg<RemoteMicroOpMessage<UnionMicroOp<N,T> > > areg;
+
+    friend class PartitioningMicroOp;
     template <typename S>
-    bool serialize_params(S& s) const;
+    bool serialize_params(S& s) const WARN_UNUSED;
 
     // construct from received packet
     template <typename S>
@@ -64,10 +63,6 @@ namespace Realm {
     static const int DIM = N;
     typedef T IDXTYPE;
 
-    static const Opcode OPCODE = UOPCODE_INTERSECTION;
-
-    static DynamicTemplates::TagType type_tag(void);
-
     IntersectionMicroOp(const std::vector<IndexSpace<N,T> >& _inputs);
     IntersectionMicroOp(IndexSpace<N,T> _lhs, IndexSpace<N,T> _rhs);
     virtual ~IntersectionMicroOp(void);
@@ -79,9 +74,12 @@ namespace Realm {
     void dispatch(PartitioningOperation *op, bool inline_ok);
 
   protected:
-    friend struct RemoteMicroOpMessage;
+    friend struct RemoteMicroOpMessage<IntersectionMicroOp<N,T> >;
+    static ActiveMessageHandlerReg<RemoteMicroOpMessage<IntersectionMicroOp<N,T> > > areg;
+
+    friend class PartitioningMicroOp;
     template <typename S>
-    bool serialize_params(S& s) const;
+    bool serialize_params(S& s) const WARN_UNUSED;
 
     // construct from received packet
     template <typename S>
@@ -100,10 +98,6 @@ namespace Realm {
     static const int DIM = N;
     typedef T IDXTYPE;
 
-    static const Opcode OPCODE = UOPCODE_DIFFERENCE;
-
-    static DynamicTemplates::TagType type_tag(void);
-
     DifferenceMicroOp(IndexSpace<N,T> _lhs, IndexSpace<N,T> _rhs);
     virtual ~DifferenceMicroOp(void);
 
@@ -114,9 +108,12 @@ namespace Realm {
     void dispatch(PartitioningOperation *op, bool inline_ok);
 
   protected:
-    friend struct RemoteMicroOpMessage;
+    friend struct RemoteMicroOpMessage<DifferenceMicroOp<N,T> >;
+    static ActiveMessageHandlerReg<RemoteMicroOpMessage<DifferenceMicroOp<N,T> > > areg;
+
+    friend class PartitioningMicroOp;
     template <typename S>
-    bool serialize_params(S& s) const;
+    bool serialize_params(S& s) const WARN_UNUSED;
 
     // construct from received packet
     template <typename S>
@@ -133,7 +130,7 @@ namespace Realm {
   class UnionOperation : public PartitioningOperation {
   public:
     UnionOperation(const ProfilingRequestSet& reqs,
-		   Event _finish_event);
+		   GenEventImpl *_finish_event, EventImpl::gen_t _finish_gen);
 
     virtual ~UnionOperation(void);
 
@@ -153,7 +150,7 @@ namespace Realm {
   class IntersectionOperation : public PartitioningOperation {
   public:
     IntersectionOperation(const ProfilingRequestSet& reqs,
-			  Event _finish_event);
+			  GenEventImpl *_finish_event, EventImpl::gen_t _finish_gen);
 
     virtual ~IntersectionOperation(void);
 
@@ -173,7 +170,7 @@ namespace Realm {
   class DifferenceOperation : public PartitioningOperation {
   public:
     DifferenceOperation(const ProfilingRequestSet& reqs,
-			Event _finish_event);
+			GenEventImpl *_finish_event, EventImpl::gen_t _finish_gen);
 
     virtual ~DifferenceOperation(void);
 

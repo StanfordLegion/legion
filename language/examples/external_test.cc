@@ -1,4 +1,4 @@
-/* Copyright 2018 Stanford University
+/* Copyright 2019 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -117,7 +117,7 @@ void ExternalTestMapper::map_task(const MapperContext  ctx,
   DefaultMapper::map_task(ctx, task, input, output);
 }
 
-static void create_mappers(Machine machine, HighLevelRuntime *runtime,
+static void create_mappers(Machine machine, Runtime *runtime,
                                          const std::set<Processor> &local_procs)
 {
   std::vector<Processor>* procs_list = new std::vector<Processor>();
@@ -164,6 +164,6 @@ static void create_mappers(Machine machine, HighLevelRuntime *runtime,
 
 void register_mappers()
 {
-  HighLevelRuntime::add_registration_callback(create_mappers);
+  Runtime::add_registration_callback(create_mappers);
 }
 

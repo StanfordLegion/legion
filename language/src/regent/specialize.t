@@ -1,4 +1,4 @@
--- Copyright 2018 Stanford University, NVIDIA Corporation
+-- Copyright 2019 Stanford University, NVIDIA Corporation
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -120,6 +120,14 @@ local function convert_lua_value(cx, node, value, allow_lists)
   elseif terralib.isconstant(value) then
     local expr_type = value:gettype()
     return ast.specialized.expr.Constant {
+      value = value,
+      expr_type = expr_type,
+      annotations = node.annotations,
+      span = node.span,
+    }
+  elseif terralib.isglobalvar(value) then
+    local expr_type = value:gettype()
+    return ast.specialized.expr.Global {
       value = value,
       expr_type = expr_type,
       annotations = node.annotations,
@@ -399,9 +407,10 @@ function specialize.effect_expr(cx, node)
     if i > #field_path then
       return false
     end
+    local fields = make_field(field_path, i + 1)
     return ast.specialized.region.Field {
       field_name = field_path[i],
-      fields = make_field(field_path, i + 1),
+      fields = (fields and terralib.newlist({ fields })) or false,
       span = span,
     }
   end
@@ -516,29 +525,43 @@ end
 
 -- assumes multi-field accesses have already been flattened by the caller
 function specialize.expr_field_access(cx, node, allow_lists)
-  --if #node.field_names ~= 1 then
-  --  report.error(node, "illegal use of multi-field access")
-  --end
   local value = specialize.expr(cx, node.value)
 
-  local field_names = data.flatmap(
-    function(field_name) return specialize.field_names(cx, field_name) end,
-    node.field_names)
-  --if #field_names ~= 1 then
-  --  report.error(node, "FIXME: handle specialization of multiple fields")
-  --end
-  local field_name = field_names -- this will be flattened in the normalizer
-  if #field_names == 1 then field_name = field_names[1] end
+  if std.config["allow-multi-field-expansion"] then
+    local field_names = data.flatmap(
+      function(field_name) return specialize.field_names(cx, field_name) end,
+      node.field_names)
+    local field_name = field_names -- this will be flattened in the normalizer
+    if #field_names == 1 then field_name = field_names[1] end
 
-  if value:is(ast.specialized.expr.LuaTable) then
-    return convert_lua_value(cx, node, value.value[field_name])
+    if value:is(ast.specialized.expr.LuaTable) then
+      return convert_lua_value(cx, node, value.value[field_name])
+    else
+      return ast.specialized.expr.FieldAccess {
+        value = value,
+        field_name = field_name,
+        annotations = node.annotations,
+        span = node.span,
+      }
+    end
   else
-    return ast.specialized.expr.FieldAccess {
-      value = value,
-      field_name = field_name,
-      annotations = node.annotations,
-      span = node.span,
-    }
+    local fields = data.flatmap(function(field_name)
+      return specialize.field_names(cx, field_name)
+    end, node.field_names)
+
+    if value:is(ast.specialized.expr.LuaTable) then
+      if #fields > 1 then
+        report.error(node, "unable to specialize multi-field access")
+      end
+      return convert_lua_value(cx, node, value.value[fields[1]])
+    else
+      return ast.specialized.expr.FieldAccess {
+        value = value,
+        field_name = fields,
+        annotations = node.annotations,
+        span = node.span,
+      }
+    end
   end
 end
 
@@ -701,7 +724,7 @@ end
 
 function specialize.expr_raw_fields(cx, node, allow_lists)
   return ast.specialized.expr.RawFields {
-    region = specialize.expr(cx, node.region),
+    region = specialize.expr_region_root(cx, node.region),
     annotations = node.annotations,
     span = node.span,
   }
@@ -709,7 +732,7 @@ end
 
 function specialize.expr_raw_physical(cx, node, allow_lists)
   return ast.specialized.expr.RawPhysical {
-    region = specialize.expr(cx, node.region),
+    region = specialize.expr_region_root(cx, node.region),
     annotations = node.annotations,
     span = node.span,
   }
@@ -717,6 +740,13 @@ end
 
 function specialize.expr_raw_runtime(cx, node, allow_lists)
   return ast.specialized.expr.RawRuntime {
+    annotations = node.annotations,
+    span = node.span,
+  }
+end
+
+function specialize.expr_raw_task(cx, node, allow_lists)
+  return ast.specialized.expr.RawTask {
     annotations = node.annotations,
     span = node.span,
   }
@@ -855,8 +885,21 @@ function specialize.expr_partition_by_field(cx, node, allow_lists)
   }
 end
 
+function specialize.expr_partition_by_restriction(cx, node, allow_lists)
+  return ast.specialized.expr.PartitionByRestriction {
+    disjointness = node.disjointness and specialize.disjointness_kind(cx, node.disjointness),
+    region = specialize.expr(cx, node.region),
+    transform = specialize.expr(cx, node.transform),
+    extent = specialize.expr(cx, node.extent),
+    colors = specialize.expr(cx, node.colors),
+    annotations = node.annotations,
+    span = node.span,
+  }
+end
+
 function specialize.expr_image(cx, node, allow_lists)
   return ast.specialized.expr.Image {
+    disjointness = node.disjointness and specialize.disjointness_kind(cx, node.disjointness),
     parent = specialize.expr(cx, node.parent),
     partition = specialize.expr(cx, node.partition),
     region = specialize.expr_region_root(cx, node.region),
@@ -867,6 +910,7 @@ end
 
 function specialize.expr_preimage(cx, node, allow_lists)
   return ast.specialized.expr.Preimage {
+    disjointness = node.disjointness and specialize.disjointness_kind(cx, node.disjointness),
     parent = specialize.expr(cx, node.parent),
     partition = specialize.expr(cx, node.partition),
     region = specialize.expr_region_root(cx, node.region),
@@ -1080,6 +1124,7 @@ function specialize.expr_attach_hdf5(cx, node, allow_lists)
     region = specialize.expr_region_root(cx, node.region),
     filename = specialize.expr(cx, node.filename),
     mode = specialize.expr(cx, node.mode),
+    field_map = node.field_map and specialize.expr(cx, node.field_map),
     annotations = node.annotations,
     span = node.span,
   }
@@ -1137,6 +1182,111 @@ function specialize.expr_deref(cx, node, allow_lists)
   }
 end
 
+function specialize.expr_address_of(cx, node, allow_lists)
+  return ast.specialized.expr.AddressOf {
+    value = specialize.expr(cx, node.value),
+    annotations = node.annotations,
+    span = node.span,
+  }
+end
+
+function specialize.expr_import_ispace(cx, node)
+  return ast.specialized.expr.ImportIspace {
+    index_type = node.index_type_expr(cx.env:env()),
+    value = specialize.expr(cx, node.value),
+    annotations = node.annotations,
+    span = node.span,
+  }
+end
+
+function specialize.expr_import_region(cx, node)
+  local fspace_type = node.fspace_type_expr(cx.env:env())
+  return ast.specialized.expr.ImportRegion {
+    ispace = specialize.expr(cx, node.ispace),
+    fspace_type = fspace_type,
+    value = specialize.expr(cx, node.value),
+    field_ids = specialize.expr(cx, node.field_ids),
+    annotations = node.annotations,
+    span = node.span,
+  }
+end
+
+function specialize.expr_import_partition(cx, node)
+  return ast.specialized.expr.ImportPartition {
+    disjointness = node.disjointness,
+    region = specialize.expr(cx, node.region),
+    colors = specialize.expr(cx, node.colors),
+    value = specialize.expr(cx, node.value),
+    annotations = node.annotations,
+    span = node.span,
+  }
+end
+
+function specialize.projection_field(cx, node)
+  local renames = node.rename and specialize.field_names(cx, node.rename)
+  local field_names = specialize.field_names(cx, node.field_name)
+  if renames and #renames ~= #field_names then
+    report.error(node, "mismatch in specialization: expected " .. tostring(#renames) ..
+        " fields to rename but got " .. tostring(#field_names) .. " fields")
+  end
+  local fields = specialize.projection_fields(cx, node.fields)
+  if renames then
+    return data.zip(renames, field_names):map(
+      function(pair)
+        local rename, field_path = unpack(pair)
+        if not data.is_tuple(field_path) then
+          field_path = data.newtuple(field_path)
+        end
+        local result = fields
+        for i = #field_path, 1, -1 do
+          result = terralib.newlist({
+            ast.specialized.projection.Field {
+              rename = (i == 1 and rename) or false,
+              field_name = field_path[i],
+              fields = result,
+              span = node.span,
+            }})
+        end
+        return result[1]
+      end)
+  else
+    return field_names:map(
+      function(field_path)
+        if not data.is_tuple(field_path) then
+          field_path = data.newtuple(field_path)
+        end
+        local result = fields
+        for i = #field_path, 1, -1 do
+          result = terralib.newlist({
+            ast.specialized.projection.Field {
+              rename = false,
+              field_name = field_path[i],
+              fields = result,
+              span = node.span,
+            }})
+        end
+        return result[1]
+      end)
+  end
+end
+
+function specialize.projection_fields(cx, node)
+  return node and data.flatmap(
+    function(field) return specialize.projection_field(cx, field) end,
+    node)
+end
+
+function specialize.expr_projection(cx, node)
+  local region = specialize.expr(cx, node.region)
+  local fields = specialize.projection_fields(cx, node.fields)
+  return ast.specialized.expr.Projection {
+    region = region,
+    fields = fields,
+    span = node.span,
+    annotations = node.annotations,
+  }
+end
+
 function specialize.expr(cx, node, allow_lists)
   if node:is(ast.unspecialized.expr.ID) then
     return specialize.expr_id(cx, node, allow_lists)
@@ -1174,6 +1324,9 @@ function specialize.expr(cx, node, allow_lists)
   elseif node:is(ast.unspecialized.expr.RawRuntime) then
     return specialize.expr_raw_runtime(cx, node, allow_lists)
 
+  elseif node:is(ast.unspecialized.expr.RawTask) then
+    return specialize.expr_raw_task(cx, node, allow_lists)
+
   elseif node:is(ast.unspecialized.expr.RawValue) then
     return specialize.expr_raw_value(cx, node, allow_lists)
 
@@ -1209,6 +1362,9 @@ function specialize.expr(cx, node, allow_lists)
 
   elseif node:is(ast.unspecialized.expr.PartitionByField) then
     return specialize.expr_partition_by_field(cx, node, allow_lists)
+
+  elseif node:is(ast.unspecialized.expr.PartitionByRestriction) then
+    return specialize.expr_partition_by_restriction(cx, node, allow_lists)
 
   elseif node:is(ast.unspecialized.expr.Image) then
     return specialize.expr_image(cx, node, allow_lists)
@@ -1303,6 +1459,21 @@ function specialize.expr(cx, node, allow_lists)
   elseif node:is(ast.unspecialized.expr.Deref) then
     return specialize.expr_deref(cx, node, allow_lists)
 
+  elseif node:is(ast.unspecialized.expr.AddressOf) then
+    return specialize.expr_address_of(cx, node, allow_lists)
+
+  elseif node:is(ast.unspecialized.expr.ImportIspace) then
+    return specialize.expr_import_ispace(cx, node)
+
+  elseif node:is(ast.unspecialized.expr.ImportRegion) then
+    return specialize.expr_import_region(cx, node)
+
+  elseif node:is(ast.unspecialized.expr.ImportPartition) then
+    return specialize.expr_import_partition(cx, node)
+
+  elseif node:is(ast.unspecialized.expr.Projection) then
+    return specialize.expr_projection(cx, node)
+
   else
     assert(false, "unexpected node type " .. tostring(node.node_type))
   end
@@ -1373,7 +1544,40 @@ local function make_symbol(cx, node, var_name, var_type)
     end
   end
 
-  report.error(node, "unable to specialize value of type " .. tostring(type(var_name)))
+  report.error(node, "mismatch in specialization: expected a symbol but got value of type " .. tostring(type(var_name)))
+end
+
+local function convert_index_launch_annotations(node)
+  local fail = report.error
+  if std.config["allow-loop-demand-parallel"] then
+    fail = report.warn
+  end
+
+  if node.annotations.parallel:is(ast.annotation.Demand) then
+    if not (node.annotations.index_launch:is(ast.annotation.Allow) or
+              node.annotations.index_launch:is(ast.annotation.Demand))
+    then
+      report.error(node, "conflicting annotations for __parallel and __index_launch")
+    end
+    fail(node, "__demand(__parallel) is deprecated, please use __demand(__index_launch)\n\nThis error can be temporarily downgraded to a warning with the flag:\n    -fallow-loop-demand-parallel 1\nBut please upgrade as soon as possible, as this flag will be removed in a future release.\nFor more information see: https://github.com/StanfordLegion/legion/issues/520\n")
+    return node.annotations {
+      parallel = ast.annotation.Allow { value = false },
+      index_launch = ast.annotation.Demand { value = false },
+    }
+  elseif node.annotations.parallel:is(ast.annotation.Forbid) then
+    if not (node.annotations.index_launch:is(ast.annotation.Allow) or
+              node.annotations.index_launch:is(ast.annotation.Forbid))
+    then
+      report.error(node, "conflicting annotations for __parallel and __index_launch")
+    end
+    fail(node, "__forbid(__parallel) is deprecated, please use __forbid(__index_launch)\n\nThis error can be temporarily downgraded to a warning with the flag:\n    -fallow-loop-demand-parallel 1\nBut please upgrade as soon as possible, as this flag will be removed in a future release.\nFor more information see: https://github.com/StanfordLegion/legion/issues/520\n")
+    return node.annotations {
+      parallel = ast.annotation.Allow { value = false },
+      index_launch = ast.annotation.Forbid { value = false },
+    }
+  else
+    return node.annotations
+  end
 end
 
 function specialize.stat_for_num(cx, node)
@@ -1407,7 +1611,7 @@ function specialize.stat_for_num(cx, node)
     symbol = symbol,
     values = values,
     block = block,
-    annotations = node.annotations,
+    annotations = convert_index_launch_annotations(node),
     span = node.span,
   }
 end
@@ -1442,7 +1646,7 @@ function specialize.stat_for_list(cx, node)
     symbol = symbol,
     value = value,
     block = block,
-    annotations = node.annotations,
+    annotations = convert_index_launch_annotations(node),
     span = node.span,
   }
 end
@@ -1452,7 +1656,7 @@ function specialize.stat_repeat(cx, node)
   return ast.specialized.stat.Repeat {
     block = specialize.block(cx, node.block),
     until_cond = specialize.expr(cx, node.until_cond),
-    annotations = node.annotations,
+    annotations = convert_index_launch_annotations(node),
     span = node.span,
   }
 end
@@ -1779,7 +1983,7 @@ local function make_symbols(cx, node, var_name)
     return var_name:map(function(v) return {v, v} end)
   end
 
-  report.error(node, "unable to specialize value of type " .. tostring(type(var_name)))
+  report.error(node, "mismatch in specialization: expected a symbol or list of symbols but got value of type " .. tostring(type(var_name)))
 end
 
 function specialize.top_task_param(cx, node)
@@ -1951,20 +2155,20 @@ end
 
 function specialize.top_quote_expr(cx, node)
   local cx = cx:new_local_scope(true)
-  return ast.specialized.top.QuoteExpr {
+  return std.newrquote(ast.specialized.top.QuoteExpr {
     expr = specialize.expr(cx, node.expr),
     annotations = node.annotations,
     span = node.span,
-  }
+  })
 end
 
 function specialize.top_quote_stat(cx, node)
   local cx = cx:new_local_scope(true)
-  return ast.specialized.top.QuoteStat {
+  return std.newrquote(ast.specialized.top.QuoteStat {
     block = specialize.block(cx, node.block),
     annotations = node.annotations,
     span = node.span,
-  }
+  })
 end
 
 function specialize.top(cx, node)

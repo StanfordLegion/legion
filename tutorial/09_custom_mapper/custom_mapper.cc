@@ -1,4 +1,4 @@
-/* Copyright 2018 Stanford University
+/* Copyright 2019 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -819,6 +819,7 @@ void top_level_task(const Task *task,
   runtime->destroy_field_space(ctx, input_fs);
   runtime->destroy_field_space(ctx, output_fs);
   runtime->destroy_index_space(ctx, is);
+  runtime->destroy_index_space(ctx, color_is);
 }
 
 void init_field_task(const Task *task,

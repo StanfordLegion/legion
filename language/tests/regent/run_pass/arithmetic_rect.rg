@@ -1,4 +1,4 @@
--- Copyright 2018 Stanford University
+-- Copyright 2019 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -28,5 +28,11 @@ task main()
   regentlib.assert(int1d( 1) % rect1d { -1, 2 } == int1d( 1), "test failed")
   regentlib.assert(int1d( 2) % rect1d { -1, 2 } == int1d( 2), "test failed")
   regentlib.assert(int1d( 3) % rect1d { -1, 2 } == int1d(-1), "test failed")
+
+  regentlib.assert(rect1d { 2, 3 } + int1d(2) == rect1d { 4, 5 }, "test failed")
+  regentlib.assert(rect1d { 2, 3 } - int1d(2) == rect1d { 0, 1 }, "test failed")
+  regentlib.assert(rect1d { 2, 3 } * int1d(2) == rect1d { 4, 6 }, "test failed")
+  regentlib.assert(rect1d { 2, 3 } / int1d(2) == rect1d { 1, 1 }, "test failed")
+  regentlib.assert(rect1d { 2, 3 } % int1d(2) == rect1d { 0, 1 }, "test failed")
 end
 regentlib.start(main)

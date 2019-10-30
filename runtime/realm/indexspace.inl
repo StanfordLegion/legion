@@ -1,4 +1,4 @@
-/* Copyright 2018 Stanford University, NVIDIA Corporation
+/* Copyright 2019 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,8 +24,6 @@
 #include "realm/serialize.h"
 #include "realm/logging.h"
 
-TEMPLATE_TYPE_IS_SERIALIZABLE2(int N, typename T, Realm::Point<N,T>);
-TEMPLATE_TYPE_IS_SERIALIZABLE2(int N, typename T, Realm::Rect<N,T>);
 TEMPLATE_TYPE_IS_SERIALIZABLE2(int N, typename T, Realm::IndexSpace<N,T>);
 
 namespace Realm {
@@ -35,427 +33,7 @@ namespace Realm {
 
   ////////////////////////////////////////////////////////////////////////
   //
-  // class Point<N,T>
-
-  template <int N, typename T> __CUDA_HD__
-  inline Point<N,T>::Point(void)
-  {}
-
-  template <int N, typename T> __CUDA_HD__
-  inline Point<N,T>::Point(const T vals[N])
-  {
-    for(int i = 0; i < N; i++)
-      (&x)[i] = vals[i];
-  }
-
-  template <int N, typename T>
-  template <typename T2> __CUDA_HD__
-  inline Point<N,T>::Point(const Point<N,T2>& copy_from)
-  {
-    for(int i = 0; i < N; i++)
-      (&x)[i] = (&copy_from.x)[i];
-  }
-
-  template <int N, typename T>
-  template <typename T2> __CUDA_HD__
-  inline Point<N,T>& Point<N,T>::operator=(const Point<N,T2>& copy_from)
-  {
-    for(int i = 0; i < N; i++)
-      (&x)[i] = (&copy_from.x)[i];
-    return *this;
-  }
-
-  template <int N, typename T> __CUDA_HD__
-  inline T& Point<N,T>::operator[](int index)
-  {
-    return (&x)[index];
-  }
-
-  template <int N, typename T> __CUDA_HD__
-  inline const T& Point<N,T>::operator[](int index) const
-  {
-    return (&x)[index];
-  }
-
-  template <int N, typename T>
-  template <typename T2> __CUDA_HD__
-  inline T Point<N,T>::dot(const Point<N,T2>& rhs) const
-  {
-    T acc = x * rhs.x;
-    for(int i = 1; i < N; i++)
-      acc += (&x)[i] * (&rhs.x)[i];
-    return acc;
-  }
-
-  // specializations for N <= 4
-  template <typename T>
-  struct Point<1,T> {
-    T x;
-    __CUDA_HD__
-    Point(void) {}
-    // No need for a static array constructor here
-    __CUDA_HD__
-    Point(T _x) : x(_x) {}
-    // copies allow type coercion (assuming the underlying type does)
-    template <typename T2> __CUDA_HD__
-    Point(const Point<1, T2>& copy_from) : x(copy_from.x) {}
-    template <typename T2> __CUDA_HD__
-    Point<1,T>& operator=(const Point<1, T2>& copy_from)
-    {
-      x = copy_from.x;
-      return *this;
-    }
-
-    __CUDA_HD__
-    T& operator[](int index) { return (&x)[index]; }
-    __CUDA_HD__
-    const T& operator[](int index) const { return (&x)[index]; }
-
-    template <typename T2> __CUDA_HD__
-    T dot(const Point<1, T2>& rhs) const
-    {
-      return (x * rhs.x);
-    }
-
-    // special case: for N == 1, we're willing to coerce to T
-    __CUDA_HD__
-    operator T(void) const { return x; }
-  };
-
-  template <typename T>
-  struct Point<2,T> {
-    T x, y;
-    __CUDA_HD__
-    Point(void) {}
-    __CUDA_HD__
-    explicit Point(const T vals[2]) : x(vals[0]), y(vals[1]) {}
-    __CUDA_HD__
-    Point(T _x, T _y) : x(_x), y(_y) {}
-    // copies allow type coercion (assuming the underlying type does)
-    template <typename T2> __CUDA_HD__
-    Point(const Point<2, T2>& copy_from)
-      : x(copy_from.x), y(copy_from.y) {}
-    template <typename T2> __CUDA_HD__
-    Point<2,T>& operator=(const Point<2,T2>& copy_from)
-    {
-      x = copy_from.x;
-      y = copy_from.y;
-      return *this;
-    }
-
-    __CUDA_HD__
-    T& operator[](int index) { return (&x)[index]; }
-    __CUDA_HD__
-    const T& operator[](int index) const { return (&x)[index]; }
-
-    template <typename T2> __CUDA_HD__
-    T dot(const Point<2, T2>& rhs) const
-    {
-      return (x * rhs.x) + (y * rhs.y);
-    }
-  };
-
-  template <typename T>
-  struct Point<3,T> {
-    T x, y, z;
-    __CUDA_HD__
-    Point(void) {}
-    __CUDA_HD__
-    explicit Point(const T vals[3]) : x(vals[0]), y(vals[1]), z(vals[2]) {}
-    __CUDA_HD__
-    Point(T _x, T _y, T _z) : x(_x), y(_y), z(_z) {}
-    // copies allow type coercion (assuming the underlying type does)
-    template <typename T2> __CUDA_HD__
-    Point(const Point<3, T2>& copy_from)
-      : x(copy_from.x), y(copy_from.y), z(copy_from.z) {}
-    template <typename T2> __CUDA_HD__
-    Point<3,T>& operator=(const Point<3,T2>& copy_from)
-    {
-      x = copy_from.x;
-      y = copy_from.y;
-      z = copy_from.z;
-      return *this;
-    }
-
-    __CUDA_HD__
-    T& operator[](int index) { return (&x)[index]; }
-    __CUDA_HD__
-    const T& operator[](int index) const { return (&x)[index]; }
-
-    template <typename T2> __CUDA_HD__
-    T dot(const Point<3, T2>& rhs) const
-    {
-      return (x * rhs.x) + (y * rhs.y) + (z * rhs.z);
-    }
-  };
-
-  template <typename T>
-  struct Point<4,T> {
-    T x, y, z, w;
-    __CUDA_HD__
-    Point(void) {}
-    __CUDA_HD__
-    explicit Point(const T vals[4]) : x(vals[0]), y(vals[1]), z(vals[2]), w(vals[3]) {}
-    __CUDA_HD__
-    Point(T _x, T _y, T _z, T _w) : x(_x), y(_y), z(_z), w(_w) {}
-    // copies allow type coercion (assuming the underlying type does)
-    template <typename T2> __CUDA_HD__
-    Point(const Point<4, T2>& copy_from)
-      : x(copy_from.x), y(copy_from.y), z(copy_from.z), w(copy_from.w) {}
-    template <typename T2> __CUDA_HD__
-    Point<4,T>& operator=(const Point<4,T2>& copy_from)
-    {
-      x = copy_from.x;
-      y = copy_from.y;
-      z = copy_from.z;
-      w = copy_from.w;
-      return *this;
-    }
-
-    __CUDA_HD__
-    T& operator[](int index) { return (&x)[index]; }
-    __CUDA_HD__
-    const T& operator[](int index) const { return (&x)[index]; }
-
-    template <typename T2> __CUDA_HD__
-    T dot(const Point<4, T2>& rhs) const
-    {
-      return (x * rhs.x) + (y * rhs.y) + (z * rhs.z) + (w * rhs.w);
-    }
-  };
-
-  template <int N, typename T>
-  inline std::ostream& operator<<(std::ostream& os, const Point<N,T>& p)
-  {
-    os << '<' << p[0];
-    for(int i = 1; i < N; i++)
-      os << ',' << p[i];
-    os << '>';
-    return os;
-  }
-
-  // component-wise operators defined on Point<N,T> (with optional coercion)
-  template <int N, typename T, typename T2> __CUDA_HD__
-  inline bool operator==(const Point<N,T>& lhs, const Point<N,T2>& rhs)
-  {
-    for(int i = 0; i < N; i++) if(lhs[i] != rhs[i]) return false;
-    return true;
-  }
-    
-  template <int N, typename T, typename T2> __CUDA_HD__
-  inline bool operator!=(const Point<N,T>& lhs, const Point<N,T2>& rhs)
-  {
-    for(int i = 0; i < N; i++) if(lhs[i] != rhs[i]) return true;
-    return false;
-  }
-
-  template <int N, typename T, typename T2> __CUDA_HD__
-  inline Point<N,T> operator+(const Point<N,T>& lhs, const Point<N,T2>& rhs)
-  {
-    Point<N,T> out;
-    for(int i = 0; i < N; i++) out[i] = lhs[i] + rhs[i];
-    return out;
-  }
-
-  template <int N, typename T, typename T2> __CUDA_HD__
-  inline Point<N,T>& operator+=(Point<N,T>& lhs, const Point<N,T2>& rhs)
-  {
-    for(int i = 0; i < N; i++) lhs[i] += rhs[i];
-    return lhs;
-  }
-
-  template <int N, typename T, typename T2> __CUDA_HD__
-  inline Point<N,T> operator-(const Point<N,T>& lhs, const Point<N,T2>& rhs)
-  {
-    Point<N,T> out;
-    for(int i = 0; i < N; i++) out[i] = lhs[i] - rhs[i];
-    return out;
-  }
-
-  template <int N, typename T, typename T2> __CUDA_HD__
-  inline Point<N,T>& operator-=(Point<N,T>& lhs, const Point<N,T2>& rhs)
-  {
-    for(int i = 0; i < N; i++) lhs[i] -= rhs[i];
-    return lhs;
-  }
-
-  template <int N, typename T, typename T2> __CUDA_HD__
-  inline Point<N,T> operator*(const Point<N,T>& lhs, const Point<N,T2>& rhs)
-  {
-    Point<N,T> out;
-    for(int i = 0; i < N; i++) out[i] = lhs[i] * rhs[i];
-    return out;
-  }
-
-  template <int N, typename T, typename T2> __CUDA_HD__
-  inline Point<N,T>& operator*=(Point<N,T>& lhs, const Point<N,T2>& rhs)
-  {
-    for(int i = 0; i < N; i++) lhs[i] *= rhs[i];
-    return lhs;
-  }
-
-  template <int N, typename T, typename T2> __CUDA_HD__
-  inline Point<N,T> operator/(const Point<N,T>& lhs, const Point<N,T2>& rhs)
-  {
-    Point<N,T> out;
-    for(int i = 0; i < N; i++) out[i] = lhs[i] / rhs[i];
-    return out;
-  }
-
-  template <int N, typename T, typename T2> __CUDA_HD__
-  inline Point<N,T>& operator/=(Point<N,T>& lhs, const Point<N,T2>& rhs)
-  {
-    for(int i = 0; i < N; i++) lhs[i] /= rhs[i];
-    return lhs;
-  }
-
-  template <int N, typename T, typename T2> __CUDA_HD__
-  inline Point<N,T> operator%(const Point<N,T>& lhs, const Point<N,T2>& rhs)
-  {
-    Point<N,T> out;
-    for(int i = 0; i < N; i++) out[i] = lhs[i] % rhs[i];
-    return out;
-  }
-
-  template <int N, typename T, typename T2> __CUDA_HD__
-  inline Point<N,T>& operator%=(Point<N,T>& lhs, const Point<N,T2>& rhs)
-  {
-    for(int i = 0; i < N; i++) lhs[i] %= rhs[i];
-    return lhs;
-  }
-
-
-  ////////////////////////////////////////////////////////////////////////
-  //
   // class Rect<N,T>
-
-  template <int N, typename T> __CUDA_HD__
-  inline Rect<N,T>::Rect(void)
-  {}
-
-  template <int N, typename T> __CUDA_HD__
-  inline Rect<N,T>::Rect(const Point<N,T>& _lo, const Point<N,T>& _hi)
-    : lo(_lo), hi(_hi)
-  {}
-
-  template <int N, typename T>
-  template <typename T2> __CUDA_HD__
-  inline Rect<N,T>::Rect(const Rect<N, T2>& copy_from)
-    : lo(copy_from.lo), hi(copy_from.hi)
-  {}
-
-  template <int N, typename T>
-  template <typename T2> __CUDA_HD__
-  inline Rect<N,T>& Rect<N,T>::operator=(const Rect<N, T2>& copy_from)
-  {
-    lo = copy_from.lo;
-    hi = copy_from.hi;
-    return *this;
-  }
-
-  template <int N, typename T> __CUDA_HD__
-  inline /*static*/ Rect<N,T> Rect<N,T>::make_empty(void)
-  {
-    Rect<N,T> r;
-    T v = T(); // assume any user-defined default constructor initializes things
-    for(int i = 0; i < N; i++) r.hi[i] = v;
-    ++v;
-    for(int i = 0; i < N; i++) r.lo[i] = v;
-    return r;
-  }
-
-  template <int N, typename T> __CUDA_HD__
-  inline bool Rect<N,T>::empty(void) const
-  {
-    for(int i = 0; i < N; i++) if(lo[i] > hi[i]) return true;
-    return false;
-  }
-
-  template <int N, typename T> __CUDA_HD__
-  inline size_t Rect<N,T>::volume(void) const
-  {
-    size_t v = 1;
-    for(int i = 0; i < N; i++)
-      if(lo[i] > hi[i])
-	return 0;
-      else
-	v *= size_t(hi[i] - lo[i] + 1);
-    return v;
-  }
-
-  template <int N, typename T> __CUDA_HD__
-  inline bool Rect<N,T>::contains(const Point<N,T>& p) const
-  {
-    for(int i = 0; i < N; i++)
-      if((p[i] < lo[i]) || (p[i] > hi[i])) return false;
-    return true;
-  }
-
-  // true if all points in other are in this rectangle
-  template <int N, typename T> __CUDA_HD__
-  inline bool Rect<N,T>::contains(const Rect<N,T>& other) const
-  {
-    // containment is weird w.r.t. emptiness: if other is empty, the answer is
-    //  always true - if we're empty, the answer is false, unless other was empty
-    // this means we can early-out with true if other is empty, but have to remember
-    //  our emptiness separately
-    bool ctns = true;
-    for(int i = 0; i < N; i++) {
-      if(other.lo[i] > other.hi[i]) return true; // other is empty
-      // now that we know the other is nonempty, we need:
-      //  lo[i] <= other.lo[i] ^ other.hi[i] <= hi[i]
-      // (which can only be satisfied if we're non-empty)
-      if((lo[i] > other.lo[i]) || (other.hi[i] > hi[i]))
-	ctns = false;
-    }
-    return ctns;
-  }
-
-  // true if all points in other are in this rectangle
-  // FIXME: the bounds of an index space aren't necessarily tight - is that ok?
-  template <int N, typename T> __CUDA_HD__
-  inline bool Rect<N,T>::contains(const IndexSpace<N,T>& other) const
-  {
-    return contains(other.bounds);
-  }
-
-  // true if there are any points in the intersection of the two rectangles
-  template <int N, typename T> __CUDA_HD__
-  inline bool Rect<N,T>::overlaps(const Rect<N,T>& other) const
-  {
-    // overlapping requires there be an element that lies in both ranges, which
-    //  is equivalent to saying that both lo's are <= both hi's - this catches
-    //  cases where either rectangle is empty
-    for(int i = 0; i < N; i++)
-      if((lo[i] > hi[i]) || (lo[i] > other.hi[i]) ||
-	 (other.lo[i] > hi[i]) || (other.lo[i] > other.hi[i])) return false;
-    return true;
-  }
-
-  template <int N, typename T> __CUDA_HD__
-  inline Rect<N,T> Rect<N,T>::intersection(const Rect<N,T>& other) const
-  {
-    Rect<N,T> out;
-    for(int i = 0; i < N; i++) {
-      out.lo[i] = (lo[i] < other.lo[i]) ? other.lo[i] : lo[i]; // max
-      out.hi[i] = (hi[i] < other.hi[i]) ? hi[i] : other.hi[i]; // min
-    }
-    return out;
-  };
-
-  template <int N, typename T> __CUDA_HD__
-  inline Rect<N,T> Rect<N,T>::union_bbox(const Rect<N,T>& other) const
-  {
-    if(empty()) return other;
-    if(other.empty()) return *this;
-    // the code below only works if both rectangles are non-empty
-    Rect<N,T> out;
-    for(int i = 0; i < N; i++) {
-      out.lo[i] = (lo[i] < other.lo[i]) ? lo[i] : other.lo[i]; // min
-      out.hi[i] = (hi[i] < other.hi[i]) ? other.hi[i] : hi[i]; // max
-    }
-    return out;
-  };
 
   // copy and fill operations (wrappers for IndexSpace versions)
   template <int N, typename T>
@@ -496,163 +74,6 @@ namespace Realm {
 					redop_id, red_fold);
   }
 
-  template <int N, typename T>
-  inline std::ostream& operator<<(std::ostream& os, const Rect<N,T>& p)
-  {
-    os << p.lo << ".." << p.hi;
-    return os;
-  }
-
-  template <int N, typename T, typename T2> __CUDA_HD__
-  inline bool operator==(const Rect<N,T>& lhs, const Rect<N,T2>& rhs)
-  {
-    return (lhs.lo == rhs.lo) && (lhs.hi == rhs.hi);
-  }
-    
-  template <int N, typename T, typename T2> __CUDA_HD__
-  inline bool operator!=(const Rect<N,T>& lhs, const Rect<N,T2>& rhs)
-  {
-    return (lhs.lo != rhs.lo) || (lhs.hi != rhs.hi);
-  }
-
-  // rectangles may be displaced by a vector (i.e. point)
-  template <int N, typename T, typename T2> __CUDA_HD__
-  inline Rect<N,T> operator+(const Rect<N,T>& lhs, const Point<N,T2>& rhs)
-  {
-    return Rect<N,T>(lhs.lo + rhs, lhs.hi + rhs);
-  }
-
-  template <int N, typename T, typename T2> __CUDA_HD__
-  inline Rect<N,T>& operator+=(Rect<N,T>& lhs, const Point<N,T2>& rhs)
-  {
-    lhs.lo += rhs;
-    lhs.hi += rhs;
-    return lhs;
-  }
-
-  template <int N, typename T, typename T2> __CUDA_HD__
-  inline Rect<N,T> operator-(const Rect<N,T>& lhs, const Point<N,T2>& rhs)
-  {
-    return Rect<N,T>(lhs.lo - rhs, lhs.hi - rhs);
-  }
-
-  template <int N, typename T, typename T2> __CUDA_HD__
-  inline Rect<N,T>& operator-=(Rect<N,T>& lhs, const Rect<N,T2>& rhs)
-  {
-    lhs.lo -= rhs;
-    lhs.hi -= rhs;
-    return lhs;
-  }
-
-
-  ////////////////////////////////////////////////////////////////////////
-  //
-  // class Matrix<M,N,T>
-
-  template <int M, int N, typename T> __CUDA_HD__
-  inline Matrix<M,N,T>::Matrix(void)
-  {}
-
-  // copies allow type coercion (assuming the underlying type does)
-  template <int M, int N, typename T>
-  template <typename T2> __CUDA_HD__
-  inline Matrix<M,N,T>::Matrix(const Matrix<M, N, T2>& copy_from)
-  {
-    for(int i = 0; i < M; i++)
-      rows[i] = copy_from[i];
-  }
-  
-  template <int M, int N, typename T>
-  template <typename T2> __CUDA_HD__
-  inline Matrix<M, N, T>& Matrix<M,N,T>::operator=(const Matrix<M, N, T2>& copy_from)
-  {
-    for(int i = 0; i < M; i++)
-      rows[i] = copy_from[i];
-    return *this;
-  }
-
-  template <int M, int N, typename T, typename T2> __CUDA_HD__
-  inline Point<M, T> operator*(const Matrix<M, N, T>& m, const Point<N, T2>& p)
-  {
-    Point<M,T> out;
-    for(int j = 0; j < M; j++)
-      out[j] = m.rows[j].dot(p);
-    return out;
-  }
-
-  template <int M, int N, typename T> __CUDA_HD__
-  inline Point<N, T>& Matrix<M,N,T>::operator[](int index)
-  {
-    return rows[index];
-  }
-
-  template <int M, int N, typename T> __CUDA_HD__
-  inline const Point<N, T>& Matrix<M,N,T>::operator[](int index) const
-  {
-    return rows[index];
-  }
-
-  ////////////////////////////////////////////////////////////////////////
-  //
-  // class PointInRectIterator<N,T>
-  
-  template <int N, typename T> __CUDA_HD__
-  inline PointInRectIterator<N,T>::PointInRectIterator(void)
-    : valid(false)
-  {}
-
-  template <int N, typename T> __CUDA_HD__
-  inline PointInRectIterator<N,T>::PointInRectIterator(const Rect<N,T>& _r,
-							 bool _fortran_order /*= true*/)
-    : p(_r.lo), valid(!_r.empty()), rect(_r), fortran_order(_fortran_order)
-  {}
-
-  template <int N, typename T> __CUDA_HD__
-  inline void PointInRectIterator<N,T>::reset(const Rect<N,T>& _r,
-					      bool _fortran_order /*= true*/)
-  {
-    p = _r.lo;
-    valid = !_r.empty();
-    rect = _r;
-    fortran_order = _fortran_order;
-  }
-
-  template <int N, typename T> __CUDA_HD__
-  inline bool PointInRectIterator<N,T>::step(void)
-  {
-    assert(valid);  // can't step an iterator that's already done
-    if(N == 1) {
-      // 1-D doesn't care about fortran/C order
-      if(p.x < rect.hi.x) {
-	p.x++;
-	return true;
-      }
-    } else {
-      if(fortran_order) {
-	// do dimensions in increasing order
-	for(int i = 0; i < N; i++) {
-	  if(p[i] < rect.hi[i]) {
-	    p[i]++;
-	    return true;
-	  }
-	  p[i] = rect.lo[i];
-	}
-      } else {
-	// do dimensions in decreasing order
-	for(int i = N - 1; i >= 0; i--) {
-	  if(p[i] < rect.hi[i]) {
-	    p[i]++;
-	    return true;
-	  }
-	  p[i] = rect.lo[i];
-	}
-      }
-    }
-    // if we fall through, we're out of points
-    valid = false;
-    return false;
-  }
-
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -671,10 +92,69 @@ namespace Realm {
     fill_data.indirect = 0;
   }
 
+  inline CopySrcDstField::CopySrcDstField(const CopySrcDstField& copy_from)
+    : inst(copy_from.inst)
+    , field_id(copy_from.field_id)
+    , size(copy_from.size)
+    , redop_id(copy_from.redop_id)
+    , red_fold(copy_from.red_fold)
+    , serdez_id(copy_from.serdez_id)
+    , subfield_offset(copy_from.subfield_offset)
+    , indirect_index(copy_from.indirect_index)
+  {
+    // we know there's a fill value if the field ID is -1
+    if(copy_from.field_id == FieldID(-1)) {
+      if(size <= MAX_DIRECT_SIZE) {
+	// copy whole buffer to make sure indirect is initialized too
+	memcpy(fill_data.direct, copy_from.fill_data.direct, MAX_DIRECT_SIZE);
+      } else {
+	if(copy_from.fill_data.indirect) {
+	  fill_data.indirect = malloc(size);
+	  memcpy(fill_data.indirect, copy_from.fill_data.indirect, size);
+	} else
+	  fill_data.indirect = 0;
+      }
+    } else
+      fill_data.indirect = 0;
+  }
+
+  inline CopySrcDstField& CopySrcDstField::operator=(const CopySrcDstField& copy_from)
+  {
+    if((field_id != FieldID(-1)) && (size > MAX_DIRECT_SIZE) && fill_data.indirect)
+      free(fill_data.indirect);
+
+    inst = copy_from.inst;
+    field_id = copy_from.field_id;
+    size = copy_from.size;
+    redop_id = copy_from.redop_id;
+    red_fold = copy_from.red_fold;
+    serdez_id = copy_from.serdez_id;
+    subfield_offset = copy_from.subfield_offset;
+    indirect_index = copy_from.indirect_index;
+
+    // we know there's a fill value if the field ID is -1
+    if(copy_from.field_id == FieldID(-1)) {
+      if(size <= MAX_DIRECT_SIZE) {
+	// copy whole buffer to make sure indirect is initialized too
+	memcpy(fill_data.direct, copy_from.fill_data.direct, MAX_DIRECT_SIZE);
+      } else {
+	if(copy_from.fill_data.indirect) {
+	  fill_data.indirect = malloc(size);
+	  memcpy(fill_data.indirect, copy_from.fill_data.indirect, size);
+	} else
+	  fill_data.indirect = 0;
+      }
+    } else
+      fill_data.indirect = 0;
+
+    return *this;
+  }
+
   inline CopySrcDstField::~CopySrcDstField(void)
   {
-    if((size > MAX_DIRECT_SIZE) && fill_data.indirect)
+    if((field_id == FieldID(-1)) && (size > MAX_DIRECT_SIZE)) {
       free(fill_data.indirect);
+    }
   }
 
   inline CopySrcDstField &CopySrcDstField::set_field(RegionInstance _inst,
@@ -730,6 +210,57 @@ namespace Realm {
   inline CopySrcDstField &CopySrcDstField::set_fill(T value)
   {
     return set_fill(&value, sizeof(T));
+  }
+
+  template <typename S>
+  inline bool serialize(S& s, const CopySrcDstField& v)
+  {
+    if(!((s << v.inst) &&
+	 (s << v.field_id) &&
+	 (s << v.size) &&
+	 (s << v.redop_id) &&
+	 (s << v.red_fold) &&
+	 (s << v.serdez_id) &&
+	 (s << v.subfield_offset) &&
+	 (s << v.indirect_index))) return false;
+
+    // we know there's a fill value if the field ID is -1
+    if(v.field_id == FieldID(-1)) {
+      if(!s.append_bytes(((v.size <= CopySrcDstField::MAX_DIRECT_SIZE) ?
+			    v.fill_data.direct :
+			    v.fill_data.indirect),
+			 v.size))
+	return false;
+    }
+
+    return true;
+  }
+
+  template <typename S>
+  inline bool deserialize(S& s, CopySrcDstField& v)
+  {
+    if(!((s >> v.inst) &&
+	 (s >> v.field_id) &&
+	 (s >> v.size) &&
+	 (s >> v.redop_id) &&
+	 (s >> v.red_fold) &&
+	 (s >> v.serdez_id) &&
+	 (s >> v.subfield_offset) &&
+	 (s >> v.indirect_index))) return false;
+
+    // we know there's a fill value if the field ID is -1
+    if(v.field_id == FieldID(-1)) {
+      if(v.size <= CopySrcDstField::MAX_DIRECT_SIZE) {
+	if(!s.extract_bytes(v.fill_data.direct, v.size))
+	  return false;
+      } else {
+	v.fill_data.indirect = malloc(v.size);
+	if(!s.extract_bytes(v.fill_data.indirect, v.size))
+	  return false;
+      }
+    }
+
+    return true;
   }
 
 
@@ -1050,23 +581,24 @@ namespace Realm {
   template <int N, typename T>
   inline bool IndexSpace<N,T>::overlaps(const IndexSpace<N,T>& other) const
   {
-    if(dense()) {
-      if(other.dense()) {
-	// just test bounding boxes
-	return bounds.overlaps(other.bounds);
-      } else {
-	// have the other guy test against our bounding box
-	return other.contains_any(bounds);
-      }
-    } else {
-      if(other.dense()) {
-	return contains_any(other.bounds);
-      } else {
-	// nasty case - both sparse
-	assert(0);
-	return true;
-      }
-    }
+    // this covers the both-dense case as well as the same-sparsity-map case
+    if(sparsity == other.sparsity)
+      return bounds.overlaps(other.bounds);
+
+    // dense vs. sparse in both directions
+    if(dense())
+      return other.contains_any(bounds);
+
+    if(other.dense())
+      return contains_any(other.bounds);
+
+    // both sparse case can be expensive...
+    SparsityMapPublicImpl<N,T> *impl = sparsity.impl();
+    SparsityMapPublicImpl<N,T> *other_impl = other.sparsity.impl();
+    // overlap can only be within intersecion of bounds
+    Rect<N,T> isect = bounds.intersection(other.bounds);
+
+    return impl->overlaps(other_impl, isect, false /*!approx*/);
   }
 
   // actual number of points in index space (may be less than volume of bounding box)
@@ -1175,23 +707,24 @@ namespace Realm {
   template <int N, typename T>
   inline bool IndexSpace<N,T>::overlaps_approx(const IndexSpace<N,T>& other) const
   {
-    if(dense()) {
-      if(other.dense()) {
-	// just test bounding boxes
-	return bounds.overlaps(other.bounds);
-      } else {
-	// have the other guy test against our bounding box
-	return other.contains_any_approx(bounds);
-      }
-    } else {
-      if(other.dense()) {
-	return contains_any_approx(other.bounds);
-      } else {
-	// nasty case - both sparse
-	assert(0);
-	return true;
-      }
-    }
+    // this covers the both-dense case as well as the same-sparsity-map case
+    if(sparsity == other.sparsity)
+      return bounds.overlaps(other.bounds);
+
+    // dense vs. sparse in both directions
+    if(dense())
+      return other.contains_any_approx(bounds);
+
+    if(other.dense())
+      return contains_any_approx(other.bounds);
+
+    // both sparse case can be expensive...
+    SparsityMapPublicImpl<N,T> *impl = sparsity.impl();
+    SparsityMapPublicImpl<N,T> *other_impl = other.sparsity.impl();
+    // overlap can only be within intersecion of bounds
+    Rect<N,T> isect = bounds.intersection(other.bounds);
+
+    return impl->overlaps(other_impl, isect, true /*approx*/);
   }
 
   // approximage number of points in index space (may be less than volume of bounding box, but larger than
@@ -1735,27 +1268,6 @@ namespace Realm {
 }; // namespace Realm
 
 namespace std {
-  template<int N, typename T>
-  inline bool less<Realm::Point<N,T> >::operator()(const Realm::Point<N,T>& p1,
-						    const Realm::Point<N,T>& p2) const
-  {
-    for(int i = 0; i < N; i++) {
-      if(p1[i] < p2[i]) return true;
-      if(p1[i] > p2[i]) return false;
-    }
-    return false;
-  }
-
-  template<int N, typename T>
-  inline bool less<Realm::Rect<N,T> >::operator()(const Realm::Rect<N,T>& r1,
-						   const Realm::Rect<N,T>& r2) const
-  {
-    if(std::less<Realm::Point<N,T> >()(r1.lo, r2.lo)) return true;
-    if(std::less<Realm::Point<N,T> >()(r2.lo, r1.lo)) return false;
-    if(std::less<Realm::Point<N,T> >()(r1.hi, r2.hi)) return true;
-    if(std::less<Realm::Point<N,T> >()(r2.hi, r1.hi)) return false;
-    return false;
-  }
 
   template<int N, typename T>
   inline bool less<Realm::IndexSpace<N,T> >::operator()(const Realm::IndexSpace<N,T>& is1,

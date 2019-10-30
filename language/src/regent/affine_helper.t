@@ -1,4 +1,4 @@
--- Copyright 2018 Stanford University, NVIDIA Corporation
+-- Copyright 2019 Stanford University, NVIDIA Corporation
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -156,6 +156,67 @@ local function strip_casts(node)
     return node.arg
   end
   return node
+end
+
+function affine.analyze_index_noninterference_self(loop_index, arg, field_name)
+  local arg_index = strip_casts(arg)
+
+  if arg_index:is(ast.typed.expr.ID) then
+    return arg_index == loop_index
+
+  elseif arg_index:is(ast.typed.expr.Binary) then
+    if arg_index.op == "+" or arg_index.op == "-" then
+      local left = affine.analyze_index_noninterference_self(loop_index, arg_index.lhs, field_name)
+      local right = affine.analyze_index_noninterference_self(loop_index, arg_index.rhs, field_name)
+      return left ~= right
+
+    elseif arg_index.op == "*" then
+      if affine.is_constant_expr(arg_index.lhs) then
+        local coeff = affine.convert_constant_expr(arg_index.lhs)
+        return (coeff >= 1 or coeff <= -1) and
+          affine.analyze_index_noninterference_self(loop_index, arg_index.rhs, field_name)
+      elseif affine.is_constant_expr(arg_index.rhs) then
+        local coeff = affine.convert_constant_expr(arg_index.rhs)
+        return -1 <= coeff and coeff <= 1 and
+          affine.analyze_index_noninterference_self(loop_index, arg_index.lhs, field_name)
+      end
+    elseif arg_index.op == "/" then
+      if affine.is_constant_expr(arg_index.rhs) then
+        local coeff = affine.convert_constant_expr(arg_index.rhs)
+        return -1 <= coeff and coeff <= 1 and
+          affine.analyze_index_noninterference_self(loop_index, arg_index.lhs, field_name)
+      end
+    -- TODO: add mod operator check
+    else
+      return false
+    end
+
+  elseif arg_index:is(ast.typed.expr.Ctor) then
+    local loop_index_type = loop_index:gettype()
+    if loop_index_type.fields then
+
+      for _, loop_index_field in ipairs(loop_index_type.fields) do
+        local field_present = false
+        for _, ctor_field in ipairs(arg_index.fields) do
+          field_present = field_present or
+            affine.analyze_index_noninterference_self(loop_index, ctor_field.value, loop_index_field)
+        end
+        if not field_present then
+          return false
+        end
+      end
+
+      return true
+    else
+      assert(false) -- unreachable?
+    end
+
+  elseif arg_index:is(ast.typed.expr.FieldAccess) then
+    local id = arg_index.value
+    return loop_index == id.value and field_name == arg_index.field_name
+  end
+
+  return false
 end
 
 function affine.analyze_index_noninterference(index, other_index)

@@ -1,4 +1,4 @@
-/* Copyright 2018 Stanford University, NVIDIA Corporation
+/* Copyright 2019 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -174,6 +174,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(current_state != DELETED_STATE);
 #endif
+      RtEvent wait_for;
       bool need_activate = false;
       bool need_validate = false;
       bool need_invalidate = false;
@@ -184,16 +185,35 @@ namespace Legion {
       while (!done)
       {
         if (need_activate)
+        {
           notify_active(mutator);
+          need_activate = false;
+        }
         if (need_validate)
+        {
           notify_valid(mutator);
+          need_validate = false;
+        }
         if (need_invalidate)
+        {
           notify_invalid(mutator);
+          need_invalidate = false;
+        }
         if (need_deactivate)
+        {
           notify_inactive(mutator);
+          need_deactivate = false;
+        }
+        if (wait_for.exists() && !wait_for.has_triggered())
+          wait_for.wait();
         AutoLock gc(gc_lock);
         if (first)
         {
+          wait_for = check_for_transition_event(); 
+          if (wait_for.exists())
+            continue;
+          // Wait for any state transitions to be finished
+          // before we attempt to update the state
 #ifdef DEBUG_LEGION
           // Should have at least one reference here
           assert(__sync_fetch_and_add(&gc_references, 0) > 0);
@@ -220,6 +240,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(current_state != DELETED_STATE);
 #endif
+      RtEvent wait_for;
       bool need_activate = false;
       bool need_validate = false;
       bool need_invalidate = false;
@@ -230,20 +251,39 @@ namespace Legion {
       while (!done)
       {
         if (need_activate)
+        {
           notify_active(mutator);
+          need_activate = false;
+        }
         if (need_validate)
+        {
           notify_valid(mutator);
+          need_validate = false;
+        }
         if (need_invalidate)
+        {
           notify_invalid(mutator);
+          need_invalidate = false;
+        }
         if (need_deactivate)
+        {
           notify_inactive(mutator);
+          need_deactivate = false;
+        }
+        if (wait_for.exists() && !wait_for.has_triggered())
+          wait_for.wait();
         AutoLock gc(gc_lock);
         if (first)
         {
+          wait_for = check_for_transition_event(); 
+          if (wait_for.exists())
+            continue;
           // Check to see if we lost the race for changing state
           if (has_gc_references && 
               (__sync_fetch_and_add(&gc_references, 0) == 0))
             has_gc_references = false;
+          else
+            break;
           first = false;
         }
         done = update_state(need_activate, need_validate,
@@ -259,6 +299,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(current_state != DELETED_STATE);
 #endif
+      RtEvent wait_for;
       bool need_activate = false;
       bool need_validate = false;
       bool need_invalidate = false;
@@ -269,16 +310,33 @@ namespace Legion {
       while (!done)
       {
         if (need_activate)
+        {
           notify_active(mutator);
+          need_activate = false;
+        }
         if (need_validate)
+        {
           notify_valid(mutator);
+          need_validate = false;
+        }
         if (need_invalidate)
+        {
           notify_invalid(mutator);
+          need_invalidate = false;
+        }
         if (need_deactivate)
+        {
           notify_inactive(mutator);
+          need_deactivate = false;
+        }
+        if (wait_for.exists() && !wait_for.has_triggered())
+          wait_for.wait();
         AutoLock gc(gc_lock);
         if (first)
         {
+          wait_for = check_for_transition_event(); 
+          if (wait_for.exists())
+            continue;
 #ifdef DEBUG_LEGION
           // Should have at least one reference here
           assert(__sync_fetch_and_add(&valid_references, 0) > 0);
@@ -305,6 +363,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(current_state != DELETED_STATE);
 #endif
+      RtEvent wait_for;
       bool need_activate = false;
       bool need_validate = false;
       bool need_invalidate = false;
@@ -315,20 +374,39 @@ namespace Legion {
       while (!done)
       {
         if (need_activate)
+        {
           notify_active(mutator);
+          need_activate = false;
+        }
         if (need_validate)
+        {
           notify_valid(mutator);
+          need_validate = false;
+        }
         if (need_invalidate)
+        {
           notify_invalid(mutator);
+          need_invalidate = false;
+        }
         if (need_deactivate)
+        {
           notify_inactive(mutator);
+          need_deactivate = false;
+        }
+        if (wait_for.exists() && !wait_for.has_triggered())
+          wait_for.wait();
         AutoLock gc(gc_lock);
         if (first)
         {
+          wait_for = check_for_transition_event(); 
+          if (wait_for.exists())
+            continue;
           // Check to see if we lost the race for changing state
           if (has_valid_references &&
               (__sync_fetch_and_add(&valid_references, 0) == 0))
             has_valid_references = false;
+          else
+            break;
           first = false;
         }
         done = update_state(need_activate, need_validate,
@@ -376,6 +454,7 @@ namespace Legion {
       assert(current_state != DELETED_STATE);
       assert((kind == GC_REF_KIND) || (kind == VALID_REF_KIND));
 #endif
+      RtEvent wait_for;
       bool need_activate = false;
       bool need_validate = false;
       bool need_invalidate = false;
@@ -386,16 +465,33 @@ namespace Legion {
       while (!done)
       {
         if (need_activate)
+        {
           notify_active(mutator);
+          need_activate = false;
+        }
         if (need_validate)
+        {
           notify_valid(mutator);
+          need_validate = false;
+        }
         if (need_invalidate)
+        {
           notify_invalid(mutator);
+          need_invalidate = false;
+        }
         if (need_deactivate)
+        {
           notify_inactive(mutator);
+          need_deactivate = false;
+        }
+        if (wait_for.exists() && !wait_for.has_triggered())
+          wait_for.wait();
         AutoLock gc(gc_lock);
         if (first)
         {
+          wait_for = check_for_transition_event(); 
+          if (wait_for.exists())
+            continue;
           std::pair<AddressSpaceID,AddressSpaceID> key(source, target);
           if (kind == VALID_REF_KIND)
           {
@@ -441,6 +537,7 @@ namespace Legion {
       assert(source != owner_space);
       assert((kind == GC_REF_KIND) || (kind == VALID_REF_KIND));
 #endif
+      RtEvent wait_for;
       bool need_activate = false;
       bool need_validate = false;
       bool need_invalidate = false;
@@ -451,16 +548,33 @@ namespace Legion {
       while (!done)
       {
         if (need_activate)
+        {
           notify_active(mutator);
+          need_activate = false;
+        }
         if (need_validate)
+        {
           notify_valid(mutator);
+          need_validate = false;
+        }
         if (need_invalidate)
+        {
           notify_invalid(mutator);
+          need_invalidate = false;
+        }
         if (need_deactivate)
+        {
           notify_inactive(mutator);
+          need_deactivate = false;
+        }
+        if (wait_for.exists() && !wait_for.has_triggered())
+          wait_for.wait();
         AutoLock gc(gc_lock);
         if (first)
         {
+          wait_for = check_for_transition_event(); 
+          if (wait_for.exists())
+            continue;
           std::pair<AddressSpaceID,AddressSpaceID> key(source, target);
           if (kind == VALID_REF_KIND)
           {
@@ -506,6 +620,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(current_state != DELETED_STATE);
 #endif
+      RtEvent wait_for;
       bool need_activate = false;
       bool need_validate = false;
       bool need_invalidate = false;
@@ -516,16 +631,33 @@ namespace Legion {
       while (!done)
       {
         if (need_activate)
+        {
           notify_active(mutator);
+          need_activate = false;
+        }
         if (need_validate)
+        {
           notify_valid(mutator);
+          need_validate = false;
+        }
         if (need_invalidate)
+        {
           notify_invalid(mutator);
+          need_invalidate = false;
+        }
         if (need_deactivate)
+        {
           notify_inactive(mutator);
+          need_deactivate = false;
+        }
+        if (wait_for.exists() && !wait_for.has_triggered())
+          wait_for.wait();
         AutoLock gc(gc_lock);
         if (first)
         {
+          wait_for = check_for_transition_event(); 
+          if (wait_for.exists())
+            continue;
           gc_references += cnt;
           std::map<ReferenceSource,int>::iterator finder = 
             detailed_base_gc_references.find(source);
@@ -561,6 +693,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(current_state != DELETED_STATE);
 #endif
+      RtEvent wait_for;
       bool need_activate = false;
       bool need_validate = false;
       bool need_invalidate = false;
@@ -571,16 +704,33 @@ namespace Legion {
       while (!done)
       {
         if (need_activate)
+        {
           notify_active(mutator);
+          need_activate = false;
+        }
         if (need_validate)
+        {
           notify_valid(mutator);
+          need_validate = false;
+        }
         if (need_invalidate)
+        {
           notify_invalid(mutator);
+          need_invalidate = false;
+        }
         if (need_deactivate)
+        {
           notify_inactive(mutator);
+          need_deactivate = false;
+        }
+        if (wait_for.exists() && !wait_for.has_triggered())
+          wait_for.wait();
         AutoLock gc(gc_lock);
         if (first)
         {
+          wait_for = check_for_transition_event(); 
+          if (wait_for.exists())
+            continue;
           gc_references++;
           std::map<DistributedID,int>::iterator finder = 
             detailed_nested_gc_references.find(did);
@@ -616,6 +766,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(current_state != DELETED_STATE);
 #endif
+      RtEvent wait_for;
       bool need_activate = false;
       bool need_validate = false;
       bool need_invalidate = false;
@@ -626,16 +777,31 @@ namespace Legion {
       while (!done)
       {
         if (need_activate)
+        {
           notify_active(mutator);
+          need_activate = false;
+        }
         if (need_validate)
+        {
           notify_valid(mutator);
+          need_validate = false;
+        }
         if (need_invalidate)
+        {
           notify_invalid(mutator);
+          need_invalidate = false;
+        }
         if (need_deactivate)
+        {
           notify_inactive(mutator);
+          need_deactivate = false;
+        }
         AutoLock gc(gc_lock);
         if (first)
         {
+          wait_for = check_for_transition_event(); 
+          if (wait_for.exists())
+            continue;
 #ifdef DEBUG_LEGION
           assert(gc_references >= cnt);
           assert(has_gc_references);
@@ -667,6 +833,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(current_state != DELETED_STATE);
 #endif
+      RtEvent wait_for;
       bool need_activate = false;
       bool need_validate = false;
       bool need_invalidate = false;
@@ -677,16 +844,33 @@ namespace Legion {
       while (!done)
       {
         if (need_activate)
+        {
           notify_active(mutator);
+          need_activate = false;
+        }
         if (need_validate)
+        {
           notify_valid(mutator);
+          need_validate = false;
+        }
         if (need_invalidate)
+        {
           notify_invalid(mutator);
+          need_invalidate = false;
+        }
         if (need_deactivate)
+        {
           notify_inactive(mutator);
+          need_deactivate = false;
+        }
+        if (wait_for.exists() && !wait_for.has_triggered())
+          wait_for.wait();
         AutoLock gc(gc_lock);
         if (first)
         {
+          wait_for = check_for_transition_event(); 
+          if (wait_for.exists())
+            continue;
 #ifdef DEBUG_LEGION
           assert(gc_references >= cnt);
           assert(has_gc_references);
@@ -718,6 +902,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(current_state != DELETED_STATE);
 #endif
+      RtEvent wait_for;
       bool need_activate = false;
       bool need_validate = false;
       bool need_invalidate = false;
@@ -728,16 +913,33 @@ namespace Legion {
       while (!done)
       {
         if (need_activate)
+        {
           notify_active(mutator);
+          need_activate = false;
+        }
         if (need_validate)
+        {
           notify_valid(mutator);
+          need_validate = false;
+        }
         if (need_invalidate)
+        {
           notify_invalid(mutator);
+          need_invalidate = false;
+        }
         if (need_deactivate)
+        {
           notify_inactive(mutator);
+          need_deactivate = false;
+        }
+        if (wait_for.exists() && !wait_for.has_triggered())
+          wait_for.wait();
         AutoLock gc(gc_lock);
         if (first)
         {
+          wait_for = check_for_transition_event(); 
+          if (wait_for.exists())
+            continue;
           valid_references += cnt;
           std::map<ReferenceSource,int>::iterator finder = 
             detailed_base_valid_references.find(source);
@@ -772,6 +974,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(current_state != DELETED_STATE);
 #endif
+      RtEvent wait_for;
       bool need_activate = false;
       bool need_validate = false;
       bool need_invalidate = false;
@@ -782,16 +985,33 @@ namespace Legion {
       while (!done)
       {
         if (need_activate)
+        {
           notify_active(mutator);
+          need_activate = false;
+        }
         if (need_validate)
+        {
           notify_valid(mutator);
+          need_validate = false;
+        }
         if (need_invalidate)
+        {
           notify_invalid(mutator);
+          need_invalidate = false;
+        }
         if (need_deactivate)
+        {
           notify_inactive(mutator);
+          need_deactivate = false;
+        }
+        if (wait_for.exists() && !wait_for.has_triggered())
+          wait_for.wait();
         AutoLock gc(gc_lock);
         if (first)
         {
+          wait_for = check_for_transition_event(); 
+          if (wait_for.exists())
+            continue;
           valid_references += cnt;
           std::map<DistributedID,int>::iterator finder = 
             detailed_nested_valid_references.find(did);
@@ -826,6 +1046,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(current_state != DELETED_STATE);
 #endif
+      RtEvent wait_for;
       bool need_activate = false;
       bool need_validate = false;
       bool need_invalidate = false;
@@ -836,16 +1057,33 @@ namespace Legion {
       while (!done)
       {
         if (need_activate)
+        {
           notify_active(mutator);
+          need_activate = false;
+        }
         if (need_validate)
+        {
           notify_valid(mutator);
+          need_validate = false;
+        }
         if (need_invalidate)
+        {
           notify_invalid(mutator);
+          need_invalidate = false;
+        }
         if (need_deactivate)
+        {
           notify_inactive(mutator);
+          need_deactivate = false;
+        }
+        if (wait_for.exists() && !wait_for.has_triggered())
+          wait_for.wait();
         AutoLock gc(gc_lock);
         if (first)
         {
+          wait_for = check_for_transition_event(); 
+          if (wait_for.exists())
+            continue;
 #ifdef DEBUG_LEGION
           assert(valid_references >= cnt);
           assert(has_valid_references);
@@ -877,6 +1115,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(current_state != DELETED_STATE);
 #endif
+      RtEvent wait_for;
       bool need_activate = false;
       bool need_validate = false;
       bool need_invalidate = false;
@@ -887,16 +1126,33 @@ namespace Legion {
       while (!done)
       {
         if (need_activate)
+        {
           notify_active(mutator);
+          need_activate = false;
+        }
         if (need_validate)
+        {
           notify_valid(mutator);
+          need_validate = false;
+        }
         if (need_invalidate)
+        {
           notify_invalid(mutator);
+          need_invalidate = false;
+        }
         if (need_deactivate)
+        {
           notify_inactive(mutator);
+          need_deactivate = false;
+        }
+        if (wait_for.exists() && !wait_for.has_triggered())
+          wait_for.wait();
         AutoLock gc(gc_lock);
         if (first)
         {
+          wait_for = check_for_transition_event(); 
+          if (wait_for.exists())
+            continue;
 #ifdef DEBUG_LEGION
           assert(valid_references >= cnt);
           assert(has_valid_references);
@@ -1010,22 +1266,6 @@ namespace Legion {
       return can_delete();
     }
 #endif // DEBUG_LEGION_GC
-
-    //--------------------------------------------------------------------------
-    void DistributedCollectable::notify_remote_inactive(ReferenceMutator *m)
-    //--------------------------------------------------------------------------
-    {
-      // Should only called for classes that override this method
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    void DistributedCollectable::notify_remote_invalid(ReferenceMutator *m)
-    //--------------------------------------------------------------------------
-    {
-      // Should only called for classes that override this method
-      assert(false);
-    }
 
     //--------------------------------------------------------------------------
     bool DistributedCollectable::has_remote_instance(
@@ -1152,8 +1392,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void DistributedCollectable::send_remote_valid_update(AddressSpaceID target,
-                            ReferenceMutator *mutator, unsigned count, bool add)
+    void DistributedCollectable::send_remote_valid_increment(
+               AddressSpaceID target, ReferenceMutator *mutator, unsigned count)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -1162,27 +1402,53 @@ namespace Legion {
 #endif
       int signed_count = count;
       RtUserEvent done_event = RtUserEvent::NO_RT_USER_EVENT;
-      if (!add)
-        signed_count = -signed_count;
-      else
+      if (mutator != NULL)
+      {
         done_event = Runtime::create_rt_user_event();
+        mutator->record_reference_mutation_effect(done_event);
+      }
       Serializer rez;
       {
         RezCheck z(rez);
         rez.serialize(did);
         rez.serialize(signed_count);
         rez.serialize<bool>(target == owner_space);
-        if (add)
-          rez.serialize(done_event);
+        rez.serialize(done_event);
       }
       runtime->send_did_remote_valid_update(target, rez);
-      if (add && (mutator != NULL))
-        mutator->record_reference_mutation_effect(done_event);
     }
 
     //--------------------------------------------------------------------------
-    void DistributedCollectable::send_remote_gc_update(AddressSpaceID target,
-                            ReferenceMutator *mutator, unsigned count, bool add)
+    void DistributedCollectable::send_remote_valid_decrement(
+                                    AddressSpaceID target, RtEvent precondition,
+                                    ReferenceMutator *mutator, unsigned count)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(count != 0);
+      assert(registered_with_runtime);
+#endif
+      if (precondition.exists() && !precondition.has_triggered())
+      {
+        DeferRemoteDecrementArgs args(this,target,mutator,count,true/*valid*/);
+        runtime->issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY, 
+                                         precondition);
+        return;
+      }
+      int signed_count = -(int(count));
+      Serializer rez;
+      {
+        RezCheck z(rez);
+        rez.serialize(did);
+        rez.serialize(signed_count);
+        rez.serialize<bool>(target == owner_space);
+      }
+      runtime->send_did_remote_valid_update(target, rez);
+    }
+
+    //--------------------------------------------------------------------------
+    void DistributedCollectable::send_remote_gc_increment(
+               AddressSpaceID target, ReferenceMutator *mutator, unsigned count)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -1191,36 +1457,40 @@ namespace Legion {
 #endif
       int signed_count = count;
       RtUserEvent done_event = RtUserEvent::NO_RT_USER_EVENT;
-      if (!add)
-        signed_count = -signed_count;
-      else
+      if (mutator != NULL)
+      {
         done_event = Runtime::create_rt_user_event();
+        mutator->record_reference_mutation_effect(done_event);
+      }
       Serializer rez;
       {
         RezCheck z(rez);
         rez.serialize(did);
         rez.serialize(signed_count);
         rez.serialize<bool>(target == owner_space);
-        if (add)
-          rez.serialize(done_event);
+        rez.serialize(done_event);
       }
       runtime->send_did_remote_gc_update(target, rez);
-      if (add && (mutator != NULL))
-        mutator->record_reference_mutation_effect(done_event);
     }
 
     //--------------------------------------------------------------------------
-    void DistributedCollectable::send_remote_resource_update(
-                                AddressSpaceID target, unsigned count, bool add)
+    void DistributedCollectable::send_remote_gc_decrement(
+                                    AddressSpaceID target, RtEvent precondition,
+                                    ReferenceMutator *mutator, unsigned count)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(count != 0);
       assert(registered_with_runtime);
 #endif
-      int signed_count = count;
-      if (!add)
-        signed_count = -signed_count;
+      if (precondition.exists() && !precondition.has_triggered())
+      {
+        DeferRemoteDecrementArgs args(this,target,mutator,count,false/*valid*/);
+        runtime->issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY, 
+                                         precondition);
+        return;
+      }
+      int signed_count = -(int(count));
       Serializer rez;
       {
         RezCheck z(rez);
@@ -1228,55 +1498,7 @@ namespace Legion {
         rez.serialize(signed_count);
         rez.serialize<bool>(target == owner_space);
       }
-      runtime->send_did_remote_resource_update(target, rez);
-    }
-
-    //--------------------------------------------------------------------------
-    void DistributedCollectable::send_remote_invalidate(AddressSpaceID target,
-                                                      ReferenceMutator *mutator)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(is_owner());
-#endif
-      Serializer rez;
-      if (mutator == NULL)
-      {
-        rez.serialize(did);
-        rez.serialize(RtUserEvent::NO_RT_USER_EVENT);
-      }
-      else
-      {
-        RtUserEvent done = Runtime::create_rt_user_event();
-        rez.serialize(did);
-        rez.serialize(done);
-        mutator->record_reference_mutation_effect(done);
-      }
-      runtime->send_did_remote_invalidate(target, rez);
-    }
-
-    //--------------------------------------------------------------------------
-    void DistributedCollectable::send_remote_deactivate(AddressSpaceID target,
-                                                      ReferenceMutator *mutator)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(is_owner());
-#endif
-      Serializer rez;
-      if (mutator == NULL)
-      {
-        rez.serialize(did);
-        rez.serialize(RtUserEvent::NO_RT_USER_EVENT);
-      }
-      else
-      {
-        RtUserEvent done = Runtime::create_rt_user_event();
-        rez.serialize(did);
-        rez.serialize(done);
-        mutator->record_reference_mutation_effect(done);
-      }
-      runtime->send_did_remote_deactivate(target, rez);
+      runtime->send_did_remote_gc_update(target, rez);
     }
 
 #ifdef USE_REMOTE_REFERENCES
@@ -1390,11 +1612,14 @@ namespace Legion {
         target->add_base_valid_ref(REMOTE_DID_REF, &mutator, unsigned(count));
         RtUserEvent done_event;
         derez.deserialize(done_event);
-        if (!mutator_events.empty())
-          Runtime::trigger_event(done_event, 
-              Runtime::merge_events(mutator_events));
-        else
-          Runtime::trigger_event(done_event);
+        if (done_event.exists())
+        {
+          if (!mutator_events.empty())
+            Runtime::trigger_event(done_event, 
+                Runtime::merge_events(mutator_events));
+          else
+            Runtime::trigger_event(done_event);
+        }
       }
       else if (target->remove_base_valid_ref(REMOTE_DID_REF, NULL,
                                              unsigned(-count)))
@@ -1430,11 +1655,14 @@ namespace Legion {
         target->add_base_gc_ref(REMOTE_DID_REF, &mutator, unsigned(count));
         RtUserEvent done_event;
         derez.deserialize(done_event);
-        if (!mutator_events.empty())
-          Runtime::trigger_event(done_event,
-              Runtime::merge_events(mutator_events));
-        else
-          Runtime::trigger_event(done_event);
+        if (done_event.exists())
+        {
+          if (!mutator_events.empty())
+            Runtime::trigger_event(done_event,
+                Runtime::merge_events(mutator_events));
+          else
+            Runtime::trigger_event(done_event);
+        }
       }
       else if (target->remove_base_gc_ref(REMOTE_DID_REF, NULL,
                                           unsigned(-count)))
@@ -1442,92 +1670,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void DistributedCollectable::handle_did_remote_resource_update(
-                                         Runtime *runtime, Deserializer &derez)
+    /*static*/ void DistributedCollectable::handle_defer_remote_decrement(
+                                                               const void *args)
     //--------------------------------------------------------------------------
     {
-      DerezCheck z(derez);
-      DistributedID did;
-      derez.deserialize(did);
-      int count;
-      derez.deserialize(count);
-      bool is_owner;
-      derez.deserialize(is_owner);
-      DistributedCollectable *target = NULL;
-      if (!is_owner)
-      {
-        RtEvent ready;
-        target = runtime->find_distributed_collectable(did, ready);
-        if (ready.exists() && !ready.has_triggered())
-          ready.wait();
-      }
+      const DeferRemoteDecrementArgs *dargs = 
+        (const DeferRemoteDecrementArgs*)args;
+      if (dargs->valid)
+        dargs->dc->send_remote_valid_decrement(dargs->target, 
+            RtEvent::NO_RT_EVENT, dargs->mutator, dargs->count);
       else
-        target = runtime->find_distributed_collectable(did);
-      if (count > 0)
-        target->add_base_resource_ref(REMOTE_DID_REF, unsigned(count));
-      else if (target->remove_base_resource_ref(REMOTE_DID_REF, 
-                                                unsigned(-count)))
-        delete target;
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void DistributedCollectable::handle_did_remote_invalidate(
-                                          Runtime *runtime, Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      DerezCheck z(derez);
-      DistributedID did;
-      derez.deserialize(did);
-      RtUserEvent done;
-      derez.deserialize(done);
-      // We know we are not the owner so we might have to wait 
-      RtEvent ready;
-      DistributedCollectable *target = 
-        runtime->find_distributed_collectable(did, ready);
-      if (ready.exists() && !ready.has_triggered())
-        ready.wait();
-      if (done.exists())
-      {
-        std::set<RtEvent> preconditions;
-        WrapperReferenceMutator mutator(preconditions);
-        target->notify_remote_invalid(&mutator);
-        if (!preconditions.empty())
-          Runtime::trigger_event(done, Runtime::merge_events(preconditions));
-        else
-          Runtime::trigger_event(done);
-      }
-      else
-        target->notify_remote_invalid(NULL);
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void DistributedCollectable::handle_did_remote_deactivate(
-                                          Runtime *runtime, Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      DerezCheck z(derez);
-      DistributedID did;
-      derez.deserialize(did);
-      RtUserEvent done;
-      derez.deserialize(done);
-      // We know we are not the owner so we might have to wait 
-      RtEvent ready;
-      DistributedCollectable *target = 
-        runtime->find_distributed_collectable(did, ready);
-      if (ready.exists() && !ready.has_triggered())
-        ready.wait();
-      if (done.exists())
-      {
-        std::set<RtEvent> preconditions;
-        WrapperReferenceMutator mutator(preconditions);
-        target->notify_remote_inactive(&mutator);
-        if (!preconditions.empty())
-          Runtime::trigger_event(done, Runtime::merge_events(preconditions));
-        else
-          Runtime::trigger_event(done);
-      }
-      else
-        target->notify_remote_inactive(NULL);
+        dargs->dc->send_remote_gc_decrement(dargs->target,
+            RtEvent::NO_RT_EVENT, dargs->mutator, dargs->count);
     }
 
     //--------------------------------------------------------------------------
@@ -1620,6 +1774,24 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    RtEvent DistributedCollectable::check_for_transition_event(void)
+    //--------------------------------------------------------------------------
+    {
+      // If we already have a transition event then return it
+      if (transition_event.exists())
+        return transition_event;
+      // Otherwise check to see if we are in the middle of a transition
+      if ((current_state == PENDING_ACTIVE_STATE) ||
+          (current_state == PENDING_INACTIVE_STATE) ||
+          (current_state == PENDING_VALID_STATE) ||
+          (current_state == PENDING_INVALID_STATE) || 
+          (current_state == PENDING_ACTIVE_VALID_STATE) ||
+          (current_state == PENDING_INACTIVE_INVALID_STATE))
+        transition_event = Runtime::create_rt_user_event();
+      return transition_event;
+    }
+
+    //--------------------------------------------------------------------------
     bool DistributedCollectable::update_state(bool &need_activate, 
                                               bool &need_validate,
                                               bool &need_invalidate,
@@ -1641,6 +1813,7 @@ namespace Legion {
             {
               current_state = PENDING_ACTIVE_VALID_STATE;
               need_activate = true;
+              need_validate = true;
             }
 #ifdef USE_REMOTE_REFERENCES
             else if (has_gc_references || !create_gc_refs.empty())
@@ -1651,9 +1824,6 @@ namespace Legion {
               current_state = PENDING_ACTIVE_STATE;
               need_activate = true;
             }
-            need_validate = false;
-            need_invalidate = false;
-            need_deactivate = false;
             break;
           }
         case ACTIVE_INVALID_STATE:
@@ -1668,7 +1838,6 @@ namespace Legion {
               // Move to a pending valid state
               current_state = PENDING_VALID_STATE;
               need_validate = true;
-              need_deactivate = false;
             }
             // See if we have a reason to be inactive
 #ifdef USE_REMOTE_REFERENCES
@@ -1678,16 +1847,8 @@ namespace Legion {
 #endif
             {
               current_state = PENDING_INACTIVE_STATE;
-              need_validate = false;
               need_deactivate = true;
             }
-            else
-            {
-              need_validate = false;
-              need_deactivate = false;
-            }
-            need_activate = false;
-            need_invalidate = false;
             break;
           }
         case VALID_STATE:
@@ -1699,14 +1860,19 @@ namespace Legion {
             if (!has_valid_references)
 #endif
             {
-              current_state = PENDING_INVALID_STATE;
               need_invalidate = true;
+#ifdef USE_REMOTE_REFERENCES
+              if (!has_gc_references && create_gc_refs.empty())
+#else
+              if (!has_gc_references)
+#endif
+              {
+                current_state = PENDING_INACTIVE_INVALID_STATE;
+                need_deactivate = true;
+              }
+              else 
+                current_state = PENDING_INVALID_STATE;
             }
-            else
-              need_invalidate = false;
-            need_activate = false;
-            need_validate = false;
-            need_deactivate = false;
             break;
           }
         case DELETED_STATE:
@@ -1717,214 +1883,110 @@ namespace Legion {
           }
         case PENDING_ACTIVE_STATE:
           {
-            // See if we were the ones doing the activating
-            if (need_activate)
-            {
-              // See if we are still active
+#ifdef DEBUG_LEGION
 #ifdef USE_REMOTE_REFERENCES
-              if (has_valid_references || !create_valid_refs.empty())
+            assert(!has_valid_references && create_valid_refs.empty());
+            assert(has_gc_references || !create_gc_refs.empty());
 #else
-              if (has_valid_references)
+            assert(!has_valid_references);
+            assert(has_gc_references);
 #endif
-              {
-                // Now we need a validate
-                current_state = PENDING_VALID_STATE;
-                need_validate = true;
-                need_deactivate = false;
-              }
-#ifdef USE_REMOTE_REFERENCES
-              else if (has_gc_references || !create_gc_refs.empty())
-#else
-              else if (has_gc_references)
 #endif
-              {
-                // Nothing more to do
-                current_state = ACTIVE_INVALID_STATE;
-                need_validate = false;
-                need_deactivate = false;
-              }
-              else
-              {
-                // Not still valid, go to pending inactive 
-                current_state = PENDING_INACTIVE_STATE;
-                need_validate = false;
-                need_deactivate = true;
-              }
-            }
-            else
+            current_state = ACTIVE_INVALID_STATE;
+            if (transition_event.exists())
             {
-              // We weren't the ones doing the activate so 
-              // we can't help, just keep going
-              need_validate = false;
-              need_deactivate = false;
+              Runtime::trigger_event(transition_event);
+              transition_event = RtUserEvent::NO_RT_USER_EVENT;
             }
-            need_activate = false;
-            need_invalidate = false;
             break;
           }
         case PENDING_INACTIVE_STATE:
           {
-            // See if we were doing the deactivate
-            if (need_deactivate)
-            {
-              // See if we are still inactive
+#ifdef DEBUG_LEGION
 #ifdef USE_REMOTE_REFERENCES
-              if (has_valid_references || !create_valid_refs.empty())
+            assert(!has_valid_references && create_valid_refs.empty());
+            assert(!has_gc_references && create_gc_refs.empty());
 #else
-              if (has_valid_references)
+            assert(!has_valid_references);
+            assert(!has_gc_references);
 #endif
-              {
-                current_state = PENDING_ACTIVE_VALID_STATE;
-                need_activate = true;
-              }
-#ifdef USE_REMOTE_REFERENCES
-              else if (!has_gc_references && create_gc_refs.empty())
-#else
-              else if (!has_gc_references)
 #endif
-              {
-                current_state = INACTIVE_STATE;
-                need_activate = false;
-              }
-              else
-              {
-                current_state = PENDING_ACTIVE_STATE;
-                need_activate = true;
-              }
-            }
-            else
+            current_state = INACTIVE_STATE;
+            if (transition_event.exists())
             {
-              // We weren't the ones doing the deactivate
-              // so we can't help, just keep going
-              need_activate = false;
+              Runtime::trigger_event(transition_event);
+              transition_event = RtUserEvent::NO_RT_USER_EVENT;
             }
-            need_validate = false;
-            need_invalidate = false;
-            need_deactivate = false;
             break;
           }
         case PENDING_VALID_STATE:
           {
-            // See if we were the ones doing the validate
-            if (need_validate)
-            {
-              // Check to see if we are still valid
+#ifdef DEBUG_LEGION
 #ifdef USE_REMOTE_REFERENCES
-              if (has_valid_references || !create_valid_refs.empty())
+            assert(has_valid_references || create_valid_refs.empty());
 #else
-              if (has_valid_references)
+            assert(has_valid_references);
 #endif
-              {
-                current_state = VALID_STATE;
-                need_invalidate = false;
-              }
-              else
-              {
-                current_state = PENDING_INVALID_STATE;
-                need_invalidate = true;
-              }
-            }
-            else
+#endif
+            current_state = VALID_STATE;
+            if (transition_event.exists())
             {
-              // We weren't the ones doing the validate
-              // so we can't help, just keep going
-              need_invalidate = false;
+              Runtime::trigger_event(transition_event);
+              transition_event = RtUserEvent::NO_RT_USER_EVENT;
             }
-            need_activate = false;
-            need_validate = false;
-            need_deactivate = false;
             break;
           }
         case PENDING_INVALID_STATE:
           {
-            // See if we were doing the invalidate
-            if (need_invalidate)
-            {
-              // Check to see if we are still valid
+#ifdef DEBUG_LEGION
 #ifdef USE_REMOTE_REFERENCES
-              if (has_valid_references || !create_valid_refs.empty())
+            assert(!has_valid_references && create_valid_refs.empty());
+            assert(has_gc_references || !create_gc_refs.empty());
 #else
-              if (has_valid_references)
+            assert(!has_valid_references);
+            assert(has_gc_references);
 #endif
-              {
-                // Now we are valid again
-                current_state = PENDING_VALID_STATE;
-                need_validate = true;
-                need_deactivate = false;
-              }
-#ifdef USE_REMOTE_REFERENCES
-              else if (!has_gc_references && create_gc_refs.empty())
-#else
-              else if (!has_gc_references)
 #endif
-              {
-                // No longer active either
-                current_state = PENDING_INACTIVE_STATE;
-                need_validate = false;
-                need_deactivate = true;
-              }
-              else
-              {
-                current_state = ACTIVE_INVALID_STATE;
-                need_validate = false;
-                need_deactivate = false;
-              }
-            }
-            else
+            current_state = ACTIVE_INVALID_STATE;
+            if (transition_event.exists())
             {
-              // We weren't the ones doing the invalidate
-              // so we can't help
-              need_validate = false;
-              need_deactivate = false;
+              Runtime::trigger_event(transition_event);
+              transition_event = RtUserEvent::NO_RT_USER_EVENT;
             }
-            need_activate = false;
-            need_invalidate = false;
             break;
           }
         case PENDING_ACTIVE_VALID_STATE:
           {
-            // See if we were the ones doing the action
-            if (need_activate)
-            {
 #ifdef USE_REMOTE_REFERENCES
-              if (has_valid_references || !create_valid_refs.empty())
+            assert(has_valid_references || !create_valid_refs.empty());
 #else
-              if (has_valid_references)
+            assert(has_valid_references);
 #endif
-              {
-                // Still going to valid
-                current_state = PENDING_VALID_STATE;
-                need_validate = true;
-                need_deactivate = false;
-              }
-#ifdef USE_REMOTE_REFERENCES
-              else if (!has_gc_references && create_gc_refs.empty())
-#else
-              else if (!has_gc_references)
-#endif
-              {
-                // all our references disappeared
-                current_state = PENDING_INACTIVE_STATE;
-                need_validate = false;
-                need_deactivate = true;
-              }
-              else
-              {
-                // our valid references disappeared, but we at least
-                // have some gc references now
-                current_state = ACTIVE_INVALID_STATE;
-                need_validate = false;
-                need_deactivate = false;
-              }
-            }
-            else
+            current_state = VALID_STATE;
+            if (transition_event.exists())
             {
-              // We weren't the ones doing the activate so we are of no help
-              need_validate = false;
-              need_deactivate = false;
+              Runtime::trigger_event(transition_event);
+              transition_event = RtUserEvent::NO_RT_USER_EVENT;
             }
-            need_activate = false;
-            need_invalidate = false;
+            break;
+          }
+        case PENDING_INACTIVE_INVALID_STATE:
+          {
+#ifdef DEBUG_LEGION
+#ifdef USE_REMOTE_REFERENCES
+            assert(!has_valid_references && !create_valid_refs.empty());
+            assert(!has_gc_references && !create_gc_refs.empty());
+#else
+            assert(!has_valid_references);
+            assert(!has_gc_references);
+#endif
+#endif
+            current_state = INACTIVE_STATE;
+            if (transition_event.exists())
+            {
+              Runtime::trigger_event(transition_event);
+              transition_event = RtUserEvent::NO_RT_USER_EVENT;
+            }
             break;
           }
         default:

@@ -1,4 +1,4 @@
-/* Copyright 2018 Stanford University, NVIDIA Corporation
+/* Copyright 2019 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -29,10 +29,6 @@ namespace Realm {
     typedef T IDXTYPE;
     typedef FT FIELDTYPE;
 
-    static const Opcode OPCODE = UOPCODE_BY_FIELD;
-
-    static DynamicTemplates::TagType type_tag(void);
-
     ByFieldMicroOp(IndexSpace<N,T> _parent_space, IndexSpace<N,T> _inst_space,
 		   RegionInstance _inst, size_t _field_offset);
     virtual ~ByFieldMicroOp(void);
@@ -46,9 +42,12 @@ namespace Realm {
     void dispatch(PartitioningOperation *op, bool inline_ok);
 
   protected:
-    friend struct RemoteMicroOpMessage;
+    friend struct RemoteMicroOpMessage<ByFieldMicroOp<N,T,FT> >;
+    static ActiveMessageHandlerReg<RemoteMicroOpMessage<ByFieldMicroOp<N,T,FT> > > areg;
+
+    friend class PartitioningMicroOp;
     template <typename S>
-    bool serialize_params(S& s) const;
+    bool serialize_params(S& s) const WARN_UNUSED;
 
     // construct from received packet
     template <typename S>
@@ -72,7 +71,7 @@ namespace Realm {
     ByFieldOperation(const IndexSpace<N,T>& _parent,
 		     const std::vector<FieldDataDescriptor<IndexSpace<N,T>,FT> >& _field_data,
 		     const ProfilingRequestSet &reqs,
-		     Event _finish_event);
+		     GenEventImpl *_finish_event, EventImpl::gen_t _finish_gen);
 
     virtual ~ByFieldOperation(void);
 

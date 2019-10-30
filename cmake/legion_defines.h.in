@@ -22,14 +22,30 @@
 #cmakedefine BOUNDS_CHECKS
 #endif
 
+#ifndef LEGION_MAX_DIM
+#cmakedefine LEGION_MAX_DIM @LEGION_MAX_DIM@
+#endif
+
+#ifndef MAX_FIELDS
+#cmakedefine MAX_FIELDS @MAX_FIELDS@
+#endif
+
 #ifndef ENABLE_LEGION_TLS
 #cmakedefine ENABLE_LEGION_TLS
 #endif
 
-#ifndef MAX_FIELDS
-#cmakedefine MAX_FIELDS @Legion_MAX_FIELDS@
-#endif
-
 #ifndef __STDC_FORMAT_MACROS
 #cmakedefine __STDC_FORMAT_MACROS
+#endif
+
+#ifndef LEGION_USE_CUDA
+#cmakedefine LEGION_USE_CUDA
+#endif
+
+#ifndef USE_ZLIB
+#cmakedefine USE_ZLIB
+#endif
+
+#ifndef LEGION_REDOP_COMPLEX
+#cmakedefine LEGION_REDOP_COMPLEX
 #endif

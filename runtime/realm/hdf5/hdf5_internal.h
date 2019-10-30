@@ -1,4 +1,4 @@
-/* Copyright 2018 Stanford University, NVIDIA Corporation
+/* Copyright 2019 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -43,10 +43,6 @@ namespace Realm {
       HDF5Memory(Memory _me);
 
       virtual ~HDF5Memory(void);
-
-      virtual off_t alloc_bytes(size_t size);
-
-      virtual void free_bytes(off_t offset, size_t size);
 
       virtual void get_bytes(off_t offset, void *dst, size_t size);
 

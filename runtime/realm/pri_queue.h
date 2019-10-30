@@ -1,4 +1,4 @@
-/* Copyright 2018 Stanford University, NVIDIA Corporation
+/* Copyright 2019 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -102,7 +102,31 @@ namespace Realm {
     std::map<NotificationCallback *, priority_t> subscriptions;
     
     ProfilingGauges::AbsoluteRangeGauge<int> *entries_in_queue;
+
+    template <typename T2, typename LT2>
+    friend std::ostream& operator<<(std::ostream& os, const PriorityQueue<T2, LT2>& pq);
   };
+
+  template <typename T, typename LT>
+  std::ostream& operator<<(std::ostream& os, const PriorityQueue<T, LT>& pq)
+  {
+    pq.lock.lock();
+    os << "PQ{\n";
+    for(typename std::map<typename PriorityQueue<T, LT>::priority_t, std::deque<T> >::const_iterator it = pq.queue.begin();
+	it != pq.queue.end();
+	++it) {
+      os << "  [" << -(it->first) << "]: ";
+      typename std::deque<T>::const_iterator it2 = it->second.begin();
+      assert(it2 != it->second.end());
+      os << ((const void *)(*it2));
+      while((++it2) != it->second.end())
+	os << ", " << ((const void *)(*it2));
+      os << "\n";
+    }
+    os << "}\n";
+    pq.lock.unlock();
+    return os;
+  }
 
 }; // namespace Realm
 

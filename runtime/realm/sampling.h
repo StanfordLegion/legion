@@ -1,4 +1,4 @@
-/* Copyright 2018 Stanford University, NVIDIA Corporation
+/* Copyright 2019 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -28,12 +28,13 @@
 #include "realm/memory.h"
 #include "realm/instance.h"
 #include "realm/faults.h"
-#include "realm/activemsg.h"
+#include "realm/atomics.h"
 
 namespace Realm {
 
   class SamplingProfiler;
   class GaugeSampler;
+  class CoreReservationSet;
 
   namespace ProfilingGauges {
 
@@ -100,7 +101,7 @@ namespace Realm {
     protected:
       friend class Realm::GaugeSampler;
 
-      T curval;  // current gauge value
+      atomic<T> curval;  // current gauge value
     };
 
     template <typename T>
@@ -136,9 +137,9 @@ namespace Realm {
     protected:
       friend class Realm::GaugeSampler;
 
-      T curval;  // current gauge value
-      T minval;  // max value seen since last sample
-      T maxval;  // min value seen since last sample
+      atomic<T> curval;  // current gauge value
+      atomic<T> minval;  // max value seen since last sample
+      atomic<T> maxval;  // min value seen since last sample
     };
 
     template <typename T = int>
@@ -162,7 +163,7 @@ namespace Realm {
     protected:
       friend class Realm::GaugeSampler;
 
-      T events;  // events recorded since last sample
+      atomic<T> events;  // events recorded since last sample
     };
 
   }; // namespace ProfilingGauges

@@ -1,4 +1,4 @@
-/* Copyright 2018 Stanford University, NVIDIA Corporation
+/* Copyright 2019 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -69,7 +69,7 @@ namespace Realm {
     }
 
     // construct and fill in a sparsity map
-    SparsityMapImplWrapper *wrap = get_runtime()->get_available_sparsity_impl(my_node_id);
+    SparsityMapImplWrapper *wrap = get_runtime()->get_available_sparsity_impl(Network::my_node_id);
     SparsityMap<N,T> sparsity = wrap->me.convert<SparsityMap<N,T> >();
     SparsityMapImpl<N,T> *impl = wrap->get_or_create<N,T>(sparsity);
     impl->set_contributor_count(1);
@@ -96,7 +96,7 @@ namespace Realm {
     }
 
     // construct and fill in a sparsity map
-    SparsityMapImplWrapper *wrap = get_runtime()->get_available_sparsity_impl(my_node_id);
+    SparsityMapImplWrapper *wrap = get_runtime()->get_available_sparsity_impl(Network::my_node_id);
     SparsityMap<N,T> sparsity = wrap->me.convert<SparsityMap<N,T> >();
     SparsityMapImpl<N,T> *impl = wrap->get_or_create<N,T>(sparsity);
     impl->set_contributor_count(1);
@@ -159,10 +159,58 @@ namespace Realm {
 
   // call actual implementation - inlining makes this cheaper than a virtual method
   template <int N, typename T>
-  __attribute__ ((noinline))
   Event SparsityMapPublicImpl<N,T>::make_valid(bool precise /*= true*/)
   {
     return static_cast<SparsityMapImpl<N,T> *>(this)->make_valid(precise);
+  }
+
+  // membership test between two (presumably-different) sparsity maps are not
+  //  cheap - try bounds-based checks first (see IndexSpace::overlaps)
+  template <int N, typename T>
+  bool SparsityMapPublicImpl<N,T>::overlaps(SparsityMapPublicImpl<N,T> *other,
+					    const Rect<N,T>& bounds,
+					    bool approx)
+  {
+    // full cross-product test for now - for larger rectangle lists, consider
+    //  an acceleration structure?
+    if(approx) {
+      const std::vector<Rect<N,T> >& rects1 = get_approx_rects();
+      const std::vector<Rect<N,T> >& rects2 = other->get_approx_rects();
+      for(typename std::vector<Rect<N,T> >::const_iterator it1 = rects1.begin();
+	  it1 != rects1.end();
+	  it1++) {
+	Rect<N,T> isect = it1->intersection(bounds);
+	if(isect.empty())
+	  continue;
+	for(typename std::vector<Rect<N,T> >::const_iterator it2 = rects2.begin();
+	    it2 != rects2.end();
+	    it2++) {
+	  if(it2->overlaps(isect))
+	    return true;
+	}
+      }
+    } else {
+      const std::vector<SparsityMapEntry<N,T> >& entries1 = get_entries();
+      const std::vector<SparsityMapEntry<N,T> >& entries2 = other->get_entries();
+      for(typename std::vector<SparsityMapEntry<N,T> >::const_iterator it1 = entries1.begin();
+	  it1 != entries1.end();
+	  it1++) {
+	Rect<N,T> isect = it1->bounds.intersection(bounds);
+	if(isect.empty())
+	  continue;
+	for(typename std::vector<SparsityMapEntry<N,T> >::const_iterator it2 = entries2.begin();
+	    it2 != entries2.end();
+	    it2++) {
+	  if(!it2->bounds.overlaps(isect)) continue;
+	  // TODO: handle further sparsity in either side
+	  assert(!it1->sparsity.exists() && (it1->bitmap == 0) &&
+		 !it2->sparsity.exists() && (it2->bitmap == 0));
+	  return true;
+	}
+      }
+    }
+
+    return false;
   }
 
 
@@ -198,12 +246,12 @@ namespace Realm {
     bool request_precise = false;
     Event e = Event::NO_EVENT;
     {
-      AutoHSLLock al(mutex);
+      AutoLock<> al(mutex);
 
       if(precise) {
 	if(!this->entries_valid) {
 	  // do we need to request the data?
-	  if((ID(me).sparsity.creator_node != my_node_id) && !precise_requested) {
+	  if((NodeID(ID(me).sparsity_creator_node()) != Network::my_node_id) && !precise_requested) {
 	    request_precise = true;
 	    precise_requested = true;
 	    // also get approx while we're at it
@@ -221,7 +269,7 @@ namespace Realm {
       } else {
 	if(!this->approx_valid) {
 	  // do we need to request the data?
-	  if((ID(me).sparsity.creator_node != my_node_id) && !approx_requested) {
+	  if((NodeID(ID(me).sparsity_creator_node()) != Network::my_node_id) && !approx_requested) {
 	    request_approx = true;
 	    approx_requested = true;
 	  }
@@ -236,10 +284,13 @@ namespace Realm {
       }
     }
     
-    if(request_approx || request_precise)
-      RemoteSparsityRequestMessage::send_request(ID(me).sparsity.creator_node, me,
-						 request_approx,
-						 request_precise);
+    if(request_approx || request_precise) {
+      ActiveMessage<RemoteSparsityRequest> amsg(ID(me).sparsity_creator_node(), 0);
+      amsg->sparsity = me;
+      amsg->send_precise = request_precise;
+      amsg->send_approx = request_approx;
+      amsg.commit();
+    }
 
     return e;
   }
@@ -254,7 +305,7 @@ namespace Realm {
   template <int N, typename T>
   void SparsityMapImpl<N,T>::set_contributor_count(int count)
   {
-    if(ID(me).sparsity.creator_node == my_node_id) {
+    if(NodeID(ID(me).sparsity_creator_node()) == Network::my_node_id) {
       // increment the count atomically - if it brings the total up to 0 (which covers count == 0),
       //  immediately finalize - the contributions happened before we got here
       // just increment the count atomically
@@ -263,20 +314,26 @@ namespace Realm {
 	finalize();
     } else {
       // send the contributor count to the owner node
-      SetContribCountMessage::send_request(ID(me).sparsity.creator_node, me, count);
+      ActiveMessage<SetContribCountMessage> amsg(ID(me).sparsity_creator_node(), 0);
+      amsg->sparsity = me;
+      amsg->count = count;
+      amsg.commit();
     }
   }
 
   template <int N, typename T>
   void SparsityMapImpl<N,T>::contribute_nothing(void)
   {
-    NodeID owner = ID(me).sparsity.creator_node;
+    NodeID owner = ID(me).sparsity_creator_node();
 
-    if(owner != my_node_id) {
+    if(owner != Network::my_node_id) {
       // send (the lack of) data to the owner to collect
-      int seq_id = fragment_assembler.get_sequence_id();
-      RemoteSparsityContribMessage::send_request<N,T>(owner, me, seq_id, 1,
-						      0, 0);
+      ActiveMessage<RemoteSparsityContrib> amsg(owner, 0);
+      amsg->sparsity = me;
+      amsg->sequence_id = fragment_assembler.get_sequence_id();
+      amsg->sequence_count = 1;
+      amsg.commit();
+
       return;
     }
 
@@ -289,9 +346,9 @@ namespace Realm {
   template <int N, typename T>
   void SparsityMapImpl<N,T>::contribute_dense_rect_list(const std::vector<Rect<N,T> >& rects)
   {
-    NodeID owner = ID(me).sparsity.creator_node;
+    NodeID owner = ID(me).sparsity_creator_node();
 
-    if(owner != my_node_id) {
+    if(owner != Network::my_node_id) {
       // send the data to the owner to collect
       int seq_id = fragment_assembler.get_sequence_id();
       const size_t max_to_send = DeppartConfig::cfg_max_bytes_per_packet / sizeof(Rect<N,T>);
@@ -300,16 +357,28 @@ namespace Realm {
       size_t remaining = rects.size();
       // send partial messages first
       while(remaining > max_to_send) {
-	RemoteSparsityContribMessage::send_request<N,T>(owner, me, seq_id, 0,
-							rdata, max_to_send);
+	size_t bytes = max_to_send * sizeof(Rect<N,T>);
+	ActiveMessage<RemoteSparsityContrib> amsg(owner, bytes);
+	amsg->sparsity = me;
+	amsg->sequence_id = seq_id;
+	amsg->sequence_count = 0;
+	amsg.add_payload(rdata, bytes, PAYLOAD_COPY);
+	amsg.commit();
+
 	seq_count++;
 	remaining -= max_to_send;
 	rdata += max_to_send;
       }
+
       // final message includes the count of all messages (including this one!)
-      RemoteSparsityContribMessage::send_request<N,T>(owner, me, 
-						      seq_id, seq_count + 1,
-						      rdata, remaining);
+      size_t bytes = remaining * sizeof(Rect<N,T>);
+      ActiveMessage<RemoteSparsityContrib> amsg(owner, bytes);
+      amsg->sparsity = me;
+      amsg->sequence_id = seq_id;
+      amsg->sequence_count = seq_count + 1;
+      amsg.add_payload(rdata, bytes, PAYLOAD_COPY);
+      amsg.commit();
+
       return;
     }
 
@@ -321,7 +390,7 @@ namespace Realm {
 						  size_t count, bool last)
   {
     if(count > 0) {
-      AutoHSLLock al(mutex);
+      AutoLock<> al(mutex);
 
       if(N == 1) {
 	// demand that our input data is sorted
@@ -463,7 +532,7 @@ namespace Realm {
     }
 
     if(last) {
-      if(ID(me).sparsity.creator_node == my_node_id) {
+      if(NodeID(ID(me).sparsity_creator_node()) == Network::my_node_id) {
 	// we're the owner, so remaining_contributor_count tracks our expected contributions
 	// count is allowed to go negative if we get contributions before we know the total expected
 	int left = __sync_sub_and_fetch(&remaining_contributor_count, 1);
@@ -492,14 +561,14 @@ namespace Realm {
     bool request_approx = false;
     bool request_precise = false;
     {
-      AutoHSLLock al(mutex);
+      AutoLock<> al(mutex);
 
       if(precise) {
 	if(!this->entries_valid) {
 	  precise_waiters.push_back(uop);
 	  registered = true;
 	  // do we need to request the data?
-	  if((ID(me).sparsity.creator_node != my_node_id) && !precise_requested) {
+	  if((NodeID(ID(me).sparsity_creator_node()) != Network::my_node_id) && !precise_requested) {
 	    request_precise = true;
 	    precise_requested = true;
 	    // also get approx while we're at it
@@ -512,7 +581,7 @@ namespace Realm {
 	  approx_waiters.push_back(uop);
 	  registered = true;
 	  // do we need to request the data?
-	  if((ID(me).sparsity.creator_node != my_node_id) && !approx_requested) {
+	  if((NodeID(ID(me).sparsity_creator_node()) != Network::my_node_id) && !approx_requested) {
 	    request_approx = true;
 	    approx_requested = true;
 	  }
@@ -520,10 +589,13 @@ namespace Realm {
       }
     }
 
-    if(request_approx || request_precise)
-      RemoteSparsityRequestMessage::send_request(ID(me).sparsity.creator_node, me,
-						 request_approx,
-						 request_precise);
+    if(request_approx || request_precise) {
+      ActiveMessage<RemoteSparsityRequest> amsg(ID(me).sparsity_creator_node(), 0);
+      amsg->sparsity = me;
+      amsg->send_precise = request_precise;
+      amsg->send_approx = request_approx;
+      amsg.commit();
+    }
 
     return registered;
   }
@@ -532,13 +604,13 @@ namespace Realm {
   void SparsityMapImpl<N,T>::remote_data_request(NodeID requestor, bool send_precise, bool send_approx)
   {
     // first sanity check - we should be the owner of the data
-    assert(ID(me).sparsity.creator_node == my_node_id);
+    assert(NodeID(ID(me).sparsity_creator_node()) == Network::my_node_id);
 
     // take the long to determine atomically if we can send data or if we need to register as a listener
     bool reply_precise = false;
     bool reply_approx = false;
     {
-      AutoHSLLock al(mutex);
+      AutoLock<> al(mutex);
 
       // always add the requestor to the sharer list
       remote_sharers.add(requestor);
@@ -561,7 +633,6 @@ namespace Realm {
     if(reply_approx || reply_precise)
       remote_data_reply(requestor, reply_precise, reply_approx);
   }
-
   
   template <int N, typename T>
   void SparsityMapImpl<N,T>::remote_data_reply(NodeID requestor, bool reply_precise, bool reply_approx)
@@ -599,16 +670,27 @@ namespace Realm {
       const size_t max_to_send = DeppartConfig::cfg_max_bytes_per_packet / sizeof(Rect<N,T>);
       // send partial messages first
       while(remaining > max_to_send) {
-	RemoteSparsityContribMessage::send_request<N,T>(requestor, me, seq_id, 0,
-							rdata, max_to_send);
+	size_t bytes = max_to_send * sizeof(Rect<N,T>);
+	ActiveMessage<RemoteSparsityContrib> amsg(requestor, bytes);
+	amsg->sparsity = me;
+	amsg->sequence_id = seq_id;
+	amsg->sequence_count = 0;
+	amsg.add_payload(rdata, bytes, PAYLOAD_COPY);
+	amsg.commit();
+
 	seq_count++;
 	remaining -= max_to_send;
 	rdata += max_to_send;
       }
+
       // final message includes the count of all messages (including this one!)
-      RemoteSparsityContribMessage::send_request<N,T>(requestor, me, 
-						      seq_id, seq_count + 1,
-						      rdata, remaining);
+      size_t bytes = remaining * sizeof(Rect<N,T>);
+      ActiveMessage<RemoteSparsityContrib> amsg(requestor, bytes);
+      amsg->sparsity = me;
+      amsg->sequence_id = seq_id;
+      amsg->sequence_count = seq_count + 1;
+      amsg.add_payload(rdata, bytes, PAYLOAD_COPY);
+      amsg.commit();
     }
   }
   
@@ -717,7 +799,7 @@ namespace Realm {
     }
 
     // now that we've got our entries nice and tidy, build a bounded approximation of them
-    if(true /*ID(me).sparsity.creator_node == my_node_id*/) {
+    if(true /*ID(me).sparsity_creator_node() == Network::my_node_id*/) {
       assert(!this->approx_valid);
       compute_approximation(this->entries, this->approx_rects, DeppartConfig::cfg_max_rects_in_approximation);
       this->approx_valid = true;
@@ -738,7 +820,7 @@ namespace Realm {
     Event trigger_approx = Event::NO_EVENT;
     std::vector<PartitioningMicroOp *> precise_waiters_copy, approx_waiters_copy;
     {
-      AutoHSLLock al(mutex);
+      AutoLock<> al(mutex);
 
       assert(!this->entries_valid);
       this->entries_valid = true;
@@ -766,7 +848,7 @@ namespace Realm {
       (*it)->sparsity_map_ready(this, false);
 
     if(!sendto_approx.empty()) {
-      for(NodeID i = 0; (i <= max_node_id) && !sendto_approx.empty(); i++)
+      for(NodeID i = 0; (i <= Network::max_node_id) && !sendto_approx.empty(); i++)
 	if(sendto_approx.contains(i)) {
 	  bool also_precise = sendto_precise.contains(i);
 	  if(also_precise)
@@ -777,7 +859,7 @@ namespace Realm {
     }
 
     if(!sendto_precise.empty()) {
-      for(NodeID i = 0; (i <= max_node_id) && !sendto_precise.empty(); i++)
+      for(NodeID i = 0; (i <= Network::max_node_id) && !sendto_precise.empty(); i++)
 	if(sendto_precise.contains(i)) {
 	  remote_data_reply(i, true, false);
 	  sendto_precise.remove(i);
@@ -790,6 +872,13 @@ namespace Realm {
     if(trigger_precise.exists())
       GenEventImpl::trigger(trigger_precise, false /*!poisoned*/);
   }
+
+  template <int N, typename T>
+  /*static*/ ActiveMessageHandlerReg<typename SparsityMapImpl<N,T>::RemoteSparsityRequest> SparsityMapImpl<N,T>::remote_sparsity_request_reg;
+  template <int N, typename T>
+  /*static*/ ActiveMessageHandlerReg<typename SparsityMapImpl<N,T>::RemoteSparsityContrib> SparsityMapImpl<N,T>::remote_sparsity_contrib_reg;
+  template <int N, typename T>
+  /*static*/ ActiveMessageHandlerReg<typename SparsityMapImpl<N,T>::SetContribCountMessage> SparsityMapImpl<N,T>::set_contrib_count_msg_reg;
 
 
   ////////////////////////////////////////////////////////////////////////
@@ -821,7 +910,7 @@ namespace Realm {
 
     // rest of this has to be protected by a lock
     {
-      AutoHSLLock al(mutex);
+      AutoLock<> al(mutex);
 
       std::map<int, int>& by_sender = fragments[sender];
 
@@ -845,186 +934,58 @@ namespace Realm {
 
   ////////////////////////////////////////////////////////////////////////
   //
-  // class RemoteSparsityContribMessage
+  // class SparsityMapImpl<N,T>::RemoteSparsityRequest
 
-  template <typename NT, typename T>
-  inline /*static*/ void RemoteSparsityContribMessage::DecodeHelper::demux(const RequestArgs *args,
-									   const void *data, size_t datalen)
+  template <int N, typename T>
+  inline /*static*/ void SparsityMapImpl<N,T>::RemoteSparsityRequest::handle_message(NodeID sender,
+										     const SparsityMapImpl<N,T>::RemoteSparsityRequest &msg,
+										     const void *data, size_t datalen)
   {
-    SparsityMap<NT::N,T> sparsity;
-    sparsity.id = args->sparsity_id;
+    log_part.info() << "received sparsity request: sparsity=" << msg.sparsity << " precise=" << msg.send_precise << " approx=" << msg.send_approx;
+    SparsityMapImpl<N,T>::lookup(msg.sparsity)->remote_data_request(sender,
+								    msg.send_precise,
+								    msg.send_approx);
+  }
 
-    log_part.info() << "received remote contribution: sparsity=" << sparsity << " len=" << datalen;
-    size_t count = datalen / sizeof(Rect<NT::N,T>);
-    assert((datalen % sizeof(Rect<NT::N,T>)) == 0);
-    bool last_fragment = fragment_assembler.add_fragment(args->sender,
-							 args->sequence_id,
-							 args->sequence_count);
-    SparsityMapImpl<NT::N,T>::lookup(sparsity)->contribute_raw_rects((const Rect<NT::N,T> *)data,
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class SparsityMapImpl<N,T>::RemoteSparsityContrib
+
+  template <int N, typename T>
+  inline /*static*/ void SparsityMapImpl<N,T>::RemoteSparsityContrib::handle_message(NodeID sender,
+										     const SparsityMapImpl<N,T>::RemoteSparsityContrib &msg,
+										     const void *data, size_t datalen)
+  {
+    log_part.info() << "received remote contribution: sparsity=" << msg.sparsity << " len=" << datalen;
+    size_t count = datalen / sizeof(Rect<N,T>);
+    assert((datalen % sizeof(Rect<N,T>)) == 0);
+    bool last_fragment = fragment_assembler.add_fragment(sender,
+							 msg.sequence_id,
+							 msg.sequence_count);
+    SparsityMapImpl<N,T>::lookup(msg.sparsity)->contribute_raw_rects((const Rect<N,T> *)data,
 								     count,
 								     last_fragment);
   }
 
-  /*static*/ void RemoteSparsityContribMessage::handle_request(RequestArgs args,
-							       const void *data, size_t datalen)
-  {
-    NT_TemplateHelper::demux<DecodeHelper>(args.type_tag, &args, data, datalen);
-  }
-
-  template <int N, typename T>
-  /*static*/ void RemoteSparsityContribMessage::send_request(NodeID target,
-							     SparsityMap<N,T> sparsity,
-							     int sequence_id,
-							     int sequence_count,
-							     const Rect<N,T> *rects,
-							     size_t count)
-  {
-    RequestArgs args;
-
-    args.sender = my_node_id;
-    args.type_tag = NT_TemplateHelper::encode_tag<N,T>();
-    args.sparsity_id = sparsity.id;
-    args.sequence_id = sequence_id;
-    args.sequence_count = sequence_count;
-
-    Message::request(target, args, rects, count * sizeof(Rect<N,T>),
-		     PAYLOAD_COPY);
-  }
-
 
   ////////////////////////////////////////////////////////////////////////
   //
-  // class RemoteSparsityRequestMessage
-
-  template <typename NT, typename T>
-  inline /*static*/ void RemoteSparsityRequestMessage::DecodeHelper::demux(const RequestArgs *args)
-  {
-    SparsityMap<NT::N,T> sparsity;
-    sparsity.id = args->sparsity_id;
-
-    log_part.info() << "received sparsity request: sparsity=" << sparsity << " precise=" << args->send_precise << " approx=" << args->send_approx;
-    SparsityMapImpl<NT::N,T>::lookup(sparsity)->remote_data_request(args->sender, args->send_precise, args->send_approx);
-  }
-
-  /*static*/ void RemoteSparsityRequestMessage::handle_request(RequestArgs args)
-  {
-    NT_TemplateHelper::demux<DecodeHelper>(args.type_tag, &args);
-  }
+  // class SparsityMapImpl<N,T>::SetContribCountMessage
 
   template <int N, typename T>
-  /*static*/ void RemoteSparsityRequestMessage::send_request(NodeID target,
-							     SparsityMap<N,T> sparsity,
-							     bool send_precise,
-							     bool send_approx)
+  inline /*static*/ void SparsityMapImpl<N,T>::SetContribCountMessage::handle_message(NodeID sender,
+										     const SparsityMapImpl<N,T>::SetContribCountMessage &msg,
+										     const void *data, size_t datalen)
   {
-    RequestArgs args;
-
-    args.sender = my_node_id;
-    args.type_tag = NT_TemplateHelper::encode_tag<N,T>();
-    args.sparsity_id = sparsity.id;
-    args.send_precise = send_precise;
-    args.send_approx = send_approx;
-
-    Message::request(target, args);
+    log_part.info() << "received contributor count: sparsity=" << msg.sparsity << " count=" << msg.count;
+    SparsityMapImpl<N,T>::lookup(msg.sparsity)->set_contributor_count(msg.count);
   }
-
-
-  ////////////////////////////////////////////////////////////////////////
-  //
-  // class SetContribCountMessage
-
-  template <typename NT, typename T>
-  inline /*static*/ void SetContribCountMessage::DecodeHelper::demux(const RequestArgs *args)
-  {
-    SparsityMap<NT::N,T> sparsity;
-    sparsity.id = args->sparsity_id;
-
-    log_part.info() << "received contributor count: sparsity=" << sparsity << " count=" << args->count;
-    SparsityMapImpl<NT::N,T>::lookup(sparsity)->set_contributor_count(args->count);
-  }
-
-  /*static*/ void SetContribCountMessage::handle_request(RequestArgs args)
-  {
-    NT_TemplateHelper::demux<DecodeHelper>(args.type_tag, &args);
-  }
-
-  template <int N, typename T>
-  /*static*/ void SetContribCountMessage::send_request(NodeID target,
-						       SparsityMap<N,T> sparsity,
-						       int count)
-  {
-    RequestArgs args;
-
-    args.type_tag = NT_TemplateHelper::encode_tag<N,T>();
-    args.sparsity_id = sparsity.id;
-    args.count = count;
-
-    Message::request(target, args);
-  }
-
-
-  // instantiation stuff
-  namespace {
-    
-#define NT_INSTANTIATIONS(u, t)	      \
-    t((SparsityMapPublicImpl<N,T> *(SparsityMap<N,T>::*)(void) const),(&SparsityMap<N,T>::impl)) \
-    u((SparsityMapImpl<N,T>::lookup)) \
-    t((Event (SparsityMapPublicImpl<N,T>::*)(bool)),(&SparsityMapPublicImpl<N,T>::make_valid)) \
-    t((SparsityMap<N,T> (*)(const std::vector<Point<N,T> >&, bool)),(&SparsityMap<N,T>::construct)) \
-    t((SparsityMap<N,T> (*)(const std::vector<Rect<N,T> >&, bool)),(&SparsityMap<N,T>::construct)) \
-    t((bool (SparsityMapImpl<N,T>::*)(PartitioningMicroOp *, bool)),(&SparsityMapImpl<N,T>::add_waiter)) \
-    t((void (SparsityMapImpl<N,T>::*)(void)),(&SparsityMapImpl<N,T>::contribute_nothing))
-    
-    struct UntypedWrapper {
-      template <typename T>
-      static UntypedWrapper *wrap(T val);
-    };
-
-    template <typename T>
-    struct TypedWrapper : public UntypedWrapper {
-    public:
-      TypedWrapper(T _val) : val(_val) {}
-      T val;
-    };
-
-    template <typename T>
-    UntypedWrapper *UntypedWrapper::wrap(T val)
-    {
-      return new TypedWrapper<T>(val);
-    }
-
-    class NT_Instantiator {
-    public:
-      template <int N, typename T>
-      static void demux2(int tag, std::vector<void *> *v)
-      {
-#define UNWRAP(x) x
-#define UNTYPED(x) v->push_back(UntypedWrapper::wrap(&x));
-#define TYPED(t,x) v->push_back(UntypedWrapper::wrap(t x));
-	NT_INSTANTIATIONS(UNTYPED, TYPED);
-      }
-      template <typename NT, typename T>
-      static void demux(int tag, std::vector<void *> *v)
-      {
-	demux2<NT::N,T>(tag, v);
-      }
-    };
-
-    // use our dynamic template demux stuff to enumerate all possible
-    //  combinations of template paramters
-    void instantiate_stuff(int tag, std::vector<void *> *v)
-    {
-      NT_TemplateHelper::demux<NT_Instantiator>(tag, tag, v);
-      //NTF_TemplateHelper::demux<NTF_Instantiator>(tag, tag, v);
-      //NTNT_TemplateHelper::demux<NTNT_Instantiator>(tag, tag, v);
-    }
-  };
-
-  //void (*dummy)(void) __attribute__((unused)) = &InstantiatePartitioningStuff<1,int>::inst_stuff;
-  void (*dummy)(int, std::vector<void *> *) __attribute__((weak, unused)) = &instantiate_stuff;
 
 #define DOIT(N,T) \
-  template class SparsityMapImpl<N,T>;
+  template class SparsityMapPublicImpl<N,T>; \
+  template class SparsityMapImpl<N,T>; \
+  template class SparsityMap<N,T>;
   FOREACH_NT(DOIT)
 
 }; // namespace Realm

@@ -1,4 +1,4 @@
--- Copyright 2018 Stanford University
+-- Copyright 2019 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -15,6 +15,7 @@
 -- Regent Configuration and Command Line Parsing
 
 local common_config = require("common/config")
+local data = require("common/data")
 
 local config = {}
 
@@ -46,7 +47,7 @@ local default_options = {
 
   -- Main user-facing optimization flags:
   ["cuda"] = true,
-  ["cuda-offline"] = false,
+  ["cuda-offline"] = not data.is_luajit(),
   ["cuda-arch"] = os.getenv("GPU_ARCH") or "fermi",
   ["index-launch"] = true,
   ["inline"] = true,
@@ -57,10 +58,10 @@ local default_options = {
   ["replicable"] = true,
   ["mapping"] = true,
   ["openmp"] = false,
+  ["openmp-offline"] = not data.is_luajit(),
   ["openmp-strict"] = false,
   ["skip-empty-tasks"] = true,
   ["vectorize"] = true,
-  ["vectorize-unsafe"] = false,
 
   -- Legion runtime optimization flags:
   ["legion-leaf"] = true,
@@ -84,7 +85,13 @@ local default_options = {
   ["debug"] = false,
   ["no-dynamic-branches"] = true,
   ["no-dynamic-branches-assert"] = false,
+  ["override-demand-index-launch"] = false,
+  ["override-demand-openmp"] = false,
+  ["override-demand-cuda"] = false,
+  ["allow-multi-field-expansion"] = false,
+  ["allow-loop-demand-parallel"] = false,
   ["pretty"] = false,
+  ["pretty-verbose"] = false,
   ["layout-constraints"] = true,
   ["trace"] = true,
   ["validate"] = true,

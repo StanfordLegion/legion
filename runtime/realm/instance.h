@@ -1,4 +1,4 @@
-/* Copyright 2018 Stanford University, NVIDIA Corporation
+/* Copyright 2019 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,6 +24,7 @@
 
 #include "realm/event.h"
 #include "realm/memory.h"
+#include "realm/point.h"
 
 #include "realm/custom_serdez.h"
 
@@ -66,6 +67,7 @@ namespace Realm {
 
     static const RegionInstance NO_INST;
 
+    __CUDA_HD__
     bool exists(void) const;
 
     Memory get_location(void) const;
@@ -165,12 +167,19 @@ namespace Realm {
 
 #ifdef USE_HDF
     template <int N, typename T>
+    struct HDF5FieldInfo {
+      FieldID field_id;
+      size_t field_size;
+      std::string dataset_name;
+      Point<N,T> offset;
+      int dim_order[N];
+    };
+
+    template <int N, typename T>
     static Event create_hdf5_instance(RegionInstance& inst,
 				      const char *file_name,
 				      const IndexSpace<N,T>& space,
-				      const std::vector<FieldID> &field_ids,
-				      const std::vector<size_t> &field_sizes,
-				      const std::vector<const char*> &field_files,
+				      const std::vector<HDF5FieldInfo<N,T> >& field_infos,
 				      bool read_only,
 				      const ProfilingRequestSet& prs,
 				      Event wait_on = Event::NO_EVENT);

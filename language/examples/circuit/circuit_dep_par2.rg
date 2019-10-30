@@ -1,4 +1,4 @@
--- Copyright 2018 Stanford University
+-- Copyright 2019 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -52,6 +52,7 @@ fspace Wire(rpn : region(Node),
 local CktConfig = require("circuit_config")
 local helper = require("circuit_helper_dep")
 
+__demand(__cuda)
 task calculate_new_currents(steps : uint,
                             rpn : region(Node),
                             rsn : region(Node),
@@ -110,6 +111,7 @@ do
   end
 end
 
+__demand(__cuda)
 task distribute_charge(rpn : region(Node),
                        rsn : region(Node),
                        rgn : region(Node),
@@ -125,6 +127,7 @@ do
   end
 end
 
+__demand(__cuda)
 task update_voltages(rn : region(Node))
 where reads(rn.{node_cap, leakage}),
       reads writes(rn.{node_voltage, charge})
@@ -169,7 +172,7 @@ task toplevel()
                       pn_ghost, pw_outgoing)
   end
 
-  __demand(__parallel)
+  __demand(__index_launch)
   for i = 0, conf.num_pieces do
     helper.validate_pointers(pn_private[i],
                              pn_shared[i],
@@ -185,7 +188,7 @@ task toplevel()
   for j = 0, conf.num_loops do
     c.legion_runtime_begin_trace(__runtime(), __context(), 0, false)
 
-    __demand(__parallel)
+    __demand(__index_launch)
     for i = 0, conf.num_pieces do
       calculate_new_currents(steps,
                              pn_private[i],
@@ -193,14 +196,14 @@ task toplevel()
                              pn_ghost[i],
                              pw_outgoing[i])
     end
-    __demand(__parallel)
+    __demand(__index_launch)
     for i = 0, conf.num_pieces do
       distribute_charge(pn_private[i],
                         pn_shared[i],
                         pn_ghost[i],
                         pw_outgoing[i])
     end
-    __demand(__parallel)
+    __demand(__index_launch)
     for i = 0, conf.num_pieces do
       update_voltages(pn_equal[i])
     end

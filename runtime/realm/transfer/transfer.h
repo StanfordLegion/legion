@@ -1,4 +1,4 @@
-/* Copyright 2018 Stanford University, NVIDIA Corporation
+/* Copyright 2019 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -47,9 +47,19 @@ namespace Realm {
 
     // flag bits to control iterators
     enum {
-      PARTIAL_OK   = (1 << 0),
-      LINES_OK     = (1 << 1),
-      PLANES_OK    = (1 << 2),
+      SRC_PARTIAL_OK   = (1 << 0),
+      SRC_LINES_OK     = (1 << 1),
+      SRC_PLANES_OK    = (1 << 2),
+      SRC_FLAGMASK     = 0xff,
+
+      DST_PARTIAL_OK   = (1 << 8),
+      DST_LINES_OK     = (1 << 9),
+      DST_PLANES_OK    = (1 << 10),
+      DST_FLAGMASK     = 0xff00,
+
+      PARTIAL_OK       = SRC_PARTIAL_OK | DST_PARTIAL_OK,
+      LINES_OK         = SRC_LINES_OK   | DST_LINES_OK,
+      PLANES_OK        = SRC_PLANES_OK  | DST_PLANES_OK,
     };
 
     struct AddressInfo {
@@ -65,6 +75,7 @@ namespace Realm {
     struct AddressInfoHDF5 {
       //hid_t dset_id;
       //hid_t dtype_id;
+      FieldID field_id;  // used to cache open datasets
       const std::string *filename;
       const std::string *dsetname;
       std::vector<hsize_t> dset_bounds;

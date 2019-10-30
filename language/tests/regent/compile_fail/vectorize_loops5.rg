@@ -1,4 +1,4 @@
--- Copyright 2018 Stanford University
+-- Copyright 2019 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -13,9 +13,9 @@
 -- limitations under the License.
 
 -- fails-with:
--- vectorize_loops5.rg:39: vectorization failed: loop body has an assignment between expressions that have inadmissible types
---    e.v1 = e.v2
---    ^
+-- vectorize_loops5.rg:39: vectorization failed: loop body has an expression of an inadmissible type
+--     e.v1 = e.v2
+--             ^
 
 import "regent"
 
@@ -31,13 +31,11 @@ fspace fs
   v2 : vec2[1],
 }
 
-task toplevel()
-  var n = 8
-  var r = region(ispace(ptr, n), fs)
+task f(r : region(fs))
+where reads writes(r)
+do
   __demand(__vectorize)
   for e in r do
     e.v1 = e.v2
   end
 end
-
-regentlib.start(toplevel)

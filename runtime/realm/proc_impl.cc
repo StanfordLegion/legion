@@ -1,4 +1,4 @@
-/* Copyright 2018 Stanford University, NVIDIA Corporation
+/* Copyright 2019 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,7 +21,7 @@
 #include "realm/serialize.h"
 #include "realm/profiling.h"
 #include "realm/utils.h"
-
+#include "realm/activemsg.h"
 #include <sys/types.h>
 #include <dirent.h>
 
@@ -48,6 +48,10 @@ namespace Realm {
 
   namespace ThreadLocal {
     __thread Processor current_processor;
+    
+    // if nonzero, prevents application thread from yielding execution
+    //  resources on an Event wait
+    __thread int scheduler_lock = 0;
   };
 
     Processor::Kind Processor::kind(void) const
@@ -58,7 +62,7 @@ namespace Realm {
     /*static*/ Processor Processor::create_group(const std::vector<Processor>& members)
     {
       // are we creating a local group?
-      if((members.size() == 0) || (ID(members[0]).proc.owner_node == my_node_id)) {
+      if((members.size() == 0) || (NodeID(ID(members[0]).proc_owner_node()) == Network::my_node_id)) {
 	ProcessorGroup *grp = get_runtime()->local_proc_group_free_list->alloc_entry();
 	grp->set_group_members(members);
 #ifdef EVENT_GRAPH_TRACE
@@ -134,7 +138,7 @@ namespace Realm {
 #endif
 
       p->spawn_task(func_id, args, arglen, ProfilingRequestSet(),
-		    wait_on, e, priority);
+		    wait_on, finish_event, ID(e).event_generation(), priority);
       return e;
     }
 
@@ -159,7 +163,7 @@ namespace Realm {
 #endif
 
       p->spawn_task(func_id, args, arglen, reqs,
-		    wait_on, e, priority);
+		    wait_on, finish_event, ID(e).event_generation(), priority);
       return e;
     }
 
@@ -183,7 +187,7 @@ namespace Realm {
     AddressSpace Processor::address_space(void) const
     {
       ID id(*this);
-      return id.proc.owner_node;
+      return id.proc_owner_node();
     }
 
     Event Processor::register_task(TaskFuncID func_id,
@@ -201,11 +205,14 @@ namespace Realm {
       // TODO: special case - registration on a local processor with a raw function pointer and no
       //  profiling requests - can be done immediately and return NO_EVENT
 
-      Event finish_event = GenEventImpl::create_genevent()->current_event();
+      GenEventImpl *finish_event_impl = GenEventImpl::create_genevent();
+      Event finish_event = finish_event_impl->current_event();
 
       TaskRegistration *tro = new TaskRegistration(codedesc, 
 						   ByteArrayRef(user_data, user_data_len),
-						   finish_event, prs);
+						   finish_event_impl,
+						   ID(finish_event).event_generation(),
+						   prs);
       get_runtime()->optable.add_local_operation(finish_event, tro);
       // we haven't told anybody about this operation yet, so cancellation really shouldn't
       //  be possible
@@ -220,8 +227,8 @@ namespace Realm {
       // is the target a single processor or a group?
       ID id(*this);
       if(id.is_processor()) {
-	NodeID n = id.proc.owner_node;
-	if(n == my_node_id)
+	NodeID n = id.proc_owner_node();
+	if(n == Network::my_node_id)
 	  local_procs.push_back(*this);
 	else
 	  remote_procs[n].push_back(*this);
@@ -235,8 +242,8 @@ namespace Realm {
 	    it != members.end();
 	    it++) {
 	  Processor p = *it;
-	  NodeID n = ID(p).proc.owner_node;
-	  if(n == my_node_id)
+	  NodeID n = ID(p).proc_owner_node();
+	  if(n == Network::my_node_id)
 	    local_procs.push_back(p);
 	  else
 	    remote_procs[n].push_back(p);
@@ -245,7 +252,9 @@ namespace Realm {
 
       // remote processors need a portable implementation available
       if(!remote_procs.empty()) {
-	if(!tro->codedesc.has_portable_implementations()) {
+	// try to create one if we don't have one
+	if(!tro->codedesc.has_portable_implementations() &&
+	   !tro->codedesc.create_portable_implementation()) {
 	  log_taskreg.fatal() << "cannot remotely register a task with no portable implementations";
 	  assert(0);
 	}
@@ -267,10 +276,14 @@ namespace Realm {
 	NodeID target = it->first;
 	RemoteTaskRegistration *reg_op = new RemoteTaskRegistration(tro, target);
 	tro->add_async_work_item(reg_op);
-	RegisterTaskMessage::send_request(target, func_id, NO_KIND, it->second,
-					  tro->codedesc,
-					  tro->userdata.base(), tro->userdata.size(),
-					  reg_op);
+	ActiveMessage<RegisterTaskMessage> amsg(target, 65536);
+	amsg->func_id = func_id;
+	amsg->kind = NO_KIND;
+	amsg->reg_op = reg_op;
+	amsg << it->second;
+	amsg << tro->codedesc;
+	amsg << ByteArrayRef(tro->userdata.base(), tro->userdata.size());
+	amsg.commit();
       }
 
       tro->mark_finished(true /*successful*/);
@@ -293,11 +306,14 @@ namespace Realm {
       // TODO: special case - registration on local processord with a raw function pointer and no
       //  profiling requests - can be done immediately and return NO_EVENT
 
-      Event finish_event = GenEventImpl::create_genevent()->current_event();
+      GenEventImpl *finish_event_impl = GenEventImpl::create_genevent();
+      Event finish_event = finish_event_impl->current_event();
 
       TaskRegistration *tro = new TaskRegistration(codedesc, 
 						   ByteArrayRef(user_data, user_data_len),
-						   finish_event, prs);
+						   finish_event_impl,
+						   ID(finish_event).event_generation(),
+						   prs);
       get_runtime()->optable.add_local_operation(finish_event, tro);
       // we haven't told anybody about this operation yet, so cancellation really shouldn't
       //  be possible
@@ -321,22 +337,27 @@ namespace Realm {
 
       if(global) {
 	// remote processors need a portable implementation available
-	if(!tro->codedesc.has_portable_implementations()) {
+	if(!tro->codedesc.has_portable_implementations() &&
+	   !tro->codedesc.create_portable_implementation()) {
 	  log_taskreg.fatal() << "cannot remotely register a task with no portable implementations";
 	  assert(0);
 	}
 
-	for(NodeID target = 0; target <= max_node_id; target++) {
+	for(NodeID target = 0; target <= Network::max_node_id; target++) {
 	  // skip ourselves
-	  if(target == my_node_id)
+	  if(target == Network::my_node_id)
 	    continue;
 
 	  RemoteTaskRegistration *reg_op = new RemoteTaskRegistration(tro, target);
 	  tro->add_async_work_item(reg_op);
-	  RegisterTaskMessage::send_request(target, func_id, target_kind, std::vector<Processor>(),
-					    tro->codedesc,
-					    tro->userdata.base(), tro->userdata.size(),
-					    reg_op);
+	  ActiveMessage<RegisterTaskMessage> amsg(target, 65536);
+	  amsg->func_id = func_id;
+	  amsg->kind = target_kind;
+	  amsg->reg_op = reg_op;
+	  amsg << std::vector<Processor>();
+	  amsg << tro->codedesc;
+	  amsg << ByteArrayRef(tro->userdata.base(), tro->userdata.size());
+	  amsg.commit();
 	}
       }
 
@@ -395,6 +416,22 @@ namespace Realm {
       return NULL;
     }
 
+  /*static*/ void Processor::enable_scheduler_lock(void)
+  {
+#ifdef DEBUG_REALM
+    assert(ThreadLocal::current_processor.exists());
+#endif
+    ThreadLocal::scheduler_lock++;
+  }
+
+  /*static*/ void Processor::disable_scheduler_lock(void)
+  {
+#ifdef DEBUG_REALM
+    assert(ThreadLocal::scheduler_lock > 0);
+#endif
+    ThreadLocal::scheduler_lock--;
+  }
+
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -434,6 +471,100 @@ namespace Realm {
       assert(0);
     }
 
+    // helper function for spawn implementations
+    void ProcessorImpl::enqueue_or_defer_task(Task *task, Event start_event,
+					      DeferredSpawnCache *cache)
+    {
+      // case 1: no precondition
+      if(!start_event.exists()) {
+	enqueue_task(task);
+	return;
+      }
+
+      // case 2: precondition is triggered or poisoned
+      EventImpl *start_impl = get_runtime()->get_event_impl(start_event);
+      EventImpl::gen_t start_gen = ID(start_event).event_generation();
+      bool poisoned = false;
+      if(!start_impl->has_triggered(start_gen, poisoned)) {
+	// we'll create a new deferral unless we can tack it on to an existing
+	//  one
+	bool new_deferral = true;
+        // we might hit in the cache below, but set up the deferral before to
+        //  avoid race conditions with other tasks being added
+	task->deferred_spawn.setup(this, task, start_event);
+
+	if(cache) {
+	  Task *leader = 0;
+	  Task *evicted = 0;
+	  {
+	    AutoLock<> al(cache->mutex);
+	    size_t i = 0;
+	    while((i < DeferredSpawnCache::MAX_ENTRIES) &&
+		  (cache->events[i] != start_event)) i++;
+	    if(i < DeferredSpawnCache::MAX_ENTRIES) {
+	      // cache hit
+	      cache->counts[i]++;
+	      leader = cache->tasks[i];
+	      leader->add_reference();  // keep it alive until we use it below
+	    } else {
+	      // miss - see if any counts are at 0
+	      i = 0;
+	      while((i < DeferredSpawnCache::MAX_ENTRIES) &&
+		    (cache->counts[i] > 0)) i++;
+	      // no? decrement them all and see if one goes to 0 now
+	      if(i < DeferredSpawnCache::MAX_ENTRIES) {
+		i = 0;
+		while((i < DeferredSpawnCache::MAX_ENTRIES) &&
+		      (--cache->counts[i] > 0)) i++;
+		// decrement the rest too
+		for(size_t j = i+1; j < DeferredSpawnCache::MAX_ENTRIES; j++)
+		  cache->counts[j]--;
+	      }
+
+	      // if we've got a candidate now, do a replacement
+	      if(i < DeferredSpawnCache::MAX_ENTRIES) {
+		evicted = cache->tasks[i];
+		cache->events[i] = start_event;
+		cache->tasks[i] = task;
+		cache->counts[i] = 1;
+		task->add_reference(); // cache holds a reference now too
+	      }
+	    }
+	  }
+	  // decrement the refcount on a task we evicted (if any)
+	  if(evicted)
+	    evicted->remove_reference();
+
+	  // if we found a leader, try to add ourselves to their list
+	  if(leader) {
+	    bool added = leader->deferred_spawn.add_task(task, poisoned);
+            leader->remove_reference();  // safe to let go of this now
+            if(added) {
+	      // success - nothing more needs to be done here
+	      return;
+	    } else {
+	      // failure, so no deferral is needed - fall through to
+	      //  enqueue-or-cancel code below
+	      new_deferral = false;
+	    }
+	  }
+	}
+
+	if(new_deferral) {
+	  task->deferred_spawn.defer(start_impl, start_gen);
+	  return;
+	}
+      }
+
+      // precondition is either triggered or poisoned
+      if(poisoned) {
+	log_poison.info() << "cancelling poisoned task - task=" << task << " after=" << task->get_finish_event();
+	task->handle_poisoned_precondition(start_event);
+      } else {
+	enqueue_task(task);
+      }
+    }
+
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -445,25 +576,27 @@ namespace Realm {
 	members_valid(false), members_requested(false), next_free(0)
       , ready_task_count(0)
     {
+      deferred_spawn_cache.clear();
     }
 
     ProcessorGroup::~ProcessorGroup(void)
     {
+      deferred_spawn_cache.flush();
       delete ready_task_count;
     }
 
     void ProcessorGroup::init(Processor _me, int _owner)
     {
-      assert(ID(_me).pgroup.owner_node == (unsigned)_owner);
+      assert(NodeID(ID(_me).pgroup_owner_node()) == _owner);
 
       me = _me;
-      lock.init(ID(me).convert<Reservation>(), ID(me).pgroup.owner_node);
+      lock.init(ID(me).convert<Reservation>(), ID(me).pgroup_owner_node());
     }
 
     void ProcessorGroup::set_group_members(const std::vector<Processor>& member_list)
     {
       // can only be performed on owner node
-      assert(ID(me).pgroup.owner_node == my_node_id);
+      assert(NodeID(ID(me).pgroup_owner_node()) == Network::my_node_id);
       
       // can only be done once
       assert(!members_valid);
@@ -497,11 +630,12 @@ namespace Realm {
 
     void ProcessorGroup::enqueue_task(Task *task)
     {
-      // put it into the task queue - one of the member procs will eventually grab it
-      if(task->mark_ready())
-	task_queue.put(task, task->priority);
-      else
-	task->mark_finished(false /*!successful*/);
+      task_queue.enqueue_task(task);
+    }
+
+    void ProcessorGroup::enqueue_tasks(Task::TaskList& tasks)
+    {
+      task_queue.enqueue_tasks(tasks);
     }
 
     void ProcessorGroup::add_to_group(ProcessorGroup *group)
@@ -518,136 +652,47 @@ namespace Realm {
     /*virtual*/ void ProcessorGroup::spawn_task(Processor::TaskFuncID func_id,
 						const void *args, size_t arglen,
                                                 const ProfilingRequestSet &reqs,
-						Event start_event, Event finish_event,
+						Event start_event,
+						GenEventImpl *finish_event,
+						EventImpl::gen_t finish_gen,
 						int priority)
     {
       // check for spawn to remote processor group
-      NodeID target = ID(me).pgroup.owner_node;
-      if(target != my_node_id) {
+      NodeID target = ID(me).pgroup_owner_node();
+      if(target != Network::my_node_id) {
+	Event e = finish_event->make_event(finish_gen);
 	log_task.debug() << "sending remote spawn request:"
 			 << " func=" << func_id
 			 << " proc=" << me
-			 << " finish=" << finish_event;
+			 << " finish=" << e;
 
-	get_runtime()->optable.add_remote_operation(finish_event, target);
-
-	SpawnTaskMessage::send_request(target, me, func_id,
-				       args, arglen, &reqs,
-				       start_event, finish_event, priority);
+	get_runtime()->optable.add_remote_operation(e, target);
+	// if profiling data need DynamicBufferSerializer?
+	size_t len = reqs.empty() ? arglen: arglen+512;
+	ActiveMessage<SpawnTaskMessage> amsg(target, len);
+	amsg->proc = me;
+	amsg->start_event = start_event;
+	amsg->finish_event = e;
+	amsg->user_arglen = arglen;
+	amsg->priority = priority;
+	amsg->func_id = func_id;
+	amsg.add_payload(args, arglen);
+	// if profiling data
+	if (!reqs.empty()) {
+	  amsg << reqs;
+	}
+	amsg.commit();
 	return;
       }
 
       // create a task object and insert it into the queue
       Task *task = new Task(me, func_id, args, arglen, reqs,
-                            start_event, finish_event, priority);
-      get_runtime()->optable.add_local_operation(finish_event, task);
+                            start_event, finish_event, finish_gen, priority);
+      get_runtime()->optable.add_local_operation(finish_event->make_event(finish_gen),
+						 task);
 
-      bool poisoned = false;
-      if (start_event.has_triggered_faultaware(poisoned)) {
-	if(poisoned) {
-	  log_poison.info() << "cancelling poisoned task - task=" << task << " after=" << task->get_finish_event();
-	  task->handle_poisoned_precondition(start_event);
-	} else
-	  enqueue_task(task);
-      } else
-	EventImpl::add_waiter(start_event, new DeferredTaskSpawn(this, task));
+      enqueue_or_defer_task(task, start_event, &deferred_spawn_cache);
     }
-
-
-  ////////////////////////////////////////////////////////////////////////
-  //
-  // class DeferredTaskSpawn
-  //
-
-    bool DeferredTaskSpawn::event_triggered(Event e, bool poisoned)
-    {
-      if(poisoned) {
-	// cancel the task - this has to work
-	log_poison.info() << "cancelling poisoned task - task=" << task << " after=" << task->get_finish_event();
-	task->handle_poisoned_precondition(e);
-	return true;
-      }
-
-      proc->enqueue_task(task);
-      return true;
-    }
-
-    void DeferredTaskSpawn::print(std::ostream& os) const
-    {
-      os << "deferred task: func=" << task->func_id << " proc=" << task->proc << " finish=" << task->get_finish_event();
-    }
-
-    Event DeferredTaskSpawn::get_finish_event(void) const
-    {
-      return task->get_finish_event();
-    }
-
-
-  ////////////////////////////////////////////////////////////////////////
-  //
-  // class SpawnTaskMessage
-  //
-
-  /*static*/ void SpawnTaskMessage::handle_request(RequestArgs args,
-						   const void *data,
-						   size_t datalen)
-  {
-    DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
-    ProcessorImpl *p = get_runtime()->get_processor_impl(args.proc);
-
-    log_task.debug() << "received remote spawn request:"
-		     << " func=" << args.func_id
-		     << " proc=" << args.proc
-		     << " finish=" << args.finish_event;
-
-    Serialization::FixedBufferDeserializer fbd(data, datalen);
-    fbd.extract_bytes(0, args.user_arglen);  // skip over task args - we'll access those directly
-
-    // profiling requests are optional - extract only if there's data
-    ProfilingRequestSet prs;
-    if(fbd.bytes_left() > 0)
-      fbd >> prs;
-      
-    p->spawn_task(args.func_id, data, args.user_arglen, prs,
-		  args.start_event, args.finish_event, args.priority);
-  }
-
-  /*static*/ void SpawnTaskMessage::send_request(NodeID target, Processor proc,
-						 Processor::TaskFuncID func_id,
-						 const void *args, size_t arglen,
-						 const ProfilingRequestSet *prs,
-						 Event start_event, Event finish_event,
-						 int priority)
-  {
-    RequestArgs r_args;
-
-    r_args.proc = proc;
-    r_args.func_id = func_id;
-    r_args.start_event = start_event;
-    r_args.finish_event = finish_event;
-    r_args.priority = priority;
-    r_args.user_arglen = arglen;
-    
-    if(!prs || prs->empty()) {
-      // no profiling, so task args are the only payload
-      Message::request(target, r_args, args, arglen, PAYLOAD_COPY);
-    } else {
-      // need to serialize both the task args and the profiling request
-      //  into a single payload
-      // allocate a little extra initial space for the profiling requests, but not too
-      //  much in case the copy sits around outside the srcdatapool for a long time
-      // (if we need more than this, we'll pay for a realloc during serialization, but it
-      //  will still work correctly)
-      Serialization::DynamicBufferSerializer dbs(arglen + 512);
-
-      dbs.append_bytes(args, arglen);
-      dbs << *prs;
-
-      size_t datalen = dbs.bytes_used();
-      void *data = dbs.detach_buffer(-1);  // don't trim - this buffer has a short life
-      Message::request(target, r_args, data, datalen, PAYLOAD_FREE);
-    }
-  }
 
 
   ////////////////////////////////////////////////////////////////////////
@@ -655,7 +700,8 @@ namespace Realm {
   // class RegisterTaskMessage
   //
 
-  /*static*/ void RegisterTaskMessage::handle_request(RequestArgs args, const void *data, size_t datalen)
+  /*static*/ void RegisterTaskMessage::handle_message(NodeID sender, const RegisterTaskMessage &args,
+						      const void *data, size_t datalen)
   {
     std::vector<Processor> procs;
     CodeDescriptor codedesc;
@@ -689,59 +735,23 @@ namespace Realm {
     }
 
     // TODO: include status/profiling eventually
-    RegisterTaskCompleteMessage::send_request(args.sender, args.reg_op,
-					      true /*successful*/);
+    ActiveMessage<RegisterTaskCompleteMessage> amsg(sender);
+    amsg->reg_op = args.reg_op;
+    amsg->successful = true;
+    amsg.commit();
   }
-
-  /*static*/ void RegisterTaskMessage::send_request(NodeID target,
-						    Processor::TaskFuncID func_id,
-						    Processor::Kind kind,
-						    const std::vector<Processor>& procs,
-						    const CodeDescriptor& codedesc,
-						    const void *userdata, size_t userlen,
-						    RemoteTaskRegistration *reg_op)
-  {
-    RequestArgs args;
-
-    args.sender = my_node_id;
-    args.func_id = func_id;
-    args.kind = kind;
-    args.reg_op = reg_op;
-
-    Serialization::DynamicBufferSerializer dbs(1024);
-    dbs << procs;
-    dbs << codedesc;
-    dbs << ByteArrayRef(userdata, userlen);
-
-    size_t datalen = dbs.bytes_used();
-    void *data = dbs.detach_buffer(-1 /*no trim*/);
-    Message::request(target, args, data, datalen, PAYLOAD_FREE);
-  }
-
 
   ////////////////////////////////////////////////////////////////////////
   //
   // class RegisterTaskCompleteMessage
   //
 
-  /*static*/ void RegisterTaskCompleteMessage::handle_request(RequestArgs args)
+  /*static*/ void RegisterTaskCompleteMessage::handle_message(NodeID sender,
+							      const RegisterTaskCompleteMessage &args,
+							      const void *data, size_t datalen)
   {
     args.reg_op->mark_finished(args.successful);
   }
-
-  /*static*/ void RegisterTaskCompleteMessage::send_request(NodeID target,
-							    RemoteTaskRegistration *reg_op,
-							    bool successful)
-  {
-    RequestArgs args;
-
-    args.sender = my_node_id;
-    args.reg_op = reg_op;
-    args.successful = successful;
-
-    Message::request(target, args);
-  }
-
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -764,6 +774,12 @@ namespace Realm {
       assert(0);
     }
 
+    void RemoteProcessor::enqueue_tasks(Task::TaskList& tasks)
+    {
+      // should never be called
+      assert(0);
+    }
+
     void RemoteProcessor::add_to_group(ProcessorGroup *group)
     {
       // not currently supported
@@ -773,29 +789,43 @@ namespace Realm {
     void RemoteProcessor::spawn_task(Processor::TaskFuncID func_id,
 				     const void *args, size_t arglen,
 				     const ProfilingRequestSet &reqs,
-				     Event start_event, Event finish_event,
+				     Event start_event,
+				     GenEventImpl *finish_event,
+				     EventImpl::gen_t finish_gen,
 				     int priority)
     {
+      Event e = finish_event->make_event(finish_gen);
       log_task.debug() << "sending remote spawn request:"
 		       << " func=" << func_id
 		       << " proc=" << me
-		       << " finish=" << finish_event;
+		       << " finish=" << e;
 
       ID id(me);
       NodeID target = 0;
       if(id.is_processor())
-	target = id.proc.owner_node;
+	target = id.proc_owner_node();
       else if(id.is_procgroup())
-	target = id.pgroup.owner_node;
+	target = id.pgroup_owner_node();
       else {
 	assert(0);
       }
 
-      get_runtime()->optable.add_remote_operation(finish_event, target);
-
-      SpawnTaskMessage::send_request(target, me, func_id,
-				     args, arglen, &reqs,
-				     start_event, finish_event, priority);
+      get_runtime()->optable.add_remote_operation(e, target);
+      // if profiling data need DynamicBufferSerializer?
+      size_t len = reqs.empty() ? arglen: arglen+512;
+      ActiveMessage<SpawnTaskMessage> amsg(target,len);
+      amsg->proc = me;
+      amsg->start_event = start_event;
+      amsg->finish_event = e;
+      amsg->user_arglen = arglen;
+      amsg->priority = priority;
+      amsg->func_id = func_id;
+      amsg.add_payload(args, arglen);
+      // if profiling data
+      if (!reqs.empty()) {
+	amsg << reqs;
+      }
+      amsg.commit();
     }
 
   
@@ -811,6 +841,7 @@ namespace Realm {
     , ready_task_count(stringbuilder() << "realm/proc " << me << "/ready tasks")
   {
     task_queue.set_gauge(&ready_task_count);
+    deferred_spawn_cache.clear();
   }
 
   LocalTaskProcessor::~LocalTaskProcessor(void)
@@ -849,35 +880,29 @@ namespace Realm {
 
   void LocalTaskProcessor::enqueue_task(Task *task)
   {
-    // just jam it into the task queue
-    if(task->mark_ready())
-      task_queue.put(task, task->priority);
-    else
-      task->mark_finished(false /*!successful*/);
+    task_queue.enqueue_task(task);
+  }
+
+  void LocalTaskProcessor::enqueue_tasks(Task::TaskList& tasks)
+  {
+    task_queue.enqueue_tasks(tasks);
   }
 
   void LocalTaskProcessor::spawn_task(Processor::TaskFuncID func_id,
-				     const void *args, size_t arglen,
-				     const ProfilingRequestSet &reqs,
-				     Event start_event, Event finish_event,
-				     int priority)
+				      const void *args, size_t arglen,
+				      const ProfilingRequestSet &reqs,
+				      Event start_event,
+				      GenEventImpl *finish_event,
+				      EventImpl::gen_t finish_gen,
+				      int priority)
   {
     // create a task object for this
     Task *task = new Task(me, func_id, args, arglen, reqs,
-			  start_event, finish_event, priority);
-    get_runtime()->optable.add_local_operation(finish_event, task);
+			  start_event, finish_event, finish_gen, priority);
+    get_runtime()->optable.add_local_operation(finish_event->make_event(finish_gen),
+					       task);
 
-    // if the start event has already triggered, we can enqueue right away
-    bool poisoned = false;
-    if (start_event.has_triggered_faultaware(poisoned)) {
-      if(poisoned) {
-	log_poison.info() << "cancelling poisoned task - task=" << task << " after=" << task->get_finish_event();
-	task->handle_poisoned_precondition(start_event);
-      } else
-	enqueue_task(task);
-    } else {
-      EventImpl::add_waiter(start_event, new DeferredTaskSpawn(this, task));
-    }
+    enqueue_or_defer_task(task, start_event, &deferred_spawn_cache);
   }
 
   void LocalTaskProcessor::register_task(Processor::TaskFuncID func_id,
@@ -925,6 +950,9 @@ namespace Realm {
   void LocalTaskProcessor::execute_task(Processor::TaskFuncID func_id,
 					const ByteArrayRef& task_args)
   {
+    if(func_id == Processor::TASK_ID_PROCESSOR_NOP)
+      return;
+
     std::map<Processor::TaskFuncID, TaskTableEntry>::const_iterator it = task_table.find(func_id);
     if(it == task_table.end()) {
       // TODO: remove this hack once the tools are available to the HLR to call these directly
@@ -971,6 +999,7 @@ namespace Realm {
 #endif
 
     sched->shutdown();
+    deferred_spawn_cache.flush();
   }
   
 
@@ -1103,8 +1132,10 @@ namespace Realm {
 
   TaskRegistration::TaskRegistration(const CodeDescriptor& _codedesc,
 				     const ByteArrayRef& _userdata,
-				     Event _finish_event, const ProfilingRequestSet &_requests)
-    : Operation(_finish_event, _requests)
+				     GenEventImpl *_finish_event,
+				     EventImpl::gen_t _finish_gen,
+				     const ProfilingRequestSet &_requests)
+    : Operation(_finish_event, _finish_gen, _requests)
     , codedesc(_codedesc), userdata(_userdata)
   {
     log_taskreg.debug() << "task registration created: op=" << (void *)this << " finish=" << _finish_event;
@@ -1141,5 +1172,41 @@ namespace Realm {
     os << "RemoteTaskRegistration(node=" << target_node << ")";
   }
 
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class SpawnTaskMessage
+  //
+  /*static*/ void SpawnTaskMessage::handle_message(NodeID sender,
+						      const SpawnTaskMessage &args,
+						      const void *data,
+						      size_t datalen)
+  {
+    DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
+    ProcessorImpl *p = get_runtime()->get_processor_impl(args.proc);
+
+    log_task.debug() << "received remote spawn request:"
+		     << " func=" << args.func_id
+		     << " proc=" << args.proc
+		     << " finish=" << args.finish_event;
+
+    Serialization::FixedBufferDeserializer fbd(data, datalen);
+    fbd.extract_bytes(0, args.user_arglen);  // skip over task args - we'll access those directly
+
+    // profiling requests are optional - extract only if there's data
+    ProfilingRequestSet prs;
+    if(fbd.bytes_left() > 0)
+      fbd >> prs;
+
+    GenEventImpl *finish_impl = get_runtime()->get_genevent_impl(args.finish_event);
+    p->spawn_task(args.func_id, data, args.user_arglen, prs,
+		  args.start_event,
+		  finish_impl, ID(args.finish_event).event_generation(),
+		  args.priority);
+  }
+
+  ActiveMessageHandlerReg<SpawnTaskMessage> spawn_task_message_handler;
+  ActiveMessageHandlerReg<RegisterTaskMessage> register_task_message_handler;
+  ActiveMessageHandlerReg<RegisterTaskCompleteMessage> register_task_complete_message_handler;
 
 }; // namespace Realm

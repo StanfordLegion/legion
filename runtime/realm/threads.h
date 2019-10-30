@@ -1,4 +1,4 @@
-/* Copyright 2018 Stanford University, NVIDIA Corporation
+/* Copyright 2019 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,7 +19,9 @@
 #define REALM_THREADS_H
 
 #include "realm/realm_config.h"
-#include "realm/activemsg.h"
+#include "realm/mutex.h"
+#include "realm/atomics.h"
+#include "realm/utils.h"
 
 #ifdef REALM_USE_USER_THREADS
 #ifdef __MACH__
@@ -215,12 +217,12 @@ namespace Realm {
     // send an asynchronous notification to the thread
     virtual void alert_thread(void) = 0;
 
-    State state;
+    atomic<State> state;
     ThreadScheduler *scheduler;
     Operation *current_op;
     int exception_handler_count;
     int signal_count;
-    GASNetHSL signal_mutex;
+    Mutex signal_mutex;
     std::deque<Signal> signal_queue;
 
 #ifdef REALM_USE_PAPI
@@ -252,20 +254,6 @@ namespace Realm {
     // delegates friendship of Thread with subclasses
     Thread::State update_thread_state(Thread *thread, Thread::State new_state);
     bool try_update_thread_state(Thread *thread, Thread::State old_state, Thread::State new_state);
-  };
-
-  template <typename T, T _DEFAULT>
-  struct WithDefault {
-  public:
-    static const T DEFAULT_VALUE = _DEFAULT;
-
-    WithDefault(void); // uses default
-    WithDefault(T _val);
-
-    operator T(void) const;
-    WithDefault<T,_DEFAULT>& operator=(T newval);
-
-    T val;
   };
 
   // any thread (user or kernel) will have its own stack and heap - the size of which can

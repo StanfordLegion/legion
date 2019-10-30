@@ -1,4 +1,4 @@
-# Copyright 2018 Stanford University
+# Copyright 2019 Stanford University
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -21,6 +21,7 @@ endif
 # Flags for directing the runtime makefile what to include
 # FIXME: DEBUG=1 causes a crash because the postamble attempts to take a lock and causes the task to block
 DEBUG           ?= 1		# Include debugging symbols
+MAX_DIM         ?= 3		# Maximum number of dimensions
 OUTPUT_LEVEL    ?= LEVEL_DEBUG	# Compile time logging level
 USE_CUDA        ?= 0		# Include CUDA support (requires CUDA)
 USE_GASNET      ?= 0		# Include GASNet support (requires GASNet)

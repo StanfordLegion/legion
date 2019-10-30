@@ -1,4 +1,4 @@
--- Copyright 2018 Stanford University
+-- Copyright 2019 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -19,19 +19,19 @@
 
 import "regent"
 
-struct s {
+fspace s {
   a : int,
   b : int,
   c : int,
 }
 
-struct t {
+fspace t {
   d : s,
   e : s,
   f : s,
 }
 
-struct u {
+fspace u {
   g : t,
   h : t,
 }

@@ -1,4 +1,4 @@
-/* Copyright 2018 Stanford University, NVIDIA Corporation
+/* Copyright 2019 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -80,7 +80,7 @@ namespace Realm {
     //  indirectly reference a piece list
     struct FieldLayout {
       int list_idx;
-      int rel_offset;
+      size_t rel_offset;
       int size_in_bytes;
     };
 
@@ -215,6 +215,9 @@ namespace Realm {
     AccessorRefHelper<FT>& operator=(const AccessorRefHelper<FT>& rhs);
 
   protected:
+    template <typename T>
+    friend std::ostream& operator<<(std::ostream& os, const AccessorRefHelper<T>& arh);
+
     RegionInstance inst;
     size_t offset;
   };
@@ -261,7 +264,7 @@ namespace Realm {
     //  piece list and relative offset of the field we're interested in
     RegionInstance inst;
     const InstancePieceList<N,T> *piece_list;
-    int rel_offset;
+    size_t rel_offset;
     // cache the most recently-used piece
     const InstanceLayoutPiece<N,T> *prev_piece;
 
@@ -330,6 +333,26 @@ namespace Realm {
 			      const Point<N2, T2>& offset,
 			      FieldID field_id, const Rect<N,T>& subrect);
 
+    // used by constructors or can be called directly
+    __CUDA_HD__
+    void reset();
+    void reset(RegionInstance inst,
+	       FieldID field_id, size_t subfield_offset = 0);
+    void reset(RegionInstance inst,
+	       FieldID field_id, const Rect<N,T>& subrect,
+	       size_t subfield_offset = 0);
+    template <int N2, typename T2>
+    void reset(RegionInstance inst,
+	       const Matrix<N2, N, T2>& transform,
+	       const Point<N2, T2>& offset,
+	       FieldID field_id, size_t subfield_offset = 0);
+    template <int N2, typename T2>
+    void reset(RegionInstance inst,
+	       const Matrix<N2, N, T2>& transform,
+	       const Point<N2, T2>& offset,
+	       FieldID field_id, const Rect<N,T>& subrect,
+	       size_t subfield_offset = 0);
+  
     __CUDA_HD__
     FT *ptr(const Point<N,T>& p) const;
     __CUDA_HD__

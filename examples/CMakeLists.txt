@@ -1,5 +1,5 @@
 #------------------------------------------------------------------------------#
-# Copyright 2018 Kitware, Inc.
+# Copyright 2019 Kitware, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -34,6 +34,8 @@ add_subdirectory(attach_array_daxpy)
 
 if(Legion_USE_GASNet)
   add_subdirectory(mpi_interop)
+else()
+  add_subdirectory(implicit_top_task)
 endif()
 
 if(Legion_USE_CUDA)

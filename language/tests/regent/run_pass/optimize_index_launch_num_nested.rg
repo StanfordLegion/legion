@@ -1,4 +1,4 @@
--- Copyright 2018 Stanford University
+-- Copyright 2019 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -36,7 +36,7 @@ task main()
   var s = cross_product(p, q)
 
   for i = 0, 2 do
-    __demand(__parallel)
+    __demand(__index_launch)
     for j = 0, 2 do
       g(s[i][j])
     end

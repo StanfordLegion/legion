@@ -1,4 +1,4 @@
--- Copyright 2018 Stanford University
+-- Copyright 2019 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -39,7 +39,7 @@ task init(r : region(ispace(int3d), fs))
 where reads writes(r)
 do
   __demand(__openmp)
-  for e in r do e.f = 0.3 * (e.x + 1) + 0.3 * (e.y + 1) + 0.4 (e.z + 1) end
+  for e in r do e.f = 0.3 * (e.x + 1) + 0.3 * (e.y + 1) + 0.4 * (e.z + 1) end
   __demand(__openmp)
   for e in r do e.g = 0 end
   __demand(__openmp)
@@ -51,15 +51,12 @@ task stencil1(interior : region(ispace(int3d), fs),
                      r : region(ispace(int3d), fs))
 where reads(r.f), reads writes(r.g), interior <= r
 do
-  var ts_start = c.legion_get_current_time_in_micros()
   __demand(__openmp)
   for e in interior do
     r[e].g = 0.5 * (r[e].f +
                     r[e + {0, -2, 0}].f + r[e + {2, 0, -1}].f +
                     r[e + {0,  1, 0}].f + r[e + {2, 0,  2}].f)
   end
-  var ts_end = c.legion_get_current_time_in_micros()
-  c.printf("[stencil1] parallel: %lu us\n", ts_end - ts_start)
 end
 
 __demand(__parallel)
@@ -67,67 +64,52 @@ task stencil2(interior : region(ispace(int3d), fs),
                      r : region(ispace(int3d), fs))
 where reads(r.f), reads writes(r.g), interior <= r
 do
-  var ts_start = c.legion_get_current_time_in_micros()
   __demand(__openmp)
   for e in interior do
     r[e].g = 0.5 * (r[e].f +
                     r[e + {1, -1, 0}].f + r[e + {0, 0, -1}].f +
                     r[e + {1,  1, 0}].f + r[e + {0, 0,  1}].f)
   end
-  var ts_end = c.legion_get_current_time_in_micros()
-  c.printf("[stencil2] parallel: %lu us\n", ts_end - ts_start)
 end
 
 __demand(__parallel)
 task stencil3(r : region(ispace(int3d), fs))
 where reads(r.f), reads writes(r.g)
 do
-  var ts_start = c.legion_get_current_time_in_micros()
   __demand(__openmp)
   for e in r do
     r[e].g = 0.5 * (r[e].f + r[(e + {1, 2, 0}) % r.bounds].f)
   end
-  var ts_end = c.legion_get_current_time_in_micros()
-  c.printf("[stencil3] parallel: %lu us\n", ts_end - ts_start)
 end
 
 task stencil1_serial(interior : region(ispace(int3d), fs),
                             r : region(ispace(int3d), fs))
 where reads(r.f), reads writes(r.h), interior <= r
 do
-  var ts_start = c.legion_get_current_time_in_micros()
   for e in interior do
     r[e].h = 0.5 * (r[e].f +
                     r[e + {0, -2, 0}].f + r[e + {2, 0, -1}].f +
                     r[e + {0,  1, 0}].f + r[e + {2, 0,  2}].f)
   end
-  var ts_end = c.legion_get_current_time_in_micros()
-  c.printf("[stencil1] serial: %lu us\n", ts_end - ts_start)
 end
 
 task stencil2_serial(interior : region(ispace(int3d), fs),
                             r : region(ispace(int3d), fs))
 where reads(r.f), reads writes(r.h), interior <= r
 do
-  var ts_start = c.legion_get_current_time_in_micros()
   for e in interior do
     r[e].h = 0.5 * (r[e].f +
                     r[e + {1, -1, 0}].f + r[e + {0, 0, -1}].f +
                     r[e + {1,  1, 0}].f + r[e + {0, 0,  1}].f)
   end
-  var ts_end = c.legion_get_current_time_in_micros()
-  c.printf("[stencil2] serial: %lu us\n", ts_end - ts_start)
 end
 
 task stencil3_serial(r : region(ispace(int3d), fs))
 where reads(r.f), reads writes(r.h)
 do
-  var ts_start = c.legion_get_current_time_in_micros()
   for e in r do
     r[e].h = 0.5 * (r[e].f + r[(e + {1, 2, 0}) % r.bounds].f)
   end
-  var ts_end = c.legion_get_current_time_in_micros()
-  c.printf("[stencil3] serial: %lu us\n", ts_end - ts_start)
 end
 
 local cmath = terralib.includec("math.h")

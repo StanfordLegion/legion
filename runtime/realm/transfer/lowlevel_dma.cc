@@ -1,5 +1,5 @@
-/* Copyright 2018 Stanford University, NVIDIA Corporation
- * Copyright 2018 Los Alamos National Laboratory
+/* Copyright 2019 Stanford University, NVIDIA Corporation
+ * Copyright 2019 Los Alamos National Laboratory
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -50,7 +50,6 @@
 #include "realm/serialize.h"
 
 TYPE_IS_SERIALIZABLE(Realm::OffsetsAndSize);
-TYPE_IS_SERIALIZABLE(Realm::CopySrcDstField);
 
 namespace Realm {
 
@@ -97,7 +96,7 @@ namespace Realm {
       void dequeue_request(Memory tgt_mem);
 
     protected:
-      GASNetHSL queue_mutex;
+      Mutex queue_mutex;
       std::map<Memory, std::queue<IBAllocRequest*> *> queues;
     };
 
@@ -118,8 +117,8 @@ namespace Realm {
       void worker_thread_loop(void);
 
     protected:
-      GASNetHSL queue_mutex;
-      GASNetCondVar queue_condvar;
+      Mutex queue_mutex;
+      CondVar queue_condvar;
       std::map<int, std::list<DmaRequest *> *> queues;
       int queue_sleepers;
       bool shutdown_flag;
@@ -132,26 +131,25 @@ namespace Realm {
   // class DmaRequest
   //
 
-    DmaRequest::DmaRequest(int _priority, Event _after_copy) 
-      : Operation(_after_copy, ProfilingRequestSet()),
+    DmaRequest::DmaRequest(int _priority,
+			   GenEventImpl *_after_copy, EventImpl::gen_t _after_gen)
+      : Operation(_after_copy, _after_gen, ProfilingRequestSet()),
 	state(STATE_INIT), priority(_priority)
     {
       tgt_fetch_completion = Event::NO_EVENT;
-      pthread_mutex_init(&request_lock, NULL);
     }
 
-    DmaRequest::DmaRequest(int _priority, Event _after_copy,
+    DmaRequest::DmaRequest(int _priority,
+			   GenEventImpl *_after_copy, EventImpl::gen_t _after_gen,
 			   const ProfilingRequestSet &reqs)
-      : Operation(_after_copy, reqs), state(STATE_INIT),
+      : Operation(_after_copy, _after_gen, reqs), state(STATE_INIT),
 	priority(_priority)
     {
       tgt_fetch_completion = Event::NO_EVENT;
-      pthread_mutex_init(&request_lock, NULL);
     }
 
     DmaRequest::~DmaRequest(void)
     {
-      pthread_mutex_destroy(&request_lock);
     }
 
     void DmaRequest::print(std::ostream& os) const
@@ -179,12 +177,12 @@ namespace Realm {
 
     void PendingIBQueue::enqueue_request(Memory tgt_mem, IBAllocRequest* req)
     {
-      AutoHSLLock al(queue_mutex);
-      assert(ID(tgt_mem).memory.owner_node == my_node_id);
+      AutoLock<> al(queue_mutex);
+      assert(NodeID(ID(tgt_mem).memory_owner_node()) == Network::my_node_id);
       // If we can allocate in target memory, no need to pend the request
-      off_t ib_offset = get_runtime()->get_memory_impl(tgt_mem)->alloc_bytes(req->ib_size);
+      off_t ib_offset = get_runtime()->get_memory_impl(tgt_mem)->alloc_bytes_local(req->ib_size);
       if (ib_offset >= 0) {
-        if (req->owner == my_node_id) {
+        if (req->owner == Network::my_node_id) {
           // local ib alloc request
           CopyRequest* cr = (CopyRequest*) req->req;
           RegionInstanceImpl *src_impl = get_runtime()->get_instance_impl(req->src_inst_id);
@@ -193,8 +191,14 @@ namespace Realm {
           cr->handle_ib_response(req->idx, inst_pair, req->ib_size, ib_offset);
         } else {
           // remote ib alloc request
-          RemoteIBAllocResponseAsync::send_request(req->owner, req->req, req->idx,
-              req->src_inst_id, req->dst_inst_id, req->ib_size, ib_offset); 
+	  ActiveMessage<RemoteIBAllocResponseAsync> amsg(req->owner,8);
+	  amsg->req = req->req;
+	  amsg->idx = req->idx;
+	  amsg->src_inst_id = req->src_inst_id;
+	  amsg->dst_inst_id = req->dst_inst_id;
+	  amsg->offset = ib_offset;
+	  amsg << req->ib_size;
+	  amsg.commit();
         }
         // Remember to free IBAllocRequest
         delete req;
@@ -219,20 +223,20 @@ namespace Realm {
 
     void PendingIBQueue::dequeue_request(Memory tgt_mem)
     {
-      AutoHSLLock al(queue_mutex);
-      assert(ID(tgt_mem).memory.owner_node == my_node_id);
+      AutoLock<> al(queue_mutex);
+      assert(NodeID(ID(tgt_mem).memory_owner_node()) == Network::my_node_id);
       std::map<Memory, std::queue<IBAllocRequest*> *>::iterator it = queues.find(tgt_mem);
       // no pending ib requests
       if (it == queues.end()) return;
       while (!it->second->empty()) {
         IBAllocRequest* req = it->second->front();
-        off_t ib_offset = get_runtime()->get_memory_impl(tgt_mem)->alloc_bytes(req->ib_size);
+        off_t ib_offset = get_runtime()->get_memory_impl(tgt_mem)->alloc_bytes_local(req->ib_size);
         if (ib_offset < 0) break;
         //printf("req: src_inst_id(%llx) dst_inst_id(%llx) ib_size(%lu) idx(%d)\n", req->src_inst_id, req->dst_inst_id, req->ib_size, req->idx);
         // deal with the completed ib alloc request
         log_ib_alloc.info() << "IBAllocRequest (" << req->src_inst_id << "," 
           << req->dst_inst_id << "): completed!";
-        if (req->owner == my_node_id) {
+        if (req->owner == Network::my_node_id) {
           // local ib alloc request
           CopyRequest* cr = (CopyRequest*) req->req;
           RegionInstanceImpl *src_impl = get_runtime()->get_instance_impl(req->src_inst_id);
@@ -241,8 +245,14 @@ namespace Realm {
           cr->handle_ib_response(req->idx, inst_pair, req->ib_size, ib_offset);
         } else {
           // remote ib alloc request
-          RemoteIBAllocResponseAsync::send_request(req->owner, req->req, req->idx,
-              req->src_inst_id, req->dst_inst_id, req->ib_size, ib_offset); 
+	  ActiveMessage<RemoteIBAllocResponseAsync> amsg(req->owner, 8);
+	  amsg->req = req->req;
+	  amsg->idx = req->idx;
+	  amsg->src_inst_id = req->src_inst_id;
+	  amsg->dst_inst_id = req->dst_inst_id;
+	  amsg->offset = ib_offset;
+	  amsg << req->ib_size;
+	  amsg.commit();
         }
         it->second->pop();
         // Remember to free IBAllocRequest
@@ -354,9 +364,9 @@ namespace Realm {
 
     CopyRequest::CopyRequest(const void *data, size_t datalen,
 			     Event _before_copy,
-			     Event _after_copy,
+			     GenEventImpl *_after_copy, EventImpl::gen_t _after_gen,
 			     int _priority)
-      : DmaRequest(_priority, _after_copy),
+      : DmaRequest(_priority, _after_copy, _after_gen),
 	oas_by_inst(0),
 	before_copy(_before_copy)
     {
@@ -410,10 +420,10 @@ namespace Realm {
     CopyRequest::CopyRequest(const TransferDomain *_domain, //const Domain& _domain,
 			     OASByInst *_oas_by_inst,
 			     Event _before_copy,
-			     Event _after_copy,
+			     GenEventImpl *_after_copy, EventImpl::gen_t _after_gen,
 			     int _priority,
                              const ProfilingRequestSet &reqs)
-      : DmaRequest(_priority, _after_copy, reqs)
+      : DmaRequest(_priority, _after_copy, _after_gen, reqs)
       , domain(_domain->clone())
       , oas_by_inst(_oas_by_inst)
       , before_copy(_before_copy)
@@ -451,25 +461,17 @@ namespace Realm {
 
     void CopyRequest::forward_request(NodeID target_node)
     {
-      RemoteCopyArgs args;
-      args.redop_id = 0;
-      args.red_fold = false;
-      args.before_copy = before_copy;
-      args.after_copy = finish_event;
-      args.priority = priority;
-
-      Serialization::DynamicBufferSerializer dbs(128);
-      bool ok = ((dbs << *domain) &&
-		 (dbs << *oas_by_inst) &&
-		 (dbs << requests));
-      assert(ok);
-
-      size_t msglen = dbs.bytes_used();
-      void *msgdata = dbs.detach_buffer(-1 /*no trim*/);
-
-      log_dma.debug() << "forwarding copy: target=" << target_node << " finish=" << finish_event;
-      RemoteCopyMessage::request(target_node, args, msgdata, msglen, PAYLOAD_FREE);
-
+      ActiveMessage<RemoteCopyMessage> amsg(target_node, 65536);
+      amsg->redop_id = 0;
+      amsg->red_fold = false;
+      amsg->before_copy = before_copy;
+      amsg->after_copy = get_finish_event();
+      amsg->priority = priority;
+      amsg << *domain;
+      amsg << *oas_by_inst;
+      amsg << requests;
+      amsg.commit();
+      log_dma.debug() << "forwarding copy: target=" << target_node << " finish=" << get_finish_event();
       clear_profiling();
     }
 
@@ -477,15 +479,16 @@ namespace Realm {
 					    Reservation l /*= Reservation::NO_RESERVATION*/)
     {
       current_lock = l;
+      wait_on = e;
       EventImpl::add_waiter(e, this);
     }
 
-    bool DmaRequest::Waiter::event_triggered(Event e, bool poisoned)
+    void DmaRequest::Waiter::event_triggered(bool poisoned)
     {
       if(poisoned) {
 	log_poison.info() << "cancelling poisoned dma operation - op=" << req << " after=" << req->get_finish_event();
-	req->handle_poisoned_precondition(e);
-	return false;
+	req->handle_poisoned_precondition(wait_on);
+	return;
       }
 
       log_dma.debug("request %p triggered in state %d (lock = " IDFMT ")",
@@ -499,9 +502,6 @@ namespace Realm {
       // this'll enqueue the DMA if it can, or wait on another event if it 
       //  can't
       req->check_readiness(false, queue);
-
-      // don't delete us!
-      return false;
     }
 
     void DmaRequest::Waiter::print(std::ostream& os) const
@@ -519,26 +519,16 @@ namespace Realm {
     // class RemoteIBAllocRequestAsync
     //
 
-    /*static*/ void RemoteIBAllocRequestAsync::handle_request(RequestArgs args)
+  /*static*/ void RemoteIBAllocRequestAsync::handle_message(NodeID sender,
+							    const RemoteIBAllocRequestAsync &args,
+							    const void *data, size_t msglen)
     {
-      assert(ID(args.memory).memory.owner_node == my_node_id);
+      assert(NodeID(ID(args.memory).memory_owner_node()) == Network::my_node_id);
+      size_t size = *((size_t*)data);
       IBAllocRequest* ib_req
-          = new IBAllocRequest(args.node, args.req, args.idx,
-                               args.src_inst_id, args.dst_inst_id, args.size);
+	  = new IBAllocRequest(sender, args.req, args.idx,
+                               args.src_inst_id, args.dst_inst_id, size);
       ib_req_queue->enqueue_request(args.memory, ib_req);
-    }
-
-    /*static*/ void RemoteIBAllocRequestAsync::send_request(NodeID target, Memory tgt_mem, void* req, int idx, ID::IDType src_inst_id, ID::IDType dst_inst_id, size_t ib_size)
-    {
-      RequestArgs args;
-      args.node = my_node_id;
-      args.memory = tgt_mem;
-      args.req = req;
-      args.idx = idx;
-      args.src_inst_id = src_inst_id;
-      args.dst_inst_id = dst_inst_id;
-      args.size = ib_size;
-      Message::request(target, args);
     }
 
     ////////////////////////////////////////////////////////////////////////
@@ -546,61 +536,48 @@ namespace Realm {
     // class RemoteIBAllocResponseAsync
     //
 
-    /*static*/ void RemoteIBAllocResponseAsync::handle_request(RequestArgs args)
+    /*static*/ void RemoteIBAllocResponseAsync::handle_message(NodeID sender,
+							       const RemoteIBAllocResponseAsync &args,
+							       const void *data, size_t msglen)
     {
       CopyRequest* req = (CopyRequest*) args.req;
       RegionInstanceImpl *src_impl = get_runtime()->get_instance_impl(args.src_inst_id);
       RegionInstanceImpl *dst_impl = get_runtime()->get_instance_impl(args.dst_inst_id);
       InstPair inst_pair(src_impl->me, dst_impl->me);
-      req->handle_ib_response(args.idx, inst_pair, args.size, args.offset);
+      size_t size = *((size_t*)data);
+      req->handle_ib_response(args.idx, inst_pair, size, args.offset);
     }
 
-    /*static*/ void RemoteIBAllocResponseAsync::send_request(NodeID target, void* req, int idx, ID::IDType src_inst_id, ID::IDType dst_inst_id, size_t ib_size, off_t ib_offset)
-    {
-      RequestArgs args;
-      args.req = req;
-      args.idx = idx;
-      args.src_inst_id = src_inst_id;
-      args.dst_inst_id = dst_inst_id;
-      args.size = ib_size;
-      args.offset = ib_offset;
-      Message::request(target, args);
-    }
 
     ////////////////////////////////////////////////////////////////////////
     //
     // class RemoteIBFreeRequestAsync
     //
 
-    /*static*/ void RemoteIBFreeRequestAsync::handle_request(RequestArgs args)
+    /*static*/ void RemoteIBFreeRequestAsync::handle_message(NodeID sender,
+							     const RemoteIBFreeRequestAsync &args,
+							     const void *data, size_t msglen)
     {
-      assert(ID(args.memory).memory.owner_node == my_node_id);
-      get_runtime()->get_memory_impl(args.memory)->free_bytes(args.ib_offset, args.ib_size);
+      assert(NodeID(ID(args.memory).memory_owner_node()) == Network::my_node_id);
+      get_runtime()->get_memory_impl(args.memory)->free_bytes_local(args.ib_offset, args.ib_size);
       ib_req_queue->dequeue_request(args.memory);
     }
-
-    /*static*/ void RemoteIBFreeRequestAsync::send_request(NodeID target, Memory tgt_mem, off_t ib_offset, size_t ib_size)
-    {
-      RequestArgs args;
-      args.memory = tgt_mem;
-      args.ib_offset = ib_offset;
-      args.ib_size = ib_size;
-      Message::request(target, args);
-    }
-
 
 #define IB_MAX_SIZE size_t(64 * 1024 * 1024)
 
     void free_intermediate_buffer(DmaRequest* req, Memory mem, off_t offset, size_t size)
     {
       //CopyRequest* cr = (CopyRequest*) req;
-      //AutoHSLLock al(cr->ib_mutex);
-      if(ID(mem).memory.owner_node == my_node_id) {
-        get_runtime()->get_memory_impl(mem)->free_bytes(offset, size);
+      //AutoLock<> al(cr->ib_mutex);
+      if(NodeID(ID(mem).memory_owner_node()) == Network::my_node_id) {
+        get_runtime()->get_memory_impl(mem)->free_bytes_local(offset, size);
         ib_req_queue->dequeue_request(mem);
       } else {
-        RemoteIBFreeRequestAsync::send_request(ID(mem).memory.owner_node,
-            mem, offset, size);
+	ActiveMessage<RemoteIBFreeRequestAsync> amsg(ID(mem).memory_owner_node());
+	amsg->memory = mem;
+	amsg->ib_offset = offset;
+	amsg->ib_size = size;
+	amsg.commit();
       }
     }
 
@@ -614,8 +591,13 @@ namespace Realm {
       size_t min_granularity = 1;
       for(OASVec::const_iterator it = oasvec.begin(); it != oasvec.end(); it++) {
 	if(it->serdez_id != 0) {
-	  const CustomSerdezUntyped *serdez_op = get_runtime()->custom_serdez_table[it->serdez_id];
+	  const CustomSerdezUntyped *serdez_op = get_runtime()->custom_serdez_table.get(it->serdez_id, 0);
 	  assert(serdez_op != 0);
+	  // sanity-check max_serialized_size
+	  if(serdez_op->max_serialized_size > IB_MAX_SIZE) {
+	    log_dma.fatal() << "FATAL: serdez " << it->serdez_id << " reports a maximum serialized size of " << serdez_op->max_serialized_size << " bytes - does not fit into max intermediate buffer size of " << IB_MAX_SIZE << " bytes";
+	    abort();
+	  }
 	  ib_elmnt_size += serdez_op->max_serialized_size;
 	  if(serdez_op->max_serialized_size > serdez_pad)
 	    serdez_pad = serdez_op->max_serialized_size;
@@ -642,15 +624,22 @@ namespace Realm {
 	  ib_size = IB_MAX_SIZE;
       }
       //log_ib_alloc.info("alloc_ib: src_inst_id(%llx) dst_inst_id(%llx) idx(%d) size(%lu) memory(%llx)", inst_pair.first.id, inst_pair.second.id, idx, ib_size, tgt_mem.id);
-      if (ID(tgt_mem).memory.owner_node == my_node_id) {
+      if (NodeID(ID(tgt_mem).memory_owner_node()) == Network::my_node_id) {
         // create local intermediate buffer
         IBAllocRequest* ib_req
-          = new IBAllocRequest(my_node_id, this, idx, inst_pair.first.id,
+          = new IBAllocRequest(Network::my_node_id, this, idx, inst_pair.first.id,
                                inst_pair.second.id, ib_size);
         ib_req_queue->enqueue_request(tgt_mem, ib_req);
       } else {
         // create remote intermediate buffer
-        RemoteIBAllocRequestAsync::send_request(ID(tgt_mem).memory.owner_node, tgt_mem, this, idx, inst_pair.first.id, inst_pair.second.id, ib_size);
+	ActiveMessage<RemoteIBAllocRequestAsync> amsg(ID(tgt_mem).memory_owner_node(), 8);
+	amsg->memory = tgt_mem;
+	amsg->req = this;
+	amsg->idx = idx;
+	amsg->src_inst_id = inst_pair.first.id;
+	amsg->dst_inst_id = inst_pair.second.id;
+	amsg << ib_size;
+	amsg.commit();
       }
     }
 
@@ -658,7 +647,7 @@ namespace Realm {
     {
       Event event_to_trigger = Event::NO_EVENT;
       {
-        AutoHSLLock al(ib_mutex);
+        AutoLock<> al(ib_mutex);
         IBByInst::iterator ib_it = ib_by_inst.find(inst_pair);
         assert(ib_it != ib_by_inst.end());
         IBVec& ibvec = ib_it->second;
@@ -732,8 +721,8 @@ namespace Realm {
 	// TODO
 	// SJT: actually, is this needed any more?
         //Memory tgt_mem = get_runtime()->get_instance_impl(oas_by_inst->begin()->first.second)->memory;
-        //NodeID tgt_node = ID(tgt_mem).memory.owner_node;
-	//assert(tgt_node == my_node_id);
+        //NodeID tgt_node = ID(tgt_mem).memory_owner_node();
+	//assert(tgt_node == Network::my_node_id);
         state = STATE_GEN_PATH;
       }
 
@@ -747,7 +736,7 @@ namespace Realm {
         find_shortest_path(src_mem, dst_mem, serdez_id, mem_path);
         // Pass 1: create IBInfo blocks
         for (OASByInst::iterator it = oas_by_inst->begin(); it != oas_by_inst->end(); it++) {
-          AutoHSLLock al(ib_mutex);
+          AutoLock<> al(ib_mutex);
           IBVec& ib_vec = ib_by_inst[it->first];
           assert(ib_vec.size() == 0);
           for (size_t i = 1; i < mem_path.size() - 1; i++) {
@@ -1151,7 +1140,7 @@ namespace Realm {
       PosixAIOWrite *op = new PosixAIOWrite(fd, offset, bytes, buffer, req);
 #endif
       {
-	AutoHSLLock al(mutex);
+	AutoLock<> al(mutex);
 	if(launched_operations.size() < (size_t)max_depth) {
 	  op->launch();
 	  launched_operations.push_back(op);
@@ -1172,7 +1161,7 @@ namespace Realm {
       PosixAIORead *op = new PosixAIORead(fd, offset, bytes, buffer, req);
 #endif
       {
-	AutoHSLLock al(mutex);
+	AutoLock<> al(mutex);
 	if(launched_operations.size() < (size_t)max_depth) {
 	  op->launch();
 	  launched_operations.push_back(op);
@@ -1186,7 +1175,7 @@ namespace Realm {
     {
       AIOFenceOp *op = new AIOFenceOp(req);
       {
-	AutoHSLLock al(mutex);
+	AutoLock<> al(mutex);
 	if(launched_operations.size() < (size_t)max_depth) {
 	  op->launch();
 	  launched_operations.push_back(op);
@@ -1198,19 +1187,19 @@ namespace Realm {
 
     bool AsyncFileIOContext::empty(void)
     {
-      AutoHSLLock al(mutex);
+      AutoLock<> al(mutex);
       return launched_operations.empty();
     }
 
     long AsyncFileIOContext::available(void)
     {
-      AutoHSLLock al(mutex);
+      AutoLock<> al(mutex);
       return (max_depth - launched_operations.size());
     }
 
     void AsyncFileIOContext::make_progress(void)
     {
-      AutoHSLLock al(mutex);
+      AutoLock<> al(mutex);
 
       // first, reap as many events as we can - oldest first
 #ifdef REALM_USE_KERNEL_AIO
@@ -1318,7 +1307,7 @@ namespace Realm {
     {
       Memory::Kind src_ll_kind = get_runtime()->get_memory_impl(src_mem)->lowlevel_kind;
       Memory::Kind dst_ll_kind = get_runtime()->get_memory_impl(dst_mem)->lowlevel_kind;
-      if(ID(src_mem).memory.owner_node == ID(dst_mem).memory.owner_node) {
+      if(ID(src_mem).memory_owner_node() == ID(dst_mem).memory_owner_node()) {
         switch(src_ll_kind) {
         case Memory::GLOBAL_MEM:
           if (is_cpu_mem(dst_ll_kind)) {
@@ -1459,7 +1448,7 @@ namespace Realm {
       XferDes::XferKind kind = XferDes::XFER_NONE;
 
       // look at the dma channels available on the source node
-      NodeID src_node = ID(src_mem).memory.owner_node;
+      NodeID src_node = ID(src_mem).memory_owner_node();
       const Node& n = get_runtime()->nodes[src_node];
       for(std::vector<DMAChannel *>::const_iterator it = n.dma_channels.begin();
 	  it != n.dma_channels.end();
@@ -1479,8 +1468,8 @@ namespace Realm {
       // exceptions:
       //  1) old code didn't allow nodes other than 0 to
       //       directly access GLOBAL_MEM
-      if((src_node == my_node_id) &&
-	 !((my_node_id != 0) && ((src_mem.kind() == Memory::GLOBAL_MEM) ||
+      if((src_node == Network::my_node_id) &&
+	 !((Network::my_node_id != 0) && ((src_mem.kind() == Memory::GLOBAL_MEM) ||
 				 (dst_mem.kind() == Memory::GLOBAL_MEM)))) {
 	XferDes::XferKind old_kind = old_get_xfer_des(src_mem, dst_mem,
 						      src_serdez_id, dst_serdez_id);
@@ -1506,13 +1495,13 @@ namespace Realm {
       std::map<Memory, std::vector<Memory> > dist;
       std::set<Memory> all_mem;
       std::queue<Memory> active_nodes;
-      Node* node = &(get_runtime()->nodes[ID(src_mem).memory.owner_node]);
+      Node* node = &(get_runtime()->nodes[ID(src_mem).memory_owner_node()]);
       for (std::vector<MemoryImpl*>::const_iterator it = node->ib_memories.begin();
            it != node->ib_memories.end(); it++) {
         all_mem.insert((*it)->me);
       }
-      if(ID(dst_mem).memory.owner_node != ID(src_mem).memory.owner_node) {
-	node = &(get_runtime()->nodes[ID(dst_mem).memory.owner_node]);
+      if(ID(dst_mem).memory_owner_node() != ID(src_mem).memory_owner_node()) {
+	node = &(get_runtime()->nodes[ID(dst_mem).memory_owner_node()]);
 	for (std::vector<MemoryImpl*>::const_iterator it = node->ib_memories.begin();
 	     it != node->ib_memories.end(); it++) {
 	  all_mem.insert((*it)->me);
@@ -1683,7 +1672,7 @@ namespace Realm {
       for (OASByInst::iterator it = oas_by_inst->begin(); it != oas_by_inst->end(); it++) {
         std::vector<XferDesID> sub_path;
         for (unsigned idx = 0; idx < mem_path.size() - 1; idx ++) {
-          XferDesID new_xdid = get_xdq_singleton()->get_guid(ID(mem_path[idx]).memory.owner_node);
+          XferDesID new_xdid = get_xdq_singleton()->get_guid(ID(mem_path[idx]).memory_owner_node());
           sub_path.push_back(new_xdid);
           path.push_back(new_xdid);
         }
@@ -1754,7 +1743,7 @@ namespace Realm {
 	      xd_src_iter = src_iter;
 	      xd_src_serdez_id = serdez_id;
 	      mark_started = (it == oas_by_inst->begin());
-	      xd_target_node = my_node_id;
+	      xd_target_node = Network::my_node_id;
 	    } else {
 	      // reads from intermediate buffer
 	      pre_xd_guid = sub_path[idx - 2];
@@ -1763,7 +1752,7 @@ namespace Realm {
 						     ibvec[idx - 2].size);
 	      xd_src_serdez_id = 0;
 	      mark_started = false;
-	      xd_target_node = ID(ibvec[idx - 2].memory).memory.owner_node;
+	      xd_target_node = ID(ibvec[idx - 2].memory).memory_owner_node();
 	    }
 
 	    // xferdes output
@@ -1799,7 +1788,7 @@ namespace Realm {
 	    // special case: gasnet reads must always be done from the node that
 	    //  owns the destination memory
 	    if(kind == XferDes::XFER_GASNET_READ)
-	      xd_target_node = ID(xd_dst_mem).memory.owner_node;
+	      xd_target_node = ID(xd_dst_mem).memory_owner_node();
 
             XferOrder::Type order;
             if (mem_path.size() == 2)
@@ -1819,7 +1808,7 @@ namespace Realm {
             XferDesFence* complete_fence = new XferDesFence(this);
             add_async_work_item(complete_fence);
 
-	    create_xfer_des(this, my_node_id, xd_target_node,
+	    create_xfer_des(this, Network::my_node_id, xd_target_node,
 			    xd_guid, pre_xd_guid,
 			    next_xd_guid, next_max_rw_gap,
 			    ((idx == 1) ? 0 : ibvec[idx - 2].offset),
@@ -1876,9 +1865,9 @@ namespace Realm {
 				 ReductionOpID _redop_id,
 				 bool _red_fold,
 				 Event _before_copy,
-				 Event _after_copy,
+				 GenEventImpl *_after_copy, EventImpl::gen_t _after_gen,
 				 int _priority)
-      : DmaRequest(_priority, _after_copy),
+      : DmaRequest(_priority, _after_copy, _after_gen),
 	inst_lock_event(Event::NO_EVENT),
 	redop_id(_redop_id), red_fold(_red_fold),
 	before_copy(_before_copy)
@@ -1911,10 +1900,10 @@ namespace Realm {
 				 ReductionOpID _redop_id,
 				 bool _red_fold,
 				 Event _before_copy,
-				 Event _after_copy,
+				 GenEventImpl *_after_copy, EventImpl::gen_t _after_gen,
 				 int _priority, 
                                  const ProfilingRequestSet &reqs)
-      : DmaRequest(_priority, _after_copy, reqs),
+      : DmaRequest(_priority, _after_copy, _after_gen, reqs),
 	domain(_domain->clone()),
 	dst(_dst), 
 	inst_lock_needed(_inst_lock_needed), inst_lock_event(Event::NO_EVENT),
@@ -1940,27 +1929,19 @@ namespace Realm {
 
     void ReduceRequest::forward_request(NodeID target_node)
     {
-      RemoteCopyArgs args;
-      args.redop_id = redop_id;
-      args.red_fold = red_fold;
-      args.before_copy = before_copy;
-      args.after_copy = finish_event;
-      args.priority = priority;
-
-      Serialization::DynamicBufferSerializer dbs(128);
-      bool ok = ((dbs << *domain) &&
-		 (dbs << srcs) &&
-		 (dbs << dst) &&
-		 (dbs << inst_lock_needed) &&
-		 (dbs << requests));
-      assert(ok);
-
-      size_t msglen = dbs.bytes_used();
-      void *msgdata = dbs.detach_buffer(-1 /*no trim*/);
-
-      log_dma.debug() << "forwarding copy: target=" << target_node << " finish=" << finish_event;
-      RemoteCopyMessage::request(target_node, args, msgdata, msglen, PAYLOAD_FREE);
-
+      ActiveMessage<RemoteCopyMessage> amsg(target_node,65536);
+      amsg->redop_id = redop_id;
+      amsg->red_fold = red_fold;
+      amsg->before_copy = before_copy;
+      amsg->after_copy = get_finish_event();
+      amsg->priority = priority;
+      amsg << *domain;
+      amsg << srcs;
+      amsg << dst;
+      amsg << inst_lock_needed;
+      amsg << requests;
+      amsg.commit();
+      log_dma.debug() << "forwarding copy: target=" << target_node << " finish=" << get_finish_event();
       clear_profiling();
     }
 
@@ -2132,7 +2113,11 @@ namespace Realm {
 							   srcs[0].inst,
 							   dst_field);
 
-      const ReductionOpUntyped *redop = get_runtime()->reduce_op_table[redop_id];
+      const ReductionOpUntyped *redop = get_runtime()->reduce_op_table.get(redop_id, 0);
+      if(redop == 0) {
+	log_dma.fatal() << "no reduction op registered for ID " << redop_id;
+	abort();
+      }
       size_t src_elem_size = red_fold ? redop->sizeof_rhs : redop->sizeof_lhs;
 
       size_t total_bytes = 0;
@@ -2267,9 +2252,11 @@ namespace Realm {
     FillRequest::FillRequest(const void *data, size_t datalen,
                              RegionInstance inst,
                              FieldID field_id, unsigned size,
-                             Event _before_fill, Event _after_fill,
+                             Event _before_fill,
+			     GenEventImpl *_after_fill, EventImpl::gen_t _after_gen,
                              int _priority)
-      : DmaRequest(_priority, _after_fill), before_fill(_before_fill)
+      : DmaRequest(_priority, _after_fill, _after_gen)
+      , before_fill(_before_fill)
     {
       dst.inst = inst;
       dst.field_id = field_id;
@@ -2293,15 +2280,17 @@ namespace Realm {
 
       log_dma.info() << "dma request " << (void *)this << " deserialized - is="
 		     << *domain << " fill dst=" << dst.inst << "[" << dst.field_id << "+" << dst.subfield_offset << "] size="
-		     << fill_size << " before=" << _before_fill << " after=" << _after_fill;
+		     << fill_size << " before=" << _before_fill << " after=" << get_finish_event();
     }
 
     FillRequest::FillRequest(const TransferDomain *_domain, //const Domain &d, 
                              const CopySrcDstField &_dst,
                              const void *_fill_value, size_t _fill_size,
-                             Event _before_fill, Event _after_fill, int _priority,
+                             Event _before_fill,
+			     GenEventImpl *_after_fill, EventImpl::gen_t _after_gen,
+			     int _priority,
                              const ProfilingRequestSet &reqs)
-      : DmaRequest(_priority, _after_fill, reqs)
+      : DmaRequest(_priority, _after_fill, _after_gen, reqs)
       , domain(_domain->clone())
       , dst(_dst)
       , before_fill(_before_fill)
@@ -2311,10 +2300,9 @@ namespace Realm {
       memcpy(fill_buffer, _fill_value, fill_size);
 
       assert(dst.size == fill_size);
-
       log_dma.info() << "dma request " << (void *)this << " created - is="
 		     << *domain << " fill dst=" << dst.inst << "[" << dst.field_id << "+" << dst.subfield_offset << "] size="
-		     << fill_size << " before=" << _before_fill << " after=" << _after_fill;
+		     << fill_size << " before=" << _before_fill << " after=" << get_finish_event();
       {
 	LoggerMessage msg(log_dma.debug());
 	if(msg.is_active()) {
@@ -2336,28 +2324,19 @@ namespace Realm {
 
     void FillRequest::forward_request(NodeID target_node)
     {
-      RemoteFillArgs args;
-      args.inst = dst.inst;
-      args.field_id = dst.field_id;
-      assert(dst.subfield_offset == 0);
-      args.size = fill_size; // redundant!
-      args.before_fill = before_fill;
-      args.after_fill = finish_event;
-      //args.priority = 0;
-
-      Serialization::DynamicBufferSerializer dbs(128);
       ByteArray ba(fill_buffer, fill_size); // TODO
-      bool ok = ((dbs << *domain) &&
-		 (dbs << ba) &&
-		 (dbs << requests));
-      assert(ok);
-
-      size_t msglen = dbs.bytes_used();
-      void *msgdata = dbs.detach_buffer(-1 /*no trim*/);
-
-      log_dma.debug() << "forwarding fill: target=" << target_node << " finish=" << finish_event;
-      RemoteFillMessage::request(target_node, args, msgdata, msglen, PAYLOAD_FREE);
-
+      ActiveMessage<RemoteFillMessage> amsg(target_node,65536);
+      amsg->inst = dst.inst;
+      amsg->field_id = dst.field_id;
+      assert(dst.subfield_offset == 0);
+      amsg->size = fill_size;
+      amsg->before_fill = before_fill;
+      amsg->after_fill = get_finish_event();
+      amsg << *domain;
+      amsg << ba;
+      amsg << requests;
+      amsg.commit();
+      log_dma.debug() << "forwarding fill: target=" << target_node << " finish=" << get_finish_event();
       clear_profiling();
     }
 
@@ -2459,19 +2438,48 @@ namespace Realm {
       return false;
     }
 
-#define SPECIALIZE_FILL(TYPE, N)                                   \
-    {                                                              \
-      TYPE *ptr = (TYPE *)rep_buffer;                              \
-      TYPE fill_value = *(TYPE*)fill_buffer;                       \
-      for(size_t ofs = 0; ofs < rep_size; ofs += N * sizeof(TYPE)) \
-      {                                                            \
-        ASSIGN_##N;                                                \
-      }                                                            \
-    }                                                              \
+    static void repeat_fill(void *dst, const void *src, size_t bytes, size_t count)
+    {
+#define SPECIALIZE_FILL(TYPE, N)                                        \
+      {									\
+	TYPE *dsttyped = reinterpret_cast<TYPE *>(dst);			\
+	const TYPE *srctyped = reinterpret_cast<const TYPE *>(src);	\
+	for(size_t i = 0; i < count; i++)				\
+	  for(size_t j = 0; j < N; j++)					\
+	    *dsttyped++ = srctyped[j];					\
+      }
 
-#define ASSIGN_1 *ptr++ = fill_value
-#define ASSIGN_2 ASSIGN_1; ASSIGN_1
-#define ASSIGN_4 ASSIGN_2; ASSIGN_2
+      switch(bytes) {
+      case sizeof(uint32_t):
+	{
+	  SPECIALIZE_FILL(uint32_t, 1);
+	  break;
+	}
+      case sizeof(uint64_t):
+	{
+	  SPECIALIZE_FILL(uint64_t, 1);
+	  break;
+	}
+      case 2 * sizeof(uint64_t):
+	{
+	  SPECIALIZE_FILL(uint64_t, 2);
+	  break;
+	}
+      case 4 * sizeof(uint64_t):
+	{
+	  SPECIALIZE_FILL(uint64_t, 4);
+	  break;
+	}
+      default:
+	{
+	  for(size_t i = 0; i < count; i++)
+	    memcpy(reinterpret_cast<char *>(dst) + (bytes * i), src, bytes);
+	  break;
+	}
+      }
+
+#undef SPECIALIZE_FILL
+    }
 
     void FillRequest::perform_dma(void)
     {
@@ -2564,34 +2572,58 @@ namespace Realm {
 	  }
 
 	  // HDF5 doesn't seem to offer a way to fill a file without building
-	  //  an equivalently-sized memory buffer first, so just do point-wise
-	  //  iteration and hope that libhdf5 does some buffering
+	  //  an equivalently-sized memory buffer first, and we can't do
+          //  point-wise because libhdf5 doesn't buffer, so try to find a 
+	  //  reasonably-sized chunk to do fills with - this code is still
+	  //  limited to each dimension being all-or-nothing
 	  int dims = info.extent.size();
+	  size_t max_chunk_elems = (32 << 20) / fill_size; // 32MB
+	  size_t chunk_elems = 1;
+	  // because HDF5 uses C data ordering, we need to group from the last
+	  //  dim backwards
+	  int step_dims = dims;
+	  while(step_dims > 0) {
+	    size_t new_elems = chunk_elems * info.extent[step_dims - 1];
+	    if(new_elems > max_chunk_elems) break;
+	    chunk_elems = new_elems;
+	    step_dims--;
+	  }
+	  void *chunk_data = fill_buffer;
+	  if(chunk_elems > 1) {
+	    chunk_data = malloc(chunk_elems * fill_size);
+	    assert(chunk_data != 0);
+	    repeat_fill(chunk_data, fill_buffer, fill_size, chunk_elems);
+	  }
 	  std::vector<hsize_t> mem_dims(dims, 1);
+	  for(int i = step_dims; i < dims; i++)
+	    mem_dims[i] = info.extent[i];
 	  hid_t mem_space_id, file_space_id;
 	  CHECK_HDF5( mem_space_id = H5Screate_simple(dims, mem_dims.data(),
 						      NULL) );
 	  CHECK_HDF5( file_space_id = H5Dget_space(dset_id) );
 
 	  std::vector<hsize_t> cur_pos(info.offset);
-	  std::vector<hsize_t> cur_size(dims, 1);
+	  std::vector<hsize_t> cur_size = mem_dims;
 	  while(true) {
 	    CHECK_HDF5( H5Sselect_hyperslab(file_space_id, H5S_SELECT_SET,
 					    cur_pos.data(), 0,
 					    cur_size.data(), 0) );
 	    CHECK_HDF5( H5Dwrite(dset_id, dtype_id,
 				 mem_space_id, file_space_id,
-				 H5P_DEFAULT, fill_buffer) );
+				 H5P_DEFAULT, chunk_data) );
 	    // advance to next position
 	    int d = 0;
-	    while(d < dims) {
+	    while(d < step_dims) {
 	      if(++cur_pos[d] < (info.offset[d] + info.extent[d]))
 		break;
 	      cur_pos[d] = info.offset[d];
 	      d++;
 	    }
-	    if(d >= dims) break;
+	    if(d >= step_dims) break;
 	  }
+
+	  if(chunk_data != fill_buffer)
+	    free(chunk_data);
 
 	  CHECK_HDF5( H5Sclose(mem_space_id) );
 	  CHECK_HDF5( H5Sclose(file_space_id) );
@@ -2629,35 +2661,7 @@ namespace Realm {
 	    rep_size = rep_elems * fill_size;
 	    rep_buffer = malloc(rep_size);
 	    assert(rep_buffer != 0);
-            switch (fill_size)
-            {
-              case sizeof(uint32_t):
-                {
-                  SPECIALIZE_FILL(uint32_t, 1);
-                  break;
-                }
-              case sizeof(uint64_t):
-                {
-                  SPECIALIZE_FILL(uint64_t, 1);
-                  break;
-                }
-              case 2 * sizeof(uint64_t):
-                {
-                  SPECIALIZE_FILL(uint64_t, 2);
-                  break;
-                }
-              case 4 * sizeof(uint64_t):
-                {
-                  SPECIALIZE_FILL(uint64_t, 4);
-                  break;
-                }
-              default:
-                {
-                  for(size_t ofs = 0; ofs < rep_size; ofs += fill_size)
-                    memcpy(((char *)rep_buffer)+ofs, fill_buffer, fill_size);
-                  break;
-                }
-            }
+	    repeat_fill(rep_buffer, fill_buffer, fill_size, rep_elems);
 	  }
 	  use_buffer = rep_buffer;
 	  use_size = rep_size;
@@ -2801,16 +2805,20 @@ namespace Realm {
       aio_context = 0;
     }
 
-    void handle_remote_copy(RemoteCopyArgs args, const void *data, size_t msglen)
+  /*static*/ void RemoteCopyMessage::handle_message(NodeID sender, const RemoteCopyMessage &args,
+						    const void *data, size_t msglen)
     {
       DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
 
+      GenEventImpl *after_copy = get_runtime()->get_genevent_impl(args.after_copy);
+      
       // is this a copy or a reduction (they deserialize differently)
       if(args.redop_id == 0) {
 	// a copy
 	CopyRequest *r = new CopyRequest(data, msglen,
 					 args.before_copy,
-					 args.after_copy,
+					 after_copy,
+					 ID(args.after_copy).event_generation(),
 					 args.priority);
 	get_runtime()->optable.add_local_operation(args.after_copy, r);
 
@@ -2821,7 +2829,8 @@ namespace Realm {
 					     args.redop_id,
 					     args.red_fold,
 					     args.before_copy,
-					     args.after_copy,
+					     after_copy,
+					     ID(args.after_copy).event_generation(),
 					     args.priority);
 	get_runtime()->optable.add_local_operation(args.after_copy, r);
 
@@ -2829,18 +2838,27 @@ namespace Realm {
       }
     }
 
-    void handle_remote_fill(RemoteFillArgs args, const void *data, size_t msglen)
+  /*static*/ void RemoteFillMessage::handle_message(NodeID sender, const RemoteFillMessage &args,
+						    const void *data, size_t msglen)
     {
+      GenEventImpl *after_fill = get_runtime()->get_genevent_impl(args.after_fill);
       FillRequest *r = new FillRequest(data, msglen,
                                        args.inst,
                                        args.field_id,
                                        args.size,
                                        args.before_fill,
-                                       args.after_fill,
+                                       after_fill,
+				       ID(args.after_fill).event_generation(),
                                        0 /* no room for args.priority */);
       get_runtime()->optable.add_local_operation(args.after_fill, r);
 
       r->check_readiness(false, dma_queue);
     }
+
+  ActiveMessageHandlerReg<RemoteFillMessage> remote_fill_message_handler;
+  ActiveMessageHandlerReg<RemoteCopyMessage> remote_copy_message_handler;
+  ActiveMessageHandlerReg<RemoteIBAllocRequestAsync> remote_ib_alloc_request_async_handler;
+  ActiveMessageHandlerReg<RemoteIBAllocResponseAsync> remote_ib_alloc_response_async_handler;
+  ActiveMessageHandlerReg<RemoteIBFreeRequestAsync> remote_ib_free_request_async_handler;
 
 };

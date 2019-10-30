@@ -1,4 +1,4 @@
-/* Copyright 2018 Stanford University, NVIDIA Corporation
+/* Copyright 2019 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,13 +22,17 @@
 #include "realm/id.h"
 #include "realm/inst_layout.h"
 
-#include "realm/activemsg.h"
+#include "realm/mutex.h"
 
 #include "realm/rsrv_impl.h"
 #include "realm/metadata.h"
+#include "realm/event_impl.h"
+#include "realm/profiling.h"
 
 namespace Realm {
 
+    class MemoryImpl;
+    
     class RegionInstanceImpl {
     protected:
       // RegionInstanceImpl creation/deletion is handled by MemoryImpl
@@ -36,11 +40,24 @@ namespace Realm {
       RegionInstanceImpl(RegionInstance _me, Memory _memory);
       ~RegionInstanceImpl(void);
 
+      class DeferredDestroy : public EventWaiter {
+      public:
+	void defer(RegionInstanceImpl *_inst, MemoryImpl *_mem, Event wait_on);
+	virtual void event_triggered(bool poisoned);
+	virtual void print(std::ostream& os) const;
+	virtual Event get_finish_event(void) const;
+
+      protected:
+	RegionInstanceImpl *inst;
+	MemoryImpl *mem;
+      };
+      DeferredDestroy deferred_destroy;
+
     public:
       // the life cycle of an instance is defined in part by when the
       //  allocation and deallocation of storage occurs, but that is managed
       //  by the memory, which uses these callbacks to notify us
-      void notify_allocation(bool success, size_t offset);
+      void notify_allocation(bool success, size_t offset, size_t footprint);
       void notify_deallocation(void);
 
 #ifdef POINTER_CHECKS
@@ -62,7 +79,7 @@ namespace Realm {
       bool get_strided_parameters(void *&base, size_t &stride,
 				  off_t field_offset);
 
-      Event request_metadata(void) { return metadata.request_data(ID(me).instance.creator_node, me.id); }
+      Event request_metadata(void) { return metadata.request_data(ID(me).instance_creator_node(), me.id); }
 
       // called once storage has been released and all remote metadata is invalidated
       void recycle_instance(void);
@@ -80,6 +97,10 @@ namespace Realm {
       class Metadata : public MetadataBase {
       public:
 	void *serialize(size_t& out_size) const;
+
+	template<typename T>
+	  void serialize_msg(T &fbd) const;
+
 	void deserialize(const void *in_data, size_t in_size);
 
 	off_t alloc_offset;
@@ -98,7 +119,7 @@ namespace Realm {
       };
 
       // used for atomic access to metadata
-      GASNetHSL mutex;
+      Mutex mutex;
       Metadata metadata;
 
       // used for serialized application access to contents of instance

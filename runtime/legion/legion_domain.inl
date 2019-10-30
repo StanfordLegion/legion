@@ -1,4 +1,4 @@
-/* Copyright 2018 Stanford University, NVIDIA Corporation
+/* Copyright 2019 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,6 +15,7 @@
 
 namespace Legion {
 
+#if __cplusplus < 201103L
   // Specialization for 1-D Points
   template<typename T>
   struct Point<1,T> : public Realm::Point<1,T> {
@@ -43,9 +44,11 @@ namespace Legion {
       { this->x = rhs.x; return *this; }
   public:
     __CUDA_HD__
-    inline static Point<1,T> ZEROES(void) { return Point<1,T>((T)0); }
+    inline static Point<1,T> ZEROES(void) 
+      { return Point<1,T>(static_cast<T>(0)); }
     __CUDA_HD__
-    inline static Point<1,T> ONES(void) { return Point<1,T>((T)1); }
+    inline static Point<1,T> ONES(void) 
+      { return Point<1,T>(static_cast<T>(1)); }
   };
 
   // Specialization for 2-D Points
@@ -74,9 +77,11 @@ namespace Legion {
       { this->x = rhs.x; this->y = rhs.y; return *this; }
   public:
     __CUDA_HD__
-    inline static Point<2,T> ZEROES(void) { return Point<2,T>((T)0); }
+    inline static Point<2,T> ZEROES(void) 
+      { return Point<2,T>(static_cast<T>(0)); }
     __CUDA_HD__
-    inline static Point<2,T> ONES(void) { return Point<2,T>((T)1); }
+    inline static Point<2,T> ONES(void) 
+      { return Point<2,T>(static_cast<T>(1)); }
   };
 
   // Specialization for 3-D Points
@@ -106,9 +111,47 @@ namespace Legion {
       { this->x = rhs.x; this->y = rhs.y; this->z = rhs.z; return *this; }
   public:
     __CUDA_HD__
-    inline static Point<3,T> ZEROES(void) { return Point<3,T>((T)0); }
+    inline static Point<3,T> ZEROES(void) 
+      { return Point<3,T>(static_cast<T>(0)); }
     __CUDA_HD__
-    inline static Point<3,T> ONES(void) { return Point<3,T>((T)1); }
+    inline static Point<3,T> ONES(void) 
+      { return Point<3,T>(static_cast<T>(1)); }
+  };
+
+  // Specialization for 4-D Points
+  template<typename T>
+  struct Point<4,T> : public Realm::Point<4,T> {
+  public:
+    __CUDA_HD__
+    inline Point(void) : Realm::Point<4,T>() { }
+    __CUDA_HD__
+    inline explicit Point(const T v) : Realm::Point<4,T>(v,v,v,v) { }
+    __CUDA_HD__
+    inline Point(const T v1, const T v2, const T v3, const T v4) 
+      : Realm::Point<4,T>(v1,v2,v3,v4) { }
+    __CUDA_HD__
+    inline explicit Point(const T vals[4]) : Realm::Point<4,T>(vals) { }
+    // copies allow type coercion (assuming the underlying type does)
+    template<typename T2> __CUDA_HD__
+    inline Point(const Point<4,T2> &rhs) : Realm::Point<4,T>(rhs) { }
+    template<typename T2> __CUDA_HD__
+    inline Point(const Realm::Point<4,T2> &rhs) : Realm::Point<4,T>(rhs) { }
+  public:
+    template<typename T2> __CUDA_HD__
+    inline Point<4,T>& operator=(const Point<4,T2> &rhs)
+      { this->x = rhs.x; this->y = rhs.y; this->z = rhs.z; 
+        this->w = rhs.w; return *this; }
+    template<typename T2> __CUDA_HD__
+    inline Point<4,T>& operator=(const Realm::Point<4,T2> &rhs)
+      { this->x = rhs.x; this->y = rhs.y; this->z = rhs.z; 
+        this->w = rhs.w; return *this; }
+  public:
+    __CUDA_HD__
+    inline static Point<4,T> ZEROES(void) 
+      { return Point<4,T>(static_cast<T>(0)); }
+    __CUDA_HD__
+    inline static Point<4,T> ONES(void) 
+      { return Point<4,T>(static_cast<T>(1)); }
   };
 
   //----------------------------------------------------------------------------
@@ -125,12 +168,8 @@ namespace Legion {
     : Realm::Point<DIM,T>()
   //----------------------------------------------------------------------------
   {
-    this->x = val;
-    this->y = val;
-    this->z = val;
-    this->w = val;
-    for (int i = 4; i < DIM; i++)
-      this->rest[i-4] = val;
+    for (int i = 0; i < DIM; i++)
+      (*this)[i] = val;
   }
   
   //----------------------------------------------------------------------------
@@ -163,7 +202,7 @@ namespace Legion {
   //----------------------------------------------------------------------------
   {
     for (int i = 0; i < DIM; i++)
-      (&Realm::Point<DIM,T>::x)[i] = (&rhs.x)[i];
+      (&(Realm::Point<DIM,T>::x))[i] = (&rhs.x)[i];
     return *this;
   }
 
@@ -173,7 +212,7 @@ namespace Legion {
   //----------------------------------------------------------------------------
   {
     for (int i = 0; i < DIM; i++)
-      (&Realm::Point<DIM,T>::x)[i] = (&rhs.x)[i];
+      (&(Realm::Point<DIM,T>::x))[i] = (&rhs.x)[i];
     return *this;
   }
 
@@ -182,7 +221,7 @@ namespace Legion {
   /*static*/ inline Point<DIM,T> Point<DIM,T>::ZEROES(void)
   //----------------------------------------------------------------------------
   {
-    return Point<DIM,T>(0);
+    return Point<DIM,T>(static_cast<T>(0));
   }
 
   //----------------------------------------------------------------------------
@@ -190,7 +229,7 @@ namespace Legion {
   /*static*/ inline Point<DIM,T> Point<DIM,T>::ONES(void)
   //----------------------------------------------------------------------------
   {
-    return Point<DIM,T>(1);
+    return Point<DIM,T>(static_cast<T>(1));
   }
 
   //----------------------------------------------------------------------------
@@ -290,6 +329,7 @@ namespace Legion {
       this->rows[i] = rhs.rows[i];
     return *this;
   }
+#endif // pre c++11
 
   //----------------------------------------------------------------------------
   template<int M, int N, typename T> __CUDA_HD__
@@ -437,7 +477,7 @@ namespace Legion {
   }
 
   //----------------------------------------------------------------------------
-  template<int M, int N, typename T>
+  template<int M, int N, typename T> __CUDA_HD__
   inline bool ScaleTransform<M,N,T>::is_identity(void) const
   //----------------------------------------------------------------------------
   {
@@ -463,6 +503,7 @@ namespace Legion {
     return true;
   }
 
+#if __cplusplus < 201103L
   //----------------------------------------------------------------------------
   template<int DIM, typename T>
   inline DomainT<DIM,T>::DomainT(void)
@@ -544,17 +585,7 @@ namespace Legion {
     this->sparsity = rhs.sparsity;
     return *this;
   }
-
-  //----------------------------------------------------------------------------
-  template<int DIM, typename T>
-  inline DomainT<DIM,T>::operator Rect<DIM,T>(void) const
-  //----------------------------------------------------------------------------
-  {
-    // Can't convert to rect if we have a sparsity map
-    assert(this->dense());
-    const Rect<DIM,T> result = this->bounds;
-    return result;
-  }
+#endif // pre c++11
 
   //----------------------------------------------------------------------------
   inline DomainPoint::DomainPoint(void)
@@ -745,11 +776,66 @@ namespace Legion {
     switch(dp.dim) {
     case 0: { os << '[' << dp.point_data[0] << ']'; break; }
     case 1: { os << '(' << dp.point_data[0] << ')'; break; }
+#if LEGION_MAX_DIM >= 2
     case 2: { os << '(' << dp.point_data[0]
                  << ',' << dp.point_data[1] << ')'; break; }
+#endif
+#if LEGION_MAX_DIM >= 3
     case 3: { os << '(' << dp.point_data[0]
                  << ',' << dp.point_data[1]
                  << ',' << dp.point_data[2] << ')'; break; }
+#endif
+#if LEGION_MAX_DIM >= 4
+    case 4: { os << '(' << dp.point_data[0]
+                 << ',' << dp.point_data[1]
+                 << ',' << dp.point_data[2] 
+                 << ',' << dp.point_data[3] << ')'; break; }
+#endif
+#if LEGION_MAX_DIM >= 5
+    case 5: { os << '(' << dp.point_data[0]
+                 << ',' << dp.point_data[1]
+                 << ',' << dp.point_data[2] 
+                 << ',' << dp.point_data[3] 
+                 << ',' << dp.point_data[4] << ')'; break; }
+#endif
+#if LEGION_MAX_DIM >= 6
+    case 6: { os << '(' << dp.point_data[0]
+                 << ',' << dp.point_data[1]
+                 << ',' << dp.point_data[2] 
+                 << ',' << dp.point_data[3] 
+                 << ',' << dp.point_data[4] 
+                 << ',' << dp.point_data[5] << ')'; break; }
+#endif
+#if LEGION_MAX_DIM >= 7
+    case 7: { os << '(' << dp.point_data[0]
+                 << ',' << dp.point_data[1]
+                 << ',' << dp.point_data[2] 
+                 << ',' << dp.point_data[3] 
+                 << ',' << dp.point_data[4] 
+                 << ',' << dp.point_data[5] 
+                 << ',' << dp.point_data[6] << ')'; break; }
+#endif
+#if LEGION_MAX_DIM >= 8
+    case 8: { os << '(' << dp.point_data[0]
+                 << ',' << dp.point_data[1]
+                 << ',' << dp.point_data[2] 
+                 << ',' << dp.point_data[3] 
+                 << ',' << dp.point_data[4] 
+                 << ',' << dp.point_data[5] 
+                 << ',' << dp.point_data[6] 
+                 << ',' << dp.point_data[7] << ')'; break; }
+#endif
+#if LEGION_MAX_DIM >= 9
+    case 9: { os << '(' << dp.point_data[0]
+                 << ',' << dp.point_data[1]
+                 << ',' << dp.point_data[2] 
+                 << ',' << dp.point_data[3] 
+                 << ',' << dp.point_data[4] 
+                 << ',' << dp.point_data[5] 
+                 << ',' << dp.point_data[6] 
+                 << ',' << dp.point_data[7] 
+                 << ',' << dp.point_data[8] << ')'; break; }
+#endif
     default: assert(0);
     }
     return os;
@@ -760,6 +846,8 @@ namespace Legion {
     : is_id(0), dim(0)
   //----------------------------------------------------------------------------
   {
+    for (int i = 0; i < MAX_RECT_DIM*2; i++)
+      rect_data[i] = 0;
   }
 
   //----------------------------------------------------------------------------
@@ -767,7 +855,7 @@ namespace Legion {
     : is_id(other.is_id), dim(other.dim)
   //----------------------------------------------------------------------------
   {
-    for(int i = 0; i < MAX_RECT_DIM*2; i++)
+    for (int i = 0; i < MAX_RECT_DIM*2; i++)
       rect_data[i] = other.rect_data[i];
   }
 
@@ -960,12 +1048,11 @@ namespace Legion {
     switch (p.dim) {
       case 0:
         assert(false);
-      case 1:
-        return Domain::from_point<1>(p.get_point<1>());
-      case 2:
-        return Domain::from_point<2>(p.get_point<2>());
-      case 3:
-        return Domain::from_point<3>(p.get_point<3>());
+#define DIMFUNC(DIM) \
+      case DIM: \
+        return Domain::from_point<DIM>(p.get_point<DIM>());
+      LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
       default:
         assert(false);
     }
@@ -987,27 +1074,16 @@ namespace Legion {
     bool result = false;
     switch (dim)
     {
-      case 1:
-        {
-          Point<1,coord_t> p1 = point;
-          DomainT<1,coord_t> is1 = *this;
-          result = is1.contains(p1);
-          break;
+#define DIMFUNC(DIM) \
+      case DIM: \
+        { \
+          Point<DIM,coord_t> p1 = point; \
+          DomainT<DIM,coord_t> is1 = *this; \
+          result = is1.contains(p1); \
+          break; \
         }
-      case 2:
-        {
-          Point<2,coord_t> p2 = point;
-          DomainT<2,coord_t> is2 = *this;
-          result = is2.contains(p2);
-          break;
-        }
-      case 3:
-        {
-          Point<3,coord_t> p3 = point;
-          DomainT<3,coord_t> is3 = *this;
-          result = is3.contains(p3);
-          break;
-        }
+      LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
       default:
         assert(false);
     }
@@ -1034,21 +1110,14 @@ namespace Legion {
   {
     switch (dim)
     {
-      case 1:
-        {
-          DomainT<1,coord_t> is = *this;
-          return is.volume();
+#define DIMFUNC(DIM) \
+      case DIM: \
+        { \
+          DomainT<DIM,coord_t> is = *this; \
+          return is.volume(); \
         }
-      case 2:
-        {
-          DomainT<2,coord_t> is = *this;
-          return is.volume();
-        }
-      case 3:
-        {
-          DomainT<3,coord_t> is = *this;
-          return is.volume();
-        }
+      LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
       default:
         assert(false);
     }
@@ -1085,48 +1154,23 @@ namespace Legion {
     Realm::ProfilingRequestSet dummy_requests;
     switch (dim)
     {
-      case 1:
-        {
-          DomainT<1,coord_t> is1 = *this;
-          DomainT<1,coord_t> is2 = other;
-          DomainT<1,coord_t> temp;
-          Internal::LgEvent wait_on( 
-            DomainT<1,coord_t>::compute_intersection(is1,is2,
-                                                  temp,dummy_requests));
-          if (wait_on.exists())
-            wait_on.wait();
-          DomainT<1,coord_t> result = temp.tighten();
-          temp.destroy();
-          return Domain(result);
+#define DIMFUNC(DIM) \
+      case DIM: \
+        { \
+          DomainT<DIM,coord_t> is1 = *this; \
+          DomainT<DIM,coord_t> is2 = other; \
+          DomainT<DIM,coord_t> temp; \
+          Internal::LgEvent wait_on( \
+            DomainT<DIM,coord_t>::compute_intersection(is1,is2, \
+                                                  temp,dummy_requests)); \
+          if (wait_on.exists()) \
+            wait_on.wait(); \
+          DomainT<DIM,coord_t> result = temp.tighten(); \
+          temp.destroy(); \
+          return Domain(result); \
         }
-      case 2:
-        {
-          DomainT<2,coord_t> is1 = *this;
-          DomainT<2,coord_t> is2 = other;
-          DomainT<2,coord_t> temp;
-          Internal::LgEvent wait_on(
-            DomainT<2,coord_t>::compute_intersection(is1,is2,
-                                                  temp,dummy_requests));
-          if (wait_on.exists())
-            wait_on.wait();
-          DomainT<2,coord_t> result = temp.tighten();
-          temp.destroy();
-          return Domain(result);
-        }
-      case 3:
-        {
-          DomainT<3,coord_t> is1 = *this;
-          DomainT<3,coord_t> is2 = other;
-          DomainT<3,coord_t> temp;
-          Internal::LgEvent wait_on(
-            DomainT<3,coord_t>::compute_intersection(is1,is2,
-                                                  temp,dummy_requests));
-          if (wait_on.exists())
-            wait_on.wait();
-          DomainT<3,coord_t> result = temp.tighten();
-          temp.destroy();
-          return Domain(result);
-        }
+      LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
       default:
         assert(false);
     }
@@ -1141,27 +1185,16 @@ namespace Legion {
     Realm::ProfilingRequestSet dummy_requests;
     switch (dim)
     {
-      case 1:
-        {
-          Rect<1,coord_t> is1 = *this;
-          Rect<1,coord_t> is2(p, p);
-          Rect<1,coord_t> result = is1.union_bbox(is2);
-          return Domain(result);
+#define DIMFUNC(DIM) \
+      case DIM: \
+        { \
+          Rect<DIM,coord_t> is1 = *this; \
+          Rect<DIM,coord_t> is2(p, p); \
+          Rect<DIM,coord_t> result = is1.union_bbox(is2); \
+          return Domain(result); \
         }
-      case 2:
-        {
-          Rect<2,coord_t> is1 = *this;
-          Rect<2,coord_t> is2(p, p);
-          Rect<2,coord_t> result = is1.union_bbox(is2);
-          return Domain(result);
-        }
-      case 3:
-        {
-          Rect<3,coord_t> is1 = *this;
-          Rect<3,coord_t> is2(p, p);
-          Rect<3,coord_t> result = is1.union_bbox(is2);
-          return Domain(result);
-        }
+      LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
       default:
         assert(false);
     }
@@ -1187,57 +1220,46 @@ namespace Legion {
   {
     p.dim = d.get_dim();
     switch(p.get_dim()) {
-    case 1:
-      {
-        Realm::IndexSpaceIterator<1,coord_t> *is_itr = 
-          new (is_iterator) Realm::IndexSpaceIterator<1,coord_t>(
-              DomainT<1,coord_t>(d));
-        is_valid = is_itr->valid;
-        if (is_valid) {
-          Realm::PointInRectIterator<1,coord_t> *rect_itr = 
-            new (rect_iterator) 
-              Realm::PointInRectIterator<1,coord_t>(is_itr->rect);
-          rect_valid = rect_itr->valid;
-          p = Point<1,coord_t>(rect_itr->p); 
-        } else {
-          rect_valid = false;
-        }
-        break;
+#if __cplusplus < 201103L
+#define DIMFUNC(DIM) \
+    case DIM: \
+      { \
+        Realm::IndexSpaceIterator<DIM,coord_t> *is_itr = \
+          new (is_iterator) Realm::IndexSpaceIterator<DIM,coord_t>( \
+              DomainT<DIM,coord_t>(d)); \
+        is_valid = is_itr->valid; \
+        if (is_valid) { \
+          Realm::PointInRectIterator<DIM,coord_t> *rect_itr = \
+            new (rect_iterator) \
+              Realm::PointInRectIterator<DIM,coord_t>(is_itr->rect); \
+          rect_valid = rect_itr->valid; \
+          p = Point<DIM,coord_t>(rect_itr->p); \
+        } else { \
+          rect_valid = false; \
+        } \
+        break; \
       }
-    case 2:
-      {
-        Realm::IndexSpaceIterator<2,coord_t> *is_itr = 
-          new (is_iterator) Realm::IndexSpaceIterator<2,coord_t>(
-              DomainT<2,coord_t>(d));
-        is_valid = is_itr->valid;
-        if (is_valid) {
-          Realm::PointInRectIterator<2,coord_t> *rect_itr = 
-            new (rect_iterator)
-              Realm::PointInRectIterator<2,coord_t>(is_itr->rect);
-          rect_valid = rect_itr->valid;
-          p = Point<2,coord_t>(rect_itr->p); 
-        } else {
-          rect_valid = false;
-        }
-        break;
+#else
+#define DIMFUNC(DIM) \
+    case DIM: \
+      { \
+        Realm::IndexSpaceIterator<DIM,coord_t> *is_itr = \
+          new (is_iterator) Realm::IndexSpaceIterator<DIM,coord_t>(d); \
+        is_valid = is_itr->valid; \
+        if (is_valid) { \
+          Realm::PointInRectIterator<DIM,coord_t> *rect_itr = \
+            new (rect_iterator) \
+              Realm::PointInRectIterator<DIM,coord_t>(is_itr->rect); \
+          rect_valid = rect_itr->valid; \
+          p = Point<DIM,coord_t>(rect_itr->p); \
+        } else { \
+          rect_valid = false; \
+        } \
+        break; \
       }
-    case 3:
-      {
-        Realm::IndexSpaceIterator<3,coord_t> *is_itr = 
-          new (is_iterator) Realm::IndexSpaceIterator<3,coord_t>(
-              DomainT<3,coord_t>(d));
-        is_valid = is_itr->valid;
-        if (is_valid) {
-          Realm::PointInRectIterator<3,coord_t> *rect_itr = 
-            new (rect_iterator) 
-              Realm::PointInRectIterator<3,coord_t>(is_itr->rect);
-          rect_valid = rect_itr->valid;
-          p = Point<3,coord_t>(rect_itr->p); 
-        } else {
-          rect_valid = false;
-        }
-        break;
-      }
+#endif
+    LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
     default:
       assert(0);
     };
@@ -1261,90 +1283,33 @@ namespace Legion {
   {
     assert(is_valid && rect_valid);
     switch(p.get_dim()) {
-    case 1:
-      {
-        // Step the rect iterator first
-        Realm::PointInRectIterator<1,coord_t> *rect_itr = 
-          (Realm::PointInRectIterator<1,coord_t>*)(void *)rect_iterator;
-        rect_itr->step();
-        rect_valid = rect_itr->valid;
-        if (!rect_valid) {
-          // If the rectangle iterator is not valid anymore
-          // then try to start the next rectangle
-          Realm::IndexSpaceIterator<1,coord_t> *is_itr = 
-            (Realm::IndexSpaceIterator<1,coord_t>*)(void *)is_iterator;
-          is_itr->step();
-          is_valid = is_itr->valid;
-          if (is_valid) {
-            // Placement new on top of the old one
-            new (rect_itr) 
-              Realm::PointInRectIterator<1,coord_t>(is_itr->rect);
-            p = Point<1,coord_t>(rect_itr->p);
-            rect_valid = rect_itr->valid;
-          } else {
-            rect_valid = false;
-          }
-        } else {
-          p = Point<1,coord_t>(rect_itr->p); 
-        }
-        break;
+#define DIMFUNC(DIM) \
+    case DIM: \
+      { \
+        Realm::PointInRectIterator<DIM,coord_t> *rect_itr = \
+          (Realm::PointInRectIterator<DIM,coord_t>*)(void *)rect_iterator; \
+        rect_itr->step(); \
+        rect_valid = rect_itr->valid; \
+        if (!rect_valid) { \
+          Realm::IndexSpaceIterator<DIM,coord_t> *is_itr = \
+            (Realm::IndexSpaceIterator<DIM,coord_t>*)(void *)is_iterator; \
+          is_itr->step(); \
+          is_valid = is_itr->valid; \
+          if (is_valid) { \
+            new (rect_itr) \
+              Realm::PointInRectIterator<DIM,coord_t>(is_itr->rect); \
+            p = Point<DIM,coord_t>(rect_itr->p); \
+            rect_valid = rect_itr->valid; \
+          } else { \
+            rect_valid = false; \
+          } \
+        } else { \
+          p = Point<DIM,coord_t>(rect_itr->p); \
+        } \
+        break; \
       }
-    case 2:
-      {
-        // Step the rect iterator first
-        Realm::PointInRectIterator<2,coord_t> *rect_itr = 
-          (Realm::PointInRectIterator<2,coord_t>*)(void *)rect_iterator;
-        rect_itr->step();
-        rect_valid = rect_itr->valid;
-        if (!rect_valid) {
-          // If the rectangle iterator is not valid anymore
-          // then try to start the next rectangle
-          Realm::IndexSpaceIterator<2,coord_t> *is_itr = 
-            (Realm::IndexSpaceIterator<2,coord_t>*)(void *)is_iterator;
-          is_itr->step();
-          is_valid = is_itr->valid;
-          if (is_valid) {
-            // Placement new on top of the old one
-            new (rect_itr) 
-              Realm::PointInRectIterator<2,coord_t>(is_itr->rect);
-            p = Point<2,coord_t>(rect_itr->p);
-            rect_valid = rect_itr->valid;
-          } else {
-            rect_valid = false;
-          }
-        } else {
-          p = Point<2,coord_t>(rect_itr->p); 
-        }
-        break;
-      }
-    case 3:
-      {
-        // Step the rect iterator first
-        Realm::PointInRectIterator<3,coord_t> *rect_itr = 
-          (Realm::PointInRectIterator<3,coord_t>*)(void *)rect_iterator;
-        rect_itr->step();
-        rect_valid = rect_itr->valid;
-        if (!rect_valid) {
-          // If the rectangle iterator is not valid anymore
-          // then try to start the next rectangle
-          Realm::IndexSpaceIterator<3,coord_t> *is_itr = 
-            (Realm::IndexSpaceIterator<3,coord_t>*)(void *)is_iterator;
-          is_itr->step();
-          is_valid = is_itr->valid;
-          if (is_valid) {
-            // Placement new on top of the old one
-            new (rect_itr) 
-              Realm::PointInRectIterator<3,coord_t>(is_itr->rect);
-            p = Point<3,coord_t>(rect_itr->p);
-            rect_valid = rect_itr->valid;
-          } else {
-            rect_valid = false;
-          }
-        } else {
-          p = Point<3,coord_t>(rect_itr->p); 
-        }
-        break;
-      }
+      LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
     default:
       assert(0);
     }
@@ -1356,6 +1321,13 @@ namespace Legion {
   //----------------------------------------------------------------------------
   {
     return is_valid && rect_valid;
+  }
+
+  //----------------------------------------------------------------------------
+  inline DomainPoint& Domain::DomainPointIterator::operator*(void)
+  //----------------------------------------------------------------------------
+  {
+    return p;
   }
   
   //----------------------------------------------------------------------------
@@ -1397,9 +1369,10 @@ namespace Legion {
   //----------------------------------------------------------------------------
   {
     switch(d.get_dim()) {
-    case 1: return os << d.get_rect<1>();
-    case 2: return os << d.get_rect<2>();
-    case 3: return os << d.get_rect<3>();
+#define DIMFUNC(DIM) \
+    case DIM: return os << d.get_rect<DIM>();
+    LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
     default: assert(0);
     }
     return os;
@@ -1419,6 +1392,7 @@ namespace Legion {
     : itr(Realm::PointInRectIterator<DIM,COORD_T>(r, column_major_order))
   //----------------------------------------------------------------------------
   {
+    assert(valid());
   }
 
   //----------------------------------------------------------------------------
@@ -1449,12 +1423,11 @@ namespace Legion {
 
   //----------------------------------------------------------------------------
   template<int DIM, typename COORD_T>
-  inline const Point<DIM,COORD_T>& 
+  inline Point<DIM,COORD_T> 
                          PointInRectIterator<DIM,COORD_T>::operator*(void) const
   //----------------------------------------------------------------------------
   {
-    current = itr.p;
-    return current;
+    return itr.p;
   }
 
   //----------------------------------------------------------------------------
@@ -1472,8 +1445,7 @@ namespace Legion {
                         PointInRectIterator<DIM,COORD_T>::operator->(void) const
   //----------------------------------------------------------------------------
   {
-    current = itr.p;
-    return &current;
+    return &(itr.p);
   }
 
   //----------------------------------------------------------------------------
@@ -1541,12 +1513,11 @@ namespace Legion {
 
   //----------------------------------------------------------------------------
   template<int DIM, typename COORD_T>
-  inline const Rect<DIM,COORD_T>&
+  inline Rect<DIM,COORD_T>
                         RectInDomainIterator<DIM,COORD_T>::operator*(void) const
   //----------------------------------------------------------------------------
   {
-    current = itr.rect;
-    return current;
+    return itr.rect;
   }
 
   //----------------------------------------------------------------------------
@@ -1555,8 +1526,7 @@ namespace Legion {
                        RectInDomainIterator<DIM,COORD_T>::operator->(void) const
   //----------------------------------------------------------------------------
   {
-    current = itr.rect;
-    return &current;
+    return &(itr.rect);
   }
 
   //----------------------------------------------------------------------------
@@ -1633,12 +1603,11 @@ namespace Legion {
 
   //----------------------------------------------------------------------------
   template<int DIM, typename COORD_T>
-  inline const Point<DIM,COORD_T>& 
+  inline Point<DIM,COORD_T> 
                        PointInDomainIterator<DIM,COORD_T>::operator*(void) const
   //----------------------------------------------------------------------------
   {
-    current = *point_itr;
-    return current;
+    return *point_itr;
   }
 
   //----------------------------------------------------------------------------
@@ -1647,8 +1616,7 @@ namespace Legion {
                       PointInDomainIterator<DIM,COORD_T>::operator->(void) const
   //----------------------------------------------------------------------------
   {
-    current = *point_itr;
-    return &current;
+    return &(*point_itr);
   }
 
   //----------------------------------------------------------------------------
@@ -1984,6 +1952,7 @@ namespace Legion {
 }; // namespace Legion
 
 // Specializations of std::less<T> for Point,Rect,DomainT for use in containers
+#if __cplusplus < 201103L
 namespace std {
   template<int DIM, typename T>
   struct less<Legion::Point<DIM,T> > {
@@ -2006,4 +1975,5 @@ namespace std {
     { return std::less<Realm::IndexSpace<DIM,T> >()(d1, d2); }
   };
 };
+#endif // pre c++11
 

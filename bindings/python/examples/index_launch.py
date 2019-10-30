@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-# Copyright 2018 Stanford University
+# Copyright 2019 Stanford University
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -18,20 +18,51 @@
 from __future__ import print_function
 
 import legion
-from legion import task
+from legion import index_launch, task, Domain, ID, IndexLaunch, R, Region, Partition
 
 @task
 def hi(i):
     print("hello %s" % i)
     return i
 
+@task(privileges=[R])
+def hello(R, i):
+    print("hello from point %s (region %s)" % (i, R.ispace.bounds))
+
 @task
 def main():
     futures = []
-    for i in legion.IndexLaunch([10]):
+    for i in IndexLaunch(10):
         futures.append(hi(i))
-    for future in futures:
+    for i, future in enumerate(futures):
         print("got %s" % future.get())
+        assert int(future.get()) == i
 
-if __name__ == '__legion_main__':
+    # Same in 2 dimensions.
+    futures = []
+    for point in IndexLaunch([3, 3]):
+        futures.append(hi(point))
+    for i, point in enumerate(Domain([3, 3])):
+        assert futures[i].get() == point
+
+    R = Region([4, 4], {'x': legion.float64})
+    P = Partition.equal(R, [2, 2])
+    legion.fill(R, 'x', 0)
+
+    for i in IndexLaunch([2, 2]):
+        hello(R, i)
+
+    for i in IndexLaunch([2, 2]):
+        hello(P[i], i)
+
+    # Again, with a more explicit syntax.
+    # ID is the name of the (implicit) loop variable.
+    futures = index_launch([3, 3], hi, ID)
+    for point in Domain([3, 3]):
+        assert futures[point].get() == point
+
+    index_launch([2, 2], hello, R, ID)
+    index_launch([2, 2], hello, P[ID], ID)
+
+if __name__ == '__main__':
     main()

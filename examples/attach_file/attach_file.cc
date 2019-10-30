@@ -1,4 +1,4 @@
-/* Copyright 2018 Stanford University
+/* Copyright 2019 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -52,6 +52,12 @@ enum FieldIDs {
 
 bool generate_disk_file(const char *file_name, int num_elements)
 {
+  // strip off any filename prefix starting with a colon
+  {
+    const char *pos = strchr(file_name, ':');
+    if(pos) file_name = pos + 1;
+  }
+
   // create the file if needed
   int fd = open(file_name, O_CREAT | O_WRONLY, 0666);
   if(fd < 0) {
@@ -75,6 +81,12 @@ bool generate_disk_file(const char *file_name, int num_elements)
 #ifdef USE_HDF
 bool generate_hdf_file(const char *file_name, const char *dataset_name, int num_elements)
 {
+  // strip off any filename prefix starting with a colon
+  {
+    const char *pos = strchr(file_name, ':');
+    if(pos) file_name = pos + 1;
+  }
+
   hid_t file_id = H5Fcreate(file_name, H5F_ACC_TRUNC, H5P_DEFAULT, H5P_DEFAULT);
   if(file_id < 0) {
     printf("H5Fcreate failed: %lld\n", (long long)file_id);
@@ -90,11 +102,40 @@ bool generate_hdf_file(const char *file_name, const char *dataset_name, int num_
     return false;
   }
 
-  hid_t dataset = H5Dcreate2(file_id, dataset_name,
+  hid_t loc_id = file_id;
+  std::vector<hid_t> group_ids;
+  // leading slash in dataset path is optional - ignore if present
+  if(*dataset_name == '/') dataset_name++;
+  while(true) {
+    const char *pos = strchr(dataset_name, '/');
+    if(!pos) break;
+    char *group_name = strndup(dataset_name, pos - dataset_name);
+    hid_t id = H5Gcreate2(loc_id, group_name,
+			  H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
+    if(id < 0) {
+      printf("H5Gcreate2 failed: %lld\n", (long long)id);
+      for(std::vector<hid_t>::const_iterator it = group_ids.begin();
+	  it != group_ids.end();
+	  ++it)
+	H5Gclose(*it);
+      H5Sclose(dataspace_id);
+      H5Fclose(file_id);
+      return false;
+    }
+    group_ids.push_back(id);
+    loc_id = id;
+    dataset_name = pos + 1;
+  }
+  
+  hid_t dataset = H5Dcreate2(loc_id, dataset_name,
 			     H5T_IEEE_F64LE, dataspace_id,
 			     H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
   if(dataset < 0) {
     printf("H5Dcreate2 failed: %lld\n", (long long)dataset);
+    for(std::vector<hid_t>::const_iterator it = group_ids.begin();
+	it != group_ids.end();
+	++it)
+      H5Gclose(*it);
     H5Sclose(dataspace_id);
     H5Fclose(file_id);
     return false;
@@ -102,6 +143,10 @@ bool generate_hdf_file(const char *file_name, const char *dataset_name, int num_
 
   // close things up - attach will reopen later
   H5Dclose(dataset);
+  for(std::vector<hid_t>::const_iterator it = group_ids.begin();
+      it != group_ids.end();
+      ++it)
+    H5Gclose(*it);
   H5Sclose(dataspace_id);
   H5Fclose(file_id);
   return true;

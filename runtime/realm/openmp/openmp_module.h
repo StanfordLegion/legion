@@ -1,4 +1,4 @@
-/* Copyright 2018 Stanford University, NVIDIA Corporation
+/* Copyright 2019 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -64,7 +64,7 @@ namespace Realm {
       int cfg_num_threads_per_cpu;
       bool cfg_use_numa;
       bool cfg_fake_cpukind;
-      size_t cfg_stack_size_in_mb;
+      size_t cfg_stack_size;
 
       std::vector<int> active_numa_domains;
     };

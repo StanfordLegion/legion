@@ -1,4 +1,4 @@
-/* Copyright 2018 Stanford University, NVIDIA Corporation
+/* Copyright 2019 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,6 +20,60 @@
 
 namespace Legion {
   namespace Mapping {
+
+    //--------------------------------------------------------------------------
+    template<typename T,
+      T (*TASK_PTR)(const Task*, const std::vector<PhysicalRegion>&,
+                    Context, Runtime*)>
+    VariantID MapperRuntime::register_task_variant(MapperContext ctx,
+                                          const TaskVariantRegistrar &registrar)
+    //--------------------------------------------------------------------------
+    {
+      CodeDescriptor desc(LegionTaskWrapper::legion_task_wrapper<T,TASK_PTR>);
+      return register_task_variant(ctx, registrar, desc, NULL/*UDT*/,
+                                   0/*sizeof(UDT)*/, true/*has return type*/);
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename T, typename UDT,
+      T (*TASK_PTR)(const Task*, const std::vector<PhysicalRegion>&,
+                    Context, Runtime*, const UDT&)>
+    VariantID MapperRuntime::register_task_variant(MapperContext ctx,
+                    const TaskVariantRegistrar &registrar, const UDT &user_data)
+    //--------------------------------------------------------------------------
+    {
+      CodeDescriptor desc(
+          LegionTaskWrapper::legion_udt_task_wrapper<T,UDT,TASK_PTR>);
+      return register_task_variant(ctx, registrar, desc, &user_data, 
+                                   sizeof(UDT), true/*has return type*/);
+    }
+
+    //--------------------------------------------------------------------------
+    template<
+      void (*TASK_PTR)(const Task*, const std::vector<PhysicalRegion>&,
+                       Context, Runtime*)>
+    VariantID MapperRuntime::register_task_variant(MapperContext ctx,
+                                          const TaskVariantRegistrar &registrar)
+    //--------------------------------------------------------------------------
+    {
+      CodeDescriptor desc(LegionTaskWrapper::legion_task_wrapper<TASK_PTR>);
+      return register_task_variant(ctx, registrar, desc, NULL/*UDT*/, 
+                                   0/*sizeof(UDT)*/, false/*has return type*/);
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename UDT,
+      void (*TASK_PTR)(const Task*, const std::vector<PhysicalRegion>&,
+                       Context, Runtime*, const UDT&)>
+    VariantID MapperRuntime::register_task_variant(MapperContext ctx,
+                    const TaskVariantRegistrar &registrar, const UDT &user_data)
+    //--------------------------------------------------------------------------
+    {
+      CodeDescriptor desc(
+          LegionTaskWrapper::legion_udt_task_wrapper<UDT,TASK_PTR>);
+      return register_variant(ctx, registrar, desc, &user_data, sizeof(UDT),
+                              false/*has return type*/);
+    }
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
@@ -63,6 +117,69 @@ namespace Legion {
       const Domain dom(realm_is);
       return IndexSpaceT<DIM,T>(create_index_space_internal(ctx, dom, &realm_is,
                 Internal::NT_TemplateHelper::template encode_tag<DIM,T>()));
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    inline IndexSpaceT<DIM,T> MapperRuntime::union_index_spaces(
+          MapperContext ctx, const std::vector<IndexSpaceT<DIM,T> > &srcs) const
+    //--------------------------------------------------------------------------
+    {
+      // C++ type system is dumb
+      std::vector<IndexSpace> sources(srcs.size());
+      for (unsigned idx = 0; idx < sources.size(); idx++)
+        sources[idx] = srcs[idx];
+      return IndexSpaceT<DIM,T>(union_index_spaces(ctx, sources));
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    inline IndexSpaceT<DIM,T> MapperRuntime::intersect_index_spaces(
+          MapperContext ctx, const std::vector<IndexSpaceT<DIM,T> > &srcs) const
+    //--------------------------------------------------------------------------
+    {
+      // C++ type system is dumb
+      std::vector<IndexSpace> sources(srcs.size());
+      for (unsigned idx = 0; idx < sources.size(); idx++)
+        sources[idx] = srcs[idx];
+      return IndexSpaceT<DIM,T>(intersect_index_spaces(ctx, sources));
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    inline IndexSpaceT<DIM,T> MapperRuntime::subtract_index_spaces(
+     MapperContext ctx, IndexSpaceT<DIM,T> left, IndexSpaceT<DIM,T> right) const
+    //--------------------------------------------------------------------------
+    {
+      return IndexSpaceT<DIM,T>(subtract_index_spaces(ctx, 
+                                (IndexSpace)left, (IndexSpace)right));
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    inline bool MapperRuntime::is_index_space_empty(MapperContext ctx,
+                                                IndexSpaceT<DIM,T> handle) const
+    //--------------------------------------------------------------------------
+    {
+      return is_index_space_empty(ctx, (IndexSpace)handle);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    inline bool MapperRuntime::index_spaces_overlap(MapperContext ctx,
+                           IndexSpaceT<DIM,T> one, IndexSpaceT<DIM,T> two) const
+    //--------------------------------------------------------------------------
+    {
+      return index_spaces_overlap(ctx, (IndexSpace)one, (IndexSpace)two);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    inline bool MapperRuntime::index_space_dominates(MapperContext ctx,
+                        IndexSpaceT<DIM,T> left, IndexSpaceT<DIM,T> right) const
+    //--------------------------------------------------------------------------
+    {
+      return index_space_dominates(ctx, (IndexSpace)left, (IndexSpace)right);
     }
 
     //--------------------------------------------------------------------------

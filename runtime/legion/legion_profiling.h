@@ -1,4 +1,4 @@
-/* Copyright 2018 Stanford University, NVIDIA Corporation
+/* Copyright 2019 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -45,6 +45,7 @@ namespace Legion {
     typedef ::realm_id_t ProcID;
     typedef ::realm_id_t MemID;
     typedef ::realm_id_t InstID;
+    typedef ::realm_id_t IDType;
 
     class LegionProfSerializer; // forward declaration
 
@@ -98,6 +99,14 @@ namespace Legion {
         MemKind kind;
         unsigned long long capacity;
       };
+      struct ProcMemDesc {
+      public:
+        ProcID proc_id;
+        MemID mem_id;
+      };
+      struct MaxDimDesc {
+	unsigned max_dim;
+      };
     };
 
     class LegionProfInstance {
@@ -141,6 +150,89 @@ namespace Legion {
         ProcID proc_id;
         timestamp_t create, ready, start, stop;
         std::deque<WaitInfo> wait_intervals;
+      };
+      struct GPUTaskInfo {
+      public:
+        UniqueID op_id;
+        TaskID task_id;
+        VariantID variant_id;
+        ProcID proc_id;
+        timestamp_t create, ready, start, stop;
+        timestamp_t gpu_start, gpu_stop;
+        std::deque<WaitInfo> wait_intervals;
+      };
+      struct IndexSpacePointDesc {
+      public:
+	IDType unique_id;
+	unsigned dim;
+        long long points[LEGION_MAX_DIM];
+      };
+      struct IndexSpaceEmptyDesc {
+      public:
+	IDType unique_id;
+      };
+      struct IndexSpaceRectDesc {
+      public:
+	IDType unique_id;
+        long long rect_lo[LEGION_MAX_DIM];
+        long long rect_hi[LEGION_MAX_DIM];
+	unsigned dim;
+      };
+      struct FieldDesc {
+      public:
+	UniqueID unique_id;
+	unsigned field_id;
+	unsigned long long size;
+	const char *name;
+      };
+      struct FieldSpaceDesc {
+      public:
+	UniqueID unique_id;
+	const char *name;
+      };
+      struct IndexPartDesc {
+      public:
+        UniqueID unique_id;
+        const char *name;
+      };
+      struct IndexSpaceDesc {
+      public:
+	UniqueID unique_id;
+	const char *name;
+      };
+      struct IndexPartitionDesc {
+      public:
+        IDType parent_id;
+        IDType unique_id;
+        bool disjoint;
+        LegionColor point;
+      };
+      struct IndexSubSpaceDesc {
+      public:
+	IDType parent_id;
+	IDType unique_id;
+      };
+      struct LogicalRegionDesc {
+      public:
+	IDType ispace_id;
+	unsigned fspace_id;
+	unsigned tree_id;
+	const char *name;
+      };
+      struct PhysicalInstRegionDesc {
+      public:
+	UniqueID op_id;
+	IDType inst_id;
+	IDType ispace_id;
+	unsigned fspace_id;
+	unsigned tree_id;
+      };
+      struct PhysicalInstLayoutDesc {
+      public:
+	UniqueID op_id;
+	IDType inst_id;
+	unsigned field_id;
+	unsigned fspace_id;
       };
       struct MetaInfo {
       public:
@@ -229,11 +321,37 @@ namespace Legion {
       void register_operation(Operation *op);
       void register_multi_task(Operation *op, TaskID kind);
       void register_slice_owner(UniqueID pid, UniqueID id);
+      void register_index_space_rect(IndexSpaceRectDesc
+				     &ispace_rect_desc);
+      void register_index_space_point(IndexSpacePointDesc
+				      &ispace_point_desc);
+      void register_empty_index_space(IDType handle);
+      void register_field(UniqueID unique_id, unsigned field_id,
+			  size_t size, const char* name);
+      void register_field_space(UniqueID unique_id, const char* name);
+      void register_index_part(UniqueID unique_id, const char* name);
+      void register_index_space(UniqueID unique_id, const char* name);
+      void register_index_subspace(IDType parent_id, IDType unique_id,
+				   const DomainPoint &point);
+      void register_index_partition(IDType parent_id, IDType unique_id,
+				    bool disjoint, LegionColor point);
+      void register_logical_region(IDType index_space,
+				   unsigned field_space, unsigned tree_id,
+				   const char* name);
+      void register_physical_instance_region(UniqueID op_id, IDType inst_id,
+					     LogicalRegion handle);
+      void register_physical_instance_field(UniqueID op_id, IDType inst_id, 
+                                    unsigned field_id, unsigned fspace);
     public:
       void process_task(TaskID task_id, VariantID variant_id, UniqueID op_id, 
             const Realm::ProfilingMeasurements::OperationTimeline &timeline,
             const Realm::ProfilingMeasurements::OperationProcessorUsage &usage,
             const Realm::ProfilingMeasurements::OperationEventWaits &waits);
+      void process_gpu_task(TaskID task_id, VariantID variant_id, UniqueID op_id,
+            const Realm::ProfilingMeasurements::OperationTimeline &timeline,
+            const Realm::ProfilingMeasurements::OperationProcessorUsage &usage,
+            const Realm::ProfilingMeasurements::OperationEventWaits &waits,
+            const Realm::ProfilingMeasurements::OperationTimelineGPU &timeline_gpu);
       void process_meta(size_t id, UniqueID op_id,
             const Realm::ProfilingMeasurements::OperationTimeline &timeline,
             const Realm::ProfilingMeasurements::OperationProcessorUsage &usage,
@@ -281,6 +399,19 @@ namespace Legion {
       std::deque<SliceOwner>        slice_owners;
     private:
       std::deque<TaskInfo> task_infos;
+      std::deque<GPUTaskInfo> gpu_task_infos;
+      std::deque<IndexSpaceRectDesc> ispace_rect_desc;
+      std::deque<IndexSpacePointDesc> ispace_point_desc;
+      std::deque<IndexSpaceEmptyDesc> ispace_empty_desc;
+      std::deque<FieldDesc> field_desc;
+      std::deque<FieldSpaceDesc> field_space_desc;
+      std::deque<IndexPartDesc> index_part_desc;
+      std::deque<IndexSpaceDesc> index_space_desc;
+      std::deque<IndexSubSpaceDesc> index_subspace_desc;
+      std::deque<IndexPartitionDesc> index_partition_desc;
+      std::deque<LogicalRegionDesc> lr_desc;
+      std::deque<PhysicalInstRegionDesc> phy_inst_rdesc;
+      std::deque<PhysicalInstLayoutDesc> phy_inst_layout_rdesc;
       std::deque<MetaInfo> meta_infos;
       std::deque<CopyInfo> copy_infos;
       std::deque<FillInfo> fill_infos;
@@ -308,6 +439,7 @@ namespace Legion {
         LEGION_PROF_FILL,
         LEGION_PROF_INST,
         LEGION_PROF_PARTITION,
+        LEGION_PROF_GPU_TASK,
         LEGION_PROF_LAST,
       };
       struct ProfilingInfo : public ProfilingResponseBase {
@@ -351,6 +483,8 @@ namespace Legion {
     public:
       void add_task_request(Realm::ProfilingRequestSet &requests, 
                             TaskID tid, VariantID vid, SingleTask *task);
+      void add_gpu_task_request(Realm::ProfilingRequestSet &requests,
+                            TaskID tid, VariantID vid, SingleTask *task);
       void add_meta_request(Realm::ProfilingRequestSet &requests,
                             LgTaskID tid, Operation *op);
       void add_copy_request(Realm::ProfilingRequestSet &requests, 
@@ -368,6 +502,8 @@ namespace Legion {
     public:
       // Alternate versions of the one above with op ids
       void add_task_request(Realm::ProfilingRequestSet &requests, 
+                            TaskID tid, VariantID vid, UniqueID uid);
+      void add_gpu_task_request(Realm::ProfilingRequestSet &requests,
                             TaskID tid, VariantID vid, UniqueID uid);
       void add_meta_request(Realm::ProfilingRequestSet &requests,
                             LgTaskID tid, UniqueID uid);
@@ -389,6 +525,24 @@ namespace Legion {
     public:
       void record_instance_creation(PhysicalInstance inst, Memory memory,
                                     UniqueID op_id, timestamp_t create);
+      void record_empty_index_space(IDType handle);
+      void record_field_space(UniqueID uid, const char* name);
+      void record_field(UniqueID unique_id,
+			unsigned field_id,
+			size_t size,
+			const char* name);
+      void record_index_space(UniqueID uid, const char* name);
+      void record_index_subspace(IDType parent_id, IDType unique_id,
+				 const DomainPoint &point);
+      void record_logical_region(IDType index_space, unsigned field_space,
+				 unsigned tree_id, const char* name);
+      void record_physical_instance_region(UniqueID op_id, IDType inst_id, 
+                                           LogicalRegion handle);
+      void record_physical_instance_fields(UniqueID op_id, IDType inst_id, 
+                                  FieldSpace fs, std::vector<FieldID>& fields);
+      void record_index_part(UniqueID id, const char* name);
+      void record_index_partition(UniqueID parent_id, UniqueID id, 
+                                  bool disjoint, LegionColor c);
     public:
       void record_message_kinds(const char *const *const message_names,
                                 unsigned int num_message_kinds);
@@ -440,6 +594,41 @@ namespace Legion {
     private:
       // For knowing when we need to start dumping early
       size_t total_memory_footprint;
+    public:
+      void record_index_space_point_desc(
+          LegionProfInstance::IndexSpacePointDesc &i);
+      void record_index_space_rect_desc(
+          LegionProfInstance::IndexSpaceRectDesc &i);
+      template <int DIM, typename T>
+      void record_index_space_point(IDType handle, const Point<DIM, T> &point); 
+#if 0
+      {
+	LegionProfInstance::IndexSpacePointDesc ispace_point_desc;
+	ispace_point_desc.unique_id = handle;
+	ispace_point_desc.dim = (unsigned)DIM;
+	ispace_point_desc.point0 = (long long) point[0];
+	ispace_point_desc.point1 = (DIM < 2) ? 0: (long long) point[1];
+	ispace_point_desc.point2 = (DIM < 3) ? 0: (long long) point[2];
+	record_index_space_point_desc(ispace_point_desc);
+      };
+#endif
+
+      template<int DIM, typename T>
+      void record_index_space_rect(IDType handle, const Rect<DIM, T> &rect); 
+#if 0
+      {
+	LegionProfInstance::IndexSpaceRectDesc ispace_rect_desc;
+	ispace_rect_desc.unique_id = handle;
+	ispace_rect_desc.dim = DIM;
+	ispace_rect_desc.rect_lo0 = (long long) rect.lo[0];
+	ispace_rect_desc.rect_lo1 = (DIM < 2) ? 0: (long long) rect.lo[1];
+	ispace_rect_desc.rect_lo2 = (DIM < 3) ? 0: (long long) rect.lo[2];
+	ispace_rect_desc.rect_hi0 = (long long) rect.hi[0];
+	ispace_rect_desc.rect_hi1 = (DIM < 2) ? 0: (long long) rect.hi[1];
+	ispace_rect_desc.rect_hi2 = (DIM < 3) ? 0: (long long) rect.hi[2];
+	record_index_space_rect_desc(ispace_rect_desc);
+      };
+#endif
     };
 
     class DetailedProfiler {
@@ -454,6 +643,39 @@ namespace Legion {
       const RuntimeCallKind call_kind;
       timestamp_t start_time;
     };
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    inline void LegionProfiler::record_index_space_point(IDType handle,
+                                                      const Point<DIM,T> &point)
+    //--------------------------------------------------------------------------
+    {
+      LegionProfInstance::IndexSpacePointDesc ispace_point_desc;
+      ispace_point_desc.unique_id = handle;
+      ispace_point_desc.dim = (unsigned)DIM;
+#define DIMFUNC(D2) \
+      ispace_point_desc.points[D2-1] = (D2<=DIM) ? (long long)point[D2-1] : 0;
+      LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
+      record_index_space_point_desc(ispace_point_desc);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    inline void LegionProfiler::record_index_space_rect(IDType handle,
+                                                        const Rect<DIM,T> &rect)
+    //--------------------------------------------------------------------------
+    {
+      LegionProfInstance::IndexSpaceRectDesc ispace_rect_desc;
+      ispace_rect_desc.unique_id = handle;
+      ispace_rect_desc.dim = DIM;
+#define DIMFUNC(D2) \
+      ispace_rect_desc.rect_lo[D2-1] = (D2<=DIM) ? (long long)rect.lo[D2-1]:0; \
+      ispace_rect_desc.rect_hi[D2-1] = (D2<=DIM) ? (long long)rect.hi[D2-1]:0;
+      LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
+      record_index_space_rect_desc(ispace_rect_desc);
+    }
 
   }; // namespace Internal
 }; // namespace Legion

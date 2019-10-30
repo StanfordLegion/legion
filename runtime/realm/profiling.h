@@ -1,4 +1,4 @@
-/* Copyright 2018 Stanford University, NVIDIA Corporation
+/* Copyright 2019 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -35,12 +35,14 @@ namespace Realm {
   //  these IDs directly
   enum ProfilingMeasurementID {
     PMID_OP_STATUS,    // completion status of operation
+    PMID_OP_STATUS_ABNORMAL,  // completion status only if abnormal
     PMID_OP_BACKTRACE,  // backtrace of a failed operation
     PMID_OP_TIMELINE,  // when task was ready, started, completed
     PMID_OP_EVENT_WAITS,  // intervals when operation is waiting on events
     PMID_OP_PROC_USAGE, // processor used by task
     PMID_OP_MEM_USAGE, // memories used by a copy
     PMID_INST_STATUS,   // "completion" status of an instance
+    PMID_INST_STATUS_ABNORMAL, // completion status only if abnormal
     PMID_INST_ALLOCRESULT, // success/failure of instance allocation
     PMID_INST_TIMELINE, // timeline for a physical instance
     PMID_INST_MEM_USAGE, // memory and size used by an instance
@@ -51,6 +53,7 @@ namespace Realm {
     PMID_PCTRS_IPC,  // instructions/clocks performance counters
     PMID_PCTRS_TLB,  // TLB miss counters
     PMID_PCTRS_BP,   // branch predictor performance counters
+    PMID_OP_TIMELINE_GPU, // when a task was started and completed on the GPU
 
     // as the name suggests, this should always be last, allowing apps/runtimes
     // sitting on top of Realm to use some of the ID space
@@ -75,6 +78,10 @@ namespace Realm {
       Result result;
       int error_code;
       ByteArray error_details;
+    };
+
+    struct OperationAbnormalStatus : public OperationStatus {
+      static const ProfilingMeasurementID ID = PMID_OP_STATUS_ABNORMAL;
     };
 
     struct OperationBacktrace {
@@ -112,6 +119,28 @@ namespace Realm {
       inline void record_start_time(void);
       inline void record_end_time(void);
       inline void record_complete_time(void);
+      inline bool is_valid(void) const;
+    };
+
+    struct OperationTimelineGPU {
+      static const ProfilingMeasurementID ID = PMID_OP_TIMELINE_GPU;
+
+      // all times reported in nanoseconds from the start of program execution
+      // on some node. This is necessary because clients can't know where the
+      // measurement times were recorded and therefore have no reference. There
+      // may be skews between the start times of different nodes.
+      typedef long long timestamp_t;
+      static const timestamp_t INVALID_TIMESTAMP = LLONG_MIN;
+
+      OperationTimelineGPU() :
+        start_time(INVALID_TIMESTAMP),
+        end_time(INVALID_TIMESTAMP)
+      { }
+      timestamp_t start_time; // when was the GPU started?
+      timestamp_t end_time; // when was the GPU completed?
+
+      inline void record_start_time(void);
+      inline void record_end_time(void);
       inline bool is_valid(void) const;
     };
 
@@ -170,11 +199,15 @@ namespace Realm {
       ByteArray error_details;
     };
 
-    // Simple boolean indicating whether or not allocation is expected to
+    struct InstanceAbnormalStatus : public InstanceStatus {
+      static const ProfilingMeasurementID ID = PMID_INST_STATUS_ABNORMAL;
+    };
+
+    // simple boolean indicating whether or not allocation is expected to
     //  succeed
     struct InstanceAllocResult {
       static const ProfilingMeasurementID ID = PMID_INST_ALLOCRESULT;
-      
+     
       bool success;
     };
 
@@ -247,7 +280,7 @@ namespace Realm {
 
   class ProfilingRequest {
   public:
-    ProfilingRequest(Processor _response_proc, Processor::TaskFuncID _response_task_id, int _priority = 0);
+    ProfilingRequest(Processor _response_proc, Processor::TaskFuncID _response_task_id, int _priority = 0, bool _report_if_empty = false);
     ProfilingRequest(const ProfilingRequest& to_copy);
 
     ~ProfilingRequest(void);
@@ -272,6 +305,7 @@ namespace Realm {
     Processor response_proc;
     Processor::TaskFuncID response_task_id;
     int priority;
+    bool report_if_empty;
     ByteArray user_data;
     std::set<ProfilingMeasurementID> requested_measurements;
   };

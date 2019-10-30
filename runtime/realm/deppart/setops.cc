@@ -1,4 +1,4 @@
-/* Copyright 2018 Stanford University, NVIDIA Corporation
+/* Copyright 2019 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -148,7 +148,6 @@ namespace Realm {
 
 
   template <int N, typename T>
-  __attribute__ ((noinline))
   /*static*/ Event IndexSpace<N,T>::compute_unions(const std::vector<IndexSpace<N,T> >& lhss,
 						    const std::vector<IndexSpace<N,T> >& rhss,
 						    std::vector<IndexSpace<N,T> >& results,
@@ -209,8 +208,10 @@ namespace Realm {
 
       // general case - create op if needed
       if(!op) {
-	e = GenEventImpl::create_genevent()->current_event();
-	op = new UnionOperation<N,T>(reqs, e);
+	GenEventImpl *finish_event = GenEventImpl::create_genevent();
+	e = finish_event->current_event();
+	op = new UnionOperation<N,T>(reqs,
+				     finish_event, ID(e).event_generation());
       }
       results[i] = op->add_union(l, r);
     }
@@ -222,14 +223,13 @@ namespace Realm {
     }
 
     if(op)
-      op->deferred_launch(wait_on);
+      op->launch(wait_on);
     else
       PartitioningOperation::do_inline_profiling(reqs, inline_start_time);
     return e;
   }
 
   template <int N, typename T>
-  __attribute__ ((noinline))
   /*static*/ Event IndexSpace<N,T>::compute_intersections(const std::vector<IndexSpace<N,T> >& lhss,
 							   const std::vector<IndexSpace<N,T> >& rhss,
 							   std::vector<IndexSpace<N,T> >& results,
@@ -279,8 +279,11 @@ namespace Realm {
 
       // general case - create op if needed
       if(!op) {
-	e = GenEventImpl::create_genevent()->current_event();
-	op = new IntersectionOperation<N,T>(reqs, e);
+	GenEventImpl *finish_event = GenEventImpl::create_genevent();
+	e = finish_event->current_event();
+	op = new IntersectionOperation<N,T>(reqs,
+					    finish_event,
+					    ID(e).event_generation());
       }
       results[i] = op->add_intersection(lhss[li], rhss[ri]);
     }
@@ -292,14 +295,13 @@ namespace Realm {
     }
 
     if(op)
-      op->deferred_launch(wait_on);
+      op->launch(wait_on);
     else
       PartitioningOperation::do_inline_profiling(reqs, inline_start_time);
     return e;
   }
 
   template <int N, typename T>
-  __attribute__ ((noinline))
   /*static*/ Event IndexSpace<N,T>::compute_differences(const std::vector<IndexSpace<N,T> >& lhss,
 							 const std::vector<IndexSpace<N,T> >& rhss,
 							 std::vector<IndexSpace<N,T> >& results,
@@ -362,8 +364,11 @@ namespace Realm {
 
       // general case - create op if needed
       if(!op) {
-	e = GenEventImpl::create_genevent()->current_event();
-	op = new DifferenceOperation<N,T>(reqs, e);
+	GenEventImpl *finish_event = GenEventImpl::create_genevent();
+	e = finish_event->current_event();
+	op = new DifferenceOperation<N,T>(reqs,
+					  finish_event,
+					  ID(e).event_generation());
       }
       results[i] = op->add_difference(lhss[li], rhss[ri]);
     }
@@ -375,7 +380,7 @@ namespace Realm {
     }
 
     if(op)
-      op->deferred_launch(wait_on);
+      op->launch(wait_on);
     else
       PartitioningOperation::do_inline_profiling(reqs, inline_start_time);
     return e;
@@ -419,11 +424,14 @@ namespace Realm {
 	}
 
 	// general case - do full computation
-	e = GenEventImpl::create_genevent()->current_event();
-	UnionOperation<N,T> *op = new UnionOperation<N,T>(reqs, e);
+	GenEventImpl *finish_event = GenEventImpl::create_genevent();
+	e = finish_event->current_event();
+	UnionOperation<N,T> *op = new UnionOperation<N,T>(reqs,
+							  finish_event,
+							  ID(e).event_generation());
 
 	result = op->add_union(subspaces);
-	op->deferred_launch(wait_on);
+	op->launch(wait_on);
 	was_inline = false;
 	break;
       }
@@ -499,11 +507,14 @@ namespace Realm {
 	}
 
 	// general case - do full computation
-	e = GenEventImpl::create_genevent()->current_event();
-	IntersectionOperation<N,T> *op = new IntersectionOperation<N,T>(reqs, e);
+	GenEventImpl *finish_event = GenEventImpl::create_genevent();
+	e = finish_event->current_event();
+	IntersectionOperation<N,T> *op = new IntersectionOperation<N,T>(reqs,
+									finish_event,
+									ID(e).event_generation());
 
 	result = op->add_intersection(subspaces);
-	op->deferred_launch(wait_on);
+	op->launch(wait_on);
 	was_inline = false;
 	break;
       }
@@ -533,16 +544,11 @@ namespace Realm {
   // class UnionMicroOp<N,T>
 
   template <int N, typename T>
-  inline /*static*/ DynamicTemplates::TagType UnionMicroOp<N,T>::type_tag(void)
-  {
-    return NT_TemplateHelper::encode_tag<N,T>();
-  }
-
-  template <int N, typename T>
   UnionMicroOp<N,T>::UnionMicroOp(const std::vector<IndexSpace<N,T> >& _inputs)
     : inputs(_inputs)
   {
     sparsity_output.id = 0;
+    areg.force_instantiation();
   }
 
   template <int N, typename T>
@@ -1022,16 +1028,10 @@ namespace Realm {
   void UnionMicroOp<N,T>::dispatch(PartitioningOperation *op, bool inline_ok)
   {
     // execute wherever our sparsity output is
-    NodeID exec_node = ID(sparsity_output).sparsity.creator_node;
+    NodeID exec_node = ID(sparsity_output).sparsity_creator_node();
 
-    if(exec_node != my_node_id) {
-      // we're going to ship it elsewhere, which means we always need an AsyncMicroOp to
-      //  track it
-      async_microop = new AsyncMicroOp(op, this);
-      op->add_async_work_item(async_microop);
-
-      RemoteMicroOpMessage::send_request(exec_node, op, *this);
-      delete this;
+    if(exec_node != Network::my_node_id) {
+      forward_microop<UnionMicroOp<N,T> >(exec_node, op, this);
       return;
     }
 
@@ -1070,22 +1070,20 @@ namespace Realm {
     assert(ok);
   }
 
+  template <int N, typename T>
+  ActiveMessageHandlerReg<RemoteMicroOpMessage<UnionMicroOp<N,T> > > UnionMicroOp<N,T>::areg;
+
 
   ////////////////////////////////////////////////////////////////////////
   //
   // class IntersectionMicroOp<N,T>
 
   template <int N, typename T>
-  inline /*static*/ DynamicTemplates::TagType IntersectionMicroOp<N,T>::type_tag(void)
-  {
-    return NT_TemplateHelper::encode_tag<N,T>();
-  }
-
-  template <int N, typename T>
   IntersectionMicroOp<N,T>::IntersectionMicroOp(const std::vector<IndexSpace<N,T> >& _inputs)
     : inputs(_inputs)
   {
     sparsity_output.id = 0;
+    areg.force_instantiation();
   }
 
   template <int N, typename T>
@@ -1192,16 +1190,10 @@ namespace Realm {
   void IntersectionMicroOp<N,T>::dispatch(PartitioningOperation *op, bool inline_ok)
   {
     // execute wherever our sparsity output is
-    NodeID exec_node = ID(sparsity_output).sparsity.creator_node;
+    NodeID exec_node = ID(sparsity_output).sparsity_creator_node();
 
-    if(exec_node != my_node_id) {
-      // we're going to ship it elsewhere, which means we always need an AsyncMicroOp to
-      //  track it
-      async_microop = new AsyncMicroOp(op, this);
-      op->add_async_work_item(async_microop);
-
-      RemoteMicroOpMessage::send_request(exec_node, op, *this);
-      delete this;
+    if(exec_node != Network::my_node_id) {
+      forward_microop<IntersectionMicroOp<N,T> >(exec_node, op, this);
       return;
     }
 
@@ -1240,16 +1232,13 @@ namespace Realm {
     assert(ok);
   }
 
+  template <int N, typename T>
+  ActiveMessageHandlerReg<RemoteMicroOpMessage<IntersectionMicroOp<N,T> > > IntersectionMicroOp<N,T>::areg;
+
 
   ////////////////////////////////////////////////////////////////////////
   //
   // class DifferenceMicroOp<N,T>
-
-  template <int N, typename T>
-  inline /*static*/ DynamicTemplates::TagType DifferenceMicroOp<N,T>::type_tag(void)
-  {
-    return NT_TemplateHelper::encode_tag<N,T>();
-  }
 
   template <int N, typename T>
   DifferenceMicroOp<N,T>::DifferenceMicroOp(IndexSpace<N,T> _lhs,
@@ -1257,6 +1246,7 @@ namespace Realm {
     : lhs(_lhs), rhs(_rhs)
   {
     sparsity_output.id = 0;
+    areg.force_instantiation();
   }
 
   template <int N, typename T>
@@ -1433,16 +1423,10 @@ namespace Realm {
   void DifferenceMicroOp<N,T>::dispatch(PartitioningOperation *op, bool inline_ok)
   {
     // execute wherever our sparsity output is
-    NodeID exec_node = ID(sparsity_output).sparsity.creator_node;
+    NodeID exec_node = ID(sparsity_output).sparsity_creator_node();
 
-    if(exec_node != my_node_id) {
-      // we're going to ship it elsewhere, which means we always need an AsyncMicroOp to
-      //  track it
-      async_microop = new AsyncMicroOp(op, this);
-      op->add_async_work_item(async_microop);
-
-      RemoteMicroOpMessage::send_request(exec_node, op, *this);
-      delete this;
+    if(exec_node != Network::my_node_id) {
+      forward_microop<DifferenceMicroOp<N,T> >(exec_node, op, this);
       return;
     }
 
@@ -1487,6 +1471,9 @@ namespace Realm {
     assert(ok);
   }
 
+  template <int N, typename T>
+  ActiveMessageHandlerReg<RemoteMicroOpMessage<DifferenceMicroOp<N,T> > > DifferenceMicroOp<N,T>::areg;
+
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -1494,8 +1481,9 @@ namespace Realm {
 
   template <int N, typename T>
   UnionOperation<N,T>::UnionOperation(const ProfilingRequestSet& reqs,
-				      Event _finish_event)
-    : PartitioningOperation(reqs, _finish_event)
+				      GenEventImpl *_finish_event,
+				      EventImpl::gen_t _finish_gen)
+    : PartitioningOperation(reqs, _finish_event, _finish_gen)
   {}
 
   template <int N, typename T>
@@ -1517,20 +1505,20 @@ namespace Realm {
     int target_node;
     if(lhs.dense()) {
       if(rhs.dense()) {
-	target_node = my_node_id;  // operation will be cheap anyway
+	target_node = Network::my_node_id;  // operation will be cheap anyway
       } else {
-	target_node = ID(rhs.sparsity).sparsity.creator_node;
+	target_node = ID(rhs.sparsity).sparsity_creator_node();
       }
     } else {
       if(rhs.dense()) {
-	target_node = ID(lhs.sparsity).sparsity.creator_node;
+	target_node = ID(lhs.sparsity).sparsity_creator_node();
       } else {
-	int lhs_node = ID(lhs.sparsity).sparsity.creator_node;
-	int rhs_node = ID(rhs.sparsity).sparsity.creator_node;
+	int lhs_node = ID(lhs.sparsity).sparsity_creator_node();
+	int rhs_node = ID(rhs.sparsity).sparsity_creator_node();
 	//if(lhs_node != rhs_node)
 	//  std::cout << "UNION PICK " << lhs_node << " or " << rhs_node << "\n";
 	// if they're different, and lhs is us, choose rhs to load-balance maybe
-	target_node = (lhs_node == my_node_id) ? rhs_node : lhs_node;
+	target_node = (lhs_node == Network::my_node_id) ? rhs_node : lhs_node;
       }
     }
     SparsityMap<N,T> sparsity = get_runtime()->get_available_sparsity_impl(target_node)->me.convert<SparsityMap<N,T> >();
@@ -1557,17 +1545,17 @@ namespace Realm {
       output.bounds = output.bounds.union_bbox(ops[i].bounds);
 
     // try to assign sparsity ID near the input sparsity maps (if present)
-    int target_node = my_node_id;
+    int target_node = Network::my_node_id;
     int node_count = 0;
     for(size_t i = 0; i < ops.size(); i++)
       if(!ops[i].dense()) {
-	int node = ID(ops[i].sparsity).sparsity.creator_node;
+	int node = ID(ops[i].sparsity).sparsity_creator_node();
 	if(node_count == 0) {
 	  node_count = 1;
 	  target_node = node;
 	} else if((node_count == 1) && (node != target_node)) {
 	  //std::cout << "UNION DIFF " << target_node << " or " << node << "\n";
-	  target_node = my_node_id;
+	  target_node = Network::my_node_id;
 	  break;
 	}
       }
@@ -1605,8 +1593,9 @@ namespace Realm {
 
   template <int N, typename T>
   IntersectionOperation<N,T>::IntersectionOperation(const ProfilingRequestSet& reqs,
-						    Event _finish_event)
-    : PartitioningOperation(reqs, _finish_event)
+						    GenEventImpl *_finish_event,
+						    EventImpl::gen_t _finish_gen)
+    : PartitioningOperation(reqs, _finish_event, _finish_gen)
   {}
 
   template <int N, typename T>
@@ -1633,20 +1622,20 @@ namespace Realm {
     int target_node;
     if(lhs.dense()) {
       if(rhs.dense()) {
-	target_node = my_node_id;  // operation will be cheap anyway
+	target_node = Network::my_node_id;  // operation will be cheap anyway
       } else {
-	target_node = ID(rhs.sparsity).sparsity.creator_node;
+	target_node = ID(rhs.sparsity).sparsity_creator_node();
       }
     } else {
       if(rhs.dense()) {
-	target_node = ID(lhs.sparsity).sparsity.creator_node;
+	target_node = ID(lhs.sparsity).sparsity_creator_node();
       } else {
-	int lhs_node = ID(lhs.sparsity).sparsity.creator_node;
-	int rhs_node = ID(rhs.sparsity).sparsity.creator_node;
+	int lhs_node = ID(lhs.sparsity).sparsity_creator_node();
+	int rhs_node = ID(rhs.sparsity).sparsity_creator_node();
 	//if(lhs_node != rhs_node)
 	//  std::cout << "ISECT PICK " << lhs_node << " or " << rhs_node << "\n";
 	// if they're different, and lhs is us, choose rhs to load-balance maybe
-	target_node = (lhs_node == my_node_id) ? rhs_node : lhs_node;
+	target_node = (lhs_node == Network::my_node_id) ? rhs_node : lhs_node;
       }
     }
     SparsityMap<N,T> sparsity = get_runtime()->get_available_sparsity_impl(target_node)->me.convert<SparsityMap<N,T> >();
@@ -1676,17 +1665,17 @@ namespace Realm {
     assert(!output.bounds.empty());
 
     // try to assign sparsity ID near the input sparsity maps (if present)
-    int target_node = my_node_id;
+    int target_node = Network::my_node_id;
     int node_count = 0;
     for(size_t i = 0; i < ops.size(); i++)
       if(!ops[i].dense()) {
-	int node = ID(ops[i].sparsity).sparsity.creator_node;
+	int node = ID(ops[i].sparsity).sparsity_creator_node();
 	if(node_count == 0) {
 	  node_count = 1;
 	  target_node = node;
 	} else if((node_count == 1) && (node != target_node)) {
 	  //std::cout << "ISECT DIFF " << target_node << " or " << node << "\n";
-	  target_node = my_node_id;
+	  target_node = Network::my_node_id;
 	  break;
 	}
       }
@@ -1724,8 +1713,9 @@ namespace Realm {
 
   template <int N, typename T>
   DifferenceOperation<N,T>::DifferenceOperation(const ProfilingRequestSet& reqs,
-				      Event _finish_event)
-    : PartitioningOperation(reqs, _finish_event)
+						GenEventImpl *_finish_event,
+						EventImpl::gen_t _finish_gen)
+    : PartitioningOperation(reqs, _finish_event, _finish_gen)
   {}
 
   template <int N, typename T>
@@ -1752,20 +1742,20 @@ namespace Realm {
     int target_node;
     if(lhs.dense()) {
       if(rhs.dense()) {
-	target_node = my_node_id;  // operation will be cheap anyway
+	target_node = Network::my_node_id;  // operation will be cheap anyway
       } else {
-	target_node = ID(rhs.sparsity).sparsity.creator_node;
+	target_node = ID(rhs.sparsity).sparsity_creator_node();
       }
     } else {
       if(rhs.dense()) {
-	target_node = ID(lhs.sparsity).sparsity.creator_node;
+	target_node = ID(lhs.sparsity).sparsity_creator_node();
       } else {
-	int lhs_node = ID(lhs.sparsity).sparsity.creator_node;
-	int rhs_node = ID(rhs.sparsity).sparsity.creator_node;
+	int lhs_node = ID(lhs.sparsity).sparsity_creator_node();
+	int rhs_node = ID(rhs.sparsity).sparsity_creator_node();
 	//if(lhs_node != rhs_node)
 	//  std::cout << "DIFF PICK " << lhs_node << " or " << rhs_node << "\n";
 	// if they're different, and lhs is us, choose rhs to load-balance maybe
-	target_node = (lhs_node == my_node_id) ? rhs_node : lhs_node;
+	target_node = (lhs_node == Network::my_node_id) ? rhs_node : lhs_node;
       }
     }
     SparsityMap<N,T> sparsity = get_runtime()->get_available_sparsity_impl(target_node)->me.convert<SparsityMap<N,T> >();

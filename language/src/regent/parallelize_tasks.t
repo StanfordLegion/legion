@@ -1,4 +1,4 @@
--- Copyright 2018 Stanford University
+-- Copyright 2019 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -2068,6 +2068,8 @@ local function insert_partition_creation(parallelizable, caller_cx, call_stats)
                 base_name .. "__gp" .. "__image_" .. tostring(field_path))
               stats:insert(ast_util.mk_stat_var(gp_symbol, nil,
                 ast.typed.expr.Image {
+		  -- TODO: determine disjointness
+		  disjointness = false,
                   expr_type = gp_type,
                   parent = ast_util.mk_expr_id(region, std.rawref(&region:gettype())),
                   partition = ast_util.mk_expr_id(pp, std.rawref(&pp:gettype())),
@@ -2442,7 +2444,12 @@ end
 function normalize_accesses.expr(normalizer_cx)
   return function(node, continuation)
     if node:is(ast.typed.expr.ID) then
-      return normalizer_cx:find_decl(node.value) or node
+      local decl = normalizer_cx:find_decl(node.value)
+      if decl ~= nil then
+        return continuation(decl)
+      else
+        return node
+      end
     else
       return continuation(node, true)
     end
@@ -2569,7 +2576,8 @@ function normalize_accesses.stat(task_cx, normalizer_cx)
     if node:is(ast.typed.stat.Var) then
       local symbol_type = node.symbol:gettype()
       if std.is_index_type(symbol_type) or
-         std.is_bounded_type(symbol_type) then
+         std.is_bounded_type(symbol_type) or
+         std.is_rect_type(symbol_type) then
         -- TODO: variables can be assigned later
         assert(node.value)
         normalizer_cx:add_decl(node.symbol, node.value)
@@ -2658,6 +2666,8 @@ function reduction_analysis.top_task(task_cx, node)
   assert(reduction_op ~= nil)
   -- TODO: convert reductions with - or / into fold-and-reduces
   assert(reduction_op ~= "-" and reduction_op ~= "/")
+  assert(node.metadata.reduction == reduction_var)
+  assert(node.metadata.op == reduction_op)
   task_cx.reduction_info = {
     op = reduction_op,
     symbol = reduction_var,
@@ -3319,6 +3329,7 @@ function parallelize_tasks.top_task(global_cx, node)
       replicable = false,
     },
     region_divergence = false,
+    metadata = false,
     prototype = task,
     annotations = node.annotations {
       parallel = ast.annotation.Forbid { value = false },
@@ -3338,6 +3349,7 @@ function parallelize_tasks.entry(node)
   if node:is(ast.typed.top.Task) then
     if global_context[node.prototype] then return node end
     if node.annotations.parallel:is(ast.annotation.Demand) then
+      assert(node.metadata)
       check_parallelizable.top_task(node)
       local task_name = node.name
       local new_task_code, cx = parallelize_tasks.top_task(global_context, node)

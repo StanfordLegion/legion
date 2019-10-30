@@ -1,4 +1,4 @@
-/* Copyright 2018 Stanford University, NVIDIA Corporation
+/* Copyright 2019 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -51,6 +51,32 @@
 #endif
 #endif
 
+// If we're doing full LEGION_SPY then turn off event pruning
+#ifdef LEGION_SPY
+#ifndef LEGION_DISABLE_EVENT_PRUNING
+#define LEGION_DISABLE_EVENT_PRUNING
+#endif
+#endif
+
+// forward declarations from bitmask.h
+template<typename T, unsigned int MAX,
+         unsigned SHIFT, unsigned MASK> class BitMask;
+template<typename T, unsigned int MAX,
+         unsigned SHIFT, unsigned MASK> class TLBitMask;
+#ifdef __SSE2__
+template<unsigned int MAX> class SSEBitMask;
+template<unsigned int MAX> class SSETLBitMask;
+#endif
+#ifdef __AVX__
+template<unsigned int MAX> class AVXBitMask;
+template<unsigned int MAX> class AVXTLBitMask;
+#endif
+#ifdef __ALTIVEC__
+template<unsigned int MAX> class PPCBitMask;
+template<unsigned int MAX> class PPCTLBitMask;
+#endif
+template<typename IT, typename DT, bool BIDIR> class IntegerSet;
+
 namespace BindingLib { class Utility; } // BindingLib namespace
 
 namespace Legion { 
@@ -65,6 +91,7 @@ namespace Legion {
   typedef ::legion_external_resource_t ExternalResource;
   typedef ::legion_timing_measurement_t TimingMeasurement;
   typedef ::legion_dependence_type_t DependenceType;
+  typedef ::legion_mappable_type_id_t MappableType;
   typedef ::legion_file_mode_t LegionFileMode;
   typedef ::legion_execution_constraint_t ExecutionConstraintKind;
   typedef ::legion_layout_constraint_t LayoutConstraintKind;
@@ -227,17 +254,7 @@ namespace Legion {
     // redop IDs - none used in HLR right now, but 0 isn't allowed
     enum {
       REDOP_ID_AVAILABLE    = 1,
-    };
-
-    // Runtime task numbering 
-    enum {
-      LG_INITIALIZE_TASK_ID   = Realm::Processor::TASK_ID_PROCESSOR_INIT,
-      LG_SHUTDOWN_TASK_ID     = Realm::Processor::TASK_ID_PROCESSOR_SHUTDOWN,
-      LG_TASK_ID              = Realm::Processor::TASK_ID_FIRST_AVAILABLE,
-      LG_LEGION_PROFILING_ID  = Realm::Processor::TASK_ID_FIRST_AVAILABLE+1,
-      LG_STARTUP_TASK_ID      = Realm::Processor::TASK_ID_FIRST_AVAILABLE+2,
-      LG_TASK_ID_AVAILABLE    = Realm::Processor::TASK_ID_FIRST_AVAILABLE+3,
-    };
+    }; 
 
     // Realm dependent partitioning kinds
     enum DepPartOpKind {
@@ -266,11 +283,9 @@ namespace Legion {
       LG_DEFERRED_EXECUTION_TRIGGER_ID,
       LG_DEFERRED_RESOLUTION_TRIGGER_ID,
       LG_DEFERRED_COMMIT_TRIGGER_ID,
-      LG_DEFERRED_POST_MAPPED_ID,
       LG_DEFERRED_EXECUTE_ID,
       LG_DEFERRED_COMPLETE_ID,
       LG_DEFERRED_COMMIT_ID,
-      LG_DEFERRED_POST_END_ID,
       LG_DEFERRED_COLLECT_ID,
       LG_PRE_PIPELINE_ID,
       LG_TRIGGER_DEPENDENCE_ID,
@@ -291,12 +306,11 @@ namespace Legion {
       LG_TOP_FINISH_TASK_ID,
       LG_MAPPER_TASK_ID,
       LG_DISJOINTNESS_TASK_ID,
+      LG_DEFER_PHYSICAL_REGISTRATION_TASK_ID,
       LG_PART_INDEPENDENCE_TASK_ID,
       LG_SPACE_INDEPENDENCE_TASK_ID,
       LG_PENDING_CHILD_TASK_ID,
       LG_POST_DECREMENT_TASK_ID,
-      LG_SEND_VERSION_STATE_UPDATE_TASK_ID,
-      LG_UPDATE_VERSION_STATE_REDUCE_TASK_ID,
       LG_ISSUE_FRAME_TASK_ID,
       LG_MAPPER_CONTINUATION_TASK_ID,
       LG_TASK_IMPL_SEMANTIC_INFO_REQ_TASK_ID,
@@ -312,25 +326,14 @@ namespace Legion {
       LG_DEFERRED_ENQUEUE_OP_ID,
       LG_DEFERRED_ENQUEUE_TASK_ID,
       LG_DEFER_MAPPER_MESSAGE_TASK_ID,
-      LG_DEFER_COMPOSITE_VIEW_REF_TASK_ID,
-      LG_DEFER_COMPOSITE_VIEW_REGISTRATION_TASK_ID,
-      LG_DEFER_COMPOSITE_NODE_REF_TASK_ID,
-      LG_DEFER_COMPOSITE_NODE_CAPTURE_TASK_ID,
-      LG_CONVERT_VIEW_TASK_ID,
-      LG_UPDATE_VIEW_REFERENCES_TASK_ID,
-      LG_REMOVE_VERSION_STATE_REF_TASK_ID,
-      LG_DEFER_RESTRICTED_MANAGER_TASK_ID,
       LG_REMOTE_VIEW_CREATION_TASK_ID,
       LG_DEFER_DISTRIBUTE_TASK_ID,
       LG_DEFER_PERFORM_MAPPING_TASK_ID,
       LG_DEFER_LAUNCH_TASK_ID,
-      LG_DEFER_MAP_AND_LAUNCH_TASK_ID,
-      LG_ADD_VERSIONING_SET_REF_TASK_ID,
-      LG_VERSION_STATE_CAPTURE_DIRTY_TASK_ID,
-      LG_VERSION_STATE_PENDING_ADVANCE_TASK_ID,
-      LG_DISJOINT_CLOSE_TASK_ID,
-      LG_DEFER_MATERIALIZED_VIEW_TASK_ID,
       LG_MISSPECULATE_TASK_ID,
+      LG_DEFER_FIND_COPY_PRE_TASK_ID,
+      LG_DEFER_MATERIALIZED_VIEW_TASK_ID,
+      LG_DEFER_REDUCTION_VIEW_TASK_ID,
       LG_DEFER_PHI_VIEW_REF_TASK_ID,
       LG_DEFER_PHI_VIEW_REGISTRATION_TASK_ID,
       LG_TIGHTEN_INDEX_SPACE_TASK_ID,
@@ -338,10 +341,61 @@ namespace Legion {
       LG_REMOTE_PHYSICAL_RESPONSE_TASK_ID,
       LG_REPLAY_SLICE_ID,
       LG_DELETE_TEMPLATE_ID,
+      LG_REFINEMENT_TASK_ID,
+      LG_REMOTE_REF_TASK_ID,
+      LG_DEFER_RAY_TRACE_TASK_ID,
+      LG_DEFER_RAY_TRACE_FINISH_TASK_ID,
+      LG_DEFER_SUBSET_REQUEST_TASK_ID,
+      LG_DEFER_MAKE_OWNER_TASK_ID,
+      LG_DEFER_MERGE_OR_FORWARD_TASK_ID,
+      LG_DEFER_EQ_RESPONSE_TASK_ID,
+      LG_DEFER_REMOTE_DECREMENT_TASK_ID,
+      LG_COPY_FILL_AGGREGATION_TASK_ID,
+      LG_COPY_FILL_DELETION_TASK_ID,
+      LG_FINALIZE_EQ_SETS_TASK_ID,
+      LG_DEFERRED_COPY_ACROSS_TASK_ID,
+      LG_DEFER_REMOTE_OP_DELETION_TASK_ID,
+      LG_DEFER_REMOTE_INSTANCE_TASK_ID,
+      LG_DEFER_REMOTE_REDUCTION_TASK_ID,
+      LG_DEFER_REMOTE_UPDATE_TASK_ID,
+      LG_DEFER_REMOTE_ACQUIRE_TASK_ID,
+      LG_DEFER_REMOTE_RELEASE_TASK_ID,
+      LG_DEFER_REMOTE_COPIES_ACROSS_TASK_ID,
+      LG_DEFER_REMOTE_OVERWRITE_TASK_ID,
+      LG_DEFER_REMOTE_FILTER_TASK_ID,
+      LG_DEFER_PERFORM_TRAVERSAL_TASK_ID,
+      LG_DEFER_PERFORM_REMOTE_TASK_ID,
+      LG_DEFER_PERFORM_UPDATE_TASK_ID,
+      LG_DEFER_PERFORM_OUTPUT_TASK_ID,
+      LG_DEFER_INSTANCE_MANAGER_TASK_ID,
+      LG_DEFER_REDUCTION_MANAGER_TASK_ID,
       LG_MESSAGE_ID, // These two must be the last two
       LG_RETRY_SHUTDOWN_TASK_ID,
       LG_LAST_TASK_ID, // This one should always be last
     }; 
+
+    // Runtime task numbering 
+#ifdef LEGION_SEPARATE_META_TASKS
+    enum {
+      LG_INITIALIZE_TASK_ID   = Realm::Processor::TASK_ID_PROCESSOR_INIT,
+      LG_SHUTDOWN_TASK_ID     = Realm::Processor::TASK_ID_PROCESSOR_SHUTDOWN,
+      LG_TASK_ID              = Realm::Processor::TASK_ID_FIRST_AVAILABLE,
+      LG_LEGION_PROFILING_ID  = Realm::Processor::TASK_ID_FIRST_AVAILABLE+LG_LAST_TASK_ID+1,
+      LG_STARTUP_TASK_ID      = Realm::Processor::TASK_ID_FIRST_AVAILABLE+LG_LAST_TASK_ID+2,
+      LG_ENDPOINT_TASK_ID     = Realm::Processor::TASK_ID_FIRST_AVAILABLE+LG_LAST_TASK_ID+3,
+      LG_TASK_ID_AVAILABLE    = Realm::Processor::TASK_ID_FIRST_AVAILABLE+LG_LAST_TASK_ID+4,
+    };
+#else
+    enum {
+      LG_INITIALIZE_TASK_ID   = Realm::Processor::TASK_ID_PROCESSOR_INIT,
+      LG_SHUTDOWN_TASK_ID     = Realm::Processor::TASK_ID_PROCESSOR_SHUTDOWN,
+      LG_TASK_ID              = Realm::Processor::TASK_ID_FIRST_AVAILABLE,
+      LG_LEGION_PROFILING_ID  = Realm::Processor::TASK_ID_FIRST_AVAILABLE+1,
+      LG_STARTUP_TASK_ID      = Realm::Processor::TASK_ID_FIRST_AVAILABLE+2,
+      LG_ENDPOINT_TASK_ID     = Realm::Processor::TASK_ID_FIRST_AVAILABLE+3,
+      LG_TASK_ID_AVAILABLE    = Realm::Processor::TASK_ID_FIRST_AVAILABLE+4,
+    };
+#endif
 
     // Make this a macro so we can keep it close to 
     // declaration of the task IDs themselves
@@ -353,11 +407,9 @@ namespace Legion {
         "Deferred Execution Trigger",                             \
         "Deferred Resolution Trigger",                            \
         "Deferred Commit Trigger",                                \
-        "Deferred Post Mapped",                                   \
         "Deferred Execute",                                       \
         "Deferred Complete",                                      \
         "Deferred Commit",                                        \
-        "Deferred Post-Task Execution",                           \
         "Garbage Collection",                                     \
         "Prepipeline Stage",                                      \
         "Logical Dependence Analysis",                            \
@@ -378,12 +430,11 @@ namespace Legion {
         "Top Finish",                                             \
         "Mapper Task",                                            \
         "Disjointness Test",                                      \
+        "Defer Physical Registration",                            \
         "Partition Independence Test",                            \
         "Index Space Independence Test",                          \
         "Remove Pending Child",                                   \
         "Post Decrement Task",                                    \
-        "Send Version State Update",                              \
-        "Update Version State Reduce",                            \
         "Issue Frame",                                            \
         "Mapper Continuation",                                    \
         "Task Impl Semantic Request",                             \
@@ -399,25 +450,14 @@ namespace Legion {
         "Deferred Enqueue Op",                                    \
         "Deferred Enqueue Task",                                  \
         "Deferred Mapper Message",                                \
-        "Deferred Composite View Ref",                            \
-        "Deferred Composite View Registration",                   \
-        "Deferred Composite Node Ref",                            \
-        "Deferred Composite Node Capture",                        \
-        "Convert View for Version State",                         \
-        "Update View References for Version State",               \
-        "Deferred Remove Version State Valid Ref",                \
-        "Deferred Restricted Manager GC Ref",                     \
         "Remote View Creation",                                   \
         "Defer Task Distribution",                                \
         "Defer Task Perform Mapping",                             \
         "Defer Task Launch",                                      \
-        "Defer Task Map and Launch",                              \
-        "Defer Versioning Set Reference",                         \
-        "Version State Capture Dirty",                            \
-        "Version State Reclaim Pending Advance",                  \
-        "Disjoint Close",                                         \
-        "Defer Materialized View Creation",                       \
         "Handle Mapping Misspeculation",                          \
+        "Defer Find Copy Preconditions",                          \
+        "Defer Materialized View Registration",                   \
+        "Defer Reduction View Registration",                      \
         "Defer Phi View Reference",                               \
         "Defer Phi View Registration",                            \
         "Tighten Index Space",                                    \
@@ -425,6 +465,34 @@ namespace Legion {
         "Remote Physical Context Response",                       \
         "Replay Physical Trace",                                  \
         "Delete Physical Template",                               \
+        "Refinement",                                             \
+        "Remove Remote References",                               \
+        "Defer Ray Trace",                                        \
+        "Defer Ray Trace Finish",                                 \
+        "Defer Subset Request",                                   \
+        "Defer Make Owner",                                       \
+        "Defer Merge or Forward",                                 \
+        "Defer Equivalence Set Response",                         \
+        "Defer Remote Decrement",                                 \
+        "Copy Fill Aggregation",                                  \
+        "Copy Fill Deletion",                                     \
+        "Finalize Equivalence Sets",                              \
+        "Deferred Copy Across",                                   \
+        "Defer Remote Op Deletion",                               \
+        "Defer Remote Instance Request",                          \
+        "Defer Remote Reduction Request",                         \
+        "Defer Remote Update Equivalence Set",                    \
+        "Defer Remote Acquire",                                   \
+        "Defer Remote Release",                                   \
+        "Defer Remote Copy Across",                               \
+        "Defer Remote Overwrite Equivalence Set",                 \
+        "Defer Remote Filter Equivalence Set",                    \
+        "Defer Physical Analysis Traversal Stage",                \
+        "Defer Physical Analysis Remote Stage",                   \
+        "Defer Physical Analysis Update Stage",                   \
+        "Defer Physical Analysis Output Stage",                   \
+        "Defer Instance Manager Registration",                    \
+        "Defer Reduction Manager Registration",                   \
         "Remote Message",                                         \
         "Retry Shutdown",                                         \
       };
@@ -439,34 +507,27 @@ namespace Legion {
       SELECT_VARIANT_CALL,
       POSTMAP_TASK_CALL,
       TASK_SELECT_SOURCES_CALL,
-      TASK_CREATE_TEMPORARY_CALL,
       TASK_SPECULATE_CALL,
       TASK_REPORT_PROFILING_CALL,
       MAP_INLINE_CALL,
       INLINE_SELECT_SOURCES_CALL,
-      INLINE_CREATE_TEMPORARY_CALL,
       INLINE_REPORT_PROFILING_CALL,
       MAP_COPY_CALL,
       COPY_SELECT_SOURCES_CALL,
-      COPY_CREATE_TEMPORARY_CALL,
       COPY_SPECULATE_CALL,
       COPY_REPORT_PROFILING_CALL,
-      MAP_CLOSE_CALL,
       CLOSE_SELECT_SOURCES_CALL,
-      CLOSE_CREATE_TEMPORARY_CALL,
       CLOSE_REPORT_PROFILING_CALL,
       MAP_ACQUIRE_CALL,
       ACQUIRE_SPECULATE_CALL,
       ACQUIRE_REPORT_PROFILING_CALL,
       MAP_RELEASE_CALL,
       RELEASE_SELECT_SOURCES_CALL,
-      RELEASE_CREATE_TEMPORARY_CALL,
       RELEASE_SPECULATE_CALL,
       RELEASE_REPORT_PROFILING_CALL,
       SELECT_PARTITION_PROJECTION_CALL,
       MAP_PARTITION_CALL,
       PARTITION_SELECT_SOURCES_CALL,
-      PARTITION_CREATE_TEMPORARY_CALL,
       PARTITION_REPORT_PROFILING_CALL,
       CONFIGURE_CONTEXT_CALL,
       SELECT_TUNABLE_VALUE_CALL,
@@ -492,34 +553,27 @@ namespace Legion {
       "select_task_variant",                        \
       "postmap_task",                               \
       "select_task_sources",                        \
-      "create task temporary",                      \
       "speculate (for task)",                       \
       "report profiling (for task)",                \
       "map_inline",                                 \
       "select_inline_sources",                      \
-      "inline create temporary",                    \
       "report profiling (for inline)",              \
       "map_copy",                                   \
       "select_copy_sources",                        \
-      "copy create temporary",                      \
       "speculate (for copy)",                       \
       "report_profiling (for copy)",                \
-      "map_close",                                  \
       "select_close_sources",                       \
-      "close create temporary",                     \
       "report_profiling (for close)",               \
       "map_acquire",                                \
       "speculate (for acquire)",                    \
       "report_profiling (for acquire)",             \
       "map_release",                                \
       "select_release_sources",                     \
-      "release create temporary",                   \
       "speculate (for release)",                    \
       "report_profiling (for release)",             \
       "select partition projection",                \
       "map_partition",                              \
       "select_partition_sources",                   \
-      "partition create temporary",                 \
       "report_profiling (for partition)",           \
       "configure_context",                          \
       "select_tunable_value",                       \
@@ -575,30 +629,31 @@ namespace Legion {
     };
 
     enum VirtualChannelKind {
-      DEFAULT_VIRTUAL_CHANNEL = 0,
-      INDEX_SPACE_VIRTUAL_CHANNEL = 1,
-      FIELD_SPACE_VIRTUAL_CHANNEL = 2,
-      LOGICAL_TREE_VIRTUAL_CHANNEL = 3,
-      MAPPER_VIRTUAL_CHANNEL = 4,
-      SEMANTIC_INFO_VIRTUAL_CHANNEL = 5,
-      LAYOUT_CONSTRAINT_VIRTUAL_CHANNEL = 6,
-      CONTEXT_VIRTUAL_CHANNEL = 7,
-      MANAGER_VIRTUAL_CHANNEL = 8,
-      VIEW_VIRTUAL_CHANNEL = 9,
-      UPDATE_VIRTUAL_CHANNEL = 10,
-      VARIANT_VIRTUAL_CHANNEL = 11,
-      VERSION_VIRTUAL_CHANNEL = 12,
-      VERSION_MANAGER_VIRTUAL_CHANNEL = 13,
-      ANALYSIS_VIRTUAL_CHANNEL = 14,
-      FUTURE_VIRTUAL_CHANNEL = 15,
-      REFERENCE_VIRTUAL_CHANNEL = 16,
-      MAX_NUM_VIRTUAL_CHANNELS = 17, // this one must be last
+      // The default and work virtual channels are unordered
+      DEFAULT_VIRTUAL_CHANNEL = 0, // latency priority
+      THROUGHPUT_VIRTUAL_CHANNEL = 1, // throughput priority
+      // All the rest of these are ordered (latency-priority) channels
+      MAPPER_VIRTUAL_CHANNEL = 1, 
+      TASK_VIRTUAL_CHANNEL = 2,
+      INDEX_SPACE_VIRTUAL_CHANNEL = 3,
+      FIELD_SPACE_VIRTUAL_CHANNEL = 4,
+      LOGICAL_TREE_VIRTUAL_CHANNEL = 5,
+      REFERENCE_VIRTUAL_CHANNEL = 6,
+      UPDATE_VIRTUAL_CHANNEL = 7, // deferred-priority
+      SUBSET_VIRTUAL_CHANNEL = 8,
+      CONTEXT_VIRTUAL_CHANNEL = 9,
+      LAYOUT_CONSTRAINT_VIRTUAL_CHANNEL = 10,
+      EXPRESSION_VIRTUAL_CHANNEL = 11,
+      MIGRATION_VIRTUAL_CHANNEL = 12,
+      TRACING_VIRTUAL_CHANNEL = 13,
+      MAX_NUM_VIRTUAL_CHANNELS = 14, // this one must be last
     };
 
     enum MessageKind {
       TASK_MESSAGE,
       STEAL_MESSAGE,
       ADVERTISEMENT_MESSAGE,
+      SEND_REMOTE_TASK_REPLAY,
       SEND_INDEX_SPACE_NODE,
       SEND_INDEX_SPACE_REQUEST,
       SEND_INDEX_SPACE_RETURN,
@@ -607,12 +662,16 @@ namespace Legion {
       SEND_INDEX_SPACE_CHILD_RESPONSE,
       SEND_INDEX_SPACE_COLORS_REQUEST,
       SEND_INDEX_SPACE_COLORS_RESPONSE,
+      SEND_INDEX_SPACE_REMOTE_EXPRESSION_REQUEST,
+      SEND_INDEX_SPACE_REMOTE_EXPRESSION_RESPONSE,
+      SEND_INDEX_SPACE_REMOTE_EXPRESSION_INVALIDATION,
       SEND_INDEX_PARTITION_NOTIFICATION,
       SEND_INDEX_PARTITION_NODE,
       SEND_INDEX_PARTITION_REQUEST,
       SEND_INDEX_PARTITION_RETURN,
       SEND_INDEX_PARTITION_CHILD_REQUEST,
       SEND_INDEX_PARTITION_CHILD_RESPONSE,
+      SEND_INDEX_PARTITION_DISJOINT_UPDATE,
       SEND_FIELD_SPACE_NODE,
       SEND_FIELD_SPACE_REQUEST,
       SEND_FIELD_SPACE_RETURN,
@@ -632,7 +691,6 @@ namespace Legion {
       FIELD_SPACE_DESTRUCTION_MESSAGE,
       LOGICAL_REGION_DESTRUCTION_MESSAGE,
       LOGICAL_PARTITION_DESTRUCTION_MESSAGE,
-      INDIVIDUAL_REMOTE_MAPPED,
       INDIVIDUAL_REMOTE_COMPLETE,
       INDIVIDUAL_REMOTE_COMMIT,
       SLICE_REMOTE_MAPPED,
@@ -641,9 +699,6 @@ namespace Legion {
       DISTRIBUTED_REMOTE_REGISTRATION,
       DISTRIBUTED_VALID_UPDATE,
       DISTRIBUTED_GC_UPDATE,
-      DISTRIBUTED_RESOURCE_UPDATE,
-      DISTRIBUTED_INVALIDATE,
-      DISTRIBUTED_DEACTIVATE,
       DISTRIBUTED_CREATE_ADD,
       DISTRIBUTED_CREATE_REMOVE,
       DISTRIBUTED_UNREGISTER,
@@ -651,7 +706,6 @@ namespace Legion {
       SEND_ATOMIC_RESERVATION_RESPONSE,
       SEND_BACK_LOGICAL_STATE,
       SEND_MATERIALIZED_VIEW,
-      SEND_COMPOSITE_VIEW,
       SEND_FILL_VIEW,
       SEND_PHI_VIEW,
       SEND_REDUCTION_VIEW,
@@ -659,13 +713,14 @@ namespace Legion {
       SEND_REDUCTION_MANAGER,
       SEND_CREATE_TOP_VIEW_REQUEST,
       SEND_CREATE_TOP_VIEW_RESPONSE,
-      SEND_SUBVIEW_DID_REQUEST,
-      SEND_SUBVIEW_DID_RESPONSE,
       SEND_VIEW_REQUEST,
-      SEND_VIEW_UPDATE_REQUEST,
-      SEND_VIEW_UPDATE_RESPONSE,
-      SEND_VIEW_REMOTE_UPDATE,
-      SEND_VIEW_REMOTE_INVALIDATE,
+      SEND_VIEW_REGISTER_USER,
+      SEND_VIEW_FIND_COPY_PRE_REQUEST,
+      SEND_VIEW_FIND_COPY_PRE_RESPONSE,
+      SEND_VIEW_ADD_COPY_USER,
+      SEND_VIEW_REPLICATION_REQUEST,
+      SEND_VIEW_REPLICATION_RESPONSE,
+      SEND_VIEW_REPLICATION_REMOVAL,
       SEND_MANAGER_REQUEST,
       SEND_FUTURE_RESULT,
       SEND_FUTURE_SUBSCRIPTION,
@@ -693,28 +748,36 @@ namespace Legion {
       SEND_REMOTE_CONTEXT_FREE,
       SEND_REMOTE_CONTEXT_PHYSICAL_REQUEST,
       SEND_REMOTE_CONTEXT_PHYSICAL_RESPONSE,
-      SEND_VERSION_OWNER_REQUEST,
-      SEND_VERSION_OWNER_RESPONSE,
-      SEND_VERSION_STATE_REQUEST,
-      SEND_VERSION_STATE_RESPONSE,
-      SEND_VERSION_STATE_UPDATE_REQUEST,
-      SEND_VERSION_STATE_UPDATE_RESPONSE,
-      SEND_VERSION_STATE_VALID_NOTIFICATION,
-      SEND_VERSION_MANAGER_ADVANCE,
-      SEND_VERSION_MANAGER_INVALIDATE,
-      SEND_VERSION_MANAGER_REQUEST,
-      SEND_VERSION_MANAGER_RESPONSE,
-      SEND_VERSION_MANAGER_UNVERSIONED_REQUEST,
-      SEND_VERSION_MANAGER_UNVERSIONED_RESPONSE,
+      SEND_COMPUTE_EQUIVALENCE_SETS_REQUEST,
+      SEND_EQUIVALENCE_SET_REQUEST,
+      SEND_EQUIVALENCE_SET_RESPONSE,
+      SEND_EQUIVALENCE_SET_SUBSET_REQUEST,
+      SEND_EQUIVALENCE_SET_SUBSET_RESPONSE,
+      SEND_EQUIVALENCE_SET_SUBSET_UPDATE,
+      SEND_EQUIVALENCE_SET_RAY_TRACE_REQUEST,
+      SEND_EQUIVALENCE_SET_RAY_TRACE_RESPONSE,
+      SEND_EQUIVALENCE_SET_MIGRATION,
+      SEND_EQUIVALENCE_SET_OWNER_UPDATE,
+      SEND_EQUIVALENCE_SET_REMOTE_REFINEMENT,
+      SEND_EQUIVALENCE_SET_REMOTE_REQUEST_INSTANCES,
+      SEND_EQUIVALENCE_SET_REMOTE_REQUEST_INVALID,
+      SEND_EQUIVALENCE_SET_REMOTE_UPDATES,
+      SEND_EQUIVALENCE_SET_REMOTE_ACQUIRES,
+      SEND_EQUIVALENCE_SET_REMOTE_RELEASES,
+      SEND_EQUIVALENCE_SET_REMOTE_COPIES_ACROSS,
+      SEND_EQUIVALENCE_SET_REMOTE_OVERWRITES,
+      SEND_EQUIVALENCE_SET_REMOTE_FILTERS,
+      SEND_EQUIVALENCE_SET_REMOTE_INSTANCES,
       SEND_INSTANCE_REQUEST,
       SEND_INSTANCE_RESPONSE,
+      SEND_EXTERNAL_CREATE_REQUEST,
+      SEND_EXTERNAL_CREATE_RESPONSE,
+      SEND_EXTERNAL_ATTACH,
       SEND_EXTERNAL_DETACH,
       SEND_GC_PRIORITY_UPDATE,
       SEND_NEVER_GC_RESPONSE,
       SEND_ACQUIRE_REQUEST,
       SEND_ACQUIRE_RESPONSE,
-      SEND_VARIANT_REQUEST,
-      SEND_VARIANT_RESPONSE,
       SEND_VARIANT_BROADCAST,
       SEND_CONSTRAINT_REQUEST,
       SEND_CONSTRAINT_RESPONSE,
@@ -728,6 +791,16 @@ namespace Legion {
       SEND_LIBRARY_PROJECTION_RESPONSE,
       SEND_LIBRARY_TASK_REQUEST,
       SEND_LIBRARY_TASK_RESPONSE,
+      SEND_LIBRARY_REDOP_REQUEST,
+      SEND_LIBRARY_REDOP_RESPONSE,
+      SEND_LIBRARY_SERDEZ_REQUEST,
+      SEND_LIBRARY_SERDEZ_RESPONSE,
+      SEND_REMOTE_OP_REPORT_UNINIT,
+      SEND_REMOTE_OP_PROFILING_COUNT_UPDATE,
+      SEND_REMOTE_TRACE_UPDATE,
+      SEND_REMOTE_TRACE_RESPONSE,
+      SEND_REMOTE_TRACE_EQ_REQUEST,
+      SEND_REMOTE_TRACE_EQ_RESPONSE,
       SEND_SHUTDOWN_NOTIFICATION,
       SEND_SHUTDOWN_RESPONSE,
       LAST_SEND_KIND, // This one must be last
@@ -738,6 +811,7 @@ namespace Legion {
         "Task Message",                                               \
         "Steal Message",                                              \
         "Advertisement Message",                                      \
+        "Send Remote Task Replay",                                    \
         "Send Index Space Node",                                      \
         "Send Index Space Request",                                   \
         "Send Index Space Return",                                    \
@@ -746,12 +820,16 @@ namespace Legion {
         "Send Index Space Child Response",                            \
         "Send Index Space Colors Request",                            \
         "Send Index Space Colors Response",                           \
+        "Send Index Space Remote Expression Request",                 \
+        "Send Index Space Remote Expression Response",                \
+        "Send Index Space Remote Expression Invalidation",            \
         "Send Index Partition Notification",                          \
         "Send Index Partition Node",                                  \
         "Send Index Partition Request",                               \
         "Send Index Partition Return",                                \
         "Send Index Partition Child Request",                         \
         "Send Index Partition Child Response",                        \
+        "Send Index Partition Disjoint Update",                       \
         "Send Field Space Node",                                      \
         "Send Field Space Request",                                   \
         "Send Field Space Return",                                    \
@@ -771,7 +849,6 @@ namespace Legion {
         "Field Space Destruction",                                    \
         "Logical Region Destruction",                                 \
         "Logical Partition Destruction",                              \
-        "Individual Remote Mapped",                                   \
         "Individual Remote Complete",                                 \
         "Individual Remote Commit",                                   \
         "Slice Remote Mapped",                                        \
@@ -780,9 +857,6 @@ namespace Legion {
         "Distributed Remote Registration",                            \
         "Distributed Valid Update",                                   \
         "Distributed GC Update",                                      \
-        "Distributed Resource Update",                                \
-        "Distributed Invalidate",                                     \
-        "Distributed Deactivate",                                     \
         "Distributed Create Add",                                     \
         "Distributed Create Remove",                                  \
         "Distributed Unregister",                                     \
@@ -790,7 +864,6 @@ namespace Legion {
         "Send Atomic Reservation Response",                           \
         "Send Back Logical State",                                    \
         "Send Materialized View",                                     \
-        "Send Composite View",                                        \
         "Send Fill View",                                             \
         "Send Phi View",                                              \
         "Send Reduction View",                                        \
@@ -798,13 +871,14 @@ namespace Legion {
         "Send Reduction Manager",                                     \
         "Send Create Top View Request",                               \
         "Send Create Top View Response",                              \
-        "Send Subview DID Request",                                   \
-        "Send Subview DID Response",                                  \
         "Send View Request",                                          \
-        "Send View Update Request",                                   \
-        "Send View Update Response",                                  \
-        "Send View Remote Update",                                    \
-        "Send View Remote Invalidate",                                \
+        "Send View Register User",                                    \
+        "Send View Find Copy Preconditions Request",                  \
+        "Send View Find Copy Preconditions Response",                 \
+        "Send View Add Copy User",                                    \
+        "Send View Replication Request",                              \
+        "Send View Replication Response",                             \
+        "Send View Replication Removal",                              \
         "Send Manager Request",                                       \
         "Send Future Result",                                         \
         "Send Future Subscription",                                   \
@@ -832,28 +906,36 @@ namespace Legion {
         "Send Remote Context Free",                                   \
         "Send Remote Context Physical Request",                       \
         "Send Remote Context Physical Response",                      \
-        "Send Version Owner Request",                                 \
-        "Send Version Owner Response",                                \
-        "Send Version State Request",                                 \
-        "Send Version State Response",                                \
-        "Send Version State Update Request",                          \
-        "Send Version State Update Response",                         \
-        "Send Version State Valid Notification",                      \
-        "Send Version Manager Advance",                               \
-        "Send Version Manager Invalidate",                            \
-        "Send Version Manager Request",                               \
-        "Send Version Manager Response",                              \
-        "Send Version Manager Unversioned Request",                   \
-        "Send Version Manager Unversioned Response",                  \
+        "Compute Equivalence Sets Request",                           \
+        "Send Equivalence Set Request",                               \
+        "Send Equivalence Set Response",                              \
+        "Send Equivalence Set Subset Request",                        \
+        "Send Equivalence Set Subset Response",                       \
+        "Send Equivalence Set Subset Update",                         \
+        "Send Equivalence Set Ray Trace Request",                     \
+        "Send Equivalence Set Ray Trace Response",                    \
+        "Send Equivalence Set Migration",                             \
+        "Send Equivalence Set Owner Update",                          \
+        "Send Equivalence Set Remote Refinement",                     \
+        "Send Equivalence Set Remote Request Instances",              \
+        "Send Equivalence Set Remote Request Invalid",                \
+        "Send Equivalence Set Remote Updates",                        \
+        "Send Equivalence Set Remote Acquires",                       \
+        "Send Equivalence Set Remote Releases",                       \
+        "Send Equivalence Set Remote Copies Across",                  \
+        "Send Equivalence Set Remote Overwrites",                     \
+        "Send Equivalence Set Remote Filters",                        \
+        "Send Equivalence Set Remote Instances",                      \
         "Send Instance Request",                                      \
         "Send Instance Response",                                     \
+        "Send External Create Request",                               \
+        "Send External Create Response",                              \
+        "Send External Attach",                                       \
         "Send External Detach",                                       \
         "Send GC Priority Update",                                    \
         "Send Never GC Response",                                     \
         "Send Acquire Request",                                       \
         "Send Acquire Response",                                      \
-        "Send Task Variant Request",                                  \
-        "Send Task Variant Response",                                 \
         "Send Task Variant Broadcast",                                \
         "Send Constraint Request",                                    \
         "Send Constraint Response",                                   \
@@ -867,6 +949,16 @@ namespace Legion {
         "Send Library Projection Response",                           \
         "Send Library Task Request",                                  \
         "Send Library Task Response",                                 \
+        "Send Library Redop Request",                                 \
+        "Send Library Redop Response",                                \
+        "Send Library Serdez Request",                                \
+        "Send Library Serdez Response",                               \
+        "Remote Op Report Uninitialized",                             \
+        "Remote Op Profiling Count Update",                           \
+        "Send Remote Trace Update",                                   \
+        "Send Remote Trace Response",                                 \
+        "Send Remote Trace Equivalence Sets Request",                 \
+        "Send Remote Trace Equivalence Sets Response",                \
         "Send Shutdown Notification",                                 \
         "Send Shutdown Response",                                     \
       };
@@ -1002,23 +1094,11 @@ namespace Legion {
       PHYSICAL_STATE_APPLY_PATH_ONLY_CALL,
       PHYSICAL_STATE_APPLY_STATE_CALL,
       PHYSICAL_STATE_MAKE_LOCAL_CALL,
-      VERSION_STATE_UPDATE_PATH_ONLY_CALL,
-      VERSION_STATE_MERGE_PHYSICAL_STATE_CALL,
-      VERSION_STATE_REQUEST_CHILDREN_CALL,
-      VERSION_STATE_REQUEST_INITIAL_CALL,
-      VERSION_STATE_REQUEST_FINAL_CALL,
-      VERSION_STATE_SEND_STATE_CALL,
-      VERSION_STATE_HANDLE_REQUEST_CALL,
-      VERSION_STATE_HANDLE_RESPONSE_CALL,
       MATERIALIZED_VIEW_FIND_LOCAL_PRECONDITIONS_CALL,
       MATERIALIZED_VIEW_FIND_LOCAL_COPY_PRECONDITIONS_CALL,
       MATERIALIZED_VIEW_FILTER_PREVIOUS_USERS_CALL,
       MATERIALIZED_VIEW_FILTER_CURRENT_USERS_CALL,
       MATERIALIZED_VIEW_FILTER_LOCAL_USERS_CALL,
-      COMPOSITE_VIEW_SIMPLIFY_CALL,
-      COMPOSITE_VIEW_ISSUE_DEFERRED_COPIES_CALL,
-      COMPOSITE_NODE_CAPTURE_PHYSICAL_STATE_CALL,
-      COMPOSITE_NODE_SIMPLIFY_CALL,
       REDUCTION_VIEW_PERFORM_REDUCTION_CALL,
       REDUCTION_VIEW_PERFORM_DEFERRED_REDUCTION_CALL,
       REDUCTION_VIEW_PERFORM_DEFERRED_REDUCTION_ACROSS_CALL,
@@ -1163,23 +1243,11 @@ namespace Legion {
       "Physical State Apply Path Only",                               \
       "Physical State Apply State",                                   \
       "Physical State Make Local",                                    \
-      "Version State Update Path Only",                               \
-      "Version State Merge Physical State",                           \
-      "Version State Request Children",                               \
-      "Version State Request Initial",                                \
-      "Version State Request Final",                                  \
-      "Version State Send State",                                     \
-      "Version State Handle Request",                                 \
-      "Version State Handle Response",                                \
       "Materialized View Find Local Preconditions",                   \
       "Materialized View Find Local Copy Preconditions",              \
       "Materialized View Filter Previous Users",                      \
       "Materialized View Filter Current Users",                       \
       "Materialized View Filter Local Users",                         \
-      "Composite View Simplify",                                      \
-      "Composite View Issue Deferred Copies",                         \
-      "Composite Node Capture Physical State",                        \
-      "Composite Node Simplify",                                      \
       "Reduction View Perform Reduction",                             \
       "Reduction View Perform Deferred Reduction",                    \
       "Reduction View Perform Deferred Reduction Across",             \
@@ -1204,6 +1272,7 @@ namespace Legion {
     // legion_types.h
     class LocalLock;
     class AutoLock;
+    class AutoTryLock;
     class LgEvent; // base event type for legion
     class ApEvent; // application event
     class ApUserEvent; // application user event
@@ -1215,28 +1284,12 @@ namespace Legion {
     // legion_utilities.h
     struct RegionUsage; 
     template<typename T> class Fraction;
-    template<typename T, unsigned int MAX, 
-             unsigned SHIFT, unsigned MASK> class BitMask;
-    template<typename T, unsigned int MAX,
-             unsigned SHIFT, unsigned MASK> class TLBitMask;
-#ifdef __SSE2__
-    template<unsigned int MAX> class SSEBitMask;
-    template<unsigned int MAX> class SSETLBitMask;
-#endif
-#ifdef __AVX__
-    template<unsigned int MAX> class AVXBitMask;
-    template<unsigned int MAX> class AVXTLBitMask;
-#endif
-#ifdef __ALTIVEC__
-    template<unsigned int MAX> class PPCBitMask;
-    template<unsigned int MAX> class PPCTLBitMask;
-#endif
     template<typename T, unsigned LOG2MAX> class BitPermutation;
-    template<typename IT, typename DT, bool BIDIR = false> class IntegerSet;
 
     // Forward declarations for runtime level objects
     // runtime.h
     class Collectable;
+    class FieldAllocatorImpl;
     class ArgumentMapImpl;
     class FutureImpl;
     class FutureMapImpl;
@@ -1249,7 +1302,6 @@ namespace Legion {
     class VirtualChannel;
     class MessageManager;
     class ShutdownManager;
-    class GarbageCollectionEpoch;
     class TaskImpl;
     class VariantImpl;
     class LayoutConstraints;
@@ -1272,6 +1324,7 @@ namespace Legion {
     // legion_ops.h
     class Operation;
     class SpeculativeOp;
+    class Memoizable;
     class MapOp;
     class CopyOp;
     class IndexCopyOp;
@@ -1280,11 +1333,8 @@ namespace Legion {
     class FrameOp;
     class DeletionOp;
     class InternalOp;
-    class OpenOp;
-    class AdvanceOp;
     class CloseOp;
-    class InterCloseOp;
-    class ReadCloseOp;
+    class MergeCloseOp;
     class PostCloseOp;
     class VirtualCloseOp;
     class AcquireOp;
@@ -1304,10 +1354,22 @@ namespace Legion {
     class AttachOp;
     class DetachOp;
     class TimingOp;
-    class TaskOp;
+    class ExternalMappable;
+    class RemoteOp;
+    class RemoteMapOp;
+    class RemoteCopyOp;
+    class RemoteCloseOp;
+    class RemoteAcquireOp;
+    class RemoteReleaseOp;
+    class RemoteFillOp;
+    class RemotePartitionOp;
+    class RemoteReplayOp;
+    class RemoteSummaryOp;
 
     // legion_tasks.h
     class ExternalTask;
+    class TaskOp;
+    class RemoteTaskOp;
     class SingleTask;
     class MultiTask;
     class IndividualTask;
@@ -1358,6 +1420,9 @@ namespace Legion {
     // the provenance of meta-task operations for profiling
     // purposes, this has no bearing on correctness
     extern __thread ::legion_unique_id_t implicit_provenance;
+    // Use this global variable to track if we're an
+    // implicit top-level task that needs to do external waits
+    extern __thread bool implicit_top_level_task;
 
     /**
      * \class LgTaskArgs
@@ -1366,13 +1431,12 @@ namespace Legion {
     template<typename T>
     struct LgTaskArgs {
     public:
-      //LgTaskArgs(void)
-      //  : lg_task_id(T::TASK_ID), provenance(implicit_provenance) { }
       LgTaskArgs(::legion_unique_id_t uid)
-        : lg_task_id(T::TASK_ID), provenance(uid) { }
+        : provenance(uid), lg_task_id(T::TASK_ID) { }
     public:
-      const LgTaskID lg_task_id;
+      // In this order for alignment reasons
       const ::legion_unique_id_t provenance;
+      const LgTaskID lg_task_id;
     };
     
     // legion_trace.h
@@ -1385,21 +1449,30 @@ namespace Legion {
     class TraceBeginOp;
     class TraceSummaryOp;
     class PhysicalTrace;
-    struct PhysicalTemplate;
-    struct Instruction;
-    struct GetTermEvent;
-    struct CreateApUserEvent;
-    struct TriggerEvent;
-    struct MergeEvent;
-    struct AssignFenceCompletion;
-    struct IssueCopy;
-    struct IssueFill;
-    struct GetOpTermEvent;
-    struct SetOpSyncEvent;
-    struct CompleteReplay;
+    class TraceViewSet;
+    class TraceConditionSet;
+    class PhysicalTemplate;
+    class Instruction;
+    class GetTermEvent;
+    class CreateApUserEvent;
+    class TriggerEvent;
+    class MergeEvent;
+    class AssignFenceCompletion;
+    class IssueCopy;
+    class IssueFill;
+    class GetOpTermEvent;
+    class SetOpSyncEvent;
+    class CompleteReplay;
 
     // region_tree.h
     class RegionTreeForest;
+    class IndexSpaceExpression;
+    class IndexSpaceOperation;
+    template<int DIM, typename T> class IndexSpaceOperationT;
+    template<int DIM, typename T> class IndexSpaceUnion;
+    template<int DIM, typename T> class IndexSpaceIntersection;
+    template<int DIM, typename T> class IndexSpaceDifference;
+    class ExpressionTrieNode;
     class IndexTreeNode;
     class IndexSpaceNode;
     template<int DIM, typename T> class IndexSpaceNodeT;
@@ -1409,6 +1482,8 @@ namespace Legion {
     class RegionTreeNode;
     class RegionNode;
     class PartitionNode;
+    class ColorSpaceIterator;
+    template<int DIM, typename T> class ColorSpaceIteratorT;
 
     class RegionTreeContext;
     class RegionTreePath;
@@ -1417,12 +1492,10 @@ namespace Legion {
 
     class ProjectionEpoch;
     class LogicalState;
-    class PhysicalState;
-    class VersionState;
+    class EquivalenceSet;
+    class VersionManager;
     class VersionInfo;
-    class RestrictInfo;
-    class Restriction;
-    class Acquisition;
+    class RayTracer;
 
     class Collectable;
     class Notifiable;
@@ -1437,12 +1510,9 @@ namespace Legion {
     class InstanceManager;
     class InstanceKey;
     class InstanceView;
+    class CollectableView; // pure virtual class
     class DeferredView;
     class MaterializedView;
-    class CompositeBase;
-    class CompositeView;
-    class CompositeVersionInfo;
-    class CompositeNode;
     class FillView;
     class PhiView;
     class MappingRef;
@@ -1459,14 +1529,11 @@ namespace Legion {
     class RegionAnalyzer;
     class RegionMapper;
 
-    struct EscapedUser;
-    struct EscapedCopy;
     struct GenericUser;
     struct LogicalUser;
     struct PhysicalUser;
     struct LogicalTraceInfo;
     struct PhysicalTraceInfo;
-    class ClosedNode;
     class LogicalCloser;
     class TreeCloseImpl;
     class TreeClose;
@@ -1505,11 +1572,8 @@ namespace Legion {
     friend class Internal::DynamicCollectiveOp;             \
     friend class Internal::FuturePredOp;                    \
     friend class Internal::DeletionOp;                      \
-    friend class Internal::OpenOp;                          \
-    friend class Internal::AdvanceOp;                       \
     friend class Internal::CloseOp;                         \
-    friend class Internal::InterCloseOp;                    \
-    friend class Internal::ReadCloseOp;                     \
+    friend class Internal::MergeCloseOp;                    \
     friend class Internal::PostCloseOp;                     \
     friend class Internal::VirtualCloseOp;                  \
     friend class Internal::AcquireOp;                       \
@@ -1529,6 +1593,7 @@ namespace Legion {
     friend class Internal::DetachOp;                        \
     friend class Internal::TimingOp;                        \
     friend class Internal::TraceSummaryOp;                  \
+    friend class Internal::ExternalMappable;                \
     friend class Internal::ExternalTask;                    \
     friend class Internal::TaskOp;                          \
     friend class Internal::SingleTask;                      \
@@ -1549,8 +1614,6 @@ namespace Legion {
     friend class Internal::DeferredView;                    \
     friend class Internal::ReductionView;                   \
     friend class Internal::MaterializedView;                \
-    friend class Internal::CompositeView;                   \
-    friend class Internal::CompositeNode;                   \
     friend class Internal::FillView;                        \
     friend class Internal::LayoutDescription;               \
     friend class Internal::PhysicalManager;                 \
@@ -1583,10 +1646,12 @@ namespace Legion {
     extern Realm::Logger log_inst;             \
     extern Realm::Logger log_variant;          \
     extern Realm::Logger log_allocation;       \
+    extern Realm::Logger log_migration;        \
     extern Realm::Logger log_prof;             \
     extern Realm::Logger log_garbage;          \
     extern Realm::Logger log_spy;              \
-    extern Realm::Logger log_shutdown;
+    extern Realm::Logger log_shutdown;         \
+    extern Realm::Logger log_tracing;
 
   }; // Internal namespace
 
@@ -1597,6 +1662,7 @@ namespace Legion {
   typedef Realm::Processor Processor;
   typedef Realm::CodeDescriptor CodeDescriptor;
   typedef Realm::Reservation Reservation;
+  typedef Realm::CompletionQueue CompletionQueue;
   typedef ::legion_reduction_op_id_t ReductionOpID;
   typedef Realm::ReductionOpUntyped ReductionOp;
   typedef ::legion_custom_serdez_id_t CustomSerdezID;
@@ -1674,6 +1740,7 @@ namespace Legion {
     const LegionColor INVALID_COLOR = LLONG_MAX;
     // This is only needed internally
     typedef Realm::RegionInstance PhysicalInstance;
+    typedef unsigned long long IndexSpaceExprID;
     // Helper for encoding templates
     struct NT_TemplateHelper : 
       public Realm::DynamicTemplates::ListProduct2<Realm::DIMCOUNTS, 
@@ -1719,44 +1786,44 @@ namespace Legion {
 #define LEGION_FIELD_MASK_FIELD_ALL_ONES      0xFFFFFFFFFFFFFFFF
 
 #if defined(__AVX__)
-#if (MAX_FIELDS > 256)
-    typedef AVXTLBitMask<MAX_FIELDS> FieldMask;
-#elif (MAX_FIELDS > 128)
-    typedef AVXBitMask<MAX_FIELDS> FieldMask;
-#elif (MAX_FIELDS > 64)
-    typedef SSEBitMask<MAX_FIELDS> FieldMask;
+#if (LEGION_MAX_FIELDS > 256)
+    typedef AVXTLBitMask<LEGION_MAX_FIELDS> FieldMask;
+#elif (LEGION_MAX_FIELDS > 128)
+    typedef AVXBitMask<LEGION_MAX_FIELDS> FieldMask;
+#elif (LEGION_MAX_FIELDS > 64)
+    typedef SSEBitMask<LEGION_MAX_FIELDS> FieldMask;
 #else
-    typedef BitMask<LEGION_FIELD_MASK_FIELD_TYPE,MAX_FIELDS,
+    typedef BitMask<LEGION_FIELD_MASK_FIELD_TYPE,LEGION_MAX_FIELDS,
                     LEGION_FIELD_MASK_FIELD_SHIFT,
                     LEGION_FIELD_MASK_FIELD_MASK> FieldMask;
 #endif
 #elif defined(__SSE2__)
-#if (MAX_FIELDS > 128)
-    typedef SSETLBitMask<MAX_FIELDS> FieldMask;
-#elif (MAX_FIELDS > 64)
-    typedef SSEBitMask<MAX_FIELDS> FieldMask;
+#if (LEGION_MAX_FIELDS > 128)
+    typedef SSETLBitMask<LEGION_MAX_FIELDS> FieldMask;
+#elif (LEGION_MAX_FIELDS > 64)
+    typedef SSEBitMask<LEGION_MAX_FIELDS> FieldMask;
 #else
-    typedef BitMask<LEGION_FIELD_MASK_FIELD_TYPE,MAX_FIELDS,
+    typedef BitMask<LEGION_FIELD_MASK_FIELD_TYPE,LEGION_MAX_FIELDS,
                     LEGION_FIELD_MASK_FIELD_SHIFT,
                     LEGION_FIELD_MASK_FIELD_MASK> FieldMask;
 #endif
 #elif defined(__ALTIVEC__)
-#if (MAX_FIELDS > 128)
-    typedef PPCTLBitMask<MAX_FIELDS> FieldMask;
-#elif (MAX_FIELDS > 64)
-    typedef PPCBitMask<MAX_FIELDS> FieldMask;
+#if (LEGION_MAX_FIELDS > 128)
+    typedef PPCTLBitMask<LEGION_MAX_FIELDS> FieldMask;
+#elif (LEGION_MAX_FIELDS > 64)
+    typedef PPCBitMask<LEGION_MAX_FIELDS> FieldMask;
 #else
-    typedef BitMask<LEGION_FIELD_MASK_FIELD_TYPE,MAX_FIELDS,
+    typedef BitMask<LEGION_FIELD_MASK_FIELD_TYPE,LEGION_MAX_FIELDS,
                     LEGION_FIELD_MASK_FIELD_SHIFT,
                     LEGION_FIELD_MASK_FIELD_MASK> FieldMask;
 #endif
 #else
-#if (MAX_FIELDS > 64)
-    typedef TLBitMask<LEGION_FIELD_MASK_FIELD_TYPE,MAX_FIELDS,
+#if (LEGION_MAX_FIELDS > 64)
+    typedef TLBitMask<LEGION_FIELD_MASK_FIELD_TYPE,LEGION_MAX_FIELDS,
                       LEGION_FIELD_MASK_FIELD_SHIFT,
                       LEGION_FIELD_MASK_FIELD_MASK> FieldMask;
 #else
-    typedef BitMask<LEGION_FIELD_MASK_FIELD_TYPE,MAX_FIELDS,
+    typedef BitMask<LEGION_FIELD_MASK_FIELD_TYPE,LEGION_MAX_FIELDS,
                     LEGION_FIELD_MASK_FIELD_SHIFT,
                     LEGION_FIELD_MASK_FIELD_MASK> FieldMask;
 #endif
@@ -1776,49 +1843,49 @@ namespace Legion {
 #define LEGION_NODE_MASK_NODE_ALL_ONES       0xFFFFFFFFFFFFFFFF
 
 #if defined(__AVX__)
-#if (MAX_NUM_NODES > 256)
-    typedef AVXTLBitMask<MAX_NUM_NODES> NodeMask;
-#elif (MAX_NUM_NODES > 128)
-    typedef AVXBitMask<MAX_NUM_NODES> NodeMask;
-#elif (MAX_NUM_NODES > 64)
-    typedef SSEBitMask<MAX_NUM_NODES> NodeMask;
+#if (LEGION_MAX_NUM_NODES > 256)
+    typedef AVXTLBitMask<LEGION_MAX_NUM_NODES> NodeMask;
+#elif (LEGION_MAX_NUM_NODES > 128)
+    typedef AVXBitMask<LEGION_MAX_NUM_NODES> NodeMask;
+#elif (LEGION_MAX_NUM_NODES > 64)
+    typedef SSEBitMask<LEGION_MAX_NUM_NODES> NodeMask;
 #else
-    typedef BitMask<LEGION_NODE_MASK_NODE_TYPE,MAX_NUM_NODES,
+    typedef BitMask<LEGION_NODE_MASK_NODE_TYPE,LEGION_MAX_NUM_NODES,
                     LEGION_NODE_MASK_NODE_SHIFT,
                     LEGION_NODE_MASK_NODE_MASK> NodeMask;
 #endif
 #elif defined(__SSE2__)
-#if (MAX_NUM_NODES > 128)
-    typedef SSETLBitMask<MAX_NUM_NODES> NodeMask;
-#elif (MAX_NUM_NODES > 64)
-    typedef SSEBitMask<MAX_NUM_NODES> NodeMask;
+#if (LEGION_MAX_NUM_NODES > 128)
+    typedef SSETLBitMask<LEGION_MAX_NUM_NODES> NodeMask;
+#elif (LEGION_MAX_NUM_NODES > 64)
+    typedef SSEBitMask<LEGION_MAX_NUM_NODES> NodeMask;
 #else
-    typedef BitMask<LEGION_NODE_MASK_NODE_TYPE,MAX_NUM_NODES,
+    typedef BitMask<LEGION_NODE_MASK_NODE_TYPE,LEGION_MAX_NUM_NODES,
                     LEGION_NODE_MASK_NODE_SHIFT,
                     LEGION_NODE_MASK_NODE_MASK> NodeMask;
 #endif
 #elif defined(__ALTIVEC__)
-#if (MAX_NUM_NODES > 128)
-    typedef PPCTLBitMask<MAX_NUM_NODES> NodeMask;
-#elif (MAX_NUM_NODES > 64)
-    typedef PPCBitMask<MAX_NUM_NODES> NodeMask;
+#if (LEGION_MAX_NUM_NODES > 128)
+    typedef PPCTLBitMask<LEGION_MAX_NUM_NODES> NodeMask;
+#elif (LEGION_MAX_NUM_NODES > 64)
+    typedef PPCBitMask<LEGION_MAX_NUM_NODES> NodeMask;
 #else
-    typedef BitMask<LEGION_NODE_MASK_NODE_TYPE,MAX_NUM_NODES,
+    typedef BitMask<LEGION_NODE_MASK_NODE_TYPE,LEGION_MAX_NUM_NODES,
                     LEGION_NODE_MASK_NODE_SHIFT,
                     LEGION_NODE_MASK_NODE_MASK> NodeMask;
 #endif
 #else
-#if (MAX_NUM_NODES > 64)
-    typedef TLBitMask<LEGION_NODE_MASK_NODE_TYPE,MAX_NUM_NODES,
+#if (LEGION_MAX_NUM_NODES > 64)
+    typedef TLBitMask<LEGION_NODE_MASK_NODE_TYPE,LEGION_MAX_NUM_NODES,
                       LEGION_NODE_MASK_NODE_SHIFT,
                       LEGION_NODE_MASK_NODE_MASK> NodeMask;
 #else
-    typedef BitMask<LEGION_NODE_MASK_NODE_TYPE,MAX_NUM_NODES,
+    typedef BitMask<LEGION_NODE_MASK_NODE_TYPE,LEGION_MAX_NUM_NODES,
                     LEGION_NODE_MASK_NODE_SHIFT,
                     LEGION_NODE_MASK_NODE_MASK> NodeMask;
 #endif
 #endif
-    typedef IntegerSet<AddressSpaceID,NodeMask> NodeSet;
+    typedef IntegerSet<AddressSpaceID,NodeMask,false/*bidir*/> NodeSet;
 
 #undef LEGION_NODE_MASK_NODE_SHIFT
 #undef LEGION_NODE_MASK_NODE_MASK
@@ -1831,44 +1898,44 @@ namespace Legion {
 #define LEGION_PROC_MASK_PROC_ALL_ONES       0xFFFFFFFFFFFFFFFF
 
 #if defined(__AVX__)
-#if (MAX_NUM_PROCS > 256)
-    typedef AVXTLBitMask<MAX_NUM_PROCS> ProcessorMask;
-#elif (MAX_NUM_PROCS > 128)
-    typedef AVXBitMask<MAX_NUM_PROCS> ProcessorMask;
-#elif (MAX_NUM_PROCS > 64)
-    typedef SSEBitMask<MAX_NUM_PROCS> ProcessorMask;
+#if (LEGION_MAX_NUM_PROCS > 256)
+    typedef AVXTLBitMask<LEGION_MAX_NUM_PROCS> ProcessorMask;
+#elif (LEGION_MAX_NUM_PROCS > 128)
+    typedef AVXBitMask<LEGION_MAX_NUM_PROCS> ProcessorMask;
+#elif (LEGION_MAX_NUM_PROCS > 64)
+    typedef SSEBitMask<LEGION_MAX_NUM_PROCS> ProcessorMask;
 #else
-    typedef BitMask<LEGION_PROC_MASK_PROC_TYPE,MAX_NUM_PROCS,
+    typedef BitMask<LEGION_PROC_MASK_PROC_TYPE,LEGION_MAX_NUM_PROCS,
                     LEGION_PROC_MASK_PROC_SHIFT,
                     LEGION_PROC_MASK_PROC_MASK> ProcessorMask;
 #endif
 #elif defined(__SSE2__)
-#if (MAX_NUM_PROCS > 128)
-    typedef SSETLBitMask<MAX_NUM_PROCS> ProcessorMask;
-#elif (MAX_NUM_PROCS > 64)
-    typedef SSEBitMask<MAX_NUM_PROCS> ProcessorMask;
+#if (LEGION_MAX_NUM_PROCS > 128)
+    typedef SSETLBitMask<LEGION_MAX_NUM_PROCS> ProcessorMask;
+#elif (LEGION_MAX_NUM_PROCS > 64)
+    typedef SSEBitMask<LEGION_MAX_NUM_PROCS> ProcessorMask;
 #else
-    typedef BitMask<LEGION_PROC_MASK_PROC_TYPE,MAX_NUM_PROCS,
+    typedef BitMask<LEGION_PROC_MASK_PROC_TYPE,LEGION_MAX_NUM_PROCS,
                     LEGION_PROC_MASK_PROC_SHIFT,
                     LEGION_PROC_MASK_PROC_MASK> ProcessorMask;
 #endif
 #elif defined(__ALTIVEC__)
-#if (MAX_NUM_PROCS > 128)
-    typedef PPCTLBitMask<MAX_NUM_PROCS> ProcessorMask;
-#elif (MAX_NUM_PROCS > 64)
-    typedef PPCBitMask<MAX_NUM_PROCS> ProcessorMask;
+#if (LEGION_MAX_NUM_PROCS > 128)
+    typedef PPCTLBitMask<LEGION_MAX_NUM_PROCS> ProcessorMask;
+#elif (LEGION_MAX_NUM_PROCS > 64)
+    typedef PPCBitMask<LEGION_MAX_NUM_PROCS> ProcessorMask;
 #else
-    typedef BitMask<LEGION_PROC_MASK_PROC_TYPE,MAX_NUM_PROCS,
+    typedef BitMask<LEGION_PROC_MASK_PROC_TYPE,LEGION_MAX_NUM_PROCS,
                     LEGION_PROC_MASK_PROC_SHIFT,
                     LEGION_PROC_MASK_PROC_MASK> ProcessorMask;
 #endif
 #else
-#if (MAX_NUM_PROCS > 64)
-    typedef TLBitMask<LEGION_PROC_MASK_PROC_TYPE,MAX_NUM_PROCS,
+#if (LEGION_MAX_NUM_PROCS > 64)
+    typedef TLBitMask<LEGION_PROC_MASK_PROC_TYPE,LEGION_MAX_NUM_PROCS,
                       LEGION_PROC_MASK_PROC_SHIFT,
                       LEGION_PROC_MASK_PROC_MASK> ProcessorMask;
 #else
-    typedef BitMask<LEGION_PROC_MASK_PROC_TYPE,MAX_NUM_PROCS,
+    typedef BitMask<LEGION_PROC_MASK_PROC_TYPE,LEGION_MAX_NUM_PROCS,
                     LEGION_PROC_MASK_PROC_SHIFT,
                     LEGION_PROC_MASK_PROC_MASK> ProcessorMask;
 #endif
@@ -2022,9 +2089,13 @@ namespace Legion {
     private:
       // These are only accessible via AutoLock
       friend class AutoLock;
+      friend class AutoTryLock;
       inline RtEvent lock(void)   { return RtEvent(wrlock()); }
       inline RtEvent wrlock(void) { return RtEvent(reservation.wrlock()); }
       inline RtEvent rdlock(void) { return RtEvent(reservation.rdlock()); }
+      inline bool trylock(void) { return reservation.trylock(); }
+      inline bool trywrlock(void) { return reservation.trywrlock(); }
+      inline bool tryrdlock(void) { return reservation.tryrdlock(); }
       inline void unlock(void) { reservation.unlock(); }
     private:
       inline void advise_sleep_entry(Realm::UserEvent guard)
@@ -2070,6 +2141,18 @@ namespace Legion {
         }
         Internal::local_lock_list = this;
       }
+    protected:
+      // Helper constructor for AutoTryLock
+      inline AutoLock(int mode, bool excl, LocalLock &r)
+        : local_lock(r), previous(Internal::local_lock_list), 
+          exclusive(excl), held(false)
+      {
+#ifdef DEBUG_REENTRANT_LOCKS
+        if (previous != NULL)
+          previous->check_for_reentrant_locks(&local_lock);
+#endif
+        Internal::local_lock_list = this;
+      }
     public:
       inline AutoLock(const AutoLock &rhs)
         : local_lock(rhs.local_lock), previous(NULL), exclusive(false)
@@ -2080,10 +2163,10 @@ namespace Legion {
       inline ~AutoLock(void)
       {
 #ifdef DEBUG_LEGION
-        assert(held);
         assert(Internal::local_lock_list == this);
 #endif
-        local_lock.unlock();
+        if (held)
+          local_lock.unlock();
         Internal::local_lock_list = previous;
       }
     public:
@@ -2158,11 +2241,31 @@ namespace Legion {
           previous->check_for_reentrant_locks(to_acquire);
       }
 #endif
-    private:
+    protected:
       LocalLock &local_lock;
       AutoLock *const previous;
       const bool exclusive;
       bool held;
+    };
+
+    // AutoTryLock is an extension of AutoLock that supports try lock
+    class AutoTryLock : public AutoLock {
+    public:
+      inline AutoTryLock(LocalLock &r, int mode = 0, bool excl = true)
+        : AutoLock(mode, excl, r) 
+      {
+        if (exclusive)
+          ready = local_lock.wrlock();
+        else
+          ready = local_lock.rdlock();
+        held = !ready.exists();
+      }
+    public:
+      // Allow an easy test for whether we got the lock or not
+      inline bool has_lock(void) const { return held; }
+      inline RtEvent try_next(void) const { return ready; }
+    protected:
+      RtEvent ready;
     };
     
     // Special method that we need here for waiting on events
@@ -2186,7 +2289,10 @@ namespace Legion {
         const Realm::UserEvent done = Realm::UserEvent::create_user_event();
         local_lock_list_copy->advise_sleep_entry(done);
         // Now we can do the wait
-        Realm::Event::wait();
+        if (implicit_top_level_task)
+          Realm::Event::external_wait();
+        else
+          Realm::Event::wait();
         // When we wake up, notify that we are done and exited the wait
         local_lock_list_copy->advise_sleep_exit();
         // Trigger the user-event
@@ -2198,7 +2304,12 @@ namespace Legion {
         Internal::local_lock_list = local_lock_list_copy; 
       }
       else // Just do the normal wait
-        Realm::Event::wait();
+      {
+        if (implicit_top_level_task)
+          Realm::Event::external_wait();
+        else
+          Realm::Event::wait();
+      }
       // Write the context back
       Internal::implicit_context = local_ctx;
       // Write the provenance information back
@@ -2207,7 +2318,17 @@ namespace Legion {
 
 #ifdef LEGION_SPY
     // Need a custom version of these for Legion Spy to track instance events
-    struct CopySrcDstField : public Realm::CopySrcDstField {
+    class CopySrcDstField : public Realm::CopySrcDstField {
+    public:
+      CopySrcDstField(void) : Realm::CopySrcDstField() { }
+      CopySrcDstField(const CopySrcDstField &rhs)
+        : Realm::CopySrcDstField(rhs) { inst_event = rhs.inst_event; }
+      inline CopySrcDstField& operator=(const CopySrcDstField &rhs)
+      { 
+        Realm::CopySrcDstField::operator = (rhs); 
+        inst_event = rhs.inst_event; 
+        return *this; 
+      }
     public:
       ApEvent inst_event;
     };

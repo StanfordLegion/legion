@@ -1,4 +1,4 @@
--- Copyright 2018 Stanford University
+-- Copyright 2019 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -46,7 +46,7 @@ end
 
 local skip_empty_tasks = {}
 
-function skip_empty_tasks.stat_expr(cx, node)
+local function skip_empty_tasks_sat_expr(cx, node)
   local call = node.expr
 
   if not call:is(ast.typed.expr.Call) then
@@ -159,17 +159,55 @@ function skip_empty_tasks.stat_expr(cx, node)
   }
 end
 
-local function skip_empty_tasks_node(cx)
-  return function(node)
-    if node:is(ast.typed.stat.Expr) then
-      return skip_empty_tasks.stat_expr(cx, node)
-    end
-    return node
-  end
+local function skip_empty_tasks_stat_block(cx, node)
+  return node { block = skip_empty_tasks.block(cx, node.block) }
+end
+
+local function skip_empty_tasks_if(cx, node)
+  local then_block = skip_empty_tasks.block(cx, node.then_block)
+  local elseif_blocks = node.elseif_blocks:map(function(elseif_block)
+    return skip_empty_tasks.stat(cx, elseif_block)
+  end)
+  local else_block = skip_empty_tasks.block(cx, node.else_block)
+  return node {
+    then_block = then_block,
+    elseif_blocks = elseif_blocks,
+    else_block = else_block,
+  }
+end
+
+local function skip_empty_tasks_elseif(cx, node)
+  local block = skip_empty_tasks.block(cx, node.block)
+  return node { block = block }
+end
+
+local function do_nothing(cx, node) return node end
+
+local skip_empty_tasks_stat_table = {
+  [ast.typed.stat.While]     = skip_empty_tasks_stat_block,
+  [ast.typed.stat.ForNum]    = skip_empty_tasks_stat_block,
+  [ast.typed.stat.ForList]   = skip_empty_tasks_stat_block,
+  [ast.typed.stat.Repeat]    = skip_empty_tasks_stat_block,
+  [ast.typed.stat.Block]     = skip_empty_tasks_stat_block,
+  [ast.typed.stat.MustEpoch] = skip_empty_tasks_stat_block,
+  [ast.typed.stat.If]        = skip_empty_tasks_if,
+  [ast.typed.stat.Elseif]    = skip_empty_tasks_elseif,
+  [ast.typed.stat.Expr]      = skip_empty_tasks_sat_expr,
+  [ast.typed.stat]           = do_nothing,
+}
+
+local skip_empty_tasks_stat = ast.make_single_dispatch(
+  skip_empty_tasks_stat_table,
+  {})
+
+function skip_empty_tasks.stat(cx, node)
+  return skip_empty_tasks_stat(cx)(node)
 end
 
 function skip_empty_tasks.block(cx, node)
-  return ast.map_node_postorder(skip_empty_tasks_node(cx), node)
+  return node {
+    stats = node.stats:map(function(stat) return skip_empty_tasks.stat(cx, stat) end),
+  }
 end
 
 function skip_empty_tasks.top_task(cx, node)
@@ -181,7 +219,9 @@ function skip_empty_tasks.top_task(cx, node)
 end
 
 function skip_empty_tasks.top(cx, node)
-  if node:is(ast.typed.top.Task) then
+  if node:is(ast.typed.top.Task) and
+     not node.config_options.leaf
+  then
     return skip_empty_tasks.top_task(cx, node)
 
   else

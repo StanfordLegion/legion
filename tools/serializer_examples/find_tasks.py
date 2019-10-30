@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-# Copyright 2018 Stanford University, NVIDIA Corporation
+# Copyright 2019 Stanford University, NVIDIA Corporation
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -54,6 +54,14 @@ def log_task_info(op_id, task_id, variant_id, proc_id, create, ready, start, sto
         task_spans[task_name] = []
     task_spans[task_name].append(time_range)
 
+def log_gpu_task_info(op_id, task_id, variant_id, proc_id, create, ready, start, stop, gpu_start, gpu_stop):
+    assert variant_id in task_names
+    task_name = task_names[variant_id]
+    time_range = (gpu_start, gpu_stop)
+    if task_name not in task_spans:
+        task_spans[task_name] = []
+    task_spans[task_name].append(time_range)
+
 def log_meta_info(op_id, lg_id, proc_id, create, ready, start, stop):
     assert lg_id in meta_task_names
     task_name = meta_task_names[lg_id]
@@ -69,7 +77,21 @@ callbacks = {
     "MetaDesc": log_meta_desc,
     "OpDesc": noop,
     "ProcDesc": noop,
+    "ProcMDesc": noop,
     "MemDesc": noop,
+    "MaxDimDesc": noop,
+    "IndexSpacePointDesc": noop,
+    "IndexSpaceRectDesc": noop,
+    "IndexSpaceEmptyDesc": noop,
+    "FieldDesc": noop,
+    "FieldSpaceDesc": noop,
+    "IndexSpaceDesc": noop,
+    "PartDesc": noop,
+    "IndexPartitionDesc": noop,
+    "IndexSubSpaceDesc": noop,
+    "LogicalRegionDesc": noop,
+    "PhysicalInstRegionDesc": noop,
+    "PhysicalInstLayoutDesc": noop,
     "TaskKind": log_kind,
     "TaskVariant": log_variant,
     "OperationInstance": noop,
@@ -78,6 +100,7 @@ callbacks = {
     "TaskWaitInfo": noop,
     "MetaWaitInfo": noop,
     "TaskInfo": log_task_info,
+    "GPUTaskInfo": log_gpu_task_info,
     "MetaInfo": log_meta_info,
     "CopyInfo": noop,
     "FillInfo": noop,
@@ -88,7 +111,7 @@ callbacks = {
     "MessageInfo": noop,
     "MapperCallInfo": noop,
     "RuntimeCallInfo": noop,
-    "ProfTaskInfo": noop
+    "ProfTaskInfo": noop,
 }
 
 class Dummy(object):
@@ -131,7 +154,7 @@ def main():
     task = args.task[0]
     matching_tasks = []
 
-    for task_name in task_spans.iterkeys():
+    for task_name in task_spans.keys():
         if re.search(task, task_name):
             matching_tasks.append(task_name)
 

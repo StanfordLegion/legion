@@ -1,4 +1,4 @@
-/* Copyright 2018 Stanford University, NVIDIA Corporation
+/* Copyright 2019 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,6 +21,7 @@
 #include "legion/legion_spy.h"
 #include "legion/region_tree.h"
 #include "legion/mapper_manager.h"
+#include "legion/legion_analysis.h"
 #include "legion/legion_utilities.h"
 #include "legion/legion_profiling.h"
 #include "legion/legion_allocation.h"
@@ -179,6 +180,38 @@ namespace Legion {
     };
 
     /**
+     * \class FieldAllocatorImpl
+     * The base implementation of a field allocator object. This
+     * tracks how many outstanding copies of a field allocator
+     * object there are for a task and once they've all been
+     * destroyed it informs the context that there are no more
+     * outstanding allocations.
+     */
+    class FieldAllocatorImpl : public Collectable {
+    public:
+      FieldAllocatorImpl(FieldSpace space, TaskContext *context);
+      FieldAllocatorImpl(const FieldAllocatorImpl &rhs);
+      ~FieldAllocatorImpl(void);
+    public:
+      FieldAllocatorImpl& operator=(const FieldAllocatorImpl &rhs);
+    public:
+      inline FieldSpace get_field_space(void) const { return field_space; }
+    public:
+      FieldID allocate_field(size_t field_size, 
+                             FieldID desired_fieldid,
+                             CustomSerdezID serdez_id, bool local);
+      void free_field(FieldID fid, const bool unordered);
+    public:
+      void allocate_fields(const std::vector<size_t> &field_sizes,
+                           std::vector<FieldID> &resulting_fields,
+                           CustomSerdezID serdez_id, bool local);
+      void free_fields(const std::set<FieldID> &to_free, const bool unordered);
+    public:
+      const FieldSpace field_space;
+      TaskContext *const context;
+    };
+
+    /**
      * \class FutureImpl
      * The base implementation of a future object.  The runtime
      * manages future implementation objects and knows how to
@@ -213,14 +246,16 @@ namespace Legion {
     public:
       FutureImpl& operator=(const FutureImpl &rhs);
     public:
-      virtual VirtualChannelKind get_virtual_channel(void) const 
-        { return DEFAULT_VIRTUAL_CHANNEL; }
-    public:
-      void get_void_result(bool silence_warnings = true);
-      void* get_untyped_result(bool silence_warnings = true);
-      bool is_empty(bool block, bool silence_warnings = true);
+      void* get_untyped_result(bool silence_warnings = true,
+                               const char *warning_string = NULL,
+                               bool internal = false,
+                               bool check_size = false,
+                               size_t future_size = 0);
+      bool is_empty(bool block, bool silence_warnings = true,
+                    const char *warning_string = NULL,
+                    bool internal = false);
       bool is_ready(void);
-      size_t get_untyped_size(void);
+      size_t get_untyped_size(bool internal = false);
       ApEvent get_ready_event(void) const { return ready_event; }
     public:
       // This will simply save the value of the future
@@ -242,14 +277,15 @@ namespace Legion {
       virtual void notify_inactive(ReferenceMutator *mutator);
     public:
       void register_dependence(Operation *consumer_op);
+      void register_waiter(AddressSpaceID sid, ReferenceMutator *mutator);
     protected:
       void mark_sampled(void);
       void broadcast_result(void);
-      void register_waiter(AddressSpaceID sid);
     public:
-      void record_future_registered(ReferenceMutator *creator);
+      void record_future_registered(void);
       static void handle_future_result(Deserializer &derez, Runtime *rt);
-      static void handle_future_subscription(Deserializer &derez, Runtime *rt);
+      static void handle_future_subscription(Deserializer &derez, Runtime *rt,
+                                             AddressSpaceID source);
     public:
       void contribute_to_collective(const DynamicCollective &dc,unsigned count);
       static void handle_contribute_to_collective(const void *args);
@@ -257,11 +293,14 @@ namespace Legion {
       // These three fields are only valid on the owner node
       Operation *const producer_op;
       const GenerationID op_gen;
+      // The depth of the context in which this was made
+      const int producer_depth;
 #ifdef LEGION_SPY
       const UniqueID producer_uid;
 #endif
     private:
       FRIEND_ALL_RUNTIME_CLASSES
+      mutable LocalLock future_lock;
       ApUserEvent ready_event;
       void *result; 
       size_t result_size;
@@ -302,8 +341,10 @@ namespace Legion {
       void set_future(const DomainPoint &point, FutureImpl *impl,
                       ReferenceMutator *mutator);
       void get_void_result(const DomainPoint &point, 
-                            bool silence_warnings = true);
-      void wait_all_results(bool silence_warnings = true);
+                            bool silence_warnings = true,
+                            const char *warning_string = NULL);
+      void wait_all_results(bool silence_warnings = true,
+                            const char *warning_string = NULL);
       void complete_all_futures(void);
       bool reset_all_futures(void);
     public:
@@ -326,6 +367,7 @@ namespace Legion {
       Operation *const op;
       const GenerationID op_gen;
     private:
+      mutable LocalLock future_map_lock;
       ApEvent ready_event;
       std::map<DomainPoint,Future> futures;
       bool valid;
@@ -364,7 +406,7 @@ namespace Legion {
     public:
       inline bool created_accessor(void) const { return made_accessor; }
     public:
-      void wait_until_valid(bool silence_warnings, 
+      void wait_until_valid(bool silence_warnings, const char *warning_string, 
                             bool warn = false, const char *src = NULL);
       bool is_valid(void) const;
       bool is_mapped(void) const;
@@ -402,12 +444,15 @@ namespace Legion {
       PhysicalInstance get_instance_info(PrivilegeMode mode, 
                                          FieldID fid, size_t field_size, 
                                          void *realm_is, TypeTag type_tag,
+                                         const char *warning_string,
                                          bool silence_warnings, 
                                          bool generic_accessor,
                                          bool check_field_size,
                                          ReductionOpID redop);
       void fail_bounds_check(DomainPoint p, FieldID fid, PrivilegeMode mode);
       void fail_bounds_check(Domain d, FieldID fid, PrivilegeMode mode);
+      void report_incompatible_accessor(const char *accessor_kind,
+                             PhysicalInstance instance, FieldID fid);
     public:
       Runtime *const runtime;
       TaskContext *const context;
@@ -415,6 +460,7 @@ namespace Legion {
       const MappingTagID tag;
       const bool leaf_region;
       const bool virtual_mapped;
+      const bool replaying;
     private:
       // Event for when the instance ref is ready
       ApEvent ready_event;
@@ -658,6 +704,7 @@ namespace Legion {
       // Scheduling state
       mutable LocalLock queue_lock;
       bool task_scheduler_enabled;
+      bool outstanding_task_scheduler;
       unsigned total_active_contexts;
       unsigned total_active_mappers;
       struct ContextState {
@@ -675,9 +722,13 @@ namespace Legion {
       // For each mapper something to track its state
       struct MapperState {
       public:
+        MapperState(void)
+          : queue_guard(false) { }
+      public:
         std::list<TaskOp*> ready_queue;
         RtEvent deferral_event;
-        bool added_tasks;
+        RtUserEvent queue_waiter;
+        bool queue_guard;
       };
       // State for each mapper for scheduling purposes
       std::map<MapperID,MapperState> mapper_states;
@@ -718,8 +769,7 @@ namespace Legion {
         InstanceInfo(void)
           : current_state(COLLECTABLE_STATE), 
             deferred_collect(RtUserEvent::NO_RT_USER_EVENT),
-            instance_size(0), pending_acquires(0), min_priority(0),
-            unattached_external(false) { }
+            instance_size(0), pending_acquires(0), min_priority(0) { }
       public:
         InstanceState current_state;
         RtUserEvent deferred_collect;
@@ -728,7 +778,6 @@ namespace Legion {
         GCPriority min_priority;
         std::map<std::pair<MapperID,Processor>,GCPriority> mapper_priorities;
         // For tracking external instances and whether they can be used
-        bool unattached_external;
       };
     public:
       MemoryManager(Memory mem, Runtime *rt);
@@ -737,6 +786,7 @@ namespace Legion {
     public:
       MemoryManager& operator=(const MemoryManager &rhs);
     public:
+      void find_shutdown_preconditions(std::set<ApEvent> &preconditions);
       void prepare_for_shutdown(void);
       void finalize(void);
     public:
@@ -754,13 +804,15 @@ namespace Legion {
                                     const std::vector<LogicalRegion> &regions,
                                     MappingInstance &result, MapperID mapper_id,
                                     Processor processor, bool acquire, 
-                                    GCPriority priority, UniqueID creator_id,
+                                    GCPriority priority, bool tight_bounds,
+                                    size_t *footprint, UniqueID creator_id,
                                     bool remote = false);
       bool create_physical_instance(LayoutConstraints *constraints,
                                     const std::vector<LogicalRegion> &regions,
                                     MappingInstance &result, MapperID mapper_id,
                                     Processor processor, bool acquire, 
-                                    GCPriority priority, UniqueID creator_id,
+                                    GCPriority priority, bool tight_bounds,
+                                    size_t *footprint, UniqueID creator_id,
                                     bool remote = false);
       bool find_or_create_physical_instance(
                                     const LayoutConstraintSet &constraints,
@@ -768,7 +820,7 @@ namespace Legion {
                                     MappingInstance &result, bool &created, 
                                     MapperID mapper_id, Processor processor,
                                     bool acquire, GCPriority priority, 
-                                    bool tight_region_bounds,
+                                    bool tight_region_bounds, size_t *footprint,
                                     UniqueID creator_id, bool remote = false);
       bool find_or_create_physical_instance(
                                     LayoutConstraints *constraints,
@@ -776,7 +828,7 @@ namespace Legion {
                                     MappingInstance &result, bool &created, 
                                     MapperID mapper_id, Processor processor,
                                     bool acquire, GCPriority priority, 
-                                    bool tight_region_bounds,
+                                    bool tight_region_bounds, size_t *footprint,
                                     UniqueID creator_id, bool remote = false);
       bool find_physical_instance(  const LayoutConstraintSet &constraints,
                                     const std::vector<LogicalRegion> &regions,
@@ -786,7 +838,7 @@ namespace Legion {
                                     const std::vector<LogicalRegion> &regions,
                                     MappingInstance &result, bool acquire,
                                     bool tight_bounds, bool remote = false);
-      void release_tree_instances(RegionTreeID tree_id);
+      void release_tree_instances(RegionTreeID tid);
       void set_garbage_collection_priority(PhysicalManager *manager,
                                     MapperID mapper_id, Processor proc,
                                     GCPriority priority);
@@ -795,7 +847,6 @@ namespace Legion {
       void record_created_instance( PhysicalManager *manager, bool acquire,
                                     MapperID mapper_id, Processor proc,
                                     GCPriority priority, bool remote);
-      void record_external_instance(PhysicalManager *manager);
     public:
       void process_instance_request(Deserializer &derez, AddressSpaceID source);
       void process_instance_response(Deserializer &derez,AddressSpaceID source);
@@ -827,11 +878,12 @@ namespace Legion {
       // ensure find_and_create calls will remain atomic
       RtEvent acquire_allocation_privilege(void);
       void release_allocation_privilege(void);
-      PhysicalManager* allocate_physical_instance(InstanceBuilder &builder);
+      PhysicalManager* allocate_physical_instance(InstanceBuilder &builder,
+                                                  size_t *footprint);
     public:
       bool delete_by_size_and_state(const size_t needed_size, 
                                     InstanceState state, bool larger_only); 
-      void attach_external_instance(PhysicalManager *manager);
+      RtEvent attach_external_instance(PhysicalManager *manager);
       RtEvent detach_external_instance(PhysicalManager *manager);
     public:
       // The memory that we are managing
@@ -852,9 +904,9 @@ namespace Legion {
       mutable LocalLock manager_lock;
       // We maintain several sets of instances here
       // This is a generic list that tracks all the allocated instances
-      // It is only valid on the owner node
-      LegionMap<PhysicalManager*,InstanceInfo,
-                MEMORY_INSTANCES_ALLOC>::tracked current_instances;
+      typedef LegionMap<PhysicalManager*,InstanceInfo,
+                        MEMORY_INSTANCES_ALLOC>::tracked TreeInstances;
+      std::map<RegionTreeID,TreeInstances> current_instances;
       // Keep track of outstanding requuests for allocations which 
       // will be tried in the order that they arrive
       std::deque<RtUserEvent> pending_allocation_attempts;
@@ -872,9 +924,20 @@ namespace Legion {
       // or chains of partial messages followed by a final
       // message.
       enum MessageHeader {
-        FULL_MESSAGE,
-        PARTIAL_MESSAGE,
-        FINAL_MESSAGE,
+        FULL_MESSAGE = 0x1,
+        PARTIAL_MESSAGE = 0x2,
+        FINAL_MESSAGE = 0x3,
+      };
+      struct PartialMessage {
+      public:
+        PartialMessage(void)
+          : buffer(NULL), size(0), index(0), messages(0), total(0) { }
+      public:
+        char *buffer;
+        size_t size;
+        unsigned index;
+        unsigned messages;
+        unsigned total;
       };
     public:
       VirtualChannel(VirtualChannelKind kind,AddressSpaceID local_address_space,
@@ -893,28 +956,48 @@ namespace Legion {
     private:
       void send_message(bool complete, Runtime *runtime, 
                         Processor target, bool response, bool shutdown);
-      void handle_messages(unsigned num_messages, Runtime *runtime, 
+      bool handle_messages(unsigned num_messages, Runtime *runtime, 
                            AddressSpaceID remote_address_space,
-                           const char *args, size_t arglen);
-      void buffer_messages(unsigned num_messages,
-                           const void *args, size_t arglen);
+                           const char *args, size_t arglen) const;
+      static void buffer_messages(unsigned num_messages,
+                                  const void *args, size_t arglen,
+                                  char *&receiving_buffer,
+                                  size_t &receiving_buffer_size,
+                                  unsigned &receiving_index,
+                                  unsigned &received_messages,
+                                  unsigned &partial_messages);
+      void filter_unordered_events(void);
     private:
-      mutable LocalLock send_lock;
+      mutable LocalLock channel_lock;
       char *const sending_buffer;
       unsigned sending_index;
       const size_t sending_buffer_size;
       RtEvent last_message_event;
       MessageHeader header;
       unsigned packaged_messages;
+      // For unordered channels so we can group partial
+      // messages from remote nodes
+      unsigned partial_message_id;
       bool partial;
+    private:
+      const bool ordered_channel;
+      const LgPriority request_priority;
+      const LgPriority response_priority;
+      static const unsigned MAX_UNORDERED_EVENTS = 32;
+      std::set<RtEvent> unordered_events;
+    private:
       // State for receiving messages
       // No lock for receiving messages since we know
-      // that they are ordered
+      // that they are ordered for ordered virtual
+      // channels, for un-ordered virtual channels then
+      // we know that we do need the lock
       char *receiving_buffer;
-      unsigned receiving_index;
       size_t receiving_buffer_size;
+      unsigned receiving_index;
       unsigned received_messages;
-      bool observed_recent;
+      unsigned partial_messages;
+      std::map<unsigned/*message id*/,PartialMessage> *partial_assembly;
+      mutable bool observed_recent;
     private:
       LegionProfiler *const profiler;
     }; 
@@ -941,7 +1024,7 @@ namespace Legion {
     public:
       MessageManager(AddressSpaceID remote, 
                      Runtime *rt, size_t max,
-                     const std::set<Processor> &procs);
+                     const Processor remote_util_group);
       MessageManager(const MessageManager &rhs);
       ~MessageManager(void);
     public:
@@ -955,10 +1038,11 @@ namespace Legion {
                             bool phase_one);
     public:
       const AddressSpaceID remote_address_space;
-    private:
+    public:
       Runtime *const runtime;
       // State for sending messages
-      Processor target;
+      const Processor target;
+    private:
       VirtualChannel *const channels; 
     };
 
@@ -1016,39 +1100,6 @@ namespace Legion {
       unsigned needed_responses;
       std::set<RtEvent> wait_for;
       bool result;
-    };
-
-    /**
-     * \class GarbageCollectionEpoch
-     * A class for managing the a set of garbage collections
-     */
-    class GarbageCollectionEpoch {
-    public:
-      struct GarbageCollectionArgs : public LgTaskArgs<GarbageCollectionArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_DEFERRED_COLLECT_ID;
-      public:
-        GarbageCollectionArgs(GarbageCollectionEpoch *e)
-          : LgTaskArgs<GarbageCollectionArgs>(0), epoch(e) { }
-      public:
-        GarbageCollectionEpoch *const epoch;
-        LogicalView *view;
-      };
-    public:
-      GarbageCollectionEpoch(Runtime *runtime);
-      GarbageCollectionEpoch(const GarbageCollectionEpoch &rhs);
-      ~GarbageCollectionEpoch(void);
-    public:
-      GarbageCollectionEpoch& operator=(const GarbageCollectionEpoch &rhs);
-    public:
-      void add_collection(LogicalView *view, ApEvent term_event,
-                          ReferenceMutator *mutator);
-      bool launch(RtEvent *done = NULL);
-      bool handle_collection(const GarbageCollectionArgs *args);
-    private:
-      Runtime *const runtime;
-      int remaining;
-      std::map<LogicalView*,std::set<ApEvent> > collections;
     };
 
     /**
@@ -1179,7 +1230,6 @@ namespace Legion {
     private:
       mutable LocalLock task_lock;
       std::map<VariantID,VariantImpl*> variants;
-      std::map<VariantID,RtEvent> outstanding_requests;
       // VariantIDs that we've handed out but haven't registered yet
       std::set<VariantID> pending_variants;
       std::map<SemanticTag,SemanticInfo> semantic_infos;
@@ -1224,17 +1274,13 @@ namespace Legion {
           int priority, Realm::ProfilingRequestSet &requests);
       void dispatch_inline(Processor current, InlineContext *ctx);
     public:
-      Processor::Kind get_processor_kind(bool warn) const;
+      bool can_use(Processor::Kind kind, bool warn) const;
     public:
-      void send_variant_response(AddressSpaceID source, RtUserEvent done_event);
       void broadcast_variant(RtUserEvent done, AddressSpaceID origin,
                              AddressSpaceID local);
     public:
       static void handle_variant_broadcast(Runtime *runtime, 
                                            Deserializer &derez);
-      static AddressSpaceID get_owner_space(VariantID vid, Runtime *runtime);
-      static void handle_variant_response(Runtime *runtime, 
-                                          Deserializer &derez);
     public:
       const VariantID vid;
       TaskImpl *const owner;
@@ -1296,23 +1342,26 @@ namespace Legion {
                                     RtUserEvent done_event);
       void update_constraints(Deserializer &derez);
     public:
-      bool entails(LayoutConstraints *other_constraints, unsigned total_dims);
-      bool entails(const LayoutConstraintSet &other, unsigned total_dims) const;
-      bool conflicts(LayoutConstraints *other_constraints, unsigned total_dims);
-      bool conflicts(const LayoutConstraintSet &other, 
-                     unsigned total_dims) const;
-      bool entails_without_pointer(LayoutConstraints *other,
-                                   unsigned total_dims);
+      bool entails(LayoutConstraints *other_constraints, unsigned total_dims,
+                   const LayoutConstraint **failed_constraint);
+      bool entails(const LayoutConstraintSet &other, unsigned total_dims,
+                   const LayoutConstraint **failed_constraint) const;
+      bool conflicts(LayoutConstraints *other_constraints, unsigned total_dims,
+                     const LayoutConstraint **conflict_constraint);
+      bool conflicts(const LayoutConstraintSet &other, unsigned total_dims,
+                     const LayoutConstraint **conflict_constraint) const;
+      bool entails_without_pointer(LayoutConstraints *other,unsigned total_dims,
+                                   const LayoutConstraint **failed_constraint);
       bool entails_without_pointer(const LayoutConstraintSet &other,
-                                   unsigned total_dims) const;
+         unsigned total_dims, const LayoutConstraint **failed_constraint) const;
     public:
       static AddressSpaceID get_owner_space(LayoutConstraintID layout_id,
                                             Runtime *runtime);
     public:
       static void process_request(Runtime *runtime, Deserializer &derez,
                                   AddressSpaceID source);
-      static LayoutConstraintID process_response(Runtime *runtime, 
-                          Deserializer &derez, AddressSpaceID source);
+      static void process_response(Runtime *runtime, Deserializer &derez, 
+                                   AddressSpaceID source);
     public:
       const LayoutConstraintID layout_id;
       const FieldSpace handle;
@@ -1321,12 +1370,14 @@ namespace Legion {
       const bool internal;
     protected:
       char *constraints_name;
-      // Use the base gc_lock as the layout_lock too
-      LocalLock &layout_lock;
+      mutable LocalLock layout_lock;
     protected:
-      std::map<LayoutConstraintID,bool> conflict_cache;
-      std::map<LayoutConstraintID,bool> entailment_cache;
-      std::map<LayoutConstraintID,bool> no_pointer_entailment_cache;
+      std::map<std::pair<LayoutConstraintID,unsigned/*total dims*/>,
+                const LayoutConstraint*> conflict_cache;
+      std::map<std::pair<LayoutConstraintID,unsigned/*total dims*/>,
+                const LayoutConstraint*> entailment_cache;
+      std::map<std::pair<LayoutConstraintID,unsigned/*total dims*/>,
+                const LayoutConstraint*> no_pointer_entailment_cache;
     };
 
     /**
@@ -1357,21 +1408,7 @@ namespace Legion {
     public:
       virtual const DomainPoint& get_domain_point(void) const = 0;
       virtual void set_projection_result(unsigned idx,LogicalRegion result) = 0;
-    };
-
-    /**
-     * \class Memoizable
-     * An abstract class for retrieving trace local ids in physical tracing.
-     */
-    class Memoizable
-    {
-    public:
-      // Return a trace local unique ID for this operation
-      typedef std::pair<unsigned, DomainPoint> TraceLocalID;
-      virtual TraceLocalID get_trace_local_id(void) const = 0;
-      virtual ApEvent compute_sync_precondition(void) const = 0;
-      virtual void complete_replay(ApEvent complete_event) = 0;
-    };
+    }; 
 
     /**
      * \class ProjectionFunction
@@ -1431,17 +1468,20 @@ namespace Legion {
     public:
       struct LegionConfiguration {
       public:
-        LegionConfiguration(void)
+        LegionConfiguration(bool implicit_top)
           : delay_start(0),
             legion_collective_radix(LEGION_COLLECTIVE_RADIX),
-            initial_task_window_size(DEFAULT_MAX_TASK_WINDOW),
-            initial_task_window_hysteresis(DEFAULT_TASK_WINDOW_HYSTERESIS),
-            initial_tasks_to_schedule(DEFAULT_MIN_TASKS_TO_SCHEDULE),
-            initial_meta_task_vector_width(DEFAULT_META_TASK_VECTOR_WIDTH),
-            max_message_size(DEFAULT_MAX_MESSAGE_SIZE),
-            gc_epoch_size(DEFAULT_GC_EPOCH_SIZE),
-            max_local_fields(DEFAULT_LOCAL_FIELDS),
-            max_replay_parallelism(DEFAULT_MAX_REPLAY_PARALLELISM),
+            initial_task_window_size(LEGION_DEFAULT_MAX_TASK_WINDOW),
+            initial_task_window_hysteresis(
+                LEGION_DEFAULT_TASK_WINDOW_HYSTERESIS),
+            initial_tasks_to_schedule(LEGION_DEFAULT_MIN_TASKS_TO_SCHEDULE),
+            initial_meta_task_vector_width(
+                LEGION_DEFAULT_META_TASK_VECTOR_WIDTH),
+            max_message_size(LEGION_DEFAULT_MAX_MESSAGE_SIZE),
+            gc_epoch_size(LEGION_DEFAULT_GC_EPOCH_SIZE),
+            max_local_fields(LEGION_DEFAULT_LOCAL_FIELDS),
+            max_replay_parallelism(LEGION_DEFAULT_MAX_REPLAY_PARALLELISM),
+            implicit_top_level(implicit_top),
             program_order_execution(false),
             dump_physical_traces(false),
             no_tracing(false),
@@ -1451,6 +1491,8 @@ namespace Legion {
             replay_on_cpus(false),
             verify_disjointness(false),
             runtime_warnings(false),
+            warnings_backtrace(false),
+            report_leaks(false),
             separate_runtime_instances(false),
             record_registration(false),
             stealing_disabled(false),
@@ -1473,6 +1515,8 @@ namespace Legion {
             logical_logging_only(false),
             physical_logging_only(false),
             check_privileges(true),
+#else
+            check_privileges(false),
 #endif
             num_profiling_nodes(0),
             serializer_type("binary"),
@@ -1495,6 +1539,7 @@ namespace Legion {
         unsigned max_local_fields;
         unsigned max_replay_parallelism;
       public:
+        bool implicit_top_level;
         bool program_order_execution;
         bool dump_physical_traces;
         bool no_tracing;
@@ -1504,6 +1549,8 @@ namespace Legion {
         bool replay_on_cpus;
         bool verify_disjointness;
         bool runtime_warnings;
+        bool warnings_backtrace;
+        bool report_leaks;
         bool separate_runtime_instances;
         bool record_registration;
         bool stealing_disabled;
@@ -1521,8 +1568,8 @@ namespace Legion {
         bool verbose_logging;
         bool logical_logging_only;
         bool physical_logging_only;
-        bool check_privileges;
 #endif
+        bool check_privileges;
       public:
         unsigned num_profiling_nodes;
         const char *serializer_type;
@@ -1571,13 +1618,18 @@ namespace Legion {
         static const LgTaskID TASK_ID = LG_SELECT_TUNABLE_TASK_ID;
       public:
         SelectTunableArgs(UniqueID uid, MapperID mid, MappingTagID t,
-                          TunableID tune, TaskContext *c, FutureImpl *f)
+                          TunableID tune, const void *arg, size_t size,
+                          TaskContext *c, FutureImpl *f)
           : LgTaskArgs<SelectTunableArgs>(uid), mapper_id(mid), tag(t),
-            tunable_id(tune), ctx(c), result(f) { }
+            tunable_id(tune), args((size > 0) ? malloc(size) : NULL),
+            argsize(size), ctx(c), result(f) 
+            { if (argsize > 0) memcpy(args, arg, argsize); }
       public:
         const MapperID mapper_id;
         const MappingTagID tag;
         const TunableID tunable_id;
+        void *const args;
+        const size_t argsize;
         unsigned tunable_index; // only valid for LegionSpy
         TaskContext *const ctx;
         FutureImpl *const result;
@@ -1630,6 +1682,7 @@ namespace Legion {
       const unsigned max_local_fields;
       const unsigned max_replay_parallelism;
     public:
+      const bool implicit_top_level;
       const bool program_order_execution;
       const bool dump_physical_traces;
       const bool no_tracing;
@@ -1639,6 +1692,8 @@ namespace Legion {
       const bool replay_on_cpus;
       const bool verify_disjointness;
       const bool runtime_warnings;
+      const bool warnings_backtrace;
+      const bool report_leaks;
       const bool separate_runtime_instances;
       const bool record_registration;
       const bool stealing_disabled;
@@ -1655,8 +1710,8 @@ namespace Legion {
       const bool verbose_logging;
       const bool logical_logging_only;
       const bool physical_logging_only;
-      const bool check_privileges;
 #endif
+      const bool check_privileges;
     public:
       const unsigned num_profiling_nodes;
     public:
@@ -1678,7 +1733,7 @@ namespace Legion {
       void startup_runtime(RtEvent top_level_precondition);
       void finalize_runtime(void);
       ApEvent launch_mapper_task(Mapper *mapper, Processor proc, 
-                                 Processor::TaskFuncID tid,
+                                 TaskID tid,
                                  const TaskArgument &arg, MapperID map_id);
       void process_mapper_task_result(const MapperTaskArgs *args); 
     public:
@@ -1690,13 +1745,11 @@ namespace Legion {
                                     const std::vector<IndexSpace> &spaces);
       IndexSpace subtract_index_spaces(Context ctx,
                                     IndexSpace left, IndexSpace right);
-      void destroy_index_space(Context ctx, IndexSpace handle);
-      // Called from deletion op
-      void finalize_index_space_destroy(IndexSpace handle);
+      void destroy_index_space(Context ctx, IndexSpace handle,
+                               const bool unordered);
     public:
-      void destroy_index_partition(Context ctx, IndexPartition handle);
-      // Called from deletion op
-      void finalize_index_partition_destroy(IndexPartition handle);
+      void destroy_index_partition(Context ctx, IndexPartition handle,
+                                   const bool unordered);
     public:
       IndexPartition create_equal_partition(Context ctx, IndexSpace parent,
                                             IndexSpace color_space, 
@@ -1712,6 +1765,11 @@ namespace Legion {
                                                IndexPartition handle2,
                                                IndexSpace color_space,
                                                PartitionKind kind, Color color);
+      IndexPartition create_partition_by_intersection(Context ctx,
+                                               IndexSpace parent,
+                                               IndexPartition partition,
+                                               PartitionKind kind,
+                                               Color color, bool dominates);
       IndexPartition create_partition_by_difference(Context ctx, 
                                                IndexSpace parent,
                                                IndexPartition handle1,
@@ -1865,26 +1923,21 @@ namespace Legion {
                      const void *realm_point, TypeTag type_tag);
     public:
       FieldSpace create_field_space(Context ctx);
-      void destroy_field_space(Context ctx, FieldSpace handle);
+      void destroy_field_space(Context ctx, FieldSpace handle,
+                               const bool unordered);
       size_t get_field_size(Context ctx, FieldSpace handle, FieldID fid);
       size_t get_field_size(FieldSpace handle, FieldID fid);
       void get_field_space_fields(Context ctx, FieldSpace handle,
                                   std::vector<FieldID> &fields);
       void get_field_space_fields(FieldSpace handle, 
                                   std::vector<FieldID> &fields);
-      // Called from deletion op
-      void finalize_field_space_destroy(FieldSpace handle);
-      void finalize_field_destroy(FieldSpace handle, FieldID fid);
-      void finalize_field_destroy(FieldSpace handle, 
-                                  const std::set<FieldID> &to_free);
     public:
       LogicalRegion create_logical_region(Context ctx, IndexSpace index,
                                           FieldSpace fields, bool task_local);
-      void destroy_logical_region(Context ctx, LogicalRegion handle);
-      void destroy_logical_partition(Context ctx, LogicalPartition handle);
-      // Called from deletion ops
-      void finalize_logical_region_destroy(LogicalRegion handle);
-      void finalize_logical_partition_destroy(LogicalPartition handle);
+      void destroy_logical_region(Context ctx, LogicalRegion handle,
+                                  const bool unordered);
+      void destroy_logical_partition(Context ctx, LogicalPartition handle,
+                                     const bool unordered);
     public:
       LogicalPartition get_logical_partition(Context ctx, LogicalRegion parent, 
                                              IndexPartition handle);
@@ -1953,8 +2006,8 @@ namespace Legion {
       Future execute_task(Context ctx, const TaskLauncher &launcher);
       FutureMap execute_index_space(Context ctx, 
                                     const IndexTaskLauncher &launcher);
-      Future execute_index_space(Context ctx, 
-                    const IndexTaskLauncher &launcher, ReductionOpID redop);
+      Future execute_index_space(Context ctx, const IndexTaskLauncher &launcher,
+                                 ReductionOpID redop, bool deterministic);
     public:
       PhysicalRegion map_region(Context ctx, 
                                 const InlineLauncher &launcher);
@@ -1968,7 +2021,8 @@ namespace Legion {
       void fill_fields(Context ctx, const IndexFillLauncher &launcher);
       PhysicalRegion attach_external_resource(Context ctx,
                                               const AttachLauncher &launcher);
-      Future detach_external_resource(Context ctx, PhysicalRegion region);
+      Future detach_external_resource(Context ctx, PhysicalRegion region, 
+                                      const bool flush, const bool unordered);
       void issue_copy_operation(Context ctx, const CopyLauncher &launcher);
       void issue_copy_operation(Context ctx, const IndexCopyLauncher &launcher);
     public:
@@ -2019,7 +2073,8 @@ namespace Legion {
                                       const TimingLauncher &launcher);
     public:
       Future select_tunable_value(Context ctx, TunableID tid,
-                                  MapperID mid, MappingTagID tag);
+                                  MapperID mid, MappingTagID tag,
+                                  const void *args, size_t argsize);
       int get_tunable_value(Context ctx, TunableID tid, 
                             MapperID mid, MappingTagID tag);
       void perform_tunable_selection(const SelectTunableArgs *args);
@@ -2045,6 +2100,7 @@ namespace Legion {
       static MapperID generate_static_mapper_id(void);
       void add_mapper(MapperID map_id, Mapper *mapper, Processor proc);
       void replace_default_mapper(Mapper *mapper, Processor proc);
+      MapperManager* find_mapper(MapperID map_id);
       MapperManager* find_mapper(Processor target, MapperID map_id);
       static MapperManager* wrap_mapper(Runtime *runtime, Mapper *mapper,
                                         MapperID map_id, Processor proc);
@@ -2056,10 +2112,23 @@ namespace Legion {
       void register_projection_functor(ProjectionID pid, 
                                        ProjectionFunctor *func,
                                        bool need_zero_check = true,
-                                       bool silence_warnings = false);
+                                       bool silence_warnings = false,
+                                       const char *warning_string = NULL);
       static void preregister_projection_functor(ProjectionID pid,
                                        ProjectionFunctor *func);
       ProjectionFunction* find_projection_function(ProjectionID pid);
+    public:
+      void register_reduction(ReductionOpID redop_id,
+                              ReductionOp *redop,
+                              SerdezInitFnptr init_fnptr,
+                              SerdezFoldFnptr fold_fnptr,
+                              bool permit_duplicates);
+      void register_serdez(CustomSerdezID serdez_id,
+                           SerdezOp *serdez_op,
+                           bool permit_duplicates);
+      const ReductionOp* get_reduction(ReductionOpID redop_id);
+      const SerdezOp* get_serdez(CustomSerdezID serdez_id);
+      const SerdezRedopFns* get_serdez_redop(ReductionOpID redop_id);
     public:
       void attach_semantic_information(TaskID task_id, SemanticTag,
                                    const void *buffer, size_t size, 
@@ -2101,17 +2170,6 @@ namespace Legion {
                                          const void *&result, size_t &size,
                                          bool can_fail, bool wait_until);
     public:
-      FieldID allocate_field(Context ctx, FieldSpace space, 
-                             size_t field_size, FieldID fid, 
-                             bool local, CustomSerdezID serdez);
-      void free_field(Context ctx, FieldSpace space, FieldID fid);
-      void allocate_fields(Context ctx, FieldSpace space, 
-                           const std::vector<size_t> &sizes,
-                           std::vector<FieldID> &resulting_fields, 
-                           bool local, CustomSerdezID serdez);
-      void free_fields(Context ctx, FieldSpace space, 
-                       const std::set<FieldID> &to_free);
-    public:
       TaskID generate_dynamic_task_id(void);
       TaskID generate_library_task_ids(const char *name, size_t count);
       VariantID register_variant(const TaskVariantRegistrar &registrar,
@@ -2124,6 +2182,13 @@ namespace Legion {
       VariantImpl* find_variant_impl(TaskID task_id, VariantID variant_id,
                                      bool can_fail = false);
     public:
+      ReductionOpID generate_dynamic_reduction_id(void);
+      ReductionOpID generate_library_reduction_ids(const char *name, 
+                                                   size_t count);
+    public:
+      CustomSerdezID generate_dynamic_serdez_id(void);
+      CustomSerdezID generate_library_serdez_ids(const char *name,size_t count);
+    public:
       // Memory manager functions
       MemoryManager* find_memory_manager(Memory mem);
       AddressSpaceID find_address_space(Memory handle) const;
@@ -2132,6 +2197,7 @@ namespace Legion {
       MessageManager* find_messenger(AddressSpaceID sid);
       MessageManager* find_messenger(Processor target);
       AddressSpaceID find_address_space(Processor target) const;
+      void handle_endpoint_creation(Deserializer &derez);
     public:
       void process_mapper_message(Processor target, MapperID map_id,
                                   Processor source, const void *message, 
@@ -2146,6 +2212,7 @@ namespace Legion {
                               Processor thief);
       void send_advertisements(const std::set<Processor> &targets,
                               MapperID map_id, Processor source);
+      void send_remote_task_replay(AddressSpaceID target, Serializer &rez);
       void send_index_space_node(AddressSpaceID target, Serializer &rez);
       void send_index_space_request(AddressSpaceID target, Serializer &rez);
       void send_index_space_return(AddressSpaceID target, Serializer &rez);
@@ -2158,6 +2225,12 @@ namespace Legion {
                                            Serializer &rez);
       void send_index_space_colors_response(AddressSpaceID target,
                                             Serializer &rez);
+      void send_index_space_remote_expression_request(AddressSpaceID target,
+                                                      Serializer &rez);
+      void send_index_space_remote_expression_response(AddressSpaceID target,
+                                                       Serializer &rez);
+      void send_index_space_remote_expression_invalidation(
+                                    AddressSpaceID target, Serializer &rez);
       void send_index_partition_notification(AddressSpaceID target, 
                                              Serializer &rez);
       void send_index_partition_node(AddressSpaceID target, Serializer &rez);
@@ -2167,6 +2240,8 @@ namespace Legion {
                                               Serializer &rez);
       void send_index_partition_child_response(AddressSpaceID target,
                                                Serializer &rez);
+      void send_index_partition_disjoint_update(AddressSpaceID target,
+                                                Serializer &rez);
       void send_field_space_node(AddressSpaceID target, Serializer &rez);
       void send_field_space_request(AddressSpaceID target, Serializer &rez);
       void send_field_space_return(AddressSpaceID target, Serializer &rez);
@@ -2184,17 +2259,20 @@ namespace Legion {
       void send_top_level_region_return(AddressSpaceID target, Serializer &rez);
       void send_logical_region_node(AddressSpaceID target, Serializer &rez);
       void send_index_space_destruction(IndexSpace handle, 
-                                        AddressSpaceID target);
+                                        AddressSpaceID target,
+                                        std::set<RtEvent> &applied);
       void send_index_partition_destruction(IndexPartition handle, 
-                                            AddressSpaceID target);
+                                            AddressSpaceID target,
+                                            std::set<RtEvent> &applied);
       void send_field_space_destruction(FieldSpace handle, 
-                                        AddressSpaceID target);
+                                        AddressSpaceID target,
+                                        std::set<RtEvent> &applied);
       void send_logical_region_destruction(LogicalRegion handle, 
-                                           AddressSpaceID target);
+                                           AddressSpaceID target,
+                                           std::set<RtEvent> *applied);
       void send_logical_partition_destruction(LogicalPartition handle,
-                                              AddressSpaceID target);
-      void send_individual_remote_mapped(Processor target, 
-                                         Serializer &rez, bool flush = true);
+                                              AddressSpaceID target,
+                                              std::set<RtEvent> *applied);
       void send_individual_remote_complete(Processor target, Serializer &rez);
       void send_individual_remote_commit(Processor target, Serializer &rez);
       void send_slice_remote_mapped(Processor target, Serializer &rez);
@@ -2203,10 +2281,6 @@ namespace Legion {
       void send_did_remote_registration(AddressSpaceID target, Serializer &rez);
       void send_did_remote_valid_update(AddressSpaceID target, Serializer &rez);
       void send_did_remote_gc_update(AddressSpaceID target, Serializer &rez);
-      void send_did_remote_resource_update(AddressSpaceID target,
-                                           Serializer &rez);
-      void send_did_remote_invalidate(AddressSpaceID target, Serializer &rez);
-      void send_did_remote_deactivate(AddressSpaceID target, Serializer &rez);
       void send_did_add_create_reference(AddressSpaceID target,Serializer &rez);
       void send_did_remove_create_reference(AddressSpaceID target,
                                             Serializer &rez, bool flush = true);
@@ -2219,7 +2293,6 @@ namespace Legion {
       void send_atomic_reservation_response(AddressSpaceID target, 
                                             Serializer &rez);
       void send_materialized_view(AddressSpaceID target, Serializer &rez);
-      void send_composite_view(AddressSpaceID target, Serializer &rez);
       void send_fill_view(AddressSpaceID target, Serializer &rez);
       void send_phi_view(AddressSpaceID target, Serializer &rez);
       void send_reduction_view(AddressSpaceID target, Serializer &rez);
@@ -2227,12 +2300,18 @@ namespace Legion {
       void send_reduction_manager(AddressSpaceID target, Serializer &rez);
       void send_create_top_view_request(AddressSpaceID target, Serializer &rez);
       void send_create_top_view_response(AddressSpaceID target,Serializer &rez);
-      void send_subview_did_request(AddressSpaceID target, Serializer &rez);
-      void send_subview_did_response(AddressSpaceID target, Serializer &rez);
-      void send_view_update_request(AddressSpaceID target, Serializer &rez);
-      void send_view_update_response(AddressSpaceID target, Serializer &rez);
-      void send_view_remote_update(AddressSpaceID target, Serializer &rez);
-      void send_view_remote_invalidate(AddressSpaceID target, Serializer &rez);
+      void send_view_register_user(AddressSpaceID target, Serializer &rez);
+      void send_view_find_copy_preconditions_request(AddressSpaceID target,
+                                                     Serializer &rez);
+      void send_view_find_copy_preconditions_response(AddressSpaceID target,
+                                                      Serializer &rez);
+      void send_view_add_copy_user(AddressSpaceID target, Serializer &rez);
+#ifdef ENABLE_VIEW_REPLICATION
+      void send_view_replication_request(AddressSpaceID target,Serializer &rez);
+      void send_view_replication_response(AddressSpaceID target,
+                                          Serializer &rez);
+      void send_view_replication_removal(AddressSpaceID target,Serializer &rez);
+#endif
       void send_future_result(AddressSpaceID target, Serializer &rez);
       void send_future_subscription(AddressSpaceID target, Serializer &rez);
       void send_future_map_request_future(AddressSpaceID target, 
@@ -2275,33 +2354,53 @@ namespace Legion {
                                                 Serializer &rez);
       void send_remote_context_physical_response(AddressSpaceID target,
                                                  Serializer &rez);
-      void send_version_owner_request(AddressSpaceID target, Serializer &rez);
-      void send_version_owner_response(AddressSpaceID target, Serializer &rez);
-      void send_version_state_response(AddressSpaceID target, Serializer &rez);
-      void send_version_state_update_request(AddressSpaceID target, 
-                                             Serializer &rez);
-      void send_version_state_update_response(AddressSpaceID target, 
-                                              Serializer &rez);
-      void send_version_state_valid_notification(AddressSpaceID target,
+      void send_compute_equivalence_sets_request(AddressSpaceID target, 
                                                  Serializer &rez);
-      void send_version_manager_advance(AddressSpaceID target, Serializer &rez);
-      void send_version_manager_invalidate(AddressSpaceID target,
-                                           Serializer &rez);
-      void send_version_manager_request(AddressSpaceID target, Serializer &rez);
-      void send_version_manager_response(AddressSpaceID target,Serializer &rez);
-      void send_version_manager_unversioned_request(AddressSpaceID target,
-                                                    Serializer &rez);
-      void send_version_manager_unversioned_response(AddressSpaceID target,
+      void send_equivalence_set_response(AddressSpaceID target,Serializer &rez);
+      void send_equivalence_set_subset_request(AddressSpaceID target, 
+                                               Serializer &rez);
+      void send_equivalence_set_subset_response(AddressSpaceID target, 
+                                                Serializer &rez);
+      void send_equivalence_set_subset_update(AddressSpaceID target,
+                                              Serializer &rez);
+      void send_equivalence_set_ray_trace_request(AddressSpaceID target,
+                                                  Serializer &rez);
+      void send_equivalence_set_ray_trace_response(AddressSpaceID target,
+                                                   Serializer &rez);
+      void send_equivalence_set_migration(AddressSpaceID target, 
+                                          Serializer &rez);
+      void send_equivalence_set_owner_update(AddressSpaceID target,
+                                             Serializer &rez);
+      void send_equivalence_set_remote_refinement(AddressSpaceID target,
+                                                  Serializer &rez);
+      void send_equivalence_set_remote_request_instances(AddressSpaceID target,
+                                                         Serializer &rez);
+      void send_equivalence_set_remote_request_invalid(AddressSpaceID target,
+                                                       Serializer &rez);
+      void send_equivalence_set_remote_updates(AddressSpaceID target,
+                                               Serializer &rez);
+      void send_equivalence_set_remote_acquires(AddressSpaceID target,
+                                                Serializer &rez);
+      void send_equivalence_set_remote_releases(AddressSpaceID target,
+                                                Serializer &rez);
+      void send_equivalence_set_remote_copies_across(AddressSpaceID target,
                                                      Serializer &rez);
+      void send_equivalence_set_remote_overwrites(AddressSpaceID target,
+                                                  Serializer &rez);
+      void send_equivalence_set_remote_filters(AddressSpaceID target,
+                                               Serializer &rez);
+      void send_equivalence_set_remote_instances(AddressSpaceID target,
+                                                 Serializer &rez);
       void send_instance_request(AddressSpaceID target, Serializer &rez);
       void send_instance_response(AddressSpaceID target, Serializer &rez);
+      void send_external_create_request(AddressSpaceID target, Serializer &rez);
+      void send_external_create_response(AddressSpaceID target,Serializer &rez);
+      void send_external_attach(AddressSpaceID target, Serializer &rez);
       void send_external_detach(AddressSpaceID target, Serializer &rez);
       void send_gc_priority_update(AddressSpaceID target, Serializer &rez);
       void send_never_gc_response(AddressSpaceID target, Serializer &rez);
       void send_acquire_request(AddressSpaceID target, Serializer &rez);
       void send_acquire_response(AddressSpaceID target, Serializer &rez);
-      void send_variant_request(AddressSpaceID target, Serializer &rez);
-      void send_variant_response(AddressSpaceID target, Serializer &rez);
       void send_variant_broadcast(AddressSpaceID target, Serializer &rez);
       void send_constraint_request(AddressSpaceID target, Serializer &rez);
       void send_constraint_response(AddressSpaceID target, Serializer &rez);
@@ -2315,6 +2414,20 @@ namespace Legion {
                                             Serializer &rez);
       void send_library_task_request(AddressSpaceID target, Serializer &rez);
       void send_library_task_response(AddressSpaceID target, Serializer &rez);
+      void send_library_redop_request(AddressSpaceID target, Serializer &rez);
+      void send_library_redop_response(AddressSpaceID target, Serializer &rez);
+      void send_library_serdez_request(AddressSpaceID target, Serializer &rez);
+      void send_library_serdez_response(AddressSpaceID target, Serializer &rez);
+      void send_remote_op_report_uninitialized(AddressSpaceID target,
+                                               Serializer &rez);
+      void send_remote_op_profiling_count_update(AddressSpaceID target,
+                                                 Serializer &rez);
+      void send_remote_trace_update(AddressSpaceID target, Serializer &rez);
+      void send_remote_trace_response(AddressSpaceID target, Serializer &rez);
+      void send_remote_trace_equivalence_sets_request(AddressSpaceID target,
+                                                      Serializer &rez);
+      void send_remote_trace_equivalence_sets_response(AddressSpaceID target,
+                                                       Serializer &rez);
       void send_shutdown_notification(AddressSpaceID target, Serializer &rez);
       void send_shutdown_response(AddressSpaceID target, Serializer &rez);
     public:
@@ -2322,6 +2435,7 @@ namespace Legion {
       void handle_task(Deserializer &derez);
       void handle_steal(Deserializer &derez);
       void handle_advertisement(Deserializer &derez);
+      void handle_remote_task_replay(Deserializer &derez);
       void handle_index_space_node(Deserializer &derez, AddressSpaceID source);
       void handle_index_space_request(Deserializer &derez, 
                                       AddressSpaceID source);
@@ -2333,6 +2447,12 @@ namespace Legion {
       void handle_index_space_colors_request(Deserializer &derez,
                                              AddressSpaceID source);
       void handle_index_space_colors_response(Deserializer &derez);
+      void handle_index_space_remote_expression_request(Deserializer &derez,
+                                                        AddressSpaceID source);
+      void handle_index_space_remote_expression_response(Deserializer &derez,
+                                                         AddressSpaceID source);
+      void handle_index_space_remote_expression_invalidation(
+                                                         Deserializer &derez);
       void handle_index_partition_notification(Deserializer &derez);
       void handle_index_partition_node(Deserializer &derez,
                                        AddressSpaceID source);
@@ -2342,6 +2462,7 @@ namespace Legion {
       void handle_index_partition_child_request(Deserializer &derez,
                                                 AddressSpaceID source);
       void handle_index_partition_child_response(Deserializer &derez);
+      void handle_index_partition_disjoint_update(Deserializer &derez);
       void handle_field_space_node(Deserializer &derez, AddressSpaceID source);
       void handle_field_space_request(Deserializer &derez,
                                       AddressSpaceID source);
@@ -2371,7 +2492,6 @@ namespace Legion {
                                              AddressSpaceID source);
       void handle_logical_partition_destruction(Deserializer &derez,
                                                 AddressSpaceID source);
-      void handle_individual_remote_mapped(Deserializer &derez); 
       void handle_individual_remote_complete(Deserializer &derez);
       void handle_individual_remote_commit(Deserializer &derez);
       void handle_slice_remote_mapped(Deserializer &derez, 
@@ -2382,20 +2502,16 @@ namespace Legion {
                                           AddressSpaceID source);
       void handle_did_remote_valid_update(Deserializer &derez);
       void handle_did_remote_gc_update(Deserializer &derez);
-      void handle_did_remote_resource_update(Deserializer &derez);
-      void handle_did_remote_invalidate(Deserializer &derez);
-      void handle_did_remote_deactivate(Deserializer &derez);
       void handle_did_create_add(Deserializer &derez);
       void handle_did_create_remove(Deserializer &derez);
       void handle_did_remote_unregister(Deserializer &derez);
-      void handle_send_back_logical_state(Deserializer &derez);
+      void handle_send_back_logical_state(Deserializer &derez,
+                                          AddressSpaceID source);
       void handle_send_atomic_reservation_request(Deserializer &derez,
                                                   AddressSpaceID source);
       void handle_send_atomic_reservation_response(Deserializer &derez);
       void handle_send_materialized_view(Deserializer &derez, 
                                          AddressSpaceID source);
-      void handle_send_composite_view(Deserializer &derez,
-                                      AddressSpaceID source);
       void handle_send_fill_view(Deserializer &derez, AddressSpaceID source);
       void handle_send_phi_view(Deserializer &derez, AddressSpaceID source);
       void handle_send_reduction_view(Deserializer &derez,
@@ -2407,19 +2523,24 @@ namespace Legion {
       void handle_create_top_view_request(Deserializer &derez,
                                           AddressSpaceID source);
       void handle_create_top_view_response(Deserializer &derez);
-      void handle_subview_did_request(Deserializer &derez, 
-                                      AddressSpaceID source);
-      void handle_subview_did_response(Deserializer &derez);
       void handle_view_request(Deserializer &derez, AddressSpaceID source);
-      void handle_view_update_request(Deserializer &derez, 
-                                      AddressSpaceID source);
-      void handle_view_update_response(Deserializer &derez);
-      void handle_view_remote_update(Deserializer &derez,
-                                     AddressSpaceID source);
-      void handle_view_remote_invalidate(Deserializer &derez);
+      void handle_view_register_user(Deserializer &derez,AddressSpaceID source);
+      void handle_view_copy_pre_request(Deserializer &derez,
+                                        AddressSpaceID source);
+      void handle_view_copy_pre_response(Deserializer &derez,
+                                         AddressSpaceID source);
+      void handle_view_add_copy_user(Deserializer &derez,AddressSpaceID source);
+#ifdef ENABLE_VIEW_REPLICATION
+      void handle_view_replication_request(Deserializer &derez,
+                                           AddressSpaceID source);
+      void handle_view_replication_response(Deserializer &derez);
+      void handle_view_replication_removal(Deserializer &derez, 
+                                           AddressSpaceID source);
+#endif
       void handle_manager_request(Deserializer &derez, AddressSpaceID source);
       void handle_future_result(Deserializer &derez);
-      void handle_future_subscription(Deserializer &derez);
+      void handle_future_subscription(Deserializer &derez, 
+                                      AddressSpaceID source);
       void handle_future_map_future_request(Deserializer &derez,
                                             AddressSpaceID source);
       void handle_future_map_future_response(Deserializer &derez);
@@ -2461,9 +2582,39 @@ namespace Legion {
       void handle_remote_context_physical_request(Deserializer &derez,
                                                   AddressSpaceID source);
       void handle_remote_context_physical_response(Deserializer &derez);
-      void handle_version_owner_request(Deserializer &derez, 
-                                        AddressSpaceID source);
-      void handle_version_owner_response(Deserializer &derez);
+      void handle_compute_equivalence_sets_request(Deserializer &derez, 
+                                                   AddressSpaceID source);
+      void handle_equivalence_set_request(Deserializer &derez,
+                                          AddressSpaceID source);
+      void handle_equivalence_set_response(Deserializer &derez,
+                                           AddressSpaceID source);
+      void handle_equivalence_set_subset_request(Deserializer &derez);
+      void handle_equivalence_set_subset_response(Deserializer &derez);
+      void handle_equivalence_set_subset_update(Deserializer &derez);
+      void handle_equivalence_set_ray_trace_request(Deserializer &derez,
+                                                    AddressSpaceID source);
+      void handle_equivalence_set_ray_trace_response(Deserializer &derez);
+      void handle_equivalence_set_migration(Deserializer &derez,
+                                            AddressSpaceID source);
+      void handle_equivalence_set_owner_update(Deserializer &derez);
+      void handle_equivalence_set_remote_refinement(Deserializer &derez);
+      void handle_equivalence_set_remote_request_instances(Deserializer &derez, 
+                                                         AddressSpaceID srouce);
+      void handle_equivalence_set_remote_request_invalid(Deserializer &derez, 
+                                                         AddressSpaceID srouce);
+      void handle_equivalence_set_remote_updates(Deserializer &derez,
+                                                 AddressSpaceID source);
+      void handle_equivalence_set_remote_acquires(Deserializer &derez,
+                                                  AddressSpaceID source);
+      void handle_equivalence_set_remote_releases(Deserializer &derez,
+                                                  AddressSpaceID source);
+      void handle_equivalence_set_remote_copies_across(Deserializer &derez,
+                                                       AddressSpaceID source);
+      void handle_equivalence_set_remote_overwrites(Deserializer &derez,
+                                                    AddressSpaceID source);
+      void handle_equivalence_set_remote_filters(Deserializer &derez,
+                                                 AddressSpaceID source);
+      void handle_equivalence_set_remote_instances(Deserializer &derez);
       void handle_version_state_request(Deserializer &derez,
                                         AddressSpaceID source);
       void handle_version_state_response(Deserializer &derez,
@@ -2472,16 +2623,12 @@ namespace Legion {
       void handle_version_state_update_response(Deserializer &derez);
       void handle_version_state_valid_notification(Deserializer &derez,
                                                    AddressSpaceID source);
-      void handle_version_manager_advance(Deserializer &derez);
-      void handle_version_manager_invalidate(Deserializer &derez);
-      void handle_version_manager_request(Deserializer &derez, 
-                                          AddressSpaceID source);
-      void handle_version_manager_response(Deserializer &derez);
-      void handle_version_manager_unversioned_request(Deserializer &derez,
-                                                      AddressSpaceID source);
-      void handle_version_manager_unversioned_response(Deserializer &derez);
       void handle_instance_request(Deserializer &derez, AddressSpaceID source);
       void handle_instance_response(Deserializer &derez,AddressSpaceID source);
+      void handle_external_create_request(Deserializer &derez,
+                                          AddressSpaceID source);
+      void handle_external_create_response(Deserializer &derez);
+      void handle_external_attach(Deserializer &derez);
       void handle_external_detach(Deserializer &derez);
       void handle_gc_priority_update(Deserializer &derez,AddressSpaceID source);
       void handle_never_gc_response(Deserializer &derez);
@@ -2505,6 +2652,20 @@ namespace Legion {
       void handle_library_task_request(Deserializer &derez,
                                        AddressSpaceID source);
       void handle_library_task_response(Deserializer &derez);
+      void handle_library_redop_request(Deserializer &derez,
+                                        AddressSpaceID source);
+      void handle_library_redop_response(Deserializer &derez);
+      void handle_library_serdez_request(Deserializer &derez,
+                                         AddressSpaceID source);
+      void handle_library_serdez_response(Deserializer &derez);
+      void handle_remote_op_report_uninitialized(Deserializer &derez);
+      void handle_remote_op_profiling_count_update(Deserializer &derez);
+      void handle_remote_tracing_update(Deserializer &derez,
+                                        AddressSpaceID source);
+      void handle_remote_tracing_response(Deserializer &derez);
+      void handle_remote_tracing_eq_request(Deserializer &derez,
+                                            AddressSpaceID source);
+      void handle_remote_tracing_eq_response(Deserializer &derez);
       void handle_shutdown_notification(Deserializer &derez, 
                                         AddressSpaceID source);
       void handle_shutdown_response(Deserializer &derez);
@@ -2514,27 +2675,31 @@ namespace Legion {
                                     const std::vector<LogicalRegion> &regions,
                                     MappingInstance &result, MapperID mapper_id,
                                     Processor processor, bool acquire, 
-                                    GCPriority priority, UniqueID creator_id);
+                                    GCPriority priority, bool tight_bounds,
+                                    size_t *footprint, UniqueID creator_id);
       bool create_physical_instance(Memory target_memory, 
                                     LayoutConstraintID layout_id,
                                     const std::vector<LogicalRegion> &regions,
                                     MappingInstance &result, MapperID mapper_id,
                                     Processor processor, bool acquire, 
-                                    GCPriority priority, UniqueID creator_id);
+                                    GCPriority priority, bool tight_bounds,
+                                    size_t *footprint, UniqueID creator_id);
       bool find_or_create_physical_instance(Memory target_memory,
                                     const LayoutConstraintSet &constraints,
                                     const std::vector<LogicalRegion> &regions,
                                     MappingInstance &result, bool &created, 
                                     MapperID mapper_id, Processor processor,
                                     bool acquire, GCPriority priority,
-                                    bool tight_bounds, UniqueID creator_id);
+                                    bool tight_bounds, size_t *footprint,
+                                    UniqueID creator_id);
       bool find_or_create_physical_instance(Memory target_memory,
                                     LayoutConstraintID layout_id,
                                     const std::vector<LogicalRegion> &regions,
                                     MappingInstance &result, bool &created, 
                                     MapperID mapper_id, Processor processor,
                                     bool acquire, GCPriority priority,
-                                    bool tight_bounds, UniqueID creator_id);
+                                    bool tight_bounds, size_t *footprint,
+                                    UniqueID creator_id);
       bool find_physical_instance(Memory target_memory,
                                     const LayoutConstraintSet &constraints,
                                     const std::vector<LogicalRegion> &regions,
@@ -2545,7 +2710,7 @@ namespace Legion {
                                     const std::vector<LogicalRegion> &regions,
                                     MappingInstance &result, bool acquire,
                                     bool tight_region_bounds);
-      void release_tree_instances(RegionTreeID tree_id);
+      void release_tree_instances(RegionTreeID tid);
     public:
       // Helper methods for the RegionTreeForest
       inline unsigned get_context_count(void) { return total_contexts; }
@@ -2556,7 +2721,8 @@ namespace Legion {
       void activate_context(InnerContext *context);
       void deactivate_context(InnerContext *context);
     public:
-      void add_to_dependence_queue(TaskContext *ctx, Processor p,Operation *op);
+      void add_to_dependence_queue(TaskContext *ctx, Processor p,
+                                   Operation *op, const bool unordered = false);
       void add_to_ready_queue(Processor p, TaskOp *task_op, 
                               RtEvent wait_on = RtEvent::NO_RT_EVENT);
       void add_to_local_queue(Processor p, Operation *op, LgPriority priority,
@@ -2591,8 +2757,8 @@ namespace Legion {
                                                 RtEvent &ready);
       PhysicalManager* find_or_request_physical_manager(DistributedID did, 
                                                         RtEvent &ready);
-      VersionState* find_or_request_version_state(DistributedID did,
-                                                  RtEvent &ready);
+      EquivalenceSet* find_or_request_equivalence_set(DistributedID did,
+                                                      RtEvent &ready);
     protected:
       template<typename T, MessageKind MK, VirtualChannelKind VC>
       DistributedCollectable* find_or_request_distributed_collectable(
@@ -2602,14 +2768,10 @@ namespace Legion {
                                         ReferenceMutator *mutator);
       FutureMapImpl* find_or_create_future_map(DistributedID did, 
                       TaskContext *ctx, ReferenceMutator *mutator);
-      IndexSpace find_or_create_index_launch_space(const Domain &launch_domain);
-      IndexSpace find_or_create_index_launch_space(const Domain &launch_domain,
-                                                   const void *realm_is,
-                                                   TypeTag type_tag);
-    public:
-      void defer_collect_user(LogicalView *view, ApEvent term_event, 
-                              ReferenceMutator *mutator);
-      void complete_gc_epoch(GarbageCollectionEpoch *epoch);
+      IndexSpace find_or_create_index_slice_space(const Domain &launch_domain);
+      IndexSpace find_or_create_index_slice_space(const Domain &launch_domain,
+                                                  const void *realm_is,
+                                                  TypeTag type_tag);
     public:
       void increment_outstanding_top_level_tasks(void);
       void decrement_outstanding_top_level_tasks(void);
@@ -2651,10 +2813,7 @@ namespace Legion {
       FenceOp*              get_available_fence_op(void);
       FrameOp*              get_available_frame_op(void);
       DeletionOp*           get_available_deletion_op(void);
-      OpenOp*               get_available_open_op(void);
-      AdvanceOp*            get_available_advance_op(void);
-      InterCloseOp*         get_available_inter_close_op(void);
-      ReadCloseOp*          get_available_read_close_op(void);
+      MergeCloseOp*         get_available_merge_close_op(void);
       PostCloseOp*          get_available_post_close_op(void);
       VirtualCloseOp*       get_available_virtual_close_op(void);
       DynamicCollectiveOp*  get_available_dynamic_collective_op(void);
@@ -2691,10 +2850,7 @@ namespace Legion {
       void free_fence_op(FenceOp *op);
       void free_frame_op(FrameOp *op);
       void free_deletion_op(DeletionOp *op);
-      void free_open_op(OpenOp *op);
-      void free_advance_op(AdvanceOp *op);
-      void free_inter_close_op(InterCloseOp *op); 
-      void free_read_close_op(ReadCloseOp *op);
+      void free_merge_close_op(MergeCloseOp *op); 
       void free_post_close_op(PostCloseOp *op);
       void free_virtual_close_op(VirtualCloseOp *op);
       void free_dynamic_collective_op(DynamicCollectiveOp *op);
@@ -2728,7 +2884,8 @@ namespace Legion {
                                    std::set<RtEvent> &preconditions);
       void unregister_remote_context(UniqueID context_uid);
       InnerContext* find_context(UniqueID context_uid, 
-                                 bool return_null_if_not_found = false);
+                                 bool return_null_if_not_found = false,
+                                 RtEvent *wait_for = NULL);
       inline AddressSpaceID get_runtime_owner(UniqueID uid) const
         { return (uid % runtime_stride); }
     public:
@@ -2744,6 +2901,7 @@ namespace Legion {
       FieldID            get_unique_field_id(void);
       CodeDescriptorID   get_unique_code_descriptor_id(void);
       LayoutConstraintID get_unique_constraint_id(void);
+      IndexSpaceExprID   get_unique_index_space_expr_id(void);
     public:
       // Verify that a region requirement is valid
       LegionErrorType verify_requirement(const RegionRequirement &req,
@@ -2753,6 +2911,7 @@ namespace Legion {
       Future help_create_future(Operation *op = NULL);
       void help_complete_future(const Future &f);
       bool help_reset_future(const Future &f);
+      IndexSpace help_create_index_space_handle(TypeTag type_tag);
     public:
       unsigned generate_random_integer(void);
 #ifdef TRACE_ALLOCATION
@@ -2782,6 +2941,10 @@ namespace Legion {
 			  const void *userdata, size_t userlen,
 			  Processor p);
       static void startup_runtime_task(
+                          const void *args, size_t arglen, 
+			  const void *userdata, size_t userlen,
+			  Processor p);
+      static void endpoint_runtime_task(
                           const void *args, size_t arglen, 
 			  const void *userdata, size_t userlen,
 			  Processor p);
@@ -2820,9 +2983,13 @@ namespace Legion {
       // Memory managers for all the memories we know about
       std::map<Memory,MemoryManager*> memory_managers;
       // Message managers for each of the other runtimes
-      MessageManager *message_managers[MAX_NUM_NODES];
+      MessageManager *message_managers[LEGION_MAX_NUM_NODES];
+      // Pending message manager requests
+      std::map<AddressSpaceID,RtUserEvent> pending_endpoint_requests;
       // For every processor map it to its address space
       const std::map<Processor,AddressSpaceID> proc_spaces;
+      // For every endpoint processor map to its address space
+      std::map<Processor,AddressSpaceID> endpoint_spaces;
     protected:
       // The task table 
       mutable LocalLock task_variant_lock;
@@ -2861,9 +3028,12 @@ namespace Legion {
       unsigned unique_field_id; 
       unsigned unique_code_descriptor_id;
       unsigned unique_constraint_id;
+      unsigned unique_is_expr_id;
       unsigned unique_task_id;
       unsigned unique_mapper_id;
       unsigned unique_projection_id;
+      unsigned unique_redop_id;
+      unsigned unique_serdez_id;
     protected:
       mutable LocalLock library_lock;
       struct LibraryMapperIDs {
@@ -2899,6 +3069,31 @@ namespace Legion {
       // This is only valid on node 0
       unsigned unique_library_task_id;
     protected:
+      struct LibraryRedopIDs {
+      public:
+        ReductionOpID result;
+        size_t count;
+        RtEvent ready;
+        bool result_set;
+      };
+      std::map<std::string,LibraryRedopIDs> library_redop_ids;
+      // This is only valid on node 0
+      unsigned unique_library_redop_id;
+    protected:
+      struct LibrarySerdezIDs {
+      public:
+        CustomSerdezID result;
+        size_t count;
+        RtEvent ready;
+        bool result_set;
+      };
+      std::map<std::string,LibrarySerdezIDs> library_serdez_ids;
+      // This is only valid on node 0
+      unsigned unique_library_serdez_id;
+    protected:
+      mutable LocalLock redop_lock;
+      mutable LocalLock serdez_lock;
+    protected:
       mutable LocalLock projection_lock;
       std::map<ProjectionID,ProjectionFunction*> projection_functions;
     protected:
@@ -2920,14 +3115,8 @@ namespace Legion {
       std::map<DistributedID,
         std::pair<DistributedCollectable*,RtUserEvent> > pending_collectables;
     protected:
-      mutable LocalLock is_launch_lock;
-      std::map<std::pair<Domain,TypeTag>,IndexSpace> index_launch_spaces;
-    protected:
-      mutable LocalLock gc_epoch_lock;
-      GarbageCollectionEpoch *current_gc_epoch;
-      LegionSet<GarbageCollectionEpoch*,
-                RUNTIME_GC_EPOCH_ALLOC>::tracked  pending_gc_epochs;
-      unsigned gc_epoch_counter;
+      mutable LocalLock is_slice_lock;
+      std::map<std::pair<Domain,TypeTag>,IndexSpace> index_slice_spaces;
     protected:
       // The runtime keeps track of remote contexts so they
       // can be re-used by multiple tasks that get sent remotely
@@ -2935,7 +3124,8 @@ namespace Legion {
       std::map<UniqueID,InnerContext*> local_contexts;
       LegionMap<UniqueID,RemoteContext*,
                 RUNTIME_REMOTE_ALLOC>::tracked remote_contexts;
-      std::map<UniqueID,RtUserEvent> pending_remote_contexts;
+      std::map<UniqueID,
+        std::pair<RtUserEvent,RemoteContext*> > pending_remote_contexts;
       unsigned total_contexts;
       std::deque<RegionTreeContext> available_contexts;
     protected:
@@ -2969,10 +3159,7 @@ namespace Legion {
       mutable LocalLock fence_op_lock;
       mutable LocalLock frame_op_lock;
       mutable LocalLock deletion_op_lock;
-      mutable LocalLock open_op_lock;
-      mutable LocalLock advance_op_lock;
-      mutable LocalLock inter_close_op_lock;
-      mutable LocalLock read_close_op_lock;
+      mutable LocalLock merge_close_op_lock;
       mutable LocalLock post_close_op_lock;
       mutable LocalLock virtual_close_op_lock;
       mutable LocalLock dynamic_collective_op_lock;
@@ -3006,10 +3193,7 @@ namespace Legion {
       std::deque<FenceOp*>              available_fence_ops;
       std::deque<FrameOp*>              available_frame_ops;
       std::deque<DeletionOp*>           available_deletion_ops;
-      std::deque<OpenOp*>               available_open_ops;
-      std::deque<AdvanceOp*>            available_advance_ops;
-      std::deque<InterCloseOp*>         available_inter_close_ops;
-      std::deque<ReadCloseOp*>          available_read_close_ops;
+      std::deque<MergeCloseOp*>         available_merge_close_ops;
       std::deque<PostCloseOp*>          available_post_close_ops;
       std::deque<VirtualCloseOp*>       available_virtual_close_ops;
       std::deque<DynamicCollectiveOp*>  available_dynamic_collective_ops;
@@ -3059,7 +3243,8 @@ namespace Legion {
           LayoutConstraintID id, DistributedID did = 0);
       LayoutConstraints* register_layout(FieldSpace handle,
                const LayoutConstraintSet &cons, bool internal);
-      bool register_layout(LayoutConstraints *new_constraints);
+      bool register_layout(LayoutConstraints *new_constraints,
+                           ReferenceMutator *mutator);
       void release_layout(LayoutConstraintID layout_id);
       void unregister_layout(LayoutConstraintID layout_id);
       static LayoutConstraintID preregister_layout(
@@ -3070,10 +3255,12 @@ namespace Legion {
                                   LayoutConstraintSet &layout_constraints);
       const char* get_layout_constraints_name(LayoutConstraintID layout_id);
       LayoutConstraints* find_layout_constraints(LayoutConstraintID layout_id,
-                                                 bool can_fail = false);
+                                                 bool can_fail = false,
+                                                 RtEvent *wait_for = NULL);
     public:
       // Static methods for start-up and callback phases
       static int start(int argc, char **argv, bool background);
+      static void register_builtin_reduction_operators(void);
       static RealmRuntime initialize(int *argc, char ***argv);
       static LegionConfiguration parse_arguments(int argc, char **argv);
       static void perform_slow_config_checks(const LegionConfiguration &config);
@@ -3081,23 +3268,46 @@ namespace Legion {
       static RtEvent configure_runtime(int argc, char **argv,
           const LegionConfiguration &config, RealmRuntime &realm,
           Processor::Kind &startup_kind);
-      static void wait_for_shutdown(void);
-      static void set_top_level_task_id(Processor::TaskFuncID top_id);
+      static int wait_for_shutdown(void);
+      static Context start_implicit(int argc, char **argv,
+                                    TaskID top_task_id,
+                                    Processor::Kind proc_kind,
+                                    const char *task_name,
+                                    bool control_replicable);
+      static void set_top_level_task_id(TaskID top_id);
+      static void set_top_level_task_mapper_id(MapperID mapper_id);
       static void configure_MPI_interoperability(int rank);
       static void register_handshake(MPILegionHandshake &handshake);
-      static const ReductionOp* get_reduction_op(ReductionOpID redop_id);
-      static const SerdezOp* get_serdez_op(CustomSerdezID serdez_id);
-      static const SerdezRedopFns* get_serdez_redop_fns(ReductionOpID redop_id);
+      static const ReductionOp* get_reduction_op(ReductionOpID redop_id,
+                                                 bool has_lock = false);
+      static const SerdezOp* get_serdez_op(CustomSerdezID serdez_id,
+                                           bool has_lock = false);
+      static const SerdezRedopFns* get_serdez_redop_fns(ReductionOpID redop_id,
+                                                        bool has_lock = false);
       static void add_registration_callback(RegistrationCallbackFnptr callback);
-      static ReductionOpTable& get_reduction_table(void);
-      static SerdezOpTable& get_serdez_table(void);
-      static SerdezRedopTable& get_serdez_redop_table(void);
+      static ReductionOpTable& get_reduction_table(bool safe);
+      static SerdezOpTable& get_serdez_table(bool safe);
+      static SerdezRedopTable& get_serdez_redop_table(bool safe);
+      static void register_reduction_op(ReductionOpID redop_id,
+                                        ReductionOp *redop,
+                                        SerdezInitFnptr init_fnptr,
+                                        SerdezFoldFnptr fold_fnptr,
+                                        bool permit_duplicates,
+                                        bool has_lock = false);
+      static void register_serdez_op(CustomSerdezID serdez_id,
+                                     SerdezOp *serdez_op,
+                                     bool permit_duplicates,
+                                     bool has_lock = false);
       static std::deque<PendingVariantRegistration*>&
                                 get_pending_variant_table(void);
       static std::map<LayoutConstraintID,LayoutConstraintRegistrar>&
                                 get_pending_constraint_table(void);
       static std::map<ProjectionID,ProjectionFunctor*>&
                                 get_pending_projection_table(void);
+      static std::vector<MPILegionHandshake>&
+                                get_pending_handshake_table(void);
+      static std::vector<RegistrationCallbackFnptr>&
+                                get_pending_registration_callbacks(void);
       static TaskID& get_current_static_task_id(void);
       static TaskID generate_static_task_id(void);
       static VariantID preregister_variant(
@@ -3105,6 +3315,11 @@ namespace Legion {
                       const void *user_data, size_t user_data_size,
                       CodeDescriptor *realm_desc, bool has_ret, 
                       const char *task_name,VariantID vid,bool check_id = true);
+    public:
+      static ReductionOpID& get_current_static_reduction_id(void);
+      static ReductionOpID generate_static_reduction_id(void);
+      static CustomSerdezID& get_current_static_serdez_id(void);
+      static CustomSerdezID generate_static_serdez_id(void);
     public:
       static void report_fatal_message(int code,
                                        const char *file_name,
@@ -3129,25 +3344,30 @@ namespace Legion {
 #endif
     public:
       // Static member variables
-      static Processor::TaskFuncID legion_main_id;
+      static TaskID legion_main_id;
+      static MapperID legion_main_mapper_id;
       static std::vector<RegistrationCallbackFnptr> registration_callbacks;
       static bool runtime_initialized;
       static bool runtime_started;
       static bool runtime_backgrounded;
       static Runtime *the_runtime;
+      static RtUserEvent runtime_started_event;
       // Static member variables for MPI interop
       static int mpi_rank;
-      static std::vector<MPILegionHandshake> *pending_handshakes;
     public:
-      static inline ApEvent merge_events(ApEvent e1, ApEvent e2);
-      static inline ApEvent merge_events(ApEvent e1, ApEvent e2, ApEvent e3);
-      static inline ApEvent merge_events(const std::set<ApEvent> &events);
+      static inline ApEvent merge_events(const TraceInfo *info,
+                                         ApEvent e1, ApEvent e2);
+      static inline ApEvent merge_events(const TraceInfo *info,
+                                         ApEvent e1, ApEvent e2, ApEvent e3);
+      static inline ApEvent merge_events(const TraceInfo *info,
+                                         const std::set<ApEvent> &events);
     public:
       static inline RtEvent merge_events(RtEvent e1, RtEvent e2);
       static inline RtEvent merge_events(RtEvent e1, RtEvent e2, RtEvent e3);
       static inline RtEvent merge_events(const std::set<RtEvent> &events);
     public:
-      static inline ApUserEvent create_ap_user_event(void);
+      static inline ApUserEvent create_ap_user_event(
+                                                  const TraceInfo *info = NULL);
       static inline void trigger_event(ApUserEvent to_trigger,
                                    ApEvent precondition = ApEvent::NO_AP_EVENT);
       static inline void poison_event(ApUserEvent to_poison);
@@ -3251,20 +3471,31 @@ namespace Legion {
       {
         Realm::ProfilingRequestSet requests;
         profiler->add_meta_request(requests, T::TASK_ID, args.provenance);
+#ifdef LEGION_SEPARATE_META_TASKS
+        return RtEvent(target.spawn(LG_TASK_ID + T::TASK_ID, &args, sizeof(T),
+                                    requests, precondition, priority));
+#else
         return RtEvent(target.spawn(LG_TASK_ID, &args, sizeof(T),
                                     requests, precondition, priority));
+#endif
       }
       else
+#ifdef LEGION_SEPARATE_META_TASKS
+        return RtEvent(target.spawn(LG_TASK_ID + T::TASK_ID, &args, sizeof(T),
+                                    precondition, priority));
+#else
         return RtEvent(target.spawn(LG_TASK_ID, &args, sizeof(T), 
                                     precondition, priority));
+#endif
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ inline ApEvent Runtime::merge_events(ApEvent e1, ApEvent e2)
+    /*static*/ inline ApEvent Runtime::merge_events(
+                                  const TraceInfo *info, ApEvent e1, ApEvent e2)
     //--------------------------------------------------------------------------
     {
       ApEvent result(Realm::Event::merge_events(e1, e2)); 
-#ifdef LEGION_SPY
+#ifdef LEGION_DISABLE_EVENT_PRUNING
       if (!result.exists() || (result == e1) || (result == e2))
       {
         Realm::UserEvent rename(Realm::UserEvent::create_user_event());
@@ -3276,19 +3507,23 @@ namespace Legion {
           rename.trigger();
         result = ApEvent(rename);
       }
+#endif
+#ifdef LEGION_SPY
       LegionSpy::log_event_dependence(e1, result);
       LegionSpy::log_event_dependence(e2, result);
 #endif
+      if ((info != NULL) && info->recording)
+        info->record_merge_events(result, e1, e2);
       return result;
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ inline ApEvent Runtime::merge_events(ApEvent e1, 
-                                                    ApEvent e2, ApEvent e3) 
+    /*static*/ inline ApEvent Runtime::merge_events(
+                      const TraceInfo *info, ApEvent e1, ApEvent e2, ApEvent e3) 
     //--------------------------------------------------------------------------
     {
       ApEvent result(Realm::Event::merge_events(e1, e2, e3)); 
-#ifdef LEGION_SPY
+#ifdef LEGION_DISABLE_EVENT_PRUNING
       if (!result.exists() || (result == e1) || (result == e2) ||(result == e3))
       {
         Realm::UserEvent rename(Realm::UserEvent::create_user_event());
@@ -3302,28 +3537,52 @@ namespace Legion {
           rename.trigger();
         result = ApEvent(rename);
       }
+#endif
+#ifdef LEGION_SPY
       LegionSpy::log_event_dependence(e1, result);
       LegionSpy::log_event_dependence(e2, result);
       LegionSpy::log_event_dependence(e3, result);
 #endif
+      if ((info != NULL) && info->recording)
+        info->record_merge_events(result, e1, e2, e3);
       return result;
     }
 
     //--------------------------------------------------------------------------
     /*static*/ inline ApEvent Runtime::merge_events(
-                                                const std::set<ApEvent> &events)
+                         const TraceInfo *info, const std::set<ApEvent> &events)
     //--------------------------------------------------------------------------
     {
-#ifndef LEGION_SPY
+#ifndef LEGION_DISABLE_EVENT_PRUNING
       if (events.empty())
-        return ApEvent::NO_AP_EVENT;
+      {
+        // Still need to do this for tracing because of merge filter code
+        if ((info != NULL) && info->recording)
+        {
+          ApEvent result;
+          info->record_merge_events(result, events);
+          return result;
+        }
+        else
+          return ApEvent::NO_AP_EVENT;
+      }
       if (events.size() == 1)
-        return *(events.begin());
+      {
+        // Still need to do this for tracing because of merge filter code
+        if ((info != NULL) && info->recording)
+        {
+          ApEvent result = *(events.begin());
+          info->record_merge_events(result, events);
+          return result;
+        }
+        else
+          return *(events.begin());
+      }
 #endif
       const std::set<Realm::Event> *realm_events = 
         reinterpret_cast<const std::set<Realm::Event>*>(&events);
       ApEvent result(Realm::Event::merge_events(*realm_events));
-#ifdef LEGION_SPY
+#ifdef LEGION_DISABLE_EVENT_PRUNING
       if (!result.exists() || (events.find(result) != events.end()))
       {
         Realm::UserEvent rename(Realm::UserEvent::create_user_event());
@@ -3333,10 +3592,14 @@ namespace Legion {
           rename.trigger();
         result = ApEvent(rename);
       }
+#endif
+#ifdef LEGION_SPY
       for (std::set<ApEvent>::const_iterator it = events.begin();
             it != events.end(); it++)
         LegionSpy::log_event_dependence(*it, result);
 #endif
+      if ((info != NULL) && info->recording)
+        info->record_merge_events(result, events);
       return result;
     }
 
@@ -3362,7 +3625,7 @@ namespace Legion {
                                                 const std::set<RtEvent> &events)
     //--------------------------------------------------------------------------
     {
-#ifndef LEGION_SPY
+#ifndef LEGION_DISABLE_EVENT_PRUNING
       if (events.empty())
         return RtEvent::NO_RT_EVENT;
       if (events.size() == 1)
@@ -3375,16 +3638,19 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ inline ApUserEvent Runtime::create_ap_user_event(void)
+    /*static*/ inline ApUserEvent Runtime::create_ap_user_event(
+                                                          const TraceInfo *info)
     //--------------------------------------------------------------------------
     {
 #ifdef LEGION_SPY
       ApUserEvent result(Realm::UserEvent::create_user_event());
       LegionSpy::log_ap_user_event(result);
-      return result;
 #else
-      return ApUserEvent(Realm::UserEvent::create_user_event());
+      ApUserEvent result(Realm::UserEvent::create_user_event());
 #endif
+      if ((info != NULL) && info->recording)
+        info->record_create_ap_user_event(result);
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -3491,14 +3757,16 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       ApEvent result(Realm::Event::ignorefaults(e));
-#ifdef LEGION_SPY
+#ifdef LEGION_DISABLE_EVENT_PRUNING
       if (!result.exists())
       {
         Realm::UserEvent rename(Realm::UserEvent::create_user_event());
         rename.trigger();
         result = ApEvent(rename);
       }
+#ifdef LEGION_SPY
       LegionSpy::log_event_dependence(ApEvent(e), result);
+#endif
 #endif
       return ApEvent(result);
     }
@@ -3578,13 +3846,15 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       ApEvent result(r.acquire(exclusive ? 0 : 1, exclusive, precondition));
-#ifdef LEGION_SPY
+#ifdef LEGION_DISABLE_EVENT_PRUNING
       if (precondition.exists() && !result.exists())
       {
         Realm::UserEvent rename(Realm::UserEvent::create_user_event());
         rename.trigger();
         result = ApEvent(rename);
       }
+#endif
+#ifdef LEGION_SPY
       if (precondition.exists())
         LegionSpy::log_event_dependence(precondition, result);
 #endif

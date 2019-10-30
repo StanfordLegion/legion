@@ -1,4 +1,4 @@
--- Copyright 2018 Stanford University
+-- Copyright 2019 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -13,19 +13,17 @@
 -- limitations under the License.
 
 -- fails-with:
--- vectorize_loops11.rg:27: vectorization failed: loop body has an expression as a statement
+-- vectorize_loops11.rg:27: vectorization failed: found an inadmissible statement
 --     regentlib.c.printf("test\n")
---                 ^
+--              ^
 
 import "regent"
 
-task toplevel()
-  var n = 8
-  var r = region(ispace(ptr, n), int)
+task f(r : region(int))
+where reads writes(r)
+do
   __demand(__vectorize)
   for e in r do
     regentlib.c.printf("test\n")
   end
 end
-
-regentlib.start(toplevel)

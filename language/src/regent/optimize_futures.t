@@ -1,4 +1,4 @@
--- Copyright 2018 Stanford University, NVIDIA Corporation
+-- Copyright 2019 Stanford University, NVIDIA Corporation
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -67,6 +67,10 @@ end
 
 local analyze_var_flow = {}
 
+function flow_empty()
+  return {}
+end
+
 function flow_future()
   return {[true] = true} -- Represents an unconditional future r-value
 end
@@ -76,41 +80,33 @@ function flow_var(v)
 end
 
 function flow_future_into(cx, lhs) -- Unconditionally flow future into l-value
-  if lhs then
-    for v, _ in pairs(lhs) do
-      local var_flow = cx:get_flow(v)
-      var_flow[true] = true
-    end
+  for v, _ in pairs(lhs) do
+    local var_flow = cx:get_flow(v)
+    var_flow[true] = true
   end
 end
 
 function flow_value_into_var(cx, symbol, value) -- Flow r-value into variable
   local var_flow = cx:get_flow(symbol)
-  if value then
-    for v, _ in pairs(value) do
-      var_flow[v] = true
-    end
+  for v, _ in pairs(value) do
+    var_flow[v] = true
   end
 end
 
 function flow_value_into(cx, lhs, rhs) -- Flow r-value into l-value
-  if lhs and rhs then
-    for lhv, _ in pairs(lhs) do
-      local lhv_flow = cx:get_flow(lhv)
-      for rhv, _ in pairs(rhs) do
-        lhv_flow[rhv] = true
+  for lhv, _ in pairs(lhs) do
+    local lhv_flow = cx:get_flow(lhv)
+    for rhv, _ in pairs(rhs) do
+      lhv_flow[rhv] = true
       end
-    end
   end
 end
 
 function meet_flow(...)
   local flow = {}
   for _, a in ipairs({...}) do
-    if a then
-      for v, _ in pairs(a) do
-        flow[v] = true
-      end
+    for v, _ in pairs(a) do
+      flow[v] = true
     end
   end
   return flow
@@ -126,6 +122,7 @@ function analyze_var_flow.expr_call(cx, node)
   then
     return flow_future()
   end
+  return flow_empty()
 end
 
 function analyze_var_flow.expr_dynamic_collective_get_result(cx, node)
@@ -147,12 +144,13 @@ function analyze_var_flow.expr(cx, node)
     return analyze_var_flow.expr_id(cx, node)
 
   elseif node:is(ast.typed.expr.Constant) or
+    node:is(ast.typed.expr.Global) or
     node:is(ast.typed.expr.Function) or
     node:is(ast.typed.expr.FieldAccess) or
     node:is(ast.typed.expr.IndexAccess) or
     node:is(ast.typed.expr.MethodCall)
   then
-    return nil
+    return flow_empty()
 
   elseif node:is(ast.typed.expr.Call) then
     return analyze_var_flow.expr_call(cx, node)
@@ -163,6 +161,7 @@ function analyze_var_flow.expr(cx, node)
     node:is(ast.typed.expr.RawFields) or
     node:is(ast.typed.expr.RawPhysical) or
     node:is(ast.typed.expr.RawRuntime) or
+    node:is(ast.typed.expr.RawTask) or
     node:is(ast.typed.expr.RawValue) or
     node:is(ast.typed.expr.Isnull) or
     node:is(ast.typed.expr.Null) or
@@ -174,6 +173,7 @@ function analyze_var_flow.expr(cx, node)
     node:is(ast.typed.expr.Partition) or
     node:is(ast.typed.expr.PartitionEqual) or
     node:is(ast.typed.expr.PartitionByField) or
+    node:is(ast.typed.expr.PartitionByRestriction) or
     node:is(ast.typed.expr.Image) or
     node:is(ast.typed.expr.Preimage) or
     node:is(ast.typed.expr.CrossProduct) or
@@ -191,7 +191,7 @@ function analyze_var_flow.expr(cx, node)
     node:is(ast.typed.expr.PhaseBarrier) or
     node:is(ast.typed.expr.DynamicCollective)
   then
-    return nil
+    return flow_empty()
 
   elseif node:is(ast.typed.expr.DynamicCollectiveGetResult) then
     return analyze_var_flow.expr_dynamic_collective_get_result(cx, node)
@@ -207,9 +207,13 @@ function analyze_var_flow.expr(cx, node)
     node:is(ast.typed.expr.AttachHDF5) or
     node:is(ast.typed.expr.DetachHDF5) or
     node:is(ast.typed.expr.AllocateScratchFields) or
-    node:is(ast.typed.expr.WithScratchFields)
+    node:is(ast.typed.expr.WithScratchFields) or
+    node:is(ast.typed.expr.ImportIspace) or
+    node:is(ast.typed.expr.ImportRegion) or
+    node:is(ast.typed.expr.ImportPartition) or
+    node:is(ast.typed.expr.Projection)
   then
-    return nil
+    return flow_empty()
 
   elseif node:is(ast.typed.expr.Unary) then
     return analyze_var_flow.expr_unary(cx, node)
@@ -218,7 +222,10 @@ function analyze_var_flow.expr(cx, node)
     return analyze_var_flow.expr_binary(cx, node)
 
   elseif node:is(ast.typed.expr.Deref) then
-    return nil
+    return flow_empty()
+
+  elseif node:is(ast.typed.expr.AddressOf) then
+    return flow_empty()
 
   else
     assert(false, "unexpected node type " .. tostring(node.node_type))
@@ -266,22 +273,23 @@ function analyze_var_flow.stat_block(cx, node)
 end
 
 function analyze_var_flow.stat_index_launch_num(cx, node)
+  node.preamble:map(function(stat) analyze_var_flow.stat(cx, stat) end)
   local reduce_lhs = node.reduce_lhs and
-    analyze_var_flow.expr(cx, node.reduce_lhs)
+    analyze_var_flow.expr(cx, node.reduce_lhs) or
+    flow_empty()
   flow_future_into(cx, reduce_lhs)
 end
 
 function analyze_var_flow.stat_index_launch_list(cx, node)
+  node.preamble:map(function(stat) analyze_var_flow.stat(cx, stat) end)
   local reduce_lhs = node.reduce_lhs and
-    analyze_var_flow.expr(cx, node.reduce_lhs)
+    analyze_var_flow.expr(cx, node.reduce_lhs) or
+    flow_empty()
   flow_future_into(cx, reduce_lhs)
 end
 
 function analyze_var_flow.stat_var(cx, node)
-  local value = node.value
-  if value then
-    value = analyze_var_flow.expr(cx, value)
-  end
+  local value = node.value and analyze_var_flow.expr(cx, node.value) or flow_empty()
   flow_value_into_var(cx, node.symbol, value)
 end
 
@@ -548,12 +556,12 @@ function optimize_futures.expr_ctor(cx, node)
 end
 
 function optimize_futures.expr_raw_fields(cx, node)
-  local region = concretize(optimize_futures.expr(cx, node.region))
+  local region = concretize(optimize_futures.expr_region_root(cx, node.region))
   return node { region = region }
 end
 
 function optimize_futures.expr_raw_physical(cx, node)
-  local region = concretize(optimize_futures.expr(cx, node.region))
+  local region = concretize(optimize_futures.expr_region_root(cx, node.region))
   return node { region = region }
 end
 
@@ -624,6 +632,19 @@ function optimize_futures.expr_partition_by_field(cx, node)
   local colors = concretize(optimize_futures.expr(cx, node.colors))
   return node {
     region = region,
+    colors = colors,
+  }
+end
+
+function optimize_futures.expr_partition_by_restriction(cx, node)
+  local region = concretize(optimize_futures.expr(cx, node.region))
+  local transform = concretize(optimize_futures.expr(cx, node.transform))
+  local extent = concretize(optimize_futures.expr(cx, node.extent))
+  local colors = concretize(optimize_futures.expr(cx, node.colors))
+  return node {
+    region = region,
+    transform = transform,
+    extent = extent,
     colors = colors,
   }
 end
@@ -933,11 +954,53 @@ function optimize_futures.expr_deref(cx, node)
   return node { value = value }
 end
 
+function optimize_futures.expr_address_of(cx, node)
+  local value = concretize(optimize_futures.expr(cx, node.value))
+  return node { value = value }
+end
+
+function optimize_futures.expr_import_ispace(cx, node)
+  local value = concretize(optimize_futures.expr(cx, node.value))
+  return node { value = value }
+end
+
+function optimize_futures.expr_import_region(cx, node)
+  local ispace    = concretize(optimize_futures.expr(cx, node.ispace))
+  local value     = concretize(optimize_futures.expr(cx, node.value))
+  local field_ids = concretize(optimize_futures.expr(cx, node.field_ids))
+  return node {
+    ispace = ispace,
+    value = value,
+    field_ids = field_ids,
+  }
+end
+
+function optimize_futures.expr_import_partition(cx, node)
+  local region = concretize(optimize_futures.expr(cx, node.region))
+  local colors = concretize(optimize_futures.expr(cx, node.colors))
+  local value  = concretize(optimize_futures.expr(cx, node.value))
+  return node {
+    region = region,
+    colors = colors,
+    value = value,
+  }
+end
+
+function optimize_futures.expr_projection(cx, node)
+  local region = concretize(optimize_futures.expr(cx, node.region))
+  return node {
+    region = region,
+  }
+end
+
 function optimize_futures.expr(cx, node)
   if node:is(ast.typed.expr.ID) then
     return optimize_futures.expr_id(cx, node)
 
   elseif node:is(ast.typed.expr.Constant) then
+    return node
+
+  elseif node:is(ast.typed.expr.Global) then
     return node
 
   elseif node:is(ast.typed.expr.Function) then
@@ -973,6 +1036,9 @@ function optimize_futures.expr(cx, node)
   elseif node:is(ast.typed.expr.RawRuntime) then
     return node
 
+  elseif node:is(ast.typed.expr.RawTask) then
+    return node
+
   elseif node:is(ast.typed.expr.RawValue) then
     return optimize_futures.expr_raw_value(cx, node)
 
@@ -1005,6 +1071,9 @@ function optimize_futures.expr(cx, node)
 
   elseif node:is(ast.typed.expr.PartitionByField) then
     return optimize_futures.expr_partition_by_field(cx, node)
+
+  elseif node:is(ast.typed.expr.PartitionByRestriction) then
+    return optimize_futures.expr_partition_by_restriction(cx, node)
 
   elseif node:is(ast.typed.expr.Image) then
     return optimize_futures.expr_image(cx, node)
@@ -1102,6 +1171,21 @@ function optimize_futures.expr(cx, node)
   elseif node:is(ast.typed.expr.Deref) then
     return optimize_futures.expr_deref(cx, node)
 
+  elseif node:is(ast.typed.expr.AddressOf) then
+    return optimize_futures.expr_address_of(cx, node)
+
+  elseif node:is(ast.typed.expr.ImportIspace) then
+    return optimize_futures.expr_import_ispace(cx, node)
+
+  elseif node:is(ast.typed.expr.ImportRegion) then
+    return optimize_futures.expr_import_region(cx, node)
+
+  elseif node:is(ast.typed.expr.ImportPartition) then
+    return optimize_futures.expr_import_partition(cx, node)
+
+  elseif node:is(ast.typed.expr.Projection) then
+    return optimize_futures.expr_projection(cx, node)
+
   else
     assert(false, "unexpected node type " .. tostring(node.node_type))
   end
@@ -1190,32 +1274,56 @@ end
 function optimize_futures.stat_index_launch_num(cx, node)
   local values = node.values:map(
     function(value) return concretize(optimize_futures.expr(cx, value)) end)
+  local preamble = terralib.newlist()
+  node.preamble:map(function(stat)
+    preamble:insertall(optimize_futures.stat(cx, stat))
+  end)
   local call = optimize_futures.expr(cx, node.call)
   local reduce_lhs = node.reduce_lhs and
     optimize_futures.expr(cx, node.reduce_lhs)
 
-  local args = terralib.newlist()
-  for i, arg in ipairs(call.args) do
-    if std.is_future(std.as_read(arg.expr_type)) and
-      not node.args_provably.invariant[i]
-    then
-      arg = concretize(arg)
+  if call:is(ast.typed.expr.Call) then
+    local args = terralib.newlist()
+    for i, arg in ipairs(call.args) do
+      if std.is_future(std.as_read(arg.expr_type)) and
+        not node.args_provably.invariant[i]
+      then
+        arg = concretize(arg)
+      end
+      args:insert(arg)
     end
-    args:insert(arg)
-  end
-  call.args = args
+    call.args = args
 
-  if reduce_lhs then
-    local call_type = std.as_read(call.expr_type)
-    local reduce_type = std.as_read(reduce_lhs.expr_type)
-    if std.is_future(call_type) and not std.is_future(reduce_type) then
-      call.expr_type = call_type.result_type
+    if reduce_lhs then
+      local call_type = std.as_read(call.expr_type)
+      local reduce_type = std.as_read(reduce_lhs.expr_type)
+      if std.is_future(call_type) and not std.is_future(reduce_type) then
+        call.expr_type = call_type.result_type
+      end
     end
+
+  elseif call:is(ast.typed.expr.Fill) then
+    local region = call.dst.region
+    local value = call.value
+    if std.is_future(std.as_read(value.expr_type)) then
+      value = concretize(value)
+    end
+    if std.is_future(std.as_read(region.expr_type)) then
+      region = concretize(region)
+    end
+    call = call {
+      dst = call.dst { region = region },
+      value = value,
+    }
+
+  else
+    assert(false)
   end
 
   return terralib.newlist({
     node {
       values = values,
+      preamble = preamble,
       call = call,
       reduce_lhs = reduce_lhs,
     }
@@ -1224,32 +1332,56 @@ end
 
 function optimize_futures.stat_index_launch_list(cx, node)
   local value = concretize(optimize_futures.expr(cx, node.value))
+  local preamble = terralib.newlist()
+  node.preamble:map(function(stat)
+    preamble:insertall(optimize_futures.stat(cx, stat))
+  end)
   local call = optimize_futures.expr(cx, node.call)
   local reduce_lhs = node.reduce_lhs and
     optimize_futures.expr(cx, node.reduce_lhs)
 
-  local args = terralib.newlist()
-  for i, arg in ipairs(call.args) do
-    if std.is_future(std.as_read(arg.expr_type)) and
-      not node.args_provably.invariant[i]
-    then
-      arg = concretize(arg)
+  if call:is(ast.typed.expr.Call) then
+    local args = terralib.newlist()
+    for i, arg in ipairs(call.args) do
+      if std.is_future(std.as_read(arg.expr_type)) and
+        not node.args_provably.invariant[i]
+      then
+        arg = concretize(arg)
+      end
+      args:insert(arg)
     end
-    args:insert(arg)
-  end
-  call.args = args
+    call.args = args
 
-  if reduce_lhs then
-    local call_type = std.as_read(call.expr_type)
-    local reduce_type = std.as_read(reduce_lhs.expr_type)
-    if std.is_future(call_type) and not std.is_future(reduce_type) then
-      call.expr_type = call_type.result_type
+    if reduce_lhs then
+      local call_type = std.as_read(call.expr_type)
+      local reduce_type = std.as_read(reduce_lhs.expr_type)
+      if std.is_future(call_type) and not std.is_future(reduce_type) then
+        call.expr_type = call_type.result_type
+      end
     end
+
+  elseif call:is(ast.typed.expr.Fill) then
+    local region = call.dst.region
+    local value = call.value
+    if std.is_future(std.as_read(value.expr_type)) then
+      value = concretize(value)
+    end
+    if std.is_future(std.as_read(region.expr_type)) then
+      region = concretize(region)
+    end
+    call = call {
+      dst = call.dst { region = region },
+      value = value,
+    }
+
+  else
+    assert(false)
   end
 
   return terralib.newlist({
     node {
       value = value,
+      preamble = preamble,
       call = call,
       reduce_lhs = reduce_lhs,
     }
@@ -1369,6 +1501,7 @@ local function handle_future_field_assignment(cx, lhs, rhs)
     ast.typed.stat.Assignment {
       lhs = rewrap_field_access(lhs, symbol_value),
       rhs = rhs,
+      metadata = false,
       annotations = ast.default_annotations(),
       span = lhs.span,
     },
@@ -1380,6 +1513,7 @@ local function handle_future_field_assignment(cx, lhs, rhs)
         annotations = ast.default_annotations(),
         span = lhs.span,
       },
+      metadata = false,
       annotations = ast.default_annotations(),
       span = lhs.span,
     },

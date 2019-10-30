@@ -1,4 +1,4 @@
--- Copyright 2018 Stanford University
+-- Copyright 2019 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -13,7 +13,7 @@
 -- limitations under the License.
 
 -- fails-with:
--- optimize_index_launch_num_vars2.rg:33: loop optimization failed: argument 1 is not provably projectable or invariant
+-- optimize_index_launch_num_vars2.rg:33: loop optimization failed: argument 1 interferes with itself
 --     f(p[j])
 --      ^
 
@@ -27,7 +27,7 @@ task main()
   var r = region(ispace(ptr, 5), int)
   var p = partition(equal, r, ispace(int1d, 4))
 
-  __demand(__parallel)
+  __demand(__index_launch)
   for i = 0, 4 do
     var j = g(i)
     f(p[j])

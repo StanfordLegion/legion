@@ -1,4 +1,4 @@
--- Copyright 2018 Stanford University
+-- Copyright 2019 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -23,7 +23,7 @@ task test(num : int64)
 
   var ts_start = [int64](c.legion_get_current_time_in_micros())
   for i = 0L, num do
-    agg = agg and ([ptr](i) <= is)
+    agg = agg and (ptr(i) <= is)
   end
   var ts_end = [int64](c.legion_get_current_time_in_micros())
   c.printf("num %8ld, time: %8ld us, time per check: %.2f ns\n", num, ts_end - ts_start,
@@ -36,11 +36,11 @@ task main()
   var is = ispace(ptr, 5)
 
   for i = 0, 5 do
-    regentlib.assert([ptr](i) <= is, "test failed")
+    regentlib.assert(ptr(i) <= is, "test failed")
   end
 
   for i = 5, 10 do
-    regentlib.assert(not ([ptr](i) <= is), "test failed")
+    regentlib.assert(not (ptr(i) <= is), "test failed")
   end
 
   var x = 100

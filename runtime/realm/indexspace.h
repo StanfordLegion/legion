@@ -1,4 +1,4 @@
-/* Copyright 2018 Stanford University, NVIDIA Corporation
+/* Copyright 2019 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,6 +20,7 @@
 
 #include "realm/event.h"
 #include "realm/memory.h"
+#include "realm/point.h"
 #define REALM_SKIP_INLINES
 #include "realm/instance.h"
 #undef REALM_SKIP_INLINES
@@ -43,7 +44,7 @@ namespace Realm {
   //  to have to somehow know which ones to instantiate - this is controlled by the
   //  following type lists, using a bunch of helper stuff from dynamic_templates.h
 
-  typedef DynamicTemplates::IntList<1, 3> DIMCOUNTS;
+  typedef DynamicTemplates::IntList<1, REALM_MAX_DIM> DIMCOUNTS;
   typedef DynamicTemplates::TypeList<int, unsigned int, long long>::TL DIMTYPES;
   typedef DynamicTemplates::TypeList<int, bool>::TL FLDTYPES;
 
@@ -53,6 +54,8 @@ namespace Realm {
   struct CopySrcDstField {
   public:
     CopySrcDstField(void);
+    CopySrcDstField(const CopySrcDstField& copy_from);
+    CopySrcDstField& operator=(const CopySrcDstField& copy_from);
     ~CopySrcDstField(void);
     CopySrcDstField &set_field(RegionInstance _inst, FieldID _field_id,
 			       size_t _size, size_t _subfield_offset = 0);
@@ -80,12 +83,6 @@ namespace Realm {
     } fill_data;
   };
 
-  // new stuff here - the "Z" prefix will go away once we delete the old stuff
-
-  template <int N, typename T = int> struct Point;
-  template <int N, typename T = int> struct Rect;
-  template <int M, int N, typename T = int> struct Matrix;
-  template <int N, typename T = int> struct IndexSpace;
   template <int N, typename T = int> struct IndexSpaceIterator;
   template <int N, typename T = int> class SparsityMap;
 
@@ -93,11 +90,16 @@ namespace Realm {
   class CopyIndirection {
   public:
     class Base {
+    public:
+      virtual ~Base(void) { } 
+      // TODO: remove this
       IndexSpace<N,T> target;
     };
 
     template <int N2, typename T2 = int>
     class Affine : public CopyIndirection<N,T>::Base {
+    public:
+      virtual ~Affine(void) { }
     public:
       Matrix<N,N2,T2> transform;
       Point<N2,T2> offset_lo, offset_hi;
@@ -109,6 +111,8 @@ namespace Realm {
     template <int N2, typename T2 = int>
     class Unstructured : public CopyIndirection<N,T>::Base {
     public:
+      virtual ~Unstructured(void) { }
+    public:
       FieldID field_id;
       RegionInstance inst;
       bool is_ranges;
@@ -116,194 +120,6 @@ namespace Realm {
       std::vector<IndexSpace<N2,T2> > spaces;
       std::vector<RegionInstance> insts;
     };
-  };
-
-  // a Point is a tuple describing a point in an N-dimensional space - the default "base type"
-  //  for each dimension is int, but 64-bit indices are supported as well
-
-  // only a few methods exist directly on a Point<N,T>:
-  // 1) trivial constructor
-  // 2) [for N <= 4] constructor taking N arguments of type T
-  // 3) default copy constructor
-  // 4) default assignment operator
-  // 5) operator[] to access individual components
-
-  // specializations for N <= 4 defined in indexspace.inl
-  template <int N, typename T>
-  struct Point {
-    T x, y, z, w;  T rest[N - 4];
-
-    __CUDA_HD__
-    Point(void);
-    __CUDA_HD__
-    explicit Point(const T vals[N]);
-    // copies allow type coercion (assuming the underlying type does)
-    template <typename T2> __CUDA_HD__
-    Point(const Point<N, T2>& copy_from);
-    template <typename T2> __CUDA_HD__
-    Point<N,T>& operator=(const Point<N, T2>& copy_from);
-
-    __CUDA_HD__
-    T& operator[](int index);
-    __CUDA_HD__
-    const T& operator[](int index) const;
-
-    template <typename T2> __CUDA_HD__
-    T dot(const Point<N, T2>& rhs) const;
-  };
-
-  template <int N, typename T>
-  std::ostream& operator<<(std::ostream& os, const Point<N,T>& p);
-
-  // component-wise operators defined on Point<N,T> (with optional coercion)
-  template <int N, typename T, typename T2> __CUDA_HD__
-  bool operator==(const Point<N,T>& lhs, const Point<N,T2>& rhs);
-  template <int N, typename T, typename T2> __CUDA_HD__
-  bool operator!=(const Point<N,T>& lhs, const Point<N,T2>& rhs);
-
-  template <int N, typename T, typename T2> __CUDA_HD__
-  Point<N,T> operator+(const Point<N,T>& lhs, const Point<N,T2>& rhs);
-  template <int N, typename T, typename T2> __CUDA_HD__
-  Point<N,T>& operator+=(Point<N,T>& lhs, const Point<N,T2>& rhs);
-  template <int N, typename T, typename T2> __CUDA_HD__
-  Point<N,T> operator-(const Point<N,T>& lhs, const Point<N,T2>& rhs);
-  template <int N, typename T, typename T2> __CUDA_HD__
-  Point<N,T>& operator-=(Point<N,T>& lhs, const Point<N,T2>& rhs);
-  template <int N, typename T, typename T2> __CUDA_HD__
-  Point<N,T> operator*(const Point<N,T>& lhs, const Point<N,T2>& rhs);
-  template <int N, typename T, typename T2> __CUDA_HD__
-  Point<N,T>& operator*=(Point<N,T>& lhs, const Point<N,T2>& rhs);
-  template <int N, typename T, typename T2> __CUDA_HD__
-  Point<N,T> operator/(const Point<N,T>& lhs, const Point<N,T2>& rhs);
-  template <int N, typename T, typename T2> __CUDA_HD__
-  Point<N,T>& operator/=(Point<N,T>& lhs, const Point<N,T2>& rhs);
-  template <int N, typename T, typename T2> __CUDA_HD__
-  Point<N,T> operator%(const Point<N,T>& lhs, const Point<N,T2>& rhs);
-  template <int N, typename T, typename T2> __CUDA_HD__
-  Point<N,T>& operator%=(Point<N,T>& lhs, const Point<N,T2>& rhs);
-
-  // a Rect is a pair of points defining the lower and upper bounds of an N-D rectangle
-  //  the bounds are INCLUSIVE
-
-  template <int N, typename T>
-  struct Rect {
-    Point<N,T> lo, hi;
-
-    __CUDA_HD__
-    Rect(void);
-    __CUDA_HD__
-    Rect(const Point<N,T>& _lo, const Point<N,T>& _hi);
-    // copies allow type coercion (assuming the underlying type does)
-    template <typename T2> __CUDA_HD__
-    Rect(const Rect<N, T2>& copy_from);
-    template <typename T2> __CUDA_HD__
-    Rect<N,T>& operator=(const Rect<N, T2>& copy_from);
-
-    // constructs a guaranteed-empty rectangle
-    __CUDA_HD__
-    static Rect<N,T> make_empty(void);
-
-    __CUDA_HD__
-    bool empty(void) const;
-    __CUDA_HD__
-    size_t volume(void) const;
-
-    __CUDA_HD__
-    bool contains(const Point<N,T>& p) const;
-
-    // true if all points in other are in this rectangle
-    __CUDA_HD__
-    bool contains(const Rect<N,T>& other) const;
-    __CUDA_HD__
-    bool contains(const IndexSpace<N,T>& is) const;
-
-    // true if there are any points in the intersection of the two rectangles
-    __CUDA_HD__
-    bool overlaps(const Rect<N,T>& other) const;
-
-    __CUDA_HD__
-    Rect<N,T> intersection(const Rect<N,T>& other) const;
-
-    // returns the _bounding box_ of the union of two rectangles (the actual union
-    //  might not be a rectangle)
-    __CUDA_HD__
-    Rect<N,T> union_bbox(const Rect<N,T>& other) const;
-
-    // copy and fill operations (wrappers for IndexSpace versions)
-    Event fill(const std::vector<CopySrcDstField> &dsts,
-               const ProfilingRequestSet &requests,
-               const void *fill_value, size_t fill_value_size,
-               Event wait_on = Event::NO_EVENT) const;
-
-    Event copy(const std::vector<CopySrcDstField> &srcs,
-               const std::vector<CopySrcDstField> &dsts,
-               const ProfilingRequestSet &requests,
-               Event wait_on = Event::NO_EVENT,
-               ReductionOpID redop_id = 0, bool red_fold = false) const;
-
-    Event copy(const std::vector<CopySrcDstField> &srcs,
-               const std::vector<CopySrcDstField> &dsts,
-               const IndexSpace<N,T> &mask,
-               const ProfilingRequestSet &requests,
-               Event wait_on = Event::NO_EVENT,
-               ReductionOpID redop_id = 0, bool red_fold = false) const;
-  };
-
-  template <int N, typename T>
-  std::ostream& operator<<(std::ostream& os, const Rect<N,T>& p);
-
-  template <int N, typename T, typename T2> __CUDA_HD__
-  bool operator==(const Rect<N,T>& lhs, const Rect<N,T2>& rhs);
-  template <int N, typename T, typename T2> __CUDA_HD__
-  bool operator!=(const Rect<N,T>& lhs, const Rect<N,T2>& rhs);
-
-  // rectangles may be displaced by a vector (i.e. point)
-  template <int N, typename T, typename T2> __CUDA_HD__
-  Rect<N,T> operator+(const Rect<N,T>& lhs, const Point<N,T2>& rhs);
-  template <int N, typename T, typename T2> __CUDA_HD__
-  Rect<N,T>& operator+=(Rect<N,T>& lhs, const Point<N,T2>& rhs);
-  template <int N, typename T, typename T2> __CUDA_HD__
-  Rect<N,T> operator-(const Rect<N,T>& lhs, const Point<N,T2>& rhs);
-  template <int N, typename T, typename T2> __CUDA_HD__
-  Rect<N,T>& operator-=(Rect<N,T>& lhs, const Rect<N,T2>& rhs);
-
-  template <int M, int N, typename T>
-  struct Matrix {
-    Point<N,T> rows[M];
-
-    __CUDA_HD__
-    Matrix(void);
-    // copies allow type coercion (assuming the underlying type does)
-    template <typename T2> __CUDA_HD__
-    Matrix(const Matrix<M, N, T2>& copy_from);
-    template <typename T2> __CUDA_HD__
-    Matrix<M, N, T>& operator=(const Matrix<M, N, T2>& copy_from);
-
-    __CUDA_HD__
-    Point<N,T>& operator[](int index);
-    __CUDA_HD__
-    const Point<N,T>& operator[](int index) const;
-  };
-
-  template <int M, int N, typename T, typename T2> __CUDA_HD__
-  Point<M, T> operator*(const Matrix<M, N, T>& m, const Point<N, T2>& p);
-
-  template <int N, typename T>
-  class PointInRectIterator {
-  public:
-    Point<N,T> p;
-    bool valid;
-    Rect<N,T> rect;
-    bool fortran_order;
-
-    __CUDA_HD__
-    PointInRectIterator(void);
-    __CUDA_HD__
-    PointInRectIterator(const Rect<N,T>& _r, bool _fortran_order = true);
-    __CUDA_HD__
-    void reset(const Rect<N,T>& _r, bool _fortran_order = true);
-    __CUDA_HD__
-    bool step(void);
   };
 
   // a FieldDataDescriptor is used to describe field data provided for partitioning
@@ -757,19 +573,9 @@ namespace Realm {
 
 }; // namespace Realm
 
-// specializations of std::less<T> for Point/Rect/IndexSpace<N,T> allow
+// specializations of std::less<T> for IndexSpace<N,T> allow
 //  them to be used in STL containers
 namespace std {
-  template<int N, typename T>
-  struct less<Realm::Point<N,T> > {
-    bool operator()(const Realm::Point<N,T>& p1, const Realm::Point<N,T>& p2) const;
-  };
-
-  template<int N, typename T>
-  struct less<Realm::Rect<N,T> > {
-    bool operator()(const Realm::Rect<N,T>& r1, const Realm::Rect<N,T>& r2) const;
-  };
-
   template<int N, typename T>
   struct less<Realm::IndexSpace<N,T> > {
     bool operator()(const Realm::IndexSpace<N,T>& is1, const Realm::IndexSpace<N,T>& is2) const;

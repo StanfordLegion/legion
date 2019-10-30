@@ -1,4 +1,4 @@
-/* Copyright 2018 Stanford University, NVIDIA Corporation
+/* Copyright 2019 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,7 +21,7 @@
 #include "realm/processor.h"
 #include "realm/id.h"
 
-#include "realm/activemsg.h"
+#include "realm/network.h"
 #include "realm/operation.h"
 #include "realm/profiling.h"
 #include "realm/sampling.h"
@@ -37,6 +37,12 @@ namespace Realm {
 
     class ProcessorGroup;
 
+    namespace ThreadLocal {
+      // if nonzero, prevents application thread from yielding execution
+      //  resources on an Event wait
+      extern __thread int scheduler_lock;
+    };
+
     class ProcessorImpl {
     public:
       ProcessorImpl(Processor _me, Processor::Kind _kind, int _num_cores=1);
@@ -44,11 +50,14 @@ namespace Realm {
       virtual ~ProcessorImpl(void);
 
       virtual void enqueue_task(Task *task) = 0;
+      virtual void enqueue_tasks(Task::TaskList& tasks) = 0;
 
       virtual void spawn_task(Processor::TaskFuncID func_id,
 			      const void *args, size_t arglen,
                               const ProfilingRequestSet &reqs,
-			      Event start_event, Event finish_event,
+			      Event start_event,
+			      GenEventImpl *finish_event,
+			      EventImpl::gen_t finish_gen,
                               int priority) = 0;
 
       // starts worker threads and performs any per-processor initialization
@@ -69,6 +78,33 @@ namespace Realm {
       virtual void execute_task(Processor::TaskFuncID func_id,
 				const ByteArrayRef& task_args);
 
+      struct DeferredSpawnCache {
+	static const size_t MAX_ENTRIES = 4;
+	Mutex mutex;
+	Event events[MAX_ENTRIES];
+	Task *tasks[MAX_ENTRIES];
+	int counts[MAX_ENTRIES];
+
+	void clear()
+	{
+	  for(size_t i = 0; i < MAX_ENTRIES; i++) events[i] = Event::NO_EVENT;
+	  for(size_t i = 0; i < MAX_ENTRIES; i++) tasks[i] = 0;
+	  for(size_t i = 0; i < MAX_ENTRIES; i++) counts[i] = 0;
+	}
+
+	void flush()
+	{
+	  for(size_t i = 0; i < MAX_ENTRIES; i++)
+	    if(tasks[i])
+	      tasks[i]->remove_reference();
+	  clear();
+	}
+      };
+
+      // helper function for spawn implementations
+      void enqueue_or_defer_task(Task *task, Event start_event,
+				 DeferredSpawnCache *cache);
+
     public:
       Processor me;
       Processor::Kind kind;
@@ -83,11 +119,14 @@ namespace Realm {
       virtual ~LocalTaskProcessor(void);
 
       virtual void enqueue_task(Task *task);
+      virtual void enqueue_tasks(Task::TaskList& tasks);
 
       virtual void spawn_task(Processor::TaskFuncID func_id,
 			      const void *args, size_t arglen,
                               const ProfilingRequestSet &reqs,
-			      Event start_event, Event finish_event,
+			      Event start_event,
+			      GenEventImpl *finish_event,
+			      EventImpl::gen_t finish_gen,
                               int priority);
 
       virtual void register_task(Processor::TaskFuncID func_id,
@@ -106,8 +145,9 @@ namespace Realm {
       void set_scheduler(ThreadedTaskScheduler *_sched);
 
       ThreadedTaskScheduler *sched;
-      PriorityQueue<Task *, GASNetHSL> task_queue;
+      TaskQueue task_queue; // ready tasks
       ProfilingGauges::AbsoluteRangeGauge<int> ready_task_count;
+      DeferredSpawnCache deferred_spawn_cache;
 
       struct TaskTableEntry {
 	Processor::TaskFuncPtr fnptr;
@@ -165,13 +205,16 @@ namespace Realm {
       virtual ~RemoteProcessor(void);
 
       virtual void enqueue_task(Task *task);
+      virtual void enqueue_tasks(Task::TaskList& tasks);
 
       virtual void add_to_group(ProcessorGroup *group);
 
       virtual void spawn_task(Processor::TaskFuncID func_id,
 			      const void *args, size_t arglen,
                               const ProfilingRequestSet &reqs,
-			      Event start_event, Event finish_event,
+			      Event start_event,
+			      GenEventImpl *finish_event,
+			      EventImpl::gen_t finish_gen,
                               int priority);
     };
 
@@ -190,13 +233,16 @@ namespace Realm {
       void get_group_members(std::vector<Processor>& member_list);
 
       virtual void enqueue_task(Task *task);
+      virtual void enqueue_tasks(Task::TaskList& tasks);
 
       virtual void add_to_group(ProcessorGroup *group);
 
       virtual void spawn_task(Processor::TaskFuncID func_id,
 			      const void *args, size_t arglen,
                               const ProfilingRequestSet &reqs,
-			      Event start_event, Event finish_event,
+			      Event start_event,
+			      GenEventImpl *finish_event,
+			      EventImpl::gen_t finish_gen,
                               int priority);
 
     public: //protected:
@@ -208,37 +254,20 @@ namespace Realm {
 
       void request_group_members(void);
 
-      PriorityQueue<Task *, GASNetHSL> task_queue;
+      TaskQueue task_queue; // ready tasks
       ProfilingGauges::AbsoluteRangeGauge<int> *ready_task_count;
+      DeferredSpawnCache deferred_spawn_cache;
     };
     
-    // this is generally useful to all processor implementations, so put it here
-    class DeferredTaskSpawn : public EventWaiter {
-    public:
-      DeferredTaskSpawn(ProcessorImpl *_proc, Task *_task) 
-        : proc(_proc), task(_task) {}
-
-      virtual ~DeferredTaskSpawn(void)
-      {
-        // we do _NOT_ own the task - do not free it
-      }
-
-      virtual bool event_triggered(Event e, bool poisoned);
-      virtual void print(std::ostream& os) const;
-      virtual Event get_finish_event(void) const;
-
-    protected:
-      ProcessorImpl *proc;
-      Task *task;
-    };
-
     // a task registration can take a while if remote processors and/or JITs are
     //  involved
     class TaskRegistration : public Operation {
     public:
       TaskRegistration(const CodeDescriptor& _codedesc,
 		       const ByteArrayRef& _userdata,
-		       Event _finish_event, const ProfilingRequestSet &_requests);
+		       GenEventImpl *_finish_event,
+		       EventImpl::gen_t _finish_gen,
+		       const ProfilingRequestSet &_requests);
 
     protected:
       // deletion performed when reference count goes to zero
@@ -264,72 +293,37 @@ namespace Realm {
     };
 
     // active messages
-
-    struct SpawnTaskMessage {
-      // Employ some fancy struct packing here to fit in 64 bytes
-      struct RequestArgs : public BaseMedium {
-	Processor proc;
-	Event start_event;
-	Event finish_event;
-	size_t user_arglen;
-	int priority;
-	Processor::TaskFuncID func_id;
-      };
-
-      static void handle_request(RequestArgs args, const void *data, size_t datalen);
-
-      typedef ActiveMessageMediumNoReply<SPAWN_TASK_MSGID,
- 	                                 RequestArgs,
- 	                                 handle_request> Message;
-
-      static void send_request(NodeID target, Processor proc,
-			       Processor::TaskFuncID func_id,
-			       const void *args, size_t arglen,
-			       const ProfilingRequestSet *prs,
-			       Event start_event, Event finish_event,
-			       int priority);
-    };
-    
     struct RegisterTaskMessage {
-      struct RequestArgs : public BaseMedium {
-	NodeID sender;
-	Processor::TaskFuncID func_id;
-	Processor::Kind kind;
-	RemoteTaskRegistration *reg_op;
-      };
+      NodeID sender;
+      Processor::TaskFuncID func_id;
+      Processor::Kind kind;
+      RemoteTaskRegistration *reg_op;
 
-      static void handle_request(RequestArgs args, const void *data, size_t datalen);
-
-      typedef ActiveMessageMediumNoReply<REGISTER_TASK_MSGID,
- 	                                 RequestArgs,
- 	                                 handle_request> Message;
-
-      static void send_request(NodeID target,
-			       Processor::TaskFuncID func_id,
-			       Processor::Kind kind,
-			       const std::vector<Processor>& procs,
-			       const CodeDescriptor& codedesc,
-			       const void *userdata, size_t userlen,
-			       RemoteTaskRegistration *reg_op);
+      static void handle_message(NodeID sender,const RegisterTaskMessage &msg,
+				 const void *data, size_t datalen);
     };
     
     struct RegisterTaskCompleteMessage {
-      struct RequestArgs {
-	NodeID sender;
-	RemoteTaskRegistration *reg_op;
-	bool successful;
-      };
+      RemoteTaskRegistration *reg_op;
+      bool successful;
 
-      static void handle_request(RequestArgs args);
+      static void handle_message(NodeID sender,const RegisterTaskCompleteMessage &msg,
+				 const void *data, size_t datalen);
 
-      typedef ActiveMessageShortNoReply<REGISTER_TASK_COMPLETE_MSGID,
-					RequestArgs,
-					handle_request> Message;
-
-      static void send_request(NodeID target,
-			       RemoteTaskRegistration *reg_op,
-			       bool successful);
     };
+
+    struct SpawnTaskMessage {
+      Processor proc;
+      Event start_event;
+      Event finish_event;
+      size_t user_arglen;
+      int priority;
+      Processor::TaskFuncID func_id;
+
+      static void handle_message(NodeID sender,const SpawnTaskMessage &msg,
+				 const void *data, size_t datalen);
+    };
+
 
 }; // namespace Realm
 
