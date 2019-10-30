@@ -8555,12 +8555,13 @@ function codegen.stat_for_list(cx, node)
   local openmp = not cx.variant:is_cuda() and
                  node.annotations.openmp:is(ast.annotation.Demand) and
                  openmphelper.check_openmp_available()
-  if node.annotations.openmp:is(ast.annotation.Demand) and
-     not openmphelper.check_openmp_available() then
-    report.warn(node,
-      "ignoring demand pragma at " .. node.span.source ..
-      ":" .. tostring(node.span.start.line) ..
-      " since the OpenMP module is unavailable")
+  if node.annotations.openmp:is(ast.annotation.Demand) then
+    local available, error_message = openmphelper.check_openmp_available()
+    if not available then
+      report.warn(node,
+        "ignoring demand pragma at " .. node.span.source ..
+        ":" .. tostring(node.span.start.line) .. " since " .. error_message)
+    end
   end
 
   -- Code generation for the loop body
@@ -11071,11 +11072,11 @@ function codegen.top(cx, node)
     end
 
     if node.annotations.cuda:is(ast.annotation.Demand) then 
-      if not cudahelper.check_cuda_available() then
+      local available, error_message = cudahelper.check_cuda_available()
+      if not available then
         report.warn(node,
           "ignoring demand pragma at " .. node.span.source ..
-          ":" .. tostring(node.span.start.line) ..
-          " since the CUDA compiler is unavailable")
+          ":" .. tostring(node.span.start.line) .. " since " .. error_message)
       else
         local cuda_variant = task:make_variant("cuda")
         cuda_variant:set_is_cuda(true)
