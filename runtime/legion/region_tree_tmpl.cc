@@ -75,13 +75,13 @@ namespace Legion {
 				     IndexPartNode *, \
 				     IndexPartNode *, \
 				     const std::vector<FieldDataDescriptor> &, \
-				     ApEvent); \
+				     ApEvent, ShardID, size_t); \
   template ApEvent IndexSpaceNodeT<INST_N1,T1>:: \
     create_by_image_range_helper<INST_N2,T2>(Operation *, \
 				     IndexPartNode *,	\
 				     IndexPartNode *,		\
 				     const std::vector<FieldDataDescriptor> &, \
-				     ApEvent); \
+				     ApEvent, ShardID, size_t); \
   template ApEvent IndexSpaceNodeT<INST_N1,T1>:: \
     create_by_preimage_helper<INST_N2,T2>(Operation *, \
 				     IndexPartNode *,	\
