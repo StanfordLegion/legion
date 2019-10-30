@@ -1351,10 +1351,7 @@ class Task(Operation, TimeRange, HasDependencies, HasWaiters):
 
     def __repr__(self):
         assert self.variant is not None
-        title = self.variant.task_kind.name if self.variant.task_kind is not None else 'unnamed'
-        if self.variant.name != None and self.variant.name.find("unnamed") > 0:
-            title += ' ['+self.variant.name+']'
-        return title+' '+self.get_info()
+        return str(self.variant)+' '+self.get_info()
 
 class MetaTask(Base, TimeRange, HasInitiationDependencies, HasWaiters):
     def __init__(self, variant, initiation_op, create, ready, start, stop):
