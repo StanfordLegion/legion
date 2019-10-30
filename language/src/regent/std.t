@@ -870,6 +870,8 @@ local function type_isomorphic(node, param_type, arg_type, check, mapping, polym
     return true
   elseif param_type:isprimitive() and arg_type:isprimitive() then
     return std.type_eq(param_type, arg_type)
+  elseif param_type:isarray() and arg_type:isarray() then
+    return std.type_eq(param_type, arg_type)
   else
     return false
   end
