@@ -2287,12 +2287,7 @@ namespace Legion {
       if (recurrent)
         for (std::map<unsigned, unsigned>::iterator it = frontiers.begin();
             it != frontiers.end(); ++it)
-        {
-          if (events[it->first].exists())
-            events[it->second] = events[it->first];
-          else
-            events[it->second] = completion;
-        }
+          events[it->second] = events[it->first];
       else
         for (std::map<unsigned, unsigned>::iterator it = frontiers.begin();
             it != frontiers.end(); ++it)
@@ -3824,9 +3819,8 @@ namespace Legion {
       views.insert(view, user_mask);
       record_copy_views(lhs_, expr, views);
 
-      ViewUser *user =
-        new ViewUser(RegionUsage(WRITE_ONLY, EXCLUSIVE, 0), lhs_, expr);
-      add_view_user(view, user, user_mask);
+      const RegionUsage usage(WRITE_ONLY, EXCLUSIVE, 0);
+      add_view_user(view, usage, lhs_, expr, user_mask);
     }
 
     //--------------------------------------------------------------------------
@@ -3881,9 +3875,8 @@ namespace Legion {
           {
             if (view->is_reduction_view() && IS_REDUCE(usage))
               record_issue_fill_for_reduction(memo, idx, view, mask, expr);
-            ViewUser *user = new ViewUser(usage, entry, expr);
             update_valid_views(view, *eit, usage, mask, true, applied);
-            add_view_user(view, user, mask);
+            add_view_user(view, usage, entry, expr, mask);
           }
         }
       }
@@ -3928,9 +3921,8 @@ namespace Legion {
               forest->intersect_index_spaces((*eit)->set_expr, expr);
             if (intersect->is_empty())
               continue;
-            ViewUser *user = new ViewUser(usage, entry, intersect);
             update_valid_views(vit->first, *eit, usage, mask, false, applied);
-            add_view_user(vit->first, user, mask);
+            add_view_user(vit->first, usage, entry, intersect, mask);
           }
         }
       }
@@ -3994,10 +3986,13 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void PhysicalTemplate::add_view_user(InstanceView *view,
-                                         ViewUser *user,
+                                         const RegionUsage &usage,
+                                         unsigned user_index,
+                                         IndexSpaceExpression *user_expr,
                                          const FieldMask &user_mask)
     //--------------------------------------------------------------------------
     {
+      ViewUser *user = new ViewUser(usage, user_index, user_expr);
       all_users.insert(user);
       RegionTreeForest *forest = trace->runtime->forest;
       FieldMaskSet<ViewUser> &users = view_users[view];

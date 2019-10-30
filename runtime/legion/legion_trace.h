@@ -594,8 +594,8 @@ namespace Legion {
           : usage(r), user(u), expr(e)
         {}
         const RegionUsage usage;
-        unsigned user;
-        IndexSpaceExpression *expr;
+        const unsigned user;
+        IndexSpaceExpression *const expr;
       };
     private:
       struct CachedMapping
@@ -782,7 +782,8 @@ namespace Legion {
                                       bool invalidates,
                                       std::set<RtEvent> &applied_events);
       void add_view_user(InstanceView *view,
-                         ViewUser *user,
+                         const RegionUsage &usage,
+                         unsigned user, IndexSpaceExpression *user_expr,
                          const FieldMask &user_mask);
       void record_copy_views(unsigned copy_id,
                              IndexSpaceExpression *expr,
