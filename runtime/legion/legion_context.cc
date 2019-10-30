@@ -12759,14 +12759,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplicateContext::handle_trace_update(Deserializer &derez)
+    void ReplicateContext::handle_trace_update(Deserializer &derez, 
+                                               AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
       ShardedPhysicalTemplate *tpl = find_or_buffer_trace_update(derez);
       // If the template is NULL then the request was buffered
       if (tpl == NULL)
         return;
-      tpl->handle_trace_update(derez);
+      tpl->handle_trace_update(derez, source);
     }
 
     //--------------------------------------------------------------------------

@@ -7231,7 +7231,8 @@ namespace Legion {
             }
           case SEND_REPL_TRACE_UPDATE:
             {
-              runtime->handle_control_replicate_trace_update(derez);
+              runtime->handle_control_replicate_trace_update(derez,
+                                                    remote_address_space);
               break;
             }
           case SEND_REPL_BARRIER_REFRESH:
@@ -17945,10 +17946,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_control_replicate_trace_update(Deserializer &derez)
+    void Runtime::handle_control_replicate_trace_update(Deserializer &derez,
+                                                        AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      ShardManager::handle_trace_update(derez, this);
+      ShardManager::handle_trace_update(derez, this, source);
     }
 
     //--------------------------------------------------------------------------

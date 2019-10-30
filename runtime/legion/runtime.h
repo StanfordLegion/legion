@@ -2933,7 +2933,8 @@ namespace Legion {
       void handle_control_replicate_trace_event_request(Deserializer &derez,
                                                         AddressSpaceID source);
       void handle_control_replicate_trace_event_response(Deserializer &derez);
-      void handle_control_replicate_trace_update(Deserializer &derez);
+      void handle_control_replicate_trace_update(Deserializer &derez,
+                                                 AddressSpaceID source);
       void handle_control_replicate_barrier_refresh(Deserializer &derez);
       void handle_library_mapper_request(Deserializer &derez,
                                          AddressSpaceID source);

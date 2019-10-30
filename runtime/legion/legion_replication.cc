@@ -7284,14 +7284,15 @@ namespace Legion {
         // Have to unpack the preample we already know
         ReplicationID local_repl;
         derez.deserialize(local_repl);     
-        handle_trace_update(derez);
+        handle_trace_update(derez, target_space);
       }
       else
         runtime->send_control_replicate_trace_update(target_space, rez);
     }
 
     //--------------------------------------------------------------------------
-    void ShardManager::handle_trace_update(Deserializer &derez)
+    void ShardManager::handle_trace_update(Deserializer &derez,
+                                           AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
       // Figure out which shard we are going to
@@ -7302,7 +7303,7 @@ namespace Legion {
       {
         if ((*it)->shard_id == target)
         {
-          (*it)->handle_trace_update(derez);
+          (*it)->handle_trace_update(derez, source);
           return;
         }
       }
@@ -7478,13 +7479,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ void ShardManager::handle_trace_update(Deserializer &derez,
-                                                      Runtime *runtime)
+                                                      Runtime *runtime,
+                                                      AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
       ReplicationID repl_id;
       derez.deserialize(repl_id);
       ShardManager *manager = runtime->find_shard_manager(repl_id);
-      manager->handle_trace_update(derez);
+      manager->handle_trace_update(derez, source);
     }
 
     //--------------------------------------------------------------------------

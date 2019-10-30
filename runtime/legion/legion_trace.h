@@ -590,12 +590,14 @@ namespace Legion {
       };
     private:
       struct ViewUser {
-        ViewUser(const RegionUsage &r, unsigned u, IndexSpaceExpression *e)
-          : usage(r), user(u), expr(e)
+        ViewUser(const RegionUsage &r, unsigned u, 
+                 IndexSpaceExpression *e, int s)
+          : usage(r), user(u), expr(e), shard(s)
         {}
         const RegionUsage usage;
         const unsigned user;
         IndexSpaceExpression *const expr;
+        const ShardID shard;
       };
     private:
       struct CachedMapping
@@ -754,7 +756,8 @@ namespace Legion {
                                            unsigned idx,
                                            InstanceView *view,
                                            const FieldMask &user_mask,
-                                           IndexSpaceExpression *expr);
+                                           IndexSpaceExpression *expr,
+                                           std::set<RtEvent> &applied);
     public:
       virtual void get_reduction_ready_events(Memoizable *memo,
                                               std::set<ApEvent> &ready_events);
@@ -781,10 +784,12 @@ namespace Legion {
                                       const FieldMask &user_mask,
                                       bool invalidates,
                                       std::set<RtEvent> &applied_events);
-      void add_view_user(InstanceView *view,
+      virtual void add_view_user(InstanceView *view,
                          const RegionUsage &usage,
                          unsigned user, IndexSpaceExpression *user_expr,
-                         const FieldMask &user_mask);
+                         const FieldMask &user_mask,
+                         std::set<RtEvent> &applied,
+                         int owner_shard = -1);
       void record_copy_views(unsigned copy_id,
                              IndexSpaceExpression *expr,
                              const FieldMaskSet<InstanceView> &views);
@@ -924,6 +929,7 @@ namespace Legion {
         UPDATE_VALID_VIEWS,
         UPDATE_PRE_FILL,
         UPDATE_POST_FILL,
+        UPDATE_VIEW_USER,
       };
     public:
       ShardedPhysicalTemplate(PhysicalTrace *trace, ApEvent fence_event,
@@ -995,7 +1001,7 @@ namespace Legion {
     public:
       ApBarrier find_trace_shard_event(ApEvent event, ShardID remote_shard);
       void record_trace_shard_event(ApEvent event, ApBarrier result);
-      void handle_trace_update(Deserializer &derez);
+      void handle_trace_update(Deserializer &derez, AddressSpaceID source);
       void handle_barrier_refresh(Deserializer &derez);
     protected:
 #ifdef DEBUG_LEGION
@@ -1014,11 +1020,18 @@ namespace Legion {
                                       const FieldMask &user_mask,
                                       bool invalidates,
                                       std::set<RtEvent> &applied);
+      virtual void add_view_user(InstanceView *view,
+                         const RegionUsage &usage,
+                         unsigned user, IndexSpaceExpression *user_expr,
+                         const FieldMask &user_mask,
+                         std::set<RtEvent> &applied,
+                         int owner_shard = -1);
       virtual void record_fill_views(const FieldMaskSet<FillView> &views,
                                      std::set<RtEvent> &applied_events);
     public:
       void record_replayed(void);
     protected:
+      ShardID find_view_owner(InstanceView *view);
       void find_view_shards(AddressSpace owner, std::vector<ShardID> &shards);
     public:
       ReplicateContext *const repl_ctx;

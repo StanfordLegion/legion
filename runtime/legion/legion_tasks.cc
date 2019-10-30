@@ -7449,7 +7449,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ShardTask::handle_trace_update(Deserializer &derez)
+    void ShardTask::handle_trace_update(Deserializer &derez, 
+                                        AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -7461,7 +7462,7 @@ namespace Legion {
       ReplicateContext *repl_ctx = 
         static_cast<ReplicateContext*>(execution_context);
 #endif
-      repl_ctx->handle_trace_update(derez);
+      repl_ctx->handle_trace_update(derez, source);
     }
 
     //--------------------------------------------------------------------------

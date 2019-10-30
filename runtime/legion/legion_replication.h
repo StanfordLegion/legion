@@ -1914,7 +1914,7 @@ namespace Legion {
                           AddressSpaceID template_source, ApEvent event,
                           ApBarrier result, RtUserEvent done_event);
       void send_trace_update(ShardID target, Serializer &rez);
-      void handle_trace_update(Deserializer &derez);
+      void handle_trace_update(Deserializer &derez, AddressSpaceID source);
       void send_barrier_refresh(ShardID target, Serializer &rez);
       void handle_barrier_refresh(Deserializer &derez);
     public:
@@ -1938,7 +1938,8 @@ namespace Legion {
       static void handle_trace_event_request(Deserializer &derez, Runtime *rt,
                                              AddressSpaceID request_source);
       static void handle_trace_event_response(Deserializer &derez);
-      static void handle_trace_update(Deserializer &derez, Runtime *rt);
+      static void handle_trace_update(Deserializer &derez, Runtime *rt,
+                                      AddressSpaceID source);
       static void handle_barrier_refresh(Deserializer &derez, Runtime *rt);
     public:
       ShardingFunction* find_sharding_function(ShardingID sid);
