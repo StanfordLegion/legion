@@ -2222,12 +2222,7 @@ namespace Legion {
       if (recurrent)
         for (std::map<unsigned, unsigned>::iterator it = frontiers.begin();
             it != frontiers.end(); ++it)
-        {
-          if (events[it->first].exists())
-            events[it->second] = events[it->first];
-          else
-            events[it->second] = completion;
-        }
+          events[it->second] = events[it->first];
       else
         for (std::map<unsigned, unsigned>::iterator it = frontiers.begin();
             it != frontiers.end(); ++it)
