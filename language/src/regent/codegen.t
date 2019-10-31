@@ -8372,7 +8372,7 @@ function codegen.stat_for_num_vectorized(cx, node)
 end
 
 -- Find variables defined from the outer scope
-local function collect_symbols(cx, node)
+local function collect_symbols(cx, node, cuda)
   local result = terralib.newlist()
 
   local undefined =  data.newmap()
@@ -8459,7 +8459,7 @@ local function collect_symbols(cx, node)
     if std.is_symbol(symbol) then symbol = symbol:getsymbol() end
     result:insert(symbol)
   end
-  if std.config["bounds-checks"] then
+  if not cuda then
     result:insert(cx.runtime)
     result:insert(cx.context)
     for lr, _ in lrs:items() do
@@ -8651,7 +8651,7 @@ function codegen.stat_for_list(cx, node)
     end
 
   else
-    local symbols, reductions, lrs = collect_symbols(cx, node)
+    local symbols, reductions, lrs = collect_symbols(cx, node, cuda)
     if openmp then
       symbols:insert(rect)
       local can_change = { [rect] = true }
