@@ -879,6 +879,9 @@ namespace Legion {
       // user i's event carried over from the previous replay. This data
       // structure is constructed by de-duplicating the last users of all
       // views used in the template, which are stored in view_users.
+      // - frontiers[idx] == (event idx from the previous trace)
+      // - after each replay, we do assignment 
+      //    events[frontiers[idx]] = events[idx]
       std::map<unsigned,unsigned> frontiers;
     private:
       RtUserEvent recording_done;
