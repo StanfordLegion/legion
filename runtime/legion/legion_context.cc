@@ -13533,6 +13533,9 @@ namespace Legion {
         physical_templates.find(trace_index);
       if (finder != physical_templates.end())
         return finder->second;
+#ifdef DEBUG_LEGION
+      assert(next_physical_template_index <= trace_index);
+#endif
       // If we couldn't find it then we have to buffer it for the future
       const size_t remaining_bytes = derez.get_remaining_bytes();
       void *buffer = malloc(remaining_bytes);

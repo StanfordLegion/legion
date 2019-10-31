@@ -656,6 +656,12 @@ namespace Legion {
       void propagate_copies(std::vector<unsigned> &gen);
       void prepare_parallel_replay(const std::vector<unsigned> &gen);
       void push_complete_replays(void);
+    protected:
+      virtual void initialize_propagate_merges_frontiers(
+                          std::vector<unsigned> &new_gen);
+      virtual void initialize_transitive_reduction_frontiers(
+                          std::vector<unsigned> &topo_order,
+                          std::vector<unsigned> &inv_topo_order);
     public:
       // Variants for normal traces
       bool check_preconditions(TraceReplayOp *op);
@@ -1049,6 +1055,11 @@ namespace Legion {
                                    const FieldMask &mask,
                                    std::set<unsigned> &users,
                                    std::set<RtEvent> &ready_events);
+      virtual void initialize_propagate_merges_frontiers(
+                          std::vector<unsigned> &new_gen);
+      virtual void initialize_transitive_reduction_frontiers(
+                          std::vector<unsigned> &topo_order,
+                          std::vector<unsigned> &inv_topo_order);
     public:
       ReplicateContext *const repl_ctx;
       const ShardID local_shard;

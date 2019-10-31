@@ -143,7 +143,7 @@ namespace Legion {
       // Register for this fence on every one of the operations in
       // the trace and then clear out the operations data structure
       for (std::set<std::pair<Operation*,GenerationID> >::iterator it =
-           frontiers.begin(); it != frontiers.end(); ++it)
+            frontiers.begin(); it != frontiers.end(); ++it)
       {
         const std::pair<Operation*,GenerationID> &target = *it;
 #ifdef DEBUG_LEGION
@@ -2759,9 +2759,7 @@ namespace Legion {
       std::vector<unsigned> new_gen;
       new_gen.resize(gen.size());
       new_gen[fence_completion_id] = 0;
-      for (std::map<unsigned, unsigned>::iterator it = frontiers.begin();
-          it != frontiers.end(); ++it)
-        new_gen[it->second] = 0;
+      initialize_propagate_merges_frontiers(new_gen); 
       for (unsigned idx = 0; idx < instructions.size(); ++idx)
         if (used[idx])
         {
@@ -2784,6 +2782,16 @@ namespace Legion {
       gen.swap(new_gen);
       for (unsigned idx = 0; idx < to_delete.size(); ++idx)
         delete to_delete[idx];
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalTemplate::initialize_propagate_merges_frontiers(
+                                                 std::vector<unsigned> &new_gen)
+    //--------------------------------------------------------------------------
+    {
+      for (std::map<unsigned, unsigned>::iterator it = 
+            frontiers.begin(); it != frontiers.end(); ++it)
+        new_gen[it->second] = 0;
     }
 
     //--------------------------------------------------------------------------
@@ -2968,6 +2976,19 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void PhysicalTemplate::initialize_transitive_reduction_frontiers(
+       std::vector<unsigned> &topo_order, std::vector<unsigned> &inv_topo_order)
+    //--------------------------------------------------------------------------
+    {
+      for (std::map<unsigned, unsigned>::iterator it = 
+            frontiers.begin(); it != frontiers.end(); ++it)
+      {
+        inv_topo_order[it->second] = topo_order.size();
+        topo_order.push_back(it->second);
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void PhysicalTemplate::transitive_reduction(void)
     //--------------------------------------------------------------------------
     {
@@ -2983,12 +3004,7 @@ namespace Legion {
       incoming.resize(events.size());
       outgoing.resize(events.size());
 
-      for (std::map<unsigned, unsigned>::iterator it = frontiers.begin();
-           it != frontiers.end(); ++it)
-      {
-        inv_topo_order[it->second] = topo_order.size();
-        topo_order.push_back(it->second);
-      }
+      initialize_transitive_reduction_frontiers(topo_order, inv_topo_order);
 
       std::map<TraceLocalID, GetTermEvent*> term_insts;
       for (unsigned idx = 0; idx < instructions.size(); ++idx)
@@ -4336,6 +4352,7 @@ namespace Legion {
         updated_frontiers(0)
     //--------------------------------------------------------------------------
     {
+      repl_ctx->add_reference();
     }
 
     //--------------------------------------------------------------------------
@@ -4357,6 +4374,10 @@ namespace Legion {
       for (std::map<unsigned,ApBarrier>::iterator it = 
             local_frontiers.begin(); it != local_frontiers.end(); it++)
         it->second.destroy_barrier();
+      // Unregister ourselves from the context and then remove our reference
+      repl_ctx->unregister_trace_template(template_index);
+      if (repl_ctx->remove_reference())
+        delete repl_ctx;
     }
 
     //--------------------------------------------------------------------------
@@ -4935,8 +4956,8 @@ namespace Legion {
             derez.deserialize(source_shard);
             std::set<unsigned> *target;
             derez.deserialize(target);
-            RtUserEvent done;
-            derez.deserialize(done);
+            RtUserEvent request_done;
+            derez.deserialize(request_done);
             if (view_ready.exists() && !view_ready.has_triggered())
               view_ready.wait();
             // This is a local operation and all the data structures are
@@ -4955,7 +4976,7 @@ namespace Legion {
             rez.serialize(template_index);
             rez.serialize(FIND_LAST_USERS_RESPONSE);
             rez.serialize(target);
-            rez.serialize(done);
+            rez.serialize(request_done);
             rez.serialize<size_t>(users.size());
             // We could race on this next part though because there could be
             // multiple users attempting to update the local frontiers data
@@ -4990,7 +5011,6 @@ namespace Legion {
           {
             std::set<unsigned> *users;
             derez.deserialize(users);
-            RtUserEvent done;
             derez.deserialize(done);
             size_t num_barriers;
             derez.deserialize(num_barriers);
@@ -5021,7 +5041,6 @@ namespace Legion {
                 }
               }
             }
-            Runtime::trigger_event(done);
             break;
           }
         case TEMPLATE_BARRIER_REFRESH:
@@ -5041,7 +5060,6 @@ namespace Legion {
 #endif
               finder->second->refresh_barrier(bar);
             }
-            RtUserEvent to_trigger;
             {
               AutoLock tpl_lock(template_lock);
               updated_advances += num_barriers;
@@ -5054,21 +5072,18 @@ namespace Legion {
               if ((updated_advances == local_advances.size()) &&
                   update_advances_ready.exists())
               {
-                to_trigger = update_advances_ready;
+                done = update_advances_ready;
                 // We're done so reset everything for the next refresh
                 update_advances_ready = RtUserEvent::NO_RT_USER_EVENT;
                 updated_advances = 0;
               }
             }
-            if (to_trigger.exists())
-              Runtime::trigger_event(to_trigger);
             break;
           }
         case FRONTIER_BARRIER_REFRESH:
           {
             size_t num_barriers;
             derez.deserialize(num_barriers);
-            RtUserEvent to_trigger;
             {
               AutoLock tpl_lock(template_lock);
               for (unsigned idx = 0; idx < num_barriers; idx++)
@@ -5102,26 +5117,24 @@ namespace Legion {
               if ((updated_frontiers == remote_frontiers.size()) &&
                   update_frontiers_ready.exists())
               {
-                to_trigger = update_frontiers_ready;
+                done = update_frontiers_ready;
                 // We're done so reset everything for the next stage
                 update_frontiers_ready = RtUserEvent::NO_RT_USER_EVENT;
                 updated_frontiers = 0;
               }
             }
-            if (to_trigger.exists())
-              Runtime::trigger_event(to_trigger);
             break;
           }
         default:
           assert(false);
       }
-#ifdef DEBUG_LEGION
-      assert(done.exists());
-#endif
-      if (!applied.empty())
-        Runtime::trigger_event(done, Runtime::merge_events(applied));
-      else
-        Runtime::trigger_event(done);
+      if (done.exists())
+      {
+        if (!applied.empty())
+          Runtime::trigger_event(done, Runtime::merge_events(applied));
+        else
+          Runtime::trigger_event(done);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -5164,21 +5177,14 @@ namespace Legion {
       if (result)
       {
         if (op->exchange_replayable(repl_ctx, true/*replayable*/))
-        {
-          repl_ctx->unregister_trace_template(template_index);
           return result;
-        }
         else
-        {
-          repl_ctx->unregister_trace_template(template_index);
           return Replayable(false, "Remote shard not replyable");
-        }
       }
       else
       {
         // Still need to do the exchange
         op->exchange_replayable(repl_ctx, false/*replayable*/);
-        repl_ctx->unregister_trace_template(template_index);
         return result;
       }
     }
@@ -5593,6 +5599,32 @@ namespace Legion {
       }
       else
         PhysicalTemplate::find_last_users(view, expr, mask, users,ready_events);
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardedPhysicalTemplate::initialize_propagate_merges_frontiers(
+                                                 std::vector<unsigned> &new_gen)
+    //--------------------------------------------------------------------------
+    {
+      PhysicalTemplate::initialize_propagate_merges_frontiers(new_gen);
+      for (std::vector<std::pair<ApBarrier,unsigned> >::const_iterator it =
+            remote_frontiers.begin(); it != remote_frontiers.end(); it++)
+        new_gen[it->second] = 0;
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardedPhysicalTemplate::initialize_transitive_reduction_frontiers(
+       std::vector<unsigned> &topo_order, std::vector<unsigned> &inv_topo_order)
+    //--------------------------------------------------------------------------
+    {
+      PhysicalTemplate::initialize_transitive_reduction_frontiers(topo_order,
+                                                              inv_topo_order);
+      for (std::vector<std::pair<ApBarrier,unsigned> >::const_iterator it = 
+            remote_frontiers.begin(); it != remote_frontiers.end(); it++)
+      {
+        inv_topo_order[it->second] = topo_order.size();
+        topo_order.push_back(it->second);
+      }
     }
 
     /////////////////////////////////////////////////////////////
