@@ -4940,6 +4940,22 @@ namespace Legion {
                                             user_mask, applied, owner_shard);
             break;
           }
+        case UPDATE_LAST_USER:
+          {
+            size_t num_users;
+            derez.deserialize(num_users);
+            {
+              AutoLock tpl_lock(template_lock);
+              for (unsigned idx = 0; idx < num_users; idx++)
+              {
+                unsigned user;
+                derez.deserialize(user);
+                local_last_users.insert(user);
+              }
+            }
+            derez.deserialize(done);
+            break;
+          }
         case FIND_LAST_USERS_REQUEST:
           {
             DistributedID view_did;
@@ -5176,6 +5192,49 @@ namespace Legion {
         PhysicalTemplate::check_replayable(op, has_blocking_call);
       if (result)
       {
+        // One extra step to do here, since we sharded the view_users we
+        // need to send them back to the owner shards so that we can do
+        // the right thing for any calls to the get_completion
+        // Note we do this before the exchange so that we can use the 
+        // exchange as a barrier for everyone being done with the exchange
+        // In some cases we might do some unnecessary extra work, but its
+        // only for non-replayable traces so it should be minimal
+        std::map<ShardID,std::set<unsigned> > remote_last_users;
+        const ShardID local_shard = repl_ctx->owner_shard->shard_id;
+        for (ViewUsers::const_iterator vit = view_users.begin();
+              vit != view_users.end(); vit++)
+        {
+          for (FieldMaskSet<ViewUser>::const_iterator it =
+                vit->second.begin(); it != vit->second.end(); it++)
+            if (it->first->shard != local_shard)
+              remote_last_users[it->first->shard].insert(it->first->user);
+        }
+        if (!remote_last_users.empty())
+        {
+          std::set<RtEvent> done_events;
+          ShardManager *manager = repl_ctx->shard_manager;
+          for (std::map<ShardID,std::set<unsigned> >::const_iterator sit = 
+                remote_last_users.begin(); sit != 
+                remote_last_users.end(); sit++)
+          {
+            RtUserEvent done = Runtime::create_rt_user_event();
+            Serializer rez;
+            rez.serialize(manager->repl_id);
+            rez.serialize(sit->first);
+            rez.serialize(template_index);
+            rez.serialize(UPDATE_LAST_USER);
+            rez.serialize<size_t>(sit->second.size());
+            for (std::set<unsigned>::const_iterator it = 
+                  sit->second.begin(); it != sit->second.end(); it++)
+              rez.serialize(*it);
+            rez.serialize(done);
+            manager->send_trace_update(sit->first, rez);
+          }
+          const RtEvent wait_on = Runtime::merge_events(done_events);
+          if (wait_on.exists() && !wait_on.has_triggered())
+            wait_on.wait();
+        }
+        // Now we can do the exchange
         if (op->exchange_replayable(repl_ctx, true/*replayable*/))
           return result;
         else
@@ -5239,6 +5298,27 @@ namespace Legion {
         // Reset it back to zero after updating our barriers
         total_replays = 0;
       }
+    }
+
+    //--------------------------------------------------------------------------
+    ApEvent ShardedPhysicalTemplate::get_completion(void) const
+    //--------------------------------------------------------------------------
+    {
+      std::set<ApEvent> to_merge;
+      const ShardID local_shard = repl_ctx->owner_shard->shard_id;
+      for (ViewUsers::const_iterator it = view_users.begin();
+           it != view_users.end(); ++it)
+        for (FieldMaskSet<ViewUser>::const_iterator uit = it->second.begin();
+             uit != it->second.end(); ++uit)
+          // Check to see if this is a user from our shard
+          if (uit->first->shard == local_shard)
+            to_merge.insert(events[uit->first->user]);
+      // Also get any events for users that are sharded to remote shards
+      // but which originated on this node
+      for (std::set<unsigned>::const_iterator it = 
+            local_last_users.begin(); it != local_last_users.end(); it++)
+        to_merge.insert(events[*it]);
+      return Runtime::merge_events(NULL, to_merge);
     }
 
     //--------------------------------------------------------------------------

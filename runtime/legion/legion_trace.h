@@ -588,7 +588,7 @@ namespace Legion {
       public:
         PhysicalTemplate *tpl;
       };
-    private:
+    protected:
       struct ViewUser {
         ViewUser(const RegionUsage &r, unsigned u, 
                  IndexSpaceExpression *e, int s)
@@ -609,7 +609,7 @@ namespace Legion {
         std::deque<InstanceSet> physical_instances;
       };
       typedef LegionMap<TraceLocalID,CachedMapping>::aligned CachedMappings;
-    private:
+    protected:
       typedef LegionMap<InstanceView*,
                         FieldMaskSet<IndexSpaceExpression> >::aligned ViewExprs;
       typedef LegionMap<InstanceView*,
@@ -623,7 +623,7 @@ namespace Legion {
     public:
       virtual void initialize(Runtime *runtime, ApEvent fence_completion,
                               bool recurrent);
-      ApEvent get_completion(void) const;
+      virtual ApEvent get_completion(void) const;
       virtual ApEvent get_completion_for_deletion(void) const;
     public:
       void finalize(bool has_blocking_call, ReplTraceOp *op = NULL);
@@ -902,15 +902,16 @@ namespace Legion {
     private:
       std::map<TraceLocalID,ViewExprs> op_views;
       std::map<unsigned,ViewExprs>     copy_views;
-    private:
+    protected:
       TraceConditionSet   pre, post;
+      // THIS IS SHARDED FOR CONTROL REPLICATION!!!
       ViewGroups          view_groups;
       // This data structure holds a set of last users for each view.
       // Each user (which is an index in the event table) is associated with
       // a field mask, an index expression representing the working set within
       // the view, and privilege. For any given pair of view and index
       // expression, there can be either multiple readers/reducers or a single
-      // writer.
+      // writer. THIS IS SHARDED FOR CONTROL REPLICATION!!!
       ViewUsers           view_users;
       std::set<ViewUser*> all_users;
     private:
@@ -941,6 +942,7 @@ namespace Legion {
         UPDATE_PRE_FILL,
         UPDATE_POST_FILL,
         UPDATE_VIEW_USER,
+        UPDATE_LAST_USER,
         FIND_LAST_USERS_REQUEST,
         FIND_LAST_USERS_RESPONSE,
         TEMPLATE_BARRIER_REFRESH,
@@ -964,6 +966,8 @@ namespace Legion {
     public:
       virtual void initialize(Runtime *runtime, ApEvent fence_completion,
                               bool recurrent);
+      virtual ApEvent get_completion(void) const;
+      virtual ApEvent get_completion_for_deletion(void) const;
       virtual void record_merge_events(ApEvent &lhs, 
                             const std::set<ApEvent>& rhs, Memoizable *memo);
       virtual void record_issue_copy(Memoizable *memo,
@@ -1029,7 +1033,6 @@ namespace Legion {
       virtual Replayable check_replayable(ReplTraceOp *op,
                             bool has_blocking_call) const;
       virtual bool is_sharded_template(void) const { return true; }
-      virtual ApEvent get_completion_for_deletion(void) const;
       virtual void update_valid_views(InstanceView *view,
                                       EquivalenceSet *eq,
                                       const RegionUsage &usage,
@@ -1096,6 +1099,10 @@ namespace Legion {
       size_t updated_frontiers;
       // An event to signal when our frontiers are ready
       RtUserEvent update_frontiers_ready;
+    protected:
+      // This is a data structure that tracks last users whose events we
+      // own eventhough their instance is on a remote node
+      std::set<unsigned> local_last_users;
     protected:
       // Data structures for fence elision
       // Local frontiers records barriers that should be arrived on 
