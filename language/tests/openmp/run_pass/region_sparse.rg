@@ -13,10 +13,6 @@
 -- limitations under the License.
 
 -- runs-with:
--- []
-
--- FIXME: Realm OpenMP crashes intermittently with this test.
---        Turn off this test until we fix the bug.
 -- [["-fopenmp", "1", "-ll:ocpu", "1", "-ll:othr", "4", "-ll:cpu", "0", "-ll:okindhack" ]]
 
 import "regent"
