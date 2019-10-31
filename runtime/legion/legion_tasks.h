@@ -983,7 +983,6 @@ namespace Legion {
       void handle_resource_update(Deserializer &derez,
                                   std::set<RtEvent> &applied);
       void handle_trace_update(Deserializer &derez, AddressSpaceID source);
-      void handle_barrier_refresh(Deserializer &derez);
       ApBarrier handle_find_trace_shard_event(size_t temp_index, ApEvent event,
                                               ShardID remote_shard);
     public:

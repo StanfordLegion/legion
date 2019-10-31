@@ -621,8 +621,8 @@ namespace Legion {
     protected:
       virtual ~PhysicalTemplate(void);
     public:
-      void initialize(Runtime *runtime, ApEvent fence_completion,
-                      bool recurrent);
+      virtual void initialize(Runtime *runtime, ApEvent fence_completion,
+                              bool recurrent);
       ApEvent get_completion(void) const;
       virtual ApEvent get_completion_for_deletion(void) const;
     public:
@@ -832,17 +832,19 @@ namespace Legion {
 #endif
       virtual unsigned find_event(const ApEvent &event, AutoLock &tpl_lock);
       void insert_instruction(Instruction *inst);
-    private:
+    protected:
       // Returns the set of last users for all <view,field mask,index expr>
-      // tuples in the view_exprs
+      // tuples in the view_exprs, not that this is the 
       void find_all_last_users(ViewExprs &view_exprs,
-                               std::set<unsigned> &users);
+                               std::set<unsigned> &users,
+                               std::set<RtEvent> &ready_events);
       // Returns the set of last users for a given <view,field mask,index expr>
-      // tuple
-      void find_last_users(InstanceView *view,
-                           IndexSpaceExpression *expr,
-                           const FieldMask &mask,
-                           std::set<unsigned> &users);
+      // tuple, this is virtual so it can be overridden in the sharded case
+      virtual void find_last_users(InstanceView *view,
+                                   IndexSpaceExpression *expr,
+                                   const FieldMask &mask,
+                                   std::set<unsigned> &users,
+                                   std::set<RtEvent> &ready_events);
     public:
       ApEvent get_fence_completion(void)
         { return fence_completion; }
@@ -861,7 +863,7 @@ namespace Legion {
     private:
       CachedMappings cached_mappings;
       bool has_virtual_mapping;
-    private:
+    protected:
       ApEvent                    fence_completion;
       std::vector<ApEvent>       events;
       std::vector<ApUserEvent>   user_events;
@@ -933,6 +935,10 @@ namespace Legion {
         UPDATE_PRE_FILL,
         UPDATE_POST_FILL,
         UPDATE_VIEW_USER,
+        FIND_LAST_USERS_REQUEST,
+        FIND_LAST_USERS_RESPONSE,
+        TEMPLATE_BARRIER_REFRESH,
+        FRONTIER_BARRIER_REFRESH,
       };
     public:
       ShardedPhysicalTemplate(PhysicalTrace *trace, ApEvent fence_event,
@@ -950,6 +956,8 @@ namespace Legion {
       static inline void operator delete(void *ptr)
       { free(ptr); }
     public:
+      virtual void initialize(Runtime *runtime, ApEvent fence_completion,
+                              bool recurrent);
       virtual void record_merge_events(ApEvent &lhs, 
                             const std::set<ApEvent>& rhs, Memoizable *memo);
       virtual void record_issue_copy(Memoizable *memo,
@@ -1005,7 +1013,6 @@ namespace Legion {
       ApBarrier find_trace_shard_event(ApEvent event, ShardID remote_shard);
       void record_trace_shard_event(ApEvent event, ApBarrier result);
       void handle_trace_update(Deserializer &derez, AddressSpaceID source);
-      void handle_barrier_refresh(Deserializer &derez);
     protected:
 #ifdef DEBUG_LEGION
       virtual unsigned convert_event(const ApEvent &event, bool check = true);
@@ -1036,6 +1043,12 @@ namespace Legion {
     protected:
       ShardID find_view_owner(InstanceView *view);
       void find_view_shards(AddressSpace owner, std::vector<ShardID> &shards);
+    protected:
+      virtual void find_last_users(InstanceView *view,
+                                   IndexSpaceExpression *expr,
+                                   const FieldMask &mask,
+                                   std::set<unsigned> &users,
+                                   std::set<RtEvent> &ready_events);
     public:
       ReplicateContext *const repl_ctx;
       const ShardID local_shard;
@@ -1054,6 +1067,7 @@ namespace Legion {
       std::map<unsigned/*Trace Local ID*/,ShardID> owner_shards;
       std::map<unsigned/*Trace Local ID*/,IndexSpace> local_spaces;
       std::map<unsigned/*Trace Local ID*/,ShardingFunction*> sharding_functions;
+    protected:
       // Count how many times we've been replayed so we know when we're going
       // to run out of phase barrier generations
       size_t total_replays;
@@ -1062,6 +1076,25 @@ namespace Legion {
       size_t updated_advances;
       // An event to signal when our advances are ready
       RtUserEvent update_advances_ready;
+    protected:
+      // Count how many times we've done recurrent replay so we know when we're
+      // going to run out of phase barrier generations
+      size_t recurrent_replays;
+      // Count how many frontiers ahave been updated so that we know when
+      // they are done being updated
+      size_t updated_frontiers;
+      // An event to signal when our frontiers are ready
+      RtUserEvent update_frontiers_ready;
+    protected:
+      // Data structures for fence elision
+      // Local frontiers records barriers that should be arrived on 
+      // based on events that we have here locally
+      std::map<unsigned,ApBarrier> local_frontiers;
+      // Remote shards that are subscribed to our local frontiers
+      std::map<unsigned,std::set<ShardID> > local_subscriptions;
+      // Remote frontiers records barriers that we should fill in as
+      // events from remote shards
+      std::vector<std::pair<ApBarrier,unsigned> > remote_frontiers;
     };
 
     enum InstructionKind
@@ -1367,7 +1400,8 @@ namespace Legion {
         { return this; }
       ApBarrier record_subscribed_shard(ShardID remote_shard); 
       inline ApEvent get_current_barrier(void) const { return barrier; }
-      void refresh_barrier(ApEvent key, ShardedPhysicalTemplate *owner);
+      void refresh_barrier(ApEvent key,
+          std::map<ShardID,std::map<ApEvent,ApBarrier> > &notifications);
     private:
       friend class PhysicalTemplate;
       ApBarrier barrier;

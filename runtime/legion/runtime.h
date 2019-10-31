@@ -2573,8 +2573,6 @@ namespace Legion {
                                                        Serializer &rez);
       void send_control_replicate_trace_update(AddressSpaceID target,
                                                Serializer &rez);
-      void send_control_replicate_barrier_refresh(AddressSpaceID target,
-                                                  Serializer &rez);
       void send_mapper_message(AddressSpaceID target, Serializer &rez);
       void send_mapper_broadcast(AddressSpaceID target, Serializer &rez);
       void send_task_impl_semantic_request(AddressSpaceID target, 
@@ -2935,7 +2933,6 @@ namespace Legion {
       void handle_control_replicate_trace_event_response(Deserializer &derez);
       void handle_control_replicate_trace_update(Deserializer &derez,
                                                  AddressSpaceID source);
-      void handle_control_replicate_barrier_refresh(Deserializer &derez);
       void handle_library_mapper_request(Deserializer &derez,
                                          AddressSpaceID source);
       void handle_library_mapper_response(Deserializer &derez);

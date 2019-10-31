@@ -764,7 +764,6 @@ namespace Legion {
       SEND_REPL_TRACE_EVENT_REQUEST,
       SEND_REPL_TRACE_EVENT_RESPONSE,
       SEND_REPL_TRACE_UPDATE,
-      SEND_REPL_BARRIER_REFRESH,
       SEND_MAPPER_MESSAGE,
       SEND_MAPPER_BROADCAST,
       SEND_TASK_IMPL_SEMANTIC_REQ,
@@ -943,7 +942,6 @@ namespace Legion {
         "Send Replicate Trace Event Request",                         \
         "Send Replicate Trace Event Response",                        \
         "Send Replicate Trace Update",                                \
-        "Send Replicate Barrier Refresh",                             \
         "Send Mapper Message",                                        \
         "Send Mapper Broadcast",                                      \
         "Send Task Impl Semantic Req",                                \

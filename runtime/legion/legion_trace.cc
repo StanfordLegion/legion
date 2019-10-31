@@ -2587,6 +2587,7 @@ namespace Legion {
         InstructionKind kind = inst->get_kind();
         std::set<unsigned> users;
         unsigned *precondition_idx = NULL;
+        std::set<RtEvent> ready_events;
         switch (kind)
         {
           case COMPLETE_REPLAY:
@@ -2595,7 +2596,7 @@ namespace Legion {
               std::map<TraceLocalID, ViewExprs>::iterator finder =
                 op_views.find(replay->owner);
               if (finder == op_views.end()) break;
-              find_all_last_users(finder->second, users);
+              find_all_last_users(finder->second, users, ready_events);
               precondition_idx = &replay->rhs;
               break;
             }
@@ -2607,7 +2608,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
               assert(finder != copy_views.end());
 #endif
-              find_all_last_users(finder->second, users);
+              find_all_last_users(finder->second, users, ready_events);
               precondition_idx = &copy->precondition_idx;
               break;
             }
@@ -2619,7 +2620,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
               assert(finder != copy_views.end());
 #endif
-              find_all_last_users(finder->second, users);
+              find_all_last_users(finder->second, users, ready_events);
               precondition_idx = &fill->precondition_idx;
               break;
             }
@@ -2628,7 +2629,14 @@ namespace Legion {
               break;
             }
         }
-
+        // If we have any ready events then wait for them to be ready
+        if (!ready_events.empty())
+        {
+          const RtEvent wait_on = Runtime::merge_events(ready_events);
+          if (wait_on.exists() && !wait_on.has_triggered())
+            wait_on.wait();
+        }
+        // Now see if we have any users to update
         if (users.size() > 0)
         {
           Instruction *generator_inst = instructions[*precondition_idx];
@@ -4260,31 +4268,33 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void PhysicalTemplate::find_all_last_users(ViewExprs &view_exprs,
-                                               std::set<unsigned> &users)
+                                               std::set<unsigned> &users,
+                                               std::set<RtEvent> &ready_events)
     //--------------------------------------------------------------------------
     {
       for (ViewExprs::iterator it = view_exprs.begin(); it != view_exprs.end();
            ++it)
         for (FieldMaskSet<IndexSpaceExpression>::iterator eit =
              it->second.begin(); eit != it->second.end(); ++eit)
-          find_last_users(it->first, eit->first, eit->second, users);
+          find_last_users(it->first,eit->first,eit->second,users,ready_events);
     }
 
     //--------------------------------------------------------------------------
     void PhysicalTemplate::find_last_users(InstanceView *view,
                                            IndexSpaceExpression *expr,
                                            const FieldMask &mask,
-                                           std::set<unsigned> &users)
+                                           std::set<unsigned> &users,
+                                           std::set<RtEvent> &ready_events)
     //--------------------------------------------------------------------------
     {
       if (expr->is_empty()) return;
 
-      ViewUsers::iterator finder = view_users.find(view);
+      ViewUsers::const_iterator finder = view_users.find(view);
       if (finder == view_users.end()) return;
 
       RegionTreeForest *forest = trace->runtime->forest;
-      for (FieldMaskSet<ViewUser>::iterator uit = finder->second.begin(); uit !=
-           finder->second.end(); ++uit)
+      for (FieldMaskSet<ViewUser>::const_iterator uit = 
+            finder->second.begin(); uit != finder->second.end(); ++uit)
         if (!!(uit->second & mask))
         {
           ViewUser *user = uit->first;
@@ -4292,6 +4302,9 @@ namespace Legion {
             forest->intersect_index_spaces(expr, user->expr);
           if (!intersect->is_empty())
           {
+            // Hold the lock here to protect against races on frontiers
+            // and users which could come from sharding
+            AutoLock tpl_lock(template_lock);
             std::map<unsigned,unsigned>::const_iterator finder =
               frontiers.find(user->user);
             // See if we have recorded this frontier yet or not
@@ -4319,7 +4332,8 @@ namespace Legion {
         local_shard(repl_ctx->owner_shard->shard_id), 
         total_shards(repl_ctx->shard_manager->total_shards),
         template_index(repl_ctx->register_trace_template(this)),
-        total_replays(0), updated_advances(0)
+        total_replays(0), updated_advances(0), recurrent_replays(0), 
+        updated_frontiers(0)
     //--------------------------------------------------------------------------
     {
     }
@@ -4340,6 +4354,102 @@ namespace Legion {
     ShardedPhysicalTemplate::~ShardedPhysicalTemplate(void)
     //--------------------------------------------------------------------------
     {
+      for (std::map<unsigned,ApBarrier>::iterator it = 
+            local_frontiers.begin(); it != local_frontiers.end(); it++)
+        it->second.destroy_barrier();
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardedPhysicalTemplate::initialize(Runtime *runtime,
+                                             ApEvent completion, bool recurrent)
+    //--------------------------------------------------------------------------
+    {
+      // Do all the base updates first
+      PhysicalTemplate::initialize(runtime, completion, recurrent);
+      // Now update all of our barrier information
+      if (recurrent)
+      {
+        // If we've run out of generations update the local barriers and
+        // send out the updates to everyone
+        if (recurrent_replays++ == Realm::Barrier::MAX_PHASES)
+        {
+          std::map<ShardID,std::map<ApBarrier/*old**/,ApBarrier/*new*/> >
+            notifications;
+          // Update our barriers and record which updates to send out
+          for (std::map<unsigned,ApBarrier>::iterator it = 
+                local_frontiers.begin(); it != local_frontiers.end(); it++)
+          {
+            const ApBarrier new_barrier(
+                Realm::Barrier::create_barrier(1/*arrival count*/));
+#ifdef DEBUG_LEGION
+            assert(local_subscriptions.find(it->first) !=
+                    local_subscriptions.end());
+#endif
+            const std::set<ShardID> &shards = local_subscriptions[it->first];
+            for (std::set<ShardID>::const_iterator sit = 
+                  shards.begin(); sit != shards.end(); sit++)
+              notifications[*sit][it->second] = new_barrier;
+            // destroy the old barrier and replace it with the new one
+            it->second.destroy_barrier();
+            it->second = new_barrier;
+          }
+          // Send out the notifications to all the remote shards
+          ShardManager *manager = repl_ctx->shard_manager;
+          for (std::map<ShardID,std::map<ApBarrier,ApBarrier> >::const_iterator
+                nit = notifications.begin(); nit != notifications.end(); nit++)
+          {
+            Serializer rez;
+            rez.serialize(manager->repl_id);
+            rez.serialize(nit->first);
+            rez.serialize(template_index);
+            rez.serialize(FRONTIER_BARRIER_REFRESH);
+            rez.serialize<size_t>(nit->second.size());
+            for (std::map<ApBarrier,ApBarrier>::const_iterator it = 
+                  nit->second.begin(); it != nit->second.end(); it++)
+            {
+              rez.serialize(it->first);
+              rez.serialize(it->second);
+            }
+            manager->send_trace_update(nit->first, rez);
+          }
+          // Now we wait to see that we get all of our remote barriers updated
+          RtEvent wait_on;
+          {
+            AutoLock tpl_lock(template_lock);
+            if (updated_frontiers < remote_frontiers.size())
+            {
+              update_frontiers_ready = Runtime::create_rt_user_event();
+              wait_on = update_frontiers_ready;
+            }
+            else // Reset this back to zero for the next round
+              updated_frontiers = 0;
+          }
+          if (wait_on.exists() && !wait_on.has_triggered())
+            wait_on.wait();
+          // Reset this back to zero after barrier updates
+          recurrent_replays = 0;
+        }
+        // Now we can do the normal update of events based on our barriers
+        for (std::vector<std::pair<ApBarrier,unsigned> >::iterator it = 
+              remote_frontiers.begin(); it != remote_frontiers.end(); it++)
+        {
+          events[it->second] = it->first;
+          Runtime::advance_barrier(it->first);
+        }
+        for (std::map<unsigned,ApBarrier>::iterator it = 
+              local_frontiers.begin(); it != local_frontiers.end(); it++)
+        {
+          Runtime::phase_barrier_arrive(it->second, 1/*count*/, 
+                                        events[it->first]);
+          Runtime::advance_barrier(it->second);
+        }
+      }
+      else
+      {
+        for (std::vector<std::pair<ApBarrier,unsigned> >::const_iterator it =
+              remote_frontiers.begin(); it != remote_frontiers.end(); it++)
+          events[it->second] = completion;
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -4809,6 +4919,199 @@ namespace Legion {
                                             user_mask, applied, owner_shard);
             break;
           }
+        case FIND_LAST_USERS_REQUEST:
+          {
+            DistributedID view_did;
+            derez.deserialize(view_did);
+            RtEvent view_ready;
+            InstanceView *view = static_cast<InstanceView*>(
+                runtime->find_or_request_logical_view(view_did, view_ready));
+            RegionTreeForest *forest = runtime->forest;
+            IndexSpaceExpression *user_expr = 
+              IndexSpaceExpression::unpack_expression(derez, forest, source);
+            FieldMask user_mask;
+            derez.deserialize(user_mask);
+            ShardID source_shard;
+            derez.deserialize(source_shard);
+            std::set<unsigned> *target;
+            derez.deserialize(target);
+            RtUserEvent done;
+            derez.deserialize(done);
+            if (view_ready.exists() && !view_ready.has_triggered())
+              view_ready.wait();
+            // This is a local operation and all the data structures are
+            // read-only for this part so there is no need for the lock yet
+            std::set<unsigned> users;
+            std::set<RtEvent> dummy_events;
+            PhysicalTemplate::find_last_users(view, user_expr, user_mask,
+                                              users, dummy_events);
+#ifdef DEBUG_LEGION
+            assert(dummy_events.empty());
+#endif
+            ShardManager *manager = repl_ctx->shard_manager;
+            Serializer rez;
+            rez.serialize(manager->repl_id);
+            rez.serialize(source_shard);
+            rez.serialize(template_index);
+            rez.serialize(FIND_LAST_USERS_RESPONSE);
+            rez.serialize(target);
+            rez.serialize(done);
+            rez.serialize<size_t>(users.size());
+            // We could race on this next part though because there could be
+            // multiple users attempting to update the local frontiers data
+            // structure at the same time
+            {
+              AutoLock tpl_lock(template_lock);
+              for (std::set<unsigned>::const_iterator it = 
+                    users.begin(); it != users.end(); it++)
+              {
+                // Check to see if we have a barrier for this event yet
+                std::map<unsigned,ApBarrier>::const_iterator finder =
+                  local_frontiers.find(*it);
+                if (finder == local_frontiers.end())
+                {
+                  // Make a barrier and record it 
+                  const ApBarrier result(
+                      Realm::Barrier::create_barrier(1/*arrival count*/));
+                  local_frontiers[*it] = result;
+                  rez.serialize(result);
+                }
+                else
+                  rez.serialize(finder->second);
+                // Record that this shard depends on this event
+                local_subscriptions[*it].insert(source_shard);
+              }
+              // Make sure we release the lock before doing the send
+            }
+            manager->send_trace_update(source_shard, rez);
+            break;
+          }
+        case FIND_LAST_USERS_RESPONSE:
+          {
+            std::set<unsigned> *users;
+            derez.deserialize(users);
+            RtUserEvent done;
+            derez.deserialize(done);
+            size_t num_barriers;
+            derez.deserialize(num_barriers);
+            {
+              for (unsigned idx = 0; idx < num_barriers; idx++)
+              {
+                ApBarrier barrier;
+                derez.deserialize(barrier);
+                // Scan through and see if we already have it
+                bool found = false;
+                for (std::vector<std::pair<ApBarrier,unsigned> >::const_iterator
+                      it = remote_frontiers.begin(); 
+                      it != remote_frontiers.end(); it++)
+                {
+                  if (it->first != barrier)
+                    continue;
+                  users->insert(it->second);
+                  found = true;
+                  break;
+                }
+                if (!found)
+                {
+                  const unsigned next_event_id = events.size();
+                  remote_frontiers.push_back(
+                      std::pair<ApBarrier,unsigned>(barrier, next_event_id));
+                  events.resize(next_event_id + 1);
+                  users->insert(next_event_id);
+                }
+              }
+            }
+            Runtime::trigger_event(done);
+            break;
+          }
+        case TEMPLATE_BARRIER_REFRESH:
+          {
+            size_t num_barriers;
+            derez.deserialize(num_barriers);
+            for (unsigned idx = 0; idx < num_barriers; idx++)
+            {
+              ApEvent key;
+              derez.deserialize(key);
+              ApBarrier bar;
+              derez.deserialize(bar);
+              std::map<ApEvent,BarrierAdvance*>::const_iterator finder = 
+                local_advances.find(key);
+#ifdef DEBUG_LEGION
+              assert(finder != local_advances.end());
+#endif
+              finder->second->refresh_barrier(bar);
+            }
+            RtUserEvent to_trigger;
+            {
+              AutoLock tpl_lock(template_lock);
+              updated_advances += num_barriers;
+#ifdef DEBUG_LEGION
+              assert(updated_advances <= local_advances.size());
+#endif
+              // See if the wait has already been done by the local shard
+              // If so, trigger it, otherwise do nothing so it can come
+              // along and see that everything is done
+              if ((updated_advances == local_advances.size()) &&
+                  update_advances_ready.exists())
+              {
+                to_trigger = update_advances_ready;
+                // We're done so reset everything for the next refresh
+                update_advances_ready = RtUserEvent::NO_RT_USER_EVENT;
+                updated_advances = 0;
+              }
+            }
+            if (to_trigger.exists())
+              Runtime::trigger_event(to_trigger);
+            break;
+          }
+        case FRONTIER_BARRIER_REFRESH:
+          {
+            size_t num_barriers;
+            derez.deserialize(num_barriers);
+            RtUserEvent to_trigger;
+            {
+              AutoLock tpl_lock(template_lock);
+              for (unsigned idx = 0; idx < num_barriers; idx++)
+              {
+                ApBarrier oldbar, newbar;
+                derez.deserialize(oldbar);
+                derez.deserialize(newbar);
+#ifdef DEBUG_LEGION
+                bool found = false;
+#endif
+                for (std::vector<std::pair<ApBarrier,unsigned> >::iterator it =
+                      remote_frontiers.begin(); it != 
+                      remote_frontiers.end(); it++) 
+                {
+                  if (it->first != oldbar)
+                    continue;
+                  it->first = newbar;
+#ifdef DEBUG_LEGION
+                  found = true;
+#endif
+                  break;
+                }
+#ifdef DEBUG_LEGION
+                assert(found);
+#endif
+              }
+              updated_frontiers += num_barriers;
+#ifdef DEBUG_LEGION
+              assert(updated_frontiers <= remote_frontiers.size());
+#endif
+              if ((updated_frontiers == remote_frontiers.size()) &&
+                  update_frontiers_ready.exists())
+              {
+                to_trigger = update_frontiers_ready;
+                // We're done so reset everything for the next stage
+                update_frontiers_ready = RtUserEvent::NO_RT_USER_EVENT;
+                updated_frontiers = 0;
+              }
+            }
+            if (to_trigger.exists())
+              Runtime::trigger_event(to_trigger);
+            break;
+          }
         default:
           assert(false);
       }
@@ -4819,44 +5122,6 @@ namespace Legion {
         Runtime::trigger_event(done, Runtime::merge_events(applied));
       else
         Runtime::trigger_event(done);
-    }
-
-    //--------------------------------------------------------------------------
-    void ShardedPhysicalTemplate::handle_barrier_refresh(Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      ApEvent key;
-      derez.deserialize(key);
-      ApBarrier refresh;
-      derez.deserialize(refresh);
-      RtUserEvent to_trigger;
-      {
-        AutoLock tpl_lock(template_lock);
-        std::map<ApEvent,BarrierAdvance*>::const_iterator finder = 
-          local_advances.find(key);
-#ifdef DEBUG_LEGION
-        assert(finder != local_advances.end());
-#endif
-        finder->second->refresh_barrier(refresh);
-#ifdef DEBUG_LEGION
-        assert(updated_advances < local_advances.size());
-#endif
-        if (++updated_advances == local_advances.size())
-        {
-          // See if the wait has already been done by the local shard
-          // If so, trigger it, otherwise do nothing so it can come
-          // along and see that everything is done
-          if (update_advances_ready.exists())
-          {
-            to_trigger = update_advances_ready;
-            // We're done so reset everything for the next refresh
-            update_advances_ready = RtUserEvent::NO_RT_USER_EVENT;
-            updated_advances = 0;
-          }
-        }
-      }
-      if (to_trigger.exists())
-        Runtime::trigger_event(to_trigger);
     }
 
     //--------------------------------------------------------------------------
@@ -4924,10 +5189,33 @@ namespace Legion {
     {
       if (total_replays++ == Realm::Barrier::MAX_PHASES)
       {
+        std::map<ShardID,std::map<ApEvent,ApBarrier> > notifications;
         // Need to update all our barriers since we're out of generations
         for (std::map<ApEvent,BarrierArrival*>::const_iterator it = 
               remote_arrivals.begin(); it != remote_arrivals.end(); it++)
-          it->second->refresh_barrier(it->first, this);
+          it->second->refresh_barrier(it->first, notifications);
+        // Send out the notifications to all the shards
+        ShardManager *manager = repl_ctx->shard_manager;
+        for (std::map<ShardID,std::map<ApEvent,ApBarrier> >::const_iterator
+              nit = notifications.begin(); nit != notifications.end(); nit++)
+        {
+#ifdef DEBUG_LEGION
+          assert(nit->first != repl_ctx->owner_shard->shard_id);
+#endif
+          Serializer rez;
+          rez.serialize(manager->repl_id);
+          rez.serialize(nit->first);
+          rez.serialize(template_index);
+          rez.serialize(TEMPLATE_BARRIER_REFRESH);
+          rez.serialize<size_t>(nit->second.size());
+          for (std::map<ApEvent,ApBarrier>::const_iterator it = 
+                nit->second.begin(); it != nit->second.end(); it++)
+          {
+            rez.serialize(it->first);
+            rez.serialize(it->second);
+          }
+          manager->send_trace_update(nit->first, rez);
+        }
         // Then wait for all our advances to be updated from other shards
         RtEvent wait_on;
         {
@@ -4940,7 +5228,7 @@ namespace Legion {
           else // Reset this back to zero for the next round
             updated_advances = 0;
         }
-        if (wait_on.exists())
+        if (wait_on.exists() && !wait_on.has_triggered())
           wait_on.wait();
         // Reset it back to zero after updating our barriers
         total_replays = 0;
@@ -5019,7 +5307,7 @@ namespace Legion {
         RtUserEvent done = Runtime::create_rt_user_event();
         ShardManager *manager = repl_ctx->shard_manager;
         Serializer rez;
-        rez.serialize(repl_ctx->shard_manager->repl_id);
+        rez.serialize(manager->repl_id);
         rez.serialize(target_shard);
         rez.serialize(template_index);
         rez.serialize(UPDATE_VIEW_USER);
@@ -5269,6 +5557,42 @@ namespace Legion {
 #else
       return sharding_functions[tid];
 #endif
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardedPhysicalTemplate::find_last_users(InstanceView *view,
+                                                IndexSpaceExpression *expr,
+                                                const FieldMask &mask,
+                                                std::set<unsigned> &users,
+                                                std::set<RtEvent> &ready_events)
+    //--------------------------------------------------------------------------
+    {
+      if (expr->is_empty()) return;
+
+      // Check to see if we own this view, if we do then we can handle this
+      // analysis locally, otherwise we'll need to message the owner
+      const ShardID owner_shard = find_view_owner(view);
+      if (owner_shard != repl_ctx->owner_shard->shard_id)
+      {
+        RtUserEvent done = Runtime::create_rt_user_event();
+        ShardManager *manager = repl_ctx->shard_manager;
+        // This is the remote case, send a message to find the remote users
+        Serializer rez;
+        rez.serialize(manager->repl_id);
+        rez.serialize(owner_shard);
+        rez.serialize(template_index);
+        rez.serialize(FIND_LAST_USERS_REQUEST);
+        rez.serialize(view->did);
+        expr->pack_expression(rez, manager->get_shard_space(owner_shard));
+        rez.serialize(mask);
+        rez.serialize(repl_ctx->owner_shard->shard_id);
+        rez.serialize(&users);
+        rez.serialize(done);
+        manager->send_trace_update(owner_shard, rez);
+        ready_events.insert(done);
+      }
+      else
+        PhysicalTemplate::find_last_users(view, expr, mask, users,ready_events);
     }
 
     /////////////////////////////////////////////////////////////
@@ -5801,29 +6125,16 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void BarrierArrival::refresh_barrier(ApEvent key, 
-                                         ShardedPhysicalTemplate *tpl)
+                  std::map<ShardID,std::map<ApEvent,ApBarrier> > &notifications)
     //--------------------------------------------------------------------------
     {
       // Destroy the old barrier
       barrier.destroy_barrier();
       // Make the new barrier
       barrier = ApBarrier(Realm::Barrier::create_barrier(1/*arrival count*/)); 
-      ShardManager *manager = tpl->repl_ctx->shard_manager;
       for (std::vector<ShardID>::const_iterator it = 
             subscribed_shards.begin(); it != subscribed_shards.end(); it++)
-      {
-#ifdef DEBUG_LEGION
-        // Should never be sending updates to ourself
-        assert((*it) != tpl->repl_ctx->owner_shard->shard_id);
-#endif
-        Serializer rez;
-        rez.serialize(manager->repl_id);
-        rez.serialize(*it);
-        rez.serialize(tpl->template_index);
-        rez.serialize(key);
-        rez.serialize(barrier);
-        manager->send_barrier_refresh(*it, rez);
-      }
+        notifications[*it][key] = barrier;
     }
 
     /////////////////////////////////////////////////////////////

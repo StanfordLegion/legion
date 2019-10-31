@@ -1915,8 +1915,6 @@ namespace Legion {
                           ApBarrier result, RtUserEvent done_event);
       void send_trace_update(ShardID target, Serializer &rez);
       void handle_trace_update(Deserializer &derez, AddressSpaceID source);
-      void send_barrier_refresh(ShardID target, Serializer &rez);
-      void handle_barrier_refresh(Deserializer &derez);
     public:
       static void handle_launch(const void *args);
       static void handle_delete(const void *args);
