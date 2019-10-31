@@ -1173,7 +1173,7 @@ module legion_fortran
 
     type(legion_accessor_array_1d_f_t), intent(in) :: handle
     type(legion_point_1d_f_t), intent(in)          :: point
-    integer(kind=2), target, intent(in)                    :: src
+    integer(kind=2), target, intent(in)            :: src
   
     call legion_accessor_array_1d_write_point_c(handle, point, c_loc(src), c_sizeof(src))
   end subroutine legion_accessor_array_1d_write_point_integer2_f
@@ -1184,7 +1184,7 @@ module legion_fortran
 
     type(legion_accessor_array_1d_f_t), intent(in) :: handle
     type(legion_point_1d_f_t), intent(in)          :: point
-    integer(kind=4), target, intent(in)                    :: src
+    integer(kind=4), target, intent(in)            :: src
   
     call legion_accessor_array_1d_write_point_c(handle, point, c_loc(src), c_sizeof(src))
   end subroutine legion_accessor_array_1d_write_point_integer4_f
@@ -1195,7 +1195,7 @@ module legion_fortran
 
     type(legion_accessor_array_1d_f_t), intent(in) :: handle
     type(legion_point_1d_f_t), intent(in)          :: point
-    integer(kind=8), target, intent(in)                    :: src
+    integer(kind=8), target, intent(in)            :: src
   
     call legion_accessor_array_1d_write_point_c(handle, point, c_loc(src), c_sizeof(src))
   end subroutine legion_accessor_array_1d_write_point_integer8_f
@@ -1206,7 +1206,7 @@ module legion_fortran
 
     type(legion_accessor_array_1d_f_t), intent(in) :: handle
     type(legion_point_1d_f_t), intent(in)          :: point
-    real(kind=4), target, intent(in)                    :: src
+    real(kind=4), target, intent(in)               :: src
   
     call legion_accessor_array_1d_write_point_c(handle, point, c_loc(src), c_sizeof(src))
   end subroutine legion_accessor_array_1d_write_point_real4_f
@@ -1217,7 +1217,7 @@ module legion_fortran
 
     type(legion_accessor_array_1d_f_t), intent(in) :: handle
     type(legion_point_1d_f_t), intent(in)          :: point
-    real(kind=8), target, intent(in)                    :: src
+    real(kind=8), target, intent(in)               :: src
   
     call legion_accessor_array_1d_write_point_c(handle, point, c_loc(src), c_sizeof(src))
   end subroutine legion_accessor_array_1d_write_point_real8_f
@@ -1228,7 +1228,7 @@ module legion_fortran
 
     type(legion_accessor_array_1d_f_t), intent(in) :: handle
     type(legion_point_1d_f_t), intent(in)          :: point
-    complex(kind=4), target, intent(in)                    :: src
+    complex(kind=4), target, intent(in)            :: src
   
     call legion_accessor_array_1d_write_point_c(handle, point, c_loc(src), c_sizeof(src))
   end subroutine legion_accessor_array_1d_write_point_complex4_f
@@ -1239,7 +1239,7 @@ module legion_fortran
 
     type(legion_accessor_array_1d_f_t), intent(in) :: handle
     type(legion_point_1d_f_t), intent(in)          :: point
-    complex(kind=8), target, intent(in)                    :: src
+    complex(kind=8), target, intent(in)            :: src
   
     call legion_accessor_array_1d_write_point_c(handle, point, c_loc(src), c_sizeof(src))
   end subroutine legion_accessor_array_1d_write_point_complex8_f
@@ -1263,7 +1263,7 @@ module legion_fortran
 
     type(legion_accessor_array_2d_f_t), intent(in) :: handle
     type(legion_point_2d_f_t), intent(in)          :: point
-    integer(kind=2), target, intent(in)                    :: src
+    integer(kind=2), target, intent(in)            :: src
   
     call legion_accessor_array_2d_write_point_c(handle, point, c_loc(src), c_sizeof(src))
   end subroutine legion_accessor_array_2d_write_point_integer2_f
@@ -1274,7 +1274,7 @@ module legion_fortran
 
     type(legion_accessor_array_2d_f_t), intent(in) :: handle
     type(legion_point_2d_f_t), intent(in)          :: point
-    integer(kind=4), target, intent(in)                    :: src
+    integer(kind=4), target, intent(in)            :: src
   
     call legion_accessor_array_2d_write_point_c(handle, point, c_loc(src), c_sizeof(src))
   end subroutine legion_accessor_array_2d_write_point_integer4_f
@@ -1285,7 +1285,7 @@ module legion_fortran
 
     type(legion_accessor_array_2d_f_t), intent(in) :: handle
     type(legion_point_2d_f_t), intent(in)          :: point
-    integer(kind=8), target, intent(in)                    :: src
+    integer(kind=8), target, intent(in)            :: src
   
     call legion_accessor_array_2d_write_point_c(handle, point, c_loc(src), c_sizeof(src))
   end subroutine legion_accessor_array_2d_write_point_integer8_f
@@ -1296,7 +1296,7 @@ module legion_fortran
 
     type(legion_accessor_array_2d_f_t), intent(in) :: handle
     type(legion_point_2d_f_t), intent(in)          :: point
-    real(kind=4), target, intent(in)                    :: src
+    real(kind=4), target, intent(in)               :: src
   
     call legion_accessor_array_2d_write_point_c(handle, point, c_loc(src), c_sizeof(src))
   end subroutine legion_accessor_array_2d_write_point_real4_f
@@ -1307,7 +1307,7 @@ module legion_fortran
 
     type(legion_accessor_array_2d_f_t), intent(in) :: handle
     type(legion_point_2d_f_t), intent(in)          :: point
-    real(kind=8), target, intent(in)                    :: src
+    real(kind=8), target, intent(in)               :: src
   
     call legion_accessor_array_2d_write_point_c(handle, point, c_loc(src), c_sizeof(src))
   end subroutine legion_accessor_array_2d_write_point_real8_f
@@ -1318,7 +1318,7 @@ module legion_fortran
 
     type(legion_accessor_array_2d_f_t), intent(in) :: handle
     type(legion_point_2d_f_t), intent(in)          :: point
-    complex(kind=4), target, intent(in)                    :: src
+    complex(kind=4), target, intent(in)            :: src
   
     call legion_accessor_array_2d_write_point_c(handle, point, c_loc(src), c_sizeof(src))
   end subroutine legion_accessor_array_2d_write_point_complex4_f
@@ -1329,7 +1329,7 @@ module legion_fortran
 
     type(legion_accessor_array_2d_f_t), intent(in) :: handle
     type(legion_point_2d_f_t), intent(in)          :: point
-    complex(kind=8), target, intent(in)                    :: src
+    complex(kind=8), target, intent(in)            :: src
   
     call legion_accessor_array_2d_write_point_c(handle, point, c_loc(src), c_sizeof(src))
   end subroutine legion_accessor_array_2d_write_point_complex8_f
@@ -1353,7 +1353,7 @@ module legion_fortran
 
     type(legion_accessor_array_3d_f_t), intent(in) :: handle
     type(legion_point_3d_f_t), intent(in)          :: point
-    integer(kind=2), target, intent(in)                    :: src
+    integer(kind=2), target, intent(in)            :: src
   
     call legion_accessor_array_3d_write_point_c(handle, point, c_loc(src), c_sizeof(src))
   end subroutine legion_accessor_array_3d_write_point_integer2_f
@@ -1364,7 +1364,7 @@ module legion_fortran
 
     type(legion_accessor_array_3d_f_t), intent(in) :: handle
     type(legion_point_3d_f_t), intent(in)          :: point
-    integer(kind=4), target, intent(in)                    :: src
+    integer(kind=4), target, intent(in)            :: src
   
     call legion_accessor_array_3d_write_point_c(handle, point, c_loc(src), c_sizeof(src))
   end subroutine legion_accessor_array_3d_write_point_integer4_f
@@ -1375,7 +1375,7 @@ module legion_fortran
 
     type(legion_accessor_array_3d_f_t), intent(in) :: handle
     type(legion_point_3d_f_t), intent(in)          :: point
-    integer(kind=8), target, intent(in)                    :: src
+    integer(kind=8), target, intent(in)            :: src
   
     call legion_accessor_array_3d_write_point_c(handle, point, c_loc(src), c_sizeof(src))
   end subroutine legion_accessor_array_3d_write_point_integer8_f
@@ -1386,7 +1386,7 @@ module legion_fortran
 
     type(legion_accessor_array_3d_f_t), intent(in) :: handle
     type(legion_point_3d_f_t), intent(in)          :: point
-    real(kind=4), target, intent(in)                    :: src
+    real(kind=4), target, intent(in)               :: src
   
     call legion_accessor_array_3d_write_point_c(handle, point, c_loc(src), c_sizeof(src))
   end subroutine legion_accessor_array_3d_write_point_real4_f
@@ -1397,7 +1397,7 @@ module legion_fortran
 
     type(legion_accessor_array_3d_f_t), intent(in) :: handle
     type(legion_point_3d_f_t), intent(in)          :: point
-    real(kind=8), target, intent(in)                    :: src
+    real(kind=8), target, intent(in)               :: src
   
     call legion_accessor_array_3d_write_point_c(handle, point, c_loc(src), c_sizeof(src))
   end subroutine legion_accessor_array_3d_write_point_real8_f
@@ -1408,7 +1408,7 @@ module legion_fortran
 
     type(legion_accessor_array_3d_f_t), intent(in) :: handle
     type(legion_point_3d_f_t), intent(in)          :: point
-    complex(kind=4), target, intent(in)                    :: src
+    complex(kind=4), target, intent(in)            :: src
   
     call legion_accessor_array_3d_write_point_c(handle, point, c_loc(src), c_sizeof(src))
   end subroutine legion_accessor_array_3d_write_point_complex4_f
@@ -1419,7 +1419,7 @@ module legion_fortran
 
     type(legion_accessor_array_3d_f_t), intent(in) :: handle
     type(legion_point_3d_f_t), intent(in)          :: point
-    complex(kind=8), target, intent(in)                    :: src
+    complex(kind=8), target, intent(in)            :: src
   
     call legion_accessor_array_3d_write_point_c(handle, point, c_loc(src), c_sizeof(src))
   end subroutine legion_accessor_array_3d_write_point_complex8_f
