@@ -1705,7 +1705,8 @@ namespace Legion {
     public:
       // Physical template methods
       size_t register_trace_template(ShardedPhysicalTemplate *phy_template);
-      ShardedPhysicalTemplate* find_or_buffer_trace_update(Deserializer &derez);
+      ShardedPhysicalTemplate* find_or_buffer_trace_update(Deserializer &derez,
+                                                         AddressSpaceID source);
       void unregister_trace_template(size_t template_index);
     public:
       // Fence barrier methods
@@ -1782,6 +1783,19 @@ namespace Legion {
                 std::pair<void*,size_t> > > pending_future_map_requests;
     protected:
       std::map<size_t,ShardedPhysicalTemplate*> physical_templates;
+      struct PendingTemplateUpdate {
+      public:
+        PendingTemplateUpdate(void)
+          : ptr(NULL), size(0), source(0) { }
+        PendingTemplateUpdate(void *p, size_t s, AddressSpaceID src)
+          : ptr(p), size(s), source(src) { }
+      public:
+        void *ptr;
+        size_t size;
+        AddressSpaceID source;
+      };
+      std::map<size_t/*template index*/,
+        std::vector<PendingTemplateUpdate> > pending_template_updates;
       size_t next_physical_template_index;
     protected:
       // Different from pending_top_views as this applies to our requests

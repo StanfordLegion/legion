@@ -12763,7 +12763,7 @@ namespace Legion {
                                                AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      ShardedPhysicalTemplate *tpl = find_or_buffer_trace_update(derez);
+      ShardedPhysicalTemplate *tpl = find_or_buffer_trace_update(derez, source);
       // If the template is NULL then the request was buffered
       if (tpl == NULL)
         return;
@@ -13324,7 +13324,7 @@ namespace Legion {
                                                 collective->collective_index);
         if (finder != pending_collective_updates.end())
         {
-          to_apply = finder->second;
+          to_apply.swap(finder->second);
           pending_collective_updates.erase(finder);
         }
       }
@@ -13412,7 +13412,7 @@ namespace Legion {
           finder = pending_future_map_requests.find(map->future_map_barrier);
         if (finder != pending_future_map_requests.end())
         {
-          to_apply = finder->second;
+          to_apply.swap(finder->second);
           pending_future_map_requests.erase(finder);
         }
       }
@@ -13490,18 +13490,40 @@ namespace Legion {
                                      ShardedPhysicalTemplate *physical_template)
     //--------------------------------------------------------------------------
     {
-      AutoLock r_lock(replication_lock);
-      const size_t index = next_physical_template_index++;
+      size_t index;
+      std::vector<PendingTemplateUpdate> to_apply;
+      {
+        AutoLock r_lock(replication_lock);
+        index = next_physical_template_index++;
 #ifdef DEBUG_LEGION
-      assert(physical_templates.find(index) == physical_templates.end());
+        assert(physical_templates.find(index) == physical_templates.end());
 #endif
-      physical_templates[index] = physical_template;
+        physical_templates[index] = physical_template;
+        // Check to see if we have any pending updates to perform
+        std::map<size_t,std::vector<PendingTemplateUpdate> >::iterator
+          finder = pending_template_updates.find(index);
+        if (finder != pending_template_updates.end())
+        {
+          to_apply.swap(finder->second);
+          pending_template_updates.erase(finder);
+        }
+      }
+      if (!to_apply.empty())
+      {
+        for (std::vector<PendingTemplateUpdate>::const_iterator it = 
+              to_apply.begin(); it != to_apply.end(); it++)
+        {
+          Deserializer derez(it->ptr, it->size);
+          physical_template->handle_trace_update(derez, it->source);
+          free(it->ptr);
+        }
+      }
       return index;
     }
 
     //--------------------------------------------------------------------------
     ShardedPhysicalTemplate* ReplicateContext::find_or_buffer_trace_update(
-                                                            Deserializer &derez)
+                                     Deserializer &derez, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
       size_t trace_index;
@@ -13511,9 +13533,13 @@ namespace Legion {
         physical_templates.find(trace_index);
       if (finder != physical_templates.end())
         return finder->second;
-      // I think we don't actually need to buffer right now because traces
-      // should all start together, but we'll find out for sure if we hit this
-      assert(false);
+      // If we couldn't find it then we have to buffer it for the future
+      const size_t remaining_bytes = derez.get_remaining_bytes();
+      void *buffer = malloc(remaining_bytes);
+      memcpy(buffer, derez.get_current_pointer(), remaining_bytes);
+      derez.advance_pointer(remaining_bytes);
+      pending_template_updates[trace_index].push_back(
+          PendingTemplateUpdate(buffer, remaining_bytes, source));
       return NULL;
     }
 
