@@ -4318,9 +4318,6 @@ namespace Legion {
             forest->intersect_index_spaces(expr, user->expr);
           if (!intersect->is_empty())
           {
-            // Hold the lock here to protect against races on frontiers
-            // and users which could come from sharding
-            AutoLock tpl_lock(template_lock);
             std::map<unsigned,unsigned>::const_iterator finder =
               frontiers.find(user->user);
             // See if we have recorded this frontier yet or not
@@ -4972,55 +4969,105 @@ namespace Legion {
             derez.deserialize(source_shard);
             std::set<unsigned> *target;
             derez.deserialize(target);
-            RtUserEvent request_done;
-            derez.deserialize(request_done);
+            derez.deserialize(done);
             if (view_ready.exists() && !view_ready.has_triggered())
               view_ready.wait();
             // This is a local operation and all the data structures are
             // read-only for this part so there is no need for the lock yet
-            std::set<unsigned> users;
-            std::set<RtEvent> dummy_events;
-            PhysicalTemplate::find_last_users(view, user_expr, user_mask,
-                                              users, dummy_events);
-#ifdef DEBUG_LEGION
-            assert(dummy_events.empty());
-#endif
+            std::set<std::pair<unsigned,ShardID> > sharded_users;
+            find_last_users_sharded(view, user_expr, user_mask, sharded_users);
+            // Sort these into where they should go
+            std::map<ShardID,std::vector<unsigned> > requests;
+            for (std::set<std::pair<unsigned,ShardID> >::const_iterator it =
+                  sharded_users.begin(); it != sharded_users.end(); it++)
+              requests[it->second].push_back(it->first);
+            // Send out the requests/responses
             ShardManager *manager = repl_ctx->shard_manager;
-            Serializer rez;
-            rez.serialize(manager->repl_id);
-            rez.serialize(source_shard);
-            rez.serialize(template_index);
-            rez.serialize(FIND_LAST_USERS_RESPONSE);
-            rez.serialize(target);
-            rez.serialize(request_done);
-            rez.serialize<size_t>(users.size());
-            // We could race on this next part though because there could be
-            // multiple users attempting to update the local frontiers data
-            // structure at the same time
+            const ShardID local_shard = repl_ctx->owner_shard->shard_id;
+            for (std::map<ShardID,std::vector<unsigned> >::const_iterator rit =
+                  requests.begin(); rit != requests.end(); rit++)
             {
-              AutoLock tpl_lock(template_lock);
-              for (std::set<unsigned>::const_iterator it = 
-                    users.begin(); it != users.end(); it++)
+              RtUserEvent remote_done = Runtime::create_rt_user_event();
+              if (rit->first == source_shard)
               {
-                // Check to see if we have a barrier for this event yet
-                std::map<unsigned,ApBarrier>::const_iterator finder =
-                  local_frontiers.find(*it);
-                if (finder == local_frontiers.end())
-                {
-                  // Make a barrier and record it 
-                  const ApBarrier result(
-                      Realm::Barrier::create_barrier(1/*arrival count*/));
-                  local_frontiers[*it] = result;
-                  rez.serialize(result);
-                }
-                else
-                  rez.serialize(finder->second);
-                // Record that this shard depends on this event
-                local_subscriptions[*it].insert(source_shard);
+                // Special case for sending values directly back to the user
+                Serializer rez;
+                rez.serialize(manager->repl_id);
+                rez.serialize(source_shard);
+                rez.serialize(template_index);
+                rez.serialize(FIND_LAST_USERS_RESPONSE);
+                rez.serialize(target);
+                rez.serialize(remote_done);
+                rez.serialize<size_t>(rit->second.size());
+                for (std::vector<unsigned>::const_iterator it = 
+                      rit->second.begin(); it != rit->second.end(); it++)
+                  rez.serialize(*it);
+                manager->send_trace_update(source_shard, rez);
               }
-              // Make sure we release the lock before doing the send
+              else if (rit->first == local_shard)
+              {
+                // Special case for ourselves so we can return the result as
+                // though we handled the remote frontier request
+                std::vector<ApBarrier> result_frontiers;
+                {
+                  AutoLock tpl_lock(template_lock);
+                  for (std::vector<unsigned>::const_iterator it = 
+                        rit->second.begin(); it != rit->second.end(); it++)
+                  {
+#ifdef DEBUG_LEGION
+                    // These events have already been translated to frontiers
+                    // so we just need to look up the local frontiers
+                    assert(frontiers.find(*it) != frontiers.end());
+#endif
+                    // Check to see if we have a barrier for this event yet
+                    std::map<unsigned,ApBarrier>::const_iterator finder =
+                      local_frontiers.find(*it);
+                    if (finder == local_frontiers.end())
+                    {
+                      // Make a barrier and record it 
+                      const ApBarrier result(
+                          Realm::Barrier::create_barrier(1/*arrival count*/));
+                      local_frontiers[*it] = result;
+                      result_frontiers.push_back(result);
+                    }
+                    else
+                      result_frontiers.push_back(finder->second);
+                    // Record that this shard depends on this event
+                    local_subscriptions[*it].insert(source_shard);
+                  }
+                }
+                Serializer rez;
+                rez.serialize(manager->repl_id);
+                rez.serialize(source_shard);
+                rez.serialize(template_index);
+                rez.serialize(FIND_FRONTIER_RESPONSE);
+                rez.serialize(target);
+                rez.serialize<size_t>(result_frontiers.size());
+                for (std::vector<ApBarrier>::const_iterator it = 
+                      result_frontiers.begin(); it != 
+                      result_frontiers.end(); it++)
+                  rez.serialize(*it);
+                rez.serialize(remote_done);
+                manager->send_trace_update(source_shard, rez);
+              }
+              else
+              {
+                Serializer rez;
+                rez.serialize(manager->repl_id);
+                rez.serialize(rit->first);
+                rez.serialize(template_index);
+                rez.serialize(FIND_FRONTIER_REQUEST);
+                rez.serialize(source_shard);
+                rez.serialize(target);
+                rez.serialize<size_t>(rit->second.size());
+                for (std::vector<unsigned>::const_iterator it = 
+                      rit->second.begin(); it != rit->second.end(); it++)
+                  rez.serialize(*it); 
+                rez.serialize(remote_done);
+                manager->send_trace_update(rit->first, rez);
+              }
+              applied.insert(remote_done);
             }
-            manager->send_trace_update(source_shard, rez);
             break;
           }
         case FIND_LAST_USERS_RESPONSE:
@@ -5031,6 +5078,102 @@ namespace Legion {
             size_t num_barriers;
             derez.deserialize(num_barriers);
             {
+              AutoLock tpl_lock(template_lock);
+              for (unsigned idx = 0; idx < num_barriers; idx++)
+              {
+                unsigned event_index;
+                derez.deserialize(event_index);
+                // Check to see if we already made a frontier for this
+                std::map<unsigned,unsigned>::const_iterator finder =
+                  frontiers.find(event_index);
+                // See if we have recorded this frontier yet or not
+                if (finder == frontiers.end())
+                {
+                  AutoLock tpl_lock(template_lock);
+                  const unsigned next_event_id = events.size();
+                  frontiers[event_index] = next_event_id;
+                  events.resize(next_event_id + 1);
+                  users->insert(next_event_id);
+                }
+                else
+                  users->insert(finder->second);
+              }
+            }
+            break;
+          }
+        case FIND_FRONTIER_REQUEST:
+          {
+            ShardID source_shard;
+            derez.deserialize(source_shard);
+#ifdef DEBUG_LEGION
+            assert(source_shard != repl_ctx->owner_shard->shard_id);
+#endif
+            std::set<unsigned> *target;
+            derez.deserialize(target);
+            size_t num_events;
+            derez.deserialize(num_events);
+            std::vector<ApBarrier> result_frontiers;
+            {
+              AutoLock tpl_lock(template_lock);
+              for (unsigned idx = 0; idx < num_events; idx++)
+              {
+                unsigned event_index;
+                derez.deserialize(event_index);
+                // Translate this to a local frontier first
+                std::map<unsigned,unsigned>::const_iterator finder =
+                  frontiers.find(event_index);
+                // See if we have recorded this frontier yet or not
+                if (finder == frontiers.end())
+                {
+                  AutoLock tpl_lock(template_lock);
+                  const unsigned next_event_id = events.size();
+                  frontiers[event_index] = next_event_id;
+                  events.resize(next_event_id + 1);
+                  finder = frontiers.find(event_index);
+                }
+                // Check to see if we have a barrier for this event yet
+                std::map<unsigned,ApBarrier>::const_iterator barrier_finder =
+                  local_frontiers.find(finder->second);
+                if (barrier_finder == local_frontiers.end())
+                {
+                  // Make a barrier and record it 
+                  const ApBarrier result(
+                      Realm::Barrier::create_barrier(1/*arrival count*/));
+                  local_frontiers[finder->second] = result;
+                  result_frontiers.push_back(result);
+                }
+                else
+                  result_frontiers.push_back(barrier_finder->second);
+                // Record that this shard depends on this event
+                local_subscriptions[finder->second].insert(source_shard);
+              }
+            }
+            RtUserEvent remote_done;
+            derez.deserialize(remote_done);
+            // Send the respose back to the source shard
+            ShardManager *manager = repl_ctx->shard_manager;
+            Serializer rez;
+            rez.serialize(manager->repl_id);
+            rez.serialize(source_shard);
+            rez.serialize(template_index);
+            rez.serialize(FIND_FRONTIER_RESPONSE);
+            rez.serialize(target);
+            rez.serialize<size_t>(result_frontiers.size());
+            for (std::vector<ApBarrier>::const_iterator it = 
+                  result_frontiers.begin(); it != result_frontiers.end(); it++)
+              rez.serialize(*it);
+            rez.serialize(remote_done);
+            manager->send_trace_update(source_shard, rez); 
+            break;
+          }
+        case FIND_FRONTIER_RESPONSE:
+          {
+            std::set<unsigned> *users;
+            derez.deserialize(users);
+            size_t num_barriers;
+            derez.deserialize(num_barriers);
+            {
+              AutoLock tpl_lock(template_lock);
               for (unsigned idx = 0; idx < num_barriers; idx++)
               {
                 ApBarrier barrier;
@@ -5057,6 +5200,7 @@ namespace Legion {
                 }
               }
             }
+            derez.deserialize(done);
             break;
           }
         case TEMPLATE_BARRIER_REFRESH:
@@ -5658,7 +5802,8 @@ namespace Legion {
       // Check to see if we own this view, if we do then we can handle this
       // analysis locally, otherwise we'll need to message the owner
       const ShardID owner_shard = find_view_owner(view);
-      if (owner_shard != repl_ctx->owner_shard->shard_id)
+      const ShardID local_shard = repl_ctx->owner_shard->shard_id;
+      if (owner_shard != local_shard)
       {
         RtUserEvent done = Runtime::create_rt_user_event();
         ShardManager *manager = repl_ctx->shard_manager;
@@ -5678,7 +5823,100 @@ namespace Legion {
         ready_events.insert(done);
       }
       else
-        PhysicalTemplate::find_last_users(view, expr, mask, users,ready_events);
+      {
+        std::set<std::pair<unsigned,ShardID> > sharded_users;
+        find_last_users_sharded(view, expr, mask, sharded_users);
+        std::map<ShardID,std::vector<unsigned> > remote_requests;
+        for (std::set<std::pair<unsigned,ShardID> >::const_iterator it =
+              sharded_users.begin(); it != sharded_users.end(); it++)
+        {
+          if (it->second == local_shard)
+          {
+            // Need the lock to prevent races on return values
+            AutoLock tpl_lock(template_lock);
+            users.insert(it->first);
+          }
+          else
+            remote_requests[it->second].push_back(it->first);
+        }
+        // If we have any remote requests then send them now
+        if (!remote_requests.empty())
+        {
+          ShardManager *manager = repl_ctx->shard_manager;
+          for (std::map<ShardID,std::vector<unsigned> >::const_iterator rit =
+                remote_requests.begin(); rit != remote_requests.end(); rit++)
+          {
+            RtUserEvent done = Runtime::create_rt_user_event();
+            Serializer rez;
+            rez.serialize(manager->repl_id);
+            rez.serialize(rit->first);
+            rez.serialize(template_index);
+            rez.serialize(FIND_FRONTIER_REQUEST);
+            rez.serialize(local_shard);
+            rez.serialize(&users);
+            rez.serialize<size_t>(rit->second.size());
+            for (std::vector<unsigned>::const_iterator it = 
+                  rit->second.begin(); it != rit->second.end(); it++)
+              rez.serialize(*it); 
+            rez.serialize(done);
+            manager->send_trace_update(rit->first, rez);
+            ready_events.insert(done);
+          }
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardedPhysicalTemplate::find_last_users_sharded(InstanceView *view,
+                                                  IndexSpaceExpression *expr,
+                                                  const FieldMask &mask,
+                          std::set<std::pair<unsigned,ShardID> > &sharded_users)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      // We should own this view if we are here
+      assert(find_view_owner(view) == repl_ctx->owner_shard->shard_id);
+#endif
+      ViewUsers::const_iterator finder = view_users.find(view);
+      if (finder == view_users.end()) return;
+
+      RegionTreeForest *forest = trace->runtime->forest;
+      const ShardID local_shard = repl_ctx->owner_shard->shard_id;
+      for (FieldMaskSet<ViewUser>::const_iterator uit = 
+            finder->second.begin(); uit != finder->second.end(); ++uit)
+        if (!!(uit->second & mask))
+        {
+          ViewUser *user = uit->first;
+          IndexSpaceExpression *intersect =
+            forest->intersect_index_spaces(expr, user->expr);
+          if (!intersect->is_empty())
+          {
+            // See if it is local or not
+            if (user->shard == local_shard)
+            {
+              // This is a local user so we can do the translation now
+              AutoLock tpl_lock(template_lock);
+              std::map<unsigned,unsigned>::const_iterator finder =
+                frontiers.find(user->user);
+              // See if we have recorded this frontier yet or not
+              if (finder == frontiers.end())
+              {
+                AutoLock tpl_lock(template_lock);
+                const unsigned next_event_id = events.size();
+                frontiers[user->user] = next_event_id;
+                events.resize(next_event_id + 1);
+                sharded_users.insert(
+                    std::pair<unsigned,ShardID>(next_event_id, local_shard));
+              }
+              else
+                sharded_users.insert(
+                    std::pair<unsigned,ShardID>(finder->second, local_shard));
+            }
+            else // Not local so just record it
+              sharded_users.insert(
+                  std::pair<unsigned,ShardID>(user->user, user->shard));
+          }
+        }
     }
 
     //--------------------------------------------------------------------------

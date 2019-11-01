@@ -854,7 +854,7 @@ namespace Legion {
     public:
       ApEvent get_fence_completion(void)
         { return fence_completion; }
-    private:
+    protected:
       PhysicalTrace * const trace;
       volatile bool recording;
       Replayable replayable;
@@ -879,7 +879,7 @@ namespace Legion {
       std::vector<Instruction*>               instructions;
       std::vector<std::vector<Instruction*> > slices;
       std::vector<std::vector<TraceLocalID> > slice_tasks;
-    private:
+    protected:
       std::map<unsigned,unsigned> crossing_events;
       // Frontiers of a template are a set of users whose events must
       // be carried over to the next replay for eliding the fence at the
@@ -945,6 +945,8 @@ namespace Legion {
         UPDATE_LAST_USER,
         FIND_LAST_USERS_REQUEST,
         FIND_LAST_USERS_RESPONSE,
+        FIND_FRONTIER_REQUEST,
+        FIND_FRONTIER_RESPONSE,
         TEMPLATE_BARRIER_REFRESH,
         FRONTIER_BARRIER_REFRESH,
       };
@@ -1052,6 +1054,10 @@ namespace Legion {
     protected:
       ShardID find_view_owner(InstanceView *view);
       void find_view_shards(AddressSpace owner, std::vector<ShardID> &shards);
+      void find_last_users_sharded(InstanceView *view,
+                                   IndexSpaceExpression *expr,
+                                   const FieldMask &mask,
+                       std::set<std::pair<unsigned,ShardID> > &sharded_users);
     protected:
       virtual void find_last_users(InstanceView *view,
                                    IndexSpaceExpression *expr,
