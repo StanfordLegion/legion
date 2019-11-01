@@ -18,11 +18,11 @@
 from __future__ import print_function
 
 import legion
-from legion import task, Fspace, IndexLaunch, Ispace, Region, RW
+from legion import task, Fspace, IndexLaunch, Ispace, Region, RW, WD
 import numpy
 
 # This task is defined in C++. See init_task in python_interop.cc.
-init = legion.extern_task(task_id=3, privileges=[RW], return_type=legion.int64)
+init = legion.extern_task(task_id=3, privileges=[WD], return_type=legion.int64)
 
 @task
 def hello(i, j):
