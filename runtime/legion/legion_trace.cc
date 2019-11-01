@@ -2506,8 +2506,7 @@ namespace Legion {
     {
       std::vector<unsigned> gen;
       if (!(trace->runtime->no_trace_optimization ||
-            trace->runtime->no_fence_elision ||
-            is_sharded_template()))
+            trace->runtime->no_fence_elision))
         elide_fences(gen);
       else
       {
@@ -2764,7 +2763,7 @@ namespace Legion {
         if (used[idx])
         {
           Instruction *inst = instructions[idx];
-          if (!(trace->runtime->no_fence_elision || is_sharded_template()))
+          if (!trace->runtime->no_fence_elision)
           {
             if (inst->get_kind() == MERGE_EVENT)
             {

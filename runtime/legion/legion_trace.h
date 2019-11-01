@@ -646,7 +646,6 @@ namespace Legion {
     protected:
       virtual Replayable check_replayable(ReplTraceOp *op,
                             bool has_blocking_call) const;
-      virtual bool is_sharded_template(void) const { return false; }
     public:
       void optimize(void);
     private:
@@ -1034,7 +1033,6 @@ namespace Legion {
       static AddressSpaceID find_event_space(ApEvent event);
       virtual Replayable check_replayable(ReplTraceOp *op,
                             bool has_blocking_call) const;
-      virtual bool is_sharded_template(void) const { return true; }
       virtual void update_valid_views(InstanceView *view,
                                       EquivalenceSet *eq,
                                       const RegionUsage &usage,
