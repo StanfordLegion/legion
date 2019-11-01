@@ -455,7 +455,7 @@ else()
   option(Legion_REDOP_COMPLEX "Use reduction operators for complex types" OFF)
 endif()
 if((Legion_BUILD_ALL OR Legion_BUILD_BINDINGS) AND NOT Legion_REDOP_COMPLEX)
-  error("Bindings require Legion_REDOP_COMPLEX to be set")
+  message(FATAL_ERROR "Bindings require Legion_REDOP_COMPLEX to be set")
 endif()
 if(Legion_REDOP_COMPLEX)
   # define variable for legion_defines.h
