@@ -23,8 +23,10 @@ where
 do
   var sum = 0
   __demand(__openmp)
-  for e in r do
-    sum += @e
+  for e1 in r do
+    for e2 in r do
+      sum += @e2
+    end
   end
   return sum
 end
@@ -38,7 +40,7 @@ task toplevel()
   var s_p = partition(equal, s, ispace(int1d, 1))
   var r_p = image(r, s_p, s)
   var sum = f(r_p[0])
-  regentlib.assert(sum == 32, "test failed")
+  regentlib.assert(sum == 512, "test failed")
 end
 
 regentlib.start(toplevel)
