@@ -319,6 +319,9 @@ mark_as_advanced(Legion_ENABLE_TLS)
 # define variable for legion_defines.h
 set(ENABLE_LEGION_TLS ${Legion_ENABLE_TLS})
 
+option(Legion_WARNINGS_FATAL "Make all runtime warnings fatal" OFF)
+set(LEGION_WARNINGS_FATAL ${Legion_WARNINGS_FATAL})
+
 #------------------------------------------------------------------------------#
 # Runtime library targets
 #------------------------------------------------------------------------------#

@@ -21402,10 +21402,7 @@ namespace Legion {
     {
       log_run.fatal(id, "LEGION FATAL: %s (from file %s:%d)",
                     message, file_name, line);
-#ifdef DEBUG_LEGION
-      assert(false);
-#endif
-      exit(id);
+      abort();
     }
     
     //--------------------------------------------------------------------------
@@ -21416,10 +21413,7 @@ namespace Legion {
     {
       log_run.error(id, "LEGION ERROR: %s (from file %s:%d)",
                     message, file_name, line);
-#ifdef DEBUG_LEGION
-      assert(false);
-#endif
-      exit(id);
+      abort();
     }
     
     //--------------------------------------------------------------------------
@@ -21438,6 +21432,9 @@ namespace Legion {
         bt.lookup_symbols();
         log_run.warning() << bt;
       }
+#ifdef LEGION_WARNINGS_FATAL
+      abort();
+#endif
     }
 
 #if defined(PRIVILEGE_CHECKS) || defined(BOUNDS_CHECKS)
