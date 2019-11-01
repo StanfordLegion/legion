@@ -8227,6 +8227,17 @@ namespace Legion {
       LegionSpy::log_operation_events(unique_op_id, ApEvent::NO_AP_EVENT,
                                       completion_event);
 #endif
+      // This will only be non-empty if we're doing program order execution
+      if (!effects_postconditions.empty())
+      {
+#ifdef DEBUG_LEGION
+        assert(runtime->program_order_execution);
+#endif
+        const RtEvent done = 
+          Runtime::protect_merge_events(effects_postconditions);
+        if (done.exists() && !done.has_triggered())
+          done.wait();
+      }
       if (!complete_preconditions.empty())
         complete_operation(Runtime::merge_events(complete_preconditions));
       else
@@ -8559,12 +8570,13 @@ namespace Legion {
         // things can happen with regards to tracing
         if (!effects_postconditions.empty())
         {
-          const TraceInfo trace_info(this);
-          const ApEvent done = 
-            Runtime::merge_events(&trace_info, effects_postconditions);
           ApUserEvent to_trigger;
           if (request_early_complete_no_trigger(to_trigger))
           {
+            const TraceInfo trace_info(this);
+            const ApEvent done = 
+              Runtime::merge_events(&trace_info, effects_postconditions);
+            effects_postconditions.clear();
             // TODO: Something needs to go here for this to work with tracing
 #if 0
             if (is_recording())
@@ -8577,8 +8589,9 @@ namespace Legion {
 #endif
             Runtime::trigger_event(to_trigger, done);
           }
-          else
-            done.wait();
+          // Don't worry about the else case because that only happens
+          // with inorder execution and we'll wait for it before completing
+          // See IndexTask::trigger_task_complete
         }
         // Get the mapped precondition note we can now access this
         // without holding the lock because we know we've seen
