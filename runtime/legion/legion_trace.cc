@@ -5014,11 +5014,8 @@ namespace Legion {
                   for (std::vector<unsigned>::const_iterator it = 
                         rit->second.begin(); it != rit->second.end(); it++)
                   {
-#ifdef DEBUG_LEGION
                     // These events have already been translated to frontiers
                     // so we just need to look up the local frontiers
-                    assert(frontiers.find(*it) != frontiers.end());
-#endif
                     // Check to see if we have a barrier for this event yet
                     std::map<unsigned,ApBarrier>::const_iterator finder =
                       local_frontiers.find(*it);
@@ -5125,7 +5122,6 @@ namespace Legion {
                 // See if we have recorded this frontier yet or not
                 if (finder == frontiers.end())
                 {
-                  AutoLock tpl_lock(template_lock);
                   const unsigned next_event_id = events.size();
                   frontiers[event_index] = next_event_id;
                   events.resize(next_event_id + 1);
@@ -5901,7 +5897,6 @@ namespace Legion {
               // See if we have recorded this frontier yet or not
               if (finder == frontiers.end())
               {
-                AutoLock tpl_lock(template_lock);
                 const unsigned next_event_id = events.size();
                 frontiers[user->user] = next_event_id;
                 events.resize(next_event_id + 1);
