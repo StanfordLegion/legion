@@ -5085,7 +5085,6 @@ namespace Legion {
                 // See if we have recorded this frontier yet or not
                 if (finder == frontiers.end())
                 {
-                  AutoLock tpl_lock(template_lock);
                   const unsigned next_event_id = events.size();
                   frontiers[event_index] = next_event_id;
                   events.resize(next_event_id + 1);
