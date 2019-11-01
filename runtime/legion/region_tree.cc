@@ -11201,6 +11201,7 @@ namespace Legion {
     {
       std::string result;
       std::set<unsigned> local_indexes;
+      size_t count = 0;  // used to skip leading comma
       {
         AutoLock n_lock(node_lock,1,false/*exclusive*/);
 #ifdef DEBUG_LEGION
@@ -11213,8 +11214,9 @@ namespace Legion {
           {
             if (!it->second.local)
             {
+	      if(count++) result += ',';
               char temp[32];
-              snprintf(temp, 32, ",%d", it->first);
+              snprintf(temp, 32, "%d", it->first);
               result += temp;
             }
             else
@@ -11229,8 +11231,9 @@ namespace Legion {
         for (std::vector<FieldID>::const_iterator it =
               local_fields.begin(); it != local_fields.end(); it++)
         {
-          char temp[32];
-          snprintf(temp, 32, ",%d", *it);
+	  if(count++) result += ',';
+	  char temp[32];
+          snprintf(temp, 32, "%d", *it);
           result += temp;
         }
       }
