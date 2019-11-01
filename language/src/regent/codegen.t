@@ -8569,6 +8569,8 @@ function codegen.stat_for_list(cx, node)
   local cuda = cx.variant:is_cuda() and
                (node.metadata and node.metadata.parallelizable) and
                not node.annotations.cuda:is(ast.annotation.Forbid)
+  local cuda_2d_launch = false
+  local cuda_2d_offset = nil
   local openmp = not cx.variant:is_cuda() and
                  node.annotations.openmp:is(ast.annotation.Demand) and
                  openmphelper.check_openmp_available()
@@ -8584,9 +8586,9 @@ function codegen.stat_for_list(cx, node)
   -- Code generation for the loop body
   local block = node.block
 
-  -- If the loop needs the CUDA code generation, we replace calls to CPU math functions
-  -- with their GPU counterparts.
   if cuda then
+    -- If the loop needs the CUDA code generation, we replace calls to CPU math functions
+    -- with their GPU counterparts.
     block = ast.map_node_postorder(function(node)
       if node:is(ast.typed.expr.Call) then
         local value = node.fn.value
@@ -8600,7 +8602,48 @@ function codegen.stat_for_list(cx, node)
       else
         return node
       end
-    end, node.block)
+    end, block)
+
+    -- If the inner loop is eligible to a 2D kernel launch, we change the stride of the inner
+    -- loop accordingly.
+    -- TODO: This is a very simple heurstic that does not even extend to 3D case.
+    --       At least we need to check if the inner loop has any centered accesses with
+    --       respect to that loop. In the longer term, we need a better algorithm to detect
+    --       cases where multi-dimensional kernel launches are profitable.
+    if #block.stats == 1 and block.stats[1]:is(ast.typed.stat.ForNum) then
+      local inner_loop = block.stats[1]
+      if #inner_loop.values == 2 then
+        cuda_2d_launch = true
+        local index_type = inner_loop.symbol:gettype()
+        cuda_2d_offset = std.newsymbol(index_type, "offset")
+        local stride = cudahelper.get_num_thread_y()
+        inner_loop = inner_loop {
+          values = terralib.newlist({
+            ast.typed.expr.Binary {
+              op = "+",
+              lhs = inner_loop.values[1],
+              rhs = ast.typed.expr.ID {
+                value = cuda_2d_offset,
+                expr_type = index_type,
+                annotations = ast.default_annotations(),
+                span = inner_loop.span,
+              },
+              expr_type = inner_loop.values[1].expr_type,
+              annotations = ast.default_annotations(),
+              span = inner_loop.span,
+            },
+            inner_loop.values[2],
+            ast.typed.expr.Constant {
+              value = stride,
+              expr_type = index_type,
+              annotations = ast.default_annotations(),
+              span = inner_loop.span,
+            }
+          })
+        }
+        block = block { stats = terralib.newlist({ inner_loop }) }
+      end
+    end
   end
 
   local fields = index_type.fields
@@ -8772,7 +8815,14 @@ function codegen.stat_for_list(cx, node)
           [tid] = [tid] % [ offsets[idx] ]
         end)
       end
+      local preamble_2d_launch = terralib.newlist()
+      if cuda_2d_offset ~= nil then
+        preamble_2d_launch:insert(quote
+          var [cuda_2d_offset:getsymbol()] = [cudahelper.get_tid_y()]
+        end)
+      end
       local terra kernel([args])
+        [preamble_2d_launch]
         [kernel_preamble]
         [index_inits]
         [body]
@@ -8783,7 +8833,7 @@ function codegen.stat_for_list(cx, node)
       local kernel_id = cx.task_meta:get_cuda_variant():add_cuda_kernel(kernel)
       local count = terralib.newsymbol(c.size_t, "count")
       local kernel_call =
-        cudahelper.codegen_kernel_call(kernel_id, count, args, shared_mem_size, false)
+        cudahelper.codegen_kernel_call(kernel_id, count, args, shared_mem_size, false, cuda_2d_launch)
 
       local bounds_setup = terralib.newlist()
       bounds_setup:insert(quote var [count] = 1 end)
@@ -8816,10 +8866,9 @@ function codegen.stat_for_list(cx, node)
       [rect_it_step]([rect_it])
     end
     ::[break_label]::
-    [rect_it_destroy]([rect_it]) 
+    [rect_it_destroy]([rect_it])
     [postamble]
   end
-
 end
 
 function codegen.stat_for_list_vectorized(cx, node)

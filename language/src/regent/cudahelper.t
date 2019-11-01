@@ -267,6 +267,8 @@ function cudahelper.jit_compile_kernels_and_register(kernels)
 end
 
 local THREAD_BLOCK_SIZE = 128
+local NUM_THREAD_X = 16
+local NUM_THREAD_Y = THREAD_BLOCK_SIZE / NUM_THREAD_X
 local MAX_NUM_BLOCK = 32768
 local GLOBAL_RED_BUFFER = 256
 lua_assert(GLOBAL_RED_BUFFER % THREAD_BLOCK_SIZE == 0)
@@ -307,6 +309,18 @@ end
 
 function cudahelper.get_thread_block_size()
   return THREAD_BLOCK_SIZE
+end
+
+function cudahelper.get_num_thread_x()
+  return NUM_THREAD_X
+end
+
+function cudahelper.get_num_thread_y()
+  return NUM_THREAD_Y
+end
+
+function cudahelper.get_tid_y()
+  return `(tid_y())
 end
 
 -- Slow atomic operation implementations (copied and modified from Ebb)
@@ -1098,7 +1112,7 @@ function cudahelper.generate_parallel_prefix_op(variant, total, lhs_wr, lhs_rd, 
   return launch
 end
 
-function cudahelper.codegen_kernel_call(kernel_id, count, args, shared_mem_size, tight)
+function cudahelper.codegen_kernel_call(kernel_id, count, args, shared_mem_size, tight, needs_2d)
   local setupArguments = terralib.newlist()
 
   local offset = 0
@@ -1113,20 +1127,37 @@ function cudahelper.codegen_kernel_call(kernel_id, count, args, shared_mem_size,
 
   local grid = terralib.newsymbol(RuntimeAPI.dim3, "grid")
   local block = terralib.newsymbol(RuntimeAPI.dim3, "block")
+  local num_blocks = terralib.newsymbol(int64, "num_blocks")
 
   local function round_exp(v, n)
     return `((v + (n - 1)) / n)
   end
 
-  local launch_domain_init = quote
-    if [count] <= THREAD_BLOCK_SIZE and tight then
-      [block].x, [block].y, [block].z = [count], 1, 1
-    else
-      [block].x, [block].y, [block].z = THREAD_BLOCK_SIZE, 1, 1
+  local launch_domain_init = nil
+  if not needs_2d then
+    launch_domain_init = quote
+      if [count] <= THREAD_BLOCK_SIZE and tight then
+        [block].x, [block].y, [block].z = [count], 1, 1
+      else
+        [block].x, [block].y, [block].z = THREAD_BLOCK_SIZE, 1, 1
+      end
+      var [num_blocks] = [round_exp(count, THREAD_BLOCK_SIZE)]
     end
-    var num_blocks = [round_exp(count, THREAD_BLOCK_SIZE)]
-    if num_blocks <= MAX_NUM_BLOCK then
-      [grid].x, [grid].y, [grid].z = num_blocks, 1, 1
+  else
+    launch_domain_init = quote
+      if [count] <= NUM_THREAD_X and tight then
+        [block].x, [block].y, [block].z = [count], NUM_THREAD_Y, 1
+      else
+        [block].x, [block].y, [block].z = NUM_THREAD_X, NUM_THREAD_Y, 1
+      end
+      var [num_blocks] = [round_exp(count, NUM_THREAD_X)]
+    end
+  end
+
+  launch_domain_init = quote
+    [launch_domain_init]
+    if [num_blocks] <= MAX_NUM_BLOCK then
+      [grid].x, [grid].y, [grid].z = [num_blocks], 1, 1
     elseif [count] / MAX_NUM_BLOCK <= MAX_NUM_BLOCK then
       [grid].x, [grid].y, [grid].z =
         MAX_NUM_BLOCK, [round_exp(num_blocks, MAX_NUM_BLOCK)], 1
