@@ -7680,6 +7680,42 @@ namespace Legion {
     const VersionID EquivalenceSet::init_version;
 
     //--------------------------------------------------------------------------
+    EquivalenceSet::DisjointPartitionRefinement::DisjointPartitionRefinement(
+                                                               IndexPartNode *p)
+      : partition(p), total_child_volume(0),
+        partition_volume(partition->get_union_expression()->get_volume())
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(partition->is_disjoint());
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    void EquivalenceSet::DisjointPartitionRefinement::add_child(
+                                    IndexSpaceNode *node, EquivalenceSet *child)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(children.find(node) == children.end());
+#endif
+      children[node] = child;
+      total_child_volume += node->get_volume();
+    }
+
+    //--------------------------------------------------------------------------
+    EquivalenceSet* EquivalenceSet::DisjointPartitionRefinement::find_child(
+                                                     IndexSpaceNode *node) const
+    //--------------------------------------------------------------------------
+    {
+      std::map<IndexSpaceNode*,EquivalenceSet*>::const_iterator finder = 
+        children.find(node);
+      if (finder == children.end())
+        return NULL;
+      return finder->second;
+    }
+
+    //--------------------------------------------------------------------------
     EquivalenceSet::EquivalenceSet(Runtime *rt, DistributedID did,
                                    AddressSpaceID owner, AddressSpace logical,
                                    IndexSpaceExpression *expr,
@@ -8207,15 +8243,14 @@ namespace Legion {
                   ray_mask -= overlap;
                   // Another sub-region of the disjoint partition
                   // See if we already made the refinement or not
-                  std::map<IndexSpaceNode*,EquivalenceSet*>::const_iterator
-                    finder = it->first->children.find(node);
-                  if (finder == it->first->children.end())
+                  EquivalenceSet *child = it->first->find_child(node);
+                  // If child is NULL then we haven't made it yet
+                  if (child == NULL)
                   {
                     // Refine this for all the fields in the disjoint 
                     // partition refinement to maintain the invariant that
                     // all these chidren have been refined for all fields
-                    EquivalenceSet *child = 
-                      add_pending_refinement(expr, it->second, node, source);
+                    child = add_pending_refinement(expr,it->second,node,source);
                     pending_to_traverse.insert(child, overlap);
                     to_traverse_exprs[child] = expr;
                     // If this is a pending refinement then we'll need to
@@ -8228,10 +8263,9 @@ namespace Legion {
                       refinement_done = waiting_event;
                     }
                     // Record this child for the future
-                    it->first->children[node] = child; 
+                    it->first->add_child(node, child);
                     // Check to see if we've finished this disjoint partition
-                    if (it->first->children.size() == 
-                        it->first->partition->get_num_children())
+                    if (it->first->is_refined())
                     {
                       // If we're done with this disjoint pending partition
                       // then we can remove it from the set
@@ -8260,15 +8294,15 @@ namespace Legion {
                     // Figure out which fields have already been refined
                     // and which ones are still pending, issue refinements
                     // for any fields that haven't been refined yet
-                    FieldMaskSet<EquivalenceSet>::iterator eq_finder = 
-                      subsets.find(finder->second);
-                    if (eq_finder != subsets.end())
+                    FieldMaskSet<EquivalenceSet>::iterator finder = 
+                      subsets.find(child);
+                    if (finder != subsets.end())
                     {
-                      const FieldMask eq_valid = overlap & eq_finder->second;
+                      const FieldMask eq_valid = overlap & finder->second;
                       if (!!eq_valid)
                       {
-                        to_traverse.insert(finder->second, eq_valid);
-                        to_traverse_exprs[finder->second] = expr;
+                        to_traverse.insert(child, eq_valid);
+                        to_traverse_exprs[child] = expr;
                         overlap -= eq_valid;
                       }
                     }
@@ -8276,15 +8310,15 @@ namespace Legion {
                     // also in the pending refineemnts
                     if (!!overlap)
                     {
-                      eq_finder = pending_refinements.find(finder->second);
-                      if (eq_finder != pending_refinements.end())
+                      finder = pending_refinements.find(child);
+                      if (finder != pending_refinements.end())
                       {
 #ifdef DEBUG_LEGION
                         // All overlap fields should be dominated
-                        assert(!(overlap - eq_finder->second));
+                        assert(!(overlap - finder->second));
 #endif
-                        pending_to_traverse.insert(finder->second, overlap);
-                        to_traverse_exprs[finder->second] = expr;
+                        pending_to_traverse.insert(child, overlap);
+                        to_traverse_exprs[child] = expr;
                         overlap.clear();
                         // If this is a pending refinement then we'll need to
                         // wait for it before traversing farther
@@ -8525,7 +8559,7 @@ namespace Legion {
                   refinement_done = waiting_event;
                 }
                 // Save this for the future
-                dis->children[node] = child; 
+                dis->add_child(node, child);
 #ifdef DEBUG_LEGION
                 assert(disjoint_mask * unrefined_remainders.get_valid_mask());
 #endif
@@ -9219,10 +9253,11 @@ namespace Legion {
               disjoint_partition_refinements.end(); it++)
         {
           rez.serialize(it->first->partition->handle);
-          rez.serialize<size_t>(it->first->children.size());
-          for (std::map<IndexSpaceNode*,EquivalenceSet*>::const_iterator cit =
-                it->first->children.begin(); cit != 
-                it->first->children.end(); cit++)
+          const std::map<IndexSpaceNode*,EquivalenceSet*> &children = 
+            it->first->get_children();
+          rez.serialize<size_t>(children.size());
+          for (std::map<IndexSpaceNode*,EquivalenceSet*>::const_iterator 
+                cit = children.begin(); cit != children.end(); cit++)
           {
             rez.serialize(cit->first->handle);
             rez.serialize(cit->second->did);
@@ -9400,8 +9435,8 @@ namespace Legion {
           DistributedID child_did;
           derez.deserialize(child_did);
           RtEvent ready;
-          dis->children[node] = 
-            runtime->find_or_request_equivalence_set(child_did, ready);
+          dis->add_child(node,
+            runtime->find_or_request_equivalence_set(child_did, ready));
           if (ready.exists())
             owner_preconditions.insert(ready);
         }
@@ -12216,11 +12251,13 @@ namespace Legion {
       // Figure out if we finished refining or whether there
       // is still an unrefined remainder
       IndexPartNode *partition = dis->partition;
-      if (dis->children.size() < size_t(partition->total_children))
+      if (!dis->is_refined())
       {
         std::set<LegionColor> current_colors;
-        for (std::map<IndexSpaceNode*,EquivalenceSet*>::const_iterator it =
-              dis->children.begin(); it != dis->children.end(); it++)
+        const std::map<IndexSpaceNode*,EquivalenceSet*> &children = 
+          dis->get_children();
+        for (std::map<IndexSpaceNode*,EquivalenceSet*>::const_iterator 
+              it = children.begin(); it != children.end(); it++)
           current_colors.insert(it->first->color);
         // No matter what finish making all the children since making
         // disjoint partitions is a good thing
@@ -12236,6 +12273,10 @@ namespace Legion {
               continue;
             add_pending_refinement(child, finalize_mask, 
                                    child, runtime->address_space);
+            // Don't add this to the refinement as we might only be
+            // finalizing for a subset of fields and the 
+            // DisjointPartitionRefinement should only store entries
+            // for children that have been refined for all fields
           }
         }
         else
@@ -12254,6 +12295,10 @@ namespace Legion {
               continue;
             add_pending_refinement(child, finalize_mask, 
                                    child, runtime->address_space);
+            // Don't add this to the refinement as we might only be
+            // finalizing for a subset of fields and the 
+            // DisjointPartitionRefinement should only store entries
+            // for children that have been refined for all fields
           }
           delete itr;
         }
