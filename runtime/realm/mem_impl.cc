@@ -431,7 +431,8 @@ namespace Realm {
       }
 
       AllocationResult result;
-      size_t inst_offset = 0;
+      // offer up (hopefully non-zero) offset for external allocations
+      size_t inst_offset = offset;
       {
 	AutoLock<> al(allocator_mutex);
 
