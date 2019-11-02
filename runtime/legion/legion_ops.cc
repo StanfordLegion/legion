@@ -8300,7 +8300,9 @@ namespace Legion {
                                               get_logging_name(),
                                               unique_op_id,
 #endif
-                                              true/*track effects*/);
+                                              true/*track effects*/,
+                                              true/*record valid*/,
+                                              false/*check initialized*/);
       std::set<ApEvent> close_preconditions;
       if (effects_done.exists())
         close_preconditions.insert(effects_done);

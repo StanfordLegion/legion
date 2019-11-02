@@ -369,7 +369,7 @@
 
 // Maximum number of equivalence subsets in the bounding volume hierarchy
 #ifndef LEGION_MAX_BVH_FANOUT
-#define LEGION_MAX_BVH_FANOUT             32
+#define LEGION_MAX_BVH_FANOUT             16
 #endif
 
 // Maximum number of non-replayable templates before warnings
