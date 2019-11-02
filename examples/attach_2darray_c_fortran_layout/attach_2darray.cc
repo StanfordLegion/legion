@@ -40,6 +40,11 @@ typedef struct{
     double y;
 }xy_t;
 
+struct ReadFieldArgs {
+  int num_elements;
+  double base_val, step_x, step_y;
+};
+
 void top_level_task(const Task *task,
                     const std::vector<PhysicalRegion> &regions,
                     Context ctx, Runtime *runtime)
@@ -139,24 +144,42 @@ void top_level_task(const Task *task,
     pr_b = runtime->attach_external_resource(ctx, launcher);
   }
 
-  TaskLauncher read_launcher(READ_FIELD_TASK_ID, 
-                             TaskArgument(&num_elements, 
-                             sizeof(num_elements)));
+  ReadFieldArgs read_args;
+  read_args.num_elements = num_elements;
+  TaskLauncher read_launcher(READ_FIELD_TASK_ID,
+			     TaskArgument(&read_args, sizeof(read_args)));
+  // fortran layout for FID_X, so "x" is smaller step
+  read_args.base_val = 0.0;
+  read_args.step_x = 1;
+  read_args.step_y = num_elements;
   read_launcher.add_region_requirement(
       RegionRequirement(input_lr, READ_ONLY, EXCLUSIVE, input_lr));
   read_launcher.add_field(0/*idx*/, FID_X);
   runtime->execute_task(ctx, read_launcher);
   
+  // TaskArgument takes a reference, so we can change the struct and relaunch
+  // C layout for FID_Y, so "y" is smaller step
+  read_args.base_val = 0.1;
+  read_args.step_x = num_elements;
+  read_args.step_y = 1;
   read_launcher.region_requirements[0].privilege_fields.clear();
   read_launcher.region_requirements[0].instance_fields.clear();
   read_launcher.add_field(0/*idx*/, FID_Y);
   runtime->execute_task(ctx, read_launcher);
   
+  // fortran layout for FID_A, so "x" is smaller step
+  read_args.base_val = 0.2;
+  read_args.step_x = 1;
+  read_args.step_y = num_elements;
   read_launcher.region_requirements[0].privilege_fields.clear();
   read_launcher.region_requirements[0].instance_fields.clear();
   read_launcher.add_field(0/*idx*/, FID_A);
   runtime->execute_task(ctx, read_launcher);
 
+  // C layout for FID_B, so "y" is smaller step
+  read_args.base_val = 0.3;
+  read_args.step_x = num_elements;
+  read_args.step_y = 1;
   read_launcher.region_requirements[0].privilege_fields.clear();
   read_launcher.region_requirements[0].instance_fields.clear();
   read_launcher.add_field(0/*idx*/, FID_B);
@@ -188,6 +211,7 @@ void read_field_task(const Task *task,
                      const std::vector<PhysicalRegion> &regions,
                      Context ctx, Runtime *runtime)
 {
+  const ReadFieldArgs& args = *static_cast<const ReadFieldArgs *>(task->args);
   // Check that the inputs look right since we have no
   // static checking to help us out.
   assert(regions.size() == 1); 
@@ -195,7 +219,6 @@ void read_field_task(const Task *task,
   assert(task->regions[0].privilege_fields.size() == 1);
 
   FieldID fid = *(task->regions[0].privilege_fields.begin());
-  const int num_elements = *((const int*)task->args);
   int i = 0;
   
   const AccessorRO acc(regions[0], fid);
@@ -203,15 +226,29 @@ void read_field_task(const Task *task,
   Rect<2> rect = runtime->get_index_space_domain(ctx, 
                   task->regions[0].region.get_index_space());
   printf("READ field %d, addr %p\n", fid, acc.ptr(rect.lo));
+  int errors = 0;
   for (PointInRectIterator<2> pir(rect); pir(); pir++) {
-    printf("%.1f\t", acc[*pir]);
+    double expval = (args.base_val +
+		     ((*pir).x * args.step_x) +
+		     ((*pir).y * args.step_y));
+    double actval = acc[*pir];
+    if(expval == actval) {
+      printf("%.1f\t", actval);
+    } else {
+      printf("%.1f != %.1f\t", actval, expval);
+      errors++;
+    }
     i ++;
-    if (i == num_elements) {
+    if (i == args.num_elements) {
       printf("\n");
       i = 0;
     }
   }
   printf("\n");
+  if(errors > 0) {
+    printf("%d errors - aborting!\n", errors);
+    assert(0);
+  }
 }
 
 int main(int argc, char **argv)
