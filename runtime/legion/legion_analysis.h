@@ -2157,11 +2157,21 @@ namespace Legion {
     protected:
       struct DisjointPartitionRefinement {
       public:
-        DisjointPartitionRefinement(IndexPartNode *p)
-          : partition(p) { }
+        DisjointPartitionRefinement(IndexPartNode *p);
+      public:
+        inline const std::map<IndexSpaceNode*,EquivalenceSet*>& 
+          get_children(void) const { return children; }
+        inline bool is_refined(void) const 
+          { return (total_child_volume == partition_volume); } 
+      public:
+        void add_child(IndexSpaceNode *node, EquivalenceSet *child);
+        EquivalenceSet* find_child(IndexSpaceNode *node) const;
       public:
         IndexPartNode *const partition;
+      private:
         std::map<IndexSpaceNode*,EquivalenceSet*> children;
+        size_t total_child_volume;
+        const size_t partition_volume;
       };
     public:
       EquivalenceSet(Runtime *rt, DistributedID did,

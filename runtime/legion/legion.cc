@@ -2702,6 +2702,12 @@ namespace Legion {
                               bool check_field_size, ReductionOpID redop) const
     //--------------------------------------------------------------------------
     {
+      if (impl == NULL)
+        REPORT_LEGION_ERROR(ERROR_PHYSICAL_REGION_UNMAPPED,
+            "Illegal request to create an accessor for uninitialized physical "
+            "region in task %s (UID %lld)",
+            Internal::implicit_context->get_task_name(),
+            Internal::implicit_context->get_unique_id())
       return impl->get_instance_info(mode, fid, field_size, realm_is, type_tag, 
                                      warning_string, silence_warnings, 
                                      generic_accessor, check_field_size, redop);

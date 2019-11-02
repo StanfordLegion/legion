@@ -31,6 +31,7 @@ def check_subregion(R):
 @task
 def main():
     R = Region([4, 4], {'x': legion.float64})
+    legion.fill(R, 'x', 0)
 
     # Create a partition of R.
     P = Partition.equal(R, [2, 2])

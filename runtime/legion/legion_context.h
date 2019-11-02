@@ -562,7 +562,8 @@ namespace Legion {
       bool check_region_dependence(RegionTreeID tid, IndexSpace space,
                                   const RegionRequirement &our_req,
                                   const RegionUsage &our_usage,
-                                  const RegionRequirement &req);
+                                  const RegionRequirement &req,
+                                  bool check_privileges = true) const;
       void register_inline_mapped_region(PhysicalRegion &region);
       void unregister_inline_mapped_region(PhysicalRegion &region);
     public:

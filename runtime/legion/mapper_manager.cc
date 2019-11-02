@@ -78,20 +78,20 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void MapperManager::invoke_select_task_options(TaskOp *task, 
-                            Mapper::TaskOptions *options, MappingCallInfo *info)
+          Mapper::TaskOptions *options, bool *prioritize, MappingCallInfo *info)
     //--------------------------------------------------------------------------
     {
       if (info == NULL)
       {
         RtEvent continuation_precondition;
         info = begin_mapper_call(SELECT_TASK_OPTIONS_CALL,
-                                 NULL, continuation_precondition);
+                                 NULL, continuation_precondition, *prioritize);
         // If we need to build a continuation do that now
         if (continuation_precondition.exists())
         {
-          MapperContinuation2<TaskOp, Mapper::TaskOptions,
+          MapperContinuation3<TaskOp, Mapper::TaskOptions, bool,
                               &MapperManager::invoke_select_task_options>
-                                continuation(this, task, options, info);
+                                continuation(this,task,options,prioritize,info);
           continuation.defer(runtime, continuation_precondition, task);
           return;
         }
@@ -3704,7 +3704,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     MappingCallInfo* SerializingManager::begin_mapper_call(MappingCallKind kind,
-                                           Operation *op, RtEvent &precondition)
+                          Operation *op, RtEvent &precondition, bool prioritize)
     //--------------------------------------------------------------------------
     {
       RtUserEvent to_trigger;
@@ -3724,7 +3724,10 @@ namespace Legion {
           // Put this on the list of pending calls
           result->resume = Runtime::create_rt_user_event();
           precondition = result->resume;
-          pending_calls.push_back(result);
+          if (prioritize)
+            pending_calls.push_front(result);
+          else
+            pending_calls.push_back(result);
         }
         else
           executing_call = result;
@@ -4056,7 +4059,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     MappingCallInfo* ConcurrentManager::begin_mapper_call(MappingCallKind kind,
-                                           Operation *op, RtEvent &precondition)
+                          Operation *op, RtEvent &precondition, bool prioritize)
     //--------------------------------------------------------------------------
     {
       MappingCallInfo *result = allocate_call_info(kind, op, true/*need lock*/);

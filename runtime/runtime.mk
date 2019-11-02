@@ -530,6 +530,11 @@ ifneq ($(strip ${MAX_FIELDS}),)
 LEGION_CC_FLAGS	+= -DLEGION_MAX_FIELDS=$(MAX_FIELDS)
 endif
 
+# Optionally make all Legion warnings fatal
+ifeq ($(strip ${LEGION_WARNINGS_FATAL}),1)
+LEGION_CC_FLAGS += -DLEGION_WARNINGS_FATAL
+endif
+
 # Manage the output setting
 REALM_CC_FLAGS	+= -DCOMPILE_TIME_MIN_LEVEL=$(OUTPUT_LEVEL)
 

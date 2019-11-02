@@ -973,7 +973,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool TaskOp::select_task_options(void)
+    bool TaskOp::select_task_options(bool prioritize)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -992,7 +992,7 @@ namespace Legion {
       const TaskPriority parent_priority = parent_ctx->is_priority_mutable() ?
         parent_ctx->get_current_priority() : 0;
       options.parent_priority = parent_priority;
-      mapper->invoke_select_task_options(this, &options);
+      mapper->invoke_select_task_options(this, &options, &prioritize);
       options_selected = true;
       target_proc = options.initial_proc;
       stealable = options.stealable;
@@ -5312,7 +5312,7 @@ namespace Legion {
       update_no_access_regions();
       if (!options_selected)
       {
-        const bool inline_task = select_task_options();
+        const bool inline_task = select_task_options(false/*prioritize*/);
         if (inline_task) 
         {
           REPORT_LEGION_WARNING(LEGION_WARNING_MAPPER_REQUESTED_INLINE,
@@ -7849,7 +7849,7 @@ namespace Legion {
         initialize_privilege_path(privilege_paths[idx], regions[idx]);
       if (!options_selected)
       {
-        const bool inline_task = select_task_options();
+        const bool inline_task = select_task_options(false/*prioritize*/);
         if (inline_task) 
         {
           REPORT_LEGION_WARNING(LEGION_WARNING_MAPPER_REQUESTED_INLINE,
@@ -8343,11 +8343,19 @@ namespace Legion {
           first = false;
         index_point = itr.p; 
         // Get our local args
-        Future local_arg = point_arguments.impl->get_future(index_point);
-        if (local_arg.impl != NULL)
+        if (point_arguments.impl != NULL)
         {
-          local_args = local_arg.impl->get_untyped_result(true, NULL, true);
-          local_arglen = local_arg.impl->get_untyped_size(true);
+          Future local_arg = point_arguments.impl->get_future(index_point);
+          if (local_arg.impl != NULL)
+          {
+            local_args = local_arg.impl->get_untyped_result(true, NULL, true);
+            local_arglen = local_arg.impl->get_untyped_size(true);
+          }
+          else
+          {
+            local_args = NULL;
+            local_arglen = 0;
+          }
         }
         else
         {

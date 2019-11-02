@@ -18,7 +18,7 @@
 from __future__ import print_function
 
 import legion
-from legion import task, Future, Region, RW
+from legion import task, Future, Region, WD
 import numpy
 
 # Define a custom struct type.
@@ -31,6 +31,11 @@ typedef struct mystruct {
 ''')
 mystruct_np = numpy.dtype([('x', numpy.intc), ('y', numpy.double), ('z', numpy.byte)], align=True)
 mystruct = legion.Type(mystruct_np, 'mystruct')
+
+@task(privileges=[WD])
+def region_with_struct(R):
+    R.myvalue[0] = (123, 3.14, 65)
+    print(R.myvalue[0])
 
 @task
 def main():
@@ -47,8 +52,7 @@ def main():
 
     # Make a region with the custom struct type.
     R = Region([4], {'myvalue': mystruct})
-    R.myvalue[0] = (123, 3.14, 65)
-    print(R.myvalue[0])
+    region_with_struct(R)
 
 if __name__ == '__main__':
     main()

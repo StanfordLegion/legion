@@ -18,7 +18,7 @@
 from __future__ import print_function
 
 import legion
-from legion import task, Region, RW
+from legion import task, Region, RW, WD
 import numpy
 
 @task
@@ -26,7 +26,7 @@ def f(x, y, z):
     print("inside task f%s" % ((x, y, z),))
     return x+1
 
-@task(privileges=[RW], leaf=True)
+@task(privileges=[WD], leaf=True)
 def init(R):
     for x in range(0, 4):
         for y in range(0, 4):
@@ -46,7 +46,7 @@ def inc(R, step):
     numpy.add(R.x, step, out=R.x)
     print(R.x)
 
-@task(privileges=[RW], leaf=True)
+@task(privileges=[WD], leaf=True)
 def fill(S, value):
     print("inside task fill%s" % ((S, value),))
 
