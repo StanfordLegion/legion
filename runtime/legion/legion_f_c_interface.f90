@@ -567,6 +567,21 @@ module legion_fortran_c_interface
     ! -----------------------------------------------------------------------
     ! Index Space Operations
     ! -----------------------------------------------------------------------
+    ! @see Legion::Runtime::create_index_space(Context, size_t)
+    function legion_index_space_create_c(runtime, ctx, max_num_elmts) &
+            bind(C, name="legion_index_space_create")
+      use iso_c_binding
+      import legion_index_space_f_t
+      import legion_runtime_f_t
+      import legion_context_f_t
+      implicit none
+  
+      type(legion_index_space_f_t)                :: legion_index_space_create_c
+      type(legion_runtime_f_t), value, intent(in) :: runtime
+      type(legion_context_f_t), value, intent(in) :: ctx
+      integer(kind=8), value, intent(in)          :: max_num_elmts
+    end function legion_index_space_create_c
+    
     ! @see Legion::Runtime::create_index_space(Context, Domain)
     function legion_index_space_create_domain_c(runtime, ctx, domain) &
             bind(C, name="legion_index_space_create_domain")
@@ -768,6 +783,17 @@ module legion_fortran_c_interface
       integer(c_size_t), value, intent(in)                :: field_size                                         
       integer(c_int), value, intent(in)                   :: desired_fieldid                                        
     end function legion_field_allocator_allocate_field_c
+    
+    ! @see Legion::FieldAllocator::free_field()
+    subroutine legion_field_allocator_free_field_c(allocator, fid) &
+            bind (C, name="legion_field_allocator_free_field")
+      use iso_c_binding
+      import legion_field_allocator_f_t
+      implicit none
+  
+      type(legion_field_allocator_f_t), value, intent(in) :: allocator                                                                             
+      integer(c_int), value, intent(in)                   :: fid                                        
+    end subroutine legion_field_allocator_free_field_c
 
     ! -----------------------------------------------------------------------
     ! Logical Region
