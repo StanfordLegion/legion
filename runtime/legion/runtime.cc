@@ -10628,7 +10628,7 @@ namespace Legion {
         memcpy(top_task->args, &input_args, top_task->arglen);
         // Set this to be the current processor
         top_task->set_current_proc(target);
-        top_task->select_task_options();
+        top_task->select_task_options(false/*prioritize*/);
         increment_outstanding_top_level_tasks();
         // Launch a task to deactivate the top-level context
         // when the top-level task is done
@@ -10678,7 +10678,7 @@ namespace Legion {
       Future f = mapper_task->initialize_task(map_context, launcher, 
                                               false/*track parent*/);
       mapper_task->set_current_proc(proc);
-      mapper_task->select_task_options();
+      mapper_task->select_task_options(false/*prioritize*/);
       // Create a temporary event to name the result since we 
       // have to pack it in the task that runs, but it also depends
       // on the task being reported back to the mapper

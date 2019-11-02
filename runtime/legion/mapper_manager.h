@@ -77,7 +77,7 @@ namespace Legion {
       const char* get_mapper_name(void);
     public: // Task mapper calls
       void invoke_select_task_options(TaskOp *task, Mapper::TaskOptions *output,
-                                      MappingCallInfo *info = NULL);
+                                bool *prioritize, MappingCallInfo *info = NULL);
       void invoke_premap_task(TaskOp *task, Mapper::PremapTaskInput *input,
                               Mapper::PremapTaskOutput *output, 
                               MappingCallInfo *info = NULL);
@@ -250,7 +250,7 @@ namespace Legion {
       virtual void disable_reentrant(MappingCallInfo *info) = 0;
     protected:
       virtual MappingCallInfo* begin_mapper_call(MappingCallKind kind,
-                                 Operation *op, RtEvent &precondition) = 0;
+          Operation *op, RtEvent &precondition, bool prioritize = false) = 0;
       virtual void pause_mapper_call(MappingCallInfo *info) = 0;
       virtual void resume_mapper_call(MappingCallInfo *info) = 0;
       virtual void finish_mapper_call(MappingCallInfo *info) = 0;
@@ -585,7 +585,7 @@ namespace Legion {
       virtual void disable_reentrant(MappingCallInfo *info);
     protected:
       virtual MappingCallInfo* begin_mapper_call(MappingCallKind kind,
-                                 Operation *op, RtEvent &precondition);
+          Operation *op, RtEvent &precondition, bool prioritize = false);
       virtual void pause_mapper_call(MappingCallInfo *info);
       virtual void resume_mapper_call(MappingCallInfo *info);
       virtual void finish_mapper_call(MappingCallInfo *info);
@@ -643,7 +643,7 @@ namespace Legion {
       virtual void disable_reentrant(MappingCallInfo *info);
     protected:
       virtual MappingCallInfo* begin_mapper_call(MappingCallKind kind,
-                                 Operation *op, RtEvent &precondition);
+          Operation *op, RtEvent &precondition, bool prioritize = false);
       virtual void pause_mapper_call(MappingCallInfo *info);
       virtual void resume_mapper_call(MappingCallInfo *info);
       virtual void finish_mapper_call(MappingCallInfo *info);
