@@ -8211,8 +8211,11 @@ namespace Legion {
                     finder = it->first->children.find(node);
                   if (finder == it->first->children.end())
                   {
+                    // Refine this for all the fields in the disjoint 
+                    // partition refinement to maintain the invariant that
+                    // all these chidren have been refined for all fields
                     EquivalenceSet *child = 
-                      add_pending_refinement(expr, overlap, node, source);
+                      add_pending_refinement(expr, it->second, node, source);
                     pending_to_traverse.insert(child, overlap);
                     to_traverse_exprs[child] = expr;
                     // If this is a pending refinement then we'll need to
@@ -8226,6 +8229,28 @@ namespace Legion {
                     }
                     // Record this child for the future
                     it->first->children[node] = child; 
+                    // Check to see if we've finished this disjoint partition
+                    if (it->first->children.size() == 
+                        it->first->partition->get_num_children())
+                    {
+                      // If we're done with this disjoint pending partition
+                      // then we can remove it from the set
+                      to_delete.push_back(it->first); 
+                      // If this wasn't a complete partition then we need to 
+                      // add the difference into the remainder
+                      if (!it->first->partition->is_complete())
+                      {
+                        IndexSpaceExpression *diff_expr = 
+                          runtime->forest->subtract_index_spaces(set_expr, 
+                              it->first->partition->get_union_expression());
+#ifdef DEBUG_LEGION
+                        assert((diff_expr != NULL) && !diff_expr->is_empty());
+                        assert(unrefined_remainders.get_valid_mask() * 
+                                it->second);
+#endif
+                        unrefined_remainders.insert(diff_expr, it->second);
+                      }
+                    }
                     // Remove these fields from the overlap indicating
                     // that we handled them
                     overlap.clear();
@@ -8254,49 +8279,28 @@ namespace Legion {
                       eq_finder = pending_refinements.find(finder->second);
                       if (eq_finder != pending_refinements.end())
                       {
-                        const FieldMask eq_pending = 
-                          overlap & eq_finder->second;
-                        if (!!eq_pending)
-                        {
-                          pending_to_traverse.insert(finder->second,eq_pending);
-                          to_traverse_exprs[finder->second] = expr;
-                          overlap -= eq_pending;
-                          // If this is a pending refinement then we'll need to
-                          // wait for it before traversing farther
-                          if (!refinement_done.exists())
-                          {
 #ifdef DEBUG_LEGION
-                            assert(waiting_event.exists());
+                        // All overlap fields should be dominated
+                        assert(!(overlap - eq_finder->second));
 #endif
-                            refinement_done = waiting_event;
-                          }
+                        pending_to_traverse.insert(finder->second, overlap);
+                        to_traverse_exprs[finder->second] = expr;
+                        overlap.clear();
+                        // If this is a pending refinement then we'll need to
+                        // wait for it before traversing farther
+                        if (!refinement_done.exists())
+                        {
+#ifdef DEBUG_LEGION
+                          assert(waiting_event.exists());
+#endif
+                          refinement_done = waiting_event;
                         }
                       }
                     }
-                    // If we still have valid fields then we need a refinement
-                    // for them to bring them up to date
-                    if (!!overlap)
-                    {
-                      EquivalenceSet *child = 
-                        add_pending_refinement(expr, overlap, node, source);
 #ifdef DEBUG_LEGION
-                      // These should be the same equivalence set
-                      assert(child == finder->second);
+                    // Should have handled all the fields at this point
+                    assert(!overlap);
 #endif
-                      pending_to_traverse.insert(child, overlap);
-                      to_traverse_exprs[child] = expr;
-                      // If this is a pending refinement then we'll need to
-                      // wait for it before traversing farther
-                      if (!refinement_done.exists())
-                      {
-#ifdef DEBUG_LEGION
-                        assert(waiting_event.exists());
-#endif
-                        refinement_done = waiting_event;
-                      }
-                      // Record that we refined these fields
-                      overlap.clear();
-                    }
                   }
                 }
               }
@@ -11933,7 +11937,11 @@ namespace Legion {
               break;
           }
           if (!disjoint_partition_refinements.empty())
+          {
+            // Make sure this is tight before we remove them
+            disjoint_partition_refinements.tighten_valid_mask();
             complete_mask -= disjoint_partition_refinements.get_valid_mask();
+          }
           // Only need one iteration of this loop
           break;
         }
@@ -12226,10 +12234,8 @@ namespace Legion {
             IndexSpaceNode *child = partition->get_child(color);
             if (child->is_empty())
               continue;
-            EquivalenceSet *child_set = 
-              add_pending_refinement(child, finalize_mask, 
-                                     child, runtime->address_space);
-            dis->children[child] = child_set;
+            add_pending_refinement(child, finalize_mask, 
+                                   child, runtime->address_space);
           }
         }
         else
@@ -12246,10 +12252,8 @@ namespace Legion {
             IndexSpaceNode *child = partition->get_child(color);
             if (child->is_empty())
               continue;
-            EquivalenceSet *child_set = 
-              add_pending_refinement(child, finalize_mask, 
-                                     child, runtime->address_space);
-            dis->children[child] = child_set;
+            add_pending_refinement(child, finalize_mask, 
+                                   child, runtime->address_space);
           }
           delete itr;
         }
@@ -12261,13 +12265,11 @@ namespace Legion {
         IndexSpaceExpression *diff_expr = 
           runtime->forest->subtract_index_spaces(set_expr, 
               partition->get_union_expression());
-        if ((diff_expr != NULL) && !diff_expr->is_empty())
-        {
 #ifdef DEBUG_LEGION
-          assert(unrefined_remainders.get_valid_mask() * finalize_mask);
+        assert((diff_expr != NULL) && !diff_expr->is_empty());
+        assert(unrefined_remainders.get_valid_mask() * finalize_mask);
 #endif
-          unrefined_remainders.insert(diff_expr, finalize_mask);
-        }
+        unrefined_remainders.insert(diff_expr, finalize_mask);
       }
     }
 
