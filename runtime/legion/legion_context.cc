@@ -11634,8 +11634,12 @@ namespace Legion {
 #endif
       // Now initialize the particular information for replication 
       task->initialize_replication(this);
+      if (launcher.enable_inlining && !launcher.silence_warnings)
+        REPORT_LEGION_WARNING(LEGION_WARNING_INLINING_NOT_SUPPORTED,
+            "Inlining is not currently supported for replicated tasks "
+            "such as %s (UID %lld)", get_task_name(), get_unique_id())
       execute_task_launch(task, false/*index*/, current_trace, 
-                          launcher.silence_warnings, launcher.enable_inlining);
+                          launcher.silence_warnings, false/*no inlining*/);
       return result;
     }
 
@@ -11750,8 +11754,12 @@ namespace Legion {
                                     0/*owner shard*/, COLLECTIVE_LOC_44));
 #endif
       task->initialize_replication(this);
+      if (launcher.enable_inlining && !launcher.silence_warnings)
+        REPORT_LEGION_WARNING(LEGION_WARNING_INLINING_NOT_SUPPORTED,
+            "Inlining is not currently supported for replicated tasks "
+            "such as %s (UID %lld)", get_task_name(), get_unique_id())
       execute_task_launch(task, true/*index*/, current_trace, 
-                          launcher.silence_warnings, launcher.enable_inlining);
+                          launcher.silence_warnings, false/*no inlining*/);
       return result;
     }
 
@@ -11824,8 +11832,12 @@ namespace Legion {
                                     0/*owner shard*/, COLLECTIVE_LOC_45));
 #endif
       task->initialize_replication(this);
+      if (launcher.enable_inlining && !launcher.silence_warnings)
+        REPORT_LEGION_WARNING(LEGION_WARNING_INLINING_NOT_SUPPORTED,
+            "Inlining is not currently supported for replicated tasks "
+            "such as %s (UID %lld)", get_task_name(), get_unique_id())
       execute_task_launch(task, true/*index*/, current_trace, 
-                          launcher.silence_warnings, launcher.enable_inlining);
+                          launcher.silence_warnings, false/*no inlining*/);
       return result;
     }
 
