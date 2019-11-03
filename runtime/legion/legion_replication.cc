@@ -7931,8 +7931,9 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    AllGatherCollective::AllGatherCollective(CollectiveIndexLocation loc,
-                                             ReplicateContext *ctx, bool order)
+    template<bool INORDER>
+    AllGatherCollective<INORDER>::AllGatherCollective(
+        CollectiveIndexLocation loc, ReplicateContext *ctx)
       : ShardCollective(loc, ctx),
         shard_collective_radix(ctx->get_shard_collective_radix()),
         shard_collective_log_radix(ctx->get_shard_collective_log_radix()),
@@ -7941,7 +7942,7 @@ namespace Legion {
             ctx->get_shard_collective_participating_shards()),
         shard_collective_last_radix(ctx->get_shard_collective_last_radix()),
         participating(int(local_shard) < shard_collective_participating_shards),
-        inorder(order), reorder_stages(NULL), pending_send_ready_stages(0)
+        reorder_stages(NULL), pending_send_ready_stages(0)
 #ifdef DEBUG_LEGION
         , done_triggered(false)
 #endif
@@ -7951,8 +7952,9 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    AllGatherCollective::AllGatherCollective(ReplicateContext *ctx,
-                                             CollectiveID id, bool order)
+    template<bool INORDER>
+    AllGatherCollective<INORDER>::AllGatherCollective(ReplicateContext *ctx,
+                                                      CollectiveID id)
       : ShardCollective(ctx, id),
         shard_collective_radix(ctx->get_shard_collective_radix()),
         shard_collective_log_radix(ctx->get_shard_collective_log_radix()),
@@ -7961,7 +7963,7 @@ namespace Legion {
             ctx->get_shard_collective_participating_shards()),
         shard_collective_last_radix(ctx->get_shard_collective_last_radix()),
         participating(int(local_shard) < shard_collective_participating_shards),
-        inorder(order), reorder_stages(NULL), pending_send_ready_stages(0)
+        reorder_stages(NULL), pending_send_ready_stages(0)
 #ifdef DEBUG_LEGION
         , done_triggered(false)
 #endif
@@ -7971,7 +7973,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void AllGatherCollective::initialize_collective(void)
+    template<bool INORDER>
+    void AllGatherCollective<INORDER>::initialize_collective(void)
     //--------------------------------------------------------------------------
     {
       if (manager->total_shards > 1)
@@ -7994,7 +7997,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    AllGatherCollective::~AllGatherCollective(void)
+    template<bool INORDER>
+    AllGatherCollective<INORDER>::~AllGatherCollective(void)
     //--------------------------------------------------------------------------
     {
       if (reorder_stages != NULL)
@@ -8018,7 +8022,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void AllGatherCollective::perform_collective_sync(void)
+    template<bool INORDER>
+    void AllGatherCollective<INORDER>::perform_collective_sync(void)
     //--------------------------------------------------------------------------
     {
       perform_collective_async(); 
@@ -8026,7 +8031,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void AllGatherCollective::perform_collective_async(void)
+    template<bool INORDER>
+    void AllGatherCollective<INORDER>::perform_collective_async(void)
     //--------------------------------------------------------------------------
     {
       // Register this with the context
@@ -8058,7 +8064,9 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RtEvent AllGatherCollective::perform_collective_wait(bool block/*=true*/)
+    template<bool INORDER>
+    RtEvent AllGatherCollective<INORDER>::perform_collective_wait(
+                                                            bool block/*=true*/)
     //--------------------------------------------------------------------------
     {
       if (manager->total_shards <= 1)
@@ -8074,7 +8082,9 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void AllGatherCollective::handle_collective_message(Deserializer &derez)
+    template<bool INORDER>
+    void AllGatherCollective<INORDER>::handle_collective_message(
+                                                            Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       int stage;
@@ -8098,7 +8108,8 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
-    void AllGatherCollective::elide_collective(void)
+    template<bool INORDER>
+    void AllGatherCollective<INORDER>::elide_collective(void)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -8116,8 +8127,9 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void AllGatherCollective::construct_message(ShardID target, int stage,
-                                                Serializer &rez)
+    template<bool INORDER>
+    void AllGatherCollective<INORDER>::construct_message(ShardID target, 
+                                                     int stage, Serializer &rez)
     //--------------------------------------------------------------------------
     {
       rez.serialize(manager->repl_id);
@@ -8129,7 +8141,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool AllGatherCollective::initiate_collective(void)
+    template<bool INORDER>
+    bool AllGatherCollective<INORDER>::initiate_collective(void)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -8155,7 +8168,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void AllGatherCollective::send_remainder_stage(void)
+    template<bool INORDER>
+    void AllGatherCollective<INORDER>::send_remainder_stage(void)
     //--------------------------------------------------------------------------
     {
       if (participating)
@@ -8180,7 +8194,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool AllGatherCollective::send_ready_stages(const int start_stage)
+    template<bool INORDER>
+    bool AllGatherCollective<INORDER>::send_ready_stages(const int start_stage)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -8223,7 +8238,7 @@ namespace Legion {
               pending_send_ready_stages--;
               return false;
             }
-            else if (inorder && (reorder_stages != NULL))
+            else if (INORDER && (reorder_stages != NULL))
             {
               // Check to see if we have any unhandled messages for 
               // the previous stage that we need to handle before sending
@@ -8304,12 +8319,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void AllGatherCollective::unpack_stage(int stage, Deserializer &derez)
+    template<bool INORDER>
+    void AllGatherCollective<INORDER>::unpack_stage(int stage, 
+                                                    Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       AutoLock c_lock(collective_lock);
       // Do the unpack first while holding the lock
-      if (inorder && (stage >= 0))
+      if (INORDER && (stage >= 0))
       {
         // Check to see if we can handle this message now or whether we
         // need to buffer it for the future because we have not finished
@@ -8349,7 +8366,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void AllGatherCollective::complete_exchange(void)
+    template<bool INORDER>
+    void AllGatherCollective<INORDER>::complete_exchange(void)
     //--------------------------------------------------------------------------
     {
       if ((reorder_stages != NULL) && !reorder_stages->empty())
@@ -10648,7 +10666,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     TemplateIndexExchange::TemplateIndexExchange(ReplicateContext *ctx,
                                                  CollectiveID id)
-      : AllGatherCollective(ctx, id, true/*inorder*/), current_stage(-1)
+      : AllGatherCollective(ctx, id), current_stage(-1)
     //--------------------------------------------------------------------------
     {
     }
@@ -10744,7 +10762,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     UnorderedExchange::UnorderedExchange(ReplicateContext *ctx, 
                                          CollectiveIndexLocation loc)
-      : AllGatherCollective(loc, ctx, true/*inorder*/), current_stage(-1)
+      : AllGatherCollective(loc, ctx), current_stage(-1)
     //--------------------------------------------------------------------------
     {
     }

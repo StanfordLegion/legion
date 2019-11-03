@@ -174,14 +174,13 @@ namespace Legion {
      * MPI All Gather in that it will ensure that all shards
      * see the value data from all other shards.
      */
+    template<bool INORDER>
     class AllGatherCollective : public ShardCollective {
     public:
       // Inorder says whether we need to see messages for stages inorder,
       // e.g. do we need to see all stage 0 messages before stage 1
-      AllGatherCollective(CollectiveIndexLocation loc, ReplicateContext *ctx,
-                          bool inorder = false);
-      AllGatherCollective(ReplicateContext *ctx, CollectiveID id,
-                          bool inorder = false);
+      AllGatherCollective(CollectiveIndexLocation loc, ReplicateContext *ctx);
+      AllGatherCollective(ReplicateContext *ctx, CollectiveID id);
       virtual ~AllGatherCollective(void);
     public:
       // We guarantee that these methods will be called atomically
@@ -209,7 +208,6 @@ namespace Legion {
       const int shard_collective_participating_shards;
       const int shard_collective_last_radix;
       const bool participating; 
-      const bool inorder;
     private:
       RtUserEvent done_event;
       std::vector<int> stage_notifications;
@@ -233,7 +231,7 @@ namespace Legion {
      * of the AllGatherCollective
      */
     template<typename REDOP>
-    class AllReduceCollective : public AllGatherCollective {
+    class AllReduceCollective : public AllGatherCollective<false> {
     public:
       AllReduceCollective(CollectiveIndexLocation loc, ReplicateContext *ctx);
       AllReduceCollective(ReplicateContext *ctx, CollectiveID id);
@@ -257,7 +255,7 @@ namespace Legion {
      * A class for exchanging sets of barriers between shards
      */
     template<typename BAR>
-    class BarrierExchangeCollective : public AllGatherCollective {
+    class BarrierExchangeCollective : public AllGatherCollective<false> {
     public:
       BarrierExchangeCollective(ReplicateContext *ctx, size_t window_size, 
                                 typename std::vector<BAR> &barriers,
@@ -316,7 +314,7 @@ namespace Legion {
      * trivially serialized to all the shards
      */
     template<typename T>
-    class ValueExchange : public AllGatherCollective { 
+    class ValueExchange : public AllGatherCollective<false> { 
     public:
       ValueExchange(CollectiveIndexLocation loc, ReplicateContext *ctx)
         : AllGatherCollective(loc, ctx) { }
@@ -443,7 +441,7 @@ namespace Legion {
      * A class for exchanging the names of partitions created by
      * a call for making cross-product partitions
      */
-    class CrossProductCollective : public AllGatherCollective {
+    class CrossProductCollective : public AllGatherCollective<false> {
     public:
       CrossProductCollective(ReplicateContext *ctx,
                              CollectiveIndexLocation loc);
@@ -489,7 +487,7 @@ namespace Legion {
      * A class for doing an all-gather of indirect records for 
      * doing gather/scatter/full-indirect copy operations.
      */
-    class IndirectRecordExchange : public AllGatherCollective {
+    class IndirectRecordExchange : public AllGatherCollective<false> {
     public:
       struct IndirectKey {
       public:
@@ -546,7 +544,7 @@ namespace Legion {
      * all of the constituent shards are done with the operation they
      * are collectively performing together.
      */
-    class FieldDescriptorExchange : public AllGatherCollective {
+    class FieldDescriptorExchange : public AllGatherCollective<false> {
     public:
       FieldDescriptorExchange(ReplicateContext *ctx,
                               CollectiveIndexLocation loc);
@@ -640,7 +638,7 @@ namespace Legion {
      * \class FutureExchange
      * A class for doing an all-to-all exchange of future values
      */
-    class FutureExchange : public AllGatherCollective {
+    class FutureExchange : public AllGatherCollective<false> {
     public:
       FutureExchange(ReplicateContext *ctx, size_t future_size,
                      CollectiveIndexLocation loc);
@@ -665,7 +663,7 @@ namespace Legion {
      * \class FutureNameExchange
      * A class for doing an all-to-all exchange of future names
      */
-    class FutureNameExchange : public AllGatherCollective {
+    class FutureNameExchange : public AllGatherCollective<false> {
     public:
       FutureNameExchange(ReplicateContext *ctx, CollectiveID id, 
                          ReplFutureMapImpl *future_map);
@@ -723,7 +721,7 @@ namespace Legion {
      * A class for exchanging the mapping decisions for
      * specific constraints for a must epoch launch
      */
-    class MustEpochMappingExchange : public AllGatherCollective {
+    class MustEpochMappingExchange : public AllGatherCollective<false> {
     public:
       struct ConstraintInfo {
         std::vector<DistributedID> instances;
@@ -765,7 +763,7 @@ namespace Legion {
      * the single tasks in a must epoch launch so we can know which
      * order the point tasks are being mapped in.
      */
-    class MustEpochDependenceExchange : public AllGatherCollective {
+    class MustEpochDependenceExchange : public AllGatherCollective<false> {
     public:
       MustEpochDependenceExchange(ReplicateContext *ctx, 
                                   CollectiveIndexLocation loc);
@@ -789,7 +787,7 @@ namespace Legion {
      * A class for exchanging the local mapping and completion events
      * for all the tasks in a must epoch operation
      */
-    class MustEpochCompletionExchange : public AllGatherCollective {
+    class MustEpochCompletionExchange : public AllGatherCollective<false> {
     public:
       MustEpochCompletionExchange(ReplicateContext *ctx,
                                   CollectiveIndexLocation loc);
@@ -815,7 +813,7 @@ namespace Legion {
      * A class for exchanging the names of instances and mapping dependence
      * events for sharded mapping operations.
      */
-    class ShardedMappingExchange : public AllGatherCollective {
+    class ShardedMappingExchange : public AllGatherCollective<false> {
     public:
       ShardedMappingExchange(CollectiveIndexLocation loc, ReplicateContext *ctx,
                              ShardID shard_id, bool check_mappings);
@@ -844,7 +842,7 @@ namespace Legion {
      * \class TemplateIndexExchange
      * A class for exchanging proposed templates for trace replay
      */
-    class TemplateIndexExchange : public AllGatherCollective {
+    class TemplateIndexExchange : public AllGatherCollective<true> {
     public:
       TemplateIndexExchange(ReplicateContext *ctx, CollectiveID id);
       TemplateIndexExchange(const TemplateIndexExchange &rhs);
@@ -868,7 +866,7 @@ namespace Legion {
      * that are ready to execute on each shard so that we can determine which
      * operations can be inserted into a task stream
      */
-    class UnorderedExchange : public AllGatherCollective {
+    class UnorderedExchange : public AllGatherCollective<true> {
     public:
       UnorderedExchange(ReplicateContext *ctx, CollectiveIndexLocation loc);
       UnorderedExchange(const UnorderedExchange &rhs);

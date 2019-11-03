@@ -1755,6 +1755,7 @@ namespace Legion {
     class ShardManager;
     class ShardCollective;
     class GatherCollective;
+    template<bool>
     class AllGatherCollective;
     template<typename T> class BarrierExchangeCollective;
     template<typename T> class ValueBroadcast;
