@@ -73,6 +73,10 @@ ifeq ($(findstring daint,$(shell uname -n)),daint)
 CONDUIT ?= aries
 GPU_ARCH ?= pascal
 endif
+ifeq ($(findstring nid,$(shell uname -n)),nid)
+CONDUIT ?= aries
+GPU_ARCH ?= pascal
+endif
 ifeq ($(findstring excalibur,$(shell uname -n)),excalibur)
 CONDUIT ?= aries
 endif
@@ -478,7 +482,7 @@ ifeq ($(strip $(USE_HDF)), 1)
   endif
 endif
 
-SKIP_MACHINES= titan% daint% excalibur% cori%
+SKIP_MACHINES= titan% daint% nid% excalibur% cori%
 #Extra options for MPI support in GASNet
 ifeq ($(strip $(USE_MPI)),1)
   # Skip any machines on this list list
