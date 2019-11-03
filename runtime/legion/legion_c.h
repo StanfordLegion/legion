@@ -5274,6 +5274,17 @@ extern "C" {
   legion_context_get_shard_id(legion_runtime_t /*runtime*/,
                               legion_context_t /*context*/,
                               bool /*I know what I am doing*/);
+  // Another hidden method for control replication that most
+  // people should not be using but for which there are legitamite
+  // user, especially in garbage collected languages
+  // Note the caller takes ownership of the future
+  legion_future_t
+  legion_context_consensus_match(legion_runtime_t /*runtime*/,
+                                 legion_context_t /*context*/,
+                                 const void* /*input*/,
+                                 void* /*output*/,
+                                 size_t /*num elements*/,
+                                 size_t /*element size*/);
 
 #ifdef __cplusplus
 }

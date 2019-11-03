@@ -7070,6 +7070,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    Future Runtime::consensus_match(Context ctx, const void *input,void *output,
+                                    size_t num_elements, size_t element_size)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->consensus_match(ctx, input, output, 
+                              num_elements, element_size);
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ void Runtime::enable_profiling(void)
     //--------------------------------------------------------------------------
     {

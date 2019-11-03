@@ -11012,6 +11012,182 @@ namespace Legion {
           !detach_counts.empty());
     }
 
+    /////////////////////////////////////////////////////////////
+    // Consensus Match Base 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    ConsensusMatchBase::ConsensusMatchBase(ReplicateContext *ctx,
+                                           CollectiveIndexLocation loc)
+      : AllGatherCollective(ctx, loc)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    ConsensusMatchBase::ConsensusMatchBase(const ConsensusMatchBase &rhs)
+      : AllGatherCollective(rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    ConsensusMatchBase::~ConsensusMatchBase(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void ConsensusMatchBase::handle_consensus_match(const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const ConsensusMatchArgs *margs = (const ConsensusMatchArgs*)args;
+      margs->base->complete_exchange();
+      delete margs->base;
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Consensus Match Exchange 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    template<typename T>
+    ConsensusMatchExchange<T>::ConsensusMatchExchange(ReplicateContext *ctx,
+                               CollectiveIndexLocation loc, Future f, void *out)
+      : ConsensusMatchBase(ctx, loc),to_complete(f),output(static_cast<T*>(out))
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename T>
+    ConsensusMatchExchange<T>::ConsensusMatchExchange(
+                                              const ConsensusMatchExchange &rhs)
+      : ConsensusMatchBase(rhs), to_complete(rhs.to_complete),output(rhs.output)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename T>
+    ConsensusMatchExchange<T>::~ConsensusMatchExchange(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename T>
+    ConsensusMatchExchange<T>& ConsensusMatchExchange<T>::operator=(
+                                              const ConsensusMatchExchange &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename T>
+    void ConsensusMatchExchange<T>::pack_collective_stage(Serializer &rez, 
+                                                          int stage)
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize<size_t>(element_counts.size());
+      for (typename std::map<T,size_t>::const_iterator it = 
+            element_counts.begin(); it != element_counts.end(); it++)
+      {
+        rez.serialize(it->first);
+        rez.serialize(it->second);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename T>
+    void ConsensusMatchExchange<T>::unpack_collective_stage(
+                                                 Deserializer &derez, int stage)
+    //--------------------------------------------------------------------------
+    {
+      size_t num_elements;
+      derez.deserialize(num_elements);
+      for (unsigned idx = 0; idx < num_elements; idx++)
+      {
+        T element;
+        derez.deserialize(element);
+        typename std::map<T,size_t>::iterator finder = 
+          element_counts.find(element);
+        if (finder != element_counts.end())
+        {
+          size_t count;
+          derez.deserialize(count);
+          finder->second += count;
+        }
+        else
+          derez.deserialize(element_counts[element]);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename T>
+    bool ConsensusMatchExchange<T>::match_elements_async(const void *input,
+                                                         size_t num_elements)
+    //--------------------------------------------------------------------------
+    {
+      const T *inputs = static_cast<const T*>(input);
+      for (unsigned idx = 0; idx < num_elements; idx++)
+        element_counts[inputs[idx]] = 1;
+#ifdef DEBUG_LEGION
+      max_elements = num_elements;
+#endif
+      perform_collective_async(); 
+      const RtEvent precondition = perform_collective_wait(false/*block*/);
+      if (precondition.exists() && !precondition.has_triggered())
+      {
+        ConsensusMatchArgs args(this, context->get_unique_id());
+        context->runtime->issue_runtime_meta_task(args,
+            LG_LATENCY_DEFERRED_PRIORITY, precondition);
+        return false;
+      }
+      else
+      {
+        complete_exchange();
+        return true;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename T>
+    void ConsensusMatchExchange<T>::complete_exchange(void)
+    //--------------------------------------------------------------------------
+    {
+      const size_t total_shards = manager->total_shards; 
+      size_t next_index = 0;
+      for (typename std::map<T,size_t>::const_iterator it = 
+            element_counts.begin(); it != element_counts.end(); it++)
+      {
+#ifdef DEBUG_LEGION
+        assert(it->second <= total_shards);
+#endif
+        if (it->second < total_shards)
+          continue;
+#ifdef DEBUG_LEGION
+        assert(next_index < max_elements);
+#endif
+        output[next_index++] = it->first;
+      }
+      // A little bit of help from the replicate context to complete the future
+      context->help_complete_future(to_complete, &next_index, 
+                        sizeof(next_index), false/*own*/);
+    }
+
+    template class ConsensusMatchExchange<uint8_t>;
+    template class ConsensusMatchExchange<uint16_t>;
+    template class ConsensusMatchExchange<uint32_t>;
+    template class ConsensusMatchExchange<uint64_t>;
+
   }; // namespace Internal
 }; // namespace Legion
 

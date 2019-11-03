@@ -374,6 +374,7 @@ namespace Legion {
       LG_DEFER_PERFORM_OUTPUT_TASK_ID,
       LG_DEFER_INSTANCE_MANAGER_TASK_ID,
       LG_DEFER_REDUCTION_MANAGER_TASK_ID,
+      LG_DEFER_CONSENSUS_MATCH_TASK_ID,
       LG_MESSAGE_ID, // These two must be the last two
       LG_RETRY_SHUTDOWN_TASK_ID,
       LG_LAST_TASK_ID, // This one should always be last
@@ -502,6 +503,7 @@ namespace Legion {
         "Defer Physical Analysis Output Stage",                   \
         "Defer Instance Manager Registration",                    \
         "Defer Reduction Manager Registration",                   \
+        "Defer Consensus Match",                                  \
         "Remote Message",                                         \
         "Retry Shutdown",                                         \
       };
@@ -1429,6 +1431,7 @@ namespace Legion {
       COLLECTIVE_LOC_86 = 86,
       COLLECTIVE_LOC_87 = 87,
       COLLECTIVE_LOC_88 = 88,
+      COLLECTIVE_LOC_89 = 89,
     };
 
     // legion_types.h

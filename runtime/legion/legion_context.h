@@ -86,6 +86,8 @@ namespace Legion {
       virtual void print_once(FILE *f, const char *message) const;
       virtual void log_once(Realm::LoggerMessage &message) const;
       virtual ShardID get_shard_id(void) const;
+      virtual Future consensus_match(const void *input, void *output,
+                                     size_t num_elements, size_t element_size);
     public:
       // Interface to operations performed by a context
       virtual IndexSpace create_index_space(RegionTreeForest *forest,
@@ -1431,6 +1433,8 @@ namespace Legion {
       virtual void print_once(FILE *f, const char *message) const;
       virtual void log_once(Realm::LoggerMessage &message) const;
       virtual ShardID get_shard_id(void) const;
+      virtual Future consensus_match(const void *input, void *output,
+                                     size_t num_elements, size_t element_size);
     public:
       virtual InnerContext* find_parent_physical_context(unsigned index,
                                                   LogicalRegion handle);
@@ -1732,6 +1736,10 @@ namespace Legion {
       // the same calls for the same operations in the same order
       void create_new_replicate_barrier(RtBarrier &bar, size_t arrivals);
       void create_new_replicate_barrier(ApBarrier &bar, size_t arrivals);
+    public:
+      // A little help for ConsensusMatchExchange since it is templated
+      static void help_complete_future(Future &f, const void *ptr,
+                                       size_t size, bool own);
     public:
       ShardTask *const owner_shard;
       ShardManager *const shard_manager;

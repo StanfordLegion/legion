@@ -921,6 +921,60 @@ namespace Legion {
     };
 
     /**
+     * \class ConsensusMatchBase
+     * A base class for consensus match
+     */
+    class ConsensusMatchBase : public AllGatherCollective<true> {
+    public:
+      struct ConsensusMatchArgs : public LgTaskArgs<ConsensusMatchArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_DEFER_CONSENSUS_MATCH_TASK_ID;
+      public:
+        ConsensusMatchArgs(ConsensusMatchBase *b, UniqueID uid)
+          : LgTaskArgs(uid), base(b) { }
+      public:
+        ConsensusMatchBase *const base;
+      };
+    public:
+      ConsensusMatchBase(ReplicateContext *ctx, CollectiveIndexLocation loc);
+      ConsensusMatchBase(const ConsensusMatchBase &rhs);
+      virtual ~ConsensusMatchBase(void);
+    public:
+      virtual void complete_exchange(void) = 0;
+    public:
+      static void handle_consensus_match(const void *args);
+    };
+
+    /**
+     * \class ConsensusMatchExchange
+     * This is collective for performing a consensus exchange between 
+     * the shards for a collection of values.
+     */
+    template<typename T>
+    class ConsensusMatchExchange : ConsensusMatchBase {
+    public:
+      ConsensusMatchExchange(ReplicateContext *ctx, CollectiveIndexLocation loc,
+                             Future to_complete, void *output);
+      ConsensusMatchExchange(const ConsensusMatchExchange &rhs);
+      virtual ~ConsensusMatchExchange(void);
+    public:
+      ConsensusMatchExchange& operator=(const ConsensusMatchExchange &rhs);
+    public:
+      virtual void pack_collective_stage(Serializer &rez, int stage);
+      virtual void unpack_collective_stage(Deserializer &derez, int stage);
+    public:
+      bool match_elements_async(const void *input, size_t num_elements);
+      virtual void complete_exchange(void);
+    protected:
+      Future to_complete;
+      T *const output;
+      std::map<T,size_t> element_counts;
+#ifdef DEBUG_LEGION
+      size_t max_elements;
+#endif
+    };
+
+    /**
      * \class ReplIndividualTask
      * An individual task that is aware that it is 
      * being executed in a control replication context.

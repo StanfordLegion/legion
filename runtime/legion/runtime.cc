@@ -13815,6 +13815,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    Future Runtime::consensus_match(Context ctx, const void *input,void *output,
+                                    size_t num_elements, size_t element_size)
+    //--------------------------------------------------------------------------
+    {
+      if (ctx == DUMMY_CONTEXT)
+        REPORT_DUMMY_CONTEXT("Illegal dummy context consensus match!");
+      return ctx->consensus_match(input, output, num_elements, element_size);
+    }
+
+    //--------------------------------------------------------------------------
     bool Runtime::is_MPI_interop_configured(void)
     //--------------------------------------------------------------------------
     {
@@ -24314,6 +24324,11 @@ namespace Legion {
         case LG_DEFER_REDUCTION_MANAGER_TASK_ID:
           {
             ReductionManager::handle_defer_manager(args, runtime);
+            break;
+          }
+        case LG_DEFER_CONSENSUS_MATCH_TASK_ID:
+          {
+            ConsensusMatchBase::handle_consensus_match(args);
             break;
           }
         case LG_RETRY_SHUTDOWN_TASK_ID:

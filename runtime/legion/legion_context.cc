@@ -141,6 +141,19 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    Future TaskContext::consensus_match(const void *input, void *output,
+                                        size_t num_elements,size_t element_size)
+    //--------------------------------------------------------------------------
+    {
+      // No need to do a match here, there is just one shard
+      memcpy(output, input, num_elements * element_size);
+      Future result = runtime->help_create_future();
+      result.impl->set_result(&num_elements, sizeof(num_elements),false/*own*/);
+      result.impl->complete_future();
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
     IndexSpace TaskContext::create_index_space(RegionTreeForest *forest,
                                          const void *realm_is, TypeTag type_tag)
     //--------------------------------------------------------------------------
@@ -8711,6 +8724,67 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return owner_shard->shard_id;
+    }
+
+    //--------------------------------------------------------------------------
+    Future ReplicateContext::consensus_match(const void *input, void *output,
+                                       size_t num_elements, size_t element_size)
+    //--------------------------------------------------------------------------
+    {
+      Future result = runtime->help_create_future();
+      switch (element_size)
+      {
+        case 1:
+          {
+            ConsensusMatchExchange<uint8_t> *collective = 
+              new ConsensusMatchExchange<uint8_t>(this, COLLECTIVE_LOC_89,
+                                                  result, output);
+            if (collective->match_elements_async(input, num_elements))
+              delete collective;
+            break;
+          }
+        case 2:
+          {
+            ConsensusMatchExchange<uint16_t> *collective = 
+              new ConsensusMatchExchange<uint16_t>(this, COLLECTIVE_LOC_89,
+                                                   result, output);
+            if (collective->match_elements_async(input, num_elements))
+              delete collective;
+            break;
+          }
+        case 4:
+          {
+            ConsensusMatchExchange<uint32_t> *collective = 
+              new ConsensusMatchExchange<uint32_t>(this, COLLECTIVE_LOC_89,
+                                                   result, output);
+            if (collective->match_elements_async(input, num_elements))
+              delete collective;
+            break;
+          }
+        case 8:
+          {
+            ConsensusMatchExchange<uint64_t> *collective = 
+              new ConsensusMatchExchange<uint64_t>(this, COLLECTIVE_LOC_89,
+                                                   result, output);
+            if (collective->match_elements_async(input, num_elements))
+              delete collective;
+            break;
+          }
+        default:
+          REPORT_LEGION_FATAL(LEGION_FATAL_UNSUPPORTED_CONSENSUS_SIZE,
+              "Unsupported size %zd for consensus match in %s (UID %lld)",
+              element_size, get_task_name(), get_unique_id())
+      }
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void ReplicateContext::help_complete_future(Future &f,
+                               const void *result, size_t result_size, bool own)
+    //--------------------------------------------------------------------------
+    {
+      f.impl->set_result(result, result_size, own);
+      f.impl->complete_future();
     }
 
     //--------------------------------------------------------------------------

@@ -7643,6 +7643,26 @@ namespace Legion {
       // reasonable cases where it might be utilitized for things like doing
       // file I/O or printf that people might want it for so we've got it
       ShardID get_shard_id(Context ctx, bool I_know_what_I_am_doing = false);
+      // This is another hidden method for control replication because it's
+      // still somewhat experimental. In some cases there are unavoidable 
+      // sources of randomness that can mess with the needed invariants for
+      // control replication (e.g. garbage collectors). This method will 
+      // allow the application to pass in an array of elements from each shard
+      // and the runtime will fill in an output buffer with an ordered array of 
+      // elements that were passed in by every shard. Each shard will get the 
+      // same elements that were present in all the other shards in the same
+      // order in the output array. The number of elements in the output buffer 
+      // is returned as a future (of type size_t) as the runtime will return 
+      // immediately and the application can continue running ahead. The 
+      // application must keep the input and output buffers allocated until 
+      // the future resolves. By definition the output buffer need be no bigger
+      // than the input buffer since only elements that are in the input buffer
+      // on any shard can appear in the output buffer. Note you can use this 
+      // method safely in contexts that are not control replicated as well: 
+      // the input will just be mem-copied to the output and num_elements 
+      // returned as the future result.
+      Future consensus_match(Context ctx, const void *input, void *output,
+                             size_t num_elements, size_t element_size);
     private:
       friend class Mapper;
       Internal::Runtime *runtime;

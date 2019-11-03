@@ -7227,3 +7227,17 @@ legion_context_get_shard_id(legion_runtime_t runtime_,
   return runtime->get_shard_id(ctx, I_know_what_I_am_doing);
 }
 
+legion_future_t
+legion_context_consensus_match(legion_runtime_t runtime_,
+                               legion_context_t context_,
+                               const void *input, void *output,
+                               size_t num_elements, size_t element_size)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(context_)->context();  
+
+  Future f = runtime->consensus_match(ctx, input, output, 
+                              num_elements, element_size);
+  return CObjectWrapper::wrap(new Future(f));
+}
+
