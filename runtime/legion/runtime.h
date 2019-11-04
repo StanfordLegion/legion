@@ -2023,6 +2023,7 @@ namespace Legion {
                                               const AttachLauncher &launcher);
       Future detach_external_resource(Context ctx, PhysicalRegion region, 
                                       const bool flush, const bool unordered);
+      void progress_unordered_operations(Context ctx);
       void issue_copy_operation(Context ctx, const CopyLauncher &launcher);
       void issue_copy_operation(Context ctx, const IndexCopyLauncher &launcher);
     public:

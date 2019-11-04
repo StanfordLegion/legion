@@ -5837,6 +5837,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::progress_unordered_operations(Context ctx)
+    //--------------------------------------------------------------------------
+    {
+      runtime->progress_unordered_operations(ctx);
+    }
+
+    //--------------------------------------------------------------------------
     PhysicalRegion Runtime::attach_hdf5(Context ctx, 
                                                  const char *file_name,
                                                  LogicalRegion handle,

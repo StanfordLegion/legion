@@ -298,6 +298,7 @@ namespace Legion {
                                   const AttachLauncher &launcher) = 0;
       virtual Future detach_resource(PhysicalRegion region, 
                                      const bool flush,const bool unordered) = 0;
+      virtual void progress_unordered_operations(void) = 0;
       virtual FutureMap execute_must_epoch(
                                  const MustEpochLauncher &launcher) = 0;
       virtual Future issue_timing_measurement(
@@ -948,6 +949,7 @@ namespace Legion {
       virtual PhysicalRegion attach_resource(const AttachLauncher &launcher);
       virtual Future detach_resource(PhysicalRegion region, const bool flush,
                                      const bool unordered);
+      virtual void progress_unordered_operations(void);
       virtual FutureMap execute_must_epoch(const MustEpochLauncher &launcher);
       virtual Future issue_timing_measurement(const TimingLauncher &launcher);
       virtual void issue_mapping_fence(void);
@@ -1566,6 +1568,7 @@ namespace Legion {
       virtual PhysicalRegion attach_resource(const AttachLauncher &launcher);
       virtual Future detach_resource(PhysicalRegion region, const bool flush,
                                      const bool unordered);
+      virtual void progress_unordered_operations(void);
       virtual FutureMap execute_must_epoch(const MustEpochLauncher &launcher);
       virtual Future issue_timing_measurement(const TimingLauncher &launcher);
       virtual void issue_mapping_fence(void);
@@ -1894,6 +1897,7 @@ namespace Legion {
       virtual PhysicalRegion attach_resource(const AttachLauncher &launcher);
       virtual Future detach_resource(PhysicalRegion region, const bool flush,
                                      const bool unordered);
+      virtual void progress_unordered_operations(void);
       virtual FutureMap execute_must_epoch(const MustEpochLauncher &launcher);
       virtual Future issue_timing_measurement(const TimingLauncher &launcher);
       virtual void issue_mapping_fence(void);
