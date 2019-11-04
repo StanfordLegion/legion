@@ -5417,7 +5417,7 @@ namespace Legion {
         // If we have any unordered ops and we're not in the middle of
         // a trace then add them into the queue
         if (!unordered_ops.empty() && (current_trace == NULL))
-          insert_unordered_ops();
+          insert_unordered_ops(false/*end task*/, true/*progress*/);
         if (dependence_queue.empty())
           return;
         if (!outstanding_dependence)
@@ -5798,7 +5798,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InnerContext::insert_unordered_ops(const bool end_task)
+    void InnerContext::insert_unordered_ops(const bool end_task,
+                                            const bool progress)
     //--------------------------------------------------------------------------
     {
       // If there are no unordered ops then we're done
@@ -6011,7 +6012,7 @@ namespace Legion {
         }
         dependence_queue.push_back(op);
         // Insert any unordered operations into the stream
-        insert_unordered_ops(false/*end task*/);
+        insert_unordered_ops(false/*end task*/, false/*progress*/);
       }
       if (issue_task)
       {
@@ -7911,7 +7912,7 @@ namespace Legion {
       // Check to see if we have any unordered operations that we need to inject
       {
         AutoLock d_lock(dependence_lock);
-        insert_unordered_ops(true/*end task*/);
+        insert_unordered_ops(true/*end task*/, false/*progress*/);
       }
       // Mark that we are done executing this operation
       // We're not actually done until we have registered our pending
@@ -11526,7 +11527,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplicateContext::insert_unordered_ops(const bool end_task)
+    void ReplicateContext::insert_unordered_ops(const bool end_task,
+                                                const bool progress)
     //--------------------------------------------------------------------------
     {
       // If we have a trace then we're definitely not inserting operations
@@ -11543,8 +11545,15 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(unordered_ops_counter < unordered_ops_epoch);
 #endif
-        if (++unordered_ops_counter < unordered_ops_epoch)
-          return;
+        // If we're doing progress then we can skip this check and
+        // reset the counter back to zero since we're doing an exchange
+        if (!progress)
+        {
+          if (++unordered_ops_counter < unordered_ops_epoch)
+            return;
+        }
+        else
+          unordered_ops_counter = 0;
       }
       // If we're at the end of the task and we don't have any unordered ops
       // then nobody else should have any either so we are done
