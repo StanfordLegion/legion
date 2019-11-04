@@ -13303,9 +13303,17 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (ctx == DUMMY_CONTEXT)
-        REPORT_DUMMY_CONTEXT(
-            "Illegal dummy context detach external resource!");
+        REPORT_DUMMY_CONTEXT("Illegal dummy context detach external resource!");
       return ctx->detach_resource(region, flush, unordered);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::progress_unordered_operations(Context ctx)
+    //--------------------------------------------------------------------------
+    {
+      if (ctx == DUMMY_CONTEXT)
+        REPORT_DUMMY_CONTEXT("Illegal dummy context progress unordered ops")
+      return ctx->progress_unordered_operations();
     }
 
     //--------------------------------------------------------------------------
@@ -13313,8 +13321,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (ctx == DUMMY_CONTEXT)
-        REPORT_DUMMY_CONTEXT(
-            "Illegal dummy context issue copy operation!");
+        REPORT_DUMMY_CONTEXT("Illegal dummy context issue copy operation!");
       ctx->issue_copy(launcher); 
     }
 
@@ -13324,8 +13331,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (ctx == DUMMY_CONTEXT)
-        REPORT_DUMMY_CONTEXT(
-            "Illegal dummy context issue copy operation!");
+        REPORT_DUMMY_CONTEXT("Illegal dummy context issue copy operation!");
       ctx->issue_copy(launcher);
     }
 

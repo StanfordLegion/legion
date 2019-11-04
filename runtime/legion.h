@@ -5533,6 +5533,14 @@ namespace Legion {
                                       const bool unordered = false);
 
       /**
+       * Force progress on unordered operations. After performing one
+       * of these calls then all outstanding unordered operations that
+       * have been issued are guaranteed to be in the task stream.
+       * @param ctx enclosing task context
+       */
+      void progress_unordered_operations(Context ctx);
+
+      /**
        * @deprecated
        * Attach an HDF5 file as a physical region. The file must already 
        * exist. Legion will defer the attach operation until all other

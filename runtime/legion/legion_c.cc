@@ -4483,6 +4483,16 @@ legion_unordered_detach_external_resource(legion_runtime_t runtime_,
   return CObjectWrapper::wrap(result);
 }
 
+void
+legion_context_progress_unordered_operations(legion_runtime_t runtime_,
+                                             legion_context_t ctx_)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+
+  runtime->progress_unordered_operations(ctx);
+}
+
 // -----------------------------------------------------------------------
 // Must Epoch Operations
 // -----------------------------------------------------------------------

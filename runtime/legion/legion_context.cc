@@ -5406,6 +5406,38 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void InnerContext::progress_unordered_operations(void)
+    //--------------------------------------------------------------------------
+    {
+      bool issue_task = false;
+      RtEvent precondition;
+      Operation *op = NULL;
+      {
+        AutoLock d_lock(dependence_lock);
+        // If we have any unordered ops and we're not in the middle of
+        // a trace then add them into the queue
+        if (!unordered_ops.empty() && (current_trace == NULL))
+          insert_unordered_ops();
+        if (dependence_queue.empty())
+          return;
+        if (!outstanding_dependence)
+        {
+          issue_task = true;
+          outstanding_dependence = true;
+          precondition = dependence_precondition;
+          dependence_precondition = RtEvent::NO_RT_EVENT;
+          op = dependence_queue.front();
+        }
+      }
+      if (issue_task)
+      {
+        DependenceArgs args(op, this);
+        const LgPriority priority = LG_THROUGHPUT_WORK_PRIORITY;
+        runtime->issue_runtime_meta_task(args, priority, precondition); 
+      }
+    }
+
+    //--------------------------------------------------------------------------
     FutureMap InnerContext::execute_must_epoch(
                                               const MustEpochLauncher &launcher)
     //--------------------------------------------------------------------------
@@ -15289,6 +15321,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void LeafContext::progress_unordered_operations(void)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_ILLEGAL_DETACH_RESOURCE_OPERATION,
+        "Illegal progress unordered operations performed in leaf "
+                      "task %s (ID %lld)", get_task_name(), get_unique_id())
+    }
+
+    //--------------------------------------------------------------------------
     FutureMap LeafContext::execute_must_epoch(const MustEpochLauncher &launcher)
     //--------------------------------------------------------------------------
     {
@@ -16616,6 +16657,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return enclosing->detach_resource(region, flush, unordered);
+    }
+
+    //--------------------------------------------------------------------------
+    void InlineContext::progress_unordered_operations(void)
+    //--------------------------------------------------------------------------
+    {
+      enclosing->progress_unordered_operations();
     }
 
     //--------------------------------------------------------------------------
