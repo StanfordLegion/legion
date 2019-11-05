@@ -8612,7 +8612,8 @@ function codegen.stat_for_list(cx, node)
     --       cases where multi-dimensional kernel launches are profitable.
     if #block.stats == 1 and block.stats[1]:is(ast.typed.stat.ForNum) then
       local inner_loop = block.stats[1]
-      if #inner_loop.values == 2 then
+      if inner_loop.metadata and inner_loop.metadata.parallelizable then
+        assert(#inner_loop.values == 2)
         cuda_2d_launch = true
         local index_type = inner_loop.symbol:gettype()
         cuda_2d_offset = std.newsymbol(index_type, "offset")

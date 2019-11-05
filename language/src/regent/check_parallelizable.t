@@ -641,12 +641,12 @@ function analyze_access.stat_for_num(cx, node)
     end))
   end)
 
-  cx:push_loop_context(node, not (has_stride or cx.demand_cuda) and node.symbol)
+  cx:push_loop_context(node, not has_stride and node.symbol)
   local block = analyze_access.block(cx, node.block)
   local cx = cx:pop_loop_context(node)
   local node = node {
     block = block,
-    metadata = not (has_stride or cx.demand_cuda) and cx:get_metadata(),
+    metadata = not has_stride and cx:get_metadata(),
   }
   check_demands(cx, node)
   return node
@@ -867,7 +867,8 @@ function check_context:new_local_scope(loop)
   local cx = {
     prefix = self.prefix,
     contained =
-      (loop.metadata and loop.metadata.parallelizable) or
+      (loop:is(ast.typed.stat.ForList) and
+       loop.metadata and loop.metadata.parallelizable) or
       self.contained,
   }
   return setmetatable(cx, check_context)
