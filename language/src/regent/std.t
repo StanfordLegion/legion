@@ -3962,7 +3962,8 @@ function std.setup(main_task, extra_setup_thunk, task_wrappers, registration_nam
       -- Check if this is a GPU task.
       if variant:is_cuda() then proc_types = {c.TOC_PROC} end
       if std.config["cuda"] and task:is_shard_task() then
-        proc_types[#proc_types + 1] = c.TOC_PROC
+        -- proc_types[#proc_types + 1] = c.TOC_PROC
+        proc_types = {c.TOC_PROC} -- Hack: run *ONLY* on GPU processors to force proper mapping
       end
 
       local layout_constraints = terralib.newsymbol(
