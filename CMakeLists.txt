@@ -206,6 +206,7 @@ if(Legion_USE_CUDA)
   # define variable for realm_defines.h
   set(REALM_USE_CUDA ON)
   set(USE_CUDA ON) # for backwards compatibility
+  set(REALM_USE_CUDART_HIJACK ON)
 endif()
 
 #------------------------------------------------------------------------------#
