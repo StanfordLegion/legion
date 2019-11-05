@@ -19,7 +19,6 @@ $(error LG_RT_DIR variable is not defined, aborting build)
 endif
 
 # Flags for directing the runtime makefile what to include
-# FIXME: DEBUG=1 causes a crash because the postamble attempts to take a lock and causes the task to block
 DEBUG           ?= 1		# Include debugging symbols
 MAX_DIM         ?= 3		# Maximum number of dimensions
 OUTPUT_LEVEL    ?= LEVEL_DEBUG	# Compile time logging level
