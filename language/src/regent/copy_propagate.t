@@ -518,6 +518,6 @@ function copy_propagate.entry(node)
   end
 end
 
-copy_propagate.pass_name = "optimize_mapping"
+copy_propagate.pass_name = "copy_propagate"
 
 return copy_propagate
