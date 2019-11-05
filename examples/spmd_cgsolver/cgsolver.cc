@@ -886,7 +886,7 @@ bool spmd_main_task(const Task *task,
 			    0 /*default mapper*/,
 			    CGMapper::TAG_LOCAL_SHARD);
       launcher.add_region_requirement(RegionRequirement(bm.lr_private,
-							READ_WRITE,
+							WRITE_DISCARD,
 							EXCLUSIVE,
 							bm.lr_private)
 				      .add_field(fid_sol_b));
@@ -965,7 +965,7 @@ bool spmd_main_task(const Task *task,
 			    0 /*default mapper*/,
 			    CGMapper::TAG_LOCAL_SHARD);
       launcher.add_region_requirement(RegionRequirement(bm.lr_private,
-							READ_WRITE,
+							WRITE_DISCARD,
 							EXCLUSIVE,
 							bm.lr_private)
 				      .add_field(fid_sol_Ap));

@@ -562,10 +562,10 @@ uint64 = Type(numpy.uint64, 'uint64_t')
 _rect_types = []
 for dim in xrange(1, _max_dim + 1):
     globals()["int{}d".format(dim)] = Type(
-        numpy.dtype([('x', numpy.int64, dim)], align=True),
+        numpy.dtype([('x', numpy.int64, (dim,))], align=True),
         'legion_point_{}d_t'.format(dim))
     rtype = Type(
-        numpy.dtype([('lo', numpy.int64, dim), ('hi', numpy.int64, dim)], align=True),
+        numpy.dtype([('lo', numpy.int64, (dim,)), ('hi', numpy.int64, (dim,))], align=True),
         'legion_rect_{}d_t'.format(dim))
     globals()["rect{}d".format(dim)] = rtype
     _rect_types.append(rtype)

@@ -2195,7 +2195,8 @@ namespace Legion {
                                              IndexSpace our_space,
                                              const RegionRequirement &our_req,
                                              const RegionUsage &our_usage,
-                                             const RegionRequirement &req)
+                                             const RegionRequirement &req,
+                                             bool check_privileges) const
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, CHECK_REGION_DEPENDENCE_CALL);
@@ -2233,6 +2234,9 @@ namespace Legion {
       intersection.resize(intersect_it - intersection.begin());
       if (intersection.empty())
         return false;
+      // If we aren't supposed to check privileges then we're done
+      if (!check_privileges)
+        return true;
       // Finally if everything has overlapped, do a dependence analysis
       // on the privileges and coherence
       RegionUsage usage(req);
@@ -5315,6 +5319,38 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void InnerContext::progress_unordered_operations(void)
+    //--------------------------------------------------------------------------
+    {
+      bool issue_task = false;
+      RtEvent precondition;
+      Operation *op = NULL;
+      {
+        AutoLock d_lock(dependence_lock);
+        // If we have any unordered ops and we're not in the middle of
+        // a trace then add them into the queue
+        if (!unordered_ops.empty() && (current_trace == NULL))
+          insert_unordered_ops();
+        if (dependence_queue.empty())
+          return;
+        if (!outstanding_dependence)
+        {
+          issue_task = true;
+          outstanding_dependence = true;
+          precondition = dependence_precondition;
+          dependence_precondition = RtEvent::NO_RT_EVENT;
+          op = dependence_queue.front();
+        }
+      }
+      if (issue_task)
+      {
+        DependenceArgs args(op, this);
+        const LgPriority priority = LG_THROUGHPUT_WORK_PRIORITY;
+        runtime->issue_runtime_meta_task(args, priority, precondition); 
+      }
+    }
+
+    //--------------------------------------------------------------------------
     FutureMap InnerContext::execute_must_epoch(
                                               const MustEpochLauncher &launcher)
     //--------------------------------------------------------------------------
@@ -8000,19 +8036,76 @@ namespace Legion {
         // lock because we know we are running in the application
         // thread in order to do this inlining
         unsigned local_index = child->find_parent_index(idx); 
-#ifdef DEBUG_LEGION
-        assert(local_index < physical_regions.size());
-#endif
-        InstanceSet instances;
-        physical_regions[local_index].impl->get_references(instances);
-        std::vector<MappingInstance> &mapping_instances = 
-          input.chosen_instances[idx];
-        mapping_instances.resize(instances.size());
-        for (unsigned idx2 = 0; idx2 < instances.size(); idx2++)
+        if (local_index < physical_regions.size())
         {
-          mapping_instances[idx2] = 
-            MappingInstance(instances[idx2].get_manager());
+          // Check to see if it is still mapped
+          if (physical_regions[local_index].is_mapped())
+          {
+            InstanceSet instances;
+            physical_regions[local_index].impl->get_references(instances);
+            std::vector<MappingInstance> &mapping_instances = 
+              input.chosen_instances[idx];
+            mapping_instances.resize(instances.size());
+            for (unsigned idx2 = 0; idx2 < instances.size(); idx2++)
+            {
+              mapping_instances[idx2] = 
+                MappingInstance(instances[idx2].get_manager());
+            }
+            continue;
+          }
+          // Otherwise fall through
         }
+        const RegionRequirement &child_req = child->regions[idx];
+        std::map<FieldID,MappingInstance> mapped_fields;
+        // Next check to see if which overlapping fields are mapped
+        for (std::list<PhysicalRegion>::const_iterator it = 
+              inline_regions.begin(); it != inline_regions.end(); it++)
+        {
+          if (!it->is_mapped())
+            continue;
+          const RegionRequirement &inline_req = it->impl->get_requirement();
+          const RegionUsage inline_usage(inline_req);
+          // Don't both checking the privilege, we want to know if the
+          // fields and index spaces overlap
+          if (!check_region_dependence(inline_req.region.get_tree_id(),
+                inline_req.region.get_index_space(), inline_req, 
+                inline_usage, child_req, false/*check privileges*/))
+            continue;
+          InstanceSet instances;
+          it->impl->get_references(instances);
+          FieldSpaceNode *fs_node = 
+            runtime->forest->get_node(child_req.parent.get_field_space());
+          // Find all the fields that we can that overlap
+          for (std::set<FieldID>::const_iterator fit = 
+                child_req.privilege_fields.begin(); fit !=
+                child_req.privilege_fields.end(); fit++)
+          {
+            if (inline_req.privilege_fields.find(*fit) ==
+                inline_req.privilege_fields.end())
+              continue;
+            const unsigned fidx = fs_node->get_field_index(*fit);
+            for (unsigned inst_idx = 0; inst_idx < instances.size(); inst_idx++)
+            {
+              const InstanceRef &ref = instances[inst_idx];
+              if (ref.get_valid_fields().is_set(fidx))
+                mapped_fields[*fit] = MappingInstance(ref.get_manager());
+            }
+          }
+        }
+        // If all the fields are mapped then we can create a physical
+        // instance mapping, otherwise give it a virtual mapping
+        if (mapped_fields.size() == child_req.privilege_fields.size())
+        {
+          std::vector<MappingInstance> &mapping_instances = 
+              input.chosen_instances[idx];
+          mapping_instances.reserve(mapped_fields.size());
+          for (std::map<FieldID,MappingInstance>::const_iterator it = 
+                mapped_fields.begin(); it != mapped_fields.end(); it++) 
+            mapping_instances.push_back(it->second);
+        }
+        else
+          input.chosen_instances[idx].push_back(
+              MappingInstance(runtime->virtual_manager)); 
       }
       output.chosen_variant = 0;
       // Always do this with the child mapper
@@ -8139,7 +8232,7 @@ namespace Legion {
     {
       bool inline_task = false;
       if (inlining_enabled)
-        inline_task = task->select_task_options();
+        inline_task = task->select_task_options(true/*prioritize*/);
       // Now check to see if we're inling the task or just performing
       // a normal asynchronous task launch
       if (inline_task)
@@ -9770,6 +9863,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void LeafContext::progress_unordered_operations(void)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_ILLEGAL_DETACH_RESOURCE_OPERATION,
+        "Illegal progress unordered operations performed in leaf "
+                      "task %s (ID %lld)", get_task_name(), get_unique_id())
+    }
+
+    //--------------------------------------------------------------------------
     FutureMap LeafContext::execute_must_epoch(const MustEpochLauncher &launcher)
     //--------------------------------------------------------------------------
     {
@@ -11009,6 +11111,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void InlineContext::progress_unordered_operations(void)
+    //--------------------------------------------------------------------------
+    {
+      enclosing->progress_unordered_operations();
+    }
+
+    //--------------------------------------------------------------------------
     FutureMap InlineContext::execute_must_epoch(
                                               const MustEpochLauncher &launcher)
     //--------------------------------------------------------------------------
@@ -11384,7 +11493,18 @@ namespace Legion {
                                                            Legion::Runtime *&rt)
     //--------------------------------------------------------------------------
     {
-      return enclosing->begin_task(rt);
+#ifdef DEBUG_LEGION
+      assert(implicit_context == enclosing);
+      assert(implicit_runtime == this->runtime);
+#endif
+      rt = this->runtime->external;
+      executing_processor = Processor::get_executing_processor();
+#ifdef DEBUG_LEGION
+      log_task.debug("Task %s (ID %lld) inlining on processor " IDFMT "",
+                    get_task_name(), get_unique_id(), executing_processor.id);
+      assert(regions.size() == physical_regions.size());
+#endif
+      return physical_regions;
     }
 
     //--------------------------------------------------------------------------

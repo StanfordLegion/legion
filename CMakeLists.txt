@@ -319,6 +319,9 @@ mark_as_advanced(Legion_ENABLE_TLS)
 # define variable for legion_defines.h
 set(ENABLE_LEGION_TLS ${Legion_ENABLE_TLS})
 
+option(Legion_WARNINGS_FATAL "Make all runtime warnings fatal" OFF)
+set(LEGION_WARNINGS_FATAL ${Legion_WARNINGS_FATAL})
+
 #------------------------------------------------------------------------------#
 # Runtime library targets
 #------------------------------------------------------------------------------#
@@ -455,7 +458,7 @@ else()
   option(Legion_REDOP_COMPLEX "Use reduction operators for complex types" OFF)
 endif()
 if((Legion_BUILD_ALL OR Legion_BUILD_BINDINGS) AND NOT Legion_REDOP_COMPLEX)
-  error("Bindings require Legion_REDOP_COMPLEX to be set")
+  message(FATAL_ERROR "Bindings require Legion_REDOP_COMPLEX to be set")
 endif()
 if(Legion_REDOP_COMPLEX)
   # define variable for legion_defines.h
