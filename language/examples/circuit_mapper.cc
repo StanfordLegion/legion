@@ -114,33 +114,41 @@ Memory CircuitMapper::default_policy_select_target_memory(MapperContext ctx,
   else
     return DefaultMapper::default_policy_select_target_memory(ctx, target_proc, req);
 }
+
 void CircuitMapper::map_copy(const MapperContext ctx,
                              const Copy &copy,
                              const MapCopyInput &input,
                              MapCopyOutput &output)
 {
   log_circuit.spew("Circuit mapper map_copy");
-  for (unsigned idx = 0; idx < copy.src_requirements.size(); idx++)
+  if (strcmp(copy.parent_task->get_task_name(), "toplevel") == 0)
   {
-    // Always use a virtual instance for the source.
-    output.src_instances[idx].clear();
-    output.src_instances[idx].push_back(
-      PhysicalInstance::get_virtual_instance());
+    for (unsigned idx = 0; idx < copy.src_requirements.size(); idx++)
+    {
+      // Always use a virtual instance for the source.
+      output.src_instances[idx].clear();
+      output.src_instances[idx].push_back(
+        PhysicalInstance::get_virtual_instance());
 
-    // Place the destination instance on the remote node.
-    output.dst_instances[idx].clear();
-    if (!copy.dst_requirements[idx].is_restricted()) {
-      // Call a customized method to create an instance on the desired node.
-      circuit_create_copy_instance<false/*is src*/>(ctx, copy, 
-        copy.dst_requirements[idx], idx, output.dst_instances[idx]);
-    } else {
-      // If it's restricted, just take the instance. This will only
-      // happen inside the shard task.
-      output.dst_instances[idx] = input.dst_instances[idx];
-      if (!output.dst_instances[idx].empty())
-        runtime->acquire_and_filter_instances(ctx,
-                                output.dst_instances[idx]);
+      // Place the destination instance on the remote node.
+      output.dst_instances[idx].clear();
+      if (!copy.dst_requirements[idx].is_restricted()) {
+        // Call a customized method to create an instance on the desired node.
+        circuit_create_copy_instance<false/*is src*/>(ctx, copy, 
+          copy.dst_requirements[idx], idx, output.dst_instances[idx]);
+      } else {
+        // If it's restricted, just take the instance. This will only
+        // happen inside the shard task.
+        output.dst_instances[idx] = input.dst_instances[idx];
+        if (!output.dst_instances[idx].empty())
+          runtime->acquire_and_filter_instances(ctx,
+                                  output.dst_instances[idx]);
+      }
     }
+  }
+  else
+  {
+    return DefaultMapper::map_copy(ctx, copy, input, output);
   }
 }
 
