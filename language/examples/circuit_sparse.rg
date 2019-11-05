@@ -142,6 +142,11 @@ fspace wire(rpn : region(node),
   voltage : voltages,
 }
 
+fspace timestamp {
+  start : int64,
+  stop : int64,
+}
+
 if not use_python_main then
 
 terra parse_input_args(conf : Config)
@@ -395,12 +400,18 @@ task calculate_new_currents(print_ts : bool,
                             rpn : region(node),
                             rsn : region(node),
                             rgn : region(node),
-                            rw : region(wire(rpn, rsn, rgn)))
+                            rw : region(wire(rpn, rsn, rgn)),
+                            rt : region(timestamp))
 where
   reads(rpn.node_voltage, rsn.node_voltage, rgn.node_voltage,
         rw.{in_ptr, out_ptr, inductance, resistance, wire_cap}),
-  reads writes(rw.{current, voltage})
+  reads writes(rw.{current, voltage}, rt)
 do
+  if print_ts then
+    var t = c.legion_get_current_time_in_micros()
+    for x in rt do x.start = t end
+  end
+
   --if print_ts then
   --  c.printf("t: %ld\n", c.legion_get_current_time_in_micros())
   --end
@@ -508,10 +519,11 @@ end
 __demand(__cuda)
 task update_voltages(print_ts : bool,
                      rpn : region(node),
-                     rsn : region(node))
+                     rsn : region(node),
+                     rt : region(timestamp))
 where
   reads(rpn.{node_cap, leakage}, rsn.{node_cap, leakage}),
-  reads writes(rpn.{node_voltage, charge}, rsn.{node_voltage, charge})
+  reads writes(rpn.{node_voltage, charge}, rsn.{node_voltage, charge}, rt)
 do
   for node in rpn do
     var voltage : float = node.node_voltage + node.charge / node.node_cap
@@ -528,6 +540,11 @@ do
   --if print_ts then
   --  c.printf("t: %ld\n", c.legion_get_current_time_in_micros())
   --end
+
+  if print_ts then
+    var t = c.legion_get_current_time_in_micros()
+    for x in rt do x.stop = t end
+  end
 end
 
 if not use_python_main then
@@ -624,6 +641,19 @@ task parse_input(conf : Config)
   return parse_input_args(conf)
 end
 
+task get_elapsed(all_times : region(timestamp))
+where reads(all_times) do
+  var start = [int64:max()]
+  var stop = [int64:min()]
+
+  for t in all_times do
+    start min= t.start
+    stop max= t.stop
+  end
+
+  return 1e-6 * (stop - start)
+end
+
 task print_summary(color : int, sim_time : double, conf : Config)
   if color == 0 then
     c.printf("ELAPSED TIME = %7.3f s\n", sim_time)
@@ -682,6 +712,7 @@ task toplevel()
 
   var all_nodes = region(ispace(ptr, num_circuit_nodes), node)
   var all_wires = region(ispace(ptr, num_circuit_wires), wire(wild, wild, wild))
+  var all_times = region(ispace(ptr, num_superpieces), timestamp)
 
   -- report mesh size in bytes
   --do
@@ -706,6 +737,8 @@ task toplevel()
 
   var ghost_ranges = region(ispace(ptr, num_superpieces), ghost_range)
   var rp_ghost_ranges = partition(equal, ghost_ranges, launch_domain)
+
+  var rp_times = partition(equal, all_times, launch_domain)
 
   for j = 0, 1 do
     __demand(__index_launch)
@@ -732,28 +765,20 @@ task toplevel()
   __fence(__execution, __block)
   var ts_start = c.legion_get_current_time_in_micros()
   var ts_end = ts_start
-  __demand(__spmd)
+  __demand(__spmd, __trace)
   for j = 0, num_loops do
-    if j == prune then
-      __fence(__execution, __block)
-      ts_start = c.legion_get_current_time_in_micros()
-    end
     for i = 0, num_superpieces do
-      calculate_new_currents(j == prune, steps, rp_private[i], rp_shared[i], rp_ghost[i], rp_wires[i])
+      calculate_new_currents(j == prune, steps, rp_private[i], rp_shared[i], rp_ghost[i], rp_wires[i], rp_times[i])
     end
     for i = 0, num_superpieces do
       distribute_charge(rp_private[i], rp_shared[i], rp_ghost[i], rp_wires[i])
     end
     for i = 0, num_superpieces do
-      update_voltages(j == num_loops - prune - 1, rp_private[i], rp_shared[i])
-    end
-    if j == num_loops - prune - 1 then
-      __fence(__execution, __block)
-      ts_end = c.legion_get_current_time_in_micros()
+      update_voltages(j == num_loops - prune - 1, rp_private[i], rp_shared[i], rp_times[i])
     end
   end
 
-  var sim_time = 1e-6 * (ts_end - ts_start)
+  var sim_time = get_elapsed(all_times)
   for i = 0, num_superpieces do print_summary(i, sim_time, conf) end
 end
 

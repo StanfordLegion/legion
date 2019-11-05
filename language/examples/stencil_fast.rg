@@ -141,6 +141,11 @@ fspace point {
   output : DTYPE,
 }
 
+fspace timestamp {
+  start : int64,
+  stop : int64,
+}
+
 if not use_python_main then
 
 terra to_rect(lo : int2d, hi : int2d) : c.legion_rect_2d_t
@@ -369,11 +374,16 @@ local function make_stencil(radius)
                      xp : region(ispace(int2d), point),
                      ym : region(ispace(int2d), point),
                      yp : region(ispace(int2d), point),
+                     times : region(timestamp),
                      print_ts : bool)
   where
-    reads writes(private.{input, output}),
+    reads writes(private.{input, output}, times),
     reads(xm.input, xp.input, ym.input, yp.input)
   do
+    if print_ts then
+      var t = c.legion_get_current_time_in_micros()
+      for x in times do x.start = t end
+    end
     --if print_ts then c.printf("t: %ld\n", c.legion_get_current_time_in_micros()) end
 
     var interior_rect = get_rect(interior.ispace)
@@ -439,14 +449,19 @@ task increment(private : region(ispace(int2d), point),
                xp : region(ispace(int2d), point),
                ym : region(ispace(int2d), point),
                yp : region(ispace(int2d), point),
+               times : region(timestamp),
                print_ts : bool)
-where reads writes(private.input, xm.input, xp.input, ym.input, yp.input) do
+where reads writes(private.input, xm.input, xp.input, ym.input, yp.input, times) do
   [make_increment_interior(private, exterior)]
   for i in xm do i.input += 1 end
   for i in xp do i.input += 1 end
   for i in ym do i.input += 1 end
   for i in yp do i.input += 1 end
 
+    if print_ts then
+      var t = c.legion_get_current_time_in_micros()
+      for x in times do x.stop = t end
+    end
   --if print_ts then c.printf("t: %ld\n", c.legion_get_current_time_in_micros()) end
 end
 
@@ -486,6 +501,19 @@ if not use_python_main then
 
 task read_config()
   return common.read_config()
+end
+
+task get_elapsed(all_times : region(timestamp))
+where reads(all_times) do
+  var start = [int64:max()]
+  var stop = [int64:min()]
+
+  for t in all_times do
+    start min= t.start
+    stop max= t.stop
+  end
+
+  return 1e-6 * (stop - start)
 end
 
 task print_time(color : int, sim_time : double)
@@ -528,6 +556,11 @@ task main()
   var pym_out = [make_ghost_y_partition(true)](ym, tiles, n, nt, radius, 0)
   var pyp_out = [make_ghost_y_partition(true)](yp, tiles, n, nt, radius, 0)
 
+  var times = region(ispace(ptr, nt2), timestamp)
+  var p_times = partition(equal, times, ispace(int1d, nt2))
+
+  fill(times.{start, stop}, 0)
+
   fill(points.{input, output}, init)
   fill(xm.{input, output}, init)
   fill(xp.{input, output}, init)
@@ -553,42 +586,33 @@ task main()
   --   end
   -- end
 
+  __fence(__execution, __block)
+
   __demand(__spmd)
   do
     -- for i = 0, nt2 do
     --   fill_(private[i], init)
     -- end
-
-    __fence(__execution, __block)
-    var ts_start = c.legion_get_current_time_in_micros()
-    var ts_end = ts_start
-    --__demand(__trace)
+    __demand(__trace)
     for t = 0, tsteps do
-      if t == tprune then
-        __fence(__execution, __block)
-        ts_start = c.legion_get_current_time_in_micros()
+      -- __demand(__index_launch)
+      for i = 0, nt2 do
+        stencil(private[i], interior[i], pxm_in[i], pxp_in[i], pym_in[i], pyp_in[i], p_times[i], t == tprune)
       end
       -- __demand(__index_launch)
       for i = 0, nt2 do
-        stencil(private[i], interior[i], pxm_in[i], pxp_in[i], pym_in[i], pyp_in[i], t == tprune)
-      end
-      -- __demand(__index_launch)
-      for i = 0, nt2 do
-        increment(private[i], exterior[i], pxm_out[i], pxp_out[i], pym_out[i], pyp_out[i], t == tsteps - tprune - 1)
-      end
-
-      if t == tsteps - tprune - 1 then
-        __fence(__execution, __block)
-        ts_end = c.legion_get_current_time_in_micros()
+        increment(private[i], exterior[i], pxm_out[i], pxp_out[i], pym_out[i], pyp_out[i], p_times[i], t == tsteps - tprune - 1)
       end
     end
-    var sim_time = 1e-6 * (ts_end - ts_start)
-    for i = 0, nt2 do print_time(i, sim_time) end
 
     for i = 0, nt2 do
       check(private[i], interior[i], tsteps, init)
     end
   end
+
+  var sim_time = get_elapsed(times)
+  for i = 0, nt2 do print_time(i, sim_time) end
+
 end
 
 else -- not use_python_main

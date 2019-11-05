@@ -33,6 +33,11 @@ local use_python_main = rawget(_G, "pennant_use_python_main") == true
 
 local c = regentlib.c
 
+fspace timestamp {
+  start : int64,
+  stop : int64,
+}
+
 -- #####################################
 -- ## Initialization
 -- #################
@@ -139,11 +144,18 @@ end
 -- Save off point variable values from previous cycle.
 __demand(__cuda)
 task init_step_points(rp : region(point),
-                      enable : bool)
+                      rt : region(timestamp),
+                      enable : bool,
+                      save_ts : bool)
 where
-  writes(rp.{pmaswt, pf})
+  writes(rp.{pmaswt, pf}), writes(rt)
 do
   if not enable then return end
+
+  if save_ts then
+    var t = c.legion_get_current_time_in_micros()
+    for x in rt do x.start = t end
+  end
 
   -- Initialize fields used in reductions.
   __demand(__vectorize)
@@ -284,6 +296,8 @@ do
 
     num_negatives += [int](sv <= 0.0)
   end
+
+  regentlib.assert(num_negatives == 0, "sv negative in calc_volumes")
 
   return num_negatives
 end
@@ -833,6 +847,8 @@ do
     num_negatives += [int](sv <= 0)
   end
 
+  regentlib.assert(num_negatives == 0, "sv negative in calc_volumes_full")
+
   return num_negatives
 end
 
@@ -935,14 +951,21 @@ end
 ]]
 
 __demand(__cuda)
-task calc_dt_hydro(rz : region(zone), dtlast : double, dtmax : double,
-                   cfl : double, cflv : double, enable : bool) : double
+task calc_dt_hydro(rz : region(zone),
+                   rt : region(timestamp),
+                   dtlast : double, dtmax : double,
+                   cfl : double, cflv : double, enable : bool, save_ts : bool) : double
 where
-  reads(rz.{zdl, zvol0, zvol, zss, zdu})
+  reads(rz.{zdl, zvol0, zvol, zss, zdu}), writes(rt)
 do
   var dthydro = dtmax
 
   if not enable then return dthydro end
+
+  if save_ts then
+    var t = c.legion_get_current_time_in_micros()
+    for x in rt do x.stop = t end
+  end
 
   -- dthydro min= min(calc_dt_courant(rz, dtmax, cfl),
   --                  calc_dt_volume(rz, dtlast, cflv))
@@ -1034,12 +1057,15 @@ task simulate(rz_all : region(zone), rz_all_p : partition(disjoint, rz_all),
               rp_all_shared_p : partition(disjoint, rp_all_ghost),
               rs_all : region(side(wild, wild, wild, wild)),
               rs_all_p : partition(disjoint, rs_all),
+              rt_all : region(timestamp), rt_all_p : partition(disjoint, rt_all),
               conf : config)
 where
-  reads writes(rz_all, rp_all_private, rp_all_ghost, rs_all),
+  reads writes(rz_all, rp_all_private, rp_all_ghost, rs_all, rt_all),
   rp_all_private * rp_all_ghost
 do
   var prune = conf.prune
+
+  var npieces = conf.npieces
 
   var alfa = conf.alfa
   var cfl = conf.cfl
@@ -1069,46 +1095,50 @@ do
   var dthydro = dtmax
   var ts_start = c.legion_get_current_time_in_micros()
   var ts_end = ts_start
+  var save_ts = false
+  __demand(__spmd, __trace)
   while continue_simulation(cycle, cstop, time, tstop) do
+    save_ts = cycle == prune
+
     __demand(__index_launch)
-    for i = 0, conf.npieces do
-      init_step_points(rp_all_private_p[i], enable)
+    for i = 0, npieces do
+      init_step_points(rp_all_private_p[i], rt_all_p[i], enable, save_ts)
     end
     __demand(__index_launch)
-    for i = 0, conf.npieces do
-      init_step_points(rp_all_shared_p[i], enable)
+    for i = 0, npieces do
+      init_step_points(rp_all_shared_p[i], rt_all_p[i], enable, save_ts)
     end
 
     __demand(__index_launch)
-    for i = 0, conf.npieces do
+    for i = 0, npieces do
       init_step_zones(rz_all_p[i], enable)
     end
 
     dt = calc_global_dt(dt, dtfac, dtinit, dtmax, dthydro, time, tstop, cycle)
 
-    if cycle > 0 and cycle % interval == 0 then
-      var current_time = c.legion_get_current_time_in_micros()/1.e6
-      output5("cycle %4ld    sim time %.3e    dt %.3e    time %.3e (per iteration) %.3e (total)\n",
-               cycle, time, dt, (current_time - last_time)/interval, current_time - start_time)
-      last_time = current_time
-    end
-    if cycle == prune then
-      ts_start = c.legion_get_current_time_in_micros()
-    elseif cycle == cstop - prune then
-      ts_end = c.legion_get_current_time_in_micros()
-    end
+    -- if cycle > 0 and cycle % interval == 0 then
+    --   var current_time = c.legion_get_current_time_in_micros()/1.e6
+    --   output5("cycle %4ld    sim time %.3e    dt %.3e    time %.3e (per iteration) %.3e (total)\n",
+    --            cycle, time, dt, (current_time - last_time)/interval, current_time - start_time)
+    --   last_time = current_time
+    -- end
+    -- if cycle == prune then
+    --   ts_start = c.legion_get_current_time_in_micros()
+    -- elseif cycle == cstop - prune then
+    --   ts_end = c.legion_get_current_time_in_micros()
+    -- end
 
     __demand(__index_launch)
-    for i = 0, conf.npieces do
+    for i = 0, npieces do
       adv_pos_half(rp_all_private_p[i], dt, enable)
     end
     __demand(__index_launch)
-    for i = 0, conf.npieces do
+    for i = 0, npieces do
       adv_pos_half(rp_all_shared_p[i], dt, enable)
     end
 
     __demand(__index_launch)
-    for i = 0, conf.npieces do
+    for i = 0, npieces do
       calc_centers(rz_all_p[i],
                    rp_all_private_p[i],
                    rp_all_ghost_p[i],
@@ -1116,20 +1146,20 @@ do
                    enable)
     end
 
-    var num_negatives = 0
+    -- var num_negatives = 0
     __demand(__index_launch)
-    for i = 0, conf.npieces do
-      num_negatives +=
+    for i = 0, npieces do
+      -- num_negatives +=
         calc_volumes(rz_all_p[i],
                      rp_all_private_p[i],
                      rp_all_ghost_p[i],
                      rs_all_p[i],
                      enable)
     end
-    verify_calc_volumes(num_negatives)
+    -- verify_calc_volumes(num_negatives)
 
     __demand(__index_launch)
-    for i = 0, conf.npieces do
+    for i = 0, npieces do
       calc_char_len(rz_all_p[i],
                     rp_all_private_p[i],
                     rp_all_ghost_p[i],
@@ -1138,12 +1168,12 @@ do
     end
 
     __demand(__index_launch)
-    for i = 0, conf.npieces do
+    for i = 0, npieces do
       calc_rho_half(rz_all_p[i], enable)
     end
 
     __demand(__index_launch)
-    for i = 0, conf.npieces do
+    for i = 0, npieces do
       sum_point_mass(rz_all_p[i],
                      rp_all_private_p[i],
                      rp_all_ghost_p[i],
@@ -1152,12 +1182,12 @@ do
     end
 
     __demand(__index_launch)
-    for i = 0, conf.npieces do
+    for i = 0, npieces do
       calc_state_at_half(rz_all_p[i], gamma, ssmin, dt, enable)
     end
 
     __demand(__index_launch)
-    for i = 0, conf.npieces do
+    for i = 0, npieces do
       calc_force_pgas_tts(rz_all_p[i],
                           rp_all_private_p[i],
                           rp_all_ghost_p[i],
@@ -1167,7 +1197,7 @@ do
     end
 
     __demand(__index_launch)
-    for i = 0, conf.npieces do
+    for i = 0, npieces do
       qcs_zone_center_velocity(
         rz_all_p[i],
         rp_all_private_p[i],
@@ -1177,7 +1207,7 @@ do
     end
 
     __demand(__index_launch)
-    for i = 0, conf.npieces do
+    for i = 0, npieces do
       qcs_corner_divergence(
         rz_all_p[i],
         rp_all_private_p[i],
@@ -1187,7 +1217,7 @@ do
     end
 
     __demand(__index_launch)
-    for i = 0, conf.npieces do
+    for i = 0, npieces do
       qcs_qcn_force(
         rz_all_p[i],
         rp_all_private_p[i],
@@ -1198,7 +1228,7 @@ do
     end
 
     __demand(__index_launch)
-    for i = 0, conf.npieces do
+    for i = 0, npieces do
       qcs_force(
         rz_all_p[i],
         rp_all_private_p[i],
@@ -1208,7 +1238,7 @@ do
     end
 
     __demand(__index_launch)
-    for i = 0, conf.npieces do
+    for i = 0, npieces do
       qcs_vel_diff(
         rz_all_p[i],
         rp_all_private_p[i],
@@ -1219,7 +1249,7 @@ do
     end
 
     __demand(__index_launch)
-    for i = 0, conf.npieces do
+    for i = 0, npieces do
       sum_point_force(rz_all_p[i],
                       rp_all_private_p[i],
                       rp_all_ghost_p[i],
@@ -1228,25 +1258,25 @@ do
     end
 
     __demand(__index_launch)
-    for i = 0, conf.npieces do
+    for i = 0, npieces do
       apply_boundary_conditions(rp_all_private_p[i], enable)
     end
     __demand(__index_launch)
-    for i = 0, conf.npieces do
+    for i = 0, npieces do
       apply_boundary_conditions(rp_all_shared_p[i], enable)
     end
 
     __demand(__index_launch)
-    for i = 0, conf.npieces do
+    for i = 0, npieces do
       adv_pos_full(rp_all_private_p[i], dt, enable)
     end
     __demand(__index_launch)
-    for i = 0, conf.npieces do
+    for i = 0, npieces do
       adv_pos_full(rp_all_shared_p[i], dt, enable)
     end
 
     __demand(__index_launch)
-    for i = 0, conf.npieces do
+    for i = 0, npieces do
       calc_centers_full(rz_all_p[i],
                         rp_all_private_p[i],
                         rp_all_ghost_p[i],
@@ -1254,20 +1284,20 @@ do
                         enable)
     end
 
-    var num_negatives_full = 0
+    -- var num_negatives_full = 0
     __demand(__index_launch)
-    for i = 0, conf.npieces do
-      num_negatives_full +=
+    for i = 0, npieces do
+      -- num_negatives_full +=
         calc_volumes_full(rz_all_p[i],
                           rp_all_private_p[i],
                           rp_all_ghost_p[i],
                           rs_all_p[i],
                           enable)
     end
-    verify_calc_volumes_full(num_negatives_full)
+    -- verify_calc_volumes_full(num_negatives_full)
 
     __demand(__index_launch)
-    for i = 0, conf.npieces do
+    for i = 0, npieces do
       calc_work(rz_all_p[i],
                 rp_all_private_p[i],
                 rp_all_ghost_p[i],
@@ -1276,14 +1306,16 @@ do
     end
 
     __demand(__index_launch)
-    for i = 0, conf.npieces do
+    for i = 0, npieces do
       calc_work_rate_energy_rho_full(rz_all_p[i], dt, enable)
     end
 
+    save_ts = cycle == cstop - 1 - prune
+
     dthydro = dtmax
     __demand(__index_launch)
-    for i = 0, conf.npieces do
-      dthydro min= calc_dt_hydro(rz_all_p[i], dt, dtmax, cfl, cflv, enable)
+    for i = 0, npieces do
+      dthydro min= calc_dt_hydro(rz_all_p[i], rt_all_p[i], dt, dtmax, cfl, cflv, enable, save_ts)
     end
 
     cycle += 1
@@ -1425,6 +1457,7 @@ task toplevel()
   var rz_all = region(ispace(ptr, conf.nz), zone)
   var rp_all = region(ispace(ptr, conf.np), point)
   var rs_all = region(ispace(ptr, conf.ns), side(wild, wild, wild, wild))
+  var rt_all = region(ispace(ptr, conf.npieces), timestamp)
 
   var colorings : mesh_colorings
 
@@ -1465,6 +1498,8 @@ task toplevel()
   -- Partition sides into disjoint pieces by zone.
   var rs_all_p = partition(disjoint, rs_all, colorings.rs_all_c)
 
+  var rt_all_p = partition(equal, rt_all, ispace(ptr, conf.npieces))
+
   if conf.par_init then
     __demand(__index_launch)
     for i = 0, conf.npieces do
@@ -1492,6 +1527,7 @@ task toplevel()
            rp_all_private, rp_all_private_p,
            rp_all_ghost, rp_all_ghost_p, rp_all_shared_p,
            rs_all, rs_all_p,
+           rt_all, rt_all_p,
            conf)
   var stop_time = c.legion_get_current_time_in_micros()/1.e6
   output1("Elapsed time = %.6e (total)\n", stop_time - start_time)
