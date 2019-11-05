@@ -19,6 +19,7 @@ local codegen_hooks = require("regent/codegen_hooks")
 local cudahelper = require("regent/cudahelper")
 local data = require("common/data")
 local log = require("common/log")
+local licm = require("regent/licm")
 local openmphelper = require("regent/openmphelper")
 local pretty = require("regent/pretty")
 local report = require("common/report")
@@ -8612,7 +8613,10 @@ function codegen.stat_for_list(cx, node)
     --       cases where multi-dimensional kernel launches are profitable.
     if #block.stats == 1 and block.stats[1]:is(ast.typed.stat.ForNum) then
       local inner_loop = block.stats[1]
-      if inner_loop.metadata and inner_loop.metadata.parallelizable then
+      if std.config["cuda-2d-launch"] and
+         inner_loop.metadata and
+         inner_loop.metadata.parallelizable
+      then
         assert(#inner_loop.values == 2)
         cuda_2d_launch = true
         local index_type = inner_loop.symbol:gettype()
@@ -8643,6 +8647,9 @@ function codegen.stat_for_list(cx, node)
           })
         }
         block = block { stats = terralib.newlist({ inner_loop }) }
+      end
+      if std.config["cuda-licm"] then
+        block = block { stats = terralib.newlist({ licm.entry(node.symbol, inner_loop) }) }
       end
     end
   end
