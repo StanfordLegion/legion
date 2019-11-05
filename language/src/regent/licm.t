@@ -87,6 +87,13 @@ local check_invariant_expr_table = {
   [ast.typed.expr.ID]     = function(cx, node)
     return cx:is_invariant(node.value) or std.is_region(std.as_read(node.expr_type))
   end,
+  [ast.typed.expr.FieldAccess]  = function(cx, node)
+    if std.is_ref(node.expr_type) then
+      return data.all(unpack(node.expr_type:bounds():map(function(bound)
+        return cx:is_read_only(bound, node.expr_type.field_path)
+      end)))
+    end
+  end,
   [ast.typed.expr]        = check_invariant_pass_through_expr,
   [ast.condition_kind]    = check_invariant_pass_through_expr,
   [ast.disjointness_kind] = check_invariant_pass_through_expr,
@@ -198,10 +205,10 @@ end
 
 -- TODO: We only hoist statements of the form "var x = r[y]" where
 --       both x and y are invariant in the loop
-local function hoist_region_accesses(cx, block)
+local function hoist_region_accesses(cx, inner_loop)
   local hoisted = terralib.newlist()
   local stats = terralib.newlist()
-  block.stats:map(function(stat)
+  inner_loop.block.stats:map(function(stat)
     if stat:is(ast.typed.stat.Var) and stat.value then
       -- Must check if the value is still invariant due to loop-carried dependence
       local invariant = check_invariant.expr(cx, stat.value)
@@ -216,15 +223,17 @@ local function hoist_region_accesses(cx, block)
     end
   end)
   if #hoisted > 0 then
-    block = block { stats = stats }
-    hoisted:insert(ast.typed.stat.Block {
-      block = block,
+    hoisted:insert(inner_loop { block = inner_loop.block { stats = stats } })
+    return ast.typed.stat.Block {
+      block = ast.typed.Block {
+        stats = hoisted,
+        span = inner_loop.span,
+      },
       annotations = ast.default_annotations(),
-      span = block.span,
-    })
-    return block { stats = hoisted }
+      span = inner_loop.span,
+    }
   else
-    return block
+    return inner_loop
   end
 end
 
@@ -234,7 +243,7 @@ function licm.entry(loop_var, inner_loop)
   assert(inner_loop:is(ast.typed.stat.ForNum))
   local cx = context.new_loop_scope(loop_var)
   check_invariant.block(cx, inner_loop.block)
-  inner_loop = inner_loop { block = hoist_region_accesses(cx, inner_loop.block) }
+  inner_loop = hoist_region_accesses(cx, inner_loop)
   return inner_loop
 end
 
