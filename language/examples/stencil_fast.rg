@@ -141,6 +141,11 @@ fspace point {
   output : DTYPE,
 }
 
+fspace timestamp {
+  start : int64,
+  stop : int64,
+}
+
 if not use_python_main then
 
 terra to_rect(lo : int2d, hi : int2d) : c.legion_rect_2d_t
@@ -371,12 +376,16 @@ local function make_stencil(radius)
                      xp : region(ispace(int2d), point),
                      ym : region(ispace(int2d), point),
                      yp : region(ispace(int2d), point),
+                     times : region(timestamp),
                      print_ts : bool)
   where
-    reads writes(private.{input, output}),
+    reads writes(private.{input, output}, times),
     reads(xm.input, xp.input, ym.input, yp.input)
   do
-    if print_ts then c.printf("t: %ld\n", c.legion_get_current_time_in_micros()) end
+    if print_ts then
+      var t = c.legion_get_current_time_in_micros()
+      for x in times do x.start = t end
+    end
 
     var interior_rect = get_rect(interior.ispace)
     var interior_lo = int2d { x = interior_rect.lo.x[0], y = interior_rect.lo.x[1] }
@@ -442,15 +451,19 @@ task increment(private : region(ispace(int2d), point),
                xp : region(ispace(int2d), point),
                ym : region(ispace(int2d), point),
                yp : region(ispace(int2d), point),
+               times : region(timestamp),
                print_ts : bool)
-where reads writes(private.input, xm.input, xp.input, ym.input, yp.input) do
+where reads writes(private.input, xm.input, xp.input, ym.input, yp.input, times) do
   [make_increment_interior(private, exterior)]
   for i in xm do i.input += 1 end
   for i in xp do i.input += 1 end
   for i in ym do i.input += 1 end
   for i in yp do i.input += 1 end
 
-  if print_ts then c.printf("t: %ld\n", c.legion_get_current_time_in_micros()) end
+  if print_ts then
+    var t = c.legion_get_current_time_in_micros()
+    for x in times do x.stop = t end
+  end
 end
 
 task check(private : region(ispace(int2d), point),
@@ -487,6 +500,30 @@ end
 
 if not use_python_main then
 
+task read_config()
+  return common.read_config()
+end
+
+task get_elapsed(all_times : region(timestamp))
+where reads(all_times) do
+  var start = [int64:max()]
+  var stop = [int64:min()]
+
+  for t in all_times do
+    start min= t.start
+    stop max= t.stop
+  end
+
+  return 1e-6 * (stop - start)
+end
+
+task print_time(color : int, sim_time : double)
+  if color == 0 then
+    c.printf("ELAPSED TIME = %7.3f s\n", sim_time)
+  end
+end
+
+__demand(__inner, __replicable)
 task main()
   var conf = common.read_config()
 
@@ -520,6 +557,11 @@ task main()
   var pym_out = [make_ghost_y_partition(true)](ym, tiles, n, nt, radius, 0)
   var pyp_out = [make_ghost_y_partition(true)](yp, tiles, n, nt, radius, 0)
 
+  var times = region(ispace(ptr, nt2), timestamp)
+  var p_times = partition(equal, times, ispace(int1d, nt2))
+
+  fill(times.{start, stop}, 0)
+
   fill(points.{input, output}, init)
   fill(xm.{input, output}, init)
   fill(xp.{input, output}, init)
@@ -545,6 +587,8 @@ task main()
   --   end
   -- end
 
+  __fence(__execution, __block)
+
   __demand(__spmd)
   do
     -- for i = 0, nt2 do
@@ -555,11 +599,11 @@ task main()
     for t = 0, tsteps do
       -- __demand(__index_launch)
       for i = 0, nt2 do
-        stencil(private[i], interior[i], pxm_in[i], pxp_in[i], pym_in[i], pyp_in[i], t == tprune)
+        stencil(private[i], interior[i], pxm_in[i], pxp_in[i], pym_in[i], pyp_in[i], p_times[i], t == tprune)
       end
       -- __demand(__index_launch)
       for i = 0, nt2 do
-        increment(private[i], exterior[i], pxm_out[i], pxp_out[i], pym_out[i], pyp_out[i], t == tsteps - tprune - 1)
+        increment(private[i], exterior[i], pxm_out[i], pxp_out[i], pym_out[i], pyp_out[i], p_times[i], t == tsteps - tprune - 1)
       end
     end
 
@@ -567,6 +611,9 @@ task main()
       check(private[i], interior[i], tsteps, init)
     end
   end
+
+  var sim_time = get_elapsed(times)
+  for i = 0, nt2 do print_time(i, sim_time) end
 end
 
 else -- not use_python_main
