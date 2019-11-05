@@ -1328,19 +1328,7 @@ namespace Legion {
      * executing control-replicated tasks.
      */
     class ReplicateContext : public InnerContext {
-    public:
-      struct ReclaimFutureMapArgs :
-        public LgTaskArgs<ReclaimFutureMapArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_RECLAIM_FUTURE_MAP_TASK_ID;
-      public:
-        ReclaimFutureMapArgs(ReplicateContext *c, ReplFutureMapImpl *map)
-          : LgTaskArgs<ReclaimFutureMapArgs>(map->op->get_unique_op_id()),
-            ctx(c), impl(map) { }
-      public:
-        ReplicateContext *const ctx;
-        ReplFutureMapImpl *const impl;
-      };
+    public: 
       struct ISBroadcast {
       public:
         ISBroadcast(void) : expr_id(0), did(0) { }
@@ -1706,11 +1694,11 @@ namespace Legion {
       void unregister_collective(ShardCollective *collective);
     public:
       // Future map methods
-      ApBarrier get_next_future_map_barrier(void);
+      unsigned peek_next_future_map_barrier_index(void) const;
+      RtBarrier get_next_future_map_barrier(void);
       void register_future_map(ReplFutureMapImpl *map);
       ReplFutureMapImpl* find_or_buffer_future_map_request(Deserializer &derez);
       void unregister_future_map(ReplFutureMapImpl *map);
-      static void handle_future_map_reclaim(const void *args);
     public:
       // Physical template methods
       size_t register_trace_template(ShardedPhysicalTemplate *phy_template);
@@ -1755,6 +1743,9 @@ namespace Legion {
       // These barriers are for signaling when indirect copies are done
       std::vector<ApBarrier>  indirection_barriers;
       unsigned                next_indirection_bar_index;
+      // These barriers are used for signaling when future maps can be reclaimed
+      std::vector<RtBarrier>  future_map_barriers;
+      unsigned                next_future_map_bar_index;
     protected:
       ShardID index_space_allocator_shard;
       ShardID index_partition_allocator_shard;
@@ -1763,7 +1754,6 @@ namespace Legion {
       ShardID logical_region_allocator_shard;
     protected:
       ApBarrier pending_partition_barrier;
-      ApBarrier future_map_barrier;
       RtBarrier creation_barrier;
       RtBarrier deletion_barrier;
       RtBarrier inline_mapping_barrier;
@@ -1791,8 +1781,8 @@ namespace Legion {
       std::map<CollectiveID,std::vector<
                 std::pair<void*,size_t> > > pending_collective_updates;
     protected:
-      std::map<ApEvent,ReplFutureMapImpl*> future_maps;
-      std::map<ApEvent,std::vector<
+      std::map<RtEvent,ReplFutureMapImpl*> future_maps;
+      std::map<RtEvent,std::vector<
                 std::pair<void*,size_t> > > pending_future_map_requests;
     protected:
       std::map<size_t,ShardedPhysicalTemplate*> physical_templates;

@@ -8665,16 +8665,16 @@ namespace Legion {
           ctx_uid), owner_shard(owner), shard_manager(manager),
         total_shards(shard_manager->total_shards),
         next_close_mapped_bar_index(0), next_indirection_bar_index(0),
-        index_space_allocator_shard(0), index_partition_allocator_shard(0),
-        field_space_allocator_shard(0), field_allocator_shard(0),
-        logical_region_allocator_shard(0), next_available_collective_index(0),
-        next_physical_template_index(0), next_replicate_bar_index(0),
-        unordered_ops_counter(0), unordered_ops_epoch(MIN_UNORDERED_OPS_EPOCH)
+        next_future_map_bar_index(0), index_space_allocator_shard(0), 
+        index_partition_allocator_shard(0), field_space_allocator_shard(0), 
+        field_allocator_shard(0), logical_region_allocator_shard(0), 
+        next_available_collective_index(0), next_physical_template_index(0), 
+        next_replicate_bar_index(0), unordered_ops_counter(0), 
+        unordered_ops_epoch(MIN_UNORDERED_OPS_EPOCH)
     //--------------------------------------------------------------------------
     {
       // Get our allocation barriers
       pending_partition_barrier = manager->get_pending_partition_barrier();
-      future_map_barrier = manager->get_future_map_barrier();
       creation_barrier = manager->get_creation_barrier();
       deletion_barrier = manager->get_deletion_barrier();
       inline_mapping_barrier = manager->get_inline_mapping_barrier();
@@ -8721,6 +8721,12 @@ namespace Legion {
             idx < indirection_barriers.size(); idx += total_shards)
       {
         Realm::Barrier bar = indirection_barriers[idx];
+        bar.destroy_barrier();
+      }
+      for (unsigned idx = owner_shard->shard_id;
+            idx < future_map_barriers.size(); idx += total_shards)
+      {
+        Realm::Barrier bar = future_map_barriers[idx];
         bar.destroy_barrier();
       }
     }
@@ -12709,18 +12715,23 @@ namespace Legion {
     void ReplicateContext::exchange_common_resources(void)
     //--------------------------------------------------------------------------
     {
+      size_t num_barriers = LEGION_CONTROL_REPLICATION_COMMUNICATION_BARRIERS;
+      if (shard_manager->total_shards > num_barriers)
+        num_barriers = shard_manager->total_shards;
       // Exchange close map barriers across all the shards
       BarrierExchangeCollective<RtBarrier> mapped_collective(this,
-          LEGION_CONTROL_REPLICATION_COMMUNICATION_BARRIERS,
-          close_mapped_barriers, COLLECTIVE_LOC_50);
+          num_barriers, close_mapped_barriers, COLLECTIVE_LOC_50);
       mapped_collective.exchange_barriers_async();
       BarrierExchangeCollective<ApBarrier> indirect_collective(this,
-          LEGION_CONTROL_REPLICATION_COMMUNICATION_BARRIERS,
-          indirection_barriers, COLLECTIVE_LOC_79);
+          num_barriers, indirection_barriers, COLLECTIVE_LOC_79);
       indirect_collective.exchange_barriers_async();
+      BarrierExchangeCollective<RtBarrier> future_map_collective(this,
+          num_barriers, future_map_barriers, COLLECTIVE_LOC_90);
+      future_map_collective.exchange_barriers_async();
       // Wait for everything to be done
       mapped_collective.wait_for_barrier_exchange();
       indirect_collective.wait_for_barrier_exchange();
+      future_map_collective.wait_for_barrier_exchange();
     }
 
     //--------------------------------------------------------------------------
@@ -13575,11 +13586,21 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ApBarrier ReplicateContext::get_next_future_map_barrier(void)
+    unsigned ReplicateContext::peek_next_future_map_barrier_index(void) const
     //--------------------------------------------------------------------------
     {
-      ApBarrier result = future_map_barrier;
-      advance_replicate_barrier(future_map_barrier, total_shards);
+      return next_future_map_bar_index;
+    }
+
+    //--------------------------------------------------------------------------
+    RtBarrier ReplicateContext::get_next_future_map_barrier(void)
+    //--------------------------------------------------------------------------
+    {
+      RtBarrier &next = future_map_barriers[next_future_map_bar_index++];
+      if (next_future_map_bar_index == future_map_barriers.size())
+        next_future_map_bar_index = 0;
+      RtBarrier result = next;
+      advance_replicate_barrier(next, total_shards);
       return result;
     }
 
@@ -13596,7 +13617,7 @@ namespace Legion {
 #endif
         future_maps[map->future_map_barrier] = map; 
         // Check to see if we have any pending requests to perform
-        std::map<ApEvent,std::vector<std::pair<void*,size_t> > >::iterator
+        std::map<RtEvent,std::vector<std::pair<void*,size_t> > >::iterator
           finder = pending_future_map_requests.find(map->future_map_barrier);
         if (finder != pending_future_map_requests.end())
         {
@@ -13614,12 +13635,6 @@ namespace Legion {
           free(it->first);
         }
       }
-      // Then launch a task to reclaim it when the barrier has triggered
-      ReclaimFutureMapArgs args(this, map);
-      // Add a reference to the context to prevent premature deletion
-      this->add_reference();
-      runtime->issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY,
-                              Runtime::protect_event(map->future_map_barrier));
     }
 
     //--------------------------------------------------------------------------
@@ -13627,12 +13642,12 @@ namespace Legion {
                                                             Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      ApEvent future_map_event;
+      RtEvent future_map_event;
       derez.deserialize(future_map_event);
       AutoLock repl_lock(replication_lock);
       // See if we already have the future map in which case we can just
       // return it, otherwise we need to buffer the deserializer
-      std::map<ApEvent,ReplFutureMapImpl*>::const_iterator finder = 
+      std::map<RtEvent,ReplFutureMapImpl*>::const_iterator finder = 
         future_maps.find(future_map_event);
       if (finder != future_maps.end())
         return finder->second;
@@ -13652,7 +13667,7 @@ namespace Legion {
     {
       {
         AutoLock repl_lock(replication_lock);
-        std::map<ApEvent,ReplFutureMapImpl*>::iterator finder = 
+        std::map<RtEvent,ReplFutureMapImpl*>::iterator finder = 
           future_maps.find(map->future_map_barrier);
 #ifdef DEBUG_LEGION
         assert(finder != future_maps.end());
@@ -13661,17 +13676,7 @@ namespace Legion {
       }
       if (map->remove_base_resource_ref(REPLICATION_REF))
         delete map;
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void ReplicateContext::handle_future_map_reclaim(const void *arg)
-    //--------------------------------------------------------------------------
-    {
-      const ReclaimFutureMapArgs *recl_args = (const ReclaimFutureMapArgs*)arg;
-      recl_args->ctx->unregister_future_map(recl_args->impl);
-      if (recl_args->ctx->remove_reference())
-        delete recl_args->ctx;
-    }
+    } 
 
     //--------------------------------------------------------------------------
     size_t ReplicateContext::register_trace_template(

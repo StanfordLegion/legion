@@ -97,7 +97,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (future_map != NULL)
+      {
         future_map->add_base_gc_ref(FUTURE_HANDLE_REF);
+        future_map->argument_map_wrap();
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -1288,16 +1291,16 @@ namespace Legion {
                                          DistributedID did,AddressSpaceID owner)
       : FutureMapImpl(ctx, op, rt, did, owner), 
         repl_ctx(ctx), shard_domain(shard_dom),
+        future_map_barrier_index(ctx->peek_next_future_map_barrier_index()),
         future_map_barrier(ctx->get_next_future_map_barrier()),
         collective_index(ctx->get_next_collective_index(COLLECTIVE_LOC_32)),
-        op_depth(repl_ctx->get_depth()),
-#ifdef LEGION_SPY
-        op_uid(op->get_unique_op_id()),
-#endif
+        op_depth(repl_ctx->get_depth()), op_uid(op->get_unique_op_id()),
         sharding_function_ready(Runtime::create_rt_user_event()), 
-        sharding_function(NULL), collective_performed(false)
+        sharding_function(NULL), collective_performed(false), 
+        has_non_trivial_call(false)
     //--------------------------------------------------------------------------
     {
+      repl_ctx->add_reference();
       // Now register ourselves with the context
       repl_ctx->register_future_map(this);
     }
@@ -1305,10 +1308,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     ReplFutureMapImpl::ReplFutureMapImpl(const ReplFutureMapImpl &rhs)
       : FutureMapImpl(rhs), repl_ctx(NULL), shard_domain(Domain::NO_DOMAIN), 
-        collective_index(0), op_depth(0)
-#ifdef LEGION_SPY
-        , op_uid(0)
-#endif
+        future_map_barrier_index(0), collective_index(0), op_depth(0), op_uid(0)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -1319,6 +1319,8 @@ namespace Legion {
     ReplFutureMapImpl::~ReplFutureMapImpl(void)
     //--------------------------------------------------------------------------
     {
+      if (repl_ctx->remove_reference())
+        delete repl_ctx;
     }
 
     //--------------------------------------------------------------------------
@@ -1340,7 +1342,38 @@ namespace Legion {
 #endif
       // Do the base version, then arrive on our barrier
       FutureMapImpl::notify_inactive(mutator);
-      Runtime::phase_barrier_arrive(future_map_barrier, 1/*count*/);
+      // Decide what to do here about our future map barrier depending
+      // on whether we saw any non-trivial calls on this shard. If we 
+      // did not see any non-trivial calls then neither should any of
+      // the other shards and we don't have to use the barrier to guide
+      // reclamation of this future map
+      if (has_non_trivial_call)
+      {
+        Runtime::phase_barrier_arrive(future_map_barrier, 1/*count*/);
+        if (!future_map_barrier.has_triggered())
+        {
+          // Add a reference to this to prevent it being collected
+          add_base_resource_ref(DEFERRED_TASK_REF);
+          // Launch a task to do the reclaim once everyone is done
+          ReclaimFutureMapArgs args(repl_ctx, this, op_uid);
+          runtime->issue_runtime_meta_task(args, 
+              LG_LATENCY_WORK_PRIORITY, future_map_barrier);
+        }
+        else
+          repl_ctx->unregister_future_map(this);
+      }
+      else
+      {
+        // No non-trivial call so we can unregister ourselves now
+        repl_ctx->unregister_future_map(this);
+        // If we're the owner shard of the barrier then do the arrival
+        // for all the shards so that the barrier generation triggers
+        // without needing to do any communication
+        const size_t total_shards = repl_ctx->shard_manager->total_shards;
+        if ((future_map_barrier_index % total_shards) ==  
+            repl_ctx->owner_shard->shard_id)
+          Runtime::phase_barrier_arrive(future_map_barrier, total_shards);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -1348,6 +1381,7 @@ namespace Legion {
                                          bool allow_empty)
     //--------------------------------------------------------------------------
     {
+      has_non_trivial_call = true;
       // Do a quick check to see if we've already got it
       {
         AutoLock f_lock(future_map_lock,1,false/*exclusive*/);
@@ -1370,7 +1404,7 @@ namespace Legion {
         Serializer rez;
         rez.serialize(repl_ctx->shard_manager->repl_id);
         rez.serialize(owner_shard);
-        rez.serialize<ApEvent>(future_map_barrier);
+        rez.serialize<RtEvent>(future_map_barrier);
         rez.serialize(point);
         rez.serialize<bool>(allow_empty);
         rez.serialize(did);
@@ -1400,6 +1434,7 @@ namespace Legion {
                                            std::map<DomainPoint,Future> &others)
     //--------------------------------------------------------------------------
     {
+      has_non_trivial_call = true;
       // We know this call only comes from the application so we don't
       // need to worry about thread safety
       if (collective_performed)
@@ -1608,6 +1643,16 @@ namespace Legion {
         Runtime::trigger_event(done_event, Runtime::merge_events(done_events));
       else
         Runtime::trigger_event(done_event);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/void ReplFutureMapImpl::handle_future_map_reclaim(const void *arg)
+    //--------------------------------------------------------------------------
+    {
+      const ReclaimFutureMapArgs *recl_args = (const ReclaimFutureMapArgs*)arg;
+      recl_args->ctx->unregister_future_map(recl_args->impl);
+      if (recl_args->impl->remove_base_resource_ref(DEFERRED_TASK_REF))
+        delete recl_args->impl;
     }
 
     /////////////////////////////////////////////////////////////
@@ -24204,7 +24249,7 @@ namespace Legion {
           }
         case LG_RECLAIM_FUTURE_MAP_TASK_ID:
           {
-            ReplicateContext::handle_future_map_reclaim(args);
+            ReplFutureMapImpl::handle_future_map_reclaim(args);
             break;
           }
         case LG_TIGHTEN_INDEX_SPACE_TASK_ID:

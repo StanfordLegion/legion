@@ -354,6 +354,9 @@ namespace Legion {
                                     const char *warning_string = NULL);
       virtual void complete_all_futures(void);
       bool reset_all_futures(void);
+      // Use this method to detect when we're wrapped by an argument
+      // map which is mainly needed in control replication
+      virtual void argument_map_wrap(void) { }
     public:
       virtual void get_all_futures(std::map<DomainPoint,Future> &futures);
       void set_all_futures(const std::map<DomainPoint,Future> &futures);
@@ -404,6 +407,19 @@ namespace Legion {
         RtUserEvent done_event;
         bool allow_empty;
       };
+      struct ReclaimFutureMapArgs :
+        public LgTaskArgs<ReclaimFutureMapArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_RECLAIM_FUTURE_MAP_TASK_ID;
+      public:
+        ReclaimFutureMapArgs(ReplicateContext *c, 
+                             ReplFutureMapImpl *map, UniqueID uid)
+          : LgTaskArgs<ReclaimFutureMapArgs>(uid),
+            ctx(c), impl(map) { }
+      public:
+        ReplicateContext *const ctx;
+        ReplFutureMapImpl *const impl;
+      };
     public:
       ReplFutureMapImpl(ReplicateContext *ctx, Operation *op, 
                         const Domain &shard_domain, Runtime *rt, 
@@ -421,6 +437,7 @@ namespace Legion {
       virtual void get_all_futures(std::map<DomainPoint,Future> &futures);
       virtual void wait_all_results(bool silence_warnings = true,
                                     const char *warning_string = NULL);
+      virtual void argument_map_wrap(void) { has_non_trivial_call = true; }
     public:
       virtual void complete_all_futures(void);
     public:
@@ -434,23 +451,30 @@ namespace Legion {
     public:
       static void handle_future_map_response(Deserializer &derez,
                                              Runtime *runtime);
+      static void handle_future_map_reclaim(const void *args);
     public:
       ReplicateContext *const repl_ctx;
       const Domain shard_domain;
-      const ApBarrier future_map_barrier;
+      const unsigned future_map_barrier_index;
+      const RtBarrier future_map_barrier;
       const CollectiveID collective_index; // in case we have to do all-to-all
       // Unlike normal future maps, we know these only ever exist on the
       // node where they are made so we store their producer op information
       // in case they have to make futures from remote shards
       const int op_depth; 
-#ifdef LEGION_SPY
       const UniqueID op_uid;
-#endif
     protected:
       std::vector<PendingRequest> pending_future_map_requests;
       RtUserEvent sharding_function_ready;
       ShardingFunction *sharding_function;
       bool collective_performed;
+      // For replicated future maps we track whether there have been any
+      // non-triival calls to this shard of the future map. If there are
+      // then we know there could be non-trivial calls in other shards.
+      // Conversely, if there are no non-trivial calls here then there
+      // shouldn't be in other shards as well because of the rules of
+      // control replication.
+      bool has_non_trivial_call;
     };
 
     /**

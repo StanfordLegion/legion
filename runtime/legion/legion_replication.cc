@@ -6299,8 +6299,6 @@ namespace Legion {
           RtBarrier(Realm::Barrier::create_barrier(total_shards));
         pending_partition_barrier = 
           ApBarrier(Realm::Barrier::create_barrier(total_shards));
-        future_map_barrier = 
-          ApBarrier(Realm::Barrier::create_barrier(total_shards));
         // Only need shards-1 for arrivals here since it is used
         // to signal from all the non-creator shards to the creator shard
         creation_barrier = 
@@ -6373,7 +6371,6 @@ namespace Legion {
         {
           startup_barrier.destroy_barrier();
           pending_partition_barrier.destroy_barrier();
-          future_map_barrier.destroy_barrier();
           creation_barrier.destroy_barrier();
           deletion_barrier.destroy_barrier();
           inline_mapping_barrier.destroy_barrier();
@@ -6523,7 +6520,6 @@ namespace Legion {
         {
 #ifdef DEBUG_LEGION
           assert(pending_partition_barrier.exists());
-          assert(future_map_barrier.exists());
           assert(creation_barrier.exists());
           assert(deletion_barrier.exists());
           assert(inline_mapping_barrier.exists());
@@ -6536,7 +6532,6 @@ namespace Legion {
           assert(shard_mapping.size() == total_shards);
 #endif
           rez.serialize(pending_partition_barrier);
-          rez.serialize(future_map_barrier);
           rez.serialize(creation_barrier);
           rez.serialize(deletion_barrier);
           rez.serialize(inline_mapping_barrier);
@@ -6583,7 +6578,6 @@ namespace Legion {
       if (control_replicated)
       {
         derez.deserialize(pending_partition_barrier);
-        derez.deserialize(future_map_barrier);
         derez.deserialize(creation_barrier);
         derez.deserialize(deletion_barrier);
         derez.deserialize(inline_mapping_barrier);

@@ -1893,8 +1893,6 @@ namespace Legion {
     public:
       inline ApBarrier get_pending_partition_barrier(void) const
         { return pending_partition_barrier; }
-      inline ApBarrier get_future_map_barrier(void) const
-        { return future_map_barrier; }
       inline RtBarrier get_creation_barrier(void) const
         { return creation_barrier; }
       inline RtBarrier get_deletion_barrier(void) const
@@ -2033,7 +2031,6 @@ namespace Legion {
     protected:
       RtBarrier startup_barrier;
       ApBarrier pending_partition_barrier;
-      ApBarrier future_map_barrier;
       RtBarrier creation_barrier;
       RtBarrier deletion_barrier;
       RtBarrier inline_mapping_barrier;
