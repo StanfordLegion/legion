@@ -344,6 +344,7 @@ namespace Legion {
       virtual void notify_inactive(ReferenceMutator *mutator);
     public:
       virtual Future get_future(const DomainPoint &point, 
+                                bool internal_only,
                                 bool allow_empty = false);
       void set_future(const DomainPoint &point, FutureImpl *impl,
                       ReferenceMutator *mutator);
@@ -433,7 +434,7 @@ namespace Legion {
       virtual void notify_inactive(ReferenceMutator *mutator);
     public:
       virtual Future get_future(const DomainPoint &point,
-                                bool allow_empty = false);
+                                bool internal, bool allow_empty = false);
       virtual void get_all_futures(std::map<DomainPoint,Future> &futures);
       virtual void wait_all_results(bool silence_warnings = true,
                                     const char *warning_string = NULL);

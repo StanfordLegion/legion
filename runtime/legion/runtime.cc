@@ -965,7 +965,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Future FutureMapImpl::get_future(const DomainPoint &point, bool allow_empty)
+    Future FutureMapImpl::get_future(const DomainPoint &point, 
+                                     bool internal, bool allow_empty)
     //--------------------------------------------------------------------------
     {
       if (!is_owner())
@@ -1071,7 +1072,7 @@ namespace Legion {
                                         const char *warning_string)
     //--------------------------------------------------------------------------
     {
-      Future f = get_future(point);
+      Future f = get_future(point, false/*internal*/);
       f.get_void_result(silence_warnings, warning_string);
     }
 
@@ -1235,7 +1236,7 @@ namespace Legion {
       
       // Should always find it since this is the owner node
       FutureMapImpl *impl = runtime->find_or_create_future_map(did, NULL, NULL);
-      Future f = impl->get_future(point, allow_empty);
+      Future f = impl->get_future(point, false/*internal*/, allow_empty);
       if (allow_empty && (f.impl == NULL))
       {
         Runtime::trigger_event(done);
@@ -1378,10 +1379,11 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     Future ReplFutureMapImpl::get_future(const DomainPoint &point,
-                                         bool allow_empty)
+                                         bool internal, bool allow_empty)
     //--------------------------------------------------------------------------
     {
-      has_non_trivial_call = true;
+      if (!internal)
+        has_non_trivial_call = true;
       // Do a quick check to see if we've already got it
       {
         AutoLock f_lock(future_map_lock,1,false/*exclusive*/);
@@ -1426,7 +1428,7 @@ namespace Legion {
         return finder->second;
       }
       else // If we're the owner shard we can just do the normal thing
-        return FutureMapImpl::get_future(point, allow_empty);
+        return FutureMapImpl::get_future(point, internal, allow_empty);
     }
 
     //--------------------------------------------------------------------------
@@ -1567,7 +1569,7 @@ namespace Legion {
       assert(sharding_function != NULL);
 #endif
       const AddressSpaceID source = runtime->determine_owner(src_did);
-      Future result = get_future(point, allow_empty);
+      Future result = get_future(point, false/*internal*/, allow_empty);
       if (source != runtime->address_space)
       {
         // Remote future map so send the answer back
@@ -23964,7 +23966,8 @@ namespace Legion {
             for (Domain::DomainPointIterator itr(future_args->domain); 
                   itr; itr++)
             {
-              Future f = future_args->future_map->get_future(itr.p);
+              Future f = 
+                future_args->future_map->get_future(itr.p, true/*internal*/);
               if (result_size > 0)
                 f.impl->set_result(result, result_size, false/*own*/);
             }

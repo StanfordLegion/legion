@@ -6852,7 +6852,8 @@ namespace Legion {
       // Get our argument
       if (point_arguments.impl != NULL)
       {
-        Future f = point_arguments.impl->get_future(point, true/*allow empty*/);
+        Future f = point_arguments.impl->get_future(point, true/*internal*/,
+                                                    true/*allow empty*/);
         if (f.impl != NULL)
         {
           ApEvent ready = f.impl->get_ready_event();
@@ -7992,7 +7993,7 @@ namespace Legion {
                 predicate_false_future.impl->get_untyped_result(true,NULL,true);
               for (Domain::DomainPointIterator itr(local_domain); itr; itr++)
               {
-                Future f = future_map.get_future(itr.p);
+                Future f = future_map.impl->get_future(itr.p, true/*internal*/);
                 if (result_size > 0)
                   f.impl->set_result(result, result_size, false/*own*/);
               }
@@ -8014,7 +8015,7 @@ namespace Legion {
           {
             for (Domain::DomainPointIterator itr(local_domain); itr; itr++)
             {
-              Future f = future_map.get_future(itr.p);
+              Future f = future_map.impl->get_future(itr.p, true/*internal*/);
               if (predicate_false_size > 0)
                 f.impl->set_result(predicate_false_result,
                                    predicate_false_size, false/*own*/);
@@ -8345,7 +8346,8 @@ namespace Legion {
         // Get our local args
         if (point_arguments.impl != NULL)
         {
-          Future local_arg = point_arguments.impl->get_future(index_point);
+          Future local_arg = 
+            point_arguments.impl->get_future(index_point, false/*internal*/);
           if (local_arg.impl != NULL)
           {
             local_args = local_arg.impl->get_untyped_result(true, NULL, true);
@@ -8397,7 +8399,7 @@ namespace Legion {
     {
       if (redop == 0)
       {
-        Future f = future_map.impl->get_future(index_point);
+        Future f = future_map.impl->get_future(index_point, true/*internal*/);
         f.impl->set_result(res, res_size, owned);
       }
       else
@@ -8489,7 +8491,7 @@ namespace Legion {
       {
         if (must_epoch == NULL)
         {
-          Future f = future_map.get_future(point);
+          Future f = future_map.impl->get_future(point, true/*internal*/);
           f.impl->set_result(result, result_size, owner);
         }
         else

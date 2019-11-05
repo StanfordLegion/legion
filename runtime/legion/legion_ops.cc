@@ -11899,7 +11899,7 @@ namespace Legion {
                                  size_t result_size, bool owner)
     //--------------------------------------------------------------------------
     {
-      Future f = result_map.impl->get_future(point);
+      Future f = result_map.impl->get_future(point, true/*internal*/);
       f.impl->set_result(result, result_size, owner);
     }
 

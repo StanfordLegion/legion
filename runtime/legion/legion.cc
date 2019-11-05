@@ -2530,7 +2530,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(impl != NULL);
 #endif
-      return impl->get_future(point);
+      return impl->get_future(point, false/*internal*/);
     }
 
     //--------------------------------------------------------------------------

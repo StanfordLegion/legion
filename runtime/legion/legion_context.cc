@@ -4875,7 +4875,7 @@ namespace Legion {
             for (Domain::DomainPointIterator itr(launcher.launch_domain); 
                   itr; itr++)
             {
-              Future f = result->get_future(itr.p);
+              Future f = result->get_future(itr.p, true/*internal*/);
               f.impl->set_result(f_result, f_result_size, false/*own*/);
             }
             result->complete_all_futures();
@@ -4915,7 +4915,7 @@ namespace Legion {
           // Just initialize all the futures
           for (Domain::DomainPointIterator itr(launcher.launch_domain); 
                 itr; itr++)
-            result->get_future(itr.p);
+            result->get_future(itr.p, true/*internal*/);
         }
         else
         {
@@ -4924,7 +4924,7 @@ namespace Legion {
           for (Domain::DomainPointIterator itr(launcher.launch_domain); 
                 itr; itr++)
           {
-            Future f = result->get_future(itr.p);
+            Future f = result->get_future(itr.p, true/*internal*/);
             f.impl->set_result(ptr, ptr_size, false/*own*/);
           }
         }
@@ -11722,7 +11722,7 @@ namespace Legion {
             for (Domain::DomainPointIterator itr(launcher.launch_domain); 
                   itr; itr++)
             {
-              Future f = result->get_future(itr.p);
+              Future f = result->get_future(itr.p, true/*internal*/);
               f.impl->set_result(f_result, f_result_size, false/*own*/);
             }
             result->complete_all_futures();
@@ -11762,7 +11762,7 @@ namespace Legion {
           // Just initialize all the futures
           for (Domain::DomainPointIterator itr(launcher.launch_domain); 
                 itr; itr++)
-            result->get_future(itr.p);
+            result->get_future(itr.p, true/*internal*/);
         }
         else
         {
@@ -11771,7 +11771,7 @@ namespace Legion {
           for (Domain::DomainPointIterator itr(launcher.launch_domain); 
                 itr; itr++)
           {
-            Future f = result->get_future(itr.p);
+            Future f = result->get_future(itr.p, true/*internal*/);
             f.impl->set_result(ptr, ptr_size, false/*own*/);
           }
         }
