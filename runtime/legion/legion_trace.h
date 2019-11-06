@@ -484,7 +484,7 @@ namespace Legion {
     public:
       PhysicalTemplate* start_new_template(void);
       void record_replayable_capture(PhysicalTemplate *tpl);
-      void record_failed_capture(void);
+      void record_failed_capture(PhysicalTemplate *tpl);
     public:
       const std::vector<Processor> &get_replay_targets(void)
         { return replay_targets; }
@@ -687,6 +687,8 @@ namespace Legion {
     public:
       inline bool is_replaying(void) const { return !recording; }
       inline bool is_replayable(void) const { return replayable.replayable; }
+      inline const std::string& get_replayable_message(void) const
+        { return replayable.message; }
     public:
       virtual bool is_recording(void) const { return recording; }
       virtual void add_recorder_reference(void) { /*do nothing*/ }

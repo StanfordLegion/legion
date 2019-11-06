@@ -5489,7 +5489,7 @@ namespace Legion {
           if (pending_deletion.exists())
             execution_precondition = Runtime::merge_events(NULL,
                 execution_precondition, ApEvent(pending_deletion));  
-          physical_trace->record_failed_capture();
+          physical_trace->record_failed_capture(current_template);
         }
         else
           physical_trace->record_replayable_capture(current_template);
@@ -5714,7 +5714,7 @@ namespace Legion {
           if (pending_deletion.exists())
             execution_precondition = Runtime::merge_events(NULL,
                 execution_precondition, ApEvent(pending_deletion));  
-          physical_trace->record_failed_capture();
+          physical_trace->record_failed_capture(current_template);
         }
         else
           physical_trace->record_replayable_capture(current_template);

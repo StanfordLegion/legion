@@ -1096,16 +1096,17 @@ function cudahelper.generate_parallel_prefix_op(variant, total, lhs_wr, lhs_rd, 
 end
 
 function cudahelper.codegen_kernel_call(kernel_id, count, args, shared_mem_size, tight)
-  local setupArguments = terralib.newlist()
+  local setup_arguments = terralib.newlist()
 
-  local offset = 0
+  local launch_args = terralib.newsymbol((&opaque)[#args], "launch_args")
+  setup_arguments:insert(quote
+    var [launch_args]
+  end)
   for i = 1, #args do
     local arg =  args[i]
-    local size = terralib.sizeof(arg.type)
-    setupArguments:insert(quote
-      RuntimeAPI.cudaSetupArgument(&[arg], size, offset)
+    setup_arguments:insert(quote
+      [launch_args][i-1] = &[arg]
     end)
-    offset = offset + size
   end
 
   local grid = terralib.newsymbol(RuntimeAPI.dim3, "grid")
@@ -1137,9 +1138,8 @@ function cudahelper.codegen_kernel_call(kernel_id, count, args, shared_mem_size,
   return quote
     var [grid], [block]
     [launch_domain_init]
-    RuntimeAPI.cudaConfigureCall([grid], [block], shared_mem_size, nil)
-    [setupArguments]
-    RuntimeAPI.cudaLaunch([&int8](kernel_id))
+    [setup_arguments]
+    RuntimeAPI.cudaLaunchKernel([&opaque](kernel_id), [grid], [block], [launch_args], shared_mem_size, nil)
   end
 end
 

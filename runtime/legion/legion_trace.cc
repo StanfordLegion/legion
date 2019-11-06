@@ -1235,7 +1235,7 @@ namespace Legion {
           if (pending_deletion.exists())
             execution_precondition = Runtime::merge_events(NULL,
                 execution_precondition, ApEvent(pending_deletion));  
-          physical_trace->record_failed_capture();
+          physical_trace->record_failed_capture(current_template);
         }
         else
           physical_trace->record_replayable_capture(current_template);
@@ -1403,7 +1403,7 @@ namespace Legion {
           if (pending_deletion.exists())
             execution_precondition = Runtime::merge_events(NULL,
                 execution_precondition, ApEvent(pending_deletion));  
-          physical_trace->record_failed_capture();
+          physical_trace->record_failed_capture(current_template);
         }
         else
           physical_trace->record_replayable_capture(current_template);
@@ -1838,18 +1838,21 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTrace::record_failed_capture(void)
+    void PhysicalTrace::record_failed_capture(PhysicalTemplate *tpl)
     //--------------------------------------------------------------------------
     {
       if (++nonreplayable_count > LEGION_NON_REPLAYABLE_WARNING)
       {
+        const std::string &message = tpl->get_replayable_message();
+        const char *message_buffer = message.c_str();
         REPORT_LEGION_WARNING(LEGION_WARNING_NON_REPLAYABLE_COUNT_EXCEEDED,
             "WARNING: The runtime has failed to memoize the trace more than "
             "%u times, due to the absence of a replayable template. It is "
             "highly likely that trace %u will not be memoized for the rest "
-            "of execution. Please change the mapper to stop making "
-            "memoization requests.", LEGION_NON_REPLAYABLE_WARNING,
-            logical_trace->get_trace_id())
+            "of execution. The most recent template was not replayable "
+            "for the following reason: %s. Please change the mapper to stop "
+            "making memoization requests.", LEGION_NON_REPLAYABLE_WARNING,
+            logical_trace->get_trace_id(), message_buffer)
         nonreplayable_count = 0;
       }
       current_template = NULL;
