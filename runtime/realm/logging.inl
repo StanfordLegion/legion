@@ -23,6 +23,65 @@
 #include <stdlib.h>
 #include <string.h>
 
+// static checks in here require these to be #define's instead of the enums
+//  defined in logging.h - we'll push/pop these to avoid polluting
+//  other namespaces
+#pragma push_macro("LEVEL_SPEW")
+#pragma push_macro("LEVEL_DEBUG")
+#pragma push_macro("LEVEL_INFO")
+#pragma push_macro("LEVEL_PRINT")
+#pragma push_macro("LEVEL_WARNING")
+#pragma push_macro("LEVEL_ERROR")
+#pragma push_macro("LEVEL_FATAL")
+#pragma push_macro("LEVEL_NONE")
+// in case they were already defined...
+#undef LEVEL_SPEW
+#undef LEVEL_DEBUG
+#undef LEVEL_INFO
+#undef LEVEL_PRINT
+#undef LEVEL_WARNING
+#undef LEVEL_ERROR
+#undef LEVEL_FATAL
+#undef LEVEL_NONE
+#define LEVEL_SPEW 0
+#define LEVEL_DEBUG 1
+#define LEVEL_INFO 2
+#define LEVEL_PRINT 3
+#define LEVEL_WARNING 4
+#define LEVEL_ERROR 5
+#define LEVEL_FATAL 6
+#define LEVEL_NONE 7
+
+#if REALM_LOGGING_MIN_LEVEL <= LEVEL_SPEW
+#define REALM_LOGGING_DO_SPEW
+#endif
+#if REALM_LOGGING_MIN_LEVEL <= LEVEL_DEBUG
+#define REALM_LOGGING_DO_DEBUG
+#endif
+#if REALM_LOGGING_MIN_LEVEL <= LEVEL_INFO
+#define REALM_LOGGING_DO_INFO
+#endif
+#if REALM_LOGGING_MIN_LEVEL <= LEVEL_PRINT
+#define REALM_LOGGING_DO_PRINT
+#endif
+#if REALM_LOGGING_MIN_LEVEL <= LEVEL_WARNING
+#define REALM_LOGGING_DO_WARNING
+#endif
+#if REALM_LOGGING_MIN_LEVEL <= LEVEL_ERROR
+#define REALM_LOGGING_DO_ERROR
+#endif
+#if REALM_LOGGING_MIN_LEVEL <= LEVEL_FATAL
+#define REALM_LOGGING_DO_FATAL
+#endif
+#pragma pop_macro("LEVEL_SPEW")
+#pragma pop_macro("LEVEL_DEBUG")
+#pragma pop_macro("LEVEL_INFO")
+#pragma pop_macro("LEVEL_PRINT")
+#pragma pop_macro("LEVEL_WARNING")
+#pragma pop_macro("LEVEL_ERROR")
+#pragma pop_macro("LEVEL_FATAL")
+#pragma pop_macro("LEVEL_NONE")
+
 namespace Realm {
   
   ////////////////////////////////////////////////////////////////////////
@@ -41,7 +100,7 @@ namespace Realm {
   
   inline LoggerMessage Logger::spew(void)
   {
-#if REALM_LOGGING_MIN_LEVEL > LEVEL_SPEW // static early out
+#ifndef REALM_LOGGING_DO_SPEW           // static early out
     return LoggerMessage();
 #else
     if(log_level > LEVEL_SPEW)          // dynamic early out
@@ -53,7 +112,7 @@ namespace Realm {
   
   inline LoggerMessage Logger::spew(LoggerMessageID messageID)
   {
-#if REALM_LOGGING_MIN_LEVEL > LEVEL_SPEW // static early out
+#ifndef REALM_LOGGING_DO_SPEW            // static early out
     return LoggerMessage();
 #else
     if(log_level > LEVEL_SPEW)           // dynamic early out
@@ -65,7 +124,7 @@ namespace Realm {
   
   inline LoggerMessage Logger::debug(void)
   {
-#if REALM_LOGGING_MIN_LEVEL > LEVEL_DEBUG // static early out
+#ifndef REALM_LOGGING_DO_DEBUG            // static early out
     return LoggerMessage();
 #else
     if(log_level > LEVEL_DEBUG)           // dynamic early out
@@ -77,7 +136,7 @@ namespace Realm {
   
   inline LoggerMessage Logger::debug(LoggerMessageID messageID)
   {
-#if REALM_LOGGING_MIN_LEVEL > LEVEL_DEBUG // static early out
+#ifndef REALM_LOGGING_DO_DEBUG            // static early out
     return LoggerMessage();
 #else
     if(log_level > LEVEL_DEBUG)           // dynamic early out
@@ -89,7 +148,7 @@ namespace Realm {
   
   inline LoggerMessage Logger::info(void)
   {
-#if REALM_LOGGING_MIN_LEVEL > LEVEL_INFO // static early out
+#ifndef REALM_LOGGING_DO_INFO            // static early out
     return LoggerMessage();
 #else
     if(log_level > LEVEL_INFO)           // dynamic early out
@@ -101,7 +160,7 @@ namespace Realm {
   
   inline LoggerMessage Logger::info(LoggerMessageID messageID)
   {
-#if REALM_LOGGING_MIN_LEVEL > LEVEL_INFO // static early out
+#ifndef REALM_LOGGING_DO_INFO             // static early out
     return LoggerMessage();
 #else
     if(log_level > LEVEL_INFO)           // dynamic early out
@@ -113,7 +172,7 @@ namespace Realm {
   
   inline LoggerMessage Logger::print(void)
   {
-#if REALM_LOGGING_MIN_LEVEL > LEVEL_PRINT // static early out
+#ifndef REALM_LOGGING_DO_PRINT           // static early out
     return LoggerMessage();
 #else
     if(log_level > LEVEL_PRINT)          // dynamic early out
@@ -125,7 +184,7 @@ namespace Realm {
   
   inline LoggerMessage Logger::print(LoggerMessageID messageID)
   {
-#if REALM_LOGGING_MIN_LEVEL > LEVEL_PRINT // static early out
+#ifndef REALM_LOGGING_DO_PRINT            // static early out
     return LoggerMessage();
 #else
     if(log_level > LEVEL_PRINT)           // dynamic early out
@@ -137,7 +196,7 @@ namespace Realm {
   
   inline LoggerMessage Logger::warning(void)
   {
-#if REALM_LOGGING_MIN_LEVEL > LEVEL_WARNING // static early out
+#ifndef REALM_LOGGING_DO_WARNING            // static early out
     return LoggerMessage();
 #else
     if(log_level > LEVEL_WARNING)           // dynamic early out
@@ -149,7 +208,7 @@ namespace Realm {
   
   inline LoggerMessage Logger::warning(LoggerMessageID messageID)
   {
-#if REALM_LOGGING_MIN_LEVEL > LEVEL_WARNING // static early out
+#ifndef REALM_LOGGING_DO_WARNING            // static early out
     return LoggerMessage();
 #else
     if(log_level > LEVEL_WARNING)           // dynamic early out
@@ -161,7 +220,7 @@ namespace Realm {
   
   inline LoggerMessage Logger::error(void)
   {
-#if REALM_LOGGING_MIN_LEVEL > LEVEL_ERROR // static early out
+#ifndef REALM_LOGGING_DO_ERROR            // static early out
     return LoggerMessage();
 #else
     if(log_level > LEVEL_ERROR)           // dynamic early out
@@ -173,7 +232,7 @@ namespace Realm {
   
   inline LoggerMessage Logger::error(LoggerMessageID messageID)
   {
-#if REALM_LOGGING_MIN_LEVEL > LEVEL_ERROR // static early out
+#ifndef REALM_LOGGING_DO_ERROR            // static early out
     return LoggerMessage();
 #else
     if(log_level > LEVEL_ERROR)           // dynamic early out
@@ -185,7 +244,7 @@ namespace Realm {
   
   inline LoggerMessage Logger::fatal(void)
   {
-#if REALM_LOGGING_MIN_LEVEL > LEVEL_FATAL // static early out
+#ifndef REALM_LOGGING_DO_FATAL            // static early out
     return LoggerMessage();
 #else
     if(log_level > LEVEL_FATAL)           // dynamic early out
@@ -197,7 +256,7 @@ namespace Realm {
   
   inline LoggerMessage Logger::fatal(LoggerMessageID messageID)
   {
-#if REALM_LOGGING_MIN_LEVEL > LEVEL_FATAL // static early out
+#ifndef REALM_LOGGING_DO_FATAL            // static early out
     return LoggerMessage();
 #else
     if(log_level > LEVEL_FATAL)           // dynamic early out
@@ -210,11 +269,15 @@ namespace Realm {
   // use this only if you want a dynamic level for some reason
   inline LoggerMessage Logger::newmsg(LoggingLevel level)
   {
+#ifndef REALM_LOGGING_DO_FATAL            // static early out (fatal is highest)
+    return LoggerMessage();
+#else
     if((REALM_LOGGING_MIN_LEVEL > level) ||
-    (log_level > level))
+       (log_level > level))
     return LoggerMessage();
     
     return LoggerMessage(this, true, level);
+#endif
   }
   
   
@@ -230,7 +293,7 @@ namespace Realm {
   // old printf-style interface
   inline void Logger::spew(const char *fmt, ...)
   {
-#if REALM_LOGGING_MIN_LEVEL <= LEVEL_SPEW // static early out
+#ifdef REALM_LOGGING_DO_SPEW              // static early out
     if(log_level > LEVEL_SPEW)            // dynamic early out
       return;
     
@@ -245,7 +308,7 @@ namespace Realm {
   
   inline void Logger::spew(LoggerMessageID messageID, const char *fmt, ...)
   {
-#if REALM_LOGGING_MIN_LEVEL <= LEVEL_SPEW // static early out
+#ifdef REALM_LOGGING_DO_SPEW              // static early out
     if(log_level > LEVEL_SPEW)            // dynamic early out
       return;
     
@@ -259,7 +322,7 @@ namespace Realm {
   
   inline void Logger::debug(const char *fmt, ...)
   {
-#if REALM_LOGGING_MIN_LEVEL <= LEVEL_DEBUG // static early out
+#ifdef REALM_LOGGING_DO_DEBUG              // static early out
     if(log_level > LEVEL_DEBUG)            // dynamic early out
       return;
     
@@ -272,7 +335,7 @@ namespace Realm {
   
   inline void Logger::debug(LoggerMessageID messageID, const char *fmt, ...)
   {
-#if REALM_LOGGING_MIN_LEVEL <= LEVEL_DEBUG // static early out
+#ifdef REALM_LOGGING_DO_DEBUG              // static early out
     if(log_level > LEVEL_DEBUG)            // dynamic early out
       return;
     
@@ -286,7 +349,7 @@ namespace Realm {
   
   inline void Logger::info(const char *fmt, ...)
   {
-#if REALM_LOGGING_MIN_LEVEL <= LEVEL_INFO // static early out
+#ifdef REALM_LOGGING_DO_INFO              // static early out
     if(log_level > LEVEL_INFO)            // dynamic early out
       return;
     
@@ -299,7 +362,7 @@ namespace Realm {
   
   inline void Logger::info(LoggerMessageID messageID, const char *fmt, ...)
   {
-#if REALM_LOGGING_MIN_LEVEL <= LEVEL_INFO // static early out
+#ifdef REALM_LOGGING_DO_INFO              // static early out
     if(log_level > LEVEL_INFO)            // dynamic early out
       return;
     
@@ -313,7 +376,7 @@ namespace Realm {
   
   inline void Logger::print(const char *fmt, ...)
   {
-#if REALM_LOGGING_MIN_LEVEL <= LEVEL_PRINT // static early out
+#ifdef REALM_LOGGING_DO_PRINT              // static early out
     if(log_level > LEVEL_PRINT)            // dynamic early out
       return;
     
@@ -326,7 +389,7 @@ namespace Realm {
   
   inline void Logger::print(LoggerMessageID messageID, const char *fmt, ...)
   {
-#if REALM_LOGGING_MIN_LEVEL <= LEVEL_PRINT // static early out
+#ifdef REALM_LOGGING_DO_PRINT              // static early out
     if(log_level > LEVEL_PRINT)            // dynamic early out
       return;
     
@@ -340,7 +403,7 @@ namespace Realm {
   
   inline void Logger::warning(const char *fmt, ...)
   {
-#if REALM_LOGGING_MIN_LEVEL <= LEVEL_WARNING // static early out
+#ifdef REALM_LOGGING_DO_WARNING              // static early out
     if(log_level > LEVEL_WARNING)            // dynamic early out
       return;
     
@@ -353,7 +416,7 @@ namespace Realm {
   
   inline void Logger::warning(LoggerMessageID messageID, const char *fmt, ...)
   {
-#if REALM_LOGGING_MIN_LEVEL <= LEVEL_WARNING // static early out
+#ifdef REALM_LOGGING_DO_WARNING              // static early out
     if(log_level > LEVEL_WARNING)            // dynamic early out
       return;
     
@@ -367,7 +430,7 @@ namespace Realm {
   
   inline void Logger::error(const char *fmt, ...)
   {
-#if REALM_LOGGING_MIN_LEVEL <= LEVEL_ERROR // static early out
+#ifdef REALM_LOGGING_DO_ERROR              // static early out
     if(log_level > LEVEL_ERROR)            // dynamic early out
       return;
     
@@ -380,7 +443,7 @@ namespace Realm {
   
   inline void Logger::error(LoggerMessageID messageID, const char *fmt, ...)
   {
-#if REALM_LOGGING_MIN_LEVEL <= LEVEL_ERROR // static early out
+#ifdef REALM_LOGGING_DO_ERROR              // static early out
     if(log_level > LEVEL_ERROR)            // dynamic early out
       return;
     
@@ -394,7 +457,7 @@ namespace Realm {
   
   inline void Logger::fatal(const char *fmt, ...)
   {
-#if REALM_LOGGING_MIN_LEVEL <= LEVEL_FATAL // static early out
+#ifdef REALM_LOGGING_DO_FATAL              // static early out
     if(log_level > LEVEL_FATAL)            // dynamic early out
       return;
     
@@ -407,7 +470,7 @@ namespace Realm {
   
   inline void Logger::fatal(LoggerMessageID messageID, const char *fmt, ...)
   {
-#if REALM_LOGGING_MIN_LEVEL <= LEVEL_FATAL // static early out
+#ifdef REALM_LOGGING_DO_FATAL              // static early out
     if(log_level > LEVEL_FATAL)            // dynamic early out
       return;
     
