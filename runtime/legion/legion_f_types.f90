@@ -121,8 +121,8 @@ module legion_fortran_types
 
   ! Legion::Domain
   type, bind(C) :: legion_domain_f_t
-      integer(c_long_long)                                  :: is_id
-      integer(c_int)                                        :: dim
+    integer(c_long_long)                                  :: is_id
+    integer(c_int)                                        :: dim
 #if LEGION_MAX_DIM == 1
 #define MAX_DOMAIN_DIM_F 2 
 #elif LEGION_MAX_DIM == 2
@@ -144,65 +144,66 @@ module legion_fortran_types
 #else
 #error "Illegal value of LEGION_MAX_DIM"
 #endif
-      integer(c_long_long), dimension(0:MAX_DOMAIN_DIM_F-1) :: rect_data      
+    integer(c_long_long), dimension(0:MAX_DOMAIN_DIM_F-1) :: rect_data      
 #undef MAX_DOMAIN_DIM_F
   end type legion_domain_f_t
   
   ! Legion::DomainPoint
   type, bind(C) :: legion_domain_point_f_t
-      integer(c_int)                                       :: dim
-      integer(c_long_long), dimension(0:MAX_POINT_DIM_F-1) :: point_data
+    integer(c_int)                                       :: dim
+    integer(c_long_long), dimension(0:MAX_POINT_DIM_F-1) :: point_data
   end type legion_domain_point_f_t
     
   ! Legion::IndexSpace
   type, bind(C) :: legion_index_space_f_t
-      integer(c_int) :: id
-      integer(c_int) :: tid
-      integer(c_int) :: type_tag
+    integer(c_int) :: id
+    integer(c_int) :: tid
+    integer(c_int) :: type_tag
   end type legion_index_space_f_t
   
   ! Legion::IndexPartition
   type, bind(C) :: legion_index_partition_f_t
-      integer(c_int) :: id
-      integer(c_int) :: tid
-      integer(c_int) :: type_tag
+    integer(c_int) :: id
+    integer(c_int) :: tid
+    integer(c_int) :: type_tag
   end type legion_index_partition_f_t
   
   ! Legion::FieldSpace
   type, bind(C) :: legion_field_space_f_t
-      integer(c_int) :: id
+    integer(c_int) :: id
   end type legion_field_space_f_t
   
   ! Legion::LogicalRegion
   type, bind(C) :: legion_logical_region_f_t
-      integer(c_int)               :: tree_id
-      type(legion_index_space_f_t) :: index_space
-      type(legion_field_space_f_t) :: field_space
+    integer(c_int)               :: tree_id
+    type(legion_index_space_f_t) :: index_space
+    type(legion_field_space_f_t) :: field_space
   end type legion_logical_region_f_t
    
   ! Legion::LogicalPartition
   type, bind(C) :: legion_logical_partition_f_t
-      integer(c_int)                   :: tree_id
-      type(legion_index_partition_f_t) :: index_partition
-      type(legion_field_space_f_t)     :: field_space
+    integer(c_int)                   :: tree_id
+    type(legion_index_partition_f_t) :: index_partition
+    type(legion_field_space_f_t)     :: field_space
   end type legion_logical_partition_f_t
   
   ! Legion::TaskConfigOptions
   type, bind(C) :: legion_task_config_options_f_t
-      logical(c_bool) :: leaf
-      logical(c_bool) :: inner
-      logical(c_bool) :: idempotent
+    logical(c_bool) :: leaf
+    logical(c_bool) :: inner
+    logical(c_bool) :: idempotent
+    logical(c_bool) :: replicable
   end type legion_task_config_options_f_t
   
   ! Legion::TaskArgument
   type, bind(C) :: legion_task_argument_f_t
-      type(c_ptr)         :: args
-      integer(c_size_t)   :: arglen
+    type(c_ptr)         :: args
+    integer(c_size_t)   :: arglen
   end type legion_task_argument_f_t
   
   ! offest
   type, bind(C) :: legion_byte_offset_f_t
-      integer(c_int) :: offset
+    integer(c_int) :: offset
   end type legion_byte_offset_f_t
     
     ! C typedef enum

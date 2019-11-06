@@ -4,424 +4,7 @@ module legion_fortran_object_oriented
   use legion_fortran_c_interface
   implicit none
   
-  ! ===============================================================================
-  ! DomainPoint
-  ! ===============================================================================
-  type FDomainPoint
-    type(legion_domain_point_f_t) :: point
-  contains
-    procedure :: get_point_1d => legion_domain_point_get_point_1d
-    procedure :: get_point_2d => legion_domain_point_get_point_2d
-    procedure :: get_point_3d => legion_domain_point_get_point_3d
-  end type FDomainPoint
-  
-  interface FDomainPoint
-    module procedure legion_domain_point_constructor_point_1d
-    module procedure legion_domain_point_constructor_point_2d
-    module procedure legion_domain_point_constructor_point_3d
-  end interface
-  
-  ! ===============================================================================
-  ! Point
-  ! ===============================================================================
-  type FPoint
-    integer :: dim
-  end type FPoint
-
-  type, extends(FPoint) :: FPoint1D
-    type(legion_point_1d_f_t) :: point
-  end type FPoint1D
-  
-  type, extends(FPoint) :: FPoint2D
-    type(legion_point_2d_f_t) :: point
-  end type FPoint2D
-  
-  type, extends(FPoint) :: FPoint3D
-    type(legion_point_3d_f_t) :: point
-  end type FPoint3D
-  
-  interface FPoint1D
-    module procedure legion_point_1d_constructor_integer4
-    module procedure legion_point_1d_constructor_integer8
-  end interface
-  
-  interface FPoint2D
-    module procedure legion_point_2d_constructor_integer4
-    module procedure legion_point_2d_constructor_integer8
-  end interface
-  
-  interface FPoint3D
-    module procedure legion_point_3d_constructor_integer4
-    module procedure legion_point_3d_constructor_integer8
-  end interface
-  
-  ! ===============================================================================
-  ! Rect
-  ! ===============================================================================
-  type FDomain
-    type(legion_domain_f_t) :: domain
-  end type FDomain
-  
-  ! ===============================================================================
-  ! Rect
-  ! ===============================================================================
-  type FRect1D
-    type(legion_rect_1d_f_t) :: rect
-  end type FRect1D
-  
-  type FRect2D
-    type(legion_rect_2d_f_t) :: rect
-  end type FRect2D
-  
-  type FRect3D
-    type(legion_rect_3d_f_t) :: rect
-  end type FRect3D
-  
-  interface FRect1D
-    module procedure legion_rect_1d_constructor_integer4
-    module procedure legion_rect_1d_constructor_integer8
-    module procedure legion_rect_1d_constructor_point_1d
-  end interface
-  
-  interface FRect2D
-    module procedure legion_rect_2d_constructor_point_2d
-  end interface
-  
-  interface FRect3D
-    module procedure legion_rect_3d_constructor_point_3d
-  end interface
-  
-  interface assignment (=)
-    module procedure legion_rect_1d_assignment_from_domain
-  end interface
-  
-  ! ===============================================================================
-  ! FieldAccessor
-  ! ===============================================================================
-  type FFieldAccessor
-    integer :: dim
-    integer(c_size_t) :: data_size
-  contains
-    procedure :: init => legion_field_accessor_init
-    procedure, private :: legion_field_accessor_read_point_ptr
-    procedure, private :: legion_field_accessor_read_point_integer4
-    procedure, private :: legion_field_accessor_read_point_integer8
-    procedure, private :: legion_field_accessor_read_point_real4
-    procedure, private :: legion_field_accessor_read_point_real8
-    procedure, private :: legion_field_accessor_read_point_complex4
-    procedure, private :: legion_field_accessor_read_point_complex8
-    procedure, private :: legion_field_accessor_write_point_ptr
-    procedure, private :: legion_field_accessor_write_point_integer4
-    procedure, private :: legion_field_accessor_write_point_integer8
-    procedure, private :: legion_field_accessor_write_point_real4
-    procedure, private :: legion_field_accessor_write_point_real8
-    procedure, private :: legion_field_accessor_write_point_complex4
-    procedure, private :: legion_field_accessor_write_point_complex8
-    generic :: read_point => legion_field_accessor_read_point_ptr, &
-                             legion_field_accessor_read_point_integer4, legion_field_accessor_read_point_integer8, &
-                             legion_field_accessor_read_point_real4, legion_field_accessor_read_point_real8, &
-                             legion_field_accessor_read_point_complex4, legion_field_accessor_read_point_complex8
-    generic :: write_point => legion_field_accessor_write_point_ptr, &
-                              legion_field_accessor_write_point_integer4, legion_field_accessor_write_point_integer8, &
-                              legion_field_accessor_write_point_real4, legion_field_accessor_write_point_real8, &
-                              legion_field_accessor_write_point_complex4, legion_field_accessor_write_point_complex8
-  end type FFieldAccessor
-
-  type, extends(FFieldAccessor) :: FFieldAccessor1D
-    type(legion_accessor_array_1d_f_t) :: accessor
-  end type FFieldAccessor1D
-  
-  type, extends(FFieldAccessor) :: FFieldAccessor2D
-    type(legion_accessor_array_2d_f_t) :: accessor
-  end type FFieldAccessor2D
-  
-  type, extends(FFieldAccessor) :: FFieldAccessor3D
-    type(legion_accessor_array_3d_f_t) :: accessor
-  end type FFieldAccessor3D
-  
-  interface FFieldAccessor1D
-    module procedure legion_field_accessor_1d_constructor
-  end interface
-  
-  interface FFieldAccessor2D
-    module procedure legion_field_accessor_2d_constructor
-  end interface
-  
-  interface FFieldAccessor3D
-    module procedure legion_field_accessor_3d_constructor
-  end interface
-  
-  ! ===============================================================================
-  ! FDomainPointIterator
-  ! ===============================================================================
-  type FDomainPointIterator
-    type(legion_domain_point_iterator_f_t) :: iterator    
-  contains
-    ! @see Legion::Domain::DomainPointIterator::step()
-    procedure :: step => legion_domain_point_iterator_step
-    
-    ! @see Legion::Domain::DomainPointIterator::any_left
-    procedure :: has_next => legion_domain_point_iterator_has_next
-    
-    ! @see Legion::Domain::DomainPointIterator::~DomainPointIterator()
-    procedure :: destroy => legion_domain_point_iterator_destructor
-      
-  end type FDomainPointIterator
-  
-  interface FDomainPointIterator
-    ! @see Legion::Domain::DomainPointIterator::DomainPointIterator()
-    module procedure legion_domain_point_iterator_constructor_from_domain
-    module procedure legion_domain_point_iterator_constructor_from_rect_1d
-  end interface 
-  
-  ! ===============================================================================
-  ! IndexSpace
-  ! ===============================================================================
-  type FIndexSpace
-    type(legion_index_space_f_t) :: is
-  end type FIndexSpace
-  
-  ! ===============================================================================
-  ! FieldSpace
-  ! ===============================================================================
-  type FFieldSpace
-    type(legion_field_space_f_t) :: fs
-  end type FFieldSpace
-  
-  ! ===============================================================================
-  ! FieldAllocator
-  ! ===============================================================================
-  type FFieldAllocator
-    type(legion_field_allocator_f_t) :: fa
-  contains
-    ! @see Legion::FieldAllocator::allocate_field()
-    procedure :: allocate_field => legion_field_allocator_allocate_field
-    
-    ! @see Legion::FieldAllocator::free_field()
-    procedure :: free_field => legion_field_allocator_free_field
-    
-    ! @see Legion::FieldAllocator::~FieldAllocator()
-    procedure :: destroy => legion_field_allocator_destroy
-  end type FFieldAllocator
-  
-  ! ===============================================================================
-  ! IndexPartition
-  ! ===============================================================================
-  type FIndexPartition
-    type(legion_index_partition_f_t) :: ip
-  end type FIndexPartition
-  
-  ! ===============================================================================
-  ! LogicalRegion
-  ! ===============================================================================
-  type FLogicalRegion
-    type(legion_logical_region_f_t) :: lr
-  contains
-    ! @see Legion::LogicalRegion::get_index_space
-    procedure :: get_index_space => legion_logical_region_get_index_space
-  end type FLogicalRegion
-  
-  ! ===============================================================================
-  ! LogicalPartition
-  ! ===============================================================================
-  type FLogicalPartition
-    type(legion_logical_partition_f_t) :: lp
-  end type FLogicalPartition
-  
-  ! ===============================================================================
-  ! PhysicalRegion
-  ! ===============================================================================
-  type FPhysicalRegion
-    type(legion_physical_region_f_t) :: pr
-  end type FPhysicalRegion
-  
-  ! ===============================================================================
-  ! PhysicalRegionList
-  ! ===============================================================================
-  type FPhysicalRegionList
-    type(c_ptr) :: region_ptr
-    integer :: num_regions
-  contains
-    procedure :: size => legion_physical_region_list_size
-    procedure :: get_region => legion_physical_region_list_get_region_by_id
-  end type FPhysicalRegionList
-  
-  ! ===============================================================================
-  ! RegionRequirement
-  ! ===============================================================================
-  type FRegionRequirement
-    type(legion_region_requirement_f_t) :: rr
-  contains
-    ! @see Legion::RegionRequirement::region
-    procedure :: get_region => legion_region_requirement_get_logical_region
-    
-    ! @see Legion::RegionRequirement::privilege_fields
-    procedure :: get_privilege_field => legion_region_requirement_get_privilege_field_by_id
-  end type FRegionRequirement
-  
-  ! ===============================================================================
-  ! Future
-  ! ===============================================================================
-  type FFuture
-    type(legion_future_f_t) :: future
-  end type FFuture
-  
-  ! ===============================================================================
-  ! FutureMap
-  ! ===============================================================================
-  type FFutureMap
-    type(legion_future_map_f_t) :: future_map
-  end type FFutureMap
-  
-  ! ===============================================================================
-  ! TaskArgument
-  ! ===============================================================================
-  type FTaskArgument
-    type(legion_task_argument_f_t) :: task_arg
-  end type FTaskArgument
-  
-  interface FTaskArgument
-    module procedure legion_task_argument_constructor
-  end interface
-  
-  ! ===============================================================================
-  ! ArgumentMap
-  ! ===============================================================================
-  type FArgumentMap
-    type(legion_argument_map_f_t) :: arg_map
-  end type FArgumentMap
-  
-  interface FArgumentMap
-    module procedure legion_argument_map_constructor
-  end interface
-  
-  ! ===============================================================================
-  ! TaskLauncher
-  ! ===============================================================================
-  type FTaskLauncher
-    type(legion_task_launcher_f_t) launcher
-  contains
-    procedure, private :: legion_task_launcher_add_region_requirement
-    
-    ! @see Legion::TaskLauncher::add_region_requirement()  
-    generic :: add_region_requirement => legion_task_launcher_add_region_requirement
-    
-    ! @see Legion::TaskLauncher::add_field()
-    procedure :: add_field => legion_task_launcher_add_field
-    
-    ! Legion::TaskLauncher::~TaskLauncher()
-    procedure :: destroy => legion_task_launcher_destructor
-  end type FTaskLauncher
-  
-  interface FTaskLauncher
-    module procedure legion_task_launcher_constructor
-  end interface
-  
-  ! ===============================================================================
-  ! IndexLauncher
-  ! ===============================================================================
-  type FIndexLauncher
-    type(legion_index_launcher_f_t) index_launcher
-  contains
-    procedure, private :: legion_index_launcher_add_region_requirement_logical_partition
-    
-    ! @see Legion::IndexTaskLauncher::add_region_requirement()  
-    generic :: add_region_requirement => legion_index_launcher_add_region_requirement_logical_partition
-    
-    ! @see Legion::IndexLaunchxer::add_field()
-    procedure :: add_field => legion_index_launcher_add_field
-    
-    ! @see Legion::IndexTaskLauncher::~IndexTaskLauncher()
-    procedure :: destroy => legion_index_launcher_destructor
-  end type FIndexLauncher
-  
-  interface FIndexLauncher
-    module procedure legion_index_launcher_constructor_from_index_space
-  end interface
-  
-  ! ===============================================================================
-  ! Task
-  ! ===============================================================================
-  type FTask
-    type(legion_task_f_t) :: task
-  contains
-    ! @see Legion::Task::regions
-    procedure :: get_region_requirement => legion_task_get_region_requirement_by_id
-    
-    ! @see Legion::Task::arglen
-    procedure :: get_arglen=> legion_task_get_arglen
-    
-    ! @see Legion::Task::args
-    procedure :: get_args => legion_task_get_args
-  end type FTask
-  
-  ! ===============================================================================
-  ! Runtime
-  ! ===============================================================================
-  type FRuntime
-    type(legion_runtime_f_t) :: runtime
-  contains
-    procedure, private :: legion_runtime_create_index_space_from_elmts_size
-    procedure, private :: legion_runtime_create_index_space_from_domain
-    procedure, private :: legion_runtime_create_index_space_from_rect_1d
-    
-    ! @see Legion::Runtime::get_index_space_domain()
-    procedure :: get_index_space_domain => legion_runtime_get_index_domain_return_domain
-                                         
-    ! @see Legion::Runtime::create_index_space()
-    generic :: create_index_space => legion_runtime_create_index_space_from_elmts_size, &
-                                     legion_runtime_create_index_space_from_domain, &
-                                     legion_runtime_create_index_space_from_rect_1d
-    
-    ! @see Legion::Runtime::destroy_index_space()
-    procedure :: destroy_index_space => legion_runtime_destroy_index_space
-    
-    ! @see Legion::Runtime::create_field_space()
-    procedure :: create_field_space => legion_runtime_create_field_space 
-    
-    ! @see Legion::Runtime::destroy_field_space()
-    procedure :: destroy_field_space => legion_runtime_destroy_field_space
-    
-    ! @see Legion::Runtime::create_field_allocator()
-    procedure :: create_field_allocator => legion_runtime_create_field_allocator
-    
-    ! @see Legion::Runtime::create_logical_region()
-    procedure :: create_logical_region => legion_runtime_create_logical_region
-    
-    ! @see Legion::Runtime::destroy_logical_region()
-    procedure :: destroy_logical_region => legion_runtime_destroy_logical_region
-    
-    ! @see Legion::Runtime::create_equal_partition()
-    procedure :: create_equal_partition => legion_runtime_create_equal_partition
-    
-    ! @see Legion::Runtime::get_logical_partition()
-    procedure :: get_logical_partition => legion_runtime_get_logical_partition
-    
-    ! @see Legion::Runtime::execute_task()
-    procedure :: execute_task => legion_runtime_execute_task
-    
-    ! @see Legion::Runtime::execute_index_space(Context, const IndexTaskLauncher &)
-    procedure :: execute_index_space => legion_runtime_execute_index_space
-  end type FRuntime
-  
-  type FContext
-    type(legion_context_f_t) :: context
-  end type FContext
-  
-  Type CellReal8
-    real(kind=8), dimension(:), pointer :: y
-  end type CellReal8
-
-  type LegionArray2DReal8
-    type(CellReal8), dimension(3) :: x
-    integer :: dim_x
-    integer :: dim_y
-    integer :: ld
-  end type LegionArray2DReal8
-  
-  interface LegionArray2DReal8
-    module procedure legion_array_2d_real8_constructor
-  end interface
+  include "legion_f_oo.h"
   
 contains
   
@@ -891,42 +474,6 @@ contains
     
     call legion_field_accessor_write_point_ptr(this, point, c_loc(src))
   end subroutine legion_field_accessor_write_point_complex8
-  
-  function legion_array_2d_real8_constructor(raw_ptr, num_rows, num_columns, ld)
-    implicit none
-    
-    type(LegionArray2DReal8)                 :: legion_array_2d_real8_constructor
-    type(c_ptr), intent(in)                  :: raw_ptr
-    integer, intent(in)                      :: num_rows
-    integer, intent(in)                      :: num_columns
-    type(legion_byte_offset_f_t), intent(in) :: ld
-        
-    type(c_ptr), allocatable :: ptr_columns(:)
-    type(LegionArray2DReal8) :: tmp_2d_array
-    real(kind=8), pointer :: column(:)
-    real(kind=8), target :: col(10)
-    integer :: i
-    type(CellReal8), allocatable :: matrix(:)
-    
-    allocate(matrix(num_columns))
-    
- !   allocate(tmp_2d_array%x(1:num_columns))
-    col(1:10) = 1
-    tmp_2d_array%x(1)%y(1:10) => col
-    matrix(1)%y =>col
-    column => col
-        
-    tmp_2d_array%dim_x = num_columns
-    tmp_2d_array%dim_y = num_rows
-    tmp_2d_array%ld = ld%offset
-    allocate(ptr_columns(num_columns))
-    call legion_convert_1d_to_2d_column_major_c(raw_ptr, ptr_columns, ld, num_columns)
-    do i = 1, num_columns
-      call c_f_pointer(ptr_columns(i), column, [num_rows])
-      call c_f_pointer(ptr_columns(i), tmp_2d_array%x(i)%y, [num_rows])
-    end do
-    legion_array_2d_real8_constructor = tmp_2d_array
-  end function legion_array_2d_real8_constructor
   
   ! ===============================================================================
   ! DomainPointIterator
@@ -1480,7 +1027,110 @@ contains
                                                       launcher%index_launcher)
   end function legion_runtime_execute_index_space
   
-  ! ================================
+  ! ===============================================================================
+  ! ProcessorConstraint
+  ! ===============================================================================
+  function legion_processor_constraint_constructor(proc_kind)
+    implicit none
+    
+    type(FProcessorConstraint) :: legion_processor_constraint_constructor
+    integer(c_int), intent(in) :: proc_kind
+      
+    legion_processor_constraint_constructor%proc_kind = proc_kind
+  end function legion_processor_constraint_constructor
+  
+  ! ===============================================================================
+  ! TaskVariantRegistrar
+  ! ===============================================================================
+  function legion_task_variant_registrar_constructor(task_id)
+    implicit none
+    
+    type(FTaskVariantRegistrar) :: legion_task_variant_registrar_constructor
+    integer(c_int), intent(in)  :: task_id
+    
+    legion_task_variant_registrar_constructor%task_id = task_id  
+    legion_task_variant_registrar_constructor%execution_constraints = legion_execution_constraint_set_create_c()
+    legion_task_variant_registrar_constructor%task_layout_constraints = legion_task_layout_constraint_set_create_c()
+    legion_task_variant_registrar_constructor%config_options%leaf = .false.
+    legion_task_variant_registrar_constructor%config_options%inner = .false.
+    legion_task_variant_registrar_constructor%config_options%idempotent = .false.
+    legion_task_variant_registrar_constructor%config_options%replicable = .false.
+  end function legion_task_variant_registrar_constructor
+  
+  subroutine legion_task_variant_registrar_destructor(this)
+    implicit none
+    
+    class(FTaskVariantRegistrar), intent(in) :: this
+      
+    call legion_execution_constraint_set_destroy_c(this%execution_constraints)
+    call legion_task_layout_constraint_set_destroy_c(this%task_layout_constraints)
+  end subroutine legion_task_variant_registrar_destructor
+  
+  subroutine legion_task_variant_registrar_add_processor_constraint(this, proc_constraint)
+    implicit none
+    
+    class(FTaskVariantRegistrar), intent(in) :: this
+    type(FProcessorConstraint), intent(in)   :: proc_constraint
+    
+    call legion_execution_constraint_set_add_processor_constraint_c(this%execution_constraints, proc_constraint%proc_kind)
+  end subroutine legion_task_variant_registrar_add_processor_constraint
+  
+  subroutine legion_task_variant_registrar_set_leaf(this, is_leaf)
+    implicit none
+    
+    class(FTaskVariantRegistrar), intent(inout) :: this
+    logical(c_bool), optional, intent(in)       :: is_leaf
+    
+    logical(c_bool) :: tmp_is_leaf = .true.
+    
+    if (present(is_leaf)) tmp_is_leaf = is_leaf
+    
+    this%config_options%leaf = tmp_is_leaf             
+  end subroutine legion_task_variant_registrar_set_leaf
+  
+  subroutine legion_task_variant_registrar_set_inner(this, is_inner)
+    implicit none
+    
+    class(FTaskVariantRegistrar), intent(inout) :: this
+    logical(c_bool), optional, intent(in)       :: is_inner
+    
+    logical(c_bool) :: tmp_is_inner = .true.
+    
+    if (present(is_inner)) tmp_is_inner = is_inner
+    
+    this%config_options%inner = tmp_is_inner             
+  end subroutine legion_task_variant_registrar_set_inner
+  
+  subroutine legion_task_variant_registrar_set_idempotent(this, is_idempotent)
+    implicit none
+    
+    class(FTaskVariantRegistrar), intent(inout) :: this
+    logical(c_bool), optional, intent(in)       :: is_idempotent
+    
+    logical(c_bool) :: tmp_is_idempotent = .true.
+    
+    if (present(is_idempotent)) tmp_is_idempotent = is_idempotent
+    
+    this%config_options%idempotent = tmp_is_idempotent             
+  end subroutine legion_task_variant_registrar_set_idempotent
+  
+  subroutine legion_task_variant_registrar_set_replicable(this, is_replicable)
+    implicit none
+    
+    class(FTaskVariantRegistrar), intent(inout) :: this
+    logical(c_bool), optional, intent(in)    :: is_replicable
+    
+    logical(c_bool) :: tmp_is_replicable = .true.
+    
+    if (present(is_replicable)) tmp_is_replicable = is_replicable
+    
+    this%config_options%replicable = tmp_is_replicable             
+  end subroutine legion_task_variant_registrar_set_replicable
+  
+  ! ===============================================================================
+  ! Static functions
+  ! ===============================================================================
+  ! @see legion_task_preamble
   subroutine legion_task_prolog(tdata, tdatalen, &
                                 userdata, userlen, &
                                 proc_id, &
@@ -1510,6 +1160,7 @@ contains
                                 ctx%context, runtime%runtime)
   end subroutine legion_task_prolog
   
+  ! @see legion_task_postamble
   subroutine legion_task_epilog(runtime, ctx, retval, retsize)
     implicit none
 
@@ -1528,5 +1179,40 @@ contains
   
     call legion_task_postamble_c(runtime%runtime, ctx%context, tmp_retval, tmp_retsize)
   end subroutine legion_task_epilog
+  
+  ! @see Legion::Runtime::set_top_level_task_id()
+  subroutine set_top_level_task_id(id)
+    implicit none
+    
+    integer(c_int), intent(in) :: id
+    
+    call legion_runtime_set_top_level_task_id_c(id)
+  end subroutine set_top_level_task_id
+  
+  subroutine preregister_task_variant(task_func_ptr, registrar, task_name, vid)
+    implicit none
+    
+    external                                :: task_func_ptr
+    type(FTaskVariantRegistrar), intent(in) :: registrar
+    character(*), intent(in)                :: task_name
+    integer(c_int), optional, intent(in)    :: vid
+    
+    integer(c_int) :: tmp_vid = 1
+    integer(c_int) :: task_id_return
+    integer(c_size_t) :: userlen = 0
+    type(c_funptr) :: c_func_ptr  
+    
+    if (present(vid)) tmp_vid = vid
+    c_func_ptr = c_funloc(task_func_ptr)
+    task_id_return = legion_runtime_preregister_task_variant_fnptr_c(registrar%task_id, &
+                       tmp_vid, task_name//c_null_char, &
+                       c_char_"cpu_variant"//c_null_char, &
+                       registrar%execution_constraints, &
+                       registrar%task_layout_constraints, &
+                       registrar%config_options, &
+                       c_func_ptr, &
+                       c_null_ptr, userlen)
+  end subroutine preregister_task_variant
+  
 
 end module

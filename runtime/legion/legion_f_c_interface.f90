@@ -5,126 +5,6 @@ module legion_fortran_c_interface
   
   interface
     ! -----------------------------------------------------------------------
-    ! Start-up Operations
-    ! -----------------------------------------------------------------------
-    ! Legion::Runtime::set_top_level_task_id()
-    subroutine legion_runtime_set_top_level_task_id_c(top_id) &
-                   bind(C, name="legion_runtime_set_top_level_task_id")
-      use iso_c_binding
-      implicit none
-  
-      integer(c_int), value, intent(in) :: top_id
-    end subroutine legion_runtime_set_top_level_task_id_c
-
-    ! Legion::ExecutionConstraintSet::ExecutionConstraintSet()
-    function legion_execution_constraint_set_create_c() &
-                 bind(C, name="legion_execution_constraint_set_create")
-      use iso_c_binding
-      import legion_execution_constraint_set_f_t
-      implicit none
-  
-      type(legion_execution_constraint_set_f_t) :: legion_execution_constraint_set_create_c
-    end function legion_execution_constraint_set_create_c
-
-    ! Legion::ExecutionConstraintSet::add_constraint(Legion::ProcessorConstraint)
-    subroutine legion_execution_constraint_set_add_processor_constraint_c(handle, proc_kind) &
-                   bind(C, name="legion_execution_constraint_set_add_processor_constraint")
-      use iso_c_binding
-      import legion_execution_constraint_set_f_t
-      implicit none
-  
-      type(legion_execution_constraint_set_f_t), value, intent(in)    :: handle
-      integer(c_int), value, intent(in)                               :: proc_kind
-    end subroutine legion_execution_constraint_set_add_processor_constraint_c
-
-    ! Legion::TaskLayoutConstraintSet::TaskLayoutConstraintSet()
-    function legion_task_layout_constraint_set_create_c() &
-                 bind(C, name="legion_task_layout_constraint_set_create")
-      use iso_c_binding
-      import legion_task_layout_constraint_set_f_t
-      implicit none
-  
-      type(legion_task_layout_constraint_set_f_t) :: legion_task_layout_constraint_set_create_c
-    end function legion_task_layout_constraint_set_create_c
-
-    ! Legion::Runtime::preregister_task_variant()
-    function legion_runtime_preregister_task_variant_fnptr_c(id, variant_id, task_name, &
-                                                             variant_name, &
-                                                             execution_constraints, &
-                                                             layout_constraints, &
-                                                             options, &
-                                                             wrapped_task_pointer, &
-                                                             userdata, &
-                                                             userlen) &
-                 bind(C, name="legion_runtime_preregister_task_variant_fnptr")
-      use iso_c_binding
-      import legion_execution_constraint_set_f_t
-      import legion_task_layout_constraint_set_f_t
-      import legion_task_config_options_f_t
-      implicit none
-  
-      integer(c_int)                                                  :: legion_runtime_preregister_task_variant_fnptr_c
-      integer(c_int), value, intent(in)                               :: id
-      integer(c_int), value, intent(in)                               :: variant_id
-      character(kind=c_char), intent(in)                              :: task_name(*)
-      character(kind=c_char), intent(in)                              :: variant_name(*)
-      type(legion_execution_constraint_set_f_t), value, intent(in)    :: execution_constraints
-      type(legion_task_layout_constraint_set_f_t), value, intent(in)  :: layout_constraints
-      type(legion_task_config_options_f_t), value, intent(in)         :: options
-      type(c_funptr), value, intent(in)                               :: wrapped_task_pointer
-      type(c_ptr), value, intent(in)                                  :: userdata
-      integer(c_size_t), value, intent(in)                            :: userlen
-    end function legion_runtime_preregister_task_variant_fnptr_c
-
-    ! Legion::Runtime::start()
-    function legion_runtime_start_c(argc, argv, background) &
-                 bind(C, name="legion_runtime_start")
-      use iso_c_binding
-      implicit none
-  
-      integer(c_int)                      :: legion_runtime_start_c
-      integer(c_int), value, intent(in)   :: argc
-      type(c_ptr), value, intent(in)      :: argv
-      logical(c_bool), value, intent(in)  :: background
-    end function legion_runtime_start_c
-
-    ! Legion::LegionTaskWrapper::legion_task_preamble()
-    subroutine legion_task_preamble_c(tdata, tdatalen, proc_id, &
-                                      task, regionptr, num_regions, &
-                                      ctx, runtime) &
-                   bind(C, name="legion_task_preamble")
-      use iso_c_binding
-      import legion_task_f_t
-      import legion_physical_region_f_t
-      import legion_context_f_t
-      import legion_runtime_f_t
-      implicit none
-  
-      type(c_ptr), intent(in)                         :: tdata ! pass reference
-      integer(c_size_t), value, intent(in)            :: tdatalen
-      integer(c_long_long), value, intent(in)         :: proc_id
-      type(legion_task_f_t), intent(out)              :: task ! pass reference
-      type(c_ptr), intent(out)                        :: regionptr
-      integer(c_int), intent(out)                     :: num_regions ! pass reference
-      type(legion_context_f_t), intent(out)           :: ctx ! pass reference          
-      type(legion_runtime_f_t), intent(out)           :: runtime ! pass reference
-    end subroutine legion_task_preamble_c
-
-    ! Legion::LegionTaskWrapper::legion_task_postamble()
-    subroutine legion_task_postamble_c(runtime, ctx, retval, retsize) &
-                   bind(C, name="legion_task_postamble")
-      use iso_c_binding
-      import legion_runtime_f_t
-      import legion_context_f_t
-      implicit none
-  
-      type(legion_runtime_f_t), value, intent(in) :: runtime
-      type(legion_context_f_t), value, intent(in) :: ctx
-      type(c_ptr), value, intent(in)              :: retval
-      integer(c_size_t), value, intent(in)        :: retsize
-    end subroutine legion_task_postamble_c
-
-    ! -----------------------------------------------------------------------
     ! Task Launcher
     ! -----------------------------------------------------------------------
     ! @see Legion::TaskLauncher::TaskLauncher()
@@ -1317,6 +1197,152 @@ module legion_fortran_c_interface
       
       type(legion_runtime_f_t) :: legion_runtime_get_runtime_c
     end function legion_runtime_get_runtime_c
+    
+    ! -----------------------------------------------------------------------
+    ! Execution Constraints
+    ! -----------------------------------------------------------------------
+    ! Legion::ExecutionConstraintSet::ExecutionConstraintSet()
+    function legion_execution_constraint_set_create_c() &
+                 bind(C, name="legion_execution_constraint_set_create")
+      use iso_c_binding
+      import legion_execution_constraint_set_f_t
+      implicit none
+  
+      type(legion_execution_constraint_set_f_t) :: legion_execution_constraint_set_create_c
+    end function legion_execution_constraint_set_create_c
+    
+    ! Legion::ExecutionConstraintSet::~ExecutionConstraintSet()
+    subroutine legion_execution_constraint_set_destroy_c(handle) &
+                 bind(C, name="legion_execution_constraint_set_destroy")
+      use iso_c_binding
+      import legion_execution_constraint_set_f_t
+      implicit none
+  
+      type(legion_execution_constraint_set_f_t), value, intent(in) :: handle
+    end subroutine legion_execution_constraint_set_destroy_c
+
+    ! Legion::ExecutionConstraintSet::add_constraint(Legion::ProcessorConstraint)
+    subroutine legion_execution_constraint_set_add_processor_constraint_c(handle, proc_kind) &
+                   bind(C, name="legion_execution_constraint_set_add_processor_constraint")
+      use iso_c_binding
+      import legion_execution_constraint_set_f_t
+      implicit none
+  
+      type(legion_execution_constraint_set_f_t), value, intent(in)    :: handle
+      integer(c_int), value, intent(in)                               :: proc_kind
+    end subroutine legion_execution_constraint_set_add_processor_constraint_c
+    
+    ! -----------------------------------------------------------------------
+    ! Task Layout Constraints
+    ! -----------------------------------------------------------------------
+    ! Legion::TaskLayoutConstraintSet::TaskLayoutConstraintSet()
+    function legion_task_layout_constraint_set_create_c() &
+                 bind(C, name="legion_task_layout_constraint_set_create")
+      use iso_c_binding
+      import legion_task_layout_constraint_set_f_t
+      implicit none
+  
+      type(legion_task_layout_constraint_set_f_t) :: legion_task_layout_constraint_set_create_c
+    end function legion_task_layout_constraint_set_create_c
+    
+    ! Legion::TaskLayoutConstraintSet::TaskLayoutConstraintSet()
+    subroutine legion_task_layout_constraint_set_destroy_c(handle) &
+                 bind(C, name="legion_task_layout_constraint_set_destroy")
+      use iso_c_binding
+      import legion_task_layout_constraint_set_f_t
+      implicit none
+  
+      type(legion_task_layout_constraint_set_f_t), value, intent(in) :: handle
+    end subroutine legion_task_layout_constraint_set_destroy_c
+    
+    ! -----------------------------------------------------------------------
+    ! Start-up Operations
+    ! -----------------------------------------------------------------------
+    ! Legion::Runtime::set_top_level_task_id()
+    subroutine legion_runtime_set_top_level_task_id_c(top_id) &
+                   bind(C, name="legion_runtime_set_top_level_task_id")
+      use iso_c_binding
+      implicit none
+      
+      integer(c_int), value, intent(in) :: top_id
+    end subroutine legion_runtime_set_top_level_task_id_c  
+
+    ! Legion::Runtime::preregister_task_variant()
+    function legion_runtime_preregister_task_variant_fnptr_c(id, variant_id, task_name, &
+                                                             variant_name, &
+                                                             execution_constraints, &
+                                                             layout_constraints, &
+                                                             options, &
+                                                             wrapped_task_pointer, &
+                                                             userdata, &
+                                                             userlen) &
+                 bind(C, name="legion_runtime_preregister_task_variant_fnptr")
+      use iso_c_binding
+      import legion_execution_constraint_set_f_t
+      import legion_task_layout_constraint_set_f_t
+      import legion_task_config_options_f_t
+      implicit none
+  
+      integer(c_int)                                                  :: legion_runtime_preregister_task_variant_fnptr_c
+      integer(c_int), value, intent(in)                               :: id
+      integer(c_int), value, intent(in)                               :: variant_id
+      character(kind=c_char), intent(in)                              :: task_name(*)
+      character(kind=c_char), intent(in)                              :: variant_name(*)
+      type(legion_execution_constraint_set_f_t), value, intent(in)    :: execution_constraints
+      type(legion_task_layout_constraint_set_f_t), value, intent(in)  :: layout_constraints
+      type(legion_task_config_options_f_t), value, intent(in)         :: options
+      type(c_funptr), value, intent(in)                               :: wrapped_task_pointer
+      type(c_ptr), value, intent(in)                                  :: userdata
+      integer(c_size_t), value, intent(in)                            :: userlen
+    end function legion_runtime_preregister_task_variant_fnptr_c
+
+    ! Legion::Runtime::start()
+    function legion_runtime_start_c(argc, argv, background) &
+                 bind(C, name="legion_runtime_start")
+      use iso_c_binding
+      implicit none
+  
+      integer(c_int)                      :: legion_runtime_start_c
+      integer(c_int), value, intent(in)   :: argc
+      type(c_ptr), value, intent(in)      :: argv
+      logical(c_bool), value, intent(in)  :: background
+    end function legion_runtime_start_c
+
+    ! Legion::LegionTaskWrapper::legion_task_preamble()
+    subroutine legion_task_preamble_c(tdata, tdatalen, proc_id, &
+                                      task, regionptr, num_regions, &
+                                      ctx, runtime) &
+                   bind(C, name="legion_task_preamble")
+      use iso_c_binding
+      import legion_task_f_t
+      import legion_physical_region_f_t
+      import legion_context_f_t
+      import legion_runtime_f_t
+      implicit none
+  
+      type(c_ptr), intent(in)                         :: tdata ! pass reference
+      integer(c_size_t), value, intent(in)            :: tdatalen
+      integer(c_long_long), value, intent(in)         :: proc_id
+      type(legion_task_f_t), intent(out)              :: task ! pass reference
+      type(c_ptr), intent(out)                        :: regionptr
+      integer(c_int), intent(out)                     :: num_regions ! pass reference
+      type(legion_context_f_t), intent(out)           :: ctx ! pass reference          
+      type(legion_runtime_f_t), intent(out)           :: runtime ! pass reference
+    end subroutine legion_task_preamble_c
+
+    ! Legion::LegionTaskWrapper::legion_task_postamble()
+    subroutine legion_task_postamble_c(runtime, ctx, retval, retsize) &
+                   bind(C, name="legion_task_postamble")
+      use iso_c_binding
+      import legion_runtime_f_t
+      import legion_context_f_t
+      implicit none
+  
+      type(legion_runtime_f_t), value, intent(in) :: runtime
+      type(legion_context_f_t), value, intent(in) :: ctx
+      type(c_ptr), value, intent(in)              :: retval
+      integer(c_size_t), value, intent(in)        :: retsize
+    end subroutine legion_task_postamble_c
     
 
     ! -----------------------------------------------------------------------
