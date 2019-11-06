@@ -49,7 +49,7 @@ contains
     accessor = FFieldAccessor1D(physical_region, fid, c_sizeof(x_value))
     logical_region = region_requirement%get_region()
     index_space = logical_region%get_index_space()
-    rect_1d = runtime%get_index_space_domain(ctx, index_space, 1)
+    rect_1d = runtime%get_index_space_domain(ctx, index_space)
     
     Print *, "Init Task!", fid
     
@@ -114,7 +114,7 @@ contains
     accessor_z = FFieldAccessor1D(physical_region_1, 2, c_sizeof(z_value))
     logical_region = region_requirement%get_region()
     index_space = logical_region%get_index_space()
-    rect_1d = runtime%get_index_space_domain(ctx, index_space, 1)
+    rect_1d = runtime%get_index_space_domain(ctx, index_space)
     index_rect = rect_1d%rect
     
     Print *, "Daxpy Task!", alpha
@@ -184,7 +184,7 @@ contains
     accessor_z = FFieldAccessor1D(physical_region_1, 2, c_sizeof(z_value))
     logical_region = region_requirement%get_region()
     index_space = logical_region%get_index_space()
-    rect_1d = runtime%get_index_space_domain(ctx, index_space, 1)
+    rect_1d = runtime%get_index_space_domain(ctx, index_space)
     index_rect = rect_1d%rect
     
     count = 0

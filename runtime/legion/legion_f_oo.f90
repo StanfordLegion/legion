@@ -56,21 +56,24 @@ module legion_fortran_object_oriented
   end interface
   
   ! ===============================================================================
-  ! Domain/Rect
+  ! Rect
   ! ===============================================================================
   type FDomain
     type(legion_domain_f_t) :: domain
   end type FDomain
   
-  type, extends(FDomain) :: FRect1D
+  ! ===============================================================================
+  ! Rect
+  ! ===============================================================================
+  type FRect1D
     type(legion_rect_1d_f_t) :: rect
   end type FRect1D
   
-  type, extends(FDomain) :: FRect2D
+  type FRect2D
     type(legion_rect_2d_f_t) :: rect
   end type FRect2D
   
-  type, extends(FDomain) :: FRect3D
+  type FRect3D
     type(legion_rect_3d_f_t) :: rect
   end type FRect3D
   
@@ -88,8 +91,9 @@ module legion_fortran_object_oriented
     module procedure legion_rect_3d_constructor_point_3d
   end interface
   
-  !interface assignment (=)
-    !end interface
+  interface assignment (=)
+    module procedure legion_rect_1d_assignment_from_domain
+  end interface
   
   ! ===============================================================================
   ! FieldAccessor
@@ -166,7 +170,8 @@ module legion_fortran_object_oriented
   
   interface FDomainPointIterator
     ! @see Legion::Domain::DomainPointIterator::DomainPointIterator()
-    module procedure legion_domain_point_iterator_constructor
+    module procedure legion_domain_point_iterator_constructor_from_domain
+    module procedure legion_domain_point_iterator_constructor_from_rect_1d
   end interface 
   
   ! ===============================================================================
@@ -356,15 +361,12 @@ module legion_fortran_object_oriented
   type FRuntime
     type(legion_runtime_f_t) :: runtime
   contains
-    procedure, private :: legion_runtime_get_index_domain_return_domain
-    procedure, private :: legion_runtime_get_index_domain_return_rect1
     procedure, private :: legion_runtime_create_index_space_from_elmts_size
     procedure, private :: legion_runtime_create_index_space_from_domain
     procedure, private :: legion_runtime_create_index_space_from_rect_1d
     
     ! @see Legion::Runtime::get_index_space_domain()
-    generic :: get_index_space_domain => legion_runtime_get_index_domain_return_domain, &
-                                         legion_runtime_get_index_domain_return_rect1
+    procedure :: get_index_space_domain => legion_runtime_get_index_domain_return_domain
                                          
     ! @see Legion::Runtime::create_index_space()
     generic :: create_index_space => legion_runtime_create_index_space_from_elmts_size, &
@@ -565,7 +567,7 @@ contains
   end function legion_point_3d_constructor_integer8
   
   ! ===============================================================================
-  ! Domain/Rect
+  ! Rect
   ! ===============================================================================
   function legion_rect_1d_constructor_integer4(x, y)
     implicit none
@@ -576,7 +578,6 @@ contains
     
     legion_rect_1d_constructor_integer4%rect%lo%x(0) = x
     legion_rect_1d_constructor_integer4%rect%hi%x(0) = y
-    legion_rect_1d_constructor_integer4%domain = legion_domain_from_rect_1d_c(legion_rect_1d_constructor_integer4%rect)
   end function legion_rect_1d_constructor_integer4
   
   function legion_rect_1d_constructor_integer8(x, y)
@@ -588,7 +589,6 @@ contains
     
     legion_rect_1d_constructor_integer8%rect%lo%x(0) = x
     legion_rect_1d_constructor_integer8%rect%hi%x(0) = y
-    legion_rect_1d_constructor_integer8%domain = legion_domain_from_rect_1d_c(legion_rect_1d_constructor_integer8%rect)
   end function legion_rect_1d_constructor_integer8
   
   function legion_rect_1d_constructor_point_1d(x, y)
@@ -600,7 +600,6 @@ contains
     
     legion_rect_1d_constructor_point_1d%rect%lo = x%point
     legion_rect_1d_constructor_point_1d%rect%hi = y%point
-    legion_rect_1d_constructor_point_1d%domain = legion_domain_from_rect_1d_c(legion_rect_1d_constructor_point_1d%rect)
   end function legion_rect_1d_constructor_point_1d
   
   function legion_rect_2d_constructor_point_2d(x, y)
@@ -612,7 +611,6 @@ contains
     
     legion_rect_2d_constructor_point_2d%rect%lo = x%point
     legion_rect_2d_constructor_point_2d%rect%hi = y%point
-    legion_rect_2d_constructor_point_2d%domain = legion_domain_from_rect_2d_c(legion_rect_2d_constructor_point_2d%rect)
   end function legion_rect_2d_constructor_point_2d
   
   function legion_rect_3d_constructor_point_3d(x, y)
@@ -624,8 +622,16 @@ contains
     
     legion_rect_3d_constructor_point_3d%rect%lo = x%point
     legion_rect_3d_constructor_point_3d%rect%hi = y%point
-    legion_rect_3d_constructor_point_3d%domain = legion_domain_from_rect_3d_c(legion_rect_3d_constructor_point_3d%rect)
   end function legion_rect_3d_constructor_point_3d
+  
+  subroutine legion_rect_1d_assignment_from_domain(rect, domain)
+    implicit none
+    
+    type(FRect1D), intent(out) :: rect
+    type(FDomain), intent(in) :: domain
+      
+    rect%rect = legion_domain_get_rect_1d_c(domain%domain)
+  end subroutine legion_rect_1d_assignment_from_domain
 
   ! ===============================================================================
   ! FieldAccessor
@@ -925,15 +931,28 @@ contains
   ! ===============================================================================
   ! DomainPointIterator
   ! ===============================================================================
-  function legion_domain_point_iterator_constructor(handle)
+  function legion_domain_point_iterator_constructor_from_domain(handle)
     implicit none
     
-    type(FDomainPointIterator) :: legion_domain_point_iterator_constructor
+    type(FDomainPointIterator) :: legion_domain_point_iterator_constructor_from_domain
     class(FDomain), intent(in) :: handle
       
-    legion_domain_point_iterator_constructor%iterator = &
+    legion_domain_point_iterator_constructor_from_domain%iterator = &
       legion_domain_point_iterator_create_c(handle%domain)
-  end function legion_domain_point_iterator_constructor
+  end function legion_domain_point_iterator_constructor_from_domain
+  
+  function legion_domain_point_iterator_constructor_from_rect_1d(handle)
+    implicit none
+    
+    type(FDomainPointIterator) :: legion_domain_point_iterator_constructor_from_rect_1d
+    class(FRect1D), intent(in) :: handle
+      
+    type(legion_domain_f_t) :: domain
+    
+    domain = legion_domain_from_rect_1d_c(handle%rect)  
+    legion_domain_point_iterator_constructor_from_rect_1d%iterator = &
+      legion_domain_point_iterator_create_c(domain)
+  end function legion_domain_point_iterator_constructor_from_rect_1d
   
   subroutine legion_domain_point_iterator_destructor(this)
     implicit none
@@ -1301,21 +1320,6 @@ contains
     legion_runtime_get_index_domain_return_domain%domain = legion_index_space_get_domain_c(this%runtime, index_space%is)
   end function legion_runtime_get_index_domain_return_domain
   
-  function legion_runtime_get_index_domain_return_rect1(this, ctx, index_space, dim)
-    implicit none
-    
-    type(FRect1D)                 :: legion_runtime_get_index_domain_return_rect1
-    class(FRuntime), intent(in)   :: this
-    type(FContext), intent(in)    :: ctx
-    type(FIndexSpace), intent(in) :: index_space
-    type(integer), intent(in)     :: dim
-    type(legion_domain_f_t)       :: tmp_domain
-    
-    tmp_domain = legion_index_space_get_domain_c(this%runtime, index_space%is)
-    legion_runtime_get_index_domain_return_rect1%domain = tmp_domain
-    legion_runtime_get_index_domain_return_rect1%rect = legion_domain_get_rect_1d_c(tmp_domain)
-  end function legion_runtime_get_index_domain_return_rect1
-  
   function legion_runtime_create_index_space_from_elmts_size(this, ctx, max_num_elmts)
     implicit none
     
@@ -1347,9 +1351,12 @@ contains
     class(FRuntime), intent(in) :: this
     type(FContext), intent(in)  :: ctx
     type(FRect1D), intent(in)   :: rect_1d
-      
+    
+    type(legion_domain_f_t) :: domain
+    
+    domain = legion_domain_from_rect_1d_c(rect_1d%rect)  
     legion_runtime_create_index_space_from_rect_1d%is = legion_index_space_create_domain_c(this%runtime, &
-                                                          ctx%context, rect_1d%domain)
+                                                          ctx%context, domain)
   end function legion_runtime_create_index_space_from_rect_1d
   
   subroutine legion_runtime_destroy_index_space(this, ctx, index_space)
