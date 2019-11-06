@@ -419,6 +419,7 @@ if(Legion_BUILD_ALL OR Legion_BUILD_APPS OR Legion_BUILD_BINDINGS OR Legion_BUIL
   # Make a namespaced alias so in-build examples can use it the same way as if
   # it were imported
   add_library(Legion::Legion ALIAS Legion)
+  add_library(Legion::Realm ALIAS Realm)
 
   if(Legion_USE_CUDA)
     # CUDA has some issues propogating target interface properties so we

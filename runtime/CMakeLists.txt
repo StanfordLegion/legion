@@ -362,4 +362,8 @@ add_library(Legion INTERFACE)
 set_target_properties(Legion PROPERTIES
   INTERFACE_LINK_LIBRARIES LegionRuntime
 )
-install(TARGETS Legion EXPORT LegionTargets)
+add_library(Realm INTERFACE)
+set_target_properties(Realm PROPERTIES
+  INTERFACE_LINK_LIBRARIES RealmRuntime
+)
+install(TARGETS Legion Realm EXPORT LegionTargets)
