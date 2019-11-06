@@ -1250,13 +1250,12 @@ namespace Legion {
             context->intersect_index_spaces(expr, user->expr);
           if (overlap->is_empty())
             return false;
-          if (overlap->get_volume() < user->expr->get_volume())
-            dominates = false;
         }
-        else
-          // Next doesn't cover so clearly doesn't dominate 
-          // a previous user that does cover
-          dominates = false;
+        // We don't allow any user that doesn't fully cover the
+        // expression to dominate anything. It's hard to guarantee
+        // correctness without this. Think very carefully if you
+        // plan to change this!
+        dominates = false;
       }
       return true;
     }
