@@ -668,6 +668,8 @@ namespace Legion {
     public:
       inline bool is_replaying(void) const { return !recording; }
       inline bool is_replayable(void) const { return replayable.replayable; }
+      inline const std::string& get_replayable_message(void) const
+        { return replayable.message; }
     public:
       virtual bool is_recording(void) const { return recording; }
       virtual void add_recorder_reference(void) { /*do nothing*/ }
