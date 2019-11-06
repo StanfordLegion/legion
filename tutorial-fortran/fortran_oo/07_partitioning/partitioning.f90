@@ -11,6 +11,7 @@ module daxpy
   
 contains
   subroutine init_task(tdata, tdatalen, userdata, userlen, p)
+    use legion_fortran_c_interface
     implicit none
     
     type(c_ptr), intent(in) :: tdata
@@ -21,9 +22,7 @@ contains
     
     type(FFieldAccessor1D) :: accessor
         
-    type(legion_rect_1d_f_t) :: index_rect
     real(kind=8), target :: x_value
-    type(FPoint1D) :: point_1d
     integer :: i, fid
     
     type(FContext) :: ctx
@@ -35,6 +34,8 @@ contains
     type(FRegionRequirement) :: region_requirement
     type(FIndexSpace) :: index_space
     type(FRect1D) :: rect_1d
+    type(FDomainPointIterator) :: pir
+    type(FDomainPoint) :: dp
       
     call legion_task_prolog(tdata, tdatalen, userdata, userlen, p, &
                             task, pr_list, &
@@ -49,15 +50,17 @@ contains
     logical_region = region_requirement%get_region()
     index_space = logical_region%get_index_space()
     rect_1d = runtime%get_index_space_domain(ctx, index_space, 1)
-    index_rect = rect_1d%rect
     
     Print *, "Init Task!", fid
     
-    do i = index_rect%lo%x(0), index_rect%hi%x(0)
-        point_1d = FPoint1D(i)
-        x_value = 1.1 * (fid+1) + i
-        call accessor%write_point(point_1d, x_value)
+    pir = FDomainPointIterator(rect_1d)
+    
+    do while(pir%has_next() .eqv. .true.)
+      dp = pir%step()
+      call accessor%write_point(dp%get_point_1d(), x_value)
     end do
+    
+    call pir%destroy()
     
     call legion_task_epilog(runtime, ctx)
   end subroutine init_task
@@ -219,19 +222,25 @@ contains
     real(kind=8) :: real_number = 0.0
     real(kind=8), target :: alpha = 0.1    
 
-    integer*4 :: num_elements = 1024
+    integer :: num_elements = 1024
+    integer :: num_subregions = 4
     
-    type(FRect1D) :: elem_rect
+    type(FRect1D) :: elem_rect, color_bounds
     type(FRuntime) :: runtime
     type(FContext) :: ctx
     type(FTask) :: task
     type(FPhysicalRegionList) :: pr_list
-    type(FIndexSpace) :: is
+    type(FIndexSpace) :: is, color_is
     type(FFieldSpace) :: input_fs, output_fs
     type(FFieldAllocator) :: ifs_allocator, ofs_allocator
+    type(FIndexPartition) :: ip
     type(FLogicalRegion) :: input_lr, output_lr
-    type(FTaskLauncher) :: init_launcher_x, init_launcher_y, daxpy_launcher, check_launcher
-    type(FFuture) ::task_future
+    type(FLogicalPartition) :: input_lp, output_lp
+    type(FTaskLauncher) :: check_launcher
+    type(FIndexLauncher) :: init_launcher_x, init_launcher_y, daxpy_launcher
+    type(FFuture) :: task_future
+    type(FArgumentMap) :: arg_map
+    type(FFutureMap) :: task_future_map
     
     Print *, "TOP Level Task!"
     
@@ -257,34 +266,44 @@ contains
     input_lr = runtime%create_logical_region(ctx, is, input_fs)
     output_lr = runtime%create_logical_region(ctx, is, output_fs)
     
+    ! create partition
+    color_bounds = FRect1D(0, num_subregions-1)
+    color_is = runtime%create_index_space(ctx, color_bounds)
+    ip = runtime%create_equal_partition(ctx, is, color_is)
+    input_lp = runtime%get_logical_partition(ctx, input_lr, ip)
+    output_lp = runtime%get_logical_partition(ctx, output_lr, ip)
+    
     !init task for X
-    init_launcher_x = FTaskLauncher(INIT_TASK_ID, FTaskArgument())
-    call init_launcher_x%add_region_requirement(input_lr, & 
+    init_launcher_x = FIndexLauncher(INIT_TASK_ID, color_is, &
+                                     FTaskArgument(), arg_map)
+    call init_launcher_x%add_region_requirement(input_lp, 0, & 
                                               WRITE_DISCARD, EXCLUSIVE, &
                                               input_lr)                                          
     call init_launcher_x%add_field(0, 0)
-    task_future = runtime%execute_task(ctx, init_launcher_x)
+    task_future_map = runtime%execute_index_space(ctx, init_launcher_x)
     
     !init task for Y
-    init_launcher_y = FTaskLauncher(INIT_TASK_ID, FTaskArgument())
-    call init_launcher_y%add_region_requirement(input_lr, & 
+    init_launcher_y = FIndexLauncher(INIT_TASK_ID, color_is, &
+                                     FTaskArgument(), arg_map)
+    call init_launcher_y%add_region_requirement(input_lp, 0, & 
                                               WRITE_DISCARD, EXCLUSIVE, &
                                               input_lr)                                          
     call init_launcher_y%add_field(0, 1)
-    task_future = runtime%execute_task(ctx, init_launcher_y)
+    task_future_map = runtime%execute_index_space(ctx, init_launcher_y)
     
     !daxpy task
-    daxpy_launcher = FTaskLauncher(DAXPY_TASK_ID, FTaskArgument(c_loc(alpha), c_sizeof(alpha)))
-    call daxpy_launcher%add_region_requirement(input_lr, & 
+    daxpy_launcher = FIndexLauncher(DAXPY_TASK_ID, color_is, &
+                                   FTaskArgument(c_loc(alpha), c_sizeof(alpha)), arg_map)
+    call daxpy_launcher%add_region_requirement(input_lp, 0, & 
                                               READ_ONLY, EXCLUSIVE, &
                                               input_lr)                                          
     call daxpy_launcher%add_field(0, 0)
     call daxpy_launcher%add_field(0, 1)
-    call daxpy_launcher%add_region_requirement(output_lr, & 
+    call daxpy_launcher%add_region_requirement(output_lp, 0, & 
                                               WRITE_DISCARD, EXCLUSIVE, &
                                               output_lr)                                          
     call daxpy_launcher%add_field(1, 2)
-    task_future = runtime%execute_task(ctx, daxpy_launcher)
+    task_future_map= runtime%execute_index_space(ctx, daxpy_launcher)
     
     !check task
     check_launcher = FTaskLauncher(CHECK_TASK_ID, FTaskArgument(c_loc(alpha), c_sizeof(alpha)))
