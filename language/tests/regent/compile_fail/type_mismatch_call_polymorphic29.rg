@@ -13,21 +13,29 @@
 -- limitations under the License.
 
 -- fails-with:
--- type_mismatch_projection5.rg:31: type mismatch: expected string for renaming but found table
---   var s = r.{[name]=x}
---              ^
+-- type_mismatch_call_polymorphic29.rg:40: type mismatch in argument 1: expected region(int32) but got region(double)
+--   f(r.{[field_path]})
+--    ^
 
 import "regent"
 
-struct fs
+struct vec2
 {
-  x : int;
+  x : double;
+  y : double;
 }
 
-local name = regentlib.field_path("x", "y")
+struct st
+{
+  v : vec2;
+}
 
-task f()
-  var r = region(ispace(int1d, 5), fs)
-  var s = r.{[name]=x}
+local field_path = regentlib.field_path("v", "x")
+
+task f(x : region(int))
+where reads writes(x) do end
+
+task g()
+  var r = region(ispace(ptr, 5), st)
+  f(r.{[field_path]})
 end
-f:compile()

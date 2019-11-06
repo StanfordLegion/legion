@@ -179,11 +179,14 @@ function specialize.field_names(cx, node)
     return terralib.newlist({node.names_expr})
   else
     local value = node.names_expr(cx.env:env())
-    if type(value) == "string" then
+    if type(value) == "string" or data.is_tuple(value) then
       return terralib.newlist({value})
-    elseif terralib.islist(value) and
-      data.all(value:map(function(v) return type(v) == "string" end))
-    then
+    elseif terralib.islist(value) then
+      value:map(function(v)
+        if not (type(v) == "string" or data.is_tuple(v)) then
+          report.error(node, "unable to specialize value of type " .. type(v))
+        end
+      end)
       return value
     else
       report.error(node, "unable to specialize value of type " .. tostring(type(value)))

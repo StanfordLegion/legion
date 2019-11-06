@@ -13,8 +13,8 @@
 -- limitations under the License.
 
 -- fails-with:
--- type_mismatch_projection6.rg:31: type mismatch: expected string for field name but found number
---   var s = r.{[field]}
+-- invalid_projection8.rg:31: unable to specialize value of type number
+--   var s = r.{[field]=[field]}
 --              ^
 
 import "regent"
@@ -24,10 +24,10 @@ struct fs
   x : int;
 }
 
-local field = terralib.newlist({regentlib.field_path(1)})
+local field = terralib.newlist({1})
 
 task f()
   var r = region(ispace(int1d, 5), fs)
-  var s = r.{[field]}
+  var s = r.{[field]=[field]}
 end
 f:compile()
