@@ -613,6 +613,11 @@ namespace Legion {
       }
     public:
       mutable Realm::GenericAccessor<FT,N,T> accessor;
+    public:
+      typedef FT value_type;
+      typedef FT& reference;
+      typedef const FT& const_reference;
+      static const int dim = N;
     };
 
     // Read-only FieldAccessor specialization
@@ -671,6 +676,11 @@ namespace Legion {
       FieldID field;
       PhysicalRegion field_region;
       DomainT<N,T> bounds;
+    public:
+      typedef FT value_type;
+      typedef FT& reference;
+      typedef const FT& const_reference;
+      static const int dim = N;
     };
 
     // Read-only FieldAccessor specialization 
@@ -712,6 +722,11 @@ namespace Legion {
         }
     public:
       mutable Realm::GenericAccessor<FT,1,T> accessor;
+    public:
+      typedef FT value_type;
+      typedef FT& reference;
+      typedef const FT& const_reference;
+      static const int dim = 1;
     };
 
     // Read-only FieldAccessor specialization 
@@ -763,6 +778,11 @@ namespace Legion {
       FieldID field;
       PhysicalRegion field_region;
       DomainT<1,T> bounds;
+    public:
+      typedef FT value_type;
+      typedef FT& reference;
+      typedef const FT& const_reference;
+      static const int dim = 1;
     };
 
     // Read-write FieldAccessor specialization
@@ -816,6 +836,11 @@ namespace Legion {
       // No reductions since we can't handle atomicity correctly
     public:
       mutable Realm::GenericAccessor<FT,N,T> accessor;
+    public:
+      typedef FT value_type;
+      typedef FT& reference;
+      typedef const FT& const_reference;
+      static const int dim = N;
     };
 
     // Read-write FieldAccessor specialization
@@ -881,6 +906,11 @@ namespace Legion {
       FieldID field;
       PhysicalRegion field_region;
       DomainT<N,T> bounds;
+    public:
+      typedef FT value_type;
+      typedef FT& reference;
+      typedef const FT& const_reference;
+      static const int dim = N;
     };
 
     // Read-write FieldAccessor specialization 
@@ -927,6 +957,11 @@ namespace Legion {
       // No reductions since we can't handle atomicity correctly
     public:
       mutable Realm::GenericAccessor<FT,1,T> accessor;
+    public:
+      typedef FT value_type;
+      typedef FT& reference;
+      typedef const FT& const_reference;
+      static const int dim = 1;
     };
 
     // Read-write FieldAccessor specialization 
@@ -984,6 +1019,11 @@ namespace Legion {
       FieldID field;
       PhysicalRegion field_region;
       DomainT<1,T> bounds;
+    public:
+      typedef FT value_type;
+      typedef FT& reference;
+      typedef const FT& const_reference;
+      static const int dim = 1;
     };
 
     // Write-discard FieldAccessor specialization
@@ -1036,6 +1076,11 @@ namespace Legion {
       }
     public:
       mutable Realm::GenericAccessor<FT,N,T> accessor;
+    public:
+      typedef FT value_type;
+      typedef FT& reference;
+      typedef const FT& const_reference;
+      static const int dim = 1;
     };
 
     // Write-discard FieldAccessor specialization
@@ -1101,6 +1146,11 @@ namespace Legion {
       FieldID field;
       PhysicalRegion field_region;
       DomainT<N,T> bounds;
+    public:
+      typedef FT value_type;
+      typedef FT& reference;
+      typedef const FT& const_reference;
+      static const int dim = N;
     };
 
     // Write-discard FieldAccessor specialization with
@@ -1146,6 +1196,11 @@ namespace Legion {
         }
     public:
       mutable Realm::GenericAccessor<FT,1,T> accessor;
+    public:
+      typedef FT value_type;
+      typedef FT& reference;
+      typedef const FT& const_reference;
+      static const int dim = 1;
     };
 
     // Write-discard FieldAccessor specialization with
@@ -1202,6 +1257,11 @@ namespace Legion {
       FieldID field;
       PhysicalRegion field_region;
       DomainT<1,T> bounds;
+    public:
+      typedef FT value_type;
+      typedef FT& reference;
+      typedef const FT& const_reference;
+      static const int dim = 1;
     };
 
     // Write-only FieldAccessor specialization
@@ -1250,6 +1310,11 @@ namespace Legion {
       }
     public:
       mutable Realm::GenericAccessor<FT,N,T> accessor;
+    public:
+      typedef FT value_type;
+      typedef FT& reference;
+      typedef const FT& const_reference;
+      static const int dim = 1;
     };
 
     // Write-only FieldAccessor specialization
@@ -1309,6 +1374,11 @@ namespace Legion {
       FieldID field;
       PhysicalRegion field_region;
       DomainT<N,T> bounds;
+    public:
+      typedef FT value_type;
+      typedef FT& reference;
+      typedef const FT& const_reference;
+      static const int dim = N;
     };
 
     // Write-only FieldAccessor specialization with
@@ -1350,6 +1420,11 @@ namespace Legion {
         }
     public:
       mutable Realm::GenericAccessor<FT,1,T> accessor;
+    public:
+      typedef FT value_type;
+      typedef FT& reference;
+      typedef const FT& const_reference;
+      static const int dim = 1;
     };
 
     // Write-only FieldAccessor specialization with
@@ -1400,6 +1475,11 @@ namespace Legion {
       FieldID field;
       PhysicalRegion field_region;
       DomainT<1,T> bounds;
+    public:
+      typedef FT value_type;
+      typedef FT& reference;
+      typedef const FT& const_reference;
+      static const int dim = 1;
     };
 
     // Special namespace for providing bounds check help for affine accessors
@@ -1794,6 +1874,11 @@ namespace Legion {
       }
     public:
       Realm::AffineAccessor<FT,N,T> accessor;
+    public:
+      typedef FT value_type;
+      typedef FT& reference;
+      typedef const FT& const_reference;
+      static const int dim = N;
     };
 
     // Read-only FieldAccessor specialization
@@ -1988,6 +2073,11 @@ namespace Legion {
       FieldID field;
       PhysicalRegion field_region;
       AffineBounds::Tester<N,T> bounds;
+    public:
+      typedef FT value_type;
+      typedef FT& reference;
+      typedef const FT& const_reference;
+      static const int dim = N;
     };
 
     // Read-only FieldAccessor specialization 
@@ -2133,6 +2223,11 @@ namespace Legion {
         }
     public:
       Realm::AffineAccessor<FT,1,T> accessor;
+    public:
+      typedef FT value_type;
+      typedef FT& reference;
+      typedef const FT& const_reference;
+      static const int dim = 1;
     };
 
     // Read-only FieldAccessor specialization 
@@ -2319,6 +2414,11 @@ namespace Legion {
       FieldID field;
       PhysicalRegion field_region;
       AffineBounds::Tester<1,T> bounds;
+    public:
+      typedef FT value_type;
+      typedef FT& reference;
+      typedef const FT& const_reference;
+      static const int dim = 1;
     };
 
     // Read-write FieldAccessor specialization
@@ -2484,6 +2584,11 @@ namespace Legion {
         }
     public:
       Realm::AffineAccessor<FT,N,T> accessor;
+    public:
+      typedef FT value_type;
+      typedef FT& reference;
+      typedef const FT& const_reference;
+      static const int dim = N;
     };
 
     // Read-write FieldAccessor specialization
@@ -2703,6 +2808,11 @@ namespace Legion {
       FieldID field;
       PhysicalRegion field_region;
       AffineBounds::Tester<N,T> bounds;
+    public:
+      typedef FT value_type;
+      typedef FT& reference;
+      typedef const FT& const_reference;
+      static const int dim = N;
     };
 
     // Read-write FieldAccessor specialization 
@@ -2859,6 +2969,11 @@ namespace Legion {
         }
     public:
       Realm::AffineAccessor<FT,1,T> accessor;
+    public:
+      typedef FT value_type;
+      typedef FT& reference;
+      typedef const FT& const_reference;
+      static const int dim = 1;
     };
 
     // Read-write FieldAccessor specialization 
@@ -3068,6 +3183,11 @@ namespace Legion {
       FieldID field;
       PhysicalRegion field_region;
       AffineBounds::Tester<1,T> bounds;
+    public:
+      typedef FT value_type;
+      typedef FT& reference;
+      typedef const FT& const_reference;
+      static const int dim = 1;
     };
 
     // Write-discard FieldAccessor specialization
@@ -3227,6 +3347,11 @@ namespace Legion {
       }
     public:
       Realm::AffineAccessor<FT,N,T> accessor;
+    public:
+      typedef FT value_type;
+      typedef FT& reference;
+      typedef const FT& const_reference;
+      static const int dim = N;
     };
 
     // Write-discard FieldAccessor specialization
@@ -3434,6 +3559,11 @@ namespace Legion {
       FieldID field;
       PhysicalRegion field_region;
       AffineBounds::Tester<N,T> bounds;
+    public:
+      typedef FT value_type;
+      typedef FT& reference;
+      typedef const FT& const_reference;
+      static const int dim = N;
     };
 
     // Write-discard FieldAccessor specialization with
@@ -3584,6 +3714,11 @@ namespace Legion {
         }
     public:
       Realm::AffineAccessor<FT,1,T> accessor;
+    public:
+      typedef FT value_type;
+      typedef FT& reference;
+      typedef const FT& const_reference;
+      static const int dim = 1;
     };
 
     // Write-discard FieldAccessor specialization with
@@ -3781,6 +3916,11 @@ namespace Legion {
       FieldID field;
       PhysicalRegion field_region;
       AffineBounds::Tester<1,T> bounds;
+    public:
+      typedef FT value_type;
+      typedef FT& reference;
+      typedef const FT& const_reference;
+      static const int dim = 1;
     };
 
     // Write-only FieldAccessor specialization
@@ -3935,6 +4075,11 @@ namespace Legion {
       }
     public:
       Realm::AffineAccessor<FT,N,T> accessor;
+    public:
+      typedef FT value_type;
+      typedef FT& reference;
+      typedef const FT& const_reference;
+      static const int dim = N;
     };
 
     // Write-only FieldAccessor specialization
@@ -4128,6 +4273,11 @@ namespace Legion {
       FieldID field;
       PhysicalRegion field_region;
       AffineBounds::Tester<N,T> bounds;
+    public:
+      typedef FT value_type;
+      typedef FT& reference;
+      typedef const FT& const_reference;
+      static const int dim = N;
     };
 
     // Write-only FieldAccessor specialization with
@@ -4273,6 +4423,11 @@ namespace Legion {
         }
     public:
       Realm::AffineAccessor<FT,1,T> accessor;
+    public:
+      typedef FT value_type;
+      typedef FT& reference;
+      typedef const FT& const_reference;
+      static const int dim = 1;
     };
 
     // Write-only FieldAccessor specialization with
@@ -4459,6 +4614,11 @@ namespace Legion {
       FieldID field;
       PhysicalRegion field_region;
       AffineBounds::Tester<1,T> bounds;
+    public:
+      typedef FT value_type;
+      typedef FT& reference;
+      typedef const FT& const_reference;
+      static const int dim = 1;
     };
 
     // Reduce FieldAccessor specialization
@@ -4607,6 +4767,11 @@ namespace Legion {
       }
     public:
       Realm::AffineAccessor<typename REDOP::RHS,N,T> accessor;
+    public:
+      typedef typename REDOP::RHS value_type;
+      typedef typename REDOP::RHS& reference;
+      typedef const typename REDOP::RHS& const_reference;
+      static const int dim = N;
     };
 
     // Reduce ReductionAccessor specialization with bounds checks
@@ -4791,6 +4956,11 @@ namespace Legion {
       FieldID field;
       PhysicalRegion field_region;
       AffineBounds::Tester<N,T> bounds;
+    public:
+      typedef typename REDOP::RHS value_type;
+      typedef typename REDOP::RHS& reference;
+      typedef const typename REDOP::RHS& const_reference;
+      static const int dim = N;
     };
     
     // Reduce Field Accessor specialization with N==1
@@ -4928,6 +5098,11 @@ namespace Legion {
         }
     public:
       Realm::AffineAccessor<typename REDOP::RHS,1,T> accessor;
+    public:
+      typedef typename REDOP::RHS value_type;
+      typedef typename REDOP::RHS& reference;
+      typedef const typename REDOP::RHS& const_reference;
+      static const int dim = 1;
     };
 
     // Reduce Field Accessor specialization with N==1
@@ -5100,6 +5275,11 @@ namespace Legion {
       FieldID field;
       PhysicalRegion field_region;
       AffineBounds::Tester<1,T> bounds;
+    public:
+      typedef typename REDOP::RHS value_type;
+      typedef typename REDOP::RHS& reference;
+      typedef const typename REDOP::RHS& const_reference;
+      static const int dim = 1;
     };
 
     // A hidden class for users that really know what they are doing
@@ -5152,6 +5332,11 @@ namespace Legion {
         }
     public:
       mutable A accessor;
+    public:
+      typedef FT value_type;
+      typedef FT& reference;
+      typedef const FT& const_reference;
+      static const int dim = N;
     };
 
     template<typename FT, typename T>
@@ -5189,6 +5374,11 @@ namespace Legion {
         }
     public:
       mutable Realm::GenericAccessor<FT,1,T> accessor;
+    public:
+      typedef FT value_type;
+      typedef FT& reference;
+      typedef const FT& const_reference;
+      static const int dim = 1;
     };
 
     template<typename FT, int N, typename T>
@@ -5323,6 +5513,11 @@ namespace Legion {
         }
     public:
       Realm::AffineAccessor<FT,N,T> accessor;
+    public:
+      typedef FT value_type;
+      typedef FT& reference;
+      typedef const FT& const_reference;
+      static const int dim = N;
     };
 
     // Specialization for UnsafeFieldAccessor for dimension 1 
@@ -5425,6 +5620,11 @@ namespace Legion {
         }
     public:
       Realm::AffineAccessor<FT,1,T> accessor;
+    public:
+      typedef FT value_type;
+      typedef FT& reference;
+      typedef const FT& const_reference;
+      static const int dim = 1;
     }; 
 
     //--------------------------------------------------------------------------

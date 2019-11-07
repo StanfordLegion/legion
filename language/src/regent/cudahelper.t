@@ -1112,6 +1112,16 @@ function cudahelper.generate_parallel_prefix_op(variant, total, lhs_wr, lhs_rd, 
   return launch
 end
 
+-- Declare the API calls that are deprecated in CUDA SDK 10
+-- TODO: We must move on to the new execution control API as these old functions
+--       can be dropped in the future.
+local ExecutionAPI = {
+  cudaConfigureCall =
+    ef("cudaConfigureCall", {RuntimeAPI.dim3, RuntimeAPI.dim3, uint64, RuntimeAPI.cudaStream_t} -> uint32);
+  cudaSetupArgument = ef("cudaSetupArgument", {&opaque, uint64, uint64} -> uint32);
+  cudaLaunch = ef("cudaLaunch", {&opaque} -> uint32);
+}
+
 function cudahelper.codegen_kernel_call(kernel_id, count, args, shared_mem_size, tight, needs_2d)
   local setupArguments = terralib.newlist()
 
@@ -1120,7 +1130,7 @@ function cudahelper.codegen_kernel_call(kernel_id, count, args, shared_mem_size,
     local arg =  args[i]
     local size = terralib.sizeof(arg.type)
     setupArguments:insert(quote
-      RuntimeAPI.cudaSetupArgument(&[arg], size, offset)
+      ExecutionAPI.cudaSetupArgument(&[arg], size, offset)
     end)
     offset = offset + size
   end
@@ -1171,9 +1181,9 @@ function cudahelper.codegen_kernel_call(kernel_id, count, args, shared_mem_size,
   return quote
     var [grid], [block]
     [launch_domain_init]
-    RuntimeAPI.cudaConfigureCall([grid], [block], shared_mem_size, nil)
+    ExecutionAPI.cudaConfigureCall([grid], [block], shared_mem_size, nil)
     [setupArguments]
-    RuntimeAPI.cudaLaunch([&int8](kernel_id))
+    ExecutionAPI.cudaLaunch([&int8](kernel_id))
   end
 end
 

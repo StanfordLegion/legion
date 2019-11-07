@@ -663,19 +663,16 @@ namespace Legion {
                                        user_dominates, preconditions, 
                                        dead_events, current_to_filter, 
                                        observed, non_dominated,trace_recording);
-            if (!current_to_filter.empty())
-              current_to_filter.clear();
+#ifdef DEBUG_LEGION
+            assert(!observed);
+            assert(current_to_filter.empty());
+#endif
           }
           if (!previous_epoch_users.empty())
-          {
-            const FieldMask dominated = observed - non_dominated;
-            const FieldMask previous_mask = user_mask - dominated;
-            if (!!previous_mask)
-              find_previous_preconditions(usage, previous_mask, user_expr,
-                                          term_event, op_id, index,
-                                          user_dominates, preconditions,
-                                          dead_events, trace_recording);
-          }
+            find_previous_preconditions(usage, user_mask, user_expr,
+                                        term_event, op_id, index,
+                                        user_dominates, preconditions,
+                                        dead_events, trace_recording);
         }
       } 
       if (!trace_recording && (!dead_events.empty() || 
@@ -806,18 +803,16 @@ namespace Legion {
                                        preconditions, dead_events, 
                                        current_to_filter, observed, 
                                        non_dominated, trace_recording);
-            current_to_filter.clear();
+#ifdef DEBUG_LEGION
+            assert(!observed);
+            assert(current_to_filter.empty());
+#endif
           }
           if (!previous_epoch_users.empty())
-          {
-            const FieldMask dominated = observed - non_dominated;
-            const FieldMask previous_mask = copy_mask - dominated;
-            if (!!previous_mask)
-              find_previous_preconditions(usage, previous_mask, copy_expr,
-                                          op_id, index, copy_dominates,
-                                          preconditions, dead_events,
-                                          trace_recording);
-          }
+            find_previous_preconditions(usage, copy_mask, copy_expr,
+                                        op_id, index, copy_dominates,
+                                        preconditions, dead_events,
+                                        trace_recording);
         }
       }
       if (!trace_recording && (!dead_events.empty() || 
@@ -2067,7 +2062,6 @@ namespace Legion {
             if (dominated)
             {
               observed |= user_overlap;
-              
               if (to_filter == filter_events.end())
               {
                 filter_events[cit->first].insert(it->first, user_overlap);

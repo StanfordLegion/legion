@@ -174,10 +174,14 @@ list(APPEND REALM_SRC
 foreach(N1 RANGE 1 ${REALM_MAX_DIM})
   foreach(N2 RANGE 1 ${REALM_MAX_DIM})
     foreach(SRC image preimage byfield)
-      file(WRITE
-        ${CMAKE_CURRENT_BINARY_DIR}/${SRC}_${N1}_${N2}.cc
-        "#define INST_N1 ${N1}\n#define INST_N2 ${N2}\n#include \"realm/deppart/${SRC}_tmpl.cc\"")
-      list(APPEND REALM_SRC ${CMAKE_CURRENT_BINARY_DIR}/${SRC}_${N1}_${N2}.cc)
+      # echo -e is not portable, so use perl and try to limit the escape
+      #  characters we need to tunnel through cmake
+      add_custom_command(
+	COMMAND perl -e "$x='#define INST_N1 ${N1}EOL#define INST_N2 ${N2}EOL#include QTrealm/deppart/${SRC}_tmpl.ccQT'; $x=~s/EOL/chr(10)/ge; $x=~s/QT/chr(34)/ge; print $x;" > ${SRC}_${N1}_${N2}.cc
+	OUTPUT ${SRC}_${N1}_${N2}.cc
+	VERBATIM
+	)
+      list(APPEND REALM_SRC ${SRC}_${N1}_${N2}.cc)
     endforeach()
   endforeach()
 endforeach()
@@ -304,16 +308,22 @@ list(APPEND LEGION_SRC
 
 # generate per-dimension object files for deppart stuff
 foreach(N1 RANGE 1 ${LEGION_MAX_DIM})
-  file(WRITE
-    ${CMAKE_CURRENT_BINARY_DIR}/region_tree_${N1}.cc
-    "#define INST_N1 ${N1}\n#include \"legion/region_tree_tmpl.cc\"")
-  list(APPEND LEGION_SRC ${CMAKE_CURRENT_BINARY_DIR}/region_tree_${N1}.cc)
+  # echo -e is not portable, so use perl and try to limit the escape
+  #  characters we need to tunnel through cmake
+  add_custom_command(
+    COMMAND perl -e "$x='#define INST_N1 ${N1}EOL#include QTlegion/region_tree_tmpl.ccQT'; $x=~s/EOL/chr(10)/ge; $x=~s/QT/chr(34)/ge; print $x;" > region_tree_${N1}.cc
+    OUTPUT region_tree_${N1}.cc
+    VERBATIM
+    )
+  list(APPEND LEGION_SRC region_tree_${N1}.cc)
   
   foreach(N2 RANGE 1 ${LEGION_MAX_DIM})
-    file(WRITE
-      ${CMAKE_CURRENT_BINARY_DIR}/region_tree_${N1}_${N2}.cc
-      "#define INST_N1 ${N1}\n#define INST_N2 ${N2}\n#include \"legion/region_tree_tmpl.cc\"")
-    list(APPEND LEGION_SRC ${CMAKE_CURRENT_BINARY_DIR}/region_tree_${N1}_${N2}.cc)
+    add_custom_command(
+      COMMAND perl -e "$x='#define INST_N1 ${N1}EOL#define INST_N2 ${N2}EOL#include QTlegion/region_tree_tmpl.ccQT'; $x=~s/EOL/chr(10)/ge; $x=~s/QT/chr(34)/ge; print $x;" > region_tree_${N1}_${N2}.cc
+      OUTPUT region_tree_${N1}_${N2}.cc
+      VERBATIM
+      )
+    list(APPEND LEGION_SRC region_tree_${N1}_${N2}.cc)
   endforeach()
 endforeach()
 
