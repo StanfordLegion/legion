@@ -2300,6 +2300,11 @@ namespace Legion {
 #endif
                     bool silence_warnings = false,
                     const char *warning_string = NULL) { }
+    public:
+      typedef FT value_type;
+      typedef FT& reference;
+      typedef const FT& const_reference;
+      static const int dim = N;
     };
 
     /**
@@ -2351,6 +2356,11 @@ namespace Legion {
                         const Rect<N,COORD_T> bounds,
                         bool silence_warnings = false,
                         const char *warning_string = NULL) { }
+    public:
+      typedef typename REDOP::RHS value_type;
+      typedef typename REDOP::RHS& reference;
+      typedef const typename REDOP::RHS& const_reference;
+      static const int dim = N;
     };
 
     /**
