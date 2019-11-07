@@ -620,6 +620,188 @@ contains
   end function legion_region_requirement_get_privilege_field_by_id
   
   ! ===============================================================================
+  ! Future
+  ! ===============================================================================
+  function legion_future_constructor(handle)
+    implicit none
+    
+    type(FFuture)             :: legion_future_constructor
+    type(FFuture), intent(in) :: handle
+      
+    legion_future_constructor%future = legion_future_copy_c(handle%future)
+  end function legion_future_constructor
+  
+  subroutine legion_future_destructor(this)
+    implicit none
+    
+    class(FFuture), intent(in) :: this
+      
+    call legion_future_destroy_c(this%future)
+  end subroutine legion_future_destructor
+  
+  subroutine legion_future_get_integer4(this, result)
+    implicit none
+    
+    class(FFuture), intent(in)    :: this
+    integer(kind=4), intent(out)  :: result
+    
+    type(c_ptr) :: ptr
+    integer(kind=4), pointer :: f_ptr
+    integer(c_size_t) :: result_size
+    
+    ptr = legion_future_get_untyped_pointer_c(this%future)
+    call c_f_pointer(ptr, f_ptr)
+    result = f_ptr
+    result_size = legion_future_get_untyped_size_c(this%future)
+    if (result_size .ne. c_sizeof(result)) then
+      print *, "future result size error", result_size, c_sizeof(result)
+    end if
+  end subroutine legion_future_get_integer4
+  
+  subroutine legion_future_get_integer8(this, result)
+    implicit none
+    
+    class(FFuture), intent(in)    :: this
+    integer(kind=8), intent(out)  :: result
+    
+    type(c_ptr) :: ptr
+    integer(kind=8), pointer :: f_ptr
+    integer(c_size_t) :: result_size
+    
+    ptr = legion_future_get_untyped_pointer_c(this%future)
+    call c_f_pointer(ptr, f_ptr)
+    result = f_ptr
+    result_size = legion_future_get_untyped_size_c(this%future)
+    if (result_size .ne. c_sizeof(result)) then
+      print *, "future result size error", result_size, c_sizeof(result)
+    end if
+  end subroutine legion_future_get_integer8
+  
+  subroutine legion_future_get_real4(this, result)
+    implicit none
+    
+    class(FFuture), intent(in)    :: this
+    real(kind=4), intent(out)     :: result
+    
+    type(c_ptr) :: ptr
+    real(kind=4), pointer :: f_ptr
+    integer(c_size_t) :: result_size
+    
+    ptr = legion_future_get_untyped_pointer_c(this%future)
+    call c_f_pointer(ptr, f_ptr)
+    result = f_ptr
+    result_size = legion_future_get_untyped_size_c(this%future)
+    if (result_size .ne. c_sizeof(result)) then
+      print *, "future result size error", result_size, c_sizeof(result)
+    end if
+  end subroutine legion_future_get_real4
+  
+  subroutine legion_future_get_real8(this, result)
+    implicit none
+    
+    class(FFuture), intent(in)    :: this
+    real(kind=8), intent(out)     :: result
+    
+    type(c_ptr) :: ptr
+    real(kind=8), pointer :: f_ptr
+    integer(c_size_t) :: result_size
+    
+    ptr = legion_future_get_untyped_pointer_c(this%future)
+    call c_f_pointer(ptr, f_ptr)
+    result = f_ptr
+    result_size = legion_future_get_untyped_size_c(this%future)
+    if (result_size .ne. c_sizeof(result)) then
+      print *, "future result size error", result_size, c_sizeof(result)
+    end if
+  end subroutine legion_future_get_real8
+  
+  subroutine legion_future_get_untyped(this, ptr, size)
+    implicit none
+    
+    class(FFuture), intent(in)     :: this
+    type(c_ptr), intent(out)       :: ptr
+    integer(c_size_t), intent(out) :: size
+    
+    ptr = legion_future_get_untyped_pointer_c(this%future)
+    size = legion_future_get_untyped_size_c(this%future)
+  end subroutine legion_future_get_untyped
+  
+  ! ===============================================================================
+  ! FutureMap
+  ! ===============================================================================
+  subroutine legion_future_map_wait_all_results(this)
+    implicit none
+    
+    class(FFutureMap), intent(in) :: this
+    
+    call legion_future_map_wait_all_results_c(this%future_map)
+  end subroutine legion_future_map_wait_all_results
+  
+  function legion_future_map_get_future_index(this, index)
+    implicit none
+    
+    type(FFuture)                 :: legion_future_map_get_future_index
+    class(FFutureMap), intent(in) :: this
+    integer, intent(in)           :: index
+    
+    type(FPoint1D) :: pt
+    type(legion_domain_point_f_t) :: dp
+    
+    pt = FPoint1D(index)
+    dp = legion_domain_point_from_point_1d_c(pt%point)
+    legion_future_map_get_future_index%future = legion_future_map_get_future_c(this%future_map, dp)
+  end function legion_future_map_get_future_index
+  
+  function legion_future_map_get_future_domain_point(this, dp)
+    implicit none
+    
+    type(FFuture)                  :: legion_future_map_get_future_domain_point
+    class(FFutureMap), intent(in)  :: this
+    type(FDomainPoint), intent(in) :: dp
+    
+    legion_future_map_get_future_domain_point%future = legion_future_map_get_future_c(this%future_map, dp%point)
+  end function legion_future_map_get_future_domain_point
+  
+  function legion_future_map_get_future_point_1d(this, pt)
+    implicit none
+    
+    type(FFuture)                 :: legion_future_map_get_future_point_1d
+    class(FFutureMap), intent(in) :: this
+    type(FPoint1D), intent(in)    :: pt
+   
+    type(legion_domain_point_f_t) :: dp
+    
+    dp = legion_domain_point_from_point_1d_c(pt%point)
+    legion_future_map_get_future_point_1d%future = legion_future_map_get_future_c(this%future_map, dp)
+  end function legion_future_map_get_future_point_1d
+  
+  function legion_future_map_get_future_point_2d(this, pt)
+    implicit none
+    
+    type(FFuture)                 :: legion_future_map_get_future_point_2d
+    class(FFutureMap), intent(in) :: this
+    type(FPoint2D), intent(in)    :: pt
+   
+    type(legion_domain_point_f_t) :: dp
+    
+    dp = legion_domain_point_from_point_2d_c(pt%point)
+    legion_future_map_get_future_point_2d%future = legion_future_map_get_future_c(this%future_map, dp)
+  end function legion_future_map_get_future_point_2d
+  
+  function legion_future_map_get_future_point_3d(this, pt)
+    implicit none
+    
+    type(FFuture)                 :: legion_future_map_get_future_point_3d
+    class(FFutureMap), intent(in) :: this
+    type(FPoint3D), intent(in)    :: pt
+   
+    type(legion_domain_point_f_t) :: dp
+    
+    dp = legion_domain_point_from_point_3d_c(pt%point)
+    legion_future_map_get_future_point_3d%future = legion_future_map_get_future_c(this%future_map, dp)
+  end function legion_future_map_get_future_point_3d
+  
+  ! ===============================================================================
   ! TaskArgument
   ! ===============================================================================
   function legion_task_argument_constructor(arg, arg_size)
@@ -648,11 +830,96 @@ contains
     implicit none
     
     type(FArgumentMap) :: legion_argument_map_constructor
-      
-    type(legion_argument_map_f_t) :: tmp_arg_map
-      
-    legion_argument_map_constructor%arg_map = tmp_arg_map
+
+    legion_argument_map_constructor%arg_map = legion_argument_map_create_c()
   end function legion_argument_map_constructor
+  
+  subroutine legion_argument_map_destructor(this)
+    implicit none
+    
+    class(FArgumentMap), intent(in) :: this
+      
+    call legion_argument_map_destroy_c(this%arg_map)
+  end subroutine legion_argument_map_destructor
+  
+  subroutine legion_argument_map_set_point_domain_point(this, dp, arg, replace)
+    implicit none
+    
+    class(FArgumentMap), intent(in) :: this
+    type(FDomainPoint), intent(in)  :: dp
+    type(FTaskArgument), intent(in) :: arg
+    logical, optional, intent(in)   :: replace
+      
+    logical(c_bool) :: tmp_replace = .true.
+    
+    if (present(replace)) tmp_replace = replace
+    call legion_argument_map_set_point_c(this%arg_map, dp%point, arg%task_arg, tmp_replace)
+  end subroutine legion_argument_map_set_point_domain_point
+
+  subroutine legion_argument_map_set_point_integer(this, index, arg, replace)
+    implicit none
+    
+    class(FArgumentMap), intent(in) :: this
+    integer, intent(in)             :: index
+    type(FTaskArgument), intent(in) :: arg
+    logical, optional, intent(in)   :: replace
+      
+    logical(c_bool) :: tmp_replace = .true.
+    type(legion_domain_point_f_t) :: dp
+    
+    if (present(replace)) tmp_replace = replace
+    dp%dim = 1
+    dp%point_data(0) = index
+    call legion_argument_map_set_point_c(this%arg_map, dp, arg%task_arg, tmp_replace)
+  end subroutine legion_argument_map_set_point_integer
+  
+  subroutine legion_argument_map_set_point_1d_point(this, point, arg, replace)
+    implicit none
+    
+    class(FArgumentMap), intent(in) :: this
+    type(FPoint1D), intent(in)      :: point
+    type(FTaskArgument), intent(in) :: arg
+    logical, optional, intent(in)   :: replace
+      
+    logical(c_bool) :: tmp_replace = .true.
+    type(legion_domain_point_f_t) :: dp
+    
+    if (present(replace)) tmp_replace = replace
+    dp = legion_domain_point_from_point_1d_c(point%point)
+    call legion_argument_map_set_point_c(this%arg_map, dp, arg%task_arg, tmp_replace)
+  end subroutine legion_argument_map_set_point_1d_point
+  
+  subroutine legion_argument_map_set_point_2d_point(this, point, arg, replace)
+    implicit none
+    
+    class(FArgumentMap), intent(in) :: this
+    type(FPoint2D), intent(in)      :: point
+    type(FTaskArgument), intent(in) :: arg
+    logical, optional, intent(in)   :: replace
+      
+    logical(c_bool) :: tmp_replace = .true.
+    type(legion_domain_point_f_t) :: dp
+    
+    if (present(replace)) tmp_replace = replace
+    dp = legion_domain_point_from_point_2d_c(point%point)
+    call legion_argument_map_set_point_c(this%arg_map, dp, arg%task_arg, tmp_replace)
+  end subroutine legion_argument_map_set_point_2d_point
+  
+  subroutine legion_argument_map_set_point_3d_point(this, point, arg, replace)
+    implicit none
+    
+    class(FArgumentMap), intent(in) :: this
+    type(FPoint3D), intent(in)      :: point
+    type(FTaskArgument), intent(in) :: arg
+    logical, optional, intent(in)   :: replace
+      
+    logical(c_bool) :: tmp_replace = .true.
+    type(legion_domain_point_f_t) :: dp
+    
+    if (present(replace)) tmp_replace = replace
+    dp = legion_domain_point_from_point_3d_c(point%point)
+    call legion_argument_map_set_point_c(this%arg_map, dp, arg%task_arg, tmp_replace)
+  end subroutine legion_argument_map_set_point_3d_point
   
   ! ===============================================================================
   ! TaskLauncher
@@ -852,6 +1119,24 @@ contains
     
     legion_task_get_args = legion_task_get_args_c(this%task)
   end function legion_task_get_args
+  
+  function legion_task_get_local_arglen(this)
+    implicit none
+    
+    integer(kind=8)          :: legion_task_get_local_arglen
+    class(FTask), intent(in) :: this
+    
+    legion_task_get_local_arglen = legion_task_get_local_arglen_c(this%task)
+  end function legion_task_get_local_arglen
+  
+  function legion_task_get_local_args(this)
+    implicit none
+    
+    type(c_ptr)              :: legion_task_get_local_args
+    class(FTask), intent(in) :: this
+    
+    legion_task_get_local_args = legion_task_get_local_args_c(this%task)
+  end function legion_task_get_local_args
   
   ! ===============================================================================
   ! Runtime
@@ -1166,7 +1451,7 @@ contains
 
     type(FRuntime), intent(in)                     :: runtime
     type(FContext), intent(in)                     :: ctx
-    type(c_ptr), value, optional, intent(in)       :: retval
+    type(c_ptr), optional, intent(in)              :: retval
     integer(c_size_t), value, optional, intent(in) :: retsize
     
     type(c_ptr) :: tmp_retval
@@ -1174,7 +1459,7 @@ contains
     
     tmp_retval = c_null_ptr
     tmp_retsize = 0
-    if (present(retval)) tmp_retval = tmp_retval
+    if (present(retval)) tmp_retval = retval
     if (present(retsize)) tmp_retsize = retsize
   
     call legion_task_postamble_c(runtime%runtime, ctx%context, tmp_retval, tmp_retsize)
@@ -1213,6 +1498,37 @@ contains
                        c_func_ptr, &
                        c_null_ptr, userlen)
   end subroutine preregister_task_variant
+  
+  subroutine legion_runtime_start(background)
+    logical(c_bool), optional, intent(in) :: background
+    
+    logical(c_bool) :: tmp_background = .false.
+    integer(c_int) :: ret_val
+    integer(c_int) :: argc = 0
+    type(c_ptr) :: argv(20)
+    integer :: i
+    
+    type string
+      character(len=:, kind=c_char), allocatable :: item
+    end type string
+    ! Temporary arrays of character.  Need to have TARGET for C_LOC.
+    type(string), target :: tmp_argv(20)
+    character(len=32) :: arg
+    
+    if (present(background)) tmp_background = background
+    
+    argc = iargc()
+    if (iargc() > 0) then
+      do i = 1, iargc()
+        call getarg(i, arg)
+        tmp_argv(i)%item = trim(arg) // c_null_char
+        argv(i) = c_loc(tmp_argv(i)%item)
+      end do
+    else
+      argv(1) = c_null_ptr
+    end if
+    ret_val = legion_runtime_start_c(argc, argv, tmp_background)
+  end subroutine legion_runtime_start
   
 
 end module

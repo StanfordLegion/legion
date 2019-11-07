@@ -233,6 +233,15 @@ module legion_fortran_c_interface
       type(legion_task_argument_f_t), value, intent(in) :: arg
       logical(c_bool), value, intent(in)                :: replace 
     end subroutine legion_argument_map_set_point_c
+    
+    subroutine legion_argument_map_destroy_c(handle) &
+            bind(C, name="legion_argument_map_destroy")
+      use iso_c_binding
+      import legion_argument_map_f_t
+      implicit none
+  
+      type(legion_argument_map_f_t), value, intent(in) :: handle
+    end subroutine legion_argument_map_destroy_c
 
     ! -----------------------------------------------------------------------
     ! Task Operations
@@ -510,6 +519,64 @@ module legion_fortran_c_interface
       type(legion_domain_point_f_t) :: legion_domain_point_iterator_next_c
       type(legion_domain_point_iterator_f_t), value, intent(in) :: handle 
     end function legion_domain_point_iterator_next_c
+    
+    ! -----------------------------------------------------------------------
+    ! Future Operations
+    ! -----------------------------------------------------------------------
+    ! @see Legion::Future::Future()
+    function legion_future_copy_c(handle) &
+        bind(C, name="legion_future_copy")
+      use iso_c_binding
+      import legion_future_f_t
+      implicit none
+  
+      type(legion_future_f_t)                    :: legion_future_copy_c
+      type(legion_future_f_t), value, intent(in) :: handle
+    end function legion_future_copy_c
+    
+    ! @see Legion::Future::~Future()
+    subroutine legion_future_destroy_c(handle) &
+        bind(C, name="legion_future_destroy")
+      use iso_c_binding
+      import legion_future_f_t
+      implicit none
+  
+      type(legion_future_f_t), value, intent(in) :: handle
+    end subroutine legion_future_destroy_c
+    
+    ! @see Legion::Future::is_ready()
+    function legion_future_is_ready_c(handle) &
+        bind(C, name="legion_future_is_ready")
+      use iso_c_binding
+      import legion_future_f_t
+      implicit none
+  
+      logical(c_bool)                            :: legion_future_is_ready_c
+      type(legion_future_f_t), value, intent(in) :: handle
+    end function legion_future_is_ready_c
+    
+    ! @see Legion::Future::get_untyped_pointer()
+    function legion_future_get_untyped_pointer_c(handle) &
+        bind(C, name="legion_future_get_untyped_pointer")
+      use iso_c_binding
+      import legion_future_f_t
+      implicit none
+  
+      type(c_ptr)                                :: legion_future_get_untyped_pointer_c
+      type(legion_future_f_t), value, intent(in) :: handle
+    end function legion_future_get_untyped_pointer_c
+    
+    ! @see Legion::Future::get_untyped_size()
+    function legion_future_get_untyped_size_c(handle) &
+        bind(C, name="legion_future_get_untyped_size")
+      use iso_c_binding
+      import legion_future_f_t
+      implicit none
+  
+      integer(c_size_t)                          :: legion_future_get_untyped_size_c
+      type(legion_future_f_t), value, intent(in) :: handle
+    end function legion_future_get_untyped_size_c
+    
     ! -----------------------------------------------------------------------
     ! Future Map Operations
     ! -----------------------------------------------------------------------
@@ -522,6 +589,20 @@ module legion_fortran_c_interface
   
       type(legion_future_map_f_t), value, intent(in) :: handle
     end subroutine legion_future_map_wait_all_results_c
+    
+    ! @see Legion::FutureMap::wait_all_results()
+    function legion_future_map_get_future_c(handle, point) &
+        bind(C, name="legion_future_map_get_future")
+      use iso_c_binding
+      import legion_future_f_t
+      import legion_future_map_f_t
+      import legion_domain_point_f_t
+      implicit none
+  
+      type(legion_future_f_t)                          :: legion_future_map_get_future_c
+      type(legion_future_map_f_t), value, intent(in)   :: handle
+      type(legion_domain_point_f_t), value, intent(in) :: point
+    end function legion_future_map_get_future_c
 
     ! -----------------------------------------------------------------------
     ! Index Space Operations
@@ -1304,7 +1385,7 @@ module legion_fortran_c_interface
   
       integer(c_int)                      :: legion_runtime_start_c
       integer(c_int), value, intent(in)   :: argc
-      type(c_ptr), value, intent(in)      :: argv
+      type(c_ptr), intent(in)             :: argv(*)
       logical(c_bool), value, intent(in)  :: background
     end function legion_runtime_start_c
 
