@@ -692,6 +692,7 @@ namespace Realm {
 	  } else {
 	    log_optable.info() << "awaiting remote op completion during shutdown: node=" << it->second.remote_node << " event=" << it->second.finish_event;
 	    remote_completions.push_back(it->second.finish_event);
+	    it->second.finish_event.subscribe();
 	  }
 	}
     }

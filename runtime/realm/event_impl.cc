@@ -1929,7 +1929,11 @@ namespace Realm {
 	    if(poisoned) {
 	      local_triggers[gen_triggered] = true;
 	      has_local_triggers = true;
-              subscribe_needed = true; // make sure we get that update
+	      if(gen_triggered > gen_subscribed.load()) {
+		subscribe_needed = true; // make sure we get that update
+		previous_subscribe_gen = gen_subscribed.load();
+		gen_subscribed.store(gen_triggered);
+	      }
 	    }
 
 	    // update generation last, with a store_release to make sure poisoned generation
