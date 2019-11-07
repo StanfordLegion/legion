@@ -112,7 +112,6 @@ Program index_space_main
   use index_space_test
   implicit none
   
-  integer(c_int) :: runtime_start_rv
   type(FTaskVariantRegistrar) :: registrar_top, registrar_index_space
       
   call set_top_level_task_id(TOP_LEVEL_TASK_ID)

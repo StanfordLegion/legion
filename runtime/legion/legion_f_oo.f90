@@ -1505,27 +1505,30 @@ contains
     logical(c_bool) :: tmp_background = .false.
     integer(c_int) :: ret_val
     integer(c_int) :: argc = 0
-    type(c_ptr) :: argv(20)
+    type(c_ptr) :: argv(0:15)
     integer :: i
     
     type string
       character(len=:, kind=c_char), allocatable :: item
     end type string
     ! Temporary arrays of character.  Need to have TARGET for C_LOC.
-    type(string), target :: tmp_argv(20)
+    type(string), target :: tmp_argv(0:15)
     character(len=32) :: arg
     
     if (present(background)) tmp_background = background
     
     argc = iargc()
     if (iargc() > 0) then
+      argv(0) = c_null_ptr ! somehow the first argv is not detected, so add a dummpy one
       do i = 1, iargc()
         call getarg(i, arg)
+        print *, "arg", arg
         tmp_argv(i)%item = trim(arg) // c_null_char
         argv(i) = c_loc(tmp_argv(i)%item)
       end do
+      argc = argc + 1
     else
-      argv(1) = c_null_ptr
+      argv(0) = c_null_ptr
     end if
     ret_val = legion_runtime_start_c(argc, argv, tmp_background)
   end subroutine legion_runtime_start
