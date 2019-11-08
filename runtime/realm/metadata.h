@@ -58,6 +58,8 @@ namespace Realm {
       bool handle_inval_ack(int sender);
 
     protected:
+      virtual void do_invalidate(void) = 0;
+
       Mutex mutex;
       State state;  // current state
       Event valid_event;

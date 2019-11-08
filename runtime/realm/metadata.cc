@@ -169,6 +169,9 @@ namespace Realm {
 
 	assert(state == STATE_VALID);
 
+	// eagerly invalidate local contents
+	do_invalidate();
+
 	if(remote_copies.empty()) {
 	  state = STATE_INVALID;
 	} else {
@@ -197,6 +200,7 @@ namespace Realm {
 	{
 	  // was valid, now invalid (up to app to make sure no races exist)
 	  state = STATE_INVALID;
+	  do_invalidate();
 	  break;
 	}
 
