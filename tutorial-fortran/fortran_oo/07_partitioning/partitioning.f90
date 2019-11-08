@@ -336,13 +336,11 @@ contains
 end module daxpy
 
 Program daxpy_1d_accessor
-  use legion_fortran
   use iso_c_binding
   use legion_fortran_object_oriented
   use daxpy
   implicit none
   
-  integer(c_int) :: runtime_start_rv
   type(FTaskVariantRegistrar) :: registrar_top, registrar_init, registrar_daxpy, registrar_check
       
   call set_top_level_task_id(TOP_LEVEL_TASK_ID)
@@ -370,5 +368,5 @@ Program daxpy_1d_accessor
   call preregister_task_variant(check_task, registrar_check, "check_task")
   call registrar_check%destroy()
   
-  call legion_runtime_start_f(0, c_null_ptr, .false., runtime_start_rv)
+  call legion_runtime_start()
 End Program daxpy_1d_accessor

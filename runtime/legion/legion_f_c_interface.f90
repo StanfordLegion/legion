@@ -80,6 +80,18 @@ module legion_fortran_c_interface
       integer(c_int), value, intent(in)                 :: fid
       logical(c_bool), value, intent(in)                :: inst 
     end subroutine legion_task_launcher_add_field_c
+    
+    ! @see Legion::TaskLauncher::add_future()
+    subroutine legion_task_launcher_add_future_c(launcher, future) &
+        bind(C, name="legion_task_launcher_add_future")
+      use iso_c_binding
+      import legion_task_launcher_f_t
+      import legion_future_f_t
+      implicit none
+      
+      type(legion_task_launcher_f_t), value, intent(in) :: launcher
+      type(legion_future_f_t), value, intent(in)        :: future
+    end subroutine legion_task_launcher_add_future_c
 
     ! -----------------------------------------------------------------------
     ! Index Launcher
@@ -310,10 +322,34 @@ module legion_fortran_c_interface
       import legion_task_f_t
       implicit none
   
-      type(legion_region_requirement_f_t)        :: legion_task_get_requirement_c
+      type(legion_region_requirement_f_t)      :: legion_task_get_requirement_c
       type(legion_task_f_t), value, intent(in) :: task
       integer(c_int), value, intent(in)        :: idx
     end function legion_task_get_requirement_c
+    
+    ! @see Legion::Task::futures
+    function legion_task_get_future_c(task, idx) &
+        bind(C, name="legion_task_get_future")
+      use iso_c_binding
+      import legion_future_f_t
+      import legion_task_f_t
+      implicit none
+      
+      type(legion_future_f_t)                  :: legion_task_get_future_c
+      type(legion_task_f_t), value, intent(in) :: task
+      integer(c_int), value, intent(in)        :: idx
+    end function legion_task_get_future_c
+    
+    ! @see Legion::Task::futures
+    function legion_task_get_futures_size_c(task) &
+        bind(C, name="legion_task_get_futures_size")
+      use iso_c_binding
+      import legion_task_f_t
+      implicit none
+      
+      integer(c_int)                  :: legion_task_get_futures_size_c
+      type(legion_task_f_t), value, intent(in) :: task
+    end function legion_task_get_futures_size_c
 
     ! -----------------------------------------------------------------------
     ! Domain Operations

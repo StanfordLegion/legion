@@ -996,6 +996,15 @@ contains
     call legion_task_launcher_add_field_c(this%launcher, idx, fid, tmp_inst)
   end subroutine legion_task_launcher_add_field
   
+  subroutine legion_task_launcher_add_future(this, future)
+    implicit none
+    
+    class(FTaskLauncher), intent(in) :: this
+    type(FFuture), intent(in)        :: future
+    
+    call legion_task_launcher_add_future_c(this%launcher, future%future)
+  end subroutine legion_task_launcher_add_future
+  
   ! ===============================================================================
   ! IndexLauncher
   ! ===============================================================================
@@ -1137,6 +1146,25 @@ contains
     
     legion_task_get_local_args = legion_task_get_local_args_c(this%task)
   end function legion_task_get_local_args
+  
+  function legion_task_get_future(this, idx)
+    implicit none
+    
+    type(FFuture)            :: legion_task_get_future
+    class(FTask), intent(in) :: this
+    integer, intent(in)      :: idx
+    
+    legion_task_get_future%future = legion_task_get_future_c(this%task, idx)
+  end function legion_task_get_future
+  
+  function legion_task_get_futures_size(this)
+    implicit none
+    
+    integer                  :: legion_task_get_futures_size
+    class(FTask), intent(in) :: this
+    
+    legion_task_get_futures_size = legion_task_get_futures_size_c(this%task)
+  end function legion_task_get_futures_size
   
   ! ===============================================================================
   ! Runtime
