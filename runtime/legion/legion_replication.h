@@ -975,6 +975,27 @@ namespace Legion {
     };
 
     /**
+     * \class SlowBarrier
+     * This class creates a collective that behaves like a barrier, but is
+     * probably slower than Realm phase barriers. It's useful for cases
+     * where we may not know whether we are going to perform a barrier or
+     * not so we grab a collective ID. We can throw away collective IDs
+     * for free, but in the rare case we actually do need to perform
+     * the barrier then this class will handle the implementation.
+     */
+    class SlowBarrier : public AllGatherCollective<false> {
+    public:
+      SlowBarrier(ReplicateContext *ctx, CollectiveID id);
+      SlowBarrier(const SlowBarrier &rhs);
+      virtual ~SlowBarrier(void);
+    public:
+      SlowBarrier& operator=(const SlowBarrier &rhs);
+    public:
+      virtual void pack_collective_stage(Serializer &rez, int stage) { }
+      virtual void unpack_collective_stage(Deserializer &derez, int stage) { }
+    };
+
+    /**
      * \class ReplIndividualTask
      * An individual task that is aware that it is 
      * being executed in a control replication context.
@@ -1666,9 +1687,8 @@ namespace Legion {
       virtual void execute_dependence_analysis(void);
       virtual void sync_for_replayable_check(void);
       virtual bool exchange_replayable(ReplicateContext *ctx, bool replayable);
-    protected:
-      // Should only ever be called from logical dependence analysis stage
-      RtBarrier get_next_tracing_barrier(void) const;
+      virtual void elide_fences_pre_sync(void);
+      virtual void elide_fences_post_sync(void);
     protected:
       LegionTrace *local_trace;
     };
@@ -1697,11 +1717,15 @@ namespace Legion {
       virtual void trigger_mapping(void);
       virtual void sync_for_replayable_check(void);
       virtual bool exchange_replayable(ReplicateContext *ctx, bool replayable);
+      virtual void elide_fences_pre_sync(void);
+      virtual void elide_fences_post_sync(void);
     protected:
       DynamicTrace *dynamic_trace;
       PhysicalTemplate *current_template;
       CollectiveID replayable_collective_id;
-      RtBarrier replay_sync_barrier;
+      CollectiveID replay_sync_collective_id;
+      CollectiveID pre_elide_fences_collective_id;
+      CollectiveID post_elide_fences_collective_id;
       bool has_blocking_call;
     };
 
@@ -1729,11 +1753,15 @@ namespace Legion {
       virtual void trigger_mapping(void);
       virtual void sync_for_replayable_check(void);
       virtual bool exchange_replayable(ReplicateContext *ctx, bool replayable);
+      virtual void elide_fences_pre_sync(void);
+      virtual void elide_fences_post_sync(void);
     protected:
       PhysicalTemplate *current_template;
       ApEvent template_completion;
       CollectiveID replayable_collective_id;
-      RtBarrier replay_sync_barrier;
+      CollectiveID replay_sync_collective_id;
+      CollectiveID pre_elide_fences_collective_id;
+      CollectiveID post_elide_fences_collective_id;
       bool replayed;
       bool has_blocking_call;
     };
@@ -1909,8 +1937,6 @@ namespace Legion {
         { return attach_broadcast_barrier; }
       inline ApBarrier get_attach_reduce_barrier(void) const
         { return attach_reduce_barrier; }
-      inline RtBarrier get_tracing_barrier(void) const
-        { return tracing_barrier; }
 #ifdef DEBUG_LEGION_COLLECTIVES
       inline RtBarrier get_collective_check_barrier(void) const
         { return collective_check_barrier; }
@@ -2039,7 +2065,6 @@ namespace Legion {
       ApBarrier execution_fence_barrier;
       ApBarrier attach_broadcast_barrier;
       ApBarrier attach_reduce_barrier;
-      RtBarrier tracing_barrier;
 #ifdef DEBUG_LEGION_COLLECTIVES
       RtBarrier collective_check_barrier;
       RtBarrier close_check_barrier;

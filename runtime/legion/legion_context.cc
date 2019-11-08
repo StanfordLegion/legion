@@ -8683,7 +8683,6 @@ namespace Legion {
       execution_fence_barrier = manager->get_execution_fence_barrier();
       attach_broadcast_barrier = manager->get_attach_broadcast_barrier();
       attach_reduce_barrier = manager->get_attach_reduce_barrier();
-      tracing_barrier = manager->get_tracing_barrier();
 #ifdef DEBUG_LEGION_COLLECTIVES
       collective_check_barrier = manager->get_collective_check_barrier();
       close_check_barrier = manager->get_close_check_barrier();
@@ -13769,15 +13768,6 @@ namespace Legion {
     {
       ApBarrier result = execution_fence_barrier;
       advance_replicate_barrier(execution_fence_barrier, total_shards);
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    RtBarrier ReplicateContext::get_next_tracing_barrier(void)
-    //--------------------------------------------------------------------------
-    {
-      RtBarrier result = tracing_barrier;
-      advance_replicate_barrier(tracing_barrier, total_shards);
       return result;
     }
 

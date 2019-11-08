@@ -647,9 +647,9 @@ namespace Legion {
       virtual Replayable check_replayable(ReplTraceOp *op,
                             bool has_blocking_call) const;
     public:
-      void optimize(void);
+      void optimize(ReplTraceOp *op);
     private:
-      void elide_fences(std::vector<unsigned> &gen);
+      void elide_fences(std::vector<unsigned> &gen, ReplTraceOp *op);
       void propagate_merges(std::vector<unsigned> &gen);
       void transitive_reduction(void);
       void propagate_copies(std::vector<unsigned> &gen);
@@ -845,6 +845,10 @@ namespace Legion {
       void find_all_last_users(ViewExprs &view_exprs,
                                std::set<unsigned> &users,
                                std::set<RtEvent> &ready_events);
+      // Synchronization methods for elide fences that do nothing in 
+      // the base case but can synchronize for multiple shards
+      virtual void elide_fences_pre_sync(ReplTraceOp *op) { }
+      virtual void elide_fences_post_sync(ReplTraceOp *op) { }
       // Returns the set of last users for a given <view,field mask,index expr>
       // tuple, this is virtual so it can be overridden in the sharded case
       virtual void find_last_users(InstanceView *view,
@@ -1059,6 +1063,8 @@ namespace Legion {
                                    const FieldMask &mask,
                        std::set<std::pair<unsigned,ShardID> > &sharded_users);
     protected:
+      virtual void elide_fences_pre_sync(ReplTraceOp *op);
+      virtual void elide_fences_post_sync(ReplTraceOp *op); 
       virtual void find_last_users(InstanceView *view,
                                    IndexSpaceExpression *expr,
                                    const FieldMask &mask,
