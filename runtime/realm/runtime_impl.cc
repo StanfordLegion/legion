@@ -2071,8 +2071,9 @@ namespace Realm {
 	log_runtime.info() << "local processor shutdown tasks complete";
       }
 
-      // the operation table should be clear of work
+      // the operation tables on every rank should be clear of work
       optable.shutdown_check();
+      Network::barrier();
       
       // mark that a shutdown is in progress so that we can hopefully catch
       //  things that try to run during teardown

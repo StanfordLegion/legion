@@ -205,6 +205,7 @@ namespace Realm {
     };
 
     void add_callback(Callback& cb) const;
+    bool remove_callback(Callback& cb) const;
 
   protected:
     EventImpl *event;
@@ -220,6 +221,11 @@ namespace Realm {
   void EventTriggeredCondition::add_callback(Callback& cb) const
   {
     event->add_waiter(gen, &cb);
+  }
+
+  bool EventTriggeredCondition::remove_callback(Callback& cb) const
+  {
+    return event->remove_waiter(gen, &cb);
   }
 
   EventTriggeredCondition::Callback::Callback(const EventTriggeredCondition& _cond)
@@ -1375,6 +1381,34 @@ namespace Realm {
       return true;  // waiter is always either enqueued or triggered right now
     }
 
+    bool GenEventImpl::remove_waiter(gen_t needed_gen, EventWaiter *waiter)
+    {
+      AutoLock<> a(mutex);
+
+      // case 1: the event has already triggered, so nothing to remove
+      // TODO: this might still be racy with delayed event waiter notification
+      if(needed_gen <= generation.load())
+	return false;
+
+      // case 2: is it a local trigger we've also already dealt with?
+      {
+	std::map<gen_t, bool>::const_iterator it = local_triggers.find(needed_gen);
+	if(it != local_triggers.end())
+	  return false;
+      }
+
+      // case 3: it'd better be in a waiter list
+      if(needed_gen == (generation.load() + 1)) {
+	bool ok = current_local_waiters.erase(waiter) > 0;
+	assert(ok);
+	return true;
+      } else {
+	bool ok = future_local_waiters[needed_gen].erase(waiter) > 0;
+	assert(ok);
+	return true;
+      }
+    }
+
     inline bool GenEventImpl::is_generation_poisoned(gen_t gen) const
     {
       // common case: no poisoned generations
@@ -1895,7 +1929,11 @@ namespace Realm {
 	    if(poisoned) {
 	      local_triggers[gen_triggered] = true;
 	      has_local_triggers = true;
-              subscribe_needed = true; // make sure we get that update
+	      if(gen_triggered > gen_subscribed.load()) {
+		subscribe_needed = true; // make sure we get that update
+		previous_subscribe_gen = gen_subscribed.load();
+		gen_subscribed.store(gen_triggered);
+	      }
 	    }
 
 	    // update generation last, with a store_release to make sure poisoned generation
@@ -2680,6 +2718,23 @@ static void *bytedup(const void *data, size_t datalen)
 	waiter->event_triggered(POISON_FIXME);
       }
 
+      return true;
+    }
+
+    bool BarrierImpl::remove_waiter(gen_t needed_gen, EventWaiter *waiter)
+    {
+      AutoLock<> a(mutex);
+
+      if(needed_gen <= generation) {
+	// already triggered, so nothing to remove
+	return false;
+      }
+
+      // find the right generation - this should not fail
+      std::map<gen_t, Generation *>::iterator it = generations.find(needed_gen);
+      assert(it != generations.end());
+      bool ok = it->second->local_waiters.erase(waiter);
+      assert(ok);
       return true;
     }
 
