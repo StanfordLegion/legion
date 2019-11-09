@@ -23,6 +23,10 @@
 namespace Realm {
   extern Logger log_omp;
 
+  // referred to from openmp_module.cc to force linkage of this file
+  void openmp_api_force_linkage(void)
+  {}
+
   // application-visible calls - always generated
   extern "C" {
     int omp_get_num_threads(void)
@@ -50,6 +54,47 @@ namespace Realm {
 	return wi->thread_id;
       else
 	return 0;
+    }
+
+    int omp_get_level(void)
+    {
+      Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info();
+      if(wi) {
+	int level = 0;
+	Realm::ThreadPool::WorkItem *item = wi->work_item;
+	while(item) {
+	  level++;
+	  item = item->parent_work_item;
+	}
+	return level;
+      } else
+	return 0;
+    }
+
+    int omp_in_parallel(void)
+    {
+      Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info();
+      if(wi) {
+	Realm::ThreadPool::WorkItem *item = wi->work_item;
+	if(item) {
+	  if((wi->num_threads > 1) && (item->single_winner == -1))
+	    return 1;
+	  else
+	    return 0;  // single inside parallel
+	} else
+	  return 0;
+      } else
+	return 0;
+    }
+
+    void omp_set_num_threads(int num_threads)
+    {
+      Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info();
+      if(wi) {
+	wi->app_num_threads = num_threads; // TODO: connect this to something?
+      } else {
+	log_omp.warning() << "omp_set_num_threads(" << num_threads << ") called on non-OpenMP Realm proessor - ignoring";
+      }
     }
   };
 

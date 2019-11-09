@@ -29,6 +29,10 @@ namespace Realm {
 
   Logger log_omp("openmp");
 
+  // defined in openmp_api.cc - refer to it to force linkage of that file
+  extern void openmp_api_force_linkage(void);
+
+
   ////////////////////////////////////////////////////////////////////////
   //
   // class LocalOpenMPProcessor
@@ -175,6 +179,8 @@ namespace Realm {
       // create a module to fill in with stuff - we'll delete it if numa is
       //  disabled
       OpenMPModule *m = new OpenMPModule;
+
+      openmp_api_force_linkage();
 
       // first order of business - read command line parameters
       {
