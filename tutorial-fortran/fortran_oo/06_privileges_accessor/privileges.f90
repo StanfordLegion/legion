@@ -24,7 +24,8 @@ contains
     type(legion_rect_1d_f_t) :: index_rect
     real(kind=8), target :: x_value
     type(FPoint1D) :: point_1d
-    integer :: i, fid
+    integer :: fid
+    integer(kind=8) :: i
     
     type(FContext) :: ctx
     type(FRuntime) :: runtime
@@ -48,14 +49,14 @@ contains
     accessor = FFieldAccessor1D(physical_region, fid, c_sizeof(x_value))
     logical_region = region_requirement%get_region()
     index_space = logical_region%get_index_space()
-    rect_1d = runtime%get_index_space_domain(ctx, index_space, 1)
+    rect_1d = runtime%get_index_space_domain(ctx, index_space)
     index_rect = rect_1d%rect
     
     Print *, "Init Task!", fid
     
     do i = index_rect%lo%x(0), index_rect%hi%x(0)
         point_1d = FPoint1D(i)
-        x_value = 1.1 * (fid+1) + i
+        x_value = 1.1 * (real(fid,8)+1) + real(i,8)
         call accessor%write_point(point_1d, x_value)
     end do
     
@@ -73,7 +74,7 @@ contains
 
     type(legion_rect_1d_f_t) :: index_rect
     real(kind=8), target :: z_value, x_value, y_value
-    integer :: i
+    integer(kind=8) :: i
     integer(c_size_t) :: arglen
     real(kind=8), pointer :: task_arg
     type(c_ptr) :: task_arg_ptr
@@ -104,14 +105,15 @@ contains
     region_requirement = task%get_region_requirement(0)
                                 
     physical_region_0 = pr_list%get_region(0)     
-    physical_region_1 = pr_list%get_region(1)        
+    physical_region_1 = pr_list%get_region(1)  
+    print *, "daxpy num_regions", pr_list%num_regions      
     
     accessor_x = FFieldAccessor1D(physical_region_0, 0, c_sizeof(x_value))
     accessor_y = FFieldAccessor1D(physical_region_0, 1, c_sizeof(y_value))
     accessor_z = FFieldAccessor1D(physical_region_1, 2, c_sizeof(z_value))
     logical_region = region_requirement%get_region()
     index_space = logical_region%get_index_space()
-    rect_1d = runtime%get_index_space_domain(ctx, index_space, 1)
+    rect_1d = runtime%get_index_space_domain(ctx, index_space)
     index_rect = rect_1d%rect
     
     Print *, "Daxpy Task!", alpha
@@ -140,7 +142,7 @@ contains
     real(kind=8), target :: x_value = 0
     real(kind=8), target :: y_value = 0
     real(kind=8), target :: z_value = 0
-    integer :: i
+    integer(kind=8) :: i
     logical :: all_passed = .true.
     integer(c_size_t) :: arglen
     real(kind=8), pointer :: task_arg
@@ -181,7 +183,7 @@ contains
     accessor_z = FFieldAccessor1D(physical_region_1, 2, c_sizeof(z_value))
     logical_region = region_requirement%get_region()
     index_space = logical_region%get_index_space()
-    rect_1d = runtime%get_index_space_domain(ctx, index_space, 1)
+    rect_1d = runtime%get_index_space_domain(ctx, index_space)
     index_rect = rect_1d%rect
     
     count = 0
@@ -315,71 +317,37 @@ contains
 end module daxpy
 
 Program daxpy_1d_accessor
-  use legion_fortran
+  use legion_fortran_object_oriented
   use iso_c_binding
   use daxpy
   implicit none
   
-  type(legion_execution_constraint_set_f_t) :: execution_constraints
-  type(legion_task_layout_constraint_set_f_t) :: layout_constraints
-  type(legion_task_config_options_f_t) :: config_options
-  integer(c_int) :: task_id_1, task_id_2, task_id_3, task_id_4, variant_id
-  integer(c_size_t) :: userlen = 0
-  integer(c_int) :: runtime_start_rv
-  type(c_funptr) :: c_func_ptr
+  type(FTaskVariantRegistrar) :: registrar_top, registrar_init, registrar_daxpy, registrar_check
       
-  call legion_runtime_set_top_level_task_id_f(TOP_LEVEL_TASK_ID)
-  call legion_execution_constraint_set_create_f(execution_constraints)
-  call legion_execution_constraint_set_add_processor_constraint_f(execution_constraints, LOC_PROC)
-  call legion_task_layout_constraint_set_create_f(layout_constraints)
-  config_options%leaf = .false.
-  config_options%inner = .false.
-  config_options%idempotent = .false.
+  call set_top_level_task_id(TOP_LEVEL_TASK_ID)
   
-  c_func_ptr = c_funloc(top_level_task)
+  registrar_top = FTaskVariantRegistrar(TOP_LEVEL_TASK_ID)
+  call registrar_top%add_constraint(FProcessorConstraint(LOC_PROC))
+  call preregister_task_variant(top_level_task, registrar_top, "top_level_task")
+  call registrar_top%destroy()
   
-  variant_id = 1
+  registrar_init = FTaskVariantRegistrar(INIT_TASK_ID)
+  call registrar_init%add_constraint(FProcessorConstraint(LOC_PROC))
+  call registrar_init%set_leaf()
+  call preregister_task_variant(init_task, registrar_init, "init_task")
+  call registrar_init%destroy()
   
-  call legion_runtime_preregister_task_variant_fnptr_f(TOP_LEVEL_TASK_ID, variant_id, c_char_"top_level_task"//c_null_char, &
-                                                      c_char_"cpu_variant"//c_null_char, &
-                                                      execution_constraints, &
-                                                      layout_constraints, &
-                                                      config_options, &
-                                                      c_func_ptr, &
-                                                      c_null_ptr, &
-                                                      userlen, task_id_1)
+  registrar_daxpy = FTaskVariantRegistrar(DAXPY_TASK_ID)
+  call registrar_daxpy%add_constraint(FProcessorConstraint(LOC_PROC))
+  call registrar_daxpy%set_leaf()
+  call preregister_task_variant(daxpy_task, registrar_daxpy, "daxpy_task")
+  call registrar_daxpy%destroy()
   
-  c_func_ptr = c_funloc(init_task)
-
-  call legion_runtime_preregister_task_variant_fnptr_f(INIT_TASK_ID, variant_id, c_char_"init_task"//c_null_char, &
-                                                      c_char_"cpu_variant"//c_null_char, &
-                                                      execution_constraints, &
-                                                      layout_constraints, &
-                                                      config_options, &
-                                                      c_func_ptr, &
-                                                      c_null_ptr, &
-                                                      userlen, task_id_2)
-                                                              
-  c_func_ptr = c_funloc(daxpy_task)
-
-  call legion_runtime_preregister_task_variant_fnptr_f(DAXPY_TASK_ID, variant_id, c_char_"daxpy_task"//c_null_char, &
-                                                      c_char_"cpu_variant"//c_null_char, &
-                                                      execution_constraints, &
-                                                      layout_constraints, &
-                                                      config_options, &
-                                                      c_func_ptr, &
-                                                      c_null_ptr, &
-                                                      userlen, task_id_3)
+  registrar_check = FTaskVariantRegistrar(CHECK_TASK_ID)
+  call registrar_check%add_constraint(FProcessorConstraint(LOC_PROC))
+  call registrar_check%set_leaf()
+  call preregister_task_variant(check_task, registrar_check, "check_task")
+  call registrar_check%destroy()
   
-  c_func_ptr = c_funloc(check_task)
-
-  call legion_runtime_preregister_task_variant_fnptr_f(CHECK_TASK_ID, variant_id, c_char_"check_task"//c_null_char, &
-                                                      c_char_"cpu_variant"//c_null_char, &
-                                                      execution_constraints, &
-                                                      layout_constraints, &
-                                                      config_options, &
-                                                      c_func_ptr, &
-                                                      c_null_ptr, &
-                                                      userlen, task_id_4)
-  call legion_runtime_start_f(0, c_null_ptr, .false., runtime_start_rv)
+  call legion_runtime_start()
 End Program daxpy_1d_accessor

@@ -231,6 +231,48 @@ contains
       
     rect%rect = legion_domain_get_rect_1d_c(domain%domain)
   end subroutine legion_rect_1d_assignment_from_domain
+  
+  function legion_domain_get_volume(this)
+    implicit none
+    
+    integer(kind=8)            :: legion_domain_get_volume
+    class(FDomain), intent(in) :: this
+    
+    legion_domain_get_volume = legion_domain_get_volume_c(this%domain)
+  end function legion_domain_get_volume
+  
+  function legion_rect_1d_get_volume(this)
+    implicit none
+    
+    integer(kind=8)            :: legion_rect_1d_get_volume
+    class(FRect1D), intent(in) :: this
+    
+    type(legion_domain_f_t) :: domain
+    domain = legion_domain_from_rect_1d_c(this%rect)
+    legion_rect_1d_get_volume = legion_domain_get_volume_c(domain)
+  end function legion_rect_1d_get_volume
+  
+  function legion_rect_2d_get_volume(this)
+    implicit none
+    
+    integer(kind=8)            :: legion_rect_2d_get_volume
+    class(FRect2D), intent(in) :: this
+    
+    type(legion_domain_f_t) :: domain
+    domain = legion_domain_from_rect_2d_c(this%rect)
+    legion_rect_2d_get_volume = legion_domain_get_volume_c(domain)
+  end function legion_rect_2d_get_volume
+  
+  function legion_rect_3d_get_volume(this)
+    implicit none
+    
+    integer(kind=8)            :: legion_rect_3d_get_volume
+    class(FRect3D), intent(in) :: this
+    
+    type(legion_domain_f_t) :: domain
+    domain = legion_domain_from_rect_3d_c(this%rect)
+    legion_rect_3d_get_volume = legion_domain_get_volume_c(domain)
+  end function legion_rect_3d_get_volume
 
   ! ===============================================================================
   ! FieldAccessor
@@ -490,6 +532,57 @@ contains
     
     call legion_field_accessor_write_point_ptr(this, point, c_loc(src))
   end subroutine legion_field_accessor_write_point_complex8
+  
+  subroutine legion_field_accessor_1d_get_raw_ptr(this, rect, subrect, offset, raw_ptr)
+    implicit none
+
+    class(FFieldAccessor1D), intent(in) :: this
+    type(FRect1D), intent(in)           :: rect
+    type(FRect1D), intent(out)          :: subrect
+    integer, intent(out)                :: offset
+    type(c_ptr), intent(out)            :: raw_ptr
+    
+    type(legion_byte_offset_f_t) :: tmp_offset
+      
+    raw_ptr = legion_accessor_array_1d_raw_rect_ptr_c(this%accessor, rect%rect, &
+                subrect%rect, tmp_offset)
+    offset = tmp_offset%offset
+  end subroutine legion_field_accessor_1d_get_raw_ptr
+  
+  subroutine legion_field_accessor_2d_get_raw_ptr(this, rect, subrect, offset, raw_ptr)
+    implicit none
+
+    class(FFieldAccessor2D), intent(in) :: this
+    type(FRect2D), intent(in)           :: rect
+    type(FRect2D), intent(out)          :: subrect
+    integer, intent(out)                :: offset(2)
+    type(c_ptr), intent(out)            :: raw_ptr
+    
+    type(legion_byte_offset_f_t) :: tmp_offset(2)
+      
+    raw_ptr = legion_accessor_array_2d_raw_rect_ptr_c(this%accessor, rect%rect, &
+                subrect%rect, tmp_offset)
+    offset(1) = tmp_offset(1)%offset
+    offset(2) = tmp_offset(2)%offset
+  end subroutine legion_field_accessor_2d_get_raw_ptr
+  
+  subroutine legion_field_accessor_3d_get_raw_ptr(this, rect, subrect, offset, raw_ptr)
+    implicit none
+
+    class(FFieldAccessor3D), intent(in) :: this
+    type(FRect3D), intent(in)           :: rect
+    type(FRect3D), intent(out)          :: subrect
+    integer, intent(out)                :: offset(3)
+    type(c_ptr), intent(out)            :: raw_ptr
+    
+    type(legion_byte_offset_f_t) :: tmp_offset(3)
+      
+    raw_ptr = legion_accessor_array_3d_raw_rect_ptr_c(this%accessor, rect%rect, &
+                subrect%rect, tmp_offset)
+    offset(1) = tmp_offset(1)%offset
+    offset(2) = tmp_offset(2)%offset
+    offset(3) = tmp_offset(3)%offset
+  end subroutine legion_field_accessor_3d_get_raw_ptr
   
   ! ===============================================================================
   ! DomainPointIterator
