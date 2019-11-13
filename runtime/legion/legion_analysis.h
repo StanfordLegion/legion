@@ -840,8 +840,6 @@ namespace Legion {
     template<int DIM>
     class KDNode : public KDTree {
     public:
-      
-    public:
       KDNode(IndexSpaceExpression *expr, Runtime *runtime, 
              int refinement_dim, int last_changed_dim = -1); 
       KDNode(const Rect<DIM> &rect, Runtime *runtime,
