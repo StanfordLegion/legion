@@ -37,6 +37,8 @@ contains
     type(FDomainPointIterator) :: pir
     type(FDomainPoint) :: dp
       
+    integer,parameter :: seed = 86456
+      
     call legion_task_prolog(tdata, tdatalen, userdata, userlen, p, &
                             task, pr_list, &
                             ctx, runtime)
@@ -57,6 +59,8 @@ contains
     
     do while(pir%has_next() .eqv. .true.)
       dp = pir%step()
+      call srand(seed)
+      x_value = rand()
       call accessor%write_point(dp%get_point_1d(), x_value)
     end do
     

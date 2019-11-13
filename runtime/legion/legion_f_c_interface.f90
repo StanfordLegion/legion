@@ -162,9 +162,10 @@ module legion_fortran_c_interface
     end function legion_index_launcher_execute_reduction_c
 
     ! @see Legion::IndexTaskLauncher::add_region_requirement()
-    function legion_index_launcher_add_region_requirement_lp_c(launcher, handle, proj, priv, &
-            prop, parent, tag, verified) &
-            bind (C, name="legion_index_launcher_add_region_requirement_logical_partition")
+    function legion_index_launcher_add_region_requirement_lp_c( &
+        launcher, handle, proj, priv, &
+        prop, parent, tag, verified) &
+        bind (C, name="legion_index_launcher_add_region_requirement_logical_partition")
       use iso_c_binding
       import legion_index_launcher_f_t
       import legion_logical_partition_f_t
@@ -184,7 +185,7 @@ module legion_fortran_c_interface
 
     ! @see Legion::TaskLaunchxer::add_field()
     subroutine legion_index_launcher_add_field_c(launcher, idx, fid, inst) &
-            bind(C, name="legion_index_launcher_add_field")
+        bind(C, name="legion_index_launcher_add_field")
       use iso_c_binding
       import legion_index_launcher_f_t
       implicit none
@@ -194,13 +195,115 @@ module legion_fortran_c_interface
       integer(c_int), value, intent(in)                  :: fid
       logical(c_bool), value, intent(in)                 :: inst 
     end subroutine legion_index_launcher_add_field_c
+    
+    ! -----------------------------------------------------------------------
+    ! Inline Mapping Operations
+    ! -----------------------------------------------------------------------
+    ! @see Legion::InlineLauncher::InlineLauncher()
+    function legion_inline_launcher_create_logical_region_c( &
+        handle, priv, prop, parent, &
+        region_tag, verified, id, launcher_tag) &
+        bind(C, name="legion_inline_launcher_create_logical_region")
+      use iso_c_binding
+      import legion_inline_launcher_f_t
+      import legion_logical_region_f_t
+      implicit none
+      
+      type(legion_inline_launcher_f_t)                   :: legion_inline_launcher_create_logical_region_c
+      type(legion_logical_region_f_t), value, intent(in) :: handle
+      integer(c_int), value, intent(in)                  :: priv
+      integer(c_int), value, intent(in)                  :: prop
+      type(legion_logical_region_f_t), value, intent(in) :: parent
+      integer(c_long), value, intent(in)                 :: region_tag
+      logical(c_bool), value, intent(in)                 :: verified
+      integer(c_long), value, intent(in)                 :: id
+      integer(c_long), value, intent(in)                 :: launcher_tag
+    end function legion_inline_launcher_create_logical_region_c
+    
+    ! @see Legion::InlineLauncher::~InlineLauncher()
+    subroutine legion_inline_launcher_destroy_c(handle) &
+        bind(C, name="legion_inline_launcher_destroy")
+      use iso_c_binding
+      import legion_inline_launcher_f_t
+      implicit none
+      
+      type(legion_inline_launcher_f_t), value, intent(in) :: handle
+    end subroutine legion_inline_launcher_destroy_c
+    
+    ! @see Legion::Runtime::map_region()
+    function legion_inline_launcher_execute_c(runtime, ctx, launcher) &
+        bind(C, name="legion_inline_launcher_execute")
+      use iso_c_binding
+      import legion_physical_region_f_t
+      import legion_runtime_f_t
+      import legion_context_f_t
+      import legion_inline_launcher_f_t
+      implicit none
+      
+      type(legion_physical_region_f_t)                    :: legion_inline_launcher_execute_c
+      type(legion_runtime_f_t), value, intent(in)         :: runtime
+      type(legion_context_f_t), value, intent(in)         :: ctx
+      type(legion_inline_launcher_f_t), value, intent(in) :: launcher
+    end function legion_inline_launcher_execute_c
+    
+    ! @see Legion::InlineLauncher::add_field()
+    subroutine legion_inline_launcher_add_field_c(launcher, fid, inst) &
+        bind(C, name="legion_inline_launcher_add_field")
+      use iso_c_binding
+      import legion_inline_launcher_f_t
+      implicit none
+      
+      type(legion_inline_launcher_f_t), value, intent(in) :: launcher
+      integer(c_int), value, intent(in)                   :: fid
+      logical(c_bool), value, intent(in)                  :: inst 
+    end subroutine legion_inline_launcher_add_field_c
+      
+    ! @see Legion::Runtime::remap_region()
+    subroutine legion_runtime_remap_region_c(runtime, ctx, region) &
+        bind(C, name="legion_runtime_remap_region")
+      use iso_c_binding
+      import legion_runtime_f_t
+      import legion_context_f_t
+      import legion_physical_region_f_t
+      implicit none
+      
+      type(legion_runtime_f_t), value, intent(in)       :: runtime
+      type(legion_context_f_t), value, intent(in)       :: ctx
+      type(legion_physical_region_f_t), value, intent(in) :: region
+    end subroutine legion_runtime_remap_region_c
+    
+    ! @see Legion::Runtime::unmap_region()
+    subroutine legion_runtime_unmap_region_c(runtime, ctx, region) &
+        bind(C, name="legion_runtime_unmap_region")
+      use iso_c_binding
+      import legion_runtime_f_t
+      import legion_context_f_t
+      import legion_physical_region_f_t
+      implicit none
+      
+      type(legion_runtime_f_t), value, intent(in)       :: runtime
+      type(legion_context_f_t), value, intent(in)       :: ctx
+      type(legion_physical_region_f_t), value, intent(in) :: region
+    end subroutine legion_runtime_unmap_region_c
+    
+    ! @see Legion::Runtime::unmap_all_regions()
+    subroutine legion_runtime_unmap_all_regions_c(runtime, ctx) &
+        bind(C, name="legion_runtime_unmap_all_regions")
+      use iso_c_binding
+      import legion_runtime_f_t
+      import legion_context_f_t
+      implicit none
+      
+      type(legion_runtime_f_t), value, intent(in) :: runtime
+      type(legion_context_f_t), value, intent(in) :: ctx
+    end subroutine legion_runtime_unmap_all_regions_c
 
     ! -----------------------------------------------------------------------
     ! Predicate Operations
     ! -----------------------------------------------------------------------
     ! @see Legion::Predicate::TRUE_PRED
     function legion_predicate_true_c() &
-                 bind(C, name="legion_predicate_true")
+        bind(C, name="legion_predicate_true")
       use iso_c_binding
       import legion_predicate_f_t
       implicit none
@@ -949,7 +1052,7 @@ module legion_fortran_c_interface
     ! Physical Data Operations
     ! -----------------------------------------------------------------------
     function legion_get_physical_region_by_id_c(regionptr, id, num_regions) &
-            bind(C, name="legion_get_physical_region_by_id")
+        bind(C, name="legion_get_physical_region_by_id")
       use iso_c_binding
       import legion_physical_region_f_t
       implicit none
@@ -959,10 +1062,52 @@ module legion_fortran_c_interface
       integer(c_int), value, intent(in) :: id
       integer(c_int), value, intent(in) :: num_regions
     end function legion_get_physical_region_by_id_c
+     
+    ! @see Legion::PhysicalRegion::~PhysicalRegion()
+    subroutine legion_physical_region_destroy_c(handle) &
+        bind(C, name="legion_physical_region_destroy")
+      use iso_c_binding
+      import legion_physical_region_f_t
+      implicit none
+      
+      type(legion_physical_region_f_t), value, intent(in) :: handle
+    end subroutine legion_physical_region_destroy_c
+    
+    ! @see Legion::PhysicalRegion::is_mapped()
+    function legion_physical_region_is_mapped_c(handle) &
+        bind(C, name="legion_physical_region_is_mapped")
+      use iso_c_binding
+      import legion_physical_region_f_t
+      implicit none
+      
+      logical(c_bool)                                     :: legion_physical_region_is_mapped_c
+      type(legion_physical_region_f_t), value, intent(in) :: handle
+    end function legion_physical_region_is_mapped_c
+    
+    ! @see Legion::PhysicalRegion::wait_until_valid()
+    subroutine legion_physical_region_wait_until_valid_c(handle) &
+        bind(C, name="legion_physical_region_wait_until_valid")
+      use iso_c_binding
+      import legion_physical_region_f_t
+      implicit none
+      
+      type(legion_physical_region_f_t), value, intent(in) :: handle
+    end subroutine legion_physical_region_wait_until_valid_c
+    
+    ! @see Legion::PhysicalRegion::is_valid()
+    function legion_physical_region_is_valid_c(handle) &
+        bind(C, name="legion_physical_region_is_valid")
+      use iso_c_binding
+      import legion_physical_region_f_t
+      implicit none
+      
+      logical(c_bool)                                     :: legion_physical_region_is_valid_c
+      type(legion_physical_region_f_t), value, intent(in) :: handle
+    end function legion_physical_region_is_valid_c
 
     ! @see Legion::PhysicalRegion::get_field_accessor()
     function legion_physical_region_get_field_accessor_array_1d_c(handle, fid) &
-            bind(C, name="legion_physical_region_get_field_accessor_array_1d")
+        bind(C, name="legion_physical_region_get_field_accessor_array_1d")
       use iso_c_binding
       import legion_accessor_array_1d_f_t
       import legion_physical_region_f_t
@@ -975,7 +1120,7 @@ module legion_fortran_c_interface
 
     ! @see Legion::PhysicalRegion::get_field_accessor()
     function legion_physical_region_get_field_accessor_array_2d_c(handle, fid) &
-            bind(C, name="legion_physical_region_get_field_accessor_array_2d")
+        bind(C, name="legion_physical_region_get_field_accessor_array_2d")
       use iso_c_binding
       import legion_accessor_array_2d_f_t
       import legion_physical_region_f_t
@@ -988,7 +1133,7 @@ module legion_fortran_c_interface
 
     ! @see Legion::PhysicalRegion::get_field_accessor()
     function legion_physical_region_get_field_accessor_array_3d_c(handle, fid) &
-            bind(C, name="legion_physical_region_get_field_accessor_array_3d")
+        bind(C, name="legion_physical_region_get_field_accessor_array_3d")
       use iso_c_binding
       import legion_accessor_array_3d_f_t
       import legion_physical_region_f_t
@@ -1001,7 +1146,7 @@ module legion_fortran_c_interface
 
     ! @see Legion::UnsafeFieldAccessor::ptr
     function legion_accessor_array_1d_raw_rect_ptr_c(handle, rect, subrect, offset) &
-            bind(C, name="legion_accessor_array_1d_raw_rect_ptr")
+        bind(C, name="legion_accessor_array_1d_raw_rect_ptr")
       use iso_c_binding
       import legion_accessor_array_1d_f_t
       import legion_rect_1d_f_t
@@ -1017,7 +1162,7 @@ module legion_fortran_c_interface
 
     ! @see Legion::UnsafeFieldAccessor::ptr
     function legion_accessor_array_2d_raw_rect_ptr_c(handle, rect, subrect, offset) &
-            bind(C, name="legion_accessor_array_2d_raw_rect_ptr")
+        bind(C, name="legion_accessor_array_2d_raw_rect_ptr")
       use iso_c_binding
       import legion_accessor_array_2d_f_t
       import legion_rect_2d_f_t
@@ -1033,7 +1178,7 @@ module legion_fortran_c_interface
 
     ! @see Legion::UnsafeFieldAccessor::ptr
     function legion_accessor_array_3d_raw_rect_ptr_c(handle, rect, subrect, offset) &
-            bind(C, name="legion_accessor_array_3d_raw_rect_ptr")
+        bind(C, name="legion_accessor_array_3d_raw_rect_ptr")
       use iso_c_binding
       import legion_accessor_array_3d_f_t
       import legion_rect_3d_f_t
@@ -1049,7 +1194,7 @@ module legion_fortran_c_interface
 
     ! @see Legion::UnsafeFieldAccessor::ptr
     subroutine legion_accessor_array_1d_read_point_c(handle, point, dst, bytes) &
-            bind(C, name="legion_accessor_array_1d_read_point")
+        bind(C, name="legion_accessor_array_1d_read_point")
       use iso_c_binding
       import legion_accessor_array_1d_f_t
       import legion_point_1d_f_t
@@ -1063,7 +1208,7 @@ module legion_fortran_c_interface
 
     ! @see Legion::UnsafeFieldAccessor::ptr
     subroutine legion_accessor_array_2d_read_point_c(handle, point, dst, bytes) &
-            bind(C, name="legion_accessor_array_2d_read_point")
+        bind(C, name="legion_accessor_array_2d_read_point")
       use iso_c_binding
       import legion_accessor_array_2d_f_t
       import legion_point_2d_f_t
@@ -1077,7 +1222,7 @@ module legion_fortran_c_interface
 
     ! @see Legion::UnsafeFieldAccessor::ptr
     subroutine legion_accessor_array_3d_read_point_c(handle, point, dst, bytes) &
-            bind(C, name="legion_accessor_array_3d_read_point")
+        bind(C, name="legion_accessor_array_3d_read_point")
       use iso_c_binding
       import legion_accessor_array_3d_f_t
       import legion_point_3d_f_t
@@ -1091,7 +1236,7 @@ module legion_fortran_c_interface
 
     ! @see Legion::UnsafeFieldAccessor::ptr
     subroutine legion_accessor_array_1d_write_point_c(handle, point, src, bytes) &
-            bind(C, name="legion_accessor_array_1d_write_point")
+        bind(C, name="legion_accessor_array_1d_write_point")
       use iso_c_binding
       import legion_accessor_array_1d_f_t
       import legion_point_1d_f_t
@@ -1105,7 +1250,7 @@ module legion_fortran_c_interface
 
     ! @see Legion::UnsafeFieldAccessor::ptr
     subroutine legion_accessor_array_2d_write_point_c(handle, point, src, bytes) &
-            bind(C, name="legion_accessor_array_2d_write_point")
+        bind(C, name="legion_accessor_array_2d_write_point")
       use iso_c_binding
       import legion_accessor_array_2d_f_t
       import legion_point_2d_f_t
@@ -1119,7 +1264,7 @@ module legion_fortran_c_interface
 
     ! @see Legion::UnsafeFieldAccessor::ptr
     subroutine legion_accessor_array_3d_write_point_c(handle, point, src, bytes) &
-            bind(C, name="legion_accessor_array_3d_write_point")
+        bind(C, name="legion_accessor_array_3d_write_point")
       use iso_c_binding
       import legion_accessor_array_3d_f_t
       import legion_point_3d_f_t
@@ -1130,6 +1275,28 @@ module legion_fortran_c_interface
       type(c_ptr), value, intent(in)                        :: src
       integer(c_size_t), value, intent(in)                  :: bytes
     end subroutine legion_accessor_array_3d_write_point_c
+    
+    ! -----------------------------------------------------------------------
+    ! Fill Field Operations
+    ! -----------------------------------------------------------------------
+    subroutine legion_runtime_fill_field_c(runtime, ctx, handle, parent, &
+        fid, value, value_size, pred) &
+        bind(C, name="legion_runtime_fill_field")
+      use iso_c_binding
+      import legion_runtime_f_t
+      import legion_context_f_t
+      import legion_logical_region_f_t
+      import legion_predicate_f_t
+      
+      type(legion_runtime_f_t), value, intent(in)        :: runtime
+      type(legion_context_f_t), value, intent(in)        :: ctx
+      type(legion_logical_region_f_t), value, intent(in) :: handle
+      type(legion_logical_region_f_t), value, intent(in) :: parent
+      integer(c_int), value, intent(in)                  :: fid
+      type(c_ptr), value, intent(in)                     :: value
+      integer(c_size_t), value, intent(in)               :: value_size
+      type(legion_predicate_f_t), value, intent(in)      :: pred    
+    end subroutine legion_runtime_fill_field_c
 
     ! -----------------------------------------------------------------------
     ! File Operations

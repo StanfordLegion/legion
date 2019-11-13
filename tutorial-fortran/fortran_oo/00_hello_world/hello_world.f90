@@ -33,7 +33,7 @@ end module hello_world
   
 
 Program hello_world_main
-  use legion_fortran
+  use legion_fortran_object_oriented
   use iso_c_binding
   use hello_world
   implicit none

@@ -9,6 +9,22 @@ module legion_fortran_object_oriented
 contains
   
   ! ===============================================================================
+  ! Predicate
+  ! ===============================================================================
+  function legion_predicate_constructor(flag)
+    implicit none
+    
+    type(FPredicate)    :: legion_predicate_constructor
+    logical, intent(in) :: flag
+    
+    if (flag) then
+      legion_predicate_constructor%predicate = legion_predicate_true_c()
+    else
+      legion_predicate_constructor%predicate = legion_predicate_false_c()
+    endif
+  end function legion_predicate_constructor
+  
+  ! ===============================================================================
   ! DomainPoint
   ! ===============================================================================
   function legion_domain_point_constructor_point_1d(point)
@@ -576,6 +592,43 @@ contains
   end function legion_logical_region_get_index_space
   
   ! ===============================================================================
+  ! PhysicalRegion
+  ! ===============================================================================
+  subroutine legion_physical_region_destructor(this)
+    implicit none
+    
+    class(FPhysicalRegion), intent(in) :: this
+      
+    call legion_physical_region_destroy_c(this%pr)
+  end subroutine legion_physical_region_destructor
+  
+  function legion_physical_region_is_mapped(this)
+    implicit none
+    
+    logical                            :: legion_physical_region_is_mapped
+    class(FPhysicalRegion), intent(in) :: this
+      
+    legion_physical_region_is_mapped = legion_physical_region_is_mapped_c(this%pr)
+  end function legion_physical_region_is_mapped
+  
+  subroutine legion_physical_region_wait_until_valid(this)
+    implicit none
+    
+    class(FPhysicalRegion), intent(in) :: this
+      
+    call legion_physical_region_wait_until_valid_c(this%pr)
+  end subroutine legion_physical_region_wait_until_valid
+  
+  function legion_physical_region_is_valid(this)
+    implicit none
+    
+    logical                            :: legion_physical_region_is_valid
+    class(FPhysicalRegion), intent(in) :: this
+      
+    legion_physical_region_is_valid = legion_physical_region_is_valid_c(this%pr)
+  end function legion_physical_region_is_valid
+  
+  ! ===============================================================================
   ! PhysicalRegionList
   ! ===============================================================================
   function legion_physical_region_list_size(this)
@@ -1068,12 +1121,9 @@ contains
     integer(kind=8), optional, intent(in) :: tag
     logical(c_bool), optional, intent(in) :: verified
     
-    integer(kind=8) :: tmp_tag
-    logical(c_bool) :: tmp_verified
+    integer(kind=8) :: tmp_tag = 0
+    logical(c_bool) :: tmp_verified = .false.
     integer(c_int) :: rr_id
-        
-    tmp_tag = 0
-    tmp_verified = .false.
     
     if (present(tag)) tmp_tag = tag
     if (present(verified)) tmp_verified = verified 
@@ -1089,13 +1139,63 @@ contains
     integer, intent(in)                   :: fid
     logical(c_bool), optional, intent(in) :: inst
     
-    logical(c_bool) :: tmp_inst
+    logical(c_bool) :: tmp_inst = .true.
     
-    tmp_inst = .true.
     if (present(inst)) tmp_inst = inst
     
     call legion_index_launcher_add_field_c(this%index_launcher, idx, fid, tmp_inst)
   end subroutine legion_index_launcher_add_field
+  
+  ! ===============================================================================
+  ! InlineLauncher
+  ! ===============================================================================
+  function legion_inline_launcher_constructor(handle, priv, prop, parent, region_tag, verified, id, launcher_tag)
+    implicit none
+    
+    type(FInlineLauncher)                 :: legion_inline_launcher_constructor
+    type(FLogicalRegion), intent(in)      :: handle
+    integer(c_int), intent(in)            :: priv
+    integer(c_int), intent(in)            :: prop
+    type(FLogicalRegion), intent(in)      :: parent
+    integer(kind=8), optional, intent(in) :: region_tag
+    logical(c_bool), optional, intent(in) :: verified
+    integer(kind=8), optional, intent(in) :: id
+    integer(kind=8), optional, intent(in) :: launcher_tag
+    
+    integer(kind=8) :: tmp_region_tag = 0
+    logical(c_bool) :: tmp_verified = .false.
+    integer(kind=8) :: tmp_id = 0
+    integer(kind=8) :: tmp_launcher_tag = 0
+    
+    if (present(region_tag)) tmp_region_tag = region_tag
+    if (present(verified)) tmp_verified = verified
+    if (present(id)) tmp_id = id
+    if (present(launcher_tag)) tmp_launcher_tag = launcher_tag
+    
+    legion_inline_launcher_constructor%inline_launcher = legion_inline_launcher_create_logical_region_c( &
+      handle%lr, priv, prop, parent%lr, tmp_region_tag, tmp_verified, tmp_id, tmp_launcher_tag)
+  end function legion_inline_launcher_constructor
+  
+  subroutine legion_inline_launcher_destructor(this)
+    implicit none
+    
+    class(FInlineLauncher), intent(in)     :: this
+    
+    call legion_inline_launcher_destroy_c(this%inline_launcher)
+  end subroutine legion_inline_launcher_destructor
+  
+  subroutine legion_inline_launcher_add_field(this, fid, inst)
+    implicit none
+    
+    class(FInlineLauncher), intent(in)     :: this
+    integer, intent(in)                   :: fid
+    logical(c_bool), optional, intent(in) :: inst
+    
+    logical(c_bool) :: tmp_inst = .true.
+    
+    if (present(inst)) tmp_inst = inst
+    call legion_inline_launcher_add_field_c(this%inline_launcher, fid, tmp_inst)
+  end subroutine legion_inline_launcher_add_field
   
   ! ===============================================================================
   ! Task
@@ -1331,14 +1431,149 @@ contains
   function legion_runtime_execute_index_space(this, ctx, launcher)
     implicit none
     
-    type(FFutureMap)                :: legion_runtime_execute_index_space
-    class(FRuntime), intent(in)     :: this
-    type(FContext), intent(in)      :: ctx
+    type(FFutureMap)                 :: legion_runtime_execute_index_space
+    class(FRuntime), intent(in)      :: this
+    type(FContext), intent(in)       :: ctx
     type(FIndexLauncher), intent(in) :: launcher
     
     legion_runtime_execute_index_space%future_map = legion_index_launcher_execute_c(this%runtime, ctx%context, &
                                                       launcher%index_launcher)
   end function legion_runtime_execute_index_space
+  
+  function legion_runtime_map_region(this, ctx, launcher)
+    implicit none
+    
+    type(FPhysicalRegion)             :: legion_runtime_map_region
+    class(FRuntime), intent(in)       :: this
+    type(FContext), intent(in)        :: ctx
+    type(FInlineLauncher), intent(in) :: launcher
+      
+    legion_runtime_map_region%pr = legion_inline_launcher_execute_c( &
+      this%runtime, ctx%context, launcher%inline_launcher)
+  end function legion_runtime_map_region
+  
+  subroutine legion_runtime_unmap_region(this, ctx, region)
+    implicit none
+    
+    class(FRuntime), intent(in)       :: this
+    type(FContext), intent(in)        :: ctx
+    type(FPhysicalRegion), intent(in) :: region
+      
+    call legion_runtime_unmap_region_c( &
+      this%runtime, ctx%context, region%pr)
+  end subroutine legion_runtime_unmap_region
+  
+  subroutine legion_runtime_remap_region(this, ctx, region)
+    implicit none
+    
+    class(FRuntime), intent(in)       :: this
+    type(FContext), intent(in)        :: ctx
+    type(FPhysicalRegion), intent(in) :: region
+      
+    call legion_runtime_remap_region_c( &
+      this%runtime, ctx%context, region%pr)
+  end subroutine legion_runtime_remap_region
+  
+  subroutine legion_runtime_fill_field_integer4(this, ctx, handle, parent, fid, value, pred)
+    implicit none
+    
+    class(FRuntime), intent(in)            :: this
+    type(FContext), intent(in)             :: ctx
+    type(FLogicalRegion), intent(in)       :: handle
+    type(FLogicalRegion), intent(in)       :: parent
+    integer, intent(in)                    :: fid
+    integer(kind=4), target, intent(in)    :: value
+    type(FPredicate), optional, intent(in) :: pred
+      
+    type(legion_predicate_f_t) :: tmp_pred
+    
+    tmp_pred = legion_predicate_true_c()
+    if (present(pred)) tmp_pred = pred%predicate
+    
+    call legion_runtime_fill_field_c(this%runtime, ctx%context, &
+      handle%lr, parent%lr, fid, c_loc(value), c_sizeof(value), tmp_pred)
+  end subroutine legion_runtime_fill_field_integer4
+  
+  subroutine legion_runtime_fill_field_integer8(this, ctx, handle, parent, fid, value, pred)
+    implicit none
+    
+    class(FRuntime), intent(in)            :: this
+    type(FContext), intent(in)             :: ctx
+    type(FLogicalRegion), intent(in)       :: handle
+    type(FLogicalRegion), intent(in)       :: parent
+    integer, intent(in)                    :: fid
+    integer(kind=8), target, intent(in)    :: value
+    type(FPredicate), optional, intent(in) :: pred
+      
+    type(legion_predicate_f_t) :: tmp_pred
+    
+    tmp_pred = legion_predicate_true_c()
+    if (present(pred)) tmp_pred = pred%predicate
+    
+    call legion_runtime_fill_field_c(this%runtime, ctx%context, &
+      handle%lr, parent%lr, fid, c_loc(value), c_sizeof(value), tmp_pred)
+  end subroutine legion_runtime_fill_field_integer8
+  
+  subroutine legion_runtime_fill_field_real4(this, ctx, handle, parent, fid, value, pred)
+    implicit none
+    
+    class(FRuntime), intent(in)            :: this
+    type(FContext), intent(in)             :: ctx
+    type(FLogicalRegion), intent(in)       :: handle
+    type(FLogicalRegion), intent(in)       :: parent
+    integer, intent(in)                    :: fid
+    real(kind=4), target, intent(in)       :: value
+    type(FPredicate), optional, intent(in) :: pred
+      
+    type(legion_predicate_f_t) :: tmp_pred
+    
+    tmp_pred = legion_predicate_true_c()
+    if (present(pred)) tmp_pred = pred%predicate
+    
+    call legion_runtime_fill_field_c(this%runtime, ctx%context, &
+      handle%lr, parent%lr, fid, c_loc(value), c_sizeof(value), tmp_pred)
+  end subroutine legion_runtime_fill_field_real4
+  
+  subroutine legion_runtime_fill_field_real8(this, ctx, handle, parent, fid, value, pred)
+    implicit none
+    
+    class(FRuntime), intent(in)            :: this
+    type(FContext), intent(in)             :: ctx
+    type(FLogicalRegion), intent(in)       :: handle
+    type(FLogicalRegion), intent(in)       :: parent
+    integer, intent(in)                    :: fid
+    real(kind=8), target, intent(in)       :: value
+    type(FPredicate), optional, intent(in) :: pred
+      
+    type(legion_predicate_f_t) :: tmp_pred
+    
+    tmp_pred = legion_predicate_true_c()
+    if (present(pred)) tmp_pred = pred%predicate
+    
+    call legion_runtime_fill_field_c(this%runtime, ctx%context, &
+      handle%lr, parent%lr, fid, c_loc(value), c_sizeof(value), tmp_pred)
+  end subroutine legion_runtime_fill_field_real8
+  
+  subroutine legion_runtime_fill_field_ptr(this, ctx, handle, parent, fid, value, value_size, pred)
+    implicit none
+    
+    class(FRuntime), intent(in)            :: this
+    type(FContext), intent(in)             :: ctx
+    type(FLogicalRegion), intent(in)       :: handle
+    type(FLogicalRegion), intent(in)       :: parent
+    integer, intent(in)                    :: fid
+    type(c_ptr), intent(in)                :: value
+    integer(c_size_t), intent(in)          :: value_size
+    type(FPredicate), optional, intent(in) :: pred
+      
+    type(legion_predicate_f_t) :: tmp_pred
+    
+    tmp_pred = legion_predicate_true_c()
+    if (present(pred)) tmp_pred = pred%predicate
+    
+    call legion_runtime_fill_field_c(this%runtime, ctx%context, &
+      handle%lr, parent%lr, fid, value, value_size, tmp_pred)
+  end subroutine legion_runtime_fill_field_ptr
   
   ! ===============================================================================
   ! ProcessorConstraint
