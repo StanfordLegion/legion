@@ -232,6 +232,24 @@ contains
     rect%rect = legion_domain_get_rect_1d_c(domain%domain)
   end subroutine legion_rect_1d_assignment_from_domain
   
+  subroutine legion_rect_2d_assignment_from_domain(rect, domain)
+    implicit none
+    
+    type(FRect2D), intent(out) :: rect
+    type(FDomain), intent(in) :: domain
+      
+    rect%rect = legion_domain_get_rect_2d_c(domain%domain)
+  end subroutine legion_rect_2d_assignment_from_domain
+  
+  subroutine legion_rect_3d_assignment_from_domain(rect, domain)
+    implicit none
+    
+    type(FRect3D), intent(out) :: rect
+    type(FDomain), intent(in) :: domain
+      
+    rect%rect = legion_domain_get_rect_3d_c(domain%domain)
+  end subroutine legion_rect_3d_assignment_from_domain
+  
   function legion_domain_get_volume(this)
     implicit none
     
@@ -609,6 +627,32 @@ contains
     legion_domain_point_iterator_constructor_from_rect_1d%iterator = &
       legion_domain_point_iterator_create_c(domain)
   end function legion_domain_point_iterator_constructor_from_rect_1d
+  
+  function legion_domain_point_iterator_constructor_from_rect_2d(handle)
+    implicit none
+    
+    type(FDomainPointIterator) :: legion_domain_point_iterator_constructor_from_rect_2d
+    class(FRect2D), intent(in) :: handle
+      
+    type(legion_domain_f_t) :: domain
+    
+    domain = legion_domain_from_rect_2d_c(handle%rect)  
+    legion_domain_point_iterator_constructor_from_rect_2d%iterator = &
+      legion_domain_point_iterator_create_c(domain)
+  end function legion_domain_point_iterator_constructor_from_rect_2d
+  
+  function legion_domain_point_iterator_constructor_from_rect_3d(handle)
+    implicit none
+    
+    type(FDomainPointIterator) :: legion_domain_point_iterator_constructor_from_rect_3d
+    class(FRect3D), intent(in) :: handle
+      
+    type(legion_domain_f_t) :: domain
+    
+    domain = legion_domain_from_rect_3d_c(handle%rect)  
+    legion_domain_point_iterator_constructor_from_rect_3d%iterator = &
+      legion_domain_point_iterator_create_c(domain)
+  end function legion_domain_point_iterator_constructor_from_rect_3d
   
   subroutine legion_domain_point_iterator_destructor(this)
     implicit none
@@ -1411,6 +1455,36 @@ contains
     legion_runtime_create_index_space_from_rect_1d%is = legion_index_space_create_domain_c(this%runtime, &
                                                           ctx%context, domain)
   end function legion_runtime_create_index_space_from_rect_1d
+  
+  function legion_runtime_create_index_space_from_rect_2d(this, ctx, rect_2d)
+    implicit none
+    
+    type(FIndexSpace)           :: legion_runtime_create_index_space_from_rect_2d
+    class(FRuntime), intent(in) :: this
+    type(FContext), intent(in)  :: ctx
+    type(FRect2D), intent(in)   :: rect_2d
+    
+    type(legion_domain_f_t) :: domain
+    
+    domain = legion_domain_from_rect_2d_c(rect_2d%rect)  
+    legion_runtime_create_index_space_from_rect_2d%is = legion_index_space_create_domain_c(this%runtime, &
+                                                          ctx%context, domain)
+  end function legion_runtime_create_index_space_from_rect_2d
+  
+  function legion_runtime_create_index_space_from_rect_3d(this, ctx, rect_3d)
+    implicit none
+    
+    type(FIndexSpace)           :: legion_runtime_create_index_space_from_rect_3d
+    class(FRuntime), intent(in) :: this
+    type(FContext), intent(in)  :: ctx
+    type(FRect3D), intent(in)   :: rect_3d
+    
+    type(legion_domain_f_t) :: domain
+    
+    domain = legion_domain_from_rect_3d_c(rect_3d%rect)  
+    legion_runtime_create_index_space_from_rect_3d%is = legion_index_space_create_domain_c(this%runtime, &
+                                                          ctx%context, domain)
+  end function legion_runtime_create_index_space_from_rect_3d
   
   subroutine legion_runtime_destroy_index_space(this, ctx, index_space)
     implicit none
