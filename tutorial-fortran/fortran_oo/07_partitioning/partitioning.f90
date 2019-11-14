@@ -48,7 +48,7 @@ contains
                                 
     physical_region = pr_list%get_region(0)                         
     
-    accessor = FFieldAccessor1D(physical_region, fid, c_sizeof(x_value))
+    accessor = FFieldAccessor1D(physical_region, fid, WRITE_DISCARD, c_sizeof(x_value))
     logical_region = region_requirement%get_region()
     index_space = logical_region%get_index_space()
     rect_1d = runtime%get_index_space_domain(ctx, index_space)
@@ -112,9 +112,9 @@ contains
     physical_region_0 = pr_list%get_region(0)     
     physical_region_1 = pr_list%get_region(1)        
     
-    accessor_x = FFieldAccessor1D(physical_region_0, 0, c_sizeof(x_value))
-    accessor_y = FFieldAccessor1D(physical_region_0, 1, c_sizeof(y_value))
-    accessor_z = FFieldAccessor1D(physical_region_1, 2, c_sizeof(z_value))
+    accessor_x = FFieldAccessor1D(physical_region_0, 0, READ_ONLY, c_sizeof(x_value))
+    accessor_y = FFieldAccessor1D(physical_region_0, 1, READ_ONLY, c_sizeof(y_value))
+    accessor_z = FFieldAccessor1D(physical_region_1, 2, WRITE_DISCARD, c_sizeof(z_value))
     logical_region = region_requirement%get_region()
     index_space = logical_region%get_index_space()
     rect_1d = runtime%get_index_space_domain(ctx, index_space)
@@ -185,9 +185,9 @@ contains
     physical_region_0 = pr_list%get_region(0)     
     physical_region_1 = pr_list%get_region(1)        
     
-    accessor_x = FFieldAccessor1D(physical_region_0, 0, c_sizeof(x_value))
-    accessor_y = FFieldAccessor1D(physical_region_0, 1, c_sizeof(y_value))
-    accessor_z = FFieldAccessor1D(physical_region_1, 2, c_sizeof(z_value))
+    accessor_x = FFieldAccessor1D(physical_region_0, 0, READ_ONLY, c_sizeof(x_value))
+    accessor_y = FFieldAccessor1D(physical_region_0, 1, READ_ONLY, c_sizeof(y_value))
+    accessor_z = FFieldAccessor1D(physical_region_1, 2, READ_ONLY, c_sizeof(z_value))
     logical_region = region_requirement%get_region()
     index_space = logical_region%get_index_space()
     rect_1d = runtime%get_index_space_domain(ctx, index_space)
@@ -279,6 +279,8 @@ contains
     input_lp = runtime%get_logical_partition(ctx, input_lr, ip)
     output_lp = runtime%get_logical_partition(ctx, output_lr, ip)
     
+    arg_map = FArgumentMap()
+    
     !init task for X
     init_launcher_x = FIndexLauncher(INIT_TASK_ID, color_is, &
                                      FTaskArgument(), arg_map)
@@ -323,6 +325,8 @@ contains
                                               output_lr)                                          
     call check_launcher%add_field(1, 2)
     task_future = runtime%execute_task(ctx, check_launcher) 
+    
+    call arg_map%destroy()
     
     ! clean up
     call runtime%destroy_logical_region(ctx, input_lr)

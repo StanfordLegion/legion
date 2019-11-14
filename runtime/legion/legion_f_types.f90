@@ -22,8 +22,8 @@ module legion_fortran_types
   
   !legion_file_mode_t
   integer(c_int), parameter :: LEGION_FILE_READ_ONLY = 0
-  integer(c_int), parameter :: LEGION_FILE_READ_WRITE = 0
-  integer(c_int), parameter :: LEGION_FILE_CREATE = 0
+  integer(c_int), parameter :: LEGION_FILE_READ_WRITE = 1
+  integer(c_int), parameter :: LEGION_FILE_CREATE = 2
   
   !legion_processor_kind_t
   integer(c_int), parameter :: NO_KIND = 0
@@ -35,6 +35,19 @@ module legion_fortran_types
   integer(c_int), parameter :: PROC_SET = 6
   integer(c_int), parameter :: OMP_PROC = 7
   integer(c_int), parameter :: PY_PROC = 8
+  
+  ! legion_partition_kind_t
+  integer(c_int), parameter :: DISJOINT_KIND = 0
+  integer(c_int), parameter :: ALIASED_KIND = 1
+  integer(c_int), parameter :: COMPUTE_KIND = 2
+  integer(c_int), parameter :: DISJOINT_COMPLETE_KIND = 3
+  integer(c_int), parameter :: ALIASED_COMPLETE_KIND = 4
+  integer(c_int), parameter :: COMPUTE_COMPLETE_KIND = 5
+  integer(c_int), parameter :: DISJOINT_INCOMPLETE_KIND = 6
+  integer(c_int), parameter :: ALIASED_INCOMPLETE_KIND = 7
+  integer(c_int), parameter :: COMPUTE_INCOMPLETE_KIND = 8
+  
+  integer(c_int), parameter :: AUTO_GENERATE_ID = 65536
     
     ! C NEW_OPAQUE_TYPE_F
 #define NEW_OPAQUE_TYPE_F(T) type, bind(C) :: T; type(c_ptr) :: impl; end type T
@@ -96,21 +109,21 @@ module legion_fortran_types
   NEW_POINT_TYPE_F(legion_point_3d_f_t, 3)
 #undef NEW_POINT_TYPE_F
 
-!#define LEGION_FOREACH_FN(__func__) \
+! #define LEGION_FOREACH_FN(__func__) \
 !    __func__(1); \
 !    __func__(2); \
 !    __func__(3)
-!#ifdef __GFORTRAN__
-!#define NEW_POINT_TYPE_F(DIM) type, bind(C) :: legion_point_/**/DIM/**/d_f_t; integer(c_long_long), dimension(0:DIM-1) :: x; end type legion_point_/**/DIM/**/d_f_t
+! #ifdef __GFORTRAN__
+! #define NEW_POINT_TYPE_F(DIM) type, bind(C) :: legion_point_/**/DIM/**/d_f_t; integer(c_long_long), dimension(0:DIM-1) :: x; end type legion_point_/**/DIM/**/d_f_t
 !    LEGION_FOREACH_FN(NEW_POINT_TYPE_F)
-!#undef NEW_POINT_TYPE_F
-!#else
-!#define NEW_POINT_TYPE_F(DIM) type, bind(C) :: legion_point_/**/DIM/**/d_f_t; integer(c_long_long), dimension(0:DIM-1) :: x; end type legion_point_/**/DIM/**/d_f_t
+! #undef NEW_POINT_TYPE_F
+! #else
+! #define NEW_POINT_TYPE_F(DIM) type, bind(C) :: legion_point_/**/DIM/**/d_f_t; integer(c_long_long), dimension(0:DIM-1) :: x; end type legion_point_/**/DIM/**/d_f_t
 !    NEW_POINT_TYPE_F(1)
 !    NEW_POINT_TYPE_F(2)
 !    NEW_POINT_TYPE_F(3)
-!#undef NEW_POINT_TYPE_F
-!#endif
+! #undef NEW_POINT_TYPE_F
+! #endif
 
     ! rect 1d, 2d, 3d
 #define NEW_RECT_TYPE_F(T, PT) type, bind(C) :: T; type(PT) :: lo, hi; end type T
@@ -118,6 +131,13 @@ module legion_fortran_types
   NEW_RECT_TYPE_F(legion_rect_2d_f_t, legion_point_2d_f_t)
   NEW_RECT_TYPE_F(legion_rect_3d_f_t, legion_point_3d_f_t)
 #undef NEW_RECT_TYPE_F
+
+    ! transform 1x1,2x2,3x3
+#define NEW_TRANSFORM_TYPE_F(T, D1, D2) type, bind(C) :: T; integer(c_long_long) :: trans(0:D1-1, 0:D2-1); end type T
+  NEW_TRANSFORM_TYPE_F(legion_transform_1x1_f_t, 1, 1)
+  NEW_TRANSFORM_TYPE_F(legion_transform_2x2_f_t, 2, 2)
+  NEW_TRANSFORM_TYPE_F(legion_transform_3x3_f_t, 3, 3)
+#undef NEW_TRANSFORM_TYPE_F
 
   ! Legion::Domain
   type, bind(C) :: legion_domain_f_t
@@ -153,6 +173,35 @@ module legion_fortran_types
     integer(c_int)                                       :: dim
     integer(c_long_long), dimension(0:MAX_POINT_DIM_F-1) :: point_data
   end type legion_domain_point_f_t
+  
+  ! Legion::Transform
+  type, bind(C) :: legion_domain_transform_f_t
+    integer(c_int)                                        :: m
+    integer(c_int)                                        :: n
+#if LEGION_MAX_DIM == 1
+#define MAX_MATRIX_DIM_F 1
+#elif LEGION_MAX_DIM == 2
+#define MAX_MATRIX_DIM_F 4
+#elif LEGION_MAX_DIM == 3
+#define MAX_MATRIX_DIM_F 9
+#elif LEGION_MAX_DIM == 4
+#define MAX_MATRIX_DIM_F 16
+#elif LEGION_MAX_DIM == 5
+#define MAX_MATRIX_DIM_F 25
+#elif LEGION_MAX_DIM == 6
+#define MAX_MATRIX_DIM_F 36
+#elif LEGION_MAX_DIM == 7
+#define MAX_MATRIX_DIM_F 49
+#elif LEGION_MAX_DIM == 8
+#define MAX_MATRIX_DIM_F 64
+#elif LEGION_MAX_DIM == 9
+#define MAX_MATRIX_DIM_F 81 
+#else
+#error "Illegal value of LEGION_MAX_DIM"
+#endif
+    integer(c_long_long), dimension(0:MAX_MATRIX_DIM_F-1) :: matrix      
+#undef MAX_MATRIX_DIM_F
+  end type legion_domain_transform_f_t
     
   ! Legion::IndexSpace
   type, bind(C) :: legion_index_space_f_t

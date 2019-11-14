@@ -46,7 +46,7 @@ contains
                                 
     physical_region = pr_list%get_region(0)                         
     
-    accessor = FFieldAccessor1D(physical_region, fid, c_sizeof(x_value))
+    accessor = FFieldAccessor1D(physical_region, fid, WRITE_DISCARD, c_sizeof(x_value))
     logical_region = region_requirement%get_region()
     index_space = logical_region%get_index_space()
     rect_1d = runtime%get_index_space_domain(ctx, index_space)
@@ -111,9 +111,9 @@ contains
     physical_region_1 = pr_list%get_region(1)  
     print *, "daxpy num_regions", pr_list%num_regions      
     
-    accessor_x = FFieldAccessor1D(physical_region_0, 0, c_sizeof(x_value))
-    accessor_y = FFieldAccessor1D(physical_region_0, 1, c_sizeof(y_value))
-    accessor_z = FFieldAccessor1D(physical_region_1, 2, c_sizeof(z_value))
+    accessor_x = FFieldAccessor1D(physical_region_0, 0, READ_ONLY, c_sizeof(x_value))
+    accessor_y = FFieldAccessor1D(physical_region_0, 1, READ_ONLY, c_sizeof(y_value))
+    accessor_z = FFieldAccessor1D(physical_region_1, 2, WRITE_DISCARD, c_sizeof(z_value))
     logical_region = region_requirement%get_region()
     index_space = logical_region%get_index_space()
     rect_1d = runtime%get_index_space_domain(ctx, index_space)
@@ -185,9 +185,9 @@ contains
     physical_region_0 = pr_list%get_region(0)     
     physical_region_1 = pr_list%get_region(1)        
     
-    accessor_x = FFieldAccessor1D(physical_region_0, 0, c_sizeof(x_value))
-    accessor_y = FFieldAccessor1D(physical_region_0, 1, c_sizeof(y_value))
-    accessor_z = FFieldAccessor1D(physical_region_1, 2, c_sizeof(z_value))
+    accessor_x = FFieldAccessor1D(physical_region_0, 0, READ_ONLY, c_sizeof(x_value))
+    accessor_y = FFieldAccessor1D(physical_region_0, 1, READ_ONLY, c_sizeof(y_value))
+    accessor_z = FFieldAccessor1D(physical_region_1, 2, READ_ONLY, c_sizeof(z_value))
     logical_region = region_requirement%get_region()
     index_space = logical_region%get_index_space()
     rect_1d = runtime%get_index_space_domain(ctx, index_space)

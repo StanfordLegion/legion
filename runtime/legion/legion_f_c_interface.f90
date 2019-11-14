@@ -539,6 +539,39 @@ module legion_fortran_c_interface
       integer(c_size_t)                          :: legion_domain_get_volume_c
       type(legion_domain_f_t), value, intent(in) :: d
     end function legion_domain_get_volume_c
+    
+    ! -----------------------------------------------------------------------
+    ! Domain Transform Operations
+    ! -----------------------------------------------------------------------
+    function legion_domain_transform_from_1x1_c(t) &
+        bind(C, name="legion_domain_transform_from_1x1")
+      use iso_c_binding
+      import legion_domain_transform_f_t
+      import legion_transform_1x1_f_t
+      
+      type(legion_domain_transform_f_t)                 :: legion_domain_transform_from_1x1_c
+      type(legion_transform_1x1_f_t), value, intent(in) :: t
+    end function legion_domain_transform_from_1x1_c
+    
+    function legion_domain_transform_from_2x2_c(t) &
+        bind(C, name="legion_domain_transform_from_2x2")
+      use iso_c_binding
+      import legion_domain_transform_f_t
+      import legion_transform_2x2_f_t
+      
+      type(legion_domain_transform_f_t)                 :: legion_domain_transform_from_2x2_c
+      type(legion_transform_2x2_f_t), value, intent(in) :: t
+    end function legion_domain_transform_from_2x2_c
+    
+    function legion_domain_transform_from_3x3_c(t) &
+        bind(C, name="legion_domain_transform_from_3x3")
+      use iso_c_binding
+      import legion_domain_transform_f_t
+      import legion_transform_3x3_f_t
+      
+      type(legion_domain_transform_f_t)                 :: legion_domain_transform_from_3x3_c
+      type(legion_transform_3x3_f_t), value, intent(in) :: t
+    end function legion_domain_transform_from_3x3_c
 
     ! -----------------------------------------------------------------------
     ! Domain Point Operations
@@ -840,6 +873,29 @@ module legion_fortran_c_interface
       integer(c_size_t), value, intent(in)            :: granularity
       integer(c_int), value, intent(in)               :: color
     end function legion_index_partition_create_equal_c
+    
+    function legion_index_partition_create_by_restriction_c(runtime, ctx, parent, &
+        color_space, transform, extent, part_kind, color) &
+        bind(C, name="legion_index_partition_create_by_restriction")
+      use iso_c_binding
+      import legion_index_partition_f_t
+      import legion_runtime_f_t
+      import legion_context_f_t
+      import legion_index_space_f_t
+      import legion_domain_transform_f_t
+      import legion_domain_f_t
+      implicit none
+      
+      type(legion_index_partition_f_t)                     :: legion_index_partition_create_by_restriction_c
+      type(legion_runtime_f_t), value, intent(in)          :: runtime
+      type(legion_context_f_t), value, intent(in)          :: ctx
+      type(legion_index_space_f_t), value, intent(in)      :: parent
+      type(legion_index_space_f_t), value, intent(in)      :: color_space
+      type(legion_domain_transform_f_t), value, intent(in) :: transform
+      type(legion_domain_f_t), value, intent(in)           :: extent
+      integer, value, intent(in)                           :: part_kind
+      integer(c_int), value, intent(in)                    :: color
+    end function legion_index_partition_create_by_restriction_c
 
     ! @see Legion::Runtime::attach_name()
     subroutine legion_index_partition_attach_name_c(runtime, handle, name, is_mutable) &

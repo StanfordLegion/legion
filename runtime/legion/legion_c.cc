@@ -1382,7 +1382,7 @@ legion_index_partition_create_by_restriction(
 
   IndexPartition ip = 
     runtime->create_partition_by_restriction(
-        ctx, parent, color_space, transform, extent, part_kind, color);
+        ctx, parent, color_space, transform, extent, COMPUTE_KIND, color);
 
   return CObjectWrapper::wrap(ip);
 }

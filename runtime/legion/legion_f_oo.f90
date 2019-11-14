@@ -6,7 +6,51 @@ module legion_fortran_object_oriented
   
   include "legion_f_oo.h"
   
+  interface assert_ne
+    module procedure assert_ne_integer4
+    module procedure assert_ne_integer8
+    module procedure assert_ne_logical
+  end interface
+  
 contains
+  ! ===============================================================================
+  ! assert
+  ! ===============================================================================
+  subroutine assert_ne_integer4(a, b)
+    implicit none
+    
+    integer(kind=4), intent(in) :: a
+    integer(kind=4), intent(in) :: b
+    
+    if (a .eq. b) then
+      print *, "[ERROR] Assert not equal failed", a, b
+      call exit(1)
+    end if  
+  end subroutine assert_ne_integer4
+  
+  subroutine assert_ne_integer8(a, b)
+    implicit none
+    
+    integer(kind=8), intent(in) :: a
+    integer(kind=8), intent(in) :: b
+    
+    if (a .eq. b) then
+      print *, "[ERROR] Assert not equal failed", a, b
+      call exit(1)
+    end if  
+  end subroutine assert_ne_integer8
+  
+  subroutine assert_ne_logical(a, b)
+    implicit none
+    
+    logical, intent(in) :: a
+    logical, intent(in) :: b
+    
+    if (a .eqv. b) then
+      print *, "[ERROR] Assert not equal failed", a, b
+      call exit(1)
+    end if  
+  end subroutine assert_ne_logical
   
   ! ===============================================================================
   ! Predicate
@@ -295,77 +339,53 @@ contains
   ! ===============================================================================
   ! FieldAccessor
   ! ===============================================================================
-  function legion_field_accessor_1d_constructor(physical_region, fid, data_size)
+  function legion_field_accessor_1d_constructor(physical_region, fid, priv, data_size)
     implicit none
     
     type(FFieldAccessor1D)            :: legion_field_accessor_1d_constructor
     type(FPhysicalRegion), intent(in) :: physical_region
     integer, intent(in)               :: fid
+    integer(c_int), intent(in)        :: priv
     integer(c_size_t), intent(in)     :: data_size
     
 
     legion_field_accessor_1d_constructor%dim = 1
     legion_field_accessor_1d_constructor%data_size = data_size
+    legion_field_accessor_1d_constructor%privilege_mode = priv
     legion_field_accessor_1d_constructor%accessor = legion_physical_region_get_field_accessor_array_1d_c(physical_region%pr, fid)
   end function legion_field_accessor_1d_constructor
   
-  function legion_field_accessor_2d_constructor(physical_region, fid, data_size)
+  function legion_field_accessor_2d_constructor(physical_region, fid, priv, data_size)
     implicit none
     
     type(FFieldAccessor2D)            :: legion_field_accessor_2d_constructor
     type(FPhysicalRegion), intent(in) :: physical_region
     integer, intent(in)               :: fid
+    integer(c_int), intent(in)        :: priv
     integer(c_size_t), intent(in)     :: data_size
     
 
     legion_field_accessor_2d_constructor%dim = 2
     legion_field_accessor_2d_constructor%data_size = data_size
+    legion_field_accessor_2d_constructor%privilege_mode = priv
     legion_field_accessor_2d_constructor%accessor = legion_physical_region_get_field_accessor_array_2d_c(physical_region%pr, fid)
   end function legion_field_accessor_2d_constructor
   
-  function legion_field_accessor_3d_constructor(physical_region, fid, data_size)
+  function legion_field_accessor_3d_constructor(physical_region, fid, priv, data_size)
     implicit none
     
     type(FFieldAccessor3D)            :: legion_field_accessor_3d_constructor
     type(FPhysicalRegion), intent(in) :: physical_region
     integer, intent(in)               :: fid
+    integer(c_int), intent(in)        :: priv
     integer(c_size_t), intent(in)     :: data_size
     
 
     legion_field_accessor_3d_constructor%dim = 3
     legion_field_accessor_3d_constructor%data_size = data_size
+    legion_field_accessor_3d_constructor%privilege_mode = priv
     legion_field_accessor_3d_constructor%accessor = legion_physical_region_get_field_accessor_array_3d_c(physical_region%pr, fid)
   end function legion_field_accessor_3d_constructor
-      
-  subroutine legion_field_accessor_init(this, physical_region, fid, data_size)
-    implicit none
-    
-    class(FFieldAccessor), intent(inout)         :: this
-    type(legion_physical_region_f_t), intent(in) :: physical_region
-    integer, intent(in)                          :: fid
-    integer(c_size_t), intent(in)                :: data_size
-    
-    select type (this)
-    type is (FFieldAccessor1D)
-      ! 1D
-      this%dim = 1
-      this%data_size = data_size
-      this%accessor = legion_physical_region_get_field_accessor_array_1d_c(physical_region, fid)
-    type is (FFieldAccessor2D)
-      ! 2D
-      this%dim = 2
-      this%data_size = data_size
-      this%accessor = legion_physical_region_get_field_accessor_array_2d_c(physical_region, fid)
-    type is (FFieldAccessor3D)
-      ! 3D
-      this%dim = 3
-      this%data_size = data_size
-      this%accessor = legion_physical_region_get_field_accessor_array_3d_c(physical_region, fid)
-    class default
-      ! give error for unexpected/unsupported type
-      stop 'initialize: unexpected type for LegionFieldAccessor object!'
-    end select
-  end subroutine legion_field_accessor_init
   
   subroutine legion_field_accessor_read_point_ptr(this, point, dst)
     implicit none
@@ -373,6 +393,8 @@ contains
     class(FFieldAccessor), intent(in) :: this
     class(FPoint), intent(in)         :: point
     type(c_ptr)                       :: dst 
+      
+    call assert_ne(this%privilege_mode, WRITE_DISCARD)
     
     select type (this)
     type is (FFieldAccessor1D)
@@ -465,6 +487,8 @@ contains
     class(FFieldAccessor), intent(in) :: this
     class(FPoint), intent(in)         :: point
     type(c_ptr), intent(in)           :: src
+    
+    call assert_ne(this%privilege_mode, READ_ONLY)
     
     select type (this)
     type is (FFieldAccessor1D)
@@ -1414,6 +1438,9 @@ contains
     type(FContext), intent(in)    :: ctx
     type(FIndexSpace), intent(in) :: index_space
     
+    type(FContext) :: dummy_ctx
+    dummy_ctx = ctx
+    
     legion_runtime_get_index_domain_return_domain%domain = legion_index_space_get_domain_c(this%runtime, index_space%is)
   end function legion_runtime_get_index_domain_return_domain
   
@@ -1553,7 +1580,7 @@ contains
   function legion_runtime_create_equal_partition(this, ctx, parent, color_space, granularity, color)
     implicit none
     
-    type(FIndexPartition) :: legion_runtime_create_equal_partition
+    type(FIndexPartition)                 :: legion_runtime_create_equal_partition
     class(FRuntime), intent(in)           :: this
     type(FContext), intent(in)            :: ctx
     type(FIndexSpace), intent(in)         :: parent
@@ -1562,7 +1589,7 @@ contains
     integer(c_int), optional, intent(in)  :: color
     
     integer(kind=8) :: tmp_granularity = 1
-    integer(c_int) :: tmp_color = 0
+    integer(c_int) :: tmp_color = AUTO_GENERATE_ID
     
     if (present(granularity)) tmp_granularity = granularity
     if (present(color)) tmp_color = color
@@ -1570,6 +1597,121 @@ contains
     legion_runtime_create_equal_partition%ip = legion_index_partition_create_equal_c(this%runtime, ctx%context, parent%is, &
                                                  color_space%is, tmp_granularity, tmp_color)
   end function legion_runtime_create_equal_partition
+  
+  function legion_runtime_create_partition_by_restriction_domain_transform(this, ctx, parent, &
+      color_space, transform, extent, part_kind, color)
+    implicit none
+    
+    type(FIndexPartition) :: legion_runtime_create_partition_by_restriction_domain_transform
+    class(FRuntime), intent(in)           :: this
+    type(FContext), intent(in)            :: ctx
+    type(FIndexSpace), intent(in)         :: parent
+    type(FIndexSpace), intent(in)         :: color_space
+    type(FDomainTransform), intent(in)    :: transform
+    type(FDomain), intent(in)             :: extent
+    integer, optional, intent(in)         :: part_kind
+    integer(c_int), optional, intent(in)  :: color
+    
+    integer :: tmp_part_kind = COMPUTE_KIND
+    integer(c_int) :: tmp_color = AUTO_GENERATE_ID
+    
+    if (present(part_kind)) tmp_part_kind = part_kind
+    if (present(color)) tmp_color = color
+    
+    legion_runtime_create_partition_by_restriction_domain_transform%ip = &
+      legion_index_partition_create_by_restriction_c(this%runtime, ctx%context, parent%is, &
+      color_space%is, transform%transform, extent%domain, tmp_part_kind, tmp_color)
+  end function legion_runtime_create_partition_by_restriction_domain_transform
+  
+  function legion_runtime_create_partition_by_restriction_transform_1x1(this, ctx, parent, &
+      color_space, transform, extent, part_kind, color)
+    implicit none
+    
+    type(FIndexPartition) :: legion_runtime_create_partition_by_restriction_transform_1x1
+    class(FRuntime), intent(in)           :: this
+    type(FContext), intent(in)            :: ctx
+    type(FIndexSpace), intent(in)         :: parent
+    type(FIndexSpace), intent(in)         :: color_space
+    type(FTransform1X1), intent(in)       :: transform
+    type(FRect1D), intent(in)             :: extent
+    integer, optional, intent(in)         :: part_kind
+    integer(c_int), optional, intent(in)  :: color
+    
+    integer :: tmp_part_kind = COMPUTE_KIND
+    integer(c_int) :: tmp_color = AUTO_GENERATE_ID
+    type(legion_domain_transform_f_t) :: domain_transform
+    type(legion_domain_f_t) :: domain
+    
+    if (present(part_kind)) tmp_part_kind = part_kind
+    if (present(color)) tmp_color = color
+    
+    domain = legion_domain_from_rect_1d_c(extent%rect)
+    domain_transform = legion_domain_transform_from_1x1_c(transform%transform)
+    
+    legion_runtime_create_partition_by_restriction_transform_1x1%ip = &
+      legion_index_partition_create_by_restriction_c(this%runtime, ctx%context, parent%is, &
+      color_space%is, domain_transform, domain, tmp_part_kind, tmp_color)
+  end function legion_runtime_create_partition_by_restriction_transform_1x1
+  
+  function legion_runtime_create_partition_by_restriction_transform_2x2(this, ctx, parent, &
+      color_space, transform, extent, part_kind, color)
+    implicit none
+    
+    type(FIndexPartition) :: legion_runtime_create_partition_by_restriction_transform_2x2
+    class(FRuntime), intent(in)           :: this
+    type(FContext), intent(in)            :: ctx
+    type(FIndexSpace), intent(in)         :: parent
+    type(FIndexSpace), intent(in)         :: color_space
+    type(FTransform2X2), intent(in)       :: transform
+    type(FRect2D), intent(in)             :: extent
+    integer, optional, intent(in)         :: part_kind
+    integer(c_int), optional, intent(in)  :: color
+    
+    integer :: tmp_part_kind = COMPUTE_KIND
+    integer(c_int) :: tmp_color = AUTO_GENERATE_ID
+    type(legion_domain_transform_f_t) :: domain_transform
+    type(legion_domain_f_t) :: domain
+    
+    if (present(part_kind)) tmp_part_kind = part_kind
+    if (present(color)) tmp_color = color
+    
+    domain = legion_domain_from_rect_2d_c(extent%rect)
+    domain_transform = legion_domain_transform_from_2x2_c(transform%transform)
+    
+    legion_runtime_create_partition_by_restriction_transform_2x2%ip = &
+      legion_index_partition_create_by_restriction_c(this%runtime, ctx%context, parent%is, &
+      color_space%is, domain_transform, domain, tmp_part_kind, tmp_color)
+  end function legion_runtime_create_partition_by_restriction_transform_2x2
+  
+  function legion_runtime_create_partition_by_restriction_transform_3x3(this, ctx, parent, &
+      color_space, transform, extent, part_kind, color)
+    implicit none
+    
+    type(FIndexPartition) :: legion_runtime_create_partition_by_restriction_transform_3x3
+    class(FRuntime), intent(in)           :: this
+    type(FContext), intent(in)            :: ctx
+    type(FIndexSpace), intent(in)         :: parent
+    type(FIndexSpace), intent(in)         :: color_space
+    type(FTransform3X3), intent(in)       :: transform
+    type(FRect3D), intent(in)             :: extent
+    integer, optional, intent(in)         :: part_kind
+    integer(c_int), optional, intent(in)  :: color
+    
+    integer :: tmp_part_kind = COMPUTE_KIND
+    integer(c_int) :: tmp_color = AUTO_GENERATE_ID
+    type(legion_domain_transform_f_t) :: domain_transform
+    type(legion_domain_f_t) :: domain
+    
+    if (present(part_kind)) tmp_part_kind = part_kind
+    if (present(color)) tmp_color = color
+    
+    domain = legion_domain_from_rect_3d_c(extent%rect)
+    domain_transform = legion_domain_transform_from_3x3_c(transform%transform)
+    
+    legion_runtime_create_partition_by_restriction_transform_3x3%ip = &
+      legion_index_partition_create_by_restriction_c(this%runtime, ctx%context, parent%is, &
+      color_space%is, domain_transform, domain, tmp_part_kind, tmp_color)
+  end function legion_runtime_create_partition_by_restriction_transform_3x3
   
   function legion_runtime_get_logical_partition(this, ctx, parent, handle)
     implicit none
