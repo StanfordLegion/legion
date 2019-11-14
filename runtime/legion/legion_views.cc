@@ -1102,7 +1102,6 @@ namespace Legion {
       // as we can in order to avoid doing unnecessary intersection tests later
       FieldMaskSet<ExprView> to_traverse;
       std::map<ExprView*,IndexSpaceExpression*> to_traverse_exprs;
-      FieldMask dominated_fields;
       {
         // Find all the intersecting subviews to see if we can 
         // continue the traversal
@@ -1119,37 +1118,19 @@ namespace Legion {
           IndexSpaceExpression *overlap =
             context->intersect_index_spaces(user_expr, it->first->view_expr);
           const size_t overlap_volume = overlap->get_volume();
-          if (overlap_volume == 0)
-            continue;
-          to_traverse.insert(it->first, overlap_mask);
-          if (overlap_volume == it->first->view_volume)
+          if (overlap_volume == user_volume)
           {
-            // User dominates the subview
-            to_traverse_exprs[it->first] = it->first->view_expr;
+            // Subview dominates the user so continue traversal
+            to_traverse.insert(it->first, overlap_mask);
+            // Use the right pointer here so its easier to recognize below
+            if (overlap_volume == it->first->view_expr->get_volume())
+              to_traverse_exprs[it->first] = it->first->view_expr;
+            else
+              to_traverse_exprs[it->first] = user_expr;
           }
-          else if (overlap_volume == user_volume)
-          {
-            // Subview dominates the user
-            to_traverse_exprs[it->first] = user_expr;
-            dominated_fields |= overlap_mask;
-          }
-          else
-          {
-            // Intersect only case
-            to_traverse_exprs[it->first] = overlap;
-          }
+          // Otherwise for all other cases we're going to record it here
+          // because they don't dominate the user to be recorded
         }
-      }
-      // For any fields which we aren't doing a dominated traversal of
-      // then we need to record a user here so that everyone sees it
-      if (!!dominated_fields)
-        user_mask -= dominated_fields;
-      // If we still have local fields, make a user and record it here
-      if (!!user_mask)
-      {
-        PhysicalUser *user = new PhysicalUser(usage, user_expr, op_id, index,
-                                              true/*copy*/, false/*covers*/);
-        add_current_user(user, term_event, user_mask, trace_recording);
       }
       if (!to_traverse.empty())
       {
@@ -1178,6 +1159,15 @@ namespace Legion {
                 finder->second->get_volume(), trace_recording);
           }
         }
+        // Remove fields that we did a dominated traversal
+        user_mask -= to_traverse.get_valid_mask();
+      }
+      // If we still have local fields, make a user and record it here
+      if (!!user_mask)
+      {
+        PhysicalUser *user = new PhysicalUser(usage, user_expr, op_id, index,
+                                              true/*copy*/, false/*covers*/);
+        add_current_user(user, term_event, user_mask, trace_recording);
       }
     }
 
