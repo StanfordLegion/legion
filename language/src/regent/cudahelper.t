@@ -18,9 +18,18 @@ local data = require("common/data")
 local report = require("common/report")
 
 local cudahelper = {}
-cudahelper.check_cuda_available = function() return false end
 
-if not config["cuda"] or not terralib.cudacompile then
+if not terralib.cudacompile then
+  function cudahelper.check_cuda_available()
+    return false, "Terra is built without CUDA support"
+  end
+  return cudahelper
+end
+
+if not config["cuda"] then
+  function cudahelper.check_cuda_available()
+    return false, "CUDA code generation is turned off (-fcuda 0)"
+  end
   return cudahelper
 end
 
@@ -83,13 +92,18 @@ do
   if not config["cuda-offline"] then
     if has_symbol("cuInit") then
       local r = DriverAPI.cuInit(0)
-      assert(r == 0)
-      function cudahelper.check_cuda_available()
-        return true
+      if r == 0 then
+        function cudahelper.check_cuda_available()
+          return true
+        end
+      else
+        function cudahelper.check_cuda_available()
+          return false, "calling cuInit(0) failed for some reason (CUDA devices might not exist)"
+        end
       end
     else
       function cudahelper.check_cuda_available()
-        return false
+        return false, "the cuInit function is missing (Regent might have been installed without CUDA support)"
       end
     end
   else
@@ -1084,6 +1098,16 @@ function cudahelper.generate_parallel_prefix_op(variant, total, lhs_wr, lhs_rd, 
   return launch
 end
 
+-- Declare the API calls that are deprecated in CUDA SDK 10
+-- TODO: We must move on to the new execution control API as these old functions
+--       can be dropped in the future.
+local ExecutionAPI = {
+  cudaConfigureCall =
+    ef("cudaConfigureCall", {RuntimeAPI.dim3, RuntimeAPI.dim3, uint64, RuntimeAPI.cudaStream_t} -> uint32);
+  cudaSetupArgument = ef("cudaSetupArgument", {&opaque, uint64, uint64} -> uint32);
+  cudaLaunch = ef("cudaLaunch", {&opaque} -> uint32);
+}
+
 function cudahelper.codegen_kernel_call(kernel_id, count, args, shared_mem_size, tight)
   local setupArguments = terralib.newlist()
 
@@ -1092,7 +1116,7 @@ function cudahelper.codegen_kernel_call(kernel_id, count, args, shared_mem_size,
     local arg =  args[i]
     local size = terralib.sizeof(arg.type)
     setupArguments:insert(quote
-      RuntimeAPI.cudaSetupArgument(&[arg], size, offset)
+      ExecutionAPI.cudaSetupArgument(&[arg], size, offset)
     end)
     offset = offset + size
   end
@@ -1126,9 +1150,9 @@ function cudahelper.codegen_kernel_call(kernel_id, count, args, shared_mem_size,
   return quote
     var [grid], [block]
     [launch_domain_init]
-    RuntimeAPI.cudaConfigureCall([grid], [block], shared_mem_size, nil)
+    ExecutionAPI.cudaConfigureCall([grid], [block], shared_mem_size, nil)
     [setupArguments]
-    RuntimeAPI.cudaLaunch([&int8](kernel_id))
+    ExecutionAPI.cudaLaunch([&int8](kernel_id))
   end
 end
 

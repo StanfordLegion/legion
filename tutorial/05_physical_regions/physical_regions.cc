@@ -79,6 +79,11 @@ void top_level_task(const Task *task,
   LogicalRegion input_lr = runtime->create_logical_region(ctx, is, input_fs);
   LogicalRegion output_lr = runtime->create_logical_region(ctx, is, output_fs);
 
+  // Use fill_field to set an initial value for the fields in the input
+  // logical region.
+  runtime->fill_field<double>(ctx, input_lr, input_lr, FID_X, 0.0);
+  runtime->fill_field<double>(ctx, input_lr, input_lr, FID_Y, 0.0);
+
   // Now that we have our logical regions we want to instantiate physical
   // instances of these regions which we can use for storing data.  One way
   // of creating a physical instance of a logical region is via an inline

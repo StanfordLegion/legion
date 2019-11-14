@@ -455,17 +455,18 @@ namespace Legion {
       static inline void log_index_space_union(IndexSpaceExprID result_id,
                                 const std::vector<IndexSpaceExprID> &sources)
       {
-        char *result = (char*)malloc(sources.size() * 8);
+        const size_t max_chars = 16;
+        char *result = (char*)malloc(sources.size() * max_chars);
+        char temp[max_chars];
         for (unsigned idx = 0; idx < sources.size(); idx++)
         {
           if (idx > 0)
           {
-            char temp[8];
-            sprintf(temp, " %lld", sources[idx]);
-            strcat(result, temp);
+            snprintf(temp, max_chars, " %lld", sources[idx]);
+            strncat(result, temp, max_chars);
           }
           else
-            sprintf(result,"%lld", sources[idx]);
+            snprintf(result, max_chars, "%lld", sources[idx]);
         }
         log_spy.print("Index Space Union %lld %zd %s", result_id, 
                       sources.size(), result);
@@ -475,17 +476,18 @@ namespace Legion {
       static inline void log_index_space_intersection(IndexSpaceExprID res_id,
                                   const std::vector<IndexSpaceExprID> &sources)
       {
-        char *result = (char*)malloc(sources.size() * 8);
+        const size_t max_chars = 16;
+        char *result = (char*)malloc(sources.size() * max_chars);
+        char temp[max_chars];
         for (unsigned idx = 0; idx < sources.size(); idx++)
         {
           if (idx > 0)
           {
-            char temp[8];
-            sprintf(temp, " %lld", sources[idx]);
-            strcat(result, temp);
+            snprintf(temp, max_chars, " %lld", sources[idx]);
+            strncat(result, temp, max_chars);
           }
           else
-            sprintf(result," %lld", sources[idx]);
+            snprintf(result, max_chars, " %lld", sources[idx]);
         }
         log_spy.print("Index Space Intersection %lld %zd %s", res_id, 
                       sources.size(), result);

@@ -44,7 +44,7 @@ install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/examples/hello.py
 )
 
 if(Legion_ENABLE_TESTING)
-  add_test(NAME legion_python COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:legion_python> hello -ll:py 1 -ll:cpu 0)
+  add_test(NAME legion_python COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:legion_python> hello ${Legion_TEST_ARGS} -ll:py 1 -ll:cpu 0)
   set_tests_properties(
     legion_python
     PROPERTIES

@@ -10628,7 +10628,7 @@ namespace Legion {
         memcpy(top_task->args, &input_args, top_task->arglen);
         // Set this to be the current processor
         top_task->set_current_proc(target);
-        top_task->select_task_options();
+        top_task->select_task_options(false/*prioritize*/);
         increment_outstanding_top_level_tasks();
         // Launch a task to deactivate the top-level context
         // when the top-level task is done
@@ -10678,7 +10678,7 @@ namespace Legion {
       Future f = mapper_task->initialize_task(map_context, launcher, 
                                               false/*track parent*/);
       mapper_task->set_current_proc(proc);
-      mapper_task->select_task_options();
+      mapper_task->select_task_options(false/*prioritize*/);
       // Create a temporary event to name the result since we 
       // have to pack it in the task that runs, but it also depends
       // on the task being reported back to the mapper
@@ -12171,9 +12171,17 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (ctx == DUMMY_CONTEXT)
-        REPORT_DUMMY_CONTEXT(
-            "Illegal dummy context detach external resource!");
+        REPORT_DUMMY_CONTEXT("Illegal dummy context detach external resource!");
       return ctx->detach_resource(region, flush, unordered);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::progress_unordered_operations(Context ctx)
+    //--------------------------------------------------------------------------
+    {
+      if (ctx == DUMMY_CONTEXT)
+        REPORT_DUMMY_CONTEXT("Illegal dummy context progress unordered ops")
+      return ctx->progress_unordered_operations();
     }
 
     //--------------------------------------------------------------------------
@@ -12181,8 +12189,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (ctx == DUMMY_CONTEXT)
-        REPORT_DUMMY_CONTEXT(
-            "Illegal dummy context issue copy operation!");
+        REPORT_DUMMY_CONTEXT("Illegal dummy context issue copy operation!");
       ctx->issue_copy(launcher); 
     }
 
@@ -12192,8 +12199,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (ctx == DUMMY_CONTEXT)
-        REPORT_DUMMY_CONTEXT(
-            "Illegal dummy context issue copy operation!");
+        REPORT_DUMMY_CONTEXT("Illegal dummy context issue copy operation!");
       ctx->issue_copy(launcher);
     }
 
@@ -21402,10 +21408,7 @@ namespace Legion {
     {
       log_run.fatal(id, "LEGION FATAL: %s (from file %s:%d)",
                     message, file_name, line);
-#ifdef DEBUG_LEGION
-      assert(false);
-#endif
-      exit(id);
+      abort();
     }
     
     //--------------------------------------------------------------------------
@@ -21416,10 +21419,7 @@ namespace Legion {
     {
       log_run.error(id, "LEGION ERROR: %s (from file %s:%d)",
                     message, file_name, line);
-#ifdef DEBUG_LEGION
-      assert(false);
-#endif
-      exit(id);
+      abort();
     }
     
     //--------------------------------------------------------------------------
@@ -21438,6 +21438,9 @@ namespace Legion {
         bt.lookup_symbols();
         log_run.warning() << bt;
       }
+#ifdef LEGION_WARNINGS_FATAL
+      abort();
+#endif
     }
 
 #if defined(PRIVILEGE_CHECKS) || defined(BOUNDS_CHECKS)

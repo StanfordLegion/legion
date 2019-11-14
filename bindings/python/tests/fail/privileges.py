@@ -27,6 +27,7 @@ def hello_subregion(R):
 @task
 def main():
     R = legion.Region([4, 4], {'x': legion.float64})
+    legion.fill(R, 'x', 0)
     P = legion.Partition.equal(R, [2, 2])
     hello_subregion(P[0, 0]) # this should work
     try:

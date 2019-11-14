@@ -24,7 +24,7 @@ struct fs
   x : int;
 }
 
-local field = terralib.newlist({1})
+local field = terralib.newlist({regentlib.field_path(1)})
 
 task f()
   var r = region(ispace(int1d, 5), fs)

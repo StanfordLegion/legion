@@ -44,6 +44,7 @@ end
 local default_options = {
   -- Main user-facing correctness flags:
   ["bounds-checks"] = false,
+  ["bounds-checks-targets"] = ".*",
 
   -- Main user-facing optimization flags:
   ["cuda"] = true,

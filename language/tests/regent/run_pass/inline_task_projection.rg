@@ -12,22 +12,45 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
--- fails-with:
--- type_mismatch_projection5.rg:31: type mismatch: expected string for renaming but found table
---   var s = r.{[name]=x}
---              ^
+-- runs-with:
+-- [ ["-fflow", "0"] ]
 
 import "regent"
 
-struct fs
+struct vec2
 {
-  x : int;
+  x : double;
+  y : double;
 }
 
-local name = regentlib.field_path("x", "y")
+struct iface
+{
+  a : double;
+  b : double;
+}
 
-task f()
-  var r = region(ispace(int1d, 5), fs)
-  var s = r.{[name]=x}
+task f(r : region(iface))
+where reads writes(r)
+do
+  for e in r do
+    e.a = 345
+    e.b = 543
+  end
 end
-f:compile()
+
+__demand(__inline)
+task g(r : region(vec2))
+where reads writes(r)
+do
+  f(r.{a=x, b=y})
+end
+
+task main()
+  var r = region(ispace(ptr, 5), vec2)
+  g(r)
+  for e in r do
+    regentlib.assert(e.x + e.y == 888, "test failed")
+  end
+end
+
+regentlib.start(main)

@@ -376,10 +376,6 @@ validate_output_sequential = legion.extern_task(
     return_type=legion.void,
     calling_convention='regent')
 
-@task(leaf=True, return_type=legion.float64)
-def min_task(a, b):
-    return min(a, b.get())
-
 @task(task_id=2, replicable=True, inner=True)
 def main():
     print_once('Running pennant.py')
@@ -802,15 +798,12 @@ def main():
                 dt,
                 True)
 
-            future = index_launch(
+            dthydro = index_launch(
                 pieces,
                 calc_dt_hydro,
                 zones_part[ID],
                 dt, conf.dtmax, conf.cfl, conf.cflv, True,
                 reduce='min')
-
-            dthydro = conf.dtmax
-            dthydro = min_task(dthydro, future)
         else:
             for i in IndexLaunch(pieces):
                 init_step_points(private_part[i], True)

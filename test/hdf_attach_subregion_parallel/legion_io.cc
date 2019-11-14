@@ -254,7 +254,7 @@ void PersistentRegion::write_persistent_subregions(Context ctx, LogicalRegion sr
   write_launcher.add_region_requirement(
     RegionRequirement(this->lp,
 		      0 /*no projection */, 
-		      READ_WRITE, EXCLUSIVE, this->parent_lr));
+		      WRITE_DISCARD, EXCLUSIVE, this->parent_lr));
   
   write_launcher.add_region_requirement(
     RegionRequirement(src_lp,
@@ -312,7 +312,7 @@ void PersistentRegion::read_persistent_subregions(Context ctx, LogicalRegion src
   read_launcher.add_region_requirement(
     RegionRequirement(src_lp,
 		      0 /* No prjections */, 
-		      READ_WRITE, EXCLUSIVE, src_lr));
+		      WRITE_DISCARD, EXCLUSIVE, src_lr));
   
   /* setup region requirements using field map */ 
   for(std::map<FieldID, std::string>::iterator iterator = this->field_map.begin(); iterator != this->field_map.end(); iterator++) {

@@ -298,6 +298,7 @@ namespace Legion {
                                   const AttachLauncher &launcher) = 0;
       virtual Future detach_resource(PhysicalRegion region, 
                                      const bool flush,const bool unordered) = 0;
+      virtual void progress_unordered_operations(void) = 0;
       virtual FutureMap execute_must_epoch(
                                  const MustEpochLauncher &launcher) = 0;
       virtual Future issue_timing_measurement(
@@ -516,7 +517,8 @@ namespace Legion {
       bool check_region_dependence(RegionTreeID tid, IndexSpace space,
                                   const RegionRequirement &our_req,
                                   const RegionUsage &our_usage,
-                                  const RegionRequirement &req);
+                                  const RegionRequirement &req,
+                                  bool check_privileges = true) const;
       void register_inline_mapped_region(PhysicalRegion &region);
       void unregister_inline_mapped_region(PhysicalRegion &region);
     public:
@@ -947,6 +949,7 @@ namespace Legion {
       virtual PhysicalRegion attach_resource(const AttachLauncher &launcher);
       virtual Future detach_resource(PhysicalRegion region, const bool flush,
                                      const bool unordered);
+      virtual void progress_unordered_operations(void);
       virtual FutureMap execute_must_epoch(const MustEpochLauncher &launcher);
       virtual Future issue_timing_measurement(const TimingLauncher &launcher);
       virtual void issue_mapping_fence(void);
@@ -1565,6 +1568,7 @@ namespace Legion {
       virtual PhysicalRegion attach_resource(const AttachLauncher &launcher);
       virtual Future detach_resource(PhysicalRegion region, const bool flush,
                                      const bool unordered);
+      virtual void progress_unordered_operations(void);
       virtual FutureMap execute_must_epoch(const MustEpochLauncher &launcher);
       virtual Future issue_timing_measurement(const TimingLauncher &launcher);
       virtual void issue_mapping_fence(void);
@@ -1893,6 +1897,7 @@ namespace Legion {
       virtual PhysicalRegion attach_resource(const AttachLauncher &launcher);
       virtual Future detach_resource(PhysicalRegion region, const bool flush,
                                      const bool unordered);
+      virtual void progress_unordered_operations(void);
       virtual FutureMap execute_must_epoch(const MustEpochLauncher &launcher);
       virtual Future issue_timing_measurement(const TimingLauncher &launcher);
       virtual void issue_mapping_fence(void);

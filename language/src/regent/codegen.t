@@ -50,7 +50,21 @@ local dynamic_branches_assert = std.config["no-dynamic-branches-assert"]
 -- pointer accesses. This is independent from the runtime's bounds
 -- checks flag as the compiler does not use standard runtime
 -- accessors.
-local bounds_checks = std.config["bounds-checks"]
+local bounds_checks_enabled = std.config["bounds-checks"]
+local function needs_bounds_checks(name) return bounds_checks_enabled end
+do
+  if bounds_checks_enabled then
+    local patterns = terralib.newlist()
+    for pattern in string.gmatch(std.config["bounds-checks-targets"], "[^,]+") do
+      patterns:insert(pattern)
+    end
+    needs_bounds_checks = function(name)
+      return data.any(unpack(patterns:map(function(pattern)
+        return string.match(name, pattern) ~= nil
+      end)))
+    end
+  end
+end
 
 local emergency = std.config["emergency-gc"]
 
@@ -115,10 +129,12 @@ function context:new_local_scope(divergence, must_epoch, must_epoch_point, break
     regions = self.regions:new_local_scope(),
     lists_of_regions = self.lists_of_regions:new_local_scope(),
     cleanup_items = terralib.newlist(),
+    bounds_checks = self.bounds_checks
   }, context)
 end
 
-function context:new_task_scope(expected_return_type, constraints, orderings, leaf, task_meta, task, ctx, runtime, result)
+function context:new_task_scope(expected_return_type, constraints, orderings, leaf,
+                                task_meta, task, ctx, runtime, result, bounds_checks)
   assert(expected_return_type and task and ctx and runtime and result)
   return setmetatable({
     variant = self.variant,
@@ -140,6 +156,7 @@ function context:new_task_scope(expected_return_type, constraints, orderings, le
     regions = symbol_table.new_global_scope({}),
     lists_of_regions = symbol_table.new_global_scope({}),
     cleanup_items = terralib.newlist(),
+    bounds_checks = bounds_checks
   }, context)
 end
 
@@ -956,7 +973,7 @@ function value:get_index(cx, node, index, result_type)
   local value_expr = self:read(cx)
   local actions = terralib.newlist({value_expr.actions, index.actions})
   local value_type = std.as_read(self.value_type)
-  if bounds_checks and value_type:isarray() then
+  if cx.bounds_checks and value_type:isarray() then
     actions:insert(
       quote
         std.assert_error([index.value] >= 0 and [index.value] < [value_type.N],
@@ -1064,7 +1081,7 @@ end
 
 local function get_element_pointer(cx, node, region_types, index_type, field_type,
                                    base_pointer, strides, field_path, index)
-  if bounds_checks then
+  if cx.bounds_checks then
     local terra check(runtime : c.legion_runtime_t,
                       ctx : c.legion_context_t,
                       pointer : index_type,
@@ -1486,7 +1503,7 @@ function ref:get_index(cx, node, index, result_type)
 
   local actions = terralib.newlist({value_actions, index.actions})
   local value_type = self.value_type.points_to_type
-  if bounds_checks and value_type:isarray() then
+  if cx.bounds_checks and value_type:isarray() then
     actions:insert(
       quote
         std.assert_error([index.value] >= 0 and [index.value] < [value_type.N],
@@ -1577,7 +1594,7 @@ function aref:get_index(cx, node, index, result_type)
 
   local actions = terralib.newlist({value_actions, index.actions})
   local value_type = std.as_read(self.node.expr_type)
-  if bounds_checks then
+  if cx.bounds_checks then
     actions:insert(
       quote
         std.assert_error([index.value] >= 0 and [index.value] < [value_type.N],
@@ -2089,7 +2106,7 @@ function rawref:get_index(cx, node, index, result_type)
   local ref_expr = self:__ref(cx)
   local actions = terralib.newlist({ref_expr.actions, index.actions})
   local value_type = self.value_type.type
-  if bounds_checks and value_type:isarray() then
+  if cx.bounds_checks and value_type:isarray() then
     actions:insert(
       quote
         std.assert_error([index.value] >= 0 and [index.value] < [value_type.N],
@@ -2564,7 +2581,7 @@ function codegen.expr_index_access(cx, node)
       [index.actions];
       [emit_debuginfo(node)]
     end
-    if bounds_checks then
+    if cx.bounds_checks then
       actions = quote
         [actions];
         std.assert_error([index].value.__ptr.x >= 0 and [index].value.__ptr.x < [value_type.M],
@@ -4159,7 +4176,7 @@ function codegen.expr_unsafe_cast(cx, node)
   if not std.is_vptr(value_type) then
     local input = std.implicit_cast(value_type, expr_type.index_type, value.value)
 
-    if bounds_checks then
+    if cx.bounds_checks then
       local regions = expr_type:bounds()
       assert(#regions == 1)
       local region = regions[1]
@@ -8355,7 +8372,7 @@ function codegen.stat_for_num_vectorized(cx, node)
 end
 
 -- Find variables defined from the outer scope
-local function collect_symbols(cx, node)
+local function collect_symbols(cx, node, cuda)
   local result = terralib.newlist()
 
   local undefined =  data.newmap()
@@ -8442,7 +8459,7 @@ local function collect_symbols(cx, node)
     if std.is_symbol(symbol) then symbol = symbol:getsymbol() end
     result:insert(symbol)
   end
-  if std.config["bounds-checks"] then
+  if not cuda then
     result:insert(cx.runtime)
     result:insert(cx.context)
     for lr, _ in lrs:items() do
@@ -8555,12 +8572,13 @@ function codegen.stat_for_list(cx, node)
   local openmp = not cx.variant:is_cuda() and
                  node.annotations.openmp:is(ast.annotation.Demand) and
                  openmphelper.check_openmp_available()
-  if node.annotations.openmp:is(ast.annotation.Demand) and
-     not openmphelper.check_openmp_available() then
-    report.warn(node,
-      "ignoring demand pragma at " .. node.span.source ..
-      ":" .. tostring(node.span.start.line) ..
-      " since the OpenMP module is unavailable")
+  if node.annotations.openmp:is(ast.annotation.Demand) then
+    local available, error_message = openmphelper.check_openmp_available()
+    if not available then
+      report.warn(node,
+        "ignoring demand pragma at " .. node.span.source ..
+        ":" .. tostring(node.span.start.line) .. " since " .. error_message)
+    end
   end
 
   -- Code generation for the loop body
@@ -8633,7 +8651,7 @@ function codegen.stat_for_list(cx, node)
     end
 
   else
-    local symbols, reductions, lrs = collect_symbols(cx, node)
+    local symbols, reductions, lrs = collect_symbols(cx, node, cuda)
     if openmp then
       symbols:insert(rect)
       local can_change = { [rect] = true }
@@ -9952,7 +9970,7 @@ function codegen.stat_parallelize_with(cx, node)
 end
 
 local function generate_parallel_prefix_bounds_checks(cx, node, lhs_region, rhs_region)
-  if not bounds_checks then
+  if not cx.bounds_checks then
     return quote end
   else
     local lhs_r = cx:region(lhs_region)
@@ -10617,11 +10635,16 @@ function codegen.top_task(cx, node)
     end)
   end
 
+  local task_name = task.name:mkstring("", ".", "")
+  local bounds_checks = needs_bounds_checks(task_name)
+  if bounds_checks and std.config["bounds-checks-targets"] ~= ".*" then
+    report.warn(node, "bounds checks are enabled for task " .. task_name)
+  end
   local cx = cx:new_task_scope(return_type,
                                task:get_constraints(),
                                orderings,
                                variant:get_config_options().leaf,
-                               task, c_task, c_context, c_runtime, c_result)
+                               task, c_task, c_context, c_runtime, c_result, bounds_checks)
 
   -- FIXME: This code should be deduplicated with type_check, no
   -- reason to do it twice....
@@ -11071,11 +11094,11 @@ function codegen.top(cx, node)
     end
 
     if node.annotations.cuda:is(ast.annotation.Demand) then 
-      if not cudahelper.check_cuda_available() then
+      local available, error_message = cudahelper.check_cuda_available()
+      if not available then
         report.warn(node,
           "ignoring demand pragma at " .. node.span.source ..
-          ":" .. tostring(node.span.start.line) ..
-          " since the CUDA compiler is unavailable")
+          ":" .. tostring(node.span.start.line) .. " since " .. error_message)
       else
         local cuda_variant = task:make_variant("cuda")
         cuda_variant:set_is_cuda(true)

@@ -319,6 +319,9 @@ mark_as_advanced(Legion_ENABLE_TLS)
 # define variable for legion_defines.h
 set(ENABLE_LEGION_TLS ${Legion_ENABLE_TLS})
 
+option(Legion_WARNINGS_FATAL "Make all runtime warnings fatal" OFF)
+set(LEGION_WARNINGS_FATAL ${Legion_WARNINGS_FATAL})
+
 #------------------------------------------------------------------------------#
 # Runtime library targets
 #------------------------------------------------------------------------------#
@@ -410,11 +413,13 @@ if(Legion_ENABLE_TESTING)
   enable_testing()
   # if Legion_TEST_LAUNCHER is set, split the string into a list
   separate_arguments(Legion_TEST_LAUNCHER)
+  separate_arguments(Legion_TEST_ARGS)
 endif()
 if(Legion_BUILD_ALL OR Legion_BUILD_APPS OR Legion_BUILD_BINDINGS OR Legion_BUILD_EXAMPLES OR Legion_BUILD_TUTORIAL OR Legion_BUILD_TESTS)
   # Make a namespaced alias so in-build examples can use it the same way as if
   # it were imported
   add_library(Legion::Legion ALIAS Legion)
+  add_library(Legion::Realm ALIAS Realm)
 
   if(Legion_USE_CUDA)
     # CUDA has some issues propogating target interface properties so we
@@ -455,7 +460,7 @@ else()
   option(Legion_REDOP_COMPLEX "Use reduction operators for complex types" OFF)
 endif()
 if((Legion_BUILD_ALL OR Legion_BUILD_BINDINGS) AND NOT Legion_REDOP_COMPLEX)
-  error("Bindings require Legion_REDOP_COMPLEX to be set")
+  message(FATAL_ERROR "Bindings require Legion_REDOP_COMPLEX to be set")
 endif()
 if(Legion_REDOP_COMPLEX)
   # define variable for legion_defines.h

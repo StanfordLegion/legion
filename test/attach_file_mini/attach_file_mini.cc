@@ -54,7 +54,7 @@ void top_level_task(const Task *task,
 
   // create an instance of Y
   PhysicalRegion pr_Y = runtime->map_region(ctx,
-					    RegionRequirement(lr_A, READ_WRITE, EXCLUSIVE, lr_A)
+					    RegionRequirement(lr_A, WRITE_DISCARD, EXCLUSIVE, lr_A)
 					    .add_field(FID_Y));
   pr_Y.wait_until_valid();
   runtime->unmap_region(ctx, pr_Y);

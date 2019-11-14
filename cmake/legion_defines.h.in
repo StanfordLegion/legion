@@ -49,3 +49,7 @@
 #ifndef LEGION_REDOP_COMPLEX
 #cmakedefine LEGION_REDOP_COMPLEX
 #endif
+
+#ifndef LEGION_WARNINGS_FATAL
+#cmakedefine LEGION_WARNINGS_FATAL
+#endif

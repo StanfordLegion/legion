@@ -668,6 +668,8 @@ namespace Legion {
     public:
       inline bool is_replaying(void) const { return !recording; }
       inline bool is_replayable(void) const { return replayable.replayable; }
+      inline const std::string& get_replayable_message(void) const
+        { return replayable.message; }
     public:
       virtual bool is_recording(void) const { return recording; }
       virtual void add_recorder_reference(void) { /*do nothing*/ }
@@ -836,6 +838,9 @@ namespace Legion {
       // user i's event carried over from the previous replay. This data
       // structure is constructed by de-duplicating the last users of all
       // views used in the template, which are stored in view_users.
+      // - frontiers[idx] == (event idx from the previous trace)
+      // - after each replay, we do assignment 
+      //    events[frontiers[idx]] = events[idx]
       std::map<unsigned,unsigned> frontiers;
     private:
       RtUserEvent recording_done;

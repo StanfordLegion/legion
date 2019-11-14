@@ -31,6 +31,12 @@ namespace Realm {
   extern Logger log_inst; // in inst_impl.cc
 
 
+  namespace Config {
+    // if true, Realm memories attempt to satisfy instance allocation requests
+    //  on the basis of deferred instance destructions
+    bool deferred_instance_allocation = true;
+  };
+
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -76,11 +82,12 @@ namespace Realm {
 
     MemoryImpl::MemoryImpl(Memory _me, size_t _size, MemoryKind _kind, size_t _alignment, Memory::Kind _lowlevel_kind)
       : me(_me), size(_size), kind(_kind), alignment(_alignment), lowlevel_kind(_lowlevel_kind)
+      , cur_release_seqid(0)
       , usage(stringbuilder() << "realm/mem " << _me << "/usage")
       , peak_usage(stringbuilder() << "realm/mem " << _me << "/peak_usage")
       , peak_footprint(stringbuilder() << "realm/mem " << _me << "/peak_footprint")
     {
-      allocator.add_range(0, _size);
+      current_allocator.add_range(0, _size);
     }
 
     MemoryImpl::~MemoryImpl(void)
@@ -388,34 +395,144 @@ namespace Realm {
 	return ALLOC_DEFERRED /*asynchronous notification*/;
       }
 
-      if(!precondition.has_triggered()) {
-	// TODO: queue things up?
-	precondition.wait();
+      RegionInstanceImpl *inst = get_instance(i);
+
+      // check precondition on allocation
+      bool alloc_poisoned = false;
+      if(precondition.has_triggered_faultaware(alloc_poisoned)) {
+	if(alloc_poisoned) {
+	  // a poisoned creation works a lot like a failed creation
+	  NodeID creator_node = ID(i).instance_creator_node();
+	  if(creator_node == Network::my_node_id) {
+	    // local notification of result
+	    inst->notify_allocation(ALLOC_CANCELLED,
+				    RegionInstanceImpl::INSTOFFSET_FAILED);
+	  } else {
+	    // we have to at least have the correct offset on our local
+	    //  instance impl (even if we don't have the rest of the metadata)
+	    inst->metadata.inst_offset = RegionInstanceImpl::INSTOFFSET_FAILED;
+	  
+	    // remote notification
+	    ActiveMessage<MemStorageAllocResponse> amsg(creator_node);
+	    amsg->inst = i;
+	    amsg->offset = RegionInstanceImpl::INSTOFFSET_FAILED;
+	    amsg->result = ALLOC_CANCELLED;
+	    amsg.commit();
+	  }
+	  return ALLOC_INSTANT_FAILURE;
+	} else {
+	  // attempt allocation below
+	}
+      } else {
+	// defer allocation attempt
+	inst->metadata.inst_offset = RegionInstanceImpl::INSTOFFSET_DELAYEDALLOC;
+	inst->deferred_create.defer(inst, this, bytes, alignment, precondition);
+	return ALLOC_DEFERRED /*asynchronous notification*/;
       }
 
-      bool ok;
+      AllocationResult result;
+      // offer up (hopefully non-zero) offset for external allocations
+      size_t inst_offset = offset;
       {
 	AutoLock<> al(allocator_mutex);
-	ok = allocator.allocate(i, bytes, alignment, offset);
+
+	result = attempt_deferrable_allocation(inst, bytes, alignment,
+					       inst_offset);
       }
 
-      if(NodeID(ID(i).instance_creator_node()) == Network::my_node_id) {
-	// local notification of result
-	get_instance(i)->notify_allocation(ok, offset, bytes);
-      } else {
-	// remote notification
-	ActiveMessage<MemStorageAllocResponse> amsg(ID(i).instance_creator_node());
-	amsg->inst = i;
-	amsg->offset = offset;
-	amsg->footprint = bytes;
-	amsg->success = ok;
-	amsg.commit();
+      if(result != ALLOC_DEFERRED) {
+	NodeID creator_node = ID(i).instance_creator_node();
+	if(creator_node == Network::my_node_id) {
+	  // local notification of result
+	  inst->notify_allocation(result, inst_offset);
+	} else {
+	  // we have to at least have the correct offset on our local
+	  //  instance impl (even if we don't have the rest of the metadata)
+	  inst->metadata.inst_offset = ((result == ALLOC_INSTANT_SUCCESS) ?
+					  inst_offset :
+					  RegionInstanceImpl::INSTOFFSET_FAILED);
+	  
+	  // remote notification
+	  ActiveMessage<MemStorageAllocResponse> amsg(creator_node);
+	  amsg->inst = i;
+	  amsg->offset = inst_offset;
+	  amsg->result = result;
+	  amsg.commit();
+	}
       }
 
-      return (ok ? ALLOC_INSTANT_SUCCESS :
-	           ALLOC_INSTANT_FAILURE) /*immediate notification*/;
+      return result;
     }
 
+    // for internal use by allocation routines - must be called with
+    //  allocator_mutex held!
+    MemoryImpl::AllocationResult MemoryImpl::attempt_deferrable_allocation(RegionInstanceImpl *inst,
+									   size_t bytes,
+									   size_t alignment,
+									   size_t& inst_offset)
+    {
+      // as long as there aren't any pending allocations, we can attempt to
+      //  satisfy the allocation based on the current state
+      if(pending_allocs.empty()) {
+	bool ok = current_allocator.allocate(inst->me,
+					     bytes, alignment, inst_offset);
+	if(ok) {
+	  return ALLOC_INSTANT_SUCCESS;
+	} else {
+	  // doesn't currently fit - are there any pending deletes that
+	  //  might allow it to fit in the future?
+	  // also, check that deferred allocations are even permitted
+	  if(pending_releases.empty() ||
+	     !Config::deferred_instance_allocation) {
+	    // nope - this allocation can't succeed based on what we know
+	    //  right now
+	    return ALLOC_INSTANT_FAILURE;
+	  } else {
+	    // build the future state based on those deletes and try again
+	    future_allocator = current_allocator;
+	    for(std::vector<PendingRelease>::iterator it = pending_releases.begin();
+		it != pending_releases.end();
+		++it) {
+	      // shouldn't have any ready ones here
+	      assert(!it->is_ready);
+	      // due to network delays, it's possible for multiple
+	      //  deallocations of the same instance to be in our list,
+	      //  so ignore failures to deallocate from the future state
+	      //  (this is conservative, because it can only cause a
+	      //  false-failure of a future allocation)
+	      future_allocator.deallocate(it->inst->me, true /*missing ok*/);
+	    }
+
+	    bool ok = future_allocator.allocate(inst->me,
+						bytes, alignment, inst_offset);
+	    if(ok) {
+	      pending_allocs.push_back(PendingAlloc(inst, bytes, alignment,
+						    cur_release_seqid));
+	      // now that we have pending allocs, we need release_allocator
+	      //  to be valid
+	      release_allocator = current_allocator;
+	      return ALLOC_DEFERRED;
+	    } else {
+	      return ALLOC_INSTANT_FAILURE; /*immediate notification*/
+	      // NOTE: future_allocator becomes invalid
+	    }
+	  }
+	}
+      } else {
+	// with other pending allocs, we can only tentatively allocate based
+	//  on future state
+	bool ok = future_allocator.allocate(inst->me,
+					    bytes, alignment, inst_offset);
+	if(ok) {
+	  pending_allocs.push_back(PendingAlloc(inst, bytes, alignment,
+						cur_release_seqid));
+	  return ALLOC_DEFERRED;
+	} else {
+	  return ALLOC_INSTANT_FAILURE; /*immediate notification*/
+	}
+      }
+    }
+  
     // release storage associated with an instance
     void MemoryImpl::release_instance_storage(RegionInstanceImpl *inst,
 					      Event precondition)
@@ -432,39 +549,531 @@ namespace Realm {
 	return;
       }
 
-      // TODO: memory needs to handle non-ready releases for deferred allocation
       bool poisoned = false;
-      if(!precondition.has_triggered_faultaware(poisoned)) {
-	inst->deferred_destroy.defer(inst, this, precondition);
-	return;
-      }
+      bool triggered = precondition.has_triggered_faultaware(poisoned);
+
       // a poisoned precondition silently cancels the deletion - up to
       //  requestor to realize this has occurred since the deletion does
       //  not have its own completion event
-      if(poisoned)
+      if(triggered && poisoned)
 	return;
 
-      // better not be in the unallocated state...
-      assert(inst->metadata.inst_offset != size_t(-1));
-      // deallocate unless the allocation had failed
-      if(inst->metadata.inst_offset != size_t(-2)) {
+      do { // so we can 'break' out early below
 	AutoLock<> al(allocator_mutex);
-	allocator.deallocate(inst->me);
-      }
 
-      NodeID creator_node = ID(inst->me).instance_creator_node();
-      if(creator_node == Network::my_node_id) {
-	// local notification of result
-	inst->notify_deallocation();
+	// special case: we can get a (deferred only!) destruction of an
+	//  instance whose creation precondition hasn't even been satisfied -
+	//  it won't be represented in the heap state, so we can't do a
+	//  "future release of it" - wait until the creation precondition is
+	//  satisfied
+	if(inst->metadata.inst_offset == RegionInstanceImpl::INSTOFFSET_DELAYEDALLOC) {
+	  assert(!triggered);
+	  inst->metadata.inst_offset = RegionInstanceImpl::INSTOFFSET_DELAYEDDESTROY;
+	  break;
+	}
+
+	if(pending_allocs.empty()) {
+	  if(triggered) {
+	    // we can apply the destruction directly to current state
+	    if(inst->metadata.inst_offset != RegionInstanceImpl::INSTOFFSET_FAILED)
+	      current_allocator.deallocate(inst->me);
+	  } else {
+	    // push the op, but we're not maintaining a future state yet
+	    pending_releases.push_back(PendingRelease(inst,
+						      false /*!triggered*/,
+						      ++cur_release_seqid));
+	  }
+	} else {
+	  // even if this destruction is ready, we can't update current
+	  //  state because older pending ops exist
+	  // TODO: pushing past a single pending alloc should always be safe
+	  if(triggered) {
+	    if(inst->metadata.inst_offset == RegionInstanceImpl::INSTOFFSET_FAILED) {
+	      // (exception: a ready destruction of a failed allocation need not
+	      //  be deferred)
+	    } else {
+	      // event is known to have triggered, so these must not fail
+	      release_allocator.deallocate(inst->me);
+	      future_allocator.deallocate(inst->me);
+	      pending_releases.push_back(PendingRelease(inst,
+							true /*triggered*/,
+							++cur_release_seqid));
+	    }
+	  } else {
+	    // TODO: is it safe to test for failedness yet?
+	    if(inst->metadata.inst_offset != RegionInstanceImpl::INSTOFFSET_FAILED)
+	      future_allocator.deallocate(inst->me, true /*missing ok*/);
+	    pending_releases.push_back(PendingRelease(inst,
+						      false /*!triggered*/,
+						      ++cur_release_seqid));
+	  }
+	}
+      } while(0);
+
+      // even if we don't apply the destruction to the heap state right away,
+      //  we always ack a triggered destruction
+      if(triggered) {
+	// issue notifications
+	NodeID creator_node = ID(inst->me).instance_creator_node();
+	if(creator_node == Network::my_node_id) {
+	  // local notification of result
+	  inst->notify_deallocation();
+	} else {
+	  // remote notification
+	  ActiveMessage<MemStorageReleaseResponse> amsg(creator_node);
+	  amsg->inst = inst->me;
+	  amsg.commit();
+	}
       } else {
-	// remote notification
-	ActiveMessage<MemStorageReleaseResponse> amsg(creator_node);
-	amsg->inst = inst->me;
-	amsg.commit();
+	// ask the instance to tell us when the precondition is satisified
+	inst->deferred_destroy.defer(inst, this, precondition);
       }
     }
 
+    // should only be called by RegionInstance::DeferredCreate
+    void MemoryImpl::deferred_creation_triggered(RegionInstanceImpl *inst,
+						 size_t bytes, size_t alignment,
+						 bool poisoned)
+    {
+      AllocationResult result;
+      size_t inst_offset = 0;
+      {
+	AutoLock<> al(allocator_mutex);
 
+	// with the lock held, check the state of the instance to see if a
+	//  deferred destruction has also been received - if so, we'll have to
+	//  add that to the allocator history too
+	assert((inst->metadata.inst_offset == RegionInstanceImpl::INSTOFFSET_DELAYEDALLOC) ||
+	       (inst->metadata.inst_offset == RegionInstanceImpl::INSTOFFSET_DELAYEDDESTROY));	       
+	bool deferred_destroy_exists = (inst->metadata.inst_offset == RegionInstanceImpl::INSTOFFSET_DELAYEDDESTROY);
+	inst->metadata.inst_offset = RegionInstanceImpl::INSTOFFSET_UNALLOCATED;
+
+	if(poisoned) {
+	  result = ALLOC_CANCELLED;
+	  inst_offset = RegionInstanceImpl::INSTOFFSET_FAILED;
+	} else {
+	  result = attempt_deferrable_allocation(inst, bytes, alignment,
+						 inst_offset);
+	}
+
+	// success or fail, if a deferred destruction is in flight, we have to
+	//  add it to our list so that we can find it later
+	if(deferred_destroy_exists) {
+	  // a successful (now or later) allocation should update the future
+	  //  state, if we have one
+	  if(((result == ALLOC_INSTANT_SUCCESS) || (result == ALLOC_DEFERRED)) &&
+	     !pending_allocs.empty())
+	    future_allocator.deallocate(inst->me, true /*missing ok*/);
+
+	  pending_releases.push_back(PendingRelease(inst,
+						    false /*!ready*/,
+						    ++cur_release_seqid));
+	}
+      }
+	    
+      if(result != ALLOC_DEFERRED) {
+	NodeID creator_node = ID(inst->me).instance_creator_node();
+	if(creator_node == Network::my_node_id) {
+	  // local notification of result
+	  inst->notify_allocation(result, inst_offset);
+	} else {
+	  // we have to at least have the correct offset on our local
+	  //  instance impl (even if we don't have the rest of the metadata)
+	  inst->metadata.inst_offset = ((result == ALLOC_INSTANT_SUCCESS) ?
+					  inst_offset :
+					  RegionInstanceImpl::INSTOFFSET_FAILED);
+	  
+	  // remote notification
+	  ActiveMessage<MemStorageAllocResponse> amsg(creator_node);
+	  amsg->inst = inst->me;
+	  amsg->offset = inst_offset;
+	  amsg->result = result;
+	  amsg.commit();
+	}
+      }
+    }
+
+  //define DEBUG_DEFERRED_ALLOCATIONS
+#ifdef DEBUG_DEFERRED_ALLOCATIONS
+  Logger log_defalloc("defalloc");
+
+  std::ostream& operator<<(std::ostream& os, const MemoryImpl::PendingAlloc& p)
+  {
+    os << p.inst->me << "(" << ((void *)(p.inst)) << "," << p.bytes << "," << p.alignment << "," << p.last_release_seqid << ")";
+    return os;
+  }
+
+  std::ostream& operator<<(std::ostream& os, const MemoryImpl::PendingRelease& p)
+  {
+    os << p.inst->me << "(" << ((void *)(p.inst)) << "," << p.is_ready << "," << p.seqid << ")";
+    return os;
+  }
+
+  template <typename T1, typename T2>
+  std::ostream& operator<<(std::ostream& os, const std::pair<T1, T2>& p)
+  {
+    os << "<" << p.first << "," << p.second << ">";
+    return os;
+  }
+#endif
+  
+    // should only be called by RegionInstance::DeferredDestroy
+    void MemoryImpl::deferred_destruction_triggered(RegionInstanceImpl *inst,
+						    bool poisoned)
+    {
+      std::vector<std::pair<RegionInstanceImpl *, size_t> > successful_allocs;
+      std::vector<RegionInstanceImpl *> failed_allocs;
+      //std::vector<RegionInstanceImpl *> deallocs;
+      {
+	AutoLock<> al(allocator_mutex);
+
+#ifdef DEBUG_DEFERRED_ALLOCATIONS
+	log_defalloc.print() << "deferred destruction: m=" << me
+			     << " inst=" << inst->me << " poisoned=" << poisoned
+			     << " allocs=" << PrettyVector<PendingAlloc>(pending_allocs)
+			     << " release=" << PrettyVector<PendingRelease>(pending_releases);
+#endif
+
+	// this destruction should be somewhere in the pending ops list
+	assert(!pending_releases.empty());
+	
+	std::vector<PendingRelease>::iterator it = pending_releases.begin();
+
+	if(!poisoned) {
+	  // special case: if we're the oldest pending item (and we're not
+	  //  poisoned), we unclog things in the order we planned
+	  if(it->inst == inst) {
+	    if(!pending_allocs.empty())
+	      release_allocator.deallocate(it->inst->me);
+
+	    // catch up the current state
+	    do {
+	      current_allocator.deallocate(it->inst->me);
+	      //deallocs.push_back(it->inst);
+
+	      // did this unblock any allocations?
+	      std::vector<PendingAlloc>::iterator it2 = pending_allocs.begin();
+	      while(it2 != pending_allocs.end()) {
+		// if this alloc depends on more releases, we can't be sure
+		//  it'll work
+		if(it2->last_release_seqid > it->seqid) break;
+		// but it should never be older
+		assert(it2->last_release_seqid == it->seqid);
+		
+		// all older release are done, so this alloc had better work
+		//  against the current state
+		size_t offset = 0;
+		bool ok = current_allocator.allocate(it2->inst->me, it2->bytes,
+						     it2->alignment, offset);
+		assert(ok);
+#ifdef DEBUG_REALM
+		// it should also be where we thought it was in the future
+		//  allocator state
+		size_t f_first, f_size;
+		assert(future_allocator.lookup(it2->inst->me, f_first, f_size) &&
+		       (f_first == offset) && (f_size == it2->bytes));
+#endif
+		successful_allocs.push_back(std::make_pair(it2->inst, offset));
+		++it2;
+	      }
+
+	      pending_allocs.erase(pending_allocs.begin(), it2);
+
+	      ++it;
+	    } while((it != pending_releases.end()) && (it->is_ready));
+	    
+	    pending_releases.erase(pending_releases.begin(), it);
+
+	    // if we did any allocations but some remain, we need to rebuild
+	    //  the release_allocator state (TODO: incremental updates?)
+	    if(!successful_allocs.empty() && !pending_allocs.empty()) {
+	      release_allocator = current_allocator;
+	      for(std::vector<PendingRelease>::iterator it = pending_releases.begin();
+		  it != pending_releases.end();
+		  ++it) {
+		// actually, include all pending releases
+		//if(it->seqid > pending_allocs.front().last_release_seqid)
+		//  break;
+		if(it->is_ready)
+ 		  release_allocator.deallocate(it->inst->me);
+	      }
+	    }
+	  } else {
+	    // find this destruction in the list and mark it ready
+	    do {
+	      ++it;
+	      assert(it != pending_releases.end());  // can't fall off end
+	    } while(it->inst != inst);
+	    it->is_ready = true;
+
+	    if(pending_allocs.empty()) {
+	      // we can apply this delete to the current state
+	      current_allocator.deallocate(inst->me);
+              //deallocs.push_back(inst);
+	      it = pending_releases.erase(it);
+	    } else {
+	      // apply this free to the release_allocator - we'll check below
+	      //  to see if it unblocks one or more allocations AND leaves the
+	      //  rest possible
+	      release_allocator.deallocate(inst->me);
+	    }
+	  }
+	
+	  // a couple different ways to get to a state where the ready releases
+	  //  allow allocations to proceed but we could not be sure above, so
+	  //  check now
+	  if(!pending_allocs.empty()) {
+	    PendingAlloc& oldest = pending_allocs.front();
+	    if(release_allocator.can_allocate(oldest.inst->me,
+					      oldest.bytes,
+					      oldest.alignment)) {
+	      std::vector<PendingAlloc>::iterator a_now = pending_allocs.begin();
+	      BasicRangeAllocator<size_t, RegionInstance> test_allocator = release_allocator;
+	      while(a_now != pending_allocs.end()) {
+		size_t offset = 0;
+		bool ok = test_allocator.allocate(a_now->inst->me,
+						  a_now->bytes,
+						  a_now->alignment,
+						  offset);
+		if(ok) {
+		  successful_allocs.push_back(std::make_pair(a_now->inst,
+							     offset));
+		  ++a_now;
+		} else
+		  break;
+	      }
+	      // should have gotten at least one
+	      assert(a_now != pending_allocs.begin());
+
+	      // did we get them all?
+	      if(a_now == pending_allocs.end()) {
+		// life is easy - test becomes current, and we remove
+		//  all ready deallocs
+		current_allocator.swap(test_allocator);
+		pending_allocs.clear();
+		std::vector<PendingRelease>::iterator it3 = pending_releases.begin();
+		while(it3 != pending_releases.end())
+		  if(it3->is_ready)
+		    it3 = pending_releases.erase(it3);
+		  else
+		    ++it3;
+	      } else {
+		// see if we can still tentatively satisfy remaining allocs
+		BasicRangeAllocator<size_t, RegionInstance> test_future_allocator = test_allocator;
+		std::vector<PendingAlloc>::iterator a_future = a_now;
+		std::vector<PendingRelease>::iterator it3 = pending_releases.begin();
+		while(a_future != pending_allocs.end()) {
+		  // first apply any non-ready releases older than this alloc
+		  while((it3 != pending_releases.end()) &&
+			(it3->seqid <= a_future->last_release_seqid)) {
+		    if(!it3->is_ready)
+		      test_future_allocator.deallocate(it3->inst->me,
+						       true /*missing ok*/);
+		    ++it3;
+		  }
+
+		  // and now try allocation
+		  size_t offset;
+		  bool ok = test_future_allocator.allocate(a_future->inst->me,
+							   a_future->bytes,
+							   a_future->alignment,
+							   offset);
+		  if(ok)
+		    ++a_future;
+		  else
+		    break;
+		}
+
+		// did we get all the way through?
+		if(a_future == pending_allocs.end()) {
+		  // yes - this is a viable alternate timeline
+
+		  // don't forget to apply any remaining pending releases
+		  while(it3 != pending_releases.end()) {
+		    if(!it3->is_ready)
+		      test_future_allocator.deallocate(it3->inst->me,
+						       true /*missing ok*/);
+		    ++it3;
+		  }
+
+		  // now go back through and erase any ready ones
+		  it3 = pending_releases.begin();
+		  while(it3 != pending_releases.end())
+		    if(it3->is_ready)
+		      it3 = pending_releases.erase(it3);
+		    else
+		      ++it3;
+
+		  // erase the allocations we succeeded on
+		  pending_allocs.erase(pending_allocs.begin(), a_now);
+
+		  current_allocator.swap(test_allocator);
+		  future_allocator.swap(test_future_allocator);
+		  // we applied all the ready releases, so current == release
+		  release_allocator = current_allocator;
+		} else {
+		  // nope - it didn't work - unwind everything and clear out
+		  //  the allocations we thought we could do
+		  successful_allocs.clear();
+		}
+	      }
+	    }
+	  }
+	} else {
+	  // special case: if there are no pending allocation requests, we
+	  //  just forget this destruction request ever happened - there is
+	  //  no future state to fix up
+	  if(pending_allocs.empty()) {
+	    while(it->inst != inst) {
+	      ++it;
+	      assert(it != pending_releases.end());  // can't fall off end
+	    }
+
+	    it = pending_releases.erase(it);
+	  } else {
+	    // rewrite our (future) history without this allocation
+	    future_allocator = current_allocator;
+	    release_allocator = current_allocator;
+
+	    std::vector<PendingAlloc>::iterator it2 = pending_allocs.begin();
+
+	    bool found = false;
+	    while(it != pending_releases.end()) {
+	      // save the sequence id in case we delete the entry
+	      unsigned seqid = it->seqid;
+	      
+	      // only eat the first matching release that we find
+	      if((it->inst == inst) && !found) {
+		// alternate universe starts now
+		found = true;
+		it = pending_releases.erase(it);
+	      } else {
+		// replay this destuction on the future state
+		future_allocator.deallocate(it->inst->me,
+					    true /*missing ok*/);
+		++it;
+	      }
+
+	      // check any allocs that were waiting just on the releases we
+	      //  have seen so far
+	      while((it2 != pending_allocs.end()) &&
+		    (it2->last_release_seqid <= seqid)) {
+		size_t offset;
+		bool ok = future_allocator.allocate(it2->inst->me,
+						    it2->bytes, it2->alignment,
+						    offset);
+		if(ok) {
+		  ++it2;
+		} else {
+		  // this should only happen if we've seen the poisoned release
+		  assert(found);
+		  
+		  // this alloc is no longer possible - remove from the list
+		  //  and notify of the failure
+		  failed_allocs.push_back(it2->inst);
+		  it2 = pending_allocs.erase(it2);
+		}
+	      }
+	    }
+	  }
+	}
+
+#ifdef DEBUG_DEFERRED_ALLOCATIONS
+	log_defalloc.print() << "deferred destruction done: m=" << me
+			     << " inst=" << inst->me << " poisoned=" << poisoned
+			     << " allocs=" << PrettyVector<PendingAlloc>(pending_allocs)
+			     << " release=" << PrettyVector<PendingRelease>(pending_releases)
+			     << " success=" << PrettyVector<std::pair<RegionInstanceImpl *, size_t> >(successful_allocs)
+			     << " failure=" << PrettyVector<RegionInstanceImpl *>(failed_allocs);
+#endif
+      }
+
+      // now go through and do notifications
+      if(!successful_allocs.empty())
+	for(std::vector<std::pair<RegionInstanceImpl *, size_t> >::iterator it = successful_allocs.begin();
+	    it != successful_allocs.end();
+	    ++it) {
+	  NodeID creator_node = ID(it->first->me).instance_creator_node();
+	  if(creator_node == Network::my_node_id) {
+	    // local notification of result
+	    it->first->notify_allocation(ALLOC_INSTANT_SUCCESS, it->second);
+	  } else {
+	    // we have to at least have the correct offset on our local
+	    //  instance impl (even if we don't have the rest of the metadata)
+	    it->first->metadata.inst_offset = it->second;
+	  
+	    // remote notification
+	    ActiveMessage<MemStorageAllocResponse> amsg(creator_node);
+	    amsg->inst = it->first->me;
+	    amsg->offset = it->second;
+	    amsg->result = ALLOC_INSTANT_SUCCESS;
+	    amsg.commit();
+	  }
+	}
+
+      if(!failed_allocs.empty())
+	for(std::vector<RegionInstanceImpl *>::iterator it = failed_allocs.begin();
+	    it != failed_allocs.end();
+	    ++it) {
+	  NodeID creator_node = ID((*it)->me).instance_creator_node();
+	  if(creator_node == Network::my_node_id) {
+	    // local notification of result
+	    (*it)->notify_allocation(ALLOC_INSTANT_FAILURE,
+				     RegionInstanceImpl::INSTOFFSET_FAILED);
+	  } else {
+	    // we have to at least have the correct offset on our local
+	    //  instance impl (even if we don't have the rest of the metadata)
+	    (*it)->metadata.inst_offset = RegionInstanceImpl::INSTOFFSET_FAILED;
+	  
+	    // remote notification
+	    ActiveMessage<MemStorageAllocResponse> amsg(creator_node);
+	    amsg->inst = (*it)->me;
+	    amsg->offset = RegionInstanceImpl::INSTOFFSET_FAILED;
+	    amsg->result = ALLOC_INSTANT_FAILURE;
+	    amsg.commit();
+	  }
+	}
+
+      // even if we don't apply the destruction to the heap state right away,
+      //  we always ack a triggered (but not poisoned) destruction now
+      if(!poisoned) {
+	NodeID creator_node = ID(inst->me).instance_creator_node();
+	if(creator_node == Network::my_node_id) {
+	  // local notification of result
+	  inst->notify_deallocation();
+	} else {
+	  // remote notification
+	  ActiveMessage<MemStorageReleaseResponse> amsg(creator_node);
+	  amsg->inst = inst->me;
+	  amsg.commit();
+	}
+      }
+    }
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class MemoryImpl::PendingAlloc
+  //
+
+  MemoryImpl::PendingAlloc::PendingAlloc(RegionInstanceImpl *_inst,
+					 size_t _bytes, size_t _align,
+					 unsigned _release_seqid)
+    : inst(_inst), bytes(_bytes), alignment(_align)
+    , last_release_seqid(_release_seqid)
+  {}
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class MemoryImpl::PendingRelease
+  //
+
+  MemoryImpl::PendingRelease::PendingRelease(RegionInstanceImpl *_inst,
+					     bool _ready, unsigned _seqid)
+    : inst(_inst), is_ready(_ready), seqid(_seqid)
+  {}
+
+    
   ////////////////////////////////////////////////////////////////////////
   //
   // class LocalCPUMemory
@@ -613,7 +1222,7 @@ namespace Realm {
   {
     RegionInstanceImpl *impl = get_runtime()->get_instance_impl(args.inst);
 
-    impl->notify_allocation(args.success, args.offset, args.footprint);
+    impl->notify_allocation(args.result, args.offset);
   }
 
 

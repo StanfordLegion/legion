@@ -111,6 +111,7 @@ variables:
 
 .legion: &legion
   TEST_REGENT: "0"
+  LEGION_WARNINGS_FATAL: "1"
 
 .ctest: &ctest
   TEST_CTEST: "1"

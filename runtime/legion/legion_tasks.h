@@ -259,7 +259,7 @@ namespace Legion {
       void check_empty_field_requirements(void);
       size_t check_future_size(FutureImpl *impl);
     public:
-      bool select_task_options(void);
+      bool select_task_options(bool prioritize);
     public:
       virtual void activate(void) = 0;
       virtual void deactivate(void) = 0;

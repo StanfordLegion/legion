@@ -90,6 +90,10 @@ namespace Realm {
 
       static bool add_waiter(Event needed, EventWaiter *waiter);
 
+      // use this sparingly - it has to hunt through waiter lists while
+      //  holding locks
+      virtual bool remove_waiter(gen_t needed_gen, EventWaiter *waiter) = 0;
+
       static bool detect_event_chain(Event search_from, Event target, int max_depth, bool print_chain);
 
     public:
@@ -162,6 +166,10 @@ namespace Realm {
 				      long long max_ns);
 
       virtual bool add_waiter(gen_t needed_gen, EventWaiter *waiter);
+
+      // use this sparingly - it has to hunt through waiter lists while
+      //  holding locks
+      virtual bool remove_waiter(gen_t needed_gen, EventWaiter *waiter);
 
       // creates an event that won't trigger until all input events have
       static Event merge_events(const std::set<Event>& wait_for,
@@ -274,6 +282,10 @@ namespace Realm {
 				      long long max_ns);
 
       virtual bool add_waiter(gen_t needed_gen, EventWaiter *waiter/*, bool pre_subscribed = false*/);
+
+      // use this sparingly - it has to hunt through waiter lists while
+      //  holding locks
+      virtual bool remove_waiter(gen_t needed_gen, EventWaiter *waiter);
 
       // used to adjust a barrier's arrival count either up or down
       // if delta > 0, timestamp is current time (on requesting node)

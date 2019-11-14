@@ -1,5 +1,5 @@
 #------------------------------------------------------------------------------#
-# Copyright 2019 Kitware, Inc.
+# Copyright 2019 Stanford University
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -15,27 +15,44 @@
 #------------------------------------------------------------------------------#
 
 cmake_minimum_required(VERSION 3.1)
-project(LegionExample_circuit)
+project(LegionTest_realm)
 
 # Only search if were building stand-alone and not as part of Legion
 if(NOT Legion_SOURCE_DIR)
   find_package(Legion REQUIRED)
 endif()
 
-set(CPU_SOURCES
-  circuit.h         circuit.cc
-                    circuit_cpu.cc
-                    circuit_init.cc
-  circuit_mapper.h  circuit_mapper.cc
-)
-if(Legion_USE_CUDA)
-  set(CUDA_NVCC_FLAGS ${CUDA_NVCC_FLAGS} -Wno-deprecated-gpu-targets)
-  set(GPU_SOURCES circuit_gpu.cu)
-  cuda_add_executable(circuit ${CPU_SOURCES} ${GPU_SOURCES})
-else()
-  add_executable(circuit ${CPU_SOURCES})
-endif()
-target_link_libraries(circuit Legion::Legion)
+list(APPEND REALM_TESTS
+  serializing
+  test_profiling
+  ctxswitch
+  barrier_reduce
+  taskreg
+  memspeed
+  idcheck
+  inst_reuse
+  transpose
+  proc_group
+  deppart
+  scatter
+  compqueue
+  event_subscribe
+  deferred_allocs
+  )
+foreach(test IN LISTS REALM_TESTS)
+  add_executable(${test} ${test}.cc)
+  target_link_libraries(${test} Legion::Realm)
+endforeach()
+
+# some tests need test-specific arguments
+set(TESTARGS_ctxswitch         -ll:io 1 -t 20 -i 10000)
+set(TESTARGS_proc_group        -ll:cpu 4)
+set(TESTARGS_compqueue         -ll:cpu 4)
+set(TESTARGS_event_subscribe   -ll:cpu 4)
+set(TESTARGS_deferred_allocs   -ll:gsize 0 -all)
+
 if(Legion_ENABLE_TESTING)
-  add_test(NAME circuit COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:circuit> ${Legion_TEST_ARGS})
+  foreach(test IN LISTS REALM_TESTS)
+    add_test(NAME ${test} COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:${test}> ${Legion_TEST_ARGS} ${TESTARGS_${test}})
+  endforeach()
 endif()

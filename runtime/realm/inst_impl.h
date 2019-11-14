@@ -28,17 +28,31 @@
 #include "realm/metadata.h"
 #include "realm/event_impl.h"
 #include "realm/profiling.h"
+#include "realm/mem_impl.h"
 
 namespace Realm {
 
-    class MemoryImpl;
-    
     class RegionInstanceImpl {
     protected:
       // RegionInstanceImpl creation/deletion is handled by MemoryImpl
       friend class MemoryImpl;
       RegionInstanceImpl(RegionInstance _me, Memory _memory);
       ~RegionInstanceImpl(void);
+
+      class DeferredCreate : public EventWaiter {
+      public:
+	void defer(RegionInstanceImpl *_inst, MemoryImpl *_mem,
+		   size_t _bytes, size_t _align, Event wait_on);
+	virtual void event_triggered(bool poisoned);
+	virtual void print(std::ostream& os) const;
+	virtual Event get_finish_event(void) const;
+
+      protected:
+	RegionInstanceImpl *inst;
+	MemoryImpl *mem;
+	size_t bytes, align;
+      };
+      DeferredCreate deferred_create;
 
       class DeferredDestroy : public EventWaiter {
       public:
@@ -57,7 +71,7 @@ namespace Realm {
       // the life cycle of an instance is defined in part by when the
       //  allocation and deallocation of storage occurs, but that is managed
       //  by the memory, which uses these callbacks to notify us
-      void notify_allocation(bool success, size_t offset, size_t footprint);
+      void notify_allocation(MemoryImpl::AllocationResult result, size_t offset);
       void notify_deallocation(void);
 
 #ifdef POINTER_CHECKS
@@ -94,6 +108,12 @@ namespace Realm {
       ProfilingMeasurementCollection measurements;
       ProfilingMeasurements::InstanceTimeline timeline;
 
+      // several special values exist for the 'inst_offset' field below
+      static const size_t INSTOFFSET_UNALLOCATED = size_t(-1);
+      static const size_t INSTOFFSET_FAILED = size_t(-2);
+      static const size_t INSTOFFSET_DELAYEDALLOC = size_t(-3);
+      static const size_t INSTOFFSET_DELAYEDDESTROY = size_t(-4);
+      static const size_t INSTOFFSET_MAXVALID = size_t(-5);
       class Metadata : public MetadataBase {
       public:
 	void *serialize(size_t& out_size) const;
@@ -103,6 +123,10 @@ namespace Realm {
 
 	void deserialize(const void *in_data, size_t in_size);
 
+      protected:
+	virtual void do_invalidate(void);
+
+      public:
 	off_t alloc_offset;
 	size_t size;
 	ReductionOpID redopid;

@@ -737,7 +737,13 @@ namespace Legion {
           // Go through the kinds in the rankings
           for (unsigned idx = 0; idx < ranking.size(); idx++)
           {
-            // See if we have any local processor of this kind
+            // See if we have any variants of this kind
+            runtime->find_valid_variants(ctx, task.task_id, 
+                                          variants, ranking[idx]);
+	    if (variants.empty())
+	      continue;
+	    
+            // Next see if we have any local processor of this kind
             switch (ranking[idx])
             {
               case Processor::TOC_PROC:
@@ -786,16 +792,10 @@ namespace Legion {
                 assert(false); // unknown processor type
             }
 
-            // See if we have any variants of this kind
-            runtime->find_valid_variants(ctx, task.task_id, 
-                                          variants, ranking[idx]);
             // If we have valid variants and we have processors we are
             // good to use this set of variants
-            if (!variants.empty())
-            {
-              best_kind = ranking[idx];
-              break;
-            }
+	    best_kind = ranking[idx];
+	    break;
           }
           // This is really bad if we didn't find any variants
           if (best_kind == Processor::NO_KIND)

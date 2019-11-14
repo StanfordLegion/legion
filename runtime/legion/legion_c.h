@@ -3607,6 +3607,13 @@ extern "C" {
                                             bool flush,
                                             bool unordered);
 
+  /**
+   * @see Legion::Runtime;:progress_unordered_operations()
+   */
+  void
+  legion_context_progress_unordered_operations(legion_runtime_t runtime,
+                                               legion_context_t ctx);
+
   // -----------------------------------------------------------------------
   // Must Epoch Operations
   // -----------------------------------------------------------------------
