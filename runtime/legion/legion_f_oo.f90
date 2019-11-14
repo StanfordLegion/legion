@@ -2010,7 +2010,7 @@ contains
     integer(c_size_t) :: tmp_userlen
     
     if (present(userdata)) tmp_userdata = c_null_ptr
-    tmp_userlen = userlen
+    if (present(userlen)) tmp_userlen = userlen
       
     call legion_task_preamble_c(tdata, tdatalen, proc_id, &
                                 task%task, pr_list%region_ptr, pr_list%num_regions, &
@@ -2054,7 +2054,7 @@ contains
     character(*), intent(in)                :: task_name
     integer(c_int), optional, intent(in)    :: vid
     
-    integer(c_int) :: tmp_vid = 1
+    integer(c_int) :: tmp_vid = AUTO_GENERATE_ID
     integer(c_int) :: task_id_return
     integer(c_size_t) :: userlen = 0
     type(c_funptr) :: c_func_ptr  

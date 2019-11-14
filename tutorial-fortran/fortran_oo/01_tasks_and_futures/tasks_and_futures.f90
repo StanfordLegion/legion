@@ -11,9 +11,9 @@ contains
   subroutine sum_task(tdata, tdatalen, userdata, userlen, p)
     implicit none
     
-    type(c_ptr), intent(in) :: tdata
+    type(c_ptr), value, intent(in) :: tdata
     integer(c_size_t), value, intent(in) :: tdatalen
-    type(c_ptr), intent(in) ::userdata
+    type(c_ptr), value, intent(in) ::userdata
     integer(c_size_t), value, intent(in) :: userlen
     integer(c_long_long), value, intent(in) :: p
     
@@ -40,9 +40,9 @@ contains
   subroutine fibonacci_task(tdata, tdatalen, userdata, userlen, p)
     implicit none
     
-    type(c_ptr), intent(in) :: tdata
+    type(c_ptr), value, intent(in) :: tdata
     integer(c_size_t), value, intent(in) :: tdatalen
-    type(c_ptr), intent(in) ::userdata
+    type(c_ptr), value, intent(in) ::userdata
     integer(c_size_t), value, intent(in) :: userlen
     integer(c_long_long), value, intent(in) :: p
     
@@ -97,9 +97,9 @@ contains
   subroutine top_level_task(tdata, tdatalen, userdata, userlen, p)
     implicit none
     
-    type(c_ptr), intent(in) :: tdata
+    type(c_ptr), value, intent(in) :: tdata
     integer(c_size_t), value, intent(in) :: tdatalen
-    type(c_ptr), intent(in) ::userdata
+    type(c_ptr), value, intent(in) ::userdata
     integer(c_size_t), value, intent(in) :: userlen
     integer(c_long_long), value, intent(in) :: p
     

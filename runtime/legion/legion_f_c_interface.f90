@@ -1626,8 +1626,8 @@ module legion_fortran_c_interface
       integer(c_int)                                                  :: legion_runtime_preregister_task_variant_fnptr_c
       integer(c_int), value, intent(in)                               :: id
       integer(c_int), value, intent(in)                               :: variant_id
-      character(kind=c_char), intent(in)                              :: task_name(*)
-      character(kind=c_char), intent(in)                              :: variant_name(*)
+      character(kind=c_char), intent(in)                              :: task_name(*) ! pass reference
+      character(kind=c_char), intent(in)                              :: variant_name(*) ! pass reference
       type(legion_execution_constraint_set_f_t), value, intent(in)    :: execution_constraints
       type(legion_task_layout_constraint_set_f_t), value, intent(in)  :: layout_constraints
       type(legion_task_config_options_f_t), value, intent(in)         :: options
@@ -1644,7 +1644,7 @@ module legion_fortran_c_interface
   
       integer(c_int)                      :: legion_runtime_start_c
       integer(c_int), value, intent(in)   :: argc
-      type(c_ptr), intent(in)             :: argv(*)
+      type(c_ptr), intent(in)             :: argv(*) ! pass reference
       logical(c_bool), value, intent(in)  :: background
     end function legion_runtime_start_c
 
@@ -1660,7 +1660,7 @@ module legion_fortran_c_interface
       import legion_runtime_f_t
       implicit none
   
-      type(c_ptr), intent(in)                         :: tdata ! pass reference
+      type(c_ptr), value, intent(in)                  :: tdata
       integer(c_size_t), value, intent(in)            :: tdatalen
       integer(c_long_long), value, intent(in)         :: proc_id
       type(legion_task_f_t), intent(out)              :: task ! pass reference
@@ -1688,6 +1688,8 @@ module legion_fortran_c_interface
     ! -----------------------------------------------------------------------
     ! Combined Operations
     ! -----------------------------------------------------------------------
+    
+    
     function legion_task_get_index_space_from_logical_region_c(handle, tid) &
         bind (C, name="legion_task_get_index_space_from_logical_region")
       use iso_c_binding
@@ -1700,16 +1702,5 @@ module legion_fortran_c_interface
       integer(c_int), value, intent(in)        :: tid
     end function legion_task_get_index_space_from_logical_region_c
     
-    subroutine legion_convert_1d_to_2d_column_major_c(src, dst, offset, num_columns) &
-        bind (C, name="legion_convert_1d_to_2d_column_major")
-      use iso_c_binding
-      import legion_byte_offset_f_t
-      implicit none
-      
-      type(c_ptr), value, intent(in)                  :: src
-      type(c_ptr), intent(in)                         :: dst(num_columns) ! this is OUT, set IN to cheat compiler
-      type(legion_byte_offset_f_t), value, intent(in) :: offset
-      integer(c_int), value, intent(in)               :: num_columns
-    end subroutine
   end interface
 end module

@@ -7233,6 +7233,26 @@ legion_logical_region_get_index_space(legion_logical_region_t lr_)
   return CObjectWrapper::wrap(lr.get_index_space());
 }
 
+void
+legion_task_cxx_to_c(
+  const Task *task,
+  const std::vector<PhysicalRegion> *regions,
+  Context ctx, 
+  Runtime *runtime,
+  legion_task_t *taskptr,
+  const legion_physical_region_t **regionptr,
+  unsigned * num_regions_ptr,
+  legion_context_t * ctxptr,
+  legion_runtime_t * runtimeptr)
+{
+  CContext *cctx = new CContext(ctx, *regions);
+  *taskptr = CObjectWrapper::wrap_const(task);
+  *regionptr = cctx->regions();
+  *num_regions_ptr = cctx->num_regions();
+  *ctxptr = CObjectWrapper::wrap(cctx);
+  *runtimeptr = CObjectWrapper::wrap(runtime);
+}
+
 legion_index_space_t
 legion_task_get_index_space_from_logical_region(
     legion_task_t task, unsigned idx)
@@ -7242,12 +7262,3 @@ legion_task_get_index_space_from_logical_region(
   return legion_logical_region_get_index_space(lr);
 }
 
-void 
-legion_convert_1d_to_2d_column_major(
-    void *src, void *dst[], legion_byte_offset_t offset, int num_columns)
-{
-    int i;
-    for (i = 0; i < num_columns; i++) {
-        dst[i] = (void*)((unsigned char*)src + offset.offset * i);
-    }
-}
