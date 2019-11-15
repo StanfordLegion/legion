@@ -155,7 +155,16 @@ namespace Realm {
 
     //void worker_main(void);
 
-    struct TaskRegistration {
+    class TaskRegistration : public InternalTask {
+    public:
+      virtual ~TaskRegistration() {}
+
+      virtual void execute_on_processor(Processor p)
+      {
+	proc->perform_task_registration(this);
+      }
+      
+      LocalPythonProcessor *proc;
       Processor::TaskFuncID func_id;
       CodeDescriptor *codedesc;
       ByteArray user_data;
@@ -197,8 +206,6 @@ namespace Realm {
     PythonThreadTaskScheduler(LocalPythonProcessor *_pyproc,
 			      CoreReservation& _core_rsrv);
 
-    void enqueue_taskreg(LocalPythonProcessor::TaskRegistration *treg);
-
     // entry point for python worker threads - falls through to scheduler_loop
     void python_scheduler_loop(void);
 
@@ -209,12 +216,15 @@ namespace Realm {
     virtual void thread_ready(Thread *thread);
 
   protected:
+    // both real and internal tasks need to be wrapped with acquires of the GIL
+    virtual bool execute_task(Task *task);
+    virtual void execute_internal_task(InternalTask *task);
+    
     virtual Thread *worker_create(bool make_active);
     virtual void worker_terminate(Thread *switch_to);
 
     LocalPythonProcessor *pyproc;
     bool interpreter_ready;
-    std::list<LocalPythonProcessor::TaskRegistration *> taskreg_queue;
     std::map<Thread *, PyThreadState *> pythreads;
   };
 

@@ -848,6 +848,14 @@ namespace Realm {
     log_sched.debug() << "thread priority change: thread=" << (void *)thread << " old=" << old_priority << " new=" << new_priority;
   }
 
+  void ThreadedTaskScheduler::add_internal_task(InternalTask *itask)
+  {
+    // no need to take the main mutex - just add to the internal task list and
+    //   bump the work counter
+    internal_tasks.push_back(itask);
+    work_counter.increment_counter();
+  }
+
   // the main scheduler loop
   void ThreadedTaskScheduler::scheduler_loop(void)
   {
@@ -863,6 +871,36 @@ namespace Realm {
 	//   unnecessarily
 	long long old_work_counter = work_counter.read_counter();
 
+	// internal tasks always take precedence
+	while(!internal_tasks.empty()) {
+	  InternalTask *itask = internal_tasks.pop_front();
+	  // if somebody else popped the task first, we've nothing to do
+	  if(!itask) break;
+
+	  // one fewer unassigned worker
+	  update_worker_count(0, -1);
+	
+	  // we'll run the task after letting go of the lock, but update this thread's
+	  //  priority here
+	  worker_priorities[Thread::self()] = TaskQueue::PRI_POS_INF;
+
+	  // drop scheduler lock while we execute the internal task
+	  lock.unlock();
+
+	  execute_internal_task(itask);
+
+	  // we don't delete the internal task object - it can do that itself
+	  //  if it wants, or the requestor of the operation can do it once
+	  //  completion has been determined
+
+	  lock.lock();
+
+	  worker_priorities.erase(Thread::self());
+
+	  // and we're back to being unassigned
+	  update_worker_count(0, +1);
+	}
+	
 	// if we have both resumable and new ready tasks, we want the one that
 	//  is the highest priority, with ties going to resumable tasks - we
 	//  can do this cleanly by taking advantage of the fact that the
@@ -1140,6 +1178,11 @@ namespace Realm {
     return true;
   }
 
+  void KernelThreadTaskScheduler::execute_internal_task(InternalTask *task)
+  {
+    task->execute_on_processor(proc);
+  }
+
   Thread *KernelThreadTaskScheduler::worker_create(bool make_active)
   {
     // lock is held by caller
@@ -1393,6 +1436,11 @@ namespace Realm {
   {
     task->execute_on_processor(proc);
     return true;
+  }
+
+  void UserThreadTaskScheduler::execute_internal_task(InternalTask *task)
+  {
+    task->execute_on_processor(proc);
   }
 
   Thread *UserThreadTaskScheduler::worker_create(bool make_active)

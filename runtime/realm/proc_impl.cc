@@ -22,6 +22,7 @@
 #include "realm/profiling.h"
 #include "realm/utils.h"
 #include "realm/activemsg.h"
+
 #include <sys/types.h>
 #include <dirent.h>
 
@@ -565,6 +566,13 @@ namespace Realm {
       }
     }
 
+    // runs an internal Realm operation on this processor
+    void ProcessorImpl::add_internal_task(InternalTask *task)
+    {
+      // should never be called
+      assert(0);
+    }
+
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -1002,6 +1010,12 @@ namespace Realm {
     deferred_spawn_cache.flush();
   }
   
+  // runs an internal Realm operation on this processor
+  void LocalTaskProcessor::add_internal_task(InternalTask *task)
+  {
+    sched->add_internal_task(task);
+  }
+
 
   ////////////////////////////////////////////////////////////////////////
   //

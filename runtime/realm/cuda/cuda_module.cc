@@ -1330,6 +1330,7 @@ namespace Realm {
 
     protected:
       virtual bool execute_task(Task *task);
+      virtual void execute_internal_task(InternalTask *task);
 
       // might also need to override the thread-switching methods to keep TLS up to date
 
@@ -1423,6 +1424,36 @@ namespace Realm {
       return ok;
     }
 
+    template <typename T>
+    void GPUTaskScheduler<T>::execute_internal_task(InternalTask *task)
+    {
+      // use TLS to make sure that the task can find the current GPU processor when it makes
+      //  CUDA RT calls
+      // TODO: either eliminate these asserts or do TLS swapping when using user threads
+      assert(ThreadLocal::current_gpu_proc == 0);
+      ThreadLocal::current_gpu_proc = gpu_proc;
+
+      // push the CUDA context for this GPU onto this thread
+      gpu_proc->gpu->push_context();
+
+      // internal tasks aren't allowed to wait on events, so any cuda synch
+      //  calls inside the call must be blocking
+      gpu_proc->block_on_synchronize = true;
+
+      // execute the internal task, whatever it is
+      T::execute_internal_task(task);
+
+      // we didn't use streams here, so synchronize the whole context
+      CHECK_CU( cuCtxSynchronize() );
+      gpu_proc->block_on_synchronize = false;
+
+      // pop the CUDA context for this GPU back off
+      gpu_proc->gpu->pop_context();
+
+      assert(ThreadLocal::current_gpu_proc == gpu_proc);
+      ThreadLocal::current_gpu_proc = 0;
+    }
+
 
     ////////////////////////////////////////////////////////////////////////
     //
@@ -1432,6 +1463,7 @@ namespace Realm {
                                size_t _stack_size)
       : LocalTaskProcessor(_me, Processor::TOC_PROC)
       , gpu(_gpu)
+      , block_on_synchronize(false)
     {
       Realm::CoreReservationParameters params;
       params.set_num_cores(1);
@@ -2021,17 +2053,23 @@ namespace Realm {
     void GPUProcessor::device_synchronize(void)
     {
       GPUStream *current = gpu->get_current_task_stream();
-      // We don't actually want to block the GPU processor
-      // when synchronizing, so we instead register a cuda
-      // event on the stream and then use it triggering to
-      // indicate that the stream is caught up
-      // Make a completion notification to be notified when
-      // the event has actually triggered
-      GPUPreemptionWaiter waiter(gpu);
-      // Register the waiter with the stream 
-      current->add_notification(&waiter); 
-      // Perform the wait, this will preempt the thread
-      waiter.preempt();
+
+      if(!block_on_synchronize) {
+	// We don't actually want to block the GPU processor
+	// when synchronizing, so we instead register a cuda
+	// event on the stream and then use it triggering to
+	// indicate that the stream is caught up
+	// Make a completion notification to be notified when
+	// the event has actually triggered
+	GPUPreemptionWaiter waiter(gpu);
+	// Register the waiter with the stream 
+	current->add_notification(&waiter); 
+	// Perform the wait, this will preempt the thread
+	waiter.preempt();
+      } else {
+	// oh well...
+	CHECK_CU( cuStreamSynchronize(current->get_stream()) );
+      }
     }
     
     void GPUProcessor::event_create(cudaEvent_t *event, int flags)

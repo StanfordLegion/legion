@@ -99,6 +99,7 @@ endif()
 if (REALM_USE_OPENMP)
   list(APPEND REALM_SRC
     realm/openmp/openmp_module.h realm/openmp/openmp_module.cc
+    realm/openmp/openmp_internal.h
     realm/openmp/openmp_threadpool.h realm/openmp/openmp_threadpool.cc
     realm/openmp/openmp_threadpool.inl
     realm/openmp/openmp_api.cc
