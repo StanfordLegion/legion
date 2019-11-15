@@ -821,6 +821,18 @@ namespace Realm {
       assert(ok && (layout != 0) && (fbd.bytes_left() == 0));
     }
 
+    void RegionInstanceImpl::Metadata::do_invalidate(void)
+    {
+      // delete an existing layout, if present
+      if(layout) {
+	delete layout;
+	layout = 0;
+      }
+
+      // set the offset back to the "unallocated" value
+      inst_offset = INSTOFFSET_UNALLOCATED;
+    }
+
 #ifdef POINTER_CHECKS
     void RegionInstanceImpl::verify_access(unsigned ptr)
     {

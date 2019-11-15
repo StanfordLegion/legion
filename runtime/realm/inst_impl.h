@@ -123,6 +123,10 @@ namespace Realm {
 
 	void deserialize(const void *in_data, size_t in_size);
 
+      protected:
+	virtual void do_invalidate(void);
+
+      public:
 	off_t alloc_offset;
 	size_t size;
 	ReductionOpID redopid;
