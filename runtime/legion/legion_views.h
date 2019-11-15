@@ -402,6 +402,8 @@ namespace Legion {
       void filter_current_users(const EventFieldUsers &to_filter);
       void filter_previous_users(const EventFieldUsers &to_filter);
       bool refine_users(void);
+      static void verify_current_to_filter(const FieldMask &dominated,
+                                  EventFieldUsers &current_to_filter);
     public:
       RegionTreeForest *const context;
       InstanceManager *const manager;

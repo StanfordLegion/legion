@@ -610,6 +610,58 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    /*static*/ void ExprView::verify_current_to_filter(
+                 const FieldMask &dominated, EventFieldUsers &current_to_filter)
+    //--------------------------------------------------------------------------
+    {
+      if (!!dominated)
+      {
+        for (EventFieldUsers::iterator eit = current_to_filter.begin();
+              eit != current_to_filter.end(); /*nothing*/)
+        {
+          const FieldMask non_dominated = 
+            eit->second.get_valid_mask() - dominated;
+          // If everything was actually dominated we can keep going
+          if (!non_dominated)
+          {
+            eit++;
+            continue;
+          }
+          // If no fields were dominated we can just remove this
+          if (non_dominated == eit->second.get_valid_mask())
+          {
+            EventFieldUsers::iterator to_delete = eit++;
+            current_to_filter.erase(to_delete);
+            continue;
+          }
+          // Otherwise do the actuall overlapping test
+          std::vector<PhysicalUser*> to_delete; 
+          for (FieldMaskSet<PhysicalUser>::iterator it =
+                eit->second.begin(); it != eit->second.end(); it++)
+          {
+            it.filter(non_dominated);
+            if (!it->second)
+              to_delete.push_back(it->first);
+          }
+          if (!eit->second.tighten_valid_mask())
+          {
+            EventFieldUsers::iterator to_delete = eit++;
+            current_to_filter.erase(to_delete);
+          }
+          else
+          {
+            for (std::vector<PhysicalUser*>::const_iterator it = 
+                  to_delete.begin(); it != to_delete.end(); it++)
+              eit->second.erase(*it);
+            eit++;
+          }
+        }
+      }
+      else
+        current_to_filter.clear();
+    }
+
+    //--------------------------------------------------------------------------
     void ExprView::find_user_preconditions(const RegionUsage &usage,
                                            IndexSpaceExpression *user_expr,
                                            const bool user_dominates,
@@ -622,6 +674,7 @@ namespace Legion {
     {
       DETAILED_PROFILER(runtime, 
                         MATERIALIZED_VIEW_FIND_LOCAL_PRECONDITIONS_CALL);
+      FieldMask dominated;
       std::set<ApEvent> dead_events; 
       EventFieldUsers current_to_filter, previous_to_filter;
       // Perform the analysis with a read-only lock
@@ -633,16 +686,19 @@ namespace Legion {
         if (user_dominates)
         {
           // We dominate in this case so we can do filtering
-          FieldMask observed, non_dominated;
           if (!current_epoch_users.empty())
+          {
+            FieldMask observed, non_dominated;
             find_current_preconditions(usage, user_mask, user_expr,
                                        term_event, op_id, index, 
                                        user_dominates, preconditions, 
                                        dead_events, current_to_filter, 
                                        observed, non_dominated,trace_recording);
+            if (!!observed)
+              dominated = observed - non_dominated;
+          }
           if (!previous_epoch_users.empty())
           {
-            const FieldMask dominated = observed - non_dominated;
             if (!!dominated)
               find_previous_filter_users(dominated, previous_to_filter);
             const FieldMask previous_mask = user_mask - dominated;
@@ -655,9 +711,9 @@ namespace Legion {
         }
         else
         {
-          FieldMask observed, non_dominated;
           if (!current_epoch_users.empty())
           {
+            FieldMask observed, non_dominated;
             find_current_preconditions(usage, user_mask, user_expr,
                                        term_event, op_id, index, 
                                        user_dominates, preconditions, 
@@ -675,6 +731,11 @@ namespace Legion {
                                         dead_events, trace_recording);
         }
       } 
+      // It's possible that we recorded some users for fields which
+      // are not actually fully dominated, if so we need to prune them
+      // otherwise we can get into issues of soundness
+      if (!current_to_filter.empty())
+        verify_current_to_filter(dominated, current_to_filter);
       if (!trace_recording && (!dead_events.empty() || 
            !previous_to_filter.empty() || !current_to_filter.empty()))
       {
@@ -762,6 +823,7 @@ namespace Legion {
     {
       DETAILED_PROFILER(runtime, 
                         MATERIALIZED_VIEW_FIND_LOCAL_COPY_PRECONDITIONS_CALL);
+      FieldMask dominated;
       std::set<ApEvent> dead_events; 
       EventFieldUsers current_to_filter, previous_to_filter;
       // Do the first pass with a read-only lock on the events
@@ -773,16 +835,19 @@ namespace Legion {
         if (copy_dominates)
         {
           // We dominate in this case so we can do filtering
-          FieldMask observed, non_dominated;
           if (!current_epoch_users.empty())
+          {
+            FieldMask observed, non_dominated;
             find_current_preconditions(usage, copy_mask, copy_expr, 
                                        op_id, index, copy_dominates,
                                        preconditions, dead_events, 
                                        current_to_filter, observed, 
                                        non_dominated, trace_recording);
+            if (!!observed)
+              dominated = observed - non_dominated;
+          }
           if (!previous_epoch_users.empty())
           {
-            const FieldMask dominated = observed - non_dominated;
             if (!!dominated)
               find_previous_filter_users(dominated, previous_to_filter);
             const FieldMask previous_mask = copy_mask - dominated;
@@ -795,9 +860,9 @@ namespace Legion {
         }
         else
         {
-          FieldMask observed, non_dominated;
           if (!current_epoch_users.empty())
           {
+            FieldMask observed, non_dominated;
             find_current_preconditions(usage, copy_mask, copy_expr, 
                                        op_id, index, copy_dominates,
                                        preconditions, dead_events, 
@@ -815,6 +880,11 @@ namespace Legion {
                                         trace_recording);
         }
       }
+      // It's possible that we recorded some users for fields which
+      // are not actually fully dominated, if so we need to prune them
+      // otherwise we can get into issues of soundness
+      if (!current_to_filter.empty())
+        verify_current_to_filter(dominated, current_to_filter);
       if (!trace_recording && (!dead_events.empty() || 
            !previous_to_filter.empty() || !current_to_filter.empty()))
       {
