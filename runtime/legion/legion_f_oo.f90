@@ -1359,6 +1359,302 @@ contains
   end subroutine legion_inline_launcher_add_field
   
   ! ===============================================================================
+  ! CopyLauncher
+  ! ===============================================================================
+  function legion_copy_launcher_constructor(pred, id, launcher_tag)
+    implicit none
+    
+    type(FCopyLauncher) :: legion_copy_launcher_constructor
+    type(legion_predicate_f_t), optional, intent(in) :: pred
+    integer(kind=4), optional, intent(in)            :: id
+    integer(kind=8), optional, intent(in)            :: launcher_tag
+    
+    type(legion_predicate_f_t) :: tmp_pred
+    integer(kind=4) :: tmp_id = 0
+    integer(kind=8) :: tmp_launcher_tag = 0
+    
+    tmp_pred = legion_predicate_true_c()
+    if (present(pred)) tmp_pred = pred
+    if (present(id)) tmp_id = id
+    if (present(launcher_tag)) tmp_launcher_tag = launcher_tag
+    
+    legion_copy_launcher_constructor%copy_launcher = &
+      legion_copy_launcher_create_c(tmp_pred, tmp_id, tmp_launcher_tag)
+  end function legion_copy_launcher_constructor
+  
+  subroutine legion_copy_launcher_destructor(this)
+    implicit none
+    
+    class(FCopyLauncher), intent(in) :: this
+    
+    call legion_copy_launcher_destroy_c(this%copy_launcher)
+  end subroutine legion_copy_launcher_destructor
+  
+  subroutine legion_copy_launcher_add_src_requirements(this, handle, priv, &
+      prop, parent, tag, verified)
+    implicit none
+    
+    class(FCopyLauncher), intent(in)      :: this
+    type(FLogicalRegion), intent(in)      :: handle
+    integer, intent(in)                   :: priv
+    integer, intent(in)                   :: prop
+    type(FLogicalRegion), intent(in)      :: parent
+    integer(kind=8), optional, intent(in) :: tag
+    logical, optional, intent(in)         :: verified
+    
+    integer(kind=8) :: tmp_tag = 0
+    logical(c_bool) :: tmp_verified = .false.
+    integer :: retval
+    
+    if (present(tag)) tmp_tag = tag
+    if (present(verified)) tmp_verified = verified
+    retval = legion_copy_launcher_add_src_region_requirement_lr_c( &
+      this%copy_launcher, handle%lr, priv, prop, parent%lr, tmp_tag, tmp_verified)
+  end subroutine legion_copy_launcher_add_src_requirements
+  
+  subroutine legion_copy_launcher_add_dst_requirements(this, handle, priv, &
+      prop, parent, tag, verified)
+    implicit none
+    
+    class(FCopyLauncher), intent(in)      :: this
+    type(FLogicalRegion), intent(in)      :: handle
+    integer, intent(in)                   :: priv
+    integer, intent(in)                   :: prop
+    type(FLogicalRegion), intent(in)      :: parent
+    integer(kind=8), optional, intent(in) :: tag
+    logical, optional, intent(in)         :: verified
+    
+    integer(kind=8) :: tmp_tag = 0
+    logical(c_bool) :: tmp_verified = .false.
+    integer :: retval
+    
+    if (present(tag)) tmp_tag = tag
+    if (present(verified)) tmp_verified = verified
+    retval = legion_copy_launcher_add_dst_region_requirement_lr_c( &
+      this%copy_launcher, handle%lr, priv, prop, parent%lr, tmp_tag, tmp_verified)
+  end subroutine legion_copy_launcher_add_dst_requirements
+  
+  subroutine legion_copy_launcher_add_src_field(this, idx, fid, inst)
+    implicit none
+    
+    class(FCopyLauncher), intent(in) :: this
+    integer, intent(in)              :: idx
+    integer, intent(in)              :: fid
+    logical, optional, intent(in)    :: inst
+    
+    logical(c_bool) :: tmp_inst = .true.
+    
+    if (present(inst)) tmp_inst = inst
+    call legion_copy_launcher_add_src_field_c(this%copy_launcher, idx, fid, tmp_inst)
+  end subroutine legion_copy_launcher_add_src_field
+  
+  subroutine legion_copy_launcher_add_dst_field(this, idx, fid, inst)
+    implicit none
+    
+    class(FCopyLauncher), intent(in) :: this
+    integer, intent(in)              :: idx
+    integer, intent(in)              :: fid
+    logical, optional, intent(in)    :: inst
+    
+    logical(c_bool) :: tmp_inst = .true.
+    
+    if (present(inst)) tmp_inst = inst
+    call legion_copy_launcher_add_dst_field_c(this%copy_launcher, idx, fid, tmp_inst)
+  end subroutine legion_copy_launcher_add_dst_field
+  
+  ! ===============================================================================
+  ! IndexCopyLauncher
+  ! ===============================================================================
+  function legion_index_copy_launcher_constructor(domain, pred, id, launcher_tag)
+    implicit none
+    
+    type(FIndexCopyLauncher) :: legion_index_copy_launcher_constructor
+    type(FDomain), intent(in)                        :: domain
+    type(legion_predicate_f_t), optional, intent(in) :: pred
+    integer(kind=4), optional, intent(in)            :: id
+    integer(kind=8), optional, intent(in)            :: launcher_tag
+    
+    type(legion_predicate_f_t) :: tmp_pred
+    integer(kind=4) :: tmp_id = 0
+    integer(kind=8) :: tmp_launcher_tag = 0
+    
+    tmp_pred = legion_predicate_true_c()
+    if (present(pred)) tmp_pred = pred
+    if (present(id)) tmp_id = id
+    if (present(launcher_tag)) tmp_launcher_tag = launcher_tag
+    
+    legion_index_copy_launcher_constructor%index_copy_launcher = &
+      legion_index_copy_launcher_create_c(domain%domain, tmp_pred, tmp_id, tmp_launcher_tag)
+  end function legion_index_copy_launcher_constructor
+  
+  subroutine legion_index_copy_launcher_destructor(this)
+    implicit none
+    
+    class(FIndexCopyLauncher), intent(in) :: this
+    
+    call legion_index_copy_launcher_destroy_c(this%index_copy_launcher)
+  end subroutine legion_index_copy_launcher_destructor
+  
+  subroutine legion_index_copy_launcher_add_src_requirements_lr(this, handle, proj, &
+      priv, prop, parent, tag, verified)
+    implicit none
+    
+    class(FIndexCopyLauncher), intent(in) :: this
+    type(FLogicalRegion), intent(in)      :: handle
+    integer, intent(in)                   :: proj
+    integer, intent(in)                   :: priv
+    integer, intent(in)                   :: prop
+    type(FLogicalRegion), intent(in)      :: parent
+    integer(kind=8), optional, intent(in) :: tag
+    logical, optional, intent(in)         :: verified
+    
+    integer(kind=8) :: tmp_tag = 0
+    logical(c_bool) :: tmp_verified = .false.
+    integer :: retval
+    
+    if (present(tag)) tmp_tag = tag
+    if (present(verified)) tmp_verified = verified
+    retval = legion_index_copy_launcher_add_src_region_requirement_lr_c( &
+      this%index_copy_launcher, handle%lr, proj, priv, prop, parent%lr, tmp_tag, tmp_verified)
+  end subroutine legion_index_copy_launcher_add_src_requirements_lr
+  
+  subroutine legion_index_copy_launcher_add_src_requirements_lp(this, handle, proj, &
+      priv, prop, parent, tag, verified)
+    implicit none
+    
+    class(FIndexCopyLauncher), intent(in) :: this
+    type(FLogicalPartition), intent(in)   :: handle
+    integer, intent(in)                   :: proj
+    integer, intent(in)                   :: priv
+    integer, intent(in)                   :: prop
+    type(FLogicalRegion), intent(in)      :: parent
+    integer(kind=8), optional, intent(in) :: tag
+    logical, optional, intent(in)         :: verified
+    
+    integer(kind=8) :: tmp_tag = 0
+    logical(c_bool) :: tmp_verified = .false.
+    integer :: retval
+    
+    if (present(tag)) tmp_tag = tag
+    if (present(verified)) tmp_verified = verified
+    retval = legion_index_copy_launcher_add_src_region_requirement_lp_c( &
+      this%index_copy_launcher, handle%lp, proj, priv, prop, parent%lr, tmp_tag, tmp_verified)
+  end subroutine legion_index_copy_launcher_add_src_requirements_lp
+  
+  subroutine legion_index_copy_launcher_add_dst_requirements_lr(this, handle, proj, &
+      priv, prop, parent, tag, verified)
+    implicit none
+    
+    class(FIndexCopyLauncher), intent(in) :: this
+    type(FLogicalRegion), intent(in)      :: handle
+    integer, intent(in)                   :: proj
+    integer, intent(in)                   :: priv
+    integer, intent(in)                   :: prop
+    type(FLogicalRegion), intent(in)      :: parent
+    integer(kind=8), optional, intent(in) :: tag
+    logical, optional, intent(in)         :: verified
+    
+    integer(kind=8) :: tmp_tag = 0
+    logical(c_bool) :: tmp_verified = .false.
+    integer :: retval
+    
+    if (present(tag)) tmp_tag = tag
+    if (present(verified)) tmp_verified = verified
+    retval = legion_index_copy_launcher_add_dst_region_requirement_lr_c( &
+      this%index_copy_launcher, handle%lr, proj, priv, prop, parent%lr, tmp_tag, tmp_verified)
+  end subroutine legion_index_copy_launcher_add_dst_requirements_lr
+  
+  subroutine legion_index_copy_launcher_add_dst_requirements_lp(this, handle, proj, &
+      priv, prop, parent, tag, verified)
+    implicit none
+    
+    class(FIndexCopyLauncher), intent(in) :: this
+    type(FLogicalPartition), intent(in)   :: handle
+    integer, intent(in)                   :: proj
+    integer, intent(in)                   :: priv
+    integer, intent(in)                   :: prop
+    type(FLogicalRegion), intent(in)      :: parent
+    integer(kind=8), optional, intent(in) :: tag
+    logical, optional, intent(in)         :: verified
+    
+    integer(kind=8) :: tmp_tag = 0
+    logical(c_bool) :: tmp_verified = .false.
+    integer :: retval
+    
+    if (present(tag)) tmp_tag = tag
+    if (present(verified)) tmp_verified = verified
+    retval = legion_index_copy_launcher_add_dst_region_requirement_lp_c( &
+      this%index_copy_launcher, handle%lp, proj, priv, prop, parent%lr, tmp_tag, tmp_verified)
+  end subroutine legion_index_copy_launcher_add_dst_requirements_lp
+  
+  subroutine legion_index_copy_launcher_add_src_field(this, idx, fid, inst)
+    implicit none
+    
+    class(FIndexCopyLauncher), intent(in) :: this
+    integer, intent(in)                   :: idx
+    integer, intent(in)                   :: fid
+    logical, optional, intent(in)         :: inst
+    
+    logical(c_bool) :: tmp_inst = .true.
+    
+    if (present(inst)) tmp_inst = inst
+    call legion_index_copy_launcher_add_src_field_c(this%index_copy_launcher, idx, fid, tmp_inst)
+  end subroutine legion_index_copy_launcher_add_src_field
+  
+  subroutine legion_index_copy_launcher_add_dst_field(this, idx, fid, inst)
+    implicit none
+    
+    class(FIndexCopyLauncher), intent(in) :: this
+    integer, intent(in)                   :: idx
+    integer, intent(in)                   :: fid
+    logical, optional, intent(in)         :: inst
+    
+    logical(c_bool) :: tmp_inst = .true.
+    
+    if (present(inst)) tmp_inst = inst
+    call legion_index_copy_launcher_add_dst_field_c(this%index_copy_launcher, idx, fid, tmp_inst)
+  end subroutine legion_index_copy_launcher_add_dst_field
+  
+  ! ===============================================================================
+  ! AttachLauncher
+  ! ===============================================================================
+  function legion_attach_launcher_constructor(resource, logical_region, &
+      parent_region)
+    implicit none
+    
+    type(FAttachLauncher)            :: legion_attach_launcher_constructor
+    integer(c_int), intent(in)       :: resource
+    type(FLogicalRegion), intent(in) :: logical_region
+    type(FLogicalRegion), intent(in) :: parent_region
+    
+    legion_attach_launcher_constructor%attach_launcher = &
+      legion_attach_launcher_create_c(logical_region%lr, parent_region%lr, resource)
+  end function legion_attach_launcher_constructor
+  
+  subroutine legion_attach_launcher_destructor(this)
+    implicit none
+    
+    class(FAttachLauncher), intent(in) :: this
+    
+    call legion_attach_launcher_destroy_c(this%attach_launcher)
+  end subroutine legion_attach_launcher_destructor
+  
+  subroutine legion_attach_launcher_attach_array_soa(this, fid, &
+      base_ptr, column_major)
+    implicit none
+    class(FAttachLauncher), intent(in) :: this
+    integer(c_int), intent(in)         :: fid
+    type(c_ptr), intent(in)            :: base_ptr
+    logical, intent(in)                :: column_major
+    
+    logical(c_bool) :: tmp_column_major
+    tmp_column_major = column_major
+    
+    call legion_attach_launcher_add_cpu_soa_field_c(this%attach_launcher, fid, &
+      base_ptr, tmp_column_major)
+  end subroutine legion_attach_launcher_attach_array_soa
+  
+  ! ===============================================================================
   ! Task
   ! ===============================================================================
   function legion_task_get_region_requirement_by_id(this, id)
@@ -1883,6 +2179,89 @@ contains
     call legion_runtime_fill_field_c(this%runtime, ctx%context, &
       handle%lr, parent%lr, fid, value, value_size, tmp_pred)
   end subroutine legion_runtime_fill_field_ptr
+  
+  subroutine legion_runtime_issue_copy_operation_single(this, ctx, launcher)
+    implicit none
+    
+    class(FRuntime), intent(in)     :: this
+    type(FContext), intent(in)      :: ctx
+    type(FCopyLauncher), intent(in) :: launcher
+      
+    call legion_copy_launcher_execute_c(this%runtime, &
+      ctx%context, launcher%copy_launcher)
+  end subroutine legion_runtime_issue_copy_operation_single
+  
+  subroutine legion_runtime_issue_copy_operation_index(this, ctx, launcher)
+    implicit none
+    
+    class(FRuntime), intent(in)          :: this
+    type(FContext), intent(in)           :: ctx
+    type(FIndexCopyLauncher), intent(in) :: launcher
+      
+    call legion_index_copy_launcher_execute_c(this%runtime, &
+      ctx%context, launcher%index_copy_launcher)
+  end subroutine legion_runtime_issue_copy_operation_index
+  
+  function legion_runtime_attach_external_resource(this, ctx, launcher)
+    implicit none
+    
+    type(FPhysicalRegion)             :: legion_runtime_attach_external_resource
+    class(FRuntime), intent(in)       :: this
+    type(FContext), intent(in)        :: ctx
+    type(FAttachLauncher), intent(in) :: launcher
+      
+    legion_runtime_attach_external_resource%pr = &
+      legion_attach_launcher_execute_c(this%runtime, ctx%context, launcher%attach_launcher)
+  end function legion_runtime_attach_external_resource
+  
+  function legion_runtime_detach_external_resource(this, ctx, handle)
+    implicit none
+    
+    type(FFuture)                     :: legion_runtime_detach_external_resource
+    class(FRuntime), intent(in)       :: this
+    type(FContext), intent(in)        :: ctx
+    type(FPhysicalRegion), intent(in) :: handle
+      
+    legion_runtime_detach_external_resource%future = &
+      legion_detach_external_resource_c(this%runtime, ctx%context, handle%pr)
+  end function legion_runtime_detach_external_resource
+  
+  function legion_runtime_detach_external_resource_flush(this, ctx, handle, flush)
+    implicit none
+    
+    type(FFuture)                     :: legion_runtime_detach_external_resource_flush
+    class(FRuntime), intent(in)       :: this
+    type(FContext), intent(in)        :: ctx
+    type(FPhysicalRegion), intent(in) :: handle
+    logical, intent(in)               :: flush
+    
+    logical(c_bool) :: tmp_flush
+    tmp_flush = flush
+      
+    legion_runtime_detach_external_resource_flush%future = &
+      legion_flush_detach_external_resource_c(this%runtime, ctx%context, handle%pr, tmp_flush)
+  end function legion_runtime_detach_external_resource_flush
+  
+  function legion_runtime_detach_external_resource_unordered(this, ctx, handle, &
+      flush, unordered)
+    implicit none
+    
+    type(FFuture)                     :: legion_runtime_detach_external_resource_unordered
+    class(FRuntime), intent(in)       :: this
+    type(FContext), intent(in)        :: ctx
+    type(FPhysicalRegion), intent(in) :: handle
+    logical, intent(in)               :: flush
+    logical, intent(in)               :: unordered
+    
+    logical(c_bool) :: tmp_flush
+    logical(c_bool) :: tmp_unordered
+    tmp_flush = flush
+    tmp_unordered = unordered
+      
+    legion_runtime_detach_external_resource_unordered%future = &
+      legion_unordered_detach_external_resource_c(this%runtime, ctx%context, handle%pr, &
+                                        tmp_flush, tmp_unordered)
+  end function legion_runtime_detach_external_resource_unordered
   
   ! ===============================================================================
   ! ProcessorConstraint

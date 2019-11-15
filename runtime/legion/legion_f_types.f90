@@ -47,6 +47,11 @@ module legion_fortran_types
   integer(c_int), parameter :: ALIASED_INCOMPLETE_KIND = 7
   integer(c_int), parameter :: COMPUTE_INCOMPLETE_KIND = 8
   
+  ! legion_external_resource_t
+  integer(c_int), parameter :: EXTERNAL_POSIX_FILE = 0
+  integer(c_int), parameter :: EXTERNAL_HDF5_FILE = 1
+  integer(c_int), parameter :: EXTERNAL_INSTANCE = 2
+  
   integer(c_int), parameter :: AUTO_GENERATE_ID = 65536
     
     ! C NEW_OPAQUE_TYPE_F
@@ -69,8 +74,10 @@ module legion_fortran_types
   NEW_OPAQUE_TYPE_F(legion_index_launcher_f_t)
   NEW_OPAQUE_TYPE_F(legion_inline_launcher_f_t)
   NEW_OPAQUE_TYPE_F(legion_copy_launcher_f_t)
+  NEW_OPAQUE_TYPE_F(legion_index_copy_launcher_f_t)
   NEW_OPAQUE_TYPE_F(legion_acquire_launcher_f_t)
   NEW_OPAQUE_TYPE_F(legion_release_launcher_f_t)
+  NEW_OPAQUE_TYPE_F(legion_attach_launcher_f_t)
   NEW_OPAQUE_TYPE_F(legion_must_epoch_launcher_f_t)
   NEW_OPAQUE_TYPE_F(legion_physical_region_f_t)
   NEW_OPAQUE_TYPE_F(legion_accessor_array_1d_f_t)
