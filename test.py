@@ -85,7 +85,7 @@ legion_gasnet_cxx_tests = [
 
 legion_openmp_cxx_tests = [
     # Examples
-    ['examples/omp_saxpy/omp_saxpy', []],
+    ['examples/omp_saxpy/omp_saxpy', ['-ll:ocpu', '1']],
 ]
 
 legion_python_cxx_tests = [

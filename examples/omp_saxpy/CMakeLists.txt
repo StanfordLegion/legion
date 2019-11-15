@@ -28,5 +28,5 @@ add_executable(omp_saxpy omp_saxpy.cc
 target_link_libraries(omp_saxpy Legion::Legion)
 
 if(Legion_ENABLE_TESTING)
-  add_test(NAME omp_saxpy COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:omp_saxpy> -ll:cpu 0 -ll:okindhack -ll:ocpu 1 ${Legion_TEST_ARGS})
+  add_test(NAME omp_saxpy COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:omp_saxpy> -ll:ocpu 1 ${Legion_TEST_ARGS})
 endif()
