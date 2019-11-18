@@ -282,29 +282,8 @@ task cholesky(n : int, np : int, verify : bool)
   __fence(__execution, __block)
   var ts_start = c.legion_get_current_time_in_micros()
 
-  var bn = n / np
-  
-  for x = 0, np do
-    dpotrf(x, n, bn, pB[f2d { x = x, y = x }])
-    __demand(__index_launch)
-    for y = x + 1, np do
-      dtrsm(x, y, n, bn, pB[f2d { x = x, y = y }], pB[f2d { x = x, y = x }])
-    end
-    __demand(__index_launch)
-    for k = x + 1, np do
-      dsyrk(x, k, n, bn, pB[f2d { x = k, y = k }], pB[f2d { x = x, y = k }])
-    end
-    for k = x + 1, np do
-      __demand(__index_launch)
-      for y = k + 1, np do
-        dgemm(x, y, k, n, bn,
-              pB[f2d { x = k, y = y }],
-              pB[f2d { x = x, y = y }],
-              pB[f2d { x = x, y = k }])
-      end
-    end
-  end
 
+  dpotrf(0, n, n, rB)
   __fence(__execution, __block)
   var ts_end = c.legion_get_current_time_in_micros()
   c.printf("ELAPSED TIME = %7.3f ms\n", 1e-3 * (ts_end - ts_start))
