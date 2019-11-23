@@ -23,7 +23,9 @@
 #include "realm/transfer/lowlevel_dma.h"
 #include "realm/transfer/channel.h"
 
+#ifdef REALM_USE_CUDART_HIJACK
 #include "realm/cuda/cudart_hijack.h"
+#endif
 
 #include "realm/mutex.h"
 #include "realm/utils.h"
@@ -1355,6 +1357,7 @@ namespace Realm {
       static REALM_THREAD_LOCAL GPUProcessor *current_gpu_proc = 0;
     };
 
+#ifdef REALM_USE_CUDART_HIJACK
     // this flag will be set on the first call into any of the hijack code in
     //  cudart_hijack.cc
     //  an application is linked with -lcudart, we will NOT be hijacking the
@@ -1363,6 +1366,7 @@ namespace Realm {
 
     // used in GPUTaskScheduler<T>::execute_task below
     static bool already_issued_hijack_warning = false;
+#endif
 
     template <typename T>
     bool GPUTaskScheduler<T>::execute_task(Task *task)
@@ -1401,6 +1405,7 @@ namespace Realm {
       CHECK_CU( cuStreamSynchronize(s->get_stream()) );
 #endif
 
+#ifdef REALM_USE_CUDART_HIJACK
       // if our hijack code is not active, the application may have put some work for this
       //  task on streams we don't know about, so it takes an expensive device synchronization
       //  to guarantee that any work enqueued on a stream in the future is ordered with respect
@@ -1415,6 +1420,10 @@ namespace Realm {
 	}
 	CHECK_CU( cuCtxSynchronize() );
       }
+#else
+      // no hijack at all, so always synchronize to ensure all effects are observable
+      CHECK_CU( cuCtxSynchronize() );
+#endif
       // pop the CUDA context for this GPU back off
       gpu_proc->gpu->pop_context();
 
@@ -2004,6 +2013,7 @@ namespace Realm {
       return ThreadLocal::current_gpu_proc;
     }
 
+#ifdef REALM_USE_CUDART_HIJACK
     void GPUProcessor::push_call_configuration(dim3 grid_dim, dim3 block_dim,
                                                size_t shared_size, void *stream)
     {
@@ -2022,6 +2032,7 @@ namespace Realm {
       *((cudaStream_t*)stream) = config.stream;
       call_configs.pop_back();
     }
+#endif
 
     void GPUProcessor::stream_synchronize(cudaStream_t stream)
     {
@@ -2072,6 +2083,7 @@ namespace Realm {
       }
     }
     
+#ifdef REALM_USE_CUDART_HIJACK
     void GPUProcessor::event_create(cudaEvent_t *event, int flags)
     {
       // int cu_flags = CU_EVENT_DEFAULT;
@@ -2199,6 +2211,7 @@ namespace Realm {
                                raw_stream,
                                args, NULL) );
     }
+#endif
 
     void GPUProcessor::gpu_memcpy(void *dst, const void *src, size_t size,
 				  cudaMemcpyKind kind)
@@ -2218,6 +2231,7 @@ namespace Realm {
       // no synchronization here
     }
 
+#ifdef REALM_USE_CUDART_HIJACK
     void GPUProcessor::gpu_memcpy_to_symbol(const void *dst, const void *src,
 					    size_t size, size_t offset,
 					    cudaMemcpyKind kind)
@@ -2263,6 +2277,7 @@ namespace Realm {
 			      size, current) );
       // no synchronization here
     }
+#endif
 
     void GPUProcessor::gpu_memset(void *dst, int value, size_t count)
     {
@@ -2307,8 +2322,10 @@ namespace Realm {
 
       pop_context();
 
+#ifdef REALM_USE_CUDART_HIJACK
       // now hook into the cuda runtime fatbin/etc. registration path
       GlobalRegistrations::add_gpu_context(this);
+#endif
     }
 
     GPU::~GPU(void)
@@ -2439,6 +2456,7 @@ namespace Realm {
       runtime->add_memory(fbmem);
     }
 
+#ifdef REALM_USE_CUDART_HIJACK
     void GPU::register_fat_binary(const FatBin *fatbin)
     {
       AutoGPUContext agc(this);
@@ -2519,6 +2537,7 @@ namespace Realm {
       assert(finder != device_variables.end());
       return finder->second;
     }
+#endif
 
     CUmodule GPU::load_cuda_module(const void *data)
     {
@@ -3010,6 +3029,7 @@ namespace Realm {
     }
 
 
+#ifdef REALM_USE_CUDART_HIJACK
     ////////////////////////////////////////////////////////////////////////
     //
     // struct RegisteredFunction
@@ -3153,6 +3173,7 @@ namespace Realm {
 	  it++)
 	(*it)->register_function(func);
     }
+#endif
 
 
   }; // namespace Cuda
