@@ -1492,75 +1492,26 @@ namespace Legion {
       public:
         Tester(void) : M(0) { }
         Tester(const DomainT<N,T> b) 
-          : M(N), has_source(false), has_transform(false), gpu_warning(true)
-        { 
-          new (bounds) DomainT<N,T>(b);
-        }
+          : bounds(b), M(N), has_source(false), 
+            has_transform(false), gpu_warning(true) { }
         Tester(const DomainT<N,T> b, const Rect<N,T> s)
-          : source(s), M(N), has_source(true), 
-            has_transform(false), gpu_warning(true)
-        {
-          new (bounds) DomainT<N,T>(b);
-        }
+          : bounds(b), source(s), M(N), has_source(true), 
+            has_transform(false), gpu_warning(true) { }
         template<int M2>
         Tester(const DomainT<M2,T> b,
                const AffineTransform<M2,N,T> t) 
-          : M(M2), has_source(false), 
+          : bounds(b), transform(t), M(M2), has_source(false), 
             has_transform(!t.is_identity()), gpu_warning(true)
         { 
           LEGION_STATIC_ASSERT(M2 <= LEGION_MAX_DIM);
-          new (bounds) DomainT<M2,T>(b);
-          new (transform) AffineTransform<M2,N,T>(t);
         }
         template<int M2>
         Tester(const DomainT<M2,T> b, const Rect<N,T> s,
                const AffineTransform<M2,N,T> t) 
-          : source(s), M(M2), has_source(true), 
+          : bounds(b), transform(t), source(s), M(M2), has_source(true), 
             has_transform(!t.is_identity()), gpu_warning(true)
         { 
           LEGION_STATIC_ASSERT(M2 <= LEGION_MAX_DIM);
-          new (bounds) DomainT<M2,T>(b);
-          new (transform) AffineTransform<M2,N,T>(t);
-        }
-        ~Tester(void)
-        {
-          // The CUDA compiler also doesn't deal correctly with this block 
-          // of code for c++11 when it passes it back to the host compiler
-#if !defined(__NVCC__) || __cplusplus < 201103L || defined(__CUDACC__)
-          switch (M)
-          {
-            case 0:
-              break;
-              // Clang is exceedingly stupid about this when we have a 
-              // using statement and try to do an inplace deletion, FML
-#if defined(__clang__) && __cplusplus >= 201103L
-#define DIMFUNC(DIM) \
-            case DIM: \
-              { \
-                reinterpret_cast<DomainT<DIM,T>*>(bounds)-> \
-                  ~IndexSpace<DIM,T>(); \
-                if (has_transform) \
-                  reinterpret_cast<AffineTransform<DIM,N,T>*>(transform)-> \
-                    ~AffineTransform(); \
-                break; \
-              }
-#else // This is the version that all non-clang compilers like
-#define DIMFUNC(DIM) \
-            case DIM: \
-              { \
-                reinterpret_cast<DomainT<DIM,T>*>(bounds)->~DomainT<DIM,T>(); \
-                if (has_transform) \
-                  reinterpret_cast<AffineTransform<DIM,N,T>*>(transform)-> \
-                    ~AffineTransform<DIM,N,T>(); \
-                break; \
-              }
-#endif
-            LEGION_FOREACH_N(DIMFUNC)
-#undef DIMFUNC
-            default:
-              assert(false);
-          }
-#endif
         }
       public:
         __CUDA_HD__
@@ -1572,18 +1523,22 @@ namespace Legion {
           if (gpu_warning)
             check_gpu_warning();
           if (!has_transform)
-            return reinterpret_cast<const DomainT<N,T>*>(bounds)->
-              bounds.contains(p);
+          {
+            // This is imprecise because we can't see the 
+            // Realm index space on the GPU
+            const Rect<N,T> b = bounds.bounds<N,T>();
+            return b.contains(p);
+          }
           switch (M)
           {
+            // This is imprecise because we can't see the 
+            // Realm index space on the GPU
 #define DIMFUNC(DIM) \
             case DIM: \
               { \
-                const DomainT<DIM,T> &b = \
-                  *reinterpret_cast<const DomainT<DIM,T>*>(bounds); \
-                const AffineTransform<DIM,N,T> &t = \
-                  *reinterpret_cast<const AffineTransform<DIM,N,T>*>(transform); \
-                return b.bounds.contains(t[p]); \
+                const Rect<DIM,T> b = bounds.bounds<DIM,T>(); \
+                const AffineTransform<DIM,N,T> t = transform; \
+                return b.contains(t[p]); \
               }
             LEGION_FOREACH_N(DIMFUNC)
 #undef DIMFUNC
@@ -1592,16 +1547,17 @@ namespace Legion {
           }
 #else
           if (!has_transform)
-            return reinterpret_cast<const DomainT<N,T>*>(bounds)->contains(p);
+          {
+            const DomainT<N,T> b = bounds;
+            return b.contains(p);
+          }
           switch (M)
           {
 #define DIMFUNC(DIM) \
             case DIM: \
               { \
-                const DomainT<DIM,T> &b = \
-                  *reinterpret_cast<const DomainT<DIM,T>*>(bounds); \
-                const AffineTransform<DIM,N,T> &t = \
-                  *reinterpret_cast<const AffineTransform<DIM,N,T>*>(transform); \
+                const DomainT<DIM,T> b = bounds; \
+                const AffineTransform<DIM,N,T> t = transform; \
                 return b.contains(t[p]); \
               }
             LEGION_FOREACH_N(DIMFUNC)
@@ -1621,20 +1577,24 @@ namespace Legion {
           if (gpu_warning)
             check_gpu_warning();
           if (!has_transform)
-            return reinterpret_cast<const DomainT<N,T>*>(bounds)->
-              bounds.contains(r);
+          {
+            // This is imprecise because we can't see the 
+            // Realm index space on the GPU
+            const Rect<N,T> b = bounds.bounds<N,T>();
+            return b.contains(r);
+          }
           // If we have a transform then we have to do each point separately
           switch (M)
           {
+            // This is imprecise because we can't see the 
+            // Realm index space on the GPU
 #define DIMFUNC(DIM) \
             case DIM: \
               { \
-                const DomainT<DIM,T> &b = \
-                  *reinterpret_cast<const DomainT<DIM,T>*>(bounds); \
-                const AffineTransform<DIM,N,T> &t = \
-                  *reinterpret_cast<const AffineTransform<DIM,N,T>*>(transform); \
+                const Rect<DIM,T> b = bounds.bounds<DIM,T>(); \
+                const AffineTransform<DIM,N,T> t = transform; \
                 for (PointInRectIterator<N,T> itr(r); itr(); itr++) \
-                  if (!b.bounds.contains(t[*itr])) \
+                  if (!b.contains(t[*itr])) \
                     return false; \
                 return true; \
               }
@@ -1645,18 +1605,18 @@ namespace Legion {
           }
 #else
           if (!has_transform)
-            return reinterpret_cast<const DomainT<N,T>*>(bounds)->
-              contains_all(r);
+          {
+            const DomainT<N,T> b = bounds;
+            return b.contains_all(r);
+          }
           // If we have a transform then we have to do each point separately
           switch (M)
           {
 #define DIMFUNC(DIM) \
             case DIM: \
               { \
-                const DomainT<DIM,T> &b = \
-                  *reinterpret_cast<const DomainT<DIM,T>*>(bounds); \
-                const AffineTransform<DIM,N,T> &t = \
-                  *reinterpret_cast<const AffineTransform<DIM,N,T>*>(transform); \
+                const DomainT<DIM,T> b = bounds; \
+                const AffineTransform<DIM,N,T> t = transform; \
                 for (PointInRectIterator<N,T> itr(r); itr(); itr++) \
                   if (!b.contains(t[*itr])) \
                     return false; \
@@ -1675,41 +1635,15 @@ namespace Legion {
         inline void check_gpu_warning(void) const
         {
 #ifdef __CUDA_ARCH__
-          bool need_warning = false;
-          if (has_transform)
-          {
-            switch (M)
-            {
-#define DIMFUNC(DIM) \
-              case DIM: \
-                { \
-                  const DomainT<DIM,T> &b = \
-                    *reinterpret_cast<const DomainT<DIM,T>*>(bounds); \
-                  need_warning = !b.dense(); \
-                  break; \
-                }
-              LEGION_FOREACH_N(DIMFUNC)
-#undef DIMFUNC
-              default:
-                assert(false);
-            }
-          }
-          else
-          {
-            const DomainT<N,T> &b =
-                *reinterpret_cast<const DomainT<N,T>*>(bounds);
-            need_warning = !b.dense();
-          }
+          bool need_warning = !bounds.dense();
           if (need_warning)
             printf("WARNING: GPU bounds check is imprecise!\n");
           gpu_warning = false;
 #endif
         }
       private:
-        // Use unsafe buffers for these since we can't have virtual 
-        // methods on the GPU for objects created on the CPU
-        char bounds[sizeof(DomainT<LEGION_MAX_DIM,T>)];
-        char transform[sizeof(AffineTransform<LEGION_MAX_DIM,N,T>)];
+        Domain bounds;
+        DomainAffineTransform transform;
         Rect<N,T> source;
         int M;
         bool has_source;

@@ -673,7 +673,7 @@ namespace Legion {
                                            const bool trace_recording)
     //--------------------------------------------------------------------------
     {
-      DETAILED_PROFILER(runtime, 
+      DETAILED_PROFILER(Internal::implicit_runtime, 
                         MATERIALIZED_VIEW_FIND_LOCAL_PRECONDITIONS_CALL);
       FieldMask dominated;
       std::set<ApEvent> dead_events; 
@@ -822,7 +822,7 @@ namespace Legion {
                                            const bool trace_recording)
     //--------------------------------------------------------------------------
     {
-      DETAILED_PROFILER(runtime, 
+      DETAILED_PROFILER(Internal::implicit_runtime, 
                         MATERIALIZED_VIEW_FIND_LOCAL_COPY_PRECONDITIONS_CALL);
       FieldMask dominated;
       std::set<ApEvent> dead_events; 

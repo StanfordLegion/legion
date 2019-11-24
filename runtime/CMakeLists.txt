@@ -99,6 +99,7 @@ endif()
 if (REALM_USE_OPENMP)
   list(APPEND REALM_SRC
     realm/openmp/openmp_module.h realm/openmp/openmp_module.cc
+    realm/openmp/openmp_internal.h
     realm/openmp/openmp_threadpool.h realm/openmp/openmp_threadpool.cc
     realm/openmp/openmp_threadpool.inl
     realm/openmp/openmp_api.cc
@@ -222,6 +223,14 @@ if(Legion_USE_LLVM)
 endif()
 
 if(Legion_USE_CUDA)
+  if(REALM_USE_CUDART_HIJACK)
+    # filter anything referring to *cudart* out of the CUDA_LIBRARIES
+    #  making sure our changes are visible to the scope above
+    # so list(FILTER ...) doesn't exist until cmake 3.6 - do string regex instead
+    string(REGEX REPLACE "[^\;]*cudart[^\;]*(\;?)" "" CUDA_LIBRARIES "${CUDA_LIBRARIES}")
+    set(CUDA_LIBRARIES ${CUDA_LIBRARIES} PARENT_SCOPE)
+  endif()
+
   target_include_directories(RealmRuntime PRIVATE ${CUDA_INCLUDE_DIRS})
   target_link_libraries(RealmRuntime PRIVATE ${CUDA_CUDA_LIBRARY})
 endif()

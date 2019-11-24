@@ -54,6 +54,7 @@ namespace Realm {
       ThreadPool *pool;
       int thread_id;  // in current team
       int num_threads; // in current team
+      int app_num_threads;  // num threads requested by app
       void (*fnptr)(void *data);
       void *data;
       WorkItem *work_item;

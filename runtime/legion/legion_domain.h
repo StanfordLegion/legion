@@ -233,26 +233,36 @@ namespace Legion {
   public:
     enum { MAX_POINT_DIM = LEGION_MAX_DIM };
 
+    __CUDA_HD__
     DomainPoint(void);
+    __CUDA_HD__
     DomainPoint(coord_t index);
+    __CUDA_HD__
     DomainPoint(const DomainPoint &rhs);
-    template<int DIM, typename T>
+    template<int DIM, typename T> __CUDA_HD__
     DomainPoint(const Point<DIM,T> &rhs);
 
     template<unsigned DIM>
     operator LegionRuntime::Arrays::Point<DIM>(void) const;
-    template<int DIM, typename T>
+    template<int DIM, typename T> __CUDA_HD__
     operator Point<DIM,T>(void) const;
 
+    __CUDA_HD__
     DomainPoint& operator=(const DomainPoint &rhs);
+    __CUDA_HD__
     bool operator==(const DomainPoint &rhs) const;
+    __CUDA_HD__
     bool operator!=(const DomainPoint &rhs) const;
+    __CUDA_HD__
     bool operator<(const DomainPoint &rhs) const;
 
+    __CUDA_HD__
     coord_t& operator[](unsigned index);
+    __CUDA_HD__
     const coord_t& operator[](unsigned index) const;
 
     struct STLComparator {
+      __CUDA_HD__
       bool operator()(const DomainPoint& a, const DomainPoint& b) const
       {
         if(a.dim < b.dim) return true;
@@ -269,15 +279,20 @@ namespace Legion {
     static DomainPoint from_point(
         typename LegionRuntime::Arrays::Point<DIM> p);
 
+    __CUDA_HD__
     Color get_color(void) const;
+    __CUDA_HD__
     coord_t get_index(void) const;
+    __CUDA_HD__
     int get_dim(void) const;
 
     template <int DIM>
     LegionRuntime::Arrays::Point<DIM> get_point(void) const; 
 
+    __CUDA_HD__
     bool is_null(void) const;
 
+    __CUDA_HD__
     static DomainPoint nil(void);
 
   protected:
@@ -299,28 +314,37 @@ namespace Legion {
     // Keep this in sync with legion_domain_max_rect_dim_t
     // in legion_config.h
     enum { MAX_RECT_DIM = LEGION_MAX_DIM };
+    __CUDA_HD__
     Domain(void);
+    __CUDA_HD__
     Domain(const Domain& other);
+    __CUDA_HD__
     Domain(const DomainPoint &lo, const DomainPoint &hi);
 
-    template<int DIM, typename T>
+    template<int DIM, typename T> __CUDA_HD__
     Domain(const Rect<DIM,T> &other);
 
-    template<int DIM, typename T>
+    template<int DIM, typename T> __CUDA_HD__
     Domain(const DomainT<DIM,T> &other);
 
+    __CUDA_HD__
     Domain& operator=(const Domain& other);
 
+    __CUDA_HD__
     bool operator==(const Domain &rhs) const;
+    __CUDA_HD__
     bool operator!=(const Domain &rhs) const;
+    __CUDA_HD__
     bool operator<(const Domain &rhs) const;
 
     static const Domain NO_DOMAIN;
 
+    __CUDA_HD__
     bool exists(void) const;
+    __CUDA_HD__
     bool dense(void) const;
 
-    template<int DIM, typename T>
+    template<int DIM, typename T> __CUDA_HD__
     Rect<DIM,T> bounds(void) const;
 
     template<int DIM>
@@ -332,7 +356,7 @@ namespace Legion {
     template<int DIM>
     operator LegionRuntime::Arrays::Rect<DIM>(void) const;
 
-    template<int DIM, typename T>
+    template<int DIM, typename T> __CUDA_HD__
     operator Rect<DIM,T>(void) const;
 
     template<int DIM, typename T>
@@ -344,18 +368,22 @@ namespace Legion {
     // No longer supported
     //Realm::IndexSpace get_index_space(void) const;
 
+    __CUDA_HD__
     bool is_valid(void) const;
 
     bool contains(DomainPoint point) const;
 
+    __CUDA_HD__
     int get_dim(void) const;
 
     bool empty(void) const;
 
     size_t get_volume(void) const;
 
+    __CUDA_HD__
     DomainPoint lo(void) const;
 
+    __CUDA_HD__
     DomainPoint hi(void) const;
 
     // Intersects this Domain with another Domain and returns the result.
@@ -464,20 +492,25 @@ namespace Legion {
    */
   class DomainTransform {
   public:
+    __CUDA_HD__
     DomainTransform(void);
+    __CUDA_HD__
     DomainTransform(const DomainTransform &rhs);
-    template<int M, int N, typename T>
+    template<int M, int N, typename T> __CUDA_HD__
     DomainTransform(const Transform<M,N,T> &rhs);
   public:
+    __CUDA_HD__
     DomainTransform& operator=(const DomainTransform &rhs);
-    template<int M, int N, typename T>
+    template<int M, int N, typename T> __CUDA_HD__
     DomainTransform& operator=(const Transform<M,N,T> &rhs);
   public:
-    template<int M, int N, typename T>
+    template<int M, int N, typename T> __CUDA_HD__
     operator Transform<M,N,T>(void) const;
   public:
+    __CUDA_HD__
     DomainPoint operator*(const DomainPoint &p) const;
   public:
+    __CUDA_HD__
     bool is_identity(void) const;
   public:
     int m, n;
@@ -491,22 +524,28 @@ namespace Legion {
    */
   class DomainAffineTransform {
   public:
+    __CUDA_HD__
     DomainAffineTransform(void);
+    __CUDA_HD__
     DomainAffineTransform(const DomainAffineTransform &rhs);
+    __CUDA_HD__
     DomainAffineTransform(const DomainTransform &t, const DomainPoint &p);
-    template<int M, int N, typename T>
+    template<int M, int N, typename T> __CUDA_HD__
     DomainAffineTransform(const AffineTransform<M,N,T> &transform);
   public:
+    __CUDA_HD__
     DomainAffineTransform& operator=(const DomainAffineTransform &rhs);
-    template<int M, int N, typename T>
+    template<int M, int N, typename T> __CUDA_HD__
     DomainAffineTransform& operator=(const AffineTransform<M,N,T> &rhs);
   public:
-    template<int M, int N, typename T>
+    template<int M, int N, typename T> __CUDA_HD__
     operator AffineTransform<M,N,T>(void) const;
   public:
     // Apply the transformation to a point
+    __CUDA_HD__
     DomainPoint operator[](const DomainPoint &p) const;
     // Test for the identity
+    __CUDA_HD__
     bool is_identity(void) const;
   public:
     DomainTransform transform;
@@ -520,23 +559,29 @@ namespace Legion {
    */
   class DomainScaleTransform {
   public:
+    __CUDA_HD__
     DomainScaleTransform(void);
+    __CUDA_HD__
     DomainScaleTransform(const DomainScaleTransform &rhs);
+    __CUDA_HD__
     DomainScaleTransform(const DomainTransform &transform,
                          const Domain &extent, const DomainPoint &divisor);
-    template<int M, int N, typename T>
+    template<int M, int N, typename T> __CUDA_HD__
     DomainScaleTransform(const ScaleTransform<M,N,T> &transform);
   public:
+    __CUDA_HD__
     DomainScaleTransform& operator=(const DomainScaleTransform &rhs);
-    template<int M, int N, typename T>
+    template<int M, int N, typename T> __CUDA_HD__
     DomainScaleTransform& operator=(const ScaleTransform<M,N,T> &rhs);
   public:
-    template<int M, int N, typename T>
+    template<int M, int N, typename T> __CUDA_HD__
     operator ScaleTransform<M,N,T>(void) const;
   public:
     // Apply the transformation to a point
+    __CUDA_HD__
     Domain operator[](const DomainPoint &p) const;
     // Test for the identity
+    __CUDA_HD__
     bool is_identity(void) const;
   public:
     DomainTransform transform;

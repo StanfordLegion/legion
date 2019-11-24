@@ -1265,7 +1265,6 @@ namespace Legion {
     protected: 
       std::map<PhysicalManager*,std::pair<unsigned,bool> > acquired_instances;
       std::set<RtEvent> map_applied_conditions;
-      std::set<ApEvent> effects_postconditions;
       std::set<RtEvent> complete_preconditions;
       std::set<RtEvent> commit_preconditions;
     };

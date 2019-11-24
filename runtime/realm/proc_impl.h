@@ -72,6 +72,9 @@ namespace Realm {
 				 CodeDescriptor& codedesc,
 				 const ByteArrayRef& user_data);
 
+      // runs an internal Realm operation on this processor
+      virtual void add_internal_task(InternalTask *task);
+
     protected:
       friend class Task;
 
@@ -140,6 +143,9 @@ namespace Realm {
       virtual void shutdown(void);
 
       virtual void add_to_group(ProcessorGroup *group);
+
+      // runs an internal Realm operation on this processor
+      virtual void add_internal_task(InternalTask *task);
 
     protected:
       void set_scheduler(ThreadedTaskScheduler *_sched);

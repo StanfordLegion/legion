@@ -663,6 +663,7 @@ namespace Realm {
       std::vector<LaunchConfig> launch_configs;
       std::vector<char> kernel_args;
       std::vector<CallConfig> call_configs;
+      bool block_on_synchronize;
     protected:
       Realm::CoreReservation *core_rsrv;
     };
