@@ -6899,6 +6899,7 @@ namespace Legion {
       if (!Internal::Runtime::runtime_started)
         REPORT_LEGION_ERROR(ERROR_DYNAMIC_CALL_PRE_RUNTIME_START,
             "Illegal call to 'get_runtime' before the runtime is started")
+#if 0
       if (!Internal::Runtime::runtime_started_event.has_triggered())
       {
         // Figure out whether we are internal or external
@@ -6908,6 +6909,7 @@ namespace Legion {
         else
           Internal::Runtime::runtime_started_event.external_wait();
       }
+#endif
       // If we have an implicit runtime we use that
       if (Internal::implicit_runtime != NULL)
         return Internal::implicit_runtime->external;
