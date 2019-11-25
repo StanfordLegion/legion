@@ -63,7 +63,7 @@ namespace Legion {
     __thread Runtime *implicit_runtime = NULL;
     __thread AutoLock *local_lock_list = NULL;
     __thread UniqueID implicit_provenance = 0;
-    __thread bool implicit_top_level_task = false;
+    __thread bool external_implicit_task = false;
 
     const LgEvent LgEvent::NO_LG_EVENT = LgEvent();
     const ApEvent ApEvent::NO_AP_EVENT = ApEvent();
@@ -9577,7 +9577,6 @@ namespace Legion {
         gc_epoch_size(config.gc_epoch_size),
         max_local_fields(config.max_local_fields),
         max_replay_parallelism(config.max_replay_parallelism),
-        implicit_top_level(config.implicit_top_level),
         program_order_execution(config.program_order_execution),
         dump_physical_traces(config.dump_physical_traces),
         no_tracing(config.no_tracing),
@@ -9773,7 +9772,6 @@ namespace Legion {
         gc_epoch_size(rhs.gc_epoch_size), 
         max_local_fields(rhs.max_local_fields),
         max_replay_parallelism(rhs.max_replay_parallelism),
-        implicit_top_level(rhs.implicit_top_level),
         program_order_execution(rhs.program_order_execution),
         dump_physical_traces(rhs.dump_physical_traces),
         no_tracing(rhs.no_tracing),
@@ -10583,61 +10581,18 @@ namespace Legion {
               proc_managers.begin(); it != proc_managers.end(); it++)
           it->second->startup_mappers();
       }
-      // If we are runtime 0 then we launch the top-level task
-      if ((address_space == 0) && !this->implicit_top_level)
+      if (address_space == 0)
       {
         if (legion_spy_enabled)
-          log_machine(machine);
-#ifdef DEBUG_LEGION
-        assert(!local_procs.empty());
-#endif 
-        // Find a target processor, we'll prefer a CPU processor for
-        // backwards compatibility, but will take anything we get
-        Processor target = Processor::NO_PROC;
-        for (std::set<Processor>::const_iterator it = 
-              local_procs.begin(); it != local_procs.end(); it++)
+            log_machine(machine);
+        // If we are runtime 0 then we launch the top-level task
+        if (legion_main_set)
         {
-          if (it->kind() == Processor::LOC_PROC)
-          {
-            target = *it;
-            break;
-          }
-          else if (!target.exists())
-            target = *it;
+          TaskLauncher launcher(Runtime::legion_main_id, 
+                                TaskArgument(&input_args, sizeof(InputArgs)),
+                                Predicate::TRUE_PRED, legion_main_mapper_id);
+          launch_top_level_task(launcher, top_level_precondition); 
         }
-#ifdef DEBUG_LEGION
-        assert(target.exists());
-#endif
-        // Get an individual task to be the top-level task
-        IndividualTask *top_task = get_available_individual_task();
-        // Get a remote task to serve as the top of the top-level task
-        TopLevelContext *top_context = 
-          new TopLevelContext(this, get_unique_operation_id());
-        // Add a reference to the top level context
-        top_context->add_reference();
-        // Set the executing processor
-        top_context->set_executing_processor(target);
-        TaskLauncher launcher(Runtime::legion_main_id, TaskArgument(),
-                              Predicate::TRUE_PRED, legion_main_mapper_id);
-        // Mark that this task is the top-level task
-        top_task->initialize_task(top_context, launcher, 
-                                  false/*track parent*/,true/*top level task*/);
-        // Set up the input arguments
-        top_task->arglen = sizeof(InputArgs);
-        top_task->args = malloc(top_task->arglen);
-        memcpy(top_task->args, &input_args, top_task->arglen);
-        // Set this to be the current processor
-        top_task->set_current_proc(target);
-        top_task->select_task_options(false/*prioritize*/);
-        increment_outstanding_top_level_tasks();
-        // Launch a task to deactivate the top-level context
-        // when the top-level task is done
-        TopFinishArgs args(top_context);
-        ApEvent pre = top_task->get_task_completion();
-        issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY,
-                                Runtime::protect_event(pre));
-        // Put the task in the ready queue
-        add_to_ready_queue(target, top_task, top_level_precondition);
       }
     }
 
@@ -20167,6 +20122,7 @@ namespace Legion {
 
     /*static*/ TaskID Runtime::legion_main_id = 0;
     /*static*/ MapperID Runtime::legion_main_mapper_id = 0;
+    /*static*/ bool Runtime::legion_main_set = false;
     /*static*/ bool Runtime::runtime_initialized = false;
     /*static*/ bool Runtime::runtime_started = false;
     /*static*/ bool Runtime::runtime_backgrounded = false;
@@ -20274,9 +20230,7 @@ namespace Legion {
       Runtime::trigger_event(runtime_started_event, runtime_started);
       // If we are supposed to background this thread, then we wait
       // for the runtime to shutdown, otherwise we can now return
-      if (implicit_top_level_task) // wait for the runtime to be started
-        runtime_started_event.external_wait(); 
-      else if (!background)
+      if (!background)
         return realm.wait_for_shutdown();
       return 0;
     }
@@ -20307,63 +20261,107 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ Context Runtime::start_implicit(int argc, char **argv,
-                                               TaskID top_task_id,
-                                               Processor::Kind proc_kind,
-                                               const char *task_name,
-                                               bool control_replicable)
+    Future Runtime::launch_top_level_task(const TaskLauncher &launcher,
+                                          RtEvent top_level_precondition)
     //--------------------------------------------------------------------------
     {
-      // Mark that this is going to be an implicit top-level task
-      implicit_top_level_task = true;
-      // Set the top-level task ID before starting the runtime
-      set_top_level_task_id(top_task_id);
-      // Start the runtime up, this will wait until that start-up 
-      // process is completed across all the nodes
-      start(argc, argv, false/*background*/);
+#ifdef DEBUG_LEGION
+      assert(!local_procs.empty());
+#endif 
+      // Find a target processor, we'll prefer a CPU processor for
+      // backwards compatibility, but will take anything we get
+      Processor target = Processor::NO_PROC;
+      for (std::set<Processor>::const_iterator it = 
+            local_procs.begin(); it != local_procs.end(); it++)
+      {
+        if (it->kind() == Processor::LOC_PROC)
+        {
+          target = *it;
+          break;
+        }
+        else if (!target.exists())
+          target = *it;
+      }
+#ifdef DEBUG_LEGION
+      assert(target.exists());
+#endif
+      // Get an individual task to be the top-level task
+      IndividualTask *top_task = get_available_individual_task();
+      // Get a remote task to serve as the top of the top-level task
+      TopLevelContext *top_context = 
+        new TopLevelContext(this, get_unique_operation_id());
+      // Add a reference to the top level context
+      top_context->add_reference();
+      // Set the executing processor
+      top_context->set_executing_processor(target);
+      // Mark that this task is the top-level task
+      Future result = top_task->initialize_task(top_context, launcher, 
+                                false/*track parent*/,true/*top level task*/);
+      // Set this to be the current processor
+      top_task->set_current_proc(target);
+      top_task->select_task_options(false/*prioritize*/);
+      increment_outstanding_top_level_tasks();
+      // Launch a task to deactivate the top-level context
+      // when the top-level task is done
+      TopFinishArgs args(top_context);
+      ApEvent pre = top_task->get_task_completion();
+      issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY,
+                              Runtime::protect_event(pre));
+      // Put the task in the ready queue
+      add_to_ready_queue(target, top_task, top_level_precondition);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    Context Runtime::begin_implicit_task(TaskID top_task_id,
+                                         Processor::Kind proc_kind,
+                                         const char *task_name,
+                                         bool control_replicable)
+    //--------------------------------------------------------------------------
+    {
+      // Check that we're on an external thread
+      const Processor p = Processor::get_executing_processor();
+      if (p.exists())
+        REPORT_LEGION_ERROR(ERROR_ILLEGAL_IMPLICIT_TOP_LEVEL_TASK,
+            "Implicit top-level tasks are not allowed to be started on "
+            "processors managed by Legion. They can only be started on "
+            "external threads that Legion does not control.")
+      // Record that this is an external implicit task
+      external_implicit_task = true;
+
       InnerContext *execution_context = NULL;
       // Now that the runtime is started we can make our context
-      if (the_runtime->total_address_spaces > 1)
+      if (control_replicable && (total_address_spaces > 1))
       {
-        if (control_replicable)
-          REPORT_LEGION_ERROR(ERROR_ILLEGAL_IMPLICIT_TOP_LEVEL_TASK,
-              "Implicit top-level tasks are only supported on multiple "
-              "nodes in the control_replication and later branches.")
-        else
-          REPORT_LEGION_ERROR(ERROR_ILLEGAL_IMPLICIT_TOP_LEVEL_TASK,
-              "Implicit top-level tasks are only permitted to be run "
-              "on multiple nodes if they are guaranteed to be control "
-              "replicated. Please make any changes to your top-level "
-              "task to make it control-replicable")
+        REPORT_LEGION_ERROR(ERROR_ILLEGAL_IMPLICIT_TOP_LEVEL_TASK,
+            "Implicit top-level tasks are only supported on multiple "
+            "nodes in the control_replication and later branches.")
       }
       else
       {
-        if (the_runtime->legion_spy_enabled)
-          the_runtime->log_machine(the_runtime->machine);
         // Save the top-level task name if necessary
         if (task_name != NULL)
-          the_runtime->attach_semantic_information(top_task_id, 
+          attach_semantic_information(top_task_id, 
               NAME_SEMANTIC_TAG, task_name, 
               strlen(task_name) + 1, true/*mutable*/);
         // Get an individual task to be the top-level task
-        IndividualTask *top_task = the_runtime->get_available_individual_task();
+        IndividualTask *top_task = get_available_individual_task();
         // Get a remote task to serve as the top of the top-level task
-        TopLevelContext *top_context = new TopLevelContext(the_runtime, 
-                                        the_runtime->get_unique_operation_id());
+        TopLevelContext *top_context = 
+          new TopLevelContext(this, get_unique_operation_id());
         // Save the context in the implicit context
         implicit_context = top_context;
         // Add a reference to the top level context
         top_context->add_reference();
         // Set the executing processor
 #ifdef DEBUG_LEGION
-        assert(!the_runtime->local_procs.empty());
+        assert(!local_procs.empty());
 #endif 
         // Find a proxy processor, we'll prefer a CPU processor for
         // backwards compatibility, but will take anything we get
         Processor proxy = Processor::NO_PROC;
         for (std::set<Processor>::const_iterator it =
-              the_runtime->local_procs.begin(); it !=
-              the_runtime->local_procs.end(); it++)
+              local_procs.begin(); it != local_procs.end(); it++)
         {
           if (it->kind() == proc_kind)
           {
@@ -20380,21 +20378,21 @@ namespace Legion {
         TaskLauncher launcher(legion_main_id, TaskArgument(),
                               Predicate::TRUE_PRED, legion_main_mapper_id);
         // Mark that this task is the top-level task
-        top_task->initialize_task(top_context, launcher, 
-                                  false/*track parent*/,true/*top level task*/);
-        the_runtime->increment_outstanding_top_level_tasks();
+        top_task->initialize_task(top_context, launcher, false/*track parent*/,
+                      true/*top level task*/, true/*implicit top level task*/);
+        increment_outstanding_top_level_tasks();
         top_context->increment_pending();
 #ifdef DEBUG_LEGION
-        the_runtime->increment_total_outstanding_tasks(legion_main_id, false);
+        increment_total_outstanding_tasks(legion_main_id, false);
 #else
-        the_runtime->increment_total_outstanding_tasks();
+        increment_total_outstanding_tasks();
 #endif
         // Launch a task to deactivate the top-level context
         // when the top-level task is done
         TopFinishArgs args(top_context);
         ApEvent pre = top_task->get_task_completion();
-        the_runtime->issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY,
-                                             Runtime::protect_event(pre));
+        issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY,
+                                Runtime::protect_event(pre));
         execution_context = top_task->create_implicit_context();
         Legion::Runtime *dummy_rt;
         execution_context->begin_task(dummy_rt);
@@ -20404,11 +20402,21 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::finish_implicit_task(TaskContext *ctx)
+    //--------------------------------------------------------------------------
+    {
+      // this is just a normal finish operation
+      ctx->end_task(NULL, 0, false/*owned*/);
+      // Record that this is no longer an implicit external task
+      external_implicit_task = false; 
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ Runtime::LegionConfiguration Runtime::parse_arguments(int argc,
                                                                     char **argv)
     //--------------------------------------------------------------------------
     {
-      LegionConfiguration config(implicit_top_level_task);
+      LegionConfiguration config;
 #define INT_ARG(argname, varname) do {    \
       if(!strcmp((argv)[i], argname)) {	  \
         varname = atoi((argv)[++i]);	  \
@@ -20960,7 +20968,7 @@ namespace Legion {
     /*static*/ int Runtime::wait_for_shutdown(void)
     //--------------------------------------------------------------------------
     {
-      if (!runtime_backgrounded && !implicit_top_level_task)
+      if (!runtime_backgrounded)
         REPORT_LEGION_ERROR(ERROR_ILLEGAL_WAIT_FOR_SHUTDOWN, 
                       "Illegal call to wait_for_shutdown when runtime was "
                       "not launched in background mode!");
@@ -20972,6 +20980,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       legion_main_id = top_id;
+      legion_main_set = true;
     }
 
     //--------------------------------------------------------------------------

@@ -7775,7 +7775,7 @@ namespace Legion {
       // Tell the parent context that we are ready for post-end
       // Make a copy of the results if necessary
       TaskContext *parent_ctx = owner_task->get_context();
-      RtEvent effects_done(!implicit_top_level_task ? 
+      RtEvent effects_done(!external_implicit_task ? 
           Processor::get_current_finish_event() : Realm::Event::NO_EVENT); 
       if (last_registration.exists() && !last_registration.has_triggered())
         effects_done = Runtime::merge_events(effects_done, last_registration);

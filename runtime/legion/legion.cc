@@ -6752,23 +6752,28 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ Context Runtime::start_implicit(int argc, char **argv,
-                                               TaskID top_task_id,
-                                               Processor::Kind proc_kind,
-                                               const char *task_name,
-                                               bool control_replicable)
+    Future Runtime::launch_top_level_task(const TaskLauncher &launcher)
     //--------------------------------------------------------------------------
     {
-      return Internal::Runtime::start_implicit(argc, argv, top_task_id,
-                              proc_kind, task_name, control_replicable);
+      return runtime->launch_top_level_task(launcher);
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void Runtime::finish_implicit(Context ctx)
+    Context Runtime::begin_implicit_task(TaskID top_task_id,
+                                         Processor::Kind proc_kind,
+                                         const char *task_name,
+                                         bool control_replicable)
     //--------------------------------------------------------------------------
     {
-      // this is just a normal finish operation
-      ctx->end_task(NULL, 0, false/*owned*/);
+      return runtime->begin_implicit_task(top_task_id, proc_kind,
+                                          task_name, control_replicable);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::finish_implicit_task(Context ctx)
+    //--------------------------------------------------------------------------
+    {
+      runtime->finish_implicit_task(ctx);
     }
 
     //--------------------------------------------------------------------------
@@ -6873,6 +6878,13 @@ namespace Legion {
     /*static*/ const InputArgs& Runtime::get_input_args(void)
     //--------------------------------------------------------------------------
     {
+      if (!Internal::Runtime::runtime_started)
+        REPORT_LEGION_ERROR(ERROR_DYNAMIC_CALL_PRE_RUNTIME_START,
+            "Illegal call to 'get_input_args' before the runtime is started")
+      // Originally we had a wait call here like we do below for get_runtime
+      // but it was causing issues when the mapper creation call backs were
+      // trying to access this so we remove it for now. It means this call
+      // is somewhat unsafe if someone wants to get the args back right away
       // If we have an implicit runtime we use that
       if (Internal::implicit_runtime != NULL)
         return Internal::implicit_runtime->input_args;
@@ -6884,6 +6896,18 @@ namespace Legion {
     /*static*/ Runtime* Runtime::get_runtime(Processor p)
     //--------------------------------------------------------------------------
     {
+      if (!Internal::Runtime::runtime_started)
+        REPORT_LEGION_ERROR(ERROR_DYNAMIC_CALL_PRE_RUNTIME_START,
+            "Illegal call to 'get_runtime' before the runtime is started")
+      if (!Internal::Runtime::runtime_started_event.has_triggered())
+      {
+        // Figure out whether we are internal or external
+        const Processor p2 = Processor::get_executing_processor();
+        if (p2.exists())
+          Internal::Runtime::runtime_started_event.wait();
+        else
+          Internal::Runtime::runtime_started_event.external_wait();
+      }
       // If we have an implicit runtime we use that
       if (Internal::implicit_runtime != NULL)
         return Internal::implicit_runtime->external;

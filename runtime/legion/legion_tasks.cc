@@ -4786,6 +4786,7 @@ namespace Legion {
       remote_unique_id = get_unique_id();
       sent_remotely = false;
       top_level_task = false;
+      implicit_top_level_task = false;
       need_intra_task_alias_analysis = true;
     }
 
@@ -4837,7 +4838,8 @@ namespace Legion {
     Future IndividualTask::initialize_task(InnerContext *ctx,
                                            const TaskLauncher &launcher,
                                            bool track /*=true*/,
-                                           bool top_level /*=false*/)
+                                           bool top_level /*=false*/,
+                                           bool implicit_top_level /*=false*/)
     //--------------------------------------------------------------------------
     {
       parent_ctx = ctx;
@@ -4930,6 +4932,7 @@ namespace Legion {
       if (top_level)
       {
         this->top_level_task = true;
+        this->implicit_top_level_task = implicit_top_level;
         // Top-level tasks never do dependence analysis, so we
         // need to complete those stages now
         resolve_speculation();
@@ -5477,7 +5480,7 @@ namespace Legion {
           Runtime::trigger_event(to_trigger);
       }
       // If we're an implicit top-level we do our complete mapping call here
-      else if (top_level_task && runtime->implicit_top_level)
+      else if (top_level_task && implicit_top_level_task)
         complete_mapping(mapped_precondition);
 #ifdef DEBUG_LEGION
 #ifndef NDEBUG
