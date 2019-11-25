@@ -216,12 +216,14 @@ int main(int argc, char **argv)
     registrar.set_leaf();
     Runtime::preregister_task_variant<check_task>(registrar, "check");
   }
-  // Then we can do the implicit start of the runtime
-  Context ctx = Runtime::start_implicit(argc, argv, TOP_LEVEL_TASK_ID, 
-                                        Processor::LOC_PROC, "top_level",
-                                        true/*control replicable*/);
+  // Start the runtime in background mode
+  Runtime::start(argc, argv, true/*background*/);
   // Get the runtime now that we've started it
   Runtime *runtime = Runtime::get_runtime();
+  // Then we can bind make this thread into an implicit top-level task
+  Context ctx = runtime->begin_implicit_task(TOP_LEVEL_TASK_ID, 
+                                        Processor::LOC_PROC, "top_level",
+                                        true/*control replicable*/);
   // Run the normal stencil program
   int num_elements = 1024;
   int num_subregions = 4;
@@ -303,7 +305,7 @@ int main(int argc, char **argv)
 
   // Mark that we are done excecuting the top-level task
   // After this call the context is no longer valid
-  Runtime::finish_implicit(ctx);
+  runtime->finish_implicit_task(ctx);
   // The previous call is asynchronous so we still need to 
   // wait for the shutdown of the runtime to complete
   return Runtime::wait_for_shutdown();

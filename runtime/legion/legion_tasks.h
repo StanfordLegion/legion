@@ -742,7 +742,8 @@ namespace Legion {
     public:
       Future initialize_task(InnerContext *ctx,
                              const TaskLauncher &launcher, 
-                             bool track = true, bool top_level=false);
+                             bool track = true, bool top_level=false,
+                             bool implicit_top_level = false);
       void perform_base_dependence_analysis(void);
     public:
       virtual bool has_prepipeline_stage(void) const
@@ -821,6 +822,7 @@ namespace Legion {
       friend class Internal;
       // Special field for the top level task
       bool top_level_task;
+      bool implicit_top_level_task;
       // Whether we have to do intra-task alias analysis
       bool need_intra_task_alias_analysis;
     protected:

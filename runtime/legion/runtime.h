@@ -260,7 +260,7 @@ namespace Legion {
       bool is_empty(bool block, bool silence_warnings = true,
                     const char *warning_string = NULL,
                     bool internal = false);
-      bool is_ready(void);
+      bool is_ready(void) const;
       size_t get_untyped_size(bool internal = false);
       ApEvent get_ready_event(void) const { return ready_event; }
     public:
@@ -312,6 +312,7 @@ namespace Legion {
       size_t result_size;
       volatile bool empty;
       volatile bool sampled;
+      volatile bool triggered;
       // On the owner node, keep track of the registered waiters
       std::set<AddressSpaceID> registered_waiters;
     };
@@ -1713,7 +1714,7 @@ namespace Legion {
     public:
       struct LegionConfiguration {
       public:
-        LegionConfiguration(bool implicit_top)
+        LegionConfiguration(void)
           : delay_start(0),
             legion_collective_radix(LEGION_COLLECTIVE_RADIX),
             initial_task_window_size(LEGION_DEFAULT_MAX_TASK_WINDOW),
@@ -1728,7 +1729,6 @@ namespace Legion {
                         LEGION_DEFAULT_MAX_CONTROL_REPLICATION_CONTEXTS),
             max_local_fields(LEGION_DEFAULT_LOCAL_FIELDS),
             max_replay_parallelism(LEGION_DEFAULT_MAX_REPLAY_PARALLELISM),
-            implicit_top_level(implicit_top),
             program_order_execution(false),
             dump_physical_traces(false),
             no_tracing(false),
@@ -1783,7 +1783,6 @@ namespace Legion {
         unsigned max_local_fields;
         unsigned max_replay_parallelism;
       public:
-        bool implicit_top_level;
         bool program_order_execution;
         bool dump_physical_traces;
         bool no_tracing;
@@ -1927,7 +1926,6 @@ namespace Legion {
       const unsigned max_local_fields;
       const unsigned max_replay_parallelism;
     public:
-      const bool implicit_top_level;
       const bool program_order_execution;
       const bool dump_physical_traces;
       const bool no_tracing;
@@ -1972,7 +1970,7 @@ namespace Legion {
       void initialize_mappers(void);
       void initialize_virtual_manager(void);
       void initialize_runtime(void);
-      void startup_runtime(RtEvent top_level_precondition);
+      void startup_runtime(void);
       void finalize_runtime(void);
       ApEvent launch_mapper_task(Mapper *mapper, Processor proc, 
                                  TaskID tid,
@@ -3692,11 +3690,12 @@ namespace Legion {
           const LegionConfiguration &config, RealmRuntime &realm,
           Processor::Kind &startup_kind);
       static int wait_for_shutdown(void);
-      static Context start_implicit(int argc, char **argv,
-                                    TaskID top_task_id,
-                                    Processor::Kind proc_kind,
-                                    const char *task_name,
-                                    bool control_replicable);
+      Future launch_top_level_task(const TaskLauncher &launcher);
+      Context begin_implicit_task(TaskID top_task_id,
+                                  Processor::Kind proc_kind,
+                                  const char *task_name,
+                                  bool control_replicable);
+      void finish_implicit_task(Context ctx);
       static void set_top_level_task_id(TaskID top_id);
       static void set_top_level_task_mapper_id(MapperID mapper_id);
       static void configure_MPI_interoperability(int rank);
@@ -3772,6 +3771,7 @@ namespace Legion {
       static TaskID legion_main_id;
       static MapperID legion_main_mapper_id;
       static std::vector<RegistrationCallbackFnptr> registration_callbacks;
+      static bool legion_main_set;
       static bool runtime_initialized;
       static bool runtime_started;
       static bool runtime_backgrounded;

@@ -1598,7 +1598,7 @@ namespace Legion {
     extern __thread ::legion_unique_id_t implicit_provenance;
     // Use this global variable to track if we're an
     // implicit top-level task that needs to do external waits
-    extern __thread bool implicit_top_level_task;
+    extern __thread bool external_implicit_task;
 #ifdef DEBUG_LEGION_WAITS
     extern __thread int meta_task_id;
 #endif
@@ -2555,7 +2555,7 @@ namespace Legion {
         const Realm::UserEvent done = Realm::UserEvent::create_user_event();
         local_lock_list_copy->advise_sleep_entry(done);
         // Now we can do the wait
-        if (implicit_top_level_task)
+        if (external_implicit_task)
           Realm::Event::external_wait();
         else
           Realm::Event::wait();
@@ -2571,7 +2571,7 @@ namespace Legion {
       }
       else // Just do the normal wait
       {
-        if (implicit_top_level_task)
+        if (external_implicit_task)
           Realm::Event::external_wait();
         else
           Realm::Event::wait();
