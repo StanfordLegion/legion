@@ -10571,7 +10571,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::startup_runtime(RtEvent top_level_precondition)
+    void Runtime::startup_runtime(void)
     //--------------------------------------------------------------------------
     {
       // If stealing is not disabled then startup our mappers
@@ -10591,7 +10591,7 @@ namespace Legion {
           TaskLauncher launcher(Runtime::legion_main_id, 
                                 TaskArgument(&input_args, sizeof(InputArgs)),
                                 Predicate::TRUE_PRED, legion_main_mapper_id);
-          launch_top_level_task(launcher, top_level_precondition); 
+          launch_top_level_task(launcher); 
         }
       }
     }
@@ -20222,8 +20222,7 @@ namespace Legion {
       // across the machine since we know everything is initialized
       const RtEvent runtime_started(realm.collective_spawn_by_kind(
               (config.separate_runtime_instances ? Processor::NO_KIND : 
-               startup_kind), LG_STARTUP_TASK_ID, 
-              &runtime_started_event, sizeof(runtime_started_event),
+               startup_kind), LG_STARTUP_TASK_ID, NULL, 0, 
               !config.separate_runtime_instances, 
               Runtime::merge_events(realm_initialized, legion_initialized)));
       // Trigger the start event when the runtime is ready
@@ -20261,8 +20260,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Future Runtime::launch_top_level_task(const TaskLauncher &launcher,
-                                          RtEvent top_level_precondition)
+    Future Runtime::launch_top_level_task(const TaskLauncher &launcher)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -20307,8 +20305,9 @@ namespace Legion {
       ApEvent pre = top_task->get_task_completion();
       issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY,
                               Runtime::protect_event(pre));
-      // Put the task in the ready queue
-      add_to_ready_queue(target, top_task, top_level_precondition);
+      // Put the task in the ready queue, make sure that the runtime is all
+      // set up across the machine before we launch it as well
+      add_to_ready_queue(target, top_task, runtime_started_event);
       return result;
     }
 
@@ -20319,6 +20318,9 @@ namespace Legion {
                                          bool control_replicable)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(runtime_started);
+#endif
       // Check that we're on an external thread
       const Processor p = Processor::get_executing_processor();
       if (p.exists())
@@ -20326,6 +20328,10 @@ namespace Legion {
             "Implicit top-level tasks are not allowed to be started on "
             "processors managed by Legion. They can only be started on "
             "external threads that Legion does not control.")
+      // Wait for the runtime to have started if necessary
+      if (!runtime_started_event.has_triggered())
+        runtime_started_event.external_wait();
+
       // Record that this is an external implicit task
       external_implicit_task = true;
 
@@ -22260,13 +22266,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(arglen == sizeof(RtEvent));
       assert(userlen == sizeof(Runtime**));
 #endif
-      RtEvent top_level_precondition = *((RtEvent*)args);
       Runtime *runtime = *((Runtime**)userdata);
       implicit_runtime = runtime;
-      runtime->startup_runtime(top_level_precondition);
+      runtime->startup_runtime();
     }
 
     //--------------------------------------------------------------------------

@@ -1727,7 +1727,7 @@ namespace Legion {
       void initialize_mappers(void);
       void initialize_virtual_manager(void);
       void initialize_runtime(void);
-      void startup_runtime(RtEvent top_level_precondition);
+      void startup_runtime(void);
       void finalize_runtime(void);
       ApEvent launch_mapper_task(Mapper *mapper, Processor proc, 
                                  TaskID tid,
@@ -3267,8 +3267,7 @@ namespace Legion {
           const LegionConfiguration &config, RealmRuntime &realm,
           Processor::Kind &startup_kind);
       static int wait_for_shutdown(void);
-      Future launch_top_level_task(const TaskLauncher &launcher,
-                                   RtEvent precondition = RtEvent::NO_RT_EVENT);
+      Future launch_top_level_task(const TaskLauncher &launcher);
       Context begin_implicit_task(TaskID top_task_id,
                                   Processor::Kind proc_kind,
                                   const char *task_name,

@@ -6881,11 +6881,6 @@ namespace Legion {
       if (!Internal::Runtime::runtime_started)
         REPORT_LEGION_ERROR(ERROR_DYNAMIC_CALL_PRE_RUNTIME_START,
             "Illegal call to 'get_input_args' before the runtime is started")
-      // Originally we had a wait call here like we do below for get_runtime
-      // but it was causing issues when the mapper creation call backs were
-      // trying to access this so we remove it for now. It means this call
-      // is somewhat unsafe if someone wants to get the args back right away
-      // If we have an implicit runtime we use that
       if (Internal::implicit_runtime != NULL)
         return Internal::implicit_runtime->input_args;
       // Otherwise this is not from a Legion task, so fallback to the_runtime
@@ -6899,17 +6894,6 @@ namespace Legion {
       if (!Internal::Runtime::runtime_started)
         REPORT_LEGION_ERROR(ERROR_DYNAMIC_CALL_PRE_RUNTIME_START,
             "Illegal call to 'get_runtime' before the runtime is started")
-#if 0
-      if (!Internal::Runtime::runtime_started_event.has_triggered())
-      {
-        // Figure out whether we are internal or external
-        const Processor p2 = Processor::get_executing_processor();
-        if (p2.exists())
-          Internal::Runtime::runtime_started_event.wait();
-        else
-          Internal::Runtime::runtime_started_event.external_wait();
-      }
-#endif
       // If we have an implicit runtime we use that
       if (Internal::implicit_runtime != NULL)
         return Internal::implicit_runtime->external;
