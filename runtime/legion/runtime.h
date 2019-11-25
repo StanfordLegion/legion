@@ -3272,7 +3272,8 @@ namespace Legion {
       Context begin_implicit_task(TaskID top_task_id,
                                   Processor::Kind proc_kind,
                                   const char *task_name,
-                                  bool control_replicable);
+                                  bool control_replicable,
+                                  unsigned shard_per_address_space);
       void finish_implicit_task(Context ctx);
       static void set_top_level_task_id(TaskID top_id);
       static void set_top_level_task_mapper_id(MapperID mapper_id);

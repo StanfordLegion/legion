@@ -20321,7 +20321,8 @@ namespace Legion {
     Context Runtime::begin_implicit_task(TaskID top_task_id,
                                          Processor::Kind proc_kind,
                                          const char *task_name,
-                                         bool control_replicable)
+                                         bool control_replicable,
+                                         unsigned shards_per_address_space)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
