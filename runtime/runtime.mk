@@ -682,11 +682,9 @@ LEGION_INST_SRC  += $(LG_RT_DIR)/legion/region_tree_tmpl.cc
 
 LEGION_FORTRAN_SRC += $(LG_RT_DIR)/legion/legion_f_types.f90 \
       $(LG_RT_DIR)/legion/legion_f_c_interface.f90 \
-      $(LG_RT_DIR)/legion/legion_f_oo.f90 \
 			$(LG_RT_DIR)/legion/legion_f.f90
 
-LEGION_FORTRAN_API_SRC += $(LG_RT_DIR)/legion/legion_f_oo.f90 \
-			$(LG_RT_DIR)/legion/legion_f.f90
+LEGION_FORTRAN_API_SRC += $(LG_RT_DIR)/legion/legion_f.f90
 
 # General shell commands
 SHELL	:= /bin/sh
