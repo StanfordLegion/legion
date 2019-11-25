@@ -7070,13 +7070,15 @@ namespace Legion {
        * top-level task running on a specific kind of processor. Users can 
        * also mark that this implicit top-level task is control replicable 
        * for supporting implicit top-level tasks for multi-node runs. For
-       * the control replicable case we expect to see one of these calls
-       * from every single address space.
+       * the control replicable case we expect to see the same number of 
+       * calls from every address space. This number is controlled by 
+       * shard_per_address_space and defaults to one.
        */
       Context begin_implicit_task(TaskID top_task_id,
                                   Processor::Kind proc_kind,
                                   const char *task_name = NULL,
-                                  bool control_replicable = false);
+                                  bool control_replicable = false,
+                                  unsigned shard_per_address_space = 1);
 
       /**
        * This is the final method for marking the end of an 
