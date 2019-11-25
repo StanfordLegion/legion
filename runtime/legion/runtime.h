@@ -254,7 +254,7 @@ namespace Legion {
       bool is_empty(bool block, bool silence_warnings = true,
                     const char *warning_string = NULL,
                     bool internal = false);
-      bool is_ready(void);
+      bool is_ready(void) const;
       size_t get_untyped_size(bool internal = false);
       ApEvent get_ready_event(void) const { return ready_event; }
     public:
@@ -306,6 +306,7 @@ namespace Legion {
       size_t result_size;
       volatile bool empty;
       volatile bool sampled;
+      volatile bool triggered;
       // On the owner node, keep track of the registered waiters
       std::set<AddressSpaceID> registered_waiters;
     };

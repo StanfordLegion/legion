@@ -341,7 +341,7 @@ namespace Legion {
         producer_uid((o == NULL) ? 0 : o->get_unique_op_id()),
 #endif
         ready_event(Runtime::create_ap_user_event()), 
-        result(NULL), result_size(0), empty(true), sampled(false)
+        result(NULL),result_size(0),empty(true),sampled(false),triggered(false)
     //--------------------------------------------------------------------------
     {
       if (producer_op != NULL)
@@ -370,7 +370,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // don't want to leak events
-      if (!ready_event.has_triggered())
+      if (!triggered)
         Runtime::trigger_event(ready_event);
       if (result != NULL)
       {
@@ -497,10 +497,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool FutureImpl::is_ready(void)
+    bool FutureImpl::is_ready(void) const
     //--------------------------------------------------------------------------
     {
-      return ready_event.has_triggered();
+      return (triggered || ready_event.has_triggered());
     }
 
     //--------------------------------------------------------------------------
@@ -541,7 +541,7 @@ namespace Legion {
       // from the original owner
       if (result == NULL)
         result = malloc(result_size);
-      if (!ready_event.has_triggered())
+      if (!is_ready())
       {
         derez.deserialize(result,result_size);
         empty = false;
@@ -555,9 +555,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
+      assert(!triggered);
       assert(!ready_event.has_triggered());
 #endif
       Runtime::trigger_event(ready_event);
+      __sync_synchronize();
+      triggered = true;
       // If we're the owner send our result to any remote spaces
       if (is_owner())
         broadcast_result();
@@ -567,8 +570,11 @@ namespace Legion {
     bool FutureImpl::reset_future(void)
     //--------------------------------------------------------------------------
     {
-      if (ready_event.has_triggered())
+      if (!is_ready())
+      {
         ready_event = Runtime::create_ap_user_event();
+        triggered = false;
+      }
       bool was_sampled = sampled;
       sampled = false;
       return was_sampled;
@@ -580,7 +586,7 @@ namespace Legion {
     {
       if (result != NULL)
       {
-        valid = ready_event.has_triggered();
+        valid = is_ready();
         return *((const bool*)result); 
       }
       valid = false;
@@ -697,7 +703,7 @@ namespace Legion {
           AutoLock f_lock(future_lock);
           if (registered_waiters.find(sid) == registered_waiters.end())
           {
-            send_result = ready_event.has_triggered();
+            send_result = is_ready();
             if (!send_result)
               registered_waiters.insert(sid);
           }
@@ -806,7 +812,7 @@ namespace Legion {
                                               unsigned count)
     //--------------------------------------------------------------------------
     {
-      if (!ready_event.has_triggered())
+      if (!is_ready())
       {
         // If we're not done then defer the operation until we are triggerd
         // First add a garbage collection reference so we don't get
