@@ -3130,9 +3130,17 @@ namespace Legion {
       const ReplicationID repl_context = runtime->get_unique_replication_id();
       const size_t total_shards = 
         runtime->total_address_spaces * shards_per_address_space;
+      std::vector<AddressSpaceID> address_spaces(total_shards);
+      for (AddressSpaceID space = 0; 
+            space < runtime->total_address_spaces; space++)
+      {
+        for (unsigned idx = 0; idx < shards_per_address_space; idx++)
+          address_spaces[space * shards_per_address_space + idx] = space;
+      }
       shard_manager = new ShardManager(runtime, repl_context, true/*cr*/,
         true/*top level*/, total_shards, runtime->address_space, implicit_top);
       shard_manager->add_reference();
+      shard_manager->set_address_spaces(address_spaces);
       if (runtime->legion_spy_enabled)
         LegionSpy::log_replication(implicit_top->get_unique_id(), repl_context,
                                    true/*control replication*/);

@@ -6495,6 +6495,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void ShardManager::set_address_spaces(
+                                      const std::vector<AddressSpaceID> &spaces)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(address_spaces == NULL);
+#endif
+      address_spaces = new ShardMapping(spaces);
+      address_spaces->add_reference();
+    }
+
+    //--------------------------------------------------------------------------
     ShardTask* ShardManager::create_shard(ShardID id, Processor target)
     //--------------------------------------------------------------------------
     {
@@ -6570,7 +6582,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(!shards.empty());
       assert(address_spaces != NULL);
 #endif
       Serializer rez;

@@ -1952,6 +1952,7 @@ namespace Legion {
         { return (local_shards[0] == task); }
     public:
       void set_shard_mapping(const std::vector<Processor> &shard_mapping);
+      void set_address_spaces(const std::vector<AddressSpaceID> &spaces);
       ShardTask* create_shard(ShardID id, Processor target);
       void extract_event_preconditions(const std::deque<InstanceSet> &insts);
       void launch(void);
