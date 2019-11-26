@@ -321,12 +321,13 @@ end type FRegionRequirement
 type FFuture
   type(legion_future_f_t) :: future
 contains
+  ! @see Legion::Future::get_result
   procedure, private :: legion_future_get_integer4
   procedure, private :: legion_future_get_integer8
   procedure, private :: legion_future_get_real4
   procedure, private :: legion_future_get_real8
   procedure, private :: legion_future_get_untyped
-  ! @see Legion::Future::get_result
+
   generic :: get_result => legion_future_get_integer4, &
                            legion_future_get_integer8, &
                            legion_future_get_real4, &
@@ -348,13 +349,13 @@ end interface FFuture
 type FFutureMap
   type(legion_future_map_f_t) :: future_map
 contains
+  ! @see Legion::Future::get_future()
   procedure, private :: legion_future_map_get_future_index
   procedure, private :: legion_future_map_get_future_domain_point
   procedure, private :: legion_future_map_get_future_point_1d
   procedure, private :: legion_future_map_get_future_point_2d
   procedure, private :: legion_future_map_get_future_point_3d
   
-  ! @see Legion::Future::get_future()
   generic :: get_future => legion_future_map_get_future_index
   
   ! @see Legion::FutureMap::wait_all_results()
@@ -378,13 +379,13 @@ end interface FTaskArgument
 type FArgumentMap
   type(legion_argument_map_f_t) :: arg_map
 contains
+  ! @see Legion::ArgumentMap::set_point()
   procedure, private :: legion_argument_map_set_point_domain_point
   procedure, private :: legion_argument_map_set_point_integer
   procedure, private :: legion_argument_map_set_point_1d_point
   procedure, private :: legion_argument_map_set_point_2d_point
   procedure, private :: legion_argument_map_set_point_3d_point
   
-  ! @see Legion::ArgumentMap::set_point()
   generic :: set_point => legion_argument_map_set_point_domain_point, &
                           legion_argument_map_set_point_integer, &
                           legion_argument_map_set_point_1d_point, &
@@ -405,9 +406,9 @@ end interface FArgumentMap
 type FTaskLauncher
   type(legion_task_launcher_f_t) :: launcher
 contains
+  ! @see Legion::TaskLauncher::add_region_requirement() 
   procedure, private :: legion_task_launcher_add_region_requirement
-  
-  ! @see Legion::TaskLauncher::add_region_requirement()  
+   
   generic :: add_region_requirement => legion_task_launcher_add_region_requirement
   
   ! @see Legion::TaskLauncher::add_field()
@@ -497,17 +498,17 @@ end interface FCopyLauncher
 type FIndexCopyLauncher
   type(legion_index_copy_launcher_f_t) :: index_copy_launcher
 contains
+  ! @see Legion::IndexCopyLauncher::add_copy_requirements()
   procedure, private :: legion_index_copy_launcher_add_src_requirements_lr
   procedure, private :: legion_index_copy_launcher_add_src_requirements_lp
   
-  ! @see Legion::IndexCopyLauncher::add_copy_requirements()
   generic :: add_src_requirements => legion_index_copy_launcher_add_src_requirements_lr, &
                                      legion_index_copy_launcher_add_src_requirements_lp
   
+  ! @see Legion::IndexCopyLauncher::add_copy_requirements()
   procedure, private :: legion_index_copy_launcher_add_dst_requirements_lr
   procedure, private :: legion_index_copy_launcher_add_dst_requirements_lp
   
-  ! @see Legion::IndexCopyLauncher::add_copy_requirements()
   generic :: add_dst_requirements => legion_index_copy_launcher_add_dst_requirements_lr, &
                                      legion_index_copy_launcher_add_dst_requirements_lp
   
@@ -578,16 +579,16 @@ end type FTask
 type FRuntime
   type(legion_runtime_f_t) :: runtime
 contains
+  ! @see Legion::Runtime::get_index_space_domain()
+  procedure :: get_index_space_domain => legion_runtime_get_index_domain_return_domain
+                                       
+  ! @see Legion::Runtime::create_index_space()
   procedure, private :: legion_runtime_create_index_space_from_elmts_size
   procedure, private :: legion_runtime_create_index_space_from_domain
   procedure, private :: legion_runtime_create_index_space_from_rect_1d
   procedure, private :: legion_runtime_create_index_space_from_rect_2d
   procedure, private :: legion_runtime_create_index_space_from_rect_3d
   
-  ! @see Legion::Runtime::get_index_space_domain()
-  procedure :: get_index_space_domain => legion_runtime_get_index_domain_return_domain
-                                       
-  ! @see Legion::Runtime::create_index_space()
   generic :: create_index_space => legion_runtime_create_index_space_from_elmts_size, &
                                    legion_runtime_create_index_space_from_domain, &
                                    legion_runtime_create_index_space_from_rect_1d, &
@@ -615,12 +616,36 @@ contains
   ! @see Legion::Runtime::create_equal_partition()
   procedure :: create_equal_partition => legion_runtime_create_equal_partition
   
+  ! @see Legion::Runtime::create_partition_by_union()
+  procedure :: create_partition_by_union => legion_runtime_create_partition_by_union
+  
+  ! @see Legion::Runtime::create_partition_by_intersection()
+  procedure, private :: legion_runtime_create_partition_by_intersection
+  procedure, private :: legion_runtime_create_partition_by_intersection_mirror
+  
+  generic :: create_partition_by_intersection => legion_runtime_create_partition_by_intersection
+  
+  ! @see Legion::Runtime::create_partition_by_difference()
+  procedure :: create_partition_by_difference => legion_runtime_create_partition_by_difference
+  
+  ! @see Legion::Runtime::create_partition_by_image()
+  procedure :: create_partition_by_image => legion_runtime_create_partition_by_image
+  
+  ! @see Legion::Runtime::create_partition_by_image_range()
+  procedure :: create_partition_by_image_range => legion_runtime_create_partition_by_image_range
+  
+  ! @see Legion::Runtime::create_partition_by_preimage()
+  procedure :: create_partition_by_preimage => legion_runtime_create_partition_by_preimage
+  
+  ! @see Legion::Runtime::create_partition_by_preimage_range()
+  procedure :: create_partition_by_preimage_range => legion_runtime_create_partition_by_preimage_range
+  
+  ! @see Legion::Runtime::create_partition_by_restriction()
   procedure, private :: legion_runtime_create_partition_by_restriction_domain_transform
   procedure, private :: legion_runtime_create_partition_by_restriction_transform_1x1
   procedure, private :: legion_runtime_create_partition_by_restriction_transform_2x2
   procedure, private :: legion_runtime_create_partition_by_restriction_transform_3x3
   
-  ! @see Legion::Runtime::create_partition_by_restriction()
   generic :: create_partition_by_restriction => &
     legion_runtime_create_partition_by_restriction_domain_transform, &
     legion_runtime_create_partition_by_restriction_transform_1x1, &
@@ -645,34 +670,34 @@ contains
   ! @see Legion::Runtime::remap_region()
   procedure :: remap_region => legion_runtime_remap_region
   
+  ! @see Legion::Runtime::fill_field()
   procedure, private :: legion_runtime_fill_field_integer4
   procedure, private :: legion_runtime_fill_field_integer8
   procedure, private :: legion_runtime_fill_field_real4
   procedure, private :: legion_runtime_fill_field_real8
   procedure, private :: legion_runtime_fill_field_ptr
   
-  ! @see Legion::Runtime::fill_field()
   generic :: fill_field => legion_runtime_fill_field_integer4, &
                            legion_runtime_fill_field_integer8, &
                            legion_runtime_fill_field_real4, &
                            legion_runtime_fill_field_real8, &
                            legion_runtime_fill_field_ptr
-                           
+  
+  ! @see Legion::Runtime::issue_copy_operation()                         
   procedure, private :: legion_runtime_issue_copy_operation_single
   procedure, private :: legion_runtime_issue_copy_operation_index
   
-  ! @see Legion::Runtime::issue_copy_operation()
   generic :: issue_copy_operation => legion_runtime_issue_copy_operation_single, &
                                      legion_runtime_issue_copy_operation_index
 
   ! @see Legion::Runtime::attach_external_resource()
   procedure :: attach_external_resource => legion_runtime_attach_external_resource  
   
+  ! @see Legion::Runtime::detach_external_resource()
   procedure, private :: legion_runtime_detach_external_resource
   procedure, private :: legion_runtime_detach_external_resource_flush
   procedure, private :: legion_runtime_detach_external_resource_unordered
 
-  ! @see Legion::Runtime::detach_external_resource()
   generic :: detach_external_resource => legion_runtime_detach_external_resource, &
                                          legion_runtime_detach_external_resource_flush, &
                                          legion_runtime_detach_external_resource_unordered

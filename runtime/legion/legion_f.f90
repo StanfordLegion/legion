@@ -4,7 +4,7 @@ module legion_fortran_object_oriented
   use legion_fortran_c_interface
   implicit none
   
-  include "legion_f_oo.h"
+  include "legion_f.h"
   
   interface assert_ne
     module procedure assert_ne_integer4
@@ -1893,6 +1893,203 @@ contains
     legion_runtime_create_equal_partition%ip = legion_index_partition_create_equal_c(this%runtime, ctx%context, parent%is, &
                                                  color_space%is, tmp_granularity, tmp_color)
   end function legion_runtime_create_equal_partition
+  
+  function legion_runtime_create_partition_by_union(this, ctx, parent, &
+      handle1, handle2, color_space, part_kind, color)
+    implicit none
+    type(FIndexPartition)                :: legion_runtime_create_partition_by_union
+    class(FRuntime), intent(in)          :: this
+    type(FContext), intent(in)           :: ctx
+    type(FIndexSpace), intent(in)        :: parent
+    type(FIndexPartition), intent(in)    :: handle1
+    type(FIndexPartition), intent(in)    :: handle2 
+    type(FIndexSpace), intent(in)        :: color_space
+    integer, optional, intent(in)        :: part_kind
+    integer(c_int), optional, intent(in) :: color
+    
+    integer :: tmp_part_kind = COMPUTE_KIND
+    integer(c_int) :: tmp_color = AUTO_GENERATE_ID
+    
+    if (present(part_kind)) tmp_part_kind = part_kind
+    if (present(color)) tmp_color = color
+    
+    legion_runtime_create_partition_by_union%ip = &
+      legion_index_partition_create_by_union_c(this%runtime, ctx%context, &
+      parent%is, handle1%ip, handle2%ip, color_space%is, tmp_part_kind, tmp_color)
+  end function legion_runtime_create_partition_by_union
+  
+  function legion_runtime_create_partition_by_intersection(this, ctx, parent, &
+      handle1, handle2, color_space, part_kind, color)
+    implicit none
+    type(FIndexPartition)                :: legion_runtime_create_partition_by_intersection
+    class(FRuntime), intent(in)          :: this
+    type(FContext), intent(in)           :: ctx
+    type(FIndexSpace), intent(in)        :: parent
+    type(FIndexPartition), intent(in)    :: handle1
+    type(FIndexPartition), intent(in)    :: handle2 
+    type(FIndexSpace), intent(in)        :: color_space
+    integer, optional, intent(in)        :: part_kind
+    integer(c_int), optional, intent(in) :: color
+    
+    integer :: tmp_part_kind = COMPUTE_KIND
+    integer(c_int) :: tmp_color = AUTO_GENERATE_ID
+    
+    if (present(part_kind)) tmp_part_kind = part_kind
+    if (present(color)) tmp_color = color
+    
+    legion_runtime_create_partition_by_intersection%ip = &
+      legion_index_partition_create_by_intersection_c(this%runtime, ctx%context, &
+      parent%is, handle1%ip, handle2%ip, color_space%is, tmp_part_kind, tmp_color)
+  end function legion_runtime_create_partition_by_intersection
+  
+  function legion_runtime_create_partition_by_intersection_mirror(this, ctx, parent, &
+      partition, part_kind, color, dominates)
+    implicit none
+    type(FIndexPartition)                :: legion_runtime_create_partition_by_intersection_mirror
+    class(FRuntime), intent(in)          :: this
+    type(FContext), intent(in)           :: ctx
+    type(FIndexSpace), intent(in)        :: parent
+    type(FIndexPartition), intent(in)    :: partition
+    integer, optional, intent(in)        :: part_kind
+    integer(c_int), optional, intent(in) :: color
+    logical, optional, intent(in)        :: dominates
+    
+    integer :: tmp_part_kind = COMPUTE_KIND
+    integer(c_int) :: tmp_color = AUTO_GENERATE_ID
+    logical(c_bool) :: tmp_dominates = .false.
+    
+    if (present(part_kind)) tmp_part_kind = part_kind
+    if (present(color)) tmp_color = color
+    if (present(dominates)) tmp_dominates = dominates
+    
+    legion_runtime_create_partition_by_intersection_mirror%ip = &
+      legion_index_partition_create_by_intersection_mirror_c(this%runtime, ctx%context, &
+      parent%is, partition%ip, tmp_part_kind, tmp_color, tmp_dominates)
+  end function legion_runtime_create_partition_by_intersection_mirror
+  
+  function legion_runtime_create_partition_by_difference(this, ctx, parent, &
+      handle1, handle2, color_space, part_kind, color)
+    implicit none
+    type(FIndexPartition)                :: legion_runtime_create_partition_by_difference
+    class(FRuntime), intent(in)          :: this
+    type(FContext), intent(in)           :: ctx
+    type(FIndexSpace), intent(in)        :: parent
+    type(FIndexPartition), intent(in)    :: handle1
+    type(FIndexPartition), intent(in)    :: handle2 
+    type(FIndexSpace), intent(in)        :: color_space
+    integer, optional, intent(in)        :: part_kind
+    integer(c_int), optional, intent(in) :: color
+    
+    integer :: tmp_part_kind = COMPUTE_KIND
+    integer(c_int) :: tmp_color = AUTO_GENERATE_ID
+    
+    if (present(part_kind)) tmp_part_kind = part_kind
+    if (present(color)) tmp_color = color
+    
+    legion_runtime_create_partition_by_difference%ip = &
+      legion_index_partition_create_by_difference_c(this%runtime, ctx%context, &
+      parent%is, handle1%ip, handle2%ip, color_space%is, tmp_part_kind, tmp_color)
+  end function legion_runtime_create_partition_by_difference
+  
+  function legion_runtime_create_partition_by_image(this, ctx, handle, &
+      projection, parent, fid, color_space, part_kind, color)
+    implicit none
+    type(FIndexPartition)                :: legion_runtime_create_partition_by_image
+    class(FRuntime), intent(in)          :: this
+    type(FContext), intent(in)           :: ctx
+    type(FIndexSpace), intent(in)        :: handle
+    type(FLogicalPartition), intent(in)  :: projection
+    type(FLogicalRegion), intent(in)     :: parent 
+    integer, intent(in)                  :: fid
+    type(FIndexSpace), intent(in)        :: color_space
+    integer, optional, intent(in)        :: part_kind
+    integer(c_int), optional, intent(in) :: color
+    
+    integer :: tmp_part_kind = COMPUTE_KIND
+    integer(c_int) :: tmp_color = AUTO_GENERATE_ID
+    
+    if (present(part_kind)) tmp_part_kind = part_kind
+    if (present(color)) tmp_color = color
+    
+    legion_runtime_create_partition_by_image%ip = &
+      legion_index_partition_create_by_image_c(this%runtime, ctx%context, &
+      handle%is, projection%lp, parent%lr, fid, color_space%is, tmp_part_kind, tmp_color)
+  end function legion_runtime_create_partition_by_image
+  
+  function legion_runtime_create_partition_by_image_range(this, ctx, handle, &
+      projection, parent, fid, color_space, part_kind, color)
+    implicit none
+    type(FIndexPartition)                :: legion_runtime_create_partition_by_image_range
+    class(FRuntime), intent(in)          :: this
+    type(FContext), intent(in)           :: ctx
+    type(FIndexSpace), intent(in)        :: handle
+    type(FLogicalPartition), intent(in)  :: projection
+    type(FLogicalRegion), intent(in)     :: parent 
+    integer, intent(in)                  :: fid
+    type(FIndexSpace), intent(in)        :: color_space
+    integer, optional, intent(in)        :: part_kind
+    integer(c_int), optional, intent(in) :: color
+    
+    integer :: tmp_part_kind = COMPUTE_KIND
+    integer(c_int) :: tmp_color = AUTO_GENERATE_ID
+    
+    if (present(part_kind)) tmp_part_kind = part_kind
+    if (present(color)) tmp_color = color
+    
+    legion_runtime_create_partition_by_image_range%ip = &
+      legion_index_partition_create_by_image_range_c(this%runtime, ctx%context, &
+      handle%is, projection%lp, parent%lr, fid, color_space%is, tmp_part_kind, tmp_color)
+  end function legion_runtime_create_partition_by_image_range
+  
+  function legion_runtime_create_partition_by_preimage(this, ctx, projection, &
+      handle, parent, fid, color_space, part_kind, color)
+    implicit none
+    type(FIndexPartition)                :: legion_runtime_create_partition_by_preimage
+    class(FRuntime), intent(in)          :: this
+    type(FContext), intent(in)           :: ctx
+    type(FIndexPartition), intent(in)    :: projection
+    type(FLogicalRegion), intent(in)     :: handle
+    type(FLogicalRegion), intent(in)     :: parent 
+    integer, intent(in)                  :: fid
+    type(FIndexSpace), intent(in)        :: color_space
+    integer, optional, intent(in)        :: part_kind
+    integer(c_int), optional, intent(in) :: color
+    
+    integer :: tmp_part_kind = COMPUTE_KIND
+    integer(c_int) :: tmp_color = AUTO_GENERATE_ID
+    
+    if (present(part_kind)) tmp_part_kind = part_kind
+    if (present(color)) tmp_color = color
+    
+    legion_runtime_create_partition_by_preimage%ip = &
+      legion_index_partition_create_by_preimage_c(this%runtime, ctx%context, &
+      projection%ip, handle%lr, parent%lr, fid, color_space%is, tmp_part_kind, tmp_color)
+  end function legion_runtime_create_partition_by_preimage
+  
+  function legion_runtime_create_partition_by_preimage_range(this, ctx, projection, &
+      handle, parent, fid, color_space, part_kind, color)
+    implicit none
+    type(FIndexPartition)                :: legion_runtime_create_partition_by_preimage_range
+    class(FRuntime), intent(in)          :: this
+    type(FContext), intent(in)           :: ctx
+    type(FIndexPartition), intent(in)    :: projection
+    type(FLogicalRegion), intent(in)     :: handle
+    type(FLogicalRegion), intent(in)     :: parent 
+    integer, intent(in)                  :: fid
+    type(FIndexSpace), intent(in)        :: color_space
+    integer, optional, intent(in)        :: part_kind
+    integer(c_int), optional, intent(in) :: color
+    
+    integer :: tmp_part_kind = COMPUTE_KIND
+    integer(c_int) :: tmp_color = AUTO_GENERATE_ID
+    
+    if (present(part_kind)) tmp_part_kind = part_kind
+    if (present(color)) tmp_color = color
+    
+    legion_runtime_create_partition_by_preimage_range%ip = &
+      legion_index_partition_create_by_preimage_range_c(this%runtime, ctx%context, &
+      projection%ip, handle%lr, parent%lr, fid, color_space%is, tmp_part_kind, tmp_color)
+  end function legion_runtime_create_partition_by_preimage_range
   
   function legion_runtime_create_partition_by_restriction_domain_transform(this, ctx, parent, &
       color_space, transform, extent, part_kind, color)
