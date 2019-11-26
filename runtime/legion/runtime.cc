@@ -2680,7 +2680,7 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
-    // MPI Legion Handshake Impl 
+    // MPI Rank Table
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
@@ -2999,6 +2999,258 @@ namespace Legion {
         send_remainder_stage();
       // We are done
       Runtime::trigger_event(done_event);
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Implicit Shard Manager
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    ImplicitShardManager::ImplicitShardManager(Runtime *rt, TaskID tid,
+                     MapperID mid, Processor::Kind k, unsigned shards_per_space)
+      : Collectable(), runtime(rt), task_id(tid), mapper_id(mid), kind(k), 
+        shards_per_address_space(shards_per_space), 
+        expected_local_arrivals(shards_per_space), expected_remote_arrivals(0),
+        local_shard_id(0), shard_manager(NULL)
+    //--------------------------------------------------------------------------
+    {
+      // If we're the owner node, we also expect one arrival from
+      // every remote node as well
+      if (runtime->address_space == 0)
+        expected_remote_arrivals = (runtime->total_address_spaces - 1);
+    }
+
+    //--------------------------------------------------------------------------
+    ImplicitShardManager::ImplicitShardManager(const ImplicitShardManager &rhs)
+      : Collectable(), runtime(rhs.runtime), task_id(rhs.task_id), 
+        mapper_id(rhs.mapper_id), kind(rhs.kind), 
+        shards_per_address_space(rhs.shards_per_address_space)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    ImplicitShardManager::~ImplicitShardManager(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(shard_manager != NULL);
+#endif
+      if (shard_manager->remove_reference())
+        delete shard_manager;
+    }
+
+    //--------------------------------------------------------------------------
+    ImplicitShardManager& ImplicitShardManager::operator=(
+                                                const ImplicitShardManager &rhs)
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    bool ImplicitShardManager::record_arrival(bool local)
+    //--------------------------------------------------------------------------
+    {
+      // No need for the lock here, we're always protected by the shard_lock
+      // when this is called
+      if (local)
+      {
+#ifdef DEBUG_LEGION
+        assert(expected_local_arrivals > 0);
+#endif
+        return ((--expected_local_arrivals == 0) && 
+                  (expected_remote_arrivals == 0));
+      }
+      else
+      {
+#ifdef DEBUG_LEGION
+        assert(expected_remote_arrivals > 0);
+#endif
+        return ((--expected_remote_arrivals == 0) &&
+                (expected_local_arrivals == 0));
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    ShardTask* ImplicitShardManager::create_shard(Processor proxy,
+                                                  const char *task_name)
+    //--------------------------------------------------------------------------
+    {
+      if (runtime->address_space == 0)
+      {
+        AutoLock m_lock(manager_lock);
+        if (shard_manager == NULL)
+          create_shard_manager(proxy, task_name);
+#ifdef DEBUG_LEGION
+        assert(local_shard_id < shards_per_address_space);
+#endif
+        const ShardID shard_id = local_shard_id++;
+        return shard_manager->create_shard(shard_id, proxy);   
+      }
+      else
+      {
+        RtEvent wait_on;
+        if (shard_manager == NULL)
+        {
+          AutoLock m_lock(manager_lock); 
+          if (shard_manager == NULL)
+          {
+            if (!manager_ready.exists())
+              request_shard_manager();
+            wait_on = manager_ready;
+          }
+        }
+        if (wait_on.exists())
+          wait_on.wait();
+        AutoLock m_lock(manager_lock);
+#ifdef DEBUG_LEGION
+        assert(local_shard_id < shards_per_address_space);
+#endif
+        const ShardID shard_id = runtime->address_space * 
+          shards_per_address_space + local_shard_id++; 
+        return shard_manager->create_shard(shard_id, proxy);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void ImplicitShardManager::create_shard_manager(Processor proxy,
+                                                    const char *task_name)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(shard_manager == NULL);
+#endif
+      IndividualTask *implicit_top = 
+       runtime->create_implicit_top_level(task_id, mapper_id, proxy, task_name);
+      // Now we need to make the shard manager
+      const ReplicationID repl_context = runtime->get_unique_replication_id();
+      const size_t total_shards = 
+        runtime->total_address_spaces * shards_per_address_space;
+      shard_manager = new ShardManager(runtime, repl_context, true/*cr*/,
+        true/*top level*/, total_shards, runtime->address_space, implicit_top);
+      shard_manager->add_reference();
+      if (runtime->legion_spy_enabled)
+        LegionSpy::log_replication(implicit_top->get_unique_id(), repl_context,
+                                   true/*control replication*/);
+      // Distribute the shard manager to all the remove nodes
+      std::vector<ShardTask*> empty_shards;
+      for (AddressSpaceID space = 1; 
+            space < runtime->total_address_spaces; space++)
+        shard_manager->distribute_shards(space, empty_shards);
+      // Then send any pending responses
+      if (remote_spaces.empty())
+      {
+        for (std::vector<std::pair<AddressSpaceID,void*> >::const_iterator it = 
+              remote_spaces.begin(); it != remote_spaces.end(); it++)
+        {
+          Serializer rez;
+          {
+            RezCheck z(rez);
+            rez.serialize(it->second);
+            rez.serialize(repl_context);
+          }
+          runtime->send_control_replicate_implicit_response(it->first, rez);
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void ImplicitShardManager::request_shard_manager(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(shard_manager == NULL);
+      assert(!manager_ready.exists());
+#endif
+      manager_ready = Runtime::create_rt_user_event();
+      Serializer rez;
+      {
+        RezCheck z(rez);
+        rez.serialize(task_id);
+        rez.serialize(mapper_id);
+        rez.serialize(kind);
+        rez.serialize(shards_per_address_space);
+        rez.serialize(this);
+      }
+      runtime->send_control_replicate_implicit_request(0/*owner*/, rez);
+    }
+
+    //--------------------------------------------------------------------------
+    void ImplicitShardManager::process_implicit_request(void *remote,
+                                                        AddressSpaceID space)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock m_lock(manager_lock);
+      if (shard_manager != NULL)
+      {
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(remote);
+          rez.serialize(shard_manager->repl_id);
+        }
+        runtime->send_control_replicate_implicit_response(space, rez);
+      }
+      else
+        remote_spaces.push_back(std::pair<AddressSpaceID,void*>(space, remote));
+    }
+    
+    //--------------------------------------------------------------------------
+    RtUserEvent ImplicitShardManager::process_implicit_response(ShardManager *m)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock m_lock(manager_lock);
+#ifdef DEBUG_LEGION
+      assert(shard_manager == NULL);
+      assert(manager_ready.exists());
+#endif
+      shard_manager = m;
+      RtUserEvent to_trigger = manager_ready;
+      manager_ready = RtUserEvent::NO_RT_USER_EVENT;
+      return to_trigger;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void ImplicitShardManager::handle_remote_request(
+             Deserializer &derez, Runtime *runtime, AddressSpaceID remote_space)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      TaskID task_id;
+      derez.deserialize(task_id);
+      MapperID mapper_id;
+      derez.deserialize(mapper_id);
+      Processor::Kind kind;
+      derez.deserialize(kind);
+      unsigned shards_per_address_space;
+      derez.deserialize(shards_per_address_space);
+      void *remote;
+      derez.deserialize(remote);
+      ImplicitShardManager *manager = runtime->find_implicit_shard_manager(
+          task_id, mapper_id, kind, shards_per_address_space, false/*local*/);
+      manager->process_implicit_request(remote, remote_space);
+      if (manager->remove_reference())
+        delete manager;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void ImplicitShardManager::handle_remote_response(
+                                          Deserializer &derez, Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      ImplicitShardManager *manager;
+      derez.deserialize(manager);
+      ReplicationID repl_id;
+      derez.deserialize(repl_id);
+      ShardManager *shard_manager = runtime->find_shard_manager(repl_id);
+      RtUserEvent to_trigger = 
+        manager->process_implicit_response(shard_manager);
+      Runtime::trigger_event(to_trigger);
     }
 
     /////////////////////////////////////////////////////////////
@@ -7286,6 +7538,17 @@ namespace Legion {
             {
               runtime->handle_control_replicate_trace_update(derez,
                                                     remote_address_space);
+              break;
+            }
+          case SEND_REPL_IMPLICIT_REQUEST:
+            {
+              runtime->handle_control_replicate_implicit_request(derez,
+                                                    remote_address_space);
+              break;
+            }
+          case SEND_REPL_IMPLICIT_RESPONSE:
+            {
+              runtime->handle_control_replicate_implicit_response(derez);
               break;
             }
           case SEND_MAPPER_MESSAGE:
@@ -16463,6 +16726,27 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_control_replicate_implicit_request(AddressSpaceID target,
+                                                          Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_REPL_IMPLICIT_REQUEST,
+                                DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_control_replicate_implicit_response(
+                                         AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      // This has to go on the task virtual channel so that it is ordered
+      // with respect to any distributions
+      // See Runtime::send_replicate_launch
+      find_messenger(target)->send_message(rez, SEND_REPL_IMPLICIT_RESPONSE,
+                                        TASK_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_mapper_message(AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
@@ -16987,8 +17271,12 @@ namespace Legion {
     void Runtime::send_replicate_launch(AddressSpaceID target,Serializer &rez)
     //--------------------------------------------------------------------------
     {
+      // Put this on the task virtual channel so it can be ordered with
+      // respect to requests for shard managers in implicit cases. 
+      // See ImplicitShardManager::create_shard_manager
+      // See Runtime::send_control_replicate_implicit_response
       find_messenger(target)->send_message(rez, SEND_REPLICATE_LAUNCH,
-                                        DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+                                           TASK_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -17952,6 +18240,22 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       ShardManager::handle_trace_update(derez, this, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_control_replicate_implicit_request(Deserializer &derez,
+                                                          AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      ImplicitShardManager::handle_remote_request(derez, this, source);  
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_control_replicate_implicit_response(
+                                                            Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      ImplicitShardManager::handle_remote_response(derez, this);
     }
 
     //--------------------------------------------------------------------------
@@ -22463,6 +22767,78 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    IndividualTask* Runtime::create_implicit_top_level(TaskID top_task_id,
+                 MapperID top_mapper_id, Processor proxy, const char *task_name)
+    //--------------------------------------------------------------------------
+    {
+      // Save the top-level task name if necessary
+      if (task_name != NULL)
+        attach_semantic_information(top_task_id, 
+            NAME_SEMANTIC_TAG, task_name, 
+            strlen(task_name) + 1, true/*mutable*/);
+      // Get an individual task to be the top-level task
+      IndividualTask *top_task = get_available_individual_task();
+      // Get a remote task to serve as the top of the top-level task
+      TopLevelContext *top_context = 
+        new TopLevelContext(this, get_unique_operation_id());
+      // Save the context in the implicit context
+      implicit_context = top_context;
+      // Add a reference to the top level context
+      top_context->add_reference();
+      // Set the executing processor
+      top_context->set_executing_processor(proxy);
+      TaskLauncher launcher(top_task_id, TaskArgument(),
+                            Predicate::TRUE_PRED, top_mapper_id);
+      // Mark that this task is the top-level task
+      top_task->initialize_task(top_context, launcher, false/*track parent*/,
+                    true/*top level task*/, true/*implicit top level task*/);
+      increment_outstanding_top_level_tasks();
+      top_context->increment_pending();
+#ifdef DEBUG_LEGION
+      increment_total_outstanding_tasks(legion_main_id, false);
+#else
+      increment_total_outstanding_tasks();
+#endif
+      // Launch a task to deactivate the top-level context
+      // when the top-level task is done
+      TopFinishArgs args(top_context);
+      ApEvent pre = top_task->get_task_completion();
+      issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY,
+                              Runtime::protect_event(pre));
+      return top_task;
+    }
+
+    //--------------------------------------------------------------------------
+    ImplicitShardManager* Runtime::find_implicit_shard_manager(
+                  TaskID top_task_id, MapperID mapper_id, Processor::Kind kind,
+                  unsigned shards_per_address_space, bool local)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock s_lock(shard_lock);
+      std::map<TaskID,ImplicitShardManager*>::iterator finder = 
+        implicit_shard_managers.find(top_task_id);
+      ImplicitShardManager *result = NULL;
+      if (finder == implicit_shard_managers.end())
+      {
+        result = new ImplicitShardManager(this, top_task_id, mapper_id, 
+                                          kind, shards_per_address_space);
+        result->add_reference();
+        implicit_shard_managers[top_task_id] = result;
+        finder = implicit_shard_managers.find(top_task_id);
+      }
+      else
+        result = finder->second;
+      result->add_reference();
+      if (result->record_arrival(local))
+      {
+        if (finder->second->remove_reference())
+          assert(false); // should never hit this assertion
+        implicit_shard_managers.erase(finder);
+      }
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
     Context Runtime::begin_implicit_task(TaskID top_task_id,
                                          MapperID top_mapper_id,
                                          Processor::Kind proc_kind,
@@ -22481,82 +22857,50 @@ namespace Legion {
             "Implicit top-level tasks are not allowed to be started on "
             "processors managed by Legion. They can only be started on "
             "external threads that Legion does not control.")
+#ifdef DEBUG_LEGION
+      assert(!local_procs.empty());
+#endif 
+      // Find a proxy processor, we'll prefer a CPU processor for
+      // backwards compatibility, but will take anything we get
+      Processor proxy = Processor::NO_PROC;
+      for (std::set<Processor>::const_iterator it =
+            local_procs.begin(); it != local_procs.end(); it++)
+      {
+        if (it->kind() == proc_kind)
+        {
+          proxy = *it;
+          break;
+        }
+      }
+#ifdef DEBUG_LEGION
+      // TODO: remove this once realm supports drafting this thread
+      // as a new kind of processor to use
+      assert(proxy.exists());
+#endif
       // Wait for the runtime to have started if necessary
       if (!runtime_started_event.has_triggered())
         runtime_started_event.external_wait();
-
       // Record that this is an external implicit task
       external_implicit_task = true;
-
-      InnerContext *execution_context = NULL;
+      SingleTask *local_task = NULL;
       // Now that the runtime is started we can make our context
       if (control_replicable && (total_address_spaces > 1))
       {
-        REPORT_LEGION_ERROR(ERROR_ILLEGAL_IMPLICIT_TOP_LEVEL_TASK,
-            "Implicit top-level tasks are only supported on multiple "
-            "nodes in the control_replication and later branches.")
+        // Either find or make an implicit shard manager for hooking up
+        ImplicitShardManager *implicit_shard_manager = 
+          find_implicit_shard_manager(top_task_id, top_mapper_id, proc_kind, 
+                                      shards_per_address_space, true/*local*/);
+        local_task = implicit_shard_manager->create_shard(proxy, task_name);
+        if (implicit_shard_manager->remove_reference())
+          delete implicit_shard_manager;
       }
       else
-      {
-        // Save the top-level task name if necessary
-        if (task_name != NULL)
-          attach_semantic_information(top_task_id, 
-              NAME_SEMANTIC_TAG, task_name, 
-              strlen(task_name) + 1, true/*mutable*/);
-        // Get an individual task to be the top-level task
-        IndividualTask *top_task = get_available_individual_task();
-        // Get a remote task to serve as the top of the top-level task
-        TopLevelContext *top_context = 
-          new TopLevelContext(this, get_unique_operation_id());
-        // Save the context in the implicit context
-        implicit_context = top_context;
-        // Add a reference to the top level context
-        top_context->add_reference();
-        // Set the executing processor
-#ifdef DEBUG_LEGION
-        assert(!local_procs.empty());
-#endif 
-        // Find a proxy processor, we'll prefer a CPU processor for
-        // backwards compatibility, but will take anything we get
-        Processor proxy = Processor::NO_PROC;
-        for (std::set<Processor>::const_iterator it =
-              local_procs.begin(); it != local_procs.end(); it++)
-        {
-          if (it->kind() == proc_kind)
-          {
-            proxy = *it;
-            break;
-          }
-        }
-#ifdef DEBUG_LEGION
-        // TODO: remove this once realm supports drafting this thread
-        // as a new kind of processor to use
-        assert(proxy.exists());
-#endif
-        top_context->set_executing_processor(proxy);
-        TaskLauncher launcher(top_task_id, TaskArgument(),
-                              Predicate::TRUE_PRED, top_mapper_id);
-        // Mark that this task is the top-level task
-        top_task->initialize_task(top_context, launcher, false/*track parent*/,
-                      true/*top level task*/, true/*implicit top level task*/);
-        increment_outstanding_top_level_tasks();
-        top_context->increment_pending();
-#ifdef DEBUG_LEGION
-        increment_total_outstanding_tasks(legion_main_id, false);
-#else
-        increment_total_outstanding_tasks();
-#endif
-        // Launch a task to deactivate the top-level context
-        // when the top-level task is done
-        TopFinishArgs args(top_context);
-        ApEvent pre = top_task->get_task_completion();
-        issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY,
-                                Runtime::protect_event(pre));
-        execution_context = top_task->create_implicit_context();
-        Legion::Runtime *dummy_rt;
-        execution_context->begin_task(dummy_rt);
-        execution_context->set_executing_processor(proxy);
-      }
+        local_task = create_implicit_top_level(top_task_id, top_mapper_id,
+                                               proxy, task_name);
+      InnerContext *execution_context = local_task->create_implicit_context();
+      Legion::Runtime *dummy_rt;
+      execution_context->begin_task(dummy_rt);
+      execution_context->set_executing_processor(proxy);
       return execution_context;
     }
 

@@ -7313,6 +7313,28 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    InnerContext* ShardTask::create_implicit_context(void)
+    //--------------------------------------------------------------------------
+    {
+      ReplicateContext *repl_ctx = new ReplicateContext(runtime, this,
+          get_depth(), false/*is inner*/, regions, parent_req_indexes,
+          virtual_mapped, unique_op_id, shard_manager);
+      if (mapper == NULL)
+        mapper = runtime->find_mapper(current_proc, map_id);
+      repl_ctx->configure_context(mapper, task_priority);
+      // Save the execution context early since we'll need it
+      execution_context = repl_ctx;
+      // Wait until all the other shards are ready too
+      shard_manager->complete_startup_initialization();
+      // Hold a reference during this to prevent collectives 
+      // from deleting the context prematurely
+      repl_ctx->add_reference();
+      // The replicate contexts all need to sync up to exchange resources 
+      repl_ctx->exchange_common_resources();
+      return repl_ctx;
+    }
+
+    //--------------------------------------------------------------------------
     void ShardTask::launch_shard(void)
     //--------------------------------------------------------------------------
     {

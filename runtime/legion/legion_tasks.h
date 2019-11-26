@@ -518,7 +518,7 @@ namespace Legion {
                                     MustEpochOp *must_epoch_owner,
                                     std::vector<InstanceSet> &valid_instances); 
       void replay_map_task_output(void);
-      InnerContext* create_implicit_context(void);
+      virtual InnerContext* create_implicit_context(void);
     protected: // mapper helper calls
       void validate_target_processors(const std::vector<Processor> &prcs) const;
       void validate_variant_selection(MapperManager *local_mapper,
@@ -973,6 +973,8 @@ namespace Legion {
       virtual void handle_misspeculation(void);
     protected:
       virtual InnerContext* initialize_inner_execution_context(VariantImpl *v);
+    public:
+      virtual InnerContext* create_implicit_context(void);
     public:
       void launch_shard(void);
       void extract_event_preconditions(const std::deque<InstanceSet> &insts);

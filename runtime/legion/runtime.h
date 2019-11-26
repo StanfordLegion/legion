@@ -710,6 +710,51 @@ namespace Legion {
     }; 
 
     /**
+     * \class ImplicitShardManager
+     * This is a class for helping to construct implicitly 
+     * control replicated top-level tasks from external threads.
+     * It helps to setup tasks just as though they had been 
+     * control replicated, except everything was already control
+     * replicated remotely.
+     */
+    class ImplicitShardManager : public Collectable {
+    public:
+      ImplicitShardManager(Runtime *rt, TaskID tid, MapperID mid, 
+           Processor::Kind k, unsigned shards_per_address_space);
+      ImplicitShardManager(const ImplicitShardManager &rhs);
+      ~ImplicitShardManager(void);
+    public:
+      ImplicitShardManager& operator=(const ImplicitShardManager &rhs);
+    public:
+      bool record_arrival(bool local);
+      ShardTask* create_shard(Processor proxy, const char *task_name);
+    protected:
+      void create_shard_manager(Processor proxy, const char *task_name);
+      void request_shard_manager(void);
+    public:
+      void process_implicit_request(void *remote, AddressSpaceID space);
+      RtUserEvent process_implicit_response(ShardManager *manager);
+    public:
+      static void handle_remote_request(Deserializer &derez, Runtime *runtime, 
+                                        AddressSpaceID remote_space);
+      static void handle_remote_response(Deserializer &derez, Runtime *runtime);
+    public:
+      Runtime *const runtime;
+      const TaskID task_id;
+      const MapperID mapper_id;
+      const Processor::Kind kind;
+      const unsigned shards_per_address_space;
+    protected:
+      mutable LocalLock manager_lock;
+      unsigned expected_local_arrivals;
+      unsigned expected_remote_arrivals;
+      unsigned local_shard_id;
+      ShardManager *volatile shard_manager;
+      RtUserEvent manager_ready;
+      std::vector<std::pair<AddressSpaceID,void*> > remote_spaces;
+    };
+
+    /**
      * \class ProcessorManager
      * This class manages all the state for a single processor
      * within a given instance of the Internal runtime.  It keeps
@@ -2599,6 +2644,10 @@ namespace Legion {
                                                        Serializer &rez);
       void send_control_replicate_trace_update(AddressSpaceID target,
                                                Serializer &rez);
+      void send_control_replicate_implicit_request(AddressSpaceID target,
+                                                   Serializer &rez);
+      void send_control_replicate_implicit_response(AddressSpaceID target,
+                                                    Serializer &rez);
       void send_mapper_message(AddressSpaceID target, Serializer &rez);
       void send_mapper_broadcast(AddressSpaceID target, Serializer &rez);
       void send_task_impl_semantic_request(AddressSpaceID target, 
@@ -2959,6 +3008,9 @@ namespace Legion {
       void handle_control_replicate_trace_event_response(Deserializer &derez);
       void handle_control_replicate_trace_update(Deserializer &derez,
                                                  AddressSpaceID source);
+      void handle_control_replicate_implicit_request(Deserializer &derez,
+                                                     AddressSpaceID source);
+      void handle_control_replicate_implicit_response(Deserializer &derez);
       void handle_library_mapper_request(Deserializer &derez,
                                          AddressSpaceID source);
       void handle_library_mapper_response(Deserializer &derez);
@@ -3525,6 +3577,7 @@ namespace Legion {
       // Keep track of managers for control replication execution
       mutable LocalLock shard_lock;
       std::map<ReplicationID,ShardManager*> shard_managers;
+      std::map<TaskID,ImplicitShardManager*> implicit_shard_managers;
     protected:
       // For generating random numbers
       mutable LocalLock random_lock;
@@ -3691,6 +3744,15 @@ namespace Legion {
           Processor::Kind &startup_kind);
       static int wait_for_shutdown(void);
       Future launch_top_level_task(const TaskLauncher &launcher);
+      IndividualTask* create_implicit_top_level(TaskID top_task_id,
+                                                MapperID top_mapper_id,
+                                                Processor proxy,
+                                                const char *task_name);
+      ImplicitShardManager* find_implicit_shard_manager(TaskID top_task_id,
+                                                MapperID top_mapper_id,
+                                                Processor::Kind kind,
+                                                unsigned shards_per_space,
+                                                bool local);
       Context begin_implicit_task(TaskID top_task_id,
                                   MapperID top_mapper_id,
                                   Processor::Kind proc_kind,
