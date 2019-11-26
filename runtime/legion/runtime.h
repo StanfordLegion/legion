@@ -3270,6 +3270,7 @@ namespace Legion {
       static int wait_for_shutdown(void);
       Future launch_top_level_task(const TaskLauncher &launcher);
       Context begin_implicit_task(TaskID top_task_id,
+                                  MapperID top_mapper_id,
                                   Processor::Kind proc_kind,
                                   const char *task_name,
                                   bool control_replicable,

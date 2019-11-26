@@ -20319,6 +20319,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     Context Runtime::begin_implicit_task(TaskID top_task_id,
+                                         MapperID top_mapper_id,
                                          Processor::Kind proc_kind,
                                          const char *task_name,
                                          bool control_replicable,
@@ -20388,8 +20389,8 @@ namespace Legion {
         assert(proxy.exists());
 #endif
         top_context->set_executing_processor(proxy);
-        TaskLauncher launcher(legion_main_id, TaskArgument(),
-                              Predicate::TRUE_PRED, legion_main_mapper_id);
+        TaskLauncher launcher(top_task_id, TaskArgument(),
+                              Predicate::TRUE_PRED, top_mapper_id);
         // Mark that this task is the top-level task
         top_task->initialize_task(top_context, launcher, false/*track parent*/,
                       true/*top level task*/, true/*implicit top level task*/);
