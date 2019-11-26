@@ -28,7 +28,6 @@ list(APPEND REALM_TESTS
   ctxswitch
   barrier_reduce
   taskreg
-  memspeed
   idcheck
   inst_reuse
   transpose
@@ -39,6 +38,14 @@ list(APPEND REALM_TESTS
   event_subscribe
   deferred_allocs
   )
+
+# TODO: build memspeed properly with cuda enabled...
+if(NOT Legion_USE_CUDA)
+  list(APPEND REALM_TESTS
+    memspeed
+    )
+endif()
+
 foreach(test IN LISTS REALM_TESTS)
   add_executable(${test} ${test}.cc)
   target_link_libraries(${test} Legion::Realm)

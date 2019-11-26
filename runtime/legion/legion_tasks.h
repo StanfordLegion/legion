@@ -692,7 +692,8 @@ namespace Legion {
     public:
       Future initialize_task(InnerContext *ctx,
                              const TaskLauncher &launcher, 
-                             bool track = true, bool top_level=false);
+                             bool track = true, bool top_level=false,
+                             bool implicit_top_level = false);
     public:
       virtual bool has_prepipeline_stage(void) const
         { return need_prepipeline_stage; }
@@ -771,6 +772,7 @@ namespace Legion {
       friend class Internal;
       // Special field for the top level task
       bool top_level_task;
+      bool implicit_top_level_task;
       // Whether we have to do intra-task alias analysis
       bool need_intra_task_alias_analysis;
     protected:
@@ -1117,7 +1119,6 @@ namespace Legion {
     protected: 
       std::map<PhysicalManager*,std::pair<unsigned,bool> > acquired_instances;
       std::set<RtEvent> map_applied_conditions;
-      std::set<ApEvent> effects_postconditions;
       std::set<RtEvent> complete_preconditions;
       std::set<RtEvent> commit_preconditions;
     };

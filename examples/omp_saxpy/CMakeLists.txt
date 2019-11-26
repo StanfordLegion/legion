@@ -15,37 +15,18 @@
 #------------------------------------------------------------------------------#
 
 cmake_minimum_required(VERSION 3.1)
+project(LegionExample_omp_saxpy)
 
+# Only search if were building stand-alone and not as part of Legion
 if(NOT Legion_SOURCE_DIR)
   find_package(Legion REQUIRED)
 endif()
 
-add_subdirectory(attach_file)
-add_subdirectory(circuit)
-add_subdirectory(dynamic_registration)
-add_subdirectory(ghost)
-add_subdirectory(ghost_pull)
-add_subdirectory(realm_saxpy)
-add_subdirectory(realm_stencil)
-add_subdirectory(spmd_cgsolver)
-add_subdirectory(virtual_map)
-add_subdirectory(attach_2darray_c_fortran_layout)
-add_subdirectory(attach_array_daxpy)
+add_executable(omp_saxpy omp_saxpy.cc
+                         simple_blas.h simple_blas.inl simple_blas.cc)
 
-if(Legion_USE_GASNet)
-  add_subdirectory(mpi_interop)
-else()
-  add_subdirectory(implicit_top_task)
-endif()
+target_link_libraries(omp_saxpy Legion::Legion)
 
-if(Legion_USE_CUDA)
-  add_subdirectory(thrust_interop)
-endif()
-
-if(Legion_USE_Python)
-  add_subdirectory(python_interop)
-endif()
-
-if(Legion_USE_OpenMP)
-  add_subdirectory(omp_saxpy)
+if(Legion_ENABLE_TESTING)
+  add_test(NAME omp_saxpy COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:omp_saxpy> -ll:ocpu 1 ${Legion_TEST_ARGS})
 endif()

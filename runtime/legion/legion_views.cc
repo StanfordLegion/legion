@@ -610,6 +610,58 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    /*static*/ void ExprView::verify_current_to_filter(
+                 const FieldMask &dominated, EventFieldUsers &current_to_filter)
+    //--------------------------------------------------------------------------
+    {
+      if (!!dominated)
+      {
+        for (EventFieldUsers::iterator eit = current_to_filter.begin();
+              eit != current_to_filter.end(); /*nothing*/)
+        {
+          const FieldMask non_dominated = 
+            eit->second.get_valid_mask() - dominated;
+          // If everything was actually dominated we can keep going
+          if (!non_dominated)
+          {
+            eit++;
+            continue;
+          }
+          // If no fields were dominated we can just remove this
+          if (non_dominated == eit->second.get_valid_mask())
+          {
+            EventFieldUsers::iterator to_delete = eit++;
+            current_to_filter.erase(to_delete);
+            continue;
+          }
+          // Otherwise do the actuall overlapping test
+          std::vector<PhysicalUser*> to_delete; 
+          for (FieldMaskSet<PhysicalUser>::iterator it =
+                eit->second.begin(); it != eit->second.end(); it++)
+          {
+            it.filter(non_dominated);
+            if (!it->second)
+              to_delete.push_back(it->first);
+          }
+          if (!eit->second.tighten_valid_mask())
+          {
+            EventFieldUsers::iterator to_delete = eit++;
+            current_to_filter.erase(to_delete);
+          }
+          else
+          {
+            for (std::vector<PhysicalUser*>::const_iterator it = 
+                  to_delete.begin(); it != to_delete.end(); it++)
+              eit->second.erase(*it);
+            eit++;
+          }
+        }
+      }
+      else
+        current_to_filter.clear();
+    }
+
+    //--------------------------------------------------------------------------
     void ExprView::find_user_preconditions(const RegionUsage &usage,
                                            IndexSpaceExpression *user_expr,
                                            const bool user_dominates,
@@ -620,8 +672,9 @@ namespace Legion {
                                            const bool trace_recording)
     //--------------------------------------------------------------------------
     {
-      DETAILED_PROFILER(runtime, 
+      DETAILED_PROFILER(Internal::implicit_runtime, 
                         MATERIALIZED_VIEW_FIND_LOCAL_PRECONDITIONS_CALL);
+      FieldMask dominated;
       std::set<ApEvent> dead_events; 
       EventFieldUsers current_to_filter, previous_to_filter;
       // Perform the analysis with a read-only lock
@@ -633,16 +686,19 @@ namespace Legion {
         if (user_dominates)
         {
           // We dominate in this case so we can do filtering
-          FieldMask observed, non_dominated;
           if (!current_epoch_users.empty())
+          {
+            FieldMask observed, non_dominated;
             find_current_preconditions(usage, user_mask, user_expr,
                                        term_event, op_id, index, 
                                        user_dominates, preconditions, 
                                        dead_events, current_to_filter, 
                                        observed, non_dominated,trace_recording);
+            if (!!observed)
+              dominated = observed - non_dominated;
+          }
           if (!previous_epoch_users.empty())
           {
-            const FieldMask dominated = observed - non_dominated;
             if (!!dominated)
               find_previous_filter_users(dominated, previous_to_filter);
             const FieldMask previous_mask = user_mask - dominated;
@@ -655,9 +711,9 @@ namespace Legion {
         }
         else
         {
-          FieldMask observed, non_dominated;
           if (!current_epoch_users.empty())
           {
+            FieldMask observed, non_dominated;
             find_current_preconditions(usage, user_mask, user_expr,
                                        term_event, op_id, index, 
                                        user_dominates, preconditions, 
@@ -675,6 +731,11 @@ namespace Legion {
                                         dead_events, trace_recording);
         }
       } 
+      // It's possible that we recorded some users for fields which
+      // are not actually fully dominated, if so we need to prune them
+      // otherwise we can get into issues of soundness
+      if (!current_to_filter.empty())
+        verify_current_to_filter(dominated, current_to_filter);
       if (!trace_recording && (!dead_events.empty() || 
            !previous_to_filter.empty() || !current_to_filter.empty()))
       {
@@ -760,8 +821,9 @@ namespace Legion {
                                            const bool trace_recording)
     //--------------------------------------------------------------------------
     {
-      DETAILED_PROFILER(runtime, 
+      DETAILED_PROFILER(Internal::implicit_runtime, 
                         MATERIALIZED_VIEW_FIND_LOCAL_COPY_PRECONDITIONS_CALL);
+      FieldMask dominated;
       std::set<ApEvent> dead_events; 
       EventFieldUsers current_to_filter, previous_to_filter;
       // Do the first pass with a read-only lock on the events
@@ -773,16 +835,19 @@ namespace Legion {
         if (copy_dominates)
         {
           // We dominate in this case so we can do filtering
-          FieldMask observed, non_dominated;
           if (!current_epoch_users.empty())
+          {
+            FieldMask observed, non_dominated;
             find_current_preconditions(usage, copy_mask, copy_expr, 
                                        op_id, index, copy_dominates,
                                        preconditions, dead_events, 
                                        current_to_filter, observed, 
                                        non_dominated, trace_recording);
+            if (!!observed)
+              dominated = observed - non_dominated;
+          }
           if (!previous_epoch_users.empty())
           {
-            const FieldMask dominated = observed - non_dominated;
             if (!!dominated)
               find_previous_filter_users(dominated, previous_to_filter);
             const FieldMask previous_mask = copy_mask - dominated;
@@ -795,9 +860,9 @@ namespace Legion {
         }
         else
         {
-          FieldMask observed, non_dominated;
           if (!current_epoch_users.empty())
           {
+            FieldMask observed, non_dominated;
             find_current_preconditions(usage, copy_mask, copy_expr, 
                                        op_id, index, copy_dominates,
                                        preconditions, dead_events, 
@@ -815,6 +880,11 @@ namespace Legion {
                                         trace_recording);
         }
       }
+      // It's possible that we recorded some users for fields which
+      // are not actually fully dominated, if so we need to prune them
+      // otherwise we can get into issues of soundness
+      if (!current_to_filter.empty())
+        verify_current_to_filter(dominated, current_to_filter);
       if (!trace_recording && (!dead_events.empty() || 
            !previous_to_filter.empty() || !current_to_filter.empty()))
       {
@@ -833,8 +903,6 @@ namespace Legion {
       if (!subviews.empty() && 
           !(subviews.get_valid_mask() * copy_mask))
       {
-        FieldMaskSet<ExprView> to_traverse;
-        std::map<ExprView*,IndexSpaceExpression*> traverse_exprs;
         for (FieldMaskSet<ExprView>::const_iterator it = 
               subviews.begin(); it != subviews.end(); it++)
         {
@@ -845,46 +913,28 @@ namespace Legion {
           // to do the intersection test
           if (copy_dominates)
           {
-            to_traverse.insert(it->first, overlap);
+            it->first->find_copy_preconditions(usage, it->first->view_expr,
+                                    true/*dominate*/, overlap, op_id, index,
+                                    preconditions, trace_recording);
             continue;
           }
           if (it->first->view_expr == copy_expr)
           {
-            to_traverse.insert(it->first, overlap);
-            traverse_exprs[it->first] = copy_expr;
+            it->first->find_copy_preconditions(usage, copy_expr,
+                                    true/*dominate*/, overlap, op_id, index,
+                                    preconditions, trace_recording);
             continue;
           }
           IndexSpaceExpression *expr_overlap = 
             context->intersect_index_spaces(it->first->view_expr, copy_expr);
           if (!expr_overlap->is_empty())
           {
-            to_traverse.insert(it->first, overlap);
-            traverse_exprs[it->first] = expr_overlap;
-          }
-        }
-        if (!to_traverse.empty())
-        {
-          if (copy_dominates)
-          {
-            for (FieldMaskSet<ExprView>::const_iterator it = 
-                  to_traverse.begin(); it != to_traverse.end(); it++)
-              it->first->find_copy_preconditions(usage, it->first->view_expr,
-                                  true/*dominate*/, it->second, op_id, index,
-                                  preconditions, trace_recording);
-          }
-          else
-          {
-            for (FieldMaskSet<ExprView>::const_iterator it = 
-                  to_traverse.begin(); it != to_traverse.end(); it++)
-            {
-              IndexSpaceExpression *intersect = traverse_exprs[it->first];
-              const bool copy_dominates = 
-                (intersect->expr_id == it->first->view_expr->expr_id) ||
-                (intersect->get_volume() == it->first->view_volume);
-              it->first->find_copy_preconditions(usage, intersect, 
-                                copy_dominates, it->second, op_id, 
-                                index, preconditions, trace_recording);
-            }
+            const bool copy_dominates = 
+              (expr_overlap->expr_id == it->first->view_expr->expr_id) ||
+              (expr_overlap->get_volume() == it->first->view_volume);
+            it->first->find_copy_preconditions(usage, expr_overlap, 
+                              copy_dominates, overlap, op_id, 
+                              index, preconditions, trace_recording);
           }
         }
       }
@@ -1100,8 +1150,6 @@ namespace Legion {
     {
       // We're going to try to put this user as far down the ExprView tree
       // as we can in order to avoid doing unnecessary intersection tests later
-      FieldMaskSet<ExprView> to_traverse;
-      std::map<ExprView*,IndexSpaceExpression*> to_traverse_exprs;
       {
         // Find all the intersecting subviews to see if we can 
         // continue the traversal
@@ -1120,47 +1168,29 @@ namespace Legion {
           const size_t overlap_volume = overlap->get_volume();
           if (overlap_volume == user_volume)
           {
-            // Subview dominates the user so continue traversal
-            to_traverse.insert(it->first, overlap_mask);
-            // Use the right pointer here so its easier to recognize below
+            // Check for the cases where we dominated perfectly
             if (overlap_volume == it->first->view_expr->get_volume())
-              to_traverse_exprs[it->first] = it->first->view_expr;
+            {
+              PhysicalUser *dominate_user = new PhysicalUser(usage,
+                  it->first->view_expr,op_id,index,true/*copy*/,true/*covers*/);
+              it->first->add_current_user(dominate_user, term_event,
+                                          overlap_mask, trace_recording);
+            }
             else
-              to_traverse_exprs[it->first] = user_expr;
+            {
+              // Continue the traversal on this node
+              it->first->add_partial_user(usage, op_id, index, overlap_mask,
+                  term_event, user_expr, user_volume, trace_recording);
+            }
+            // We only need to record the partial user in one sub-tree
+            // where it is dominated in order to be sound
+            user_mask -= overlap_mask;
+            if (!user_mask)
+              break;
           }
           // Otherwise for all other cases we're going to record it here
           // because they don't dominate the user to be recorded
         }
-      }
-      if (!to_traverse.empty())
-      {
-        // Traverse down any subviews that we need to
-        for (FieldMaskSet<ExprView>::iterator it = 
-              to_traverse.begin(); it != to_traverse.end(); it++)
-        {
-          std::map<ExprView*,IndexSpaceExpression*>::const_iterator
-            finder = to_traverse_exprs.find(it->first); 
-#ifdef DEBUG_LEGION
-          assert(finder != to_traverse_exprs.end());
-#endif
-          // Check for the cases where we dominated perfectly
-          if (finder->second == it->first->view_expr)
-          {
-            PhysicalUser *dominate_user = new PhysicalUser(usage,
-                finder->second, op_id, index, true/*copy*/, true/*covers*/);
-            it->first->add_current_user(dominate_user, term_event,
-                                        it->second, trace_recording);
-          }
-          else
-          {
-            // Continue the traversal on this node
-            it->first->add_partial_user(usage, op_id, index,
-                it->second, term_event, finder->second, 
-                finder->second->get_volume(), trace_recording);
-          }
-        }
-        // Remove fields that we did a dominated traversal
-        user_mask -= to_traverse.get_valid_mask();
       }
       // If we still have local fields, make a user and record it here
       if (!!user_mask)

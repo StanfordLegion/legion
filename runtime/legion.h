@@ -7032,36 +7032,13 @@ namespace Legion {
        * running in background mode.  Otherwise it is illegal to 
        * invoke this method. Returns the exit code for the application.
        */
-      static int wait_for_shutdown(void);
-
-      /**
-       * An alternative way to start the runtime to create an implicit
-       * top-level task in the main thread. After this call the main
-       * thread will be treated as though it is the top-level task 
-       * running on a specific kind of processor. Users can also mark
-       * that this implicit top-level task is control replicable for
-       * supporting implicit top-level tasks for multi-node runs.
-       */
-      static Context start_implicit(int argc, char **argv,
-                                    TaskID top_task_id,
-                                    Processor::Kind proc_kind,
-                                    const char *task_name = NULL,
-                                    bool control_replicable = false);
-
-      /**
-       * This is the final method for marking the end of an 
-       * implicit top-level task. Note that it executes asychronously
-       * and it is still the responsibility of the user to wait for 
-       * the runtime to shutdown when all of it's effects are done.
-       * The Context object is no longer valid after this call.
-       */
-      static void finish_implicit(Context ctx);
+      static int wait_for_shutdown(void); 
       
       /**
        * Set the top-level task ID for the runtime to use when beginning
-       * an application.  This should be set before calling start.  Otherwise
-       * the runtime will default to a value of zero.  Note the top-level
-       * task must be a single task and not an index space task.
+       * an application.  This should be set before calling start. If no
+       * top-level task ID is set then the runtime will not start running
+       * any tasks at start-up.
        * @param top_id ID of the top level task to be run
        */
       static void set_top_level_task_id(TaskID top_id);
@@ -7073,6 +7050,40 @@ namespace Legion {
        * have no effect after the top-level task is started.
        */
       static void set_top_level_task_mapper_id(MapperID mapper_id);
+
+      /**
+       * After the runtime is started, users can launch as many top-level
+       * tasks as they want using this method. Each one will start a new
+       * top-level task and returns values with a future. Currently we
+       * only permit this to be called from threads not managed by Legion.
+       */
+      Future launch_top_level_task(const TaskLauncher &launcher);
+
+      /**
+       * In addition to launching top-level tasks from outside the runtime,
+       * applications can bind external threads as new implicit top-level
+       * tasks to the runtime. This will tell the runtime that this external
+       * thread should now function as new top-level task that is executing.
+       * After this call the trhead will be treated as through it is a 
+       * top-level task running on a specific kind of processor. Users can 
+       * also mark that this implicit top-level task is control replicable 
+       * for supporting implicit top-level tasks for multi-node runs. For
+       * the control replicable case we expect to see one of these calls
+       * from every single address space.
+       */
+      Context begin_implicit_task(TaskID top_task_id,
+                                  Processor::Kind proc_kind,
+                                  const char *task_name = NULL,
+                                  bool control_replicable = false);
+
+      /**
+       * This is the final method for marking the end of an 
+       * implicit top-level task. Note that it executes asychronously
+       * and it is still the responsibility of the user to wait for 
+       * the runtime to shutdown when all of it's effects are done.
+       * The Context object is no longer valid after this call.
+       */
+      void finish_implicit_task(Context ctx);
 
       /**
        * Return the maximum number of dimensions that Legion was

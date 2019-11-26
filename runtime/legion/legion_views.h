@@ -29,6 +29,10 @@
 // for now as it is better to be both correct and faster. We're leaving
 // the implementation though here in case a program arises in the future
 // where view replication could lead to a performance win.
+// !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+// Note that this MAYBE was fixed by commit ddc4b70b86 but it has not
+// been tested. You can try this, but please verify that it is working
+// !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 #ifdef ENABLE_VIEW_REPLICATION
 #warning "ENABLE_VIEW_REPLICATION is buggy, see issue #653, please be careful!"
 #endif
@@ -402,6 +406,8 @@ namespace Legion {
       void filter_current_users(const EventFieldUsers &to_filter);
       void filter_previous_users(const EventFieldUsers &to_filter);
       bool refine_users(void);
+      static void verify_current_to_filter(const FieldMask &dominated,
+                                  EventFieldUsers &current_to_filter);
     public:
       RegionTreeForest *const context;
       InstanceManager *const manager;

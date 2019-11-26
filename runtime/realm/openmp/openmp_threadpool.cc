@@ -194,6 +194,7 @@ namespace Realm {
     assert(wi->status == WorkerInfo::WORKER_CLAIMED);
     wi->thread_id = thread_id;
     wi->num_threads = num_threads;
+    wi->app_num_threads = 0;
     wi->fnptr = fnptr;
     wi->data = data;
     wi->work_item = work_item;

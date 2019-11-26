@@ -105,14 +105,22 @@ inline void BlasTaskImplementations<T>::preregister_tasks(void)
   {
     axpy_task_id = Runtime::generate_static_task_id();
     TaskVariantRegistrar tvr(axpy_task_id);
+#ifdef REALM_USE_OPENMP
+    tvr.add_constraint(ProcessorConstraint(Processor::OMP_PROC));
+#else
     tvr.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
+#endif
     Runtime::preregister_task_variant<BlasTaskImplementations<T>::axpy_task_cpu>(tvr, "axpy (cpu)");
   }
 
   {
     dot_task_id = Runtime::generate_static_task_id();
     TaskVariantRegistrar tvr(dot_task_id);
+#ifdef REALM_USE_OPENMP
+    tvr.add_constraint(ProcessorConstraint(Processor::OMP_PROC));
+#else
     tvr.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
+#endif
     Runtime::preregister_task_variant<T, BlasTaskImplementations<T>::dot_task_cpu>(tvr, "dot (cpu)");
   }
 }

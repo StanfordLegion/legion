@@ -254,7 +254,10 @@ AdversarialMapper::AdversarialMapper(Machine m,
             break;
           }
         default:
-          assert(false);
+	  {
+	    printf("  Processor " IDFMT " is unknown (kind=%d)\n", it->id, it->kind());
+	    break;
+	  }
       }
     }
     // We can also get the list of all the memories available
