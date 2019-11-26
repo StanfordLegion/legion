@@ -1,4 +1,4 @@
-module legion_fortran_object_oriented
+module legion_fortran
   use, intrinsic :: iso_c_binding
   use legion_fortran_types
   use legion_fortran_c_interface
@@ -62,9 +62,9 @@ contains
     logical, intent(in) :: flag
     
     if (flag) then
-      legion_predicate_constructor%predicate = legion_predicate_true_c()
+      legion_predicate_constructor%predicate = legion_predicate_true_f()
     else
-      legion_predicate_constructor%predicate = legion_predicate_false_c()
+      legion_predicate_constructor%predicate = legion_predicate_false_f()
     endif
   end function legion_predicate_constructor
   
@@ -77,7 +77,7 @@ contains
     type(FDomainPoint)         :: legion_domain_point_constructor_point_1d
     type(FPoint1D), intent(in) :: point
       
-    legion_domain_point_constructor_point_1d%point = legion_domain_point_from_point_1d_c(point%point)
+    legion_domain_point_constructor_point_1d%point = legion_domain_point_from_point_1d_f(point%point)
   end function legion_domain_point_constructor_point_1d
   
   function legion_domain_point_constructor_point_2d(point)
@@ -86,7 +86,7 @@ contains
     type(FDomainPoint)         :: legion_domain_point_constructor_point_2d
     type(FPoint2D), intent(in) :: point
       
-    legion_domain_point_constructor_point_2d%point = legion_domain_point_from_point_2d_c(point%point)
+    legion_domain_point_constructor_point_2d%point = legion_domain_point_from_point_2d_f(point%point)
   end function legion_domain_point_constructor_point_2d
   
   function legion_domain_point_constructor_point_3d(point)
@@ -95,7 +95,7 @@ contains
     type(FDomainPoint)         :: legion_domain_point_constructor_point_3d
     type(FPoint3D), intent(in) :: point
       
-    legion_domain_point_constructor_point_3d%point = legion_domain_point_from_point_3d_c(point%point)
+    legion_domain_point_constructor_point_3d%point = legion_domain_point_from_point_3d_f(point%point)
   end function legion_domain_point_constructor_point_3d
   
   function legion_domain_point_get_point_1d(this)
@@ -107,7 +107,7 @@ contains
     if (this%point%dim .ne. 1) then
       print *, "Wrong DIM 1", this%point%dim 
     end if
-    legion_domain_point_get_point_1d%point = legion_domain_point_get_point_1d_c(this%point)
+    legion_domain_point_get_point_1d%point = legion_domain_point_get_point_1d_f(this%point)
   end function legion_domain_point_get_point_1d
   
   function legion_domain_point_get_point_2d(this)
@@ -119,7 +119,7 @@ contains
     if (this%point%dim .ne. 2) then
       print *, "Wrong DIM 2", this%point%dim 
     end if
-    legion_domain_point_get_point_2d%point = legion_domain_point_get_point_2d_c(this%point)
+    legion_domain_point_get_point_2d%point = legion_domain_point_get_point_2d_f(this%point)
   end function legion_domain_point_get_point_2d
   
   function legion_domain_point_get_point_3d(this)
@@ -131,7 +131,7 @@ contains
     if (this%point%dim .ne. 3) then
       print *, "Wrong DIM 3", this%point%dim 
     end if
-    legion_domain_point_get_point_3d%point = legion_domain_point_get_point_3d_c(this%point)
+    legion_domain_point_get_point_3d%point = legion_domain_point_get_point_3d_f(this%point)
   end function legion_domain_point_get_point_3d  
   
   ! ===============================================================================
@@ -273,7 +273,7 @@ contains
     type(FRect1D), intent(out) :: rect
     type(FDomain), intent(in) :: domain
       
-    rect%rect = legion_domain_get_rect_1d_c(domain%domain)
+    rect%rect = legion_domain_get_rect_1d_f(domain%domain)
   end subroutine legion_rect_1d_assignment_from_domain
   
   subroutine legion_rect_2d_assignment_from_domain(rect, domain)
@@ -282,7 +282,7 @@ contains
     type(FRect2D), intent(out) :: rect
     type(FDomain), intent(in) :: domain
       
-    rect%rect = legion_domain_get_rect_2d_c(domain%domain)
+    rect%rect = legion_domain_get_rect_2d_f(domain%domain)
   end subroutine legion_rect_2d_assignment_from_domain
   
   subroutine legion_rect_3d_assignment_from_domain(rect, domain)
@@ -291,7 +291,7 @@ contains
     type(FRect3D), intent(out) :: rect
     type(FDomain), intent(in) :: domain
       
-    rect%rect = legion_domain_get_rect_3d_c(domain%domain)
+    rect%rect = legion_domain_get_rect_3d_f(domain%domain)
   end subroutine legion_rect_3d_assignment_from_domain
   
   function legion_domain_get_volume(this)
@@ -300,7 +300,7 @@ contains
     integer(kind=8)            :: legion_domain_get_volume
     class(FDomain), intent(in) :: this
     
-    legion_domain_get_volume = legion_domain_get_volume_c(this%domain)
+    legion_domain_get_volume = legion_domain_get_volume_f(this%domain)
   end function legion_domain_get_volume
   
   function legion_rect_1d_get_volume(this)
@@ -310,8 +310,8 @@ contains
     class(FRect1D), intent(in) :: this
     
     type(legion_domain_f_t) :: domain
-    domain = legion_domain_from_rect_1d_c(this%rect)
-    legion_rect_1d_get_volume = legion_domain_get_volume_c(domain)
+    domain = legion_domain_from_rect_1d_f(this%rect)
+    legion_rect_1d_get_volume = legion_domain_get_volume_f(domain)
   end function legion_rect_1d_get_volume
   
   function legion_rect_2d_get_volume(this)
@@ -321,8 +321,8 @@ contains
     class(FRect2D), intent(in) :: this
     
     type(legion_domain_f_t) :: domain
-    domain = legion_domain_from_rect_2d_c(this%rect)
-    legion_rect_2d_get_volume = legion_domain_get_volume_c(domain)
+    domain = legion_domain_from_rect_2d_f(this%rect)
+    legion_rect_2d_get_volume = legion_domain_get_volume_f(domain)
   end function legion_rect_2d_get_volume
   
   function legion_rect_3d_get_volume(this)
@@ -332,8 +332,8 @@ contains
     class(FRect3D), intent(in) :: this
     
     type(legion_domain_f_t) :: domain
-    domain = legion_domain_from_rect_3d_c(this%rect)
-    legion_rect_3d_get_volume = legion_domain_get_volume_c(domain)
+    domain = legion_domain_from_rect_3d_f(this%rect)
+    legion_rect_3d_get_volume = legion_domain_get_volume_f(domain)
   end function legion_rect_3d_get_volume
 
   ! ===============================================================================
@@ -352,7 +352,7 @@ contains
     legion_field_accessor_1d_constructor%dim = 1
     legion_field_accessor_1d_constructor%data_size = data_size
     legion_field_accessor_1d_constructor%privilege_mode = priv
-    legion_field_accessor_1d_constructor%accessor = legion_physical_region_get_field_accessor_array_1d_c(physical_region%pr, fid)
+    legion_field_accessor_1d_constructor%accessor = legion_physical_region_get_field_accessor_array_1d_f(physical_region%pr, fid)
   end function legion_field_accessor_1d_constructor
   
   function legion_field_accessor_2d_constructor(physical_region, fid, priv, data_size)
@@ -368,7 +368,7 @@ contains
     legion_field_accessor_2d_constructor%dim = 2
     legion_field_accessor_2d_constructor%data_size = data_size
     legion_field_accessor_2d_constructor%privilege_mode = priv
-    legion_field_accessor_2d_constructor%accessor = legion_physical_region_get_field_accessor_array_2d_c(physical_region%pr, fid)
+    legion_field_accessor_2d_constructor%accessor = legion_physical_region_get_field_accessor_array_2d_f(physical_region%pr, fid)
   end function legion_field_accessor_2d_constructor
   
   function legion_field_accessor_3d_constructor(physical_region, fid, priv, data_size)
@@ -384,7 +384,7 @@ contains
     legion_field_accessor_3d_constructor%dim = 3
     legion_field_accessor_3d_constructor%data_size = data_size
     legion_field_accessor_3d_constructor%privilege_mode = priv
-    legion_field_accessor_3d_constructor%accessor = legion_physical_region_get_field_accessor_array_3d_c(physical_region%pr, fid)
+    legion_field_accessor_3d_constructor%accessor = legion_physical_region_get_field_accessor_array_3d_f(physical_region%pr, fid)
   end function legion_field_accessor_3d_constructor
   
   subroutine legion_field_accessor_read_point_ptr(this, point, dst)
@@ -401,19 +401,19 @@ contains
       ! 1D
       select type (point)
       type is (FPoint1D)
-        call legion_accessor_array_1d_read_point_c(this%accessor, point%point, dst, this%data_size)
+        call legion_accessor_array_1d_read_point_f(this%accessor, point%point, dst, this%data_size)
       end select
     type is (FFieldAccessor2D)
       ! 2D
       select type (point)
       type is (FPoint2D)
-        call legion_accessor_array_2d_read_point_c(this%accessor, point%point, dst, this%data_size)
+        call legion_accessor_array_2d_read_point_f(this%accessor, point%point, dst, this%data_size)
       end select
     type is (FFieldAccessor3D)
       ! 3D
       select type (point)
       type is (FPoint3D)
-        call legion_accessor_array_3d_read_point_c(this%accessor, point%point, dst, this%data_size)
+        call legion_accessor_array_3d_read_point_f(this%accessor, point%point, dst, this%data_size)
       end select
     class default
       ! give error for unexpected/unsupported type
@@ -495,19 +495,19 @@ contains
       ! 1D
       select type (point)
       type is (FPoint1D)
-        call legion_accessor_array_1d_write_point_c(this%accessor, point%point, src, this%data_size)
+        call legion_accessor_array_1d_write_point_f(this%accessor, point%point, src, this%data_size)
       end select
     type is (FFieldAccessor2D)
       ! 2D
       select type (point)
       type is (FPoint2D)
-        call legion_accessor_array_2d_write_point_c(this%accessor, point%point, src, this%data_size)
+        call legion_accessor_array_2d_write_point_f(this%accessor, point%point, src, this%data_size)
       end select
     type is (FFieldAccessor3D)
       ! 3D
       select type (point)
       type is (FPoint3D)
-        call legion_accessor_array_3d_write_point_c(this%accessor, point%point, src, this%data_size)
+        call legion_accessor_array_3d_write_point_f(this%accessor, point%point, src, this%data_size)
       end select
     class default
       ! give error for unexpected/unsupported type
@@ -586,7 +586,7 @@ contains
     
     type(legion_byte_offset_f_t) :: tmp_offset
       
-    raw_ptr = legion_accessor_array_1d_raw_rect_ptr_c(this%accessor, rect%rect, &
+    raw_ptr = legion_accessor_array_1d_raw_rect_ptr_f(this%accessor, rect%rect, &
                 subrect%rect, tmp_offset)
     offset = tmp_offset%offset
   end subroutine legion_field_accessor_1d_get_raw_ptr
@@ -602,7 +602,7 @@ contains
     
     type(legion_byte_offset_f_t) :: tmp_offset(2)
       
-    raw_ptr = legion_accessor_array_2d_raw_rect_ptr_c(this%accessor, rect%rect, &
+    raw_ptr = legion_accessor_array_2d_raw_rect_ptr_f(this%accessor, rect%rect, &
                 subrect%rect, tmp_offset)
     offset(1) = tmp_offset(1)%offset
     offset(2) = tmp_offset(2)%offset
@@ -619,7 +619,7 @@ contains
     
     type(legion_byte_offset_f_t) :: tmp_offset(3)
       
-    raw_ptr = legion_accessor_array_3d_raw_rect_ptr_c(this%accessor, rect%rect, &
+    raw_ptr = legion_accessor_array_3d_raw_rect_ptr_f(this%accessor, rect%rect, &
                 subrect%rect, tmp_offset)
     offset(1) = tmp_offset(1)%offset
     offset(2) = tmp_offset(2)%offset
@@ -636,7 +636,7 @@ contains
     class(FDomain), intent(in) :: handle
       
     legion_domain_point_iterator_constructor_from_domain%iterator = &
-      legion_domain_point_iterator_create_c(handle%domain)
+      legion_domain_point_iterator_create_f(handle%domain)
   end function legion_domain_point_iterator_constructor_from_domain
   
   function legion_domain_point_iterator_constructor_from_rect_1d(handle)
@@ -647,9 +647,9 @@ contains
       
     type(legion_domain_f_t) :: domain
     
-    domain = legion_domain_from_rect_1d_c(handle%rect)  
+    domain = legion_domain_from_rect_1d_f(handle%rect)  
     legion_domain_point_iterator_constructor_from_rect_1d%iterator = &
-      legion_domain_point_iterator_create_c(domain)
+      legion_domain_point_iterator_create_f(domain)
   end function legion_domain_point_iterator_constructor_from_rect_1d
   
   function legion_domain_point_iterator_constructor_from_rect_2d(handle)
@@ -660,9 +660,9 @@ contains
       
     type(legion_domain_f_t) :: domain
     
-    domain = legion_domain_from_rect_2d_c(handle%rect)  
+    domain = legion_domain_from_rect_2d_f(handle%rect)  
     legion_domain_point_iterator_constructor_from_rect_2d%iterator = &
-      legion_domain_point_iterator_create_c(domain)
+      legion_domain_point_iterator_create_f(domain)
   end function legion_domain_point_iterator_constructor_from_rect_2d
   
   function legion_domain_point_iterator_constructor_from_rect_3d(handle)
@@ -673,16 +673,16 @@ contains
       
     type(legion_domain_f_t) :: domain
     
-    domain = legion_domain_from_rect_3d_c(handle%rect)  
+    domain = legion_domain_from_rect_3d_f(handle%rect)  
     legion_domain_point_iterator_constructor_from_rect_3d%iterator = &
-      legion_domain_point_iterator_create_c(domain)
+      legion_domain_point_iterator_create_f(domain)
   end function legion_domain_point_iterator_constructor_from_rect_3d
   
   subroutine legion_domain_point_iterator_destructor(this)
     implicit none
     
     class(FDomainPointIterator), intent(in) :: this
-    call legion_domain_point_iterator_destroy_c(this%iterator)
+    call legion_domain_point_iterator_destroy_f(this%iterator)
   end subroutine legion_domain_point_iterator_destructor
   
   function legion_domain_point_iterator_has_next(this)
@@ -691,7 +691,7 @@ contains
     logical                                :: legion_domain_point_iterator_has_next
     class(FDomainPointIterator), intent(in) :: this
     
-    legion_domain_point_iterator_has_next = legion_domain_point_iterator_has_next_c(this%iterator)
+    legion_domain_point_iterator_has_next = legion_domain_point_iterator_has_next_f(this%iterator)
   end function legion_domain_point_iterator_has_next
   
   function legion_domain_point_iterator_step(this)
@@ -700,7 +700,7 @@ contains
     type(FDomainPoint) :: legion_domain_point_iterator_step
     class(FDomainPointIterator), intent(in) :: this
     
-    legion_domain_point_iterator_step%point = legion_domain_point_iterator_next_c(this%iterator)
+    legion_domain_point_iterator_step%point = legion_domain_point_iterator_next_f(this%iterator)
   end function legion_domain_point_iterator_step
   
   ! ===============================================================================
@@ -715,7 +715,7 @@ contains
     
     integer                            :: tmp_fid
     
-    tmp_fid = legion_field_allocator_allocate_field_c(this%fa, field_size, desired_fieldid)
+    tmp_fid = legion_field_allocator_allocate_field_f(this%fa, field_size, desired_fieldid)
     if (tmp_fid == desired_fieldid) then
     else
       print *, "Field_ID allocate error", desired_fieldid, tmp_fid
@@ -729,7 +729,7 @@ contains
     class(FFieldAllocator), intent(in) :: this
     integer, intent(in)                :: fid
     
-    call legion_field_allocator_free_field_c(this%fa, fid)
+    call legion_field_allocator_free_field_f(this%fa, fid)
   end subroutine legion_field_allocator_free_field
   
   subroutine legion_field_allocator_destroy(this)
@@ -737,7 +737,7 @@ contains
     
     class(FFieldAllocator), intent(in) :: this
     
-    call legion_field_allocator_destroy_c(this%fa)
+    call legion_field_allocator_destroy_f(this%fa)
   end subroutine legion_field_allocator_destroy
   
   ! ===============================================================================
@@ -749,7 +749,7 @@ contains
     type(FIndexSpace)                 :: legion_logical_region_get_index_space 
     class(FLogicalRegion), intent(in) :: this
     
-    legion_logical_region_get_index_space%is = legion_logical_region_get_index_space_c(this%lr)
+    legion_logical_region_get_index_space%is = legion_logical_region_get_index_space_f(this%lr)
   end function legion_logical_region_get_index_space
   
   ! ===============================================================================
@@ -760,7 +760,7 @@ contains
     
     class(FPhysicalRegion), intent(in) :: this
       
-    call legion_physical_region_destroy_c(this%pr)
+    call legion_physical_region_destroy_f(this%pr)
   end subroutine legion_physical_region_destructor
   
   function legion_physical_region_is_mapped(this)
@@ -769,7 +769,7 @@ contains
     logical                            :: legion_physical_region_is_mapped
     class(FPhysicalRegion), intent(in) :: this
       
-    legion_physical_region_is_mapped = legion_physical_region_is_mapped_c(this%pr)
+    legion_physical_region_is_mapped = legion_physical_region_is_mapped_f(this%pr)
   end function legion_physical_region_is_mapped
   
   subroutine legion_physical_region_wait_until_valid(this)
@@ -777,7 +777,7 @@ contains
     
     class(FPhysicalRegion), intent(in) :: this
       
-    call legion_physical_region_wait_until_valid_c(this%pr)
+    call legion_physical_region_wait_until_valid_f(this%pr)
   end subroutine legion_physical_region_wait_until_valid
   
   function legion_physical_region_is_valid(this)
@@ -786,7 +786,7 @@ contains
     logical                            :: legion_physical_region_is_valid
     class(FPhysicalRegion), intent(in) :: this
       
-    legion_physical_region_is_valid = legion_physical_region_is_valid_c(this%pr)
+    legion_physical_region_is_valid = legion_physical_region_is_valid_f(this%pr)
   end function legion_physical_region_is_valid
   
   ! ===============================================================================
@@ -808,7 +808,7 @@ contains
     class(FPhysicalRegionList), intent(in) :: this
     type(integer), intent(in)             :: id
       
-    legion_physical_region_list_get_region_by_id%pr = legion_get_physical_region_by_id_c(this%region_ptr, id, this%num_regions)
+    legion_physical_region_list_get_region_by_id%pr = legion_get_physical_region_by_id_f(this%region_ptr, id, this%num_regions)
   end function legion_physical_region_list_get_region_by_id
   
   ! ===============================================================================
@@ -820,7 +820,7 @@ contains
     type(FLogicalRegion)                  :: legion_region_requirement_get_logical_region
     class(FRegionRequirement), intent(in) :: this
       
-    legion_region_requirement_get_logical_region%lr = legion_region_requirement_get_region_c(this%rr)
+    legion_region_requirement_get_logical_region%lr = legion_region_requirement_get_region_f(this%rr)
   end function legion_region_requirement_get_logical_region
   
   function legion_region_requirement_get_privilege_field_by_id(this, id)
@@ -830,7 +830,7 @@ contains
     class(FRegionRequirement), intent(in) :: this
     type(integer), intent(in)             :: id
     
-    legion_region_requirement_get_privilege_field_by_id = legion_region_requirement_get_privilege_field_c(this%rr, id)
+    legion_region_requirement_get_privilege_field_by_id = legion_region_requirement_get_privilege_field_f(this%rr, id)
   end function legion_region_requirement_get_privilege_field_by_id
   
   ! ===============================================================================
@@ -842,7 +842,7 @@ contains
     type(FFuture)             :: legion_future_constructor
     type(FFuture), intent(in) :: handle
       
-    legion_future_constructor%future = legion_future_copy_c(handle%future)
+    legion_future_constructor%future = legion_future_copy_f(handle%future)
   end function legion_future_constructor
   
   subroutine legion_future_destructor(this)
@@ -850,7 +850,7 @@ contains
     
     class(FFuture), intent(in) :: this
       
-    call legion_future_destroy_c(this%future)
+    call legion_future_destroy_f(this%future)
   end subroutine legion_future_destructor
   
   subroutine legion_future_get_integer4(this, result)
@@ -863,10 +863,10 @@ contains
     integer(kind=4), pointer :: f_ptr
     integer(c_size_t) :: result_size
     
-    ptr = legion_future_get_untyped_pointer_c(this%future)
+    ptr = legion_future_get_untyped_pointer_f(this%future)
     call c_f_pointer(ptr, f_ptr)
     result = f_ptr
-    result_size = legion_future_get_untyped_size_c(this%future)
+    result_size = legion_future_get_untyped_size_f(this%future)
     if (result_size .ne. c_sizeof(result)) then
       print *, "future result size error", result_size, c_sizeof(result)
     end if
@@ -882,10 +882,10 @@ contains
     integer(kind=8), pointer :: f_ptr
     integer(c_size_t) :: result_size
     
-    ptr = legion_future_get_untyped_pointer_c(this%future)
+    ptr = legion_future_get_untyped_pointer_f(this%future)
     call c_f_pointer(ptr, f_ptr)
     result = f_ptr
-    result_size = legion_future_get_untyped_size_c(this%future)
+    result_size = legion_future_get_untyped_size_f(this%future)
     if (result_size .ne. c_sizeof(result)) then
       print *, "future result size error", result_size, c_sizeof(result)
     end if
@@ -901,10 +901,10 @@ contains
     real(kind=4), pointer :: f_ptr
     integer(c_size_t) :: result_size
     
-    ptr = legion_future_get_untyped_pointer_c(this%future)
+    ptr = legion_future_get_untyped_pointer_f(this%future)
     call c_f_pointer(ptr, f_ptr)
     result = f_ptr
-    result_size = legion_future_get_untyped_size_c(this%future)
+    result_size = legion_future_get_untyped_size_f(this%future)
     if (result_size .ne. c_sizeof(result)) then
       print *, "future result size error", result_size, c_sizeof(result)
     end if
@@ -920,10 +920,10 @@ contains
     real(kind=8), pointer :: f_ptr
     integer(c_size_t) :: result_size
     
-    ptr = legion_future_get_untyped_pointer_c(this%future)
+    ptr = legion_future_get_untyped_pointer_f(this%future)
     call c_f_pointer(ptr, f_ptr)
     result = f_ptr
-    result_size = legion_future_get_untyped_size_c(this%future)
+    result_size = legion_future_get_untyped_size_f(this%future)
     if (result_size .ne. c_sizeof(result)) then
       print *, "future result size error", result_size, c_sizeof(result)
     end if
@@ -936,8 +936,8 @@ contains
     type(c_ptr), intent(out)       :: ptr
     integer(c_size_t), intent(out) :: size
     
-    ptr = legion_future_get_untyped_pointer_c(this%future)
-    size = legion_future_get_untyped_size_c(this%future)
+    ptr = legion_future_get_untyped_pointer_f(this%future)
+    size = legion_future_get_untyped_size_f(this%future)
   end subroutine legion_future_get_untyped
   
   ! ===============================================================================
@@ -948,7 +948,7 @@ contains
     
     class(FFutureMap), intent(in) :: this
     
-    call legion_future_map_wait_all_results_c(this%future_map)
+    call legion_future_map_wait_all_results_f(this%future_map)
   end subroutine legion_future_map_wait_all_results
   
   function legion_future_map_get_future_index(this, index)
@@ -962,8 +962,8 @@ contains
     type(legion_domain_point_f_t) :: dp
     
     pt = FPoint1D(index)
-    dp = legion_domain_point_from_point_1d_c(pt%point)
-    legion_future_map_get_future_index%future = legion_future_map_get_future_c(this%future_map, dp)
+    dp = legion_domain_point_from_point_1d_f(pt%point)
+    legion_future_map_get_future_index%future = legion_future_map_get_future_f(this%future_map, dp)
   end function legion_future_map_get_future_index
   
   function legion_future_map_get_future_domain_point(this, dp)
@@ -973,7 +973,7 @@ contains
     class(FFutureMap), intent(in)  :: this
     type(FDomainPoint), intent(in) :: dp
     
-    legion_future_map_get_future_domain_point%future = legion_future_map_get_future_c(this%future_map, dp%point)
+    legion_future_map_get_future_domain_point%future = legion_future_map_get_future_f(this%future_map, dp%point)
   end function legion_future_map_get_future_domain_point
   
   function legion_future_map_get_future_point_1d(this, pt)
@@ -985,8 +985,8 @@ contains
    
     type(legion_domain_point_f_t) :: dp
     
-    dp = legion_domain_point_from_point_1d_c(pt%point)
-    legion_future_map_get_future_point_1d%future = legion_future_map_get_future_c(this%future_map, dp)
+    dp = legion_domain_point_from_point_1d_f(pt%point)
+    legion_future_map_get_future_point_1d%future = legion_future_map_get_future_f(this%future_map, dp)
   end function legion_future_map_get_future_point_1d
   
   function legion_future_map_get_future_point_2d(this, pt)
@@ -998,8 +998,8 @@ contains
    
     type(legion_domain_point_f_t) :: dp
     
-    dp = legion_domain_point_from_point_2d_c(pt%point)
-    legion_future_map_get_future_point_2d%future = legion_future_map_get_future_c(this%future_map, dp)
+    dp = legion_domain_point_from_point_2d_f(pt%point)
+    legion_future_map_get_future_point_2d%future = legion_future_map_get_future_f(this%future_map, dp)
   end function legion_future_map_get_future_point_2d
   
   function legion_future_map_get_future_point_3d(this, pt)
@@ -1011,8 +1011,8 @@ contains
    
     type(legion_domain_point_f_t) :: dp
     
-    dp = legion_domain_point_from_point_3d_c(pt%point)
-    legion_future_map_get_future_point_3d%future = legion_future_map_get_future_c(this%future_map, dp)
+    dp = legion_domain_point_from_point_3d_f(pt%point)
+    legion_future_map_get_future_point_3d%future = legion_future_map_get_future_f(this%future_map, dp)
   end function legion_future_map_get_future_point_3d
   
   ! ===============================================================================
@@ -1045,7 +1045,7 @@ contains
     
     type(FArgumentMap) :: legion_argument_map_constructor
 
-    legion_argument_map_constructor%arg_map = legion_argument_map_create_c()
+    legion_argument_map_constructor%arg_map = legion_argument_map_create_f()
   end function legion_argument_map_constructor
   
   subroutine legion_argument_map_destructor(this)
@@ -1053,7 +1053,7 @@ contains
     
     class(FArgumentMap), intent(in) :: this
       
-    call legion_argument_map_destroy_c(this%arg_map)
+    call legion_argument_map_destroy_f(this%arg_map)
   end subroutine legion_argument_map_destructor
   
   subroutine legion_argument_map_set_point_domain_point(this, dp, arg, replace)
@@ -1067,7 +1067,7 @@ contains
     logical(c_bool) :: tmp_replace = .true.
     
     if (present(replace)) tmp_replace = replace
-    call legion_argument_map_set_point_c(this%arg_map, dp%point, arg%task_arg, tmp_replace)
+    call legion_argument_map_set_point_f(this%arg_map, dp%point, arg%task_arg, tmp_replace)
   end subroutine legion_argument_map_set_point_domain_point
 
   subroutine legion_argument_map_set_point_integer(this, index, arg, replace)
@@ -1084,7 +1084,7 @@ contains
     if (present(replace)) tmp_replace = replace
     dp%dim = 1
     dp%point_data(0) = index
-    call legion_argument_map_set_point_c(this%arg_map, dp, arg%task_arg, tmp_replace)
+    call legion_argument_map_set_point_f(this%arg_map, dp, arg%task_arg, tmp_replace)
   end subroutine legion_argument_map_set_point_integer
   
   subroutine legion_argument_map_set_point_1d_point(this, point, arg, replace)
@@ -1099,8 +1099,8 @@ contains
     type(legion_domain_point_f_t) :: dp
     
     if (present(replace)) tmp_replace = replace
-    dp = legion_domain_point_from_point_1d_c(point%point)
-    call legion_argument_map_set_point_c(this%arg_map, dp, arg%task_arg, tmp_replace)
+    dp = legion_domain_point_from_point_1d_f(point%point)
+    call legion_argument_map_set_point_f(this%arg_map, dp, arg%task_arg, tmp_replace)
   end subroutine legion_argument_map_set_point_1d_point
   
   subroutine legion_argument_map_set_point_2d_point(this, point, arg, replace)
@@ -1115,8 +1115,8 @@ contains
     type(legion_domain_point_f_t) :: dp
     
     if (present(replace)) tmp_replace = replace
-    dp = legion_domain_point_from_point_2d_c(point%point)
-    call legion_argument_map_set_point_c(this%arg_map, dp, arg%task_arg, tmp_replace)
+    dp = legion_domain_point_from_point_2d_f(point%point)
+    call legion_argument_map_set_point_f(this%arg_map, dp, arg%task_arg, tmp_replace)
   end subroutine legion_argument_map_set_point_2d_point
   
   subroutine legion_argument_map_set_point_3d_point(this, point, arg, replace)
@@ -1131,8 +1131,8 @@ contains
     type(legion_domain_point_f_t) :: dp
     
     if (present(replace)) tmp_replace = replace
-    dp = legion_domain_point_from_point_3d_c(point%point)
-    call legion_argument_map_set_point_c(this%arg_map, dp, arg%task_arg, tmp_replace)
+    dp = legion_domain_point_from_point_3d_f(point%point)
+    call legion_argument_map_set_point_f(this%arg_map, dp, arg%task_arg, tmp_replace)
   end subroutine legion_argument_map_set_point_3d_point
   
   ! ===============================================================================
@@ -1152,14 +1152,14 @@ contains
     integer                    :: tmp_id
     integer(kind=8)            :: tmp_tag
     
-    tmp_pred = legion_predicate_true_c()
+    tmp_pred = legion_predicate_true_f()
     tmp_id = 0
     tmp_tag = 0
     
     if (present(pred)) tmp_pred = pred
     if (present(id)) tmp_id = id
     if (present(pred)) tmp_tag = tag
-    legion_task_launcher_constructor%launcher = legion_task_launcher_create_c(tid, arg%task_arg, tmp_pred, tmp_id, tmp_tag)
+    legion_task_launcher_constructor%launcher = legion_task_launcher_create_f(tid, arg%task_arg, tmp_pred, tmp_id, tmp_tag)
   end function legion_task_launcher_constructor
   
   subroutine legion_task_launcher_destructor(this)
@@ -1167,7 +1167,7 @@ contains
     
     class(FTaskLauncher), intent(in) :: this
     
-    call legion_task_launcher_destroy_c(this%launcher)
+    call legion_task_launcher_destroy_f(this%launcher)
   end subroutine legion_task_launcher_destructor
   
   subroutine legion_task_launcher_add_region_requirement(this, handle, priv, prop, parent, tag, verified)
@@ -1190,7 +1190,7 @@ contains
     
     if (present(tag)) tmp_tag = tag
     if (present(verified)) tmp_verified = verified 
-    rr_id = legion_task_launcher_add_region_requirement_logical_region_c(this%launcher, &
+    rr_id = legion_task_launcher_add_region_requirement_logical_region_f(this%launcher, &
               handle%lr, priv, prop, parent%lr, tmp_tag, tmp_verified)
   end subroutine legion_task_launcher_add_region_requirement
     
@@ -1207,7 +1207,7 @@ contains
     tmp_inst = .true.
     if (present(inst)) tmp_inst = inst
     
-    call legion_task_launcher_add_field_c(this%launcher, idx, fid, tmp_inst)
+    call legion_task_launcher_add_field_f(this%launcher, idx, fid, tmp_inst)
   end subroutine legion_task_launcher_add_field
   
   subroutine legion_task_launcher_add_future(this, future)
@@ -1216,7 +1216,7 @@ contains
     class(FTaskLauncher), intent(in) :: this
     type(FFuture), intent(in)        :: future
     
-    call legion_task_launcher_add_future_c(this%launcher, future%future)
+    call legion_task_launcher_add_future_f(this%launcher, future%future)
   end subroutine legion_task_launcher_add_future
   
   ! ===============================================================================
@@ -1243,7 +1243,7 @@ contains
     type(legion_domain_f_t) :: domain
     type(legion_runtime_f_t) :: runtime  
     
-    tmp_pred = legion_predicate_true_c()
+    tmp_pred = legion_predicate_true_f()
     tmp_must = .false.
     tmp_id = 0
     tmp_tag = 0
@@ -1253,11 +1253,11 @@ contains
     if (present(id)) tmp_id = id
     if (present(tag)) tmp_tag = tag
     
-    runtime = legion_runtime_get_runtime_c()
-    domain = legion_index_space_get_domain_c(runtime, launch_space%is)
+    runtime = legion_runtime_get_runtime_f()
+    domain = legion_index_space_get_domain_f(runtime, launch_space%is)
     
     legion_index_launcher_constructor_from_index_space%index_launcher = &
-      legion_index_launcher_create_c(tid, domain, &
+      legion_index_launcher_create_f(tid, domain, &
         global_arg%task_arg, map%arg_map, &
         tmp_pred, tmp_must, tmp_id, tmp_tag)
   end function legion_index_launcher_constructor_from_index_space
@@ -1267,7 +1267,7 @@ contains
     
     class(FIndexLauncher), intent(in) :: this
     
-    call legion_index_launcher_destroy_c(this%index_launcher)
+    call legion_index_launcher_destroy_f(this%index_launcher)
   end subroutine legion_index_launcher_destructor
   
   subroutine legion_index_launcher_add_region_requirement_logical_partition(this, handle, proj, priv, prop, parent, tag, verified)
@@ -1288,7 +1288,7 @@ contains
     
     if (present(tag)) tmp_tag = tag
     if (present(verified)) tmp_verified = verified 
-    rr_id = legion_index_launcher_add_region_requirement_lp_c(this%index_launcher, &
+    rr_id = legion_index_launcher_add_region_requirement_lp_f(this%index_launcher, &
               handle%lp, proj, priv, prop, parent%lr, tmp_tag, tmp_verified)
   end subroutine legion_index_launcher_add_region_requirement_logical_partition
   
@@ -1304,7 +1304,7 @@ contains
     
     if (present(inst)) tmp_inst = inst
     
-    call legion_index_launcher_add_field_c(this%index_launcher, idx, fid, tmp_inst)
+    call legion_index_launcher_add_field_f(this%index_launcher, idx, fid, tmp_inst)
   end subroutine legion_index_launcher_add_field
   
   ! ===============================================================================
@@ -1333,7 +1333,7 @@ contains
     if (present(id)) tmp_id = id
     if (present(launcher_tag)) tmp_launcher_tag = launcher_tag
     
-    legion_inline_launcher_constructor%inline_launcher = legion_inline_launcher_create_logical_region_c( &
+    legion_inline_launcher_constructor%inline_launcher = legion_inline_launcher_create_logical_region_f( &
       handle%lr, priv, prop, parent%lr, tmp_region_tag, tmp_verified, tmp_id, tmp_launcher_tag)
   end function legion_inline_launcher_constructor
   
@@ -1342,7 +1342,7 @@ contains
     
     class(FInlineLauncher), intent(in)     :: this
     
-    call legion_inline_launcher_destroy_c(this%inline_launcher)
+    call legion_inline_launcher_destroy_f(this%inline_launcher)
   end subroutine legion_inline_launcher_destructor
   
   subroutine legion_inline_launcher_add_field(this, fid, inst)
@@ -1355,7 +1355,7 @@ contains
     logical(c_bool) :: tmp_inst = .true.
     
     if (present(inst)) tmp_inst = inst
-    call legion_inline_launcher_add_field_c(this%inline_launcher, fid, tmp_inst)
+    call legion_inline_launcher_add_field_f(this%inline_launcher, fid, tmp_inst)
   end subroutine legion_inline_launcher_add_field
   
   ! ===============================================================================
@@ -1373,13 +1373,13 @@ contains
     integer(kind=4) :: tmp_id = 0
     integer(kind=8) :: tmp_launcher_tag = 0
     
-    tmp_pred = legion_predicate_true_c()
+    tmp_pred = legion_predicate_true_f()
     if (present(pred)) tmp_pred = pred
     if (present(id)) tmp_id = id
     if (present(launcher_tag)) tmp_launcher_tag = launcher_tag
     
     legion_copy_launcher_constructor%copy_launcher = &
-      legion_copy_launcher_create_c(tmp_pred, tmp_id, tmp_launcher_tag)
+      legion_copy_launcher_create_f(tmp_pred, tmp_id, tmp_launcher_tag)
   end function legion_copy_launcher_constructor
   
   subroutine legion_copy_launcher_destructor(this)
@@ -1387,7 +1387,7 @@ contains
     
     class(FCopyLauncher), intent(in) :: this
     
-    call legion_copy_launcher_destroy_c(this%copy_launcher)
+    call legion_copy_launcher_destroy_f(this%copy_launcher)
   end subroutine legion_copy_launcher_destructor
   
   subroutine legion_copy_launcher_add_src_requirements(this, handle, priv, &
@@ -1408,7 +1408,7 @@ contains
     
     if (present(tag)) tmp_tag = tag
     if (present(verified)) tmp_verified = verified
-    retval = legion_copy_launcher_add_src_region_requirement_lr_c( &
+    retval = legion_copy_launcher_add_src_region_requirement_lr_f( &
       this%copy_launcher, handle%lr, priv, prop, parent%lr, tmp_tag, tmp_verified)
   end subroutine legion_copy_launcher_add_src_requirements
   
@@ -1430,7 +1430,7 @@ contains
     
     if (present(tag)) tmp_tag = tag
     if (present(verified)) tmp_verified = verified
-    retval = legion_copy_launcher_add_dst_region_requirement_lr_c( &
+    retval = legion_copy_launcher_add_dst_region_requirement_lr_f( &
       this%copy_launcher, handle%lr, priv, prop, parent%lr, tmp_tag, tmp_verified)
   end subroutine legion_copy_launcher_add_dst_requirements
   
@@ -1445,7 +1445,7 @@ contains
     logical(c_bool) :: tmp_inst = .true.
     
     if (present(inst)) tmp_inst = inst
-    call legion_copy_launcher_add_src_field_c(this%copy_launcher, idx, fid, tmp_inst)
+    call legion_copy_launcher_add_src_field_f(this%copy_launcher, idx, fid, tmp_inst)
   end subroutine legion_copy_launcher_add_src_field
   
   subroutine legion_copy_launcher_add_dst_field(this, idx, fid, inst)
@@ -1459,7 +1459,7 @@ contains
     logical(c_bool) :: tmp_inst = .true.
     
     if (present(inst)) tmp_inst = inst
-    call legion_copy_launcher_add_dst_field_c(this%copy_launcher, idx, fid, tmp_inst)
+    call legion_copy_launcher_add_dst_field_f(this%copy_launcher, idx, fid, tmp_inst)
   end subroutine legion_copy_launcher_add_dst_field
   
   ! ===============================================================================
@@ -1478,13 +1478,13 @@ contains
     integer(kind=4) :: tmp_id = 0
     integer(kind=8) :: tmp_launcher_tag = 0
     
-    tmp_pred = legion_predicate_true_c()
+    tmp_pred = legion_predicate_true_f()
     if (present(pred)) tmp_pred = pred
     if (present(id)) tmp_id = id
     if (present(launcher_tag)) tmp_launcher_tag = launcher_tag
     
     legion_index_copy_launcher_constructor%index_copy_launcher = &
-      legion_index_copy_launcher_create_c(domain%domain, tmp_pred, tmp_id, tmp_launcher_tag)
+      legion_index_copy_launcher_create_f(domain%domain, tmp_pred, tmp_id, tmp_launcher_tag)
   end function legion_index_copy_launcher_constructor
   
   subroutine legion_index_copy_launcher_destructor(this)
@@ -1492,7 +1492,7 @@ contains
     
     class(FIndexCopyLauncher), intent(in) :: this
     
-    call legion_index_copy_launcher_destroy_c(this%index_copy_launcher)
+    call legion_index_copy_launcher_destroy_f(this%index_copy_launcher)
   end subroutine legion_index_copy_launcher_destructor
   
   subroutine legion_index_copy_launcher_add_src_requirements_lr(this, handle, proj, &
@@ -1514,7 +1514,7 @@ contains
     
     if (present(tag)) tmp_tag = tag
     if (present(verified)) tmp_verified = verified
-    retval = legion_index_copy_launcher_add_src_region_requirement_lr_c( &
+    retval = legion_index_copy_launcher_add_src_region_requirement_lr_f( &
       this%index_copy_launcher, handle%lr, proj, priv, prop, parent%lr, tmp_tag, tmp_verified)
   end subroutine legion_index_copy_launcher_add_src_requirements_lr
   
@@ -1537,7 +1537,7 @@ contains
     
     if (present(tag)) tmp_tag = tag
     if (present(verified)) tmp_verified = verified
-    retval = legion_index_copy_launcher_add_src_region_requirement_lp_c( &
+    retval = legion_index_copy_launcher_add_src_region_requirement_lp_f( &
       this%index_copy_launcher, handle%lp, proj, priv, prop, parent%lr, tmp_tag, tmp_verified)
   end subroutine legion_index_copy_launcher_add_src_requirements_lp
   
@@ -1560,7 +1560,7 @@ contains
     
     if (present(tag)) tmp_tag = tag
     if (present(verified)) tmp_verified = verified
-    retval = legion_index_copy_launcher_add_dst_region_requirement_lr_c( &
+    retval = legion_index_copy_launcher_add_dst_region_requirement_lr_f( &
       this%index_copy_launcher, handle%lr, proj, priv, prop, parent%lr, tmp_tag, tmp_verified)
   end subroutine legion_index_copy_launcher_add_dst_requirements_lr
   
@@ -1583,7 +1583,7 @@ contains
     
     if (present(tag)) tmp_tag = tag
     if (present(verified)) tmp_verified = verified
-    retval = legion_index_copy_launcher_add_dst_region_requirement_lp_c( &
+    retval = legion_index_copy_launcher_add_dst_region_requirement_lp_f( &
       this%index_copy_launcher, handle%lp, proj, priv, prop, parent%lr, tmp_tag, tmp_verified)
   end subroutine legion_index_copy_launcher_add_dst_requirements_lp
   
@@ -1598,7 +1598,7 @@ contains
     logical(c_bool) :: tmp_inst = .true.
     
     if (present(inst)) tmp_inst = inst
-    call legion_index_copy_launcher_add_src_field_c(this%index_copy_launcher, idx, fid, tmp_inst)
+    call legion_index_copy_launcher_add_src_field_f(this%index_copy_launcher, idx, fid, tmp_inst)
   end subroutine legion_index_copy_launcher_add_src_field
   
   subroutine legion_index_copy_launcher_add_dst_field(this, idx, fid, inst)
@@ -1612,7 +1612,7 @@ contains
     logical(c_bool) :: tmp_inst = .true.
     
     if (present(inst)) tmp_inst = inst
-    call legion_index_copy_launcher_add_dst_field_c(this%index_copy_launcher, idx, fid, tmp_inst)
+    call legion_index_copy_launcher_add_dst_field_f(this%index_copy_launcher, idx, fid, tmp_inst)
   end subroutine legion_index_copy_launcher_add_dst_field
   
   ! ===============================================================================
@@ -1628,7 +1628,7 @@ contains
     type(FLogicalRegion), intent(in) :: parent_region
     
     legion_attach_launcher_constructor%attach_launcher = &
-      legion_attach_launcher_create_c(logical_region%lr, parent_region%lr, resource)
+      legion_attach_launcher_create_f(logical_region%lr, parent_region%lr, resource)
   end function legion_attach_launcher_constructor
   
   subroutine legion_attach_launcher_destructor(this)
@@ -1636,7 +1636,7 @@ contains
     
     class(FAttachLauncher), intent(in) :: this
     
-    call legion_attach_launcher_destroy_c(this%attach_launcher)
+    call legion_attach_launcher_destroy_f(this%attach_launcher)
   end subroutine legion_attach_launcher_destructor
   
   subroutine legion_attach_launcher_attach_array_soa(this, fid, &
@@ -1650,7 +1650,7 @@ contains
     logical(c_bool) :: tmp_column_major
     tmp_column_major = column_major
     
-    call legion_attach_launcher_add_cpu_soa_field_c(this%attach_launcher, fid, &
+    call legion_attach_launcher_add_cpu_soa_field_f(this%attach_launcher, fid, &
       base_ptr, tmp_column_major)
   end subroutine legion_attach_launcher_attach_array_soa
   
@@ -1664,7 +1664,7 @@ contains
     class(FTask), intent(in)  :: this
     type(integer), intent(in) :: id
       
-    legion_task_get_region_requirement_by_id%rr = legion_task_get_requirement_c(this%task, id)
+    legion_task_get_region_requirement_by_id%rr = legion_task_get_requirement_f(this%task, id)
     
   end function legion_task_get_region_requirement_by_id
   
@@ -1674,7 +1674,7 @@ contains
     integer(kind=8)          :: legion_task_get_arglen
     class(FTask), intent(in) :: this
     
-    legion_task_get_arglen = legion_task_get_arglen_c(this%task)
+    legion_task_get_arglen = legion_task_get_arglen_f(this%task)
   end function legion_task_get_arglen
   
   function legion_task_get_args(this)
@@ -1683,7 +1683,7 @@ contains
     type(c_ptr)              :: legion_task_get_args
     class(FTask), intent(in) :: this
     
-    legion_task_get_args = legion_task_get_args_c(this%task)
+    legion_task_get_args = legion_task_get_args_f(this%task)
   end function legion_task_get_args
   
   function legion_task_get_local_arglen(this)
@@ -1692,7 +1692,7 @@ contains
     integer(kind=8)          :: legion_task_get_local_arglen
     class(FTask), intent(in) :: this
     
-    legion_task_get_local_arglen = legion_task_get_local_arglen_c(this%task)
+    legion_task_get_local_arglen = legion_task_get_local_arglen_f(this%task)
   end function legion_task_get_local_arglen
   
   function legion_task_get_local_args(this)
@@ -1701,7 +1701,7 @@ contains
     type(c_ptr)              :: legion_task_get_local_args
     class(FTask), intent(in) :: this
     
-    legion_task_get_local_args = legion_task_get_local_args_c(this%task)
+    legion_task_get_local_args = legion_task_get_local_args_f(this%task)
   end function legion_task_get_local_args
   
   function legion_task_get_future(this, idx)
@@ -1711,7 +1711,7 @@ contains
     class(FTask), intent(in) :: this
     integer, intent(in)      :: idx
     
-    legion_task_get_future%future = legion_task_get_future_c(this%task, idx)
+    legion_task_get_future%future = legion_task_get_future_f(this%task, idx)
   end function legion_task_get_future
   
   function legion_task_get_futures_size(this)
@@ -1720,7 +1720,7 @@ contains
     integer                  :: legion_task_get_futures_size
     class(FTask), intent(in) :: this
     
-    legion_task_get_futures_size = legion_task_get_futures_size_c(this%task)
+    legion_task_get_futures_size = legion_task_get_futures_size_f(this%task)
   end function legion_task_get_futures_size
   
   ! ===============================================================================
@@ -1737,7 +1737,7 @@ contains
     type(FContext) :: dummy_ctx
     dummy_ctx = ctx
     
-    legion_runtime_get_index_domain_return_domain%domain = legion_index_space_get_domain_c(this%runtime, index_space%is)
+    legion_runtime_get_index_domain_return_domain%domain = legion_index_space_get_domain_f(this%runtime, index_space%is)
   end function legion_runtime_get_index_domain_return_domain
   
   function legion_runtime_create_index_space_from_elmts_size(this, ctx, max_num_elmts)
@@ -1748,7 +1748,7 @@ contains
     type(FContext), intent(in)  :: ctx
     integer(kind=8), intent(in) :: max_num_elmts
       
-    legion_runtime_create_index_space_from_elmts_size%is = legion_index_space_create_c(this%runtime, &
+    legion_runtime_create_index_space_from_elmts_size%is = legion_index_space_create_f(this%runtime, &
                                                              ctx%context, max_num_elmts)
   end function legion_runtime_create_index_space_from_elmts_size
   
@@ -1760,7 +1760,7 @@ contains
     type(FContext), intent(in)  :: ctx
     type(FDomain), intent(in)   :: domain
       
-    legion_runtime_create_index_space_from_domain%is = legion_index_space_create_domain_c(this%runtime, &
+    legion_runtime_create_index_space_from_domain%is = legion_index_space_create_domain_f(this%runtime, &
                                                          ctx%context, domain%domain)
   end function legion_runtime_create_index_space_from_domain
   
@@ -1774,8 +1774,8 @@ contains
     
     type(legion_domain_f_t) :: domain
     
-    domain = legion_domain_from_rect_1d_c(rect_1d%rect)  
-    legion_runtime_create_index_space_from_rect_1d%is = legion_index_space_create_domain_c(this%runtime, &
+    domain = legion_domain_from_rect_1d_f(rect_1d%rect)  
+    legion_runtime_create_index_space_from_rect_1d%is = legion_index_space_create_domain_f(this%runtime, &
                                                           ctx%context, domain)
   end function legion_runtime_create_index_space_from_rect_1d
   
@@ -1789,8 +1789,8 @@ contains
     
     type(legion_domain_f_t) :: domain
     
-    domain = legion_domain_from_rect_2d_c(rect_2d%rect)  
-    legion_runtime_create_index_space_from_rect_2d%is = legion_index_space_create_domain_c(this%runtime, &
+    domain = legion_domain_from_rect_2d_f(rect_2d%rect)  
+    legion_runtime_create_index_space_from_rect_2d%is = legion_index_space_create_domain_f(this%runtime, &
                                                           ctx%context, domain)
   end function legion_runtime_create_index_space_from_rect_2d
   
@@ -1804,8 +1804,8 @@ contains
     
     type(legion_domain_f_t) :: domain
     
-    domain = legion_domain_from_rect_3d_c(rect_3d%rect)  
-    legion_runtime_create_index_space_from_rect_3d%is = legion_index_space_create_domain_c(this%runtime, &
+    domain = legion_domain_from_rect_3d_f(rect_3d%rect)  
+    legion_runtime_create_index_space_from_rect_3d%is = legion_index_space_create_domain_f(this%runtime, &
                                                           ctx%context, domain)
   end function legion_runtime_create_index_space_from_rect_3d
   
@@ -1816,7 +1816,7 @@ contains
     type(FContext), intent(in)    :: ctx
     type(FIndexSpace), intent(in) :: index_space
     
-    call legion_index_space_destroy_c(this%runtime, ctx%context, index_space%is)
+    call legion_index_space_destroy_f(this%runtime, ctx%context, index_space%is)
   end subroutine legion_runtime_destroy_index_space
   
   function legion_runtime_create_field_space(this, ctx)   
@@ -1826,7 +1826,7 @@ contains
     class(FRuntime), intent(in) :: this
     type(FContext), intent(in)  :: ctx
       
-    legion_runtime_create_field_space%fs = legion_field_space_create_c(this%runtime, ctx%context)
+    legion_runtime_create_field_space%fs = legion_field_space_create_f(this%runtime, ctx%context)
   end function legion_runtime_create_field_space
   
   subroutine legion_runtime_destroy_field_space(this, ctx, field_space)
@@ -1836,7 +1836,7 @@ contains
     type(FContext), intent(in)    :: ctx
     type(FFieldSpace), intent(in) :: field_space
       
-    call legion_field_space_destroy_c(this%runtime, ctx%context, field_space%fs)
+    call legion_field_space_destroy_f(this%runtime, ctx%context, field_space%fs)
   end subroutine legion_runtime_destroy_field_space
   
   function legion_runtime_create_field_allocator(this, ctx, field_space)
@@ -1847,7 +1847,7 @@ contains
     type(FContext), intent(in)    :: ctx
     type(FFieldSpace), intent(in) :: field_space
       
-    legion_runtime_create_field_allocator%fa = legion_field_allocator_create_c(this%runtime, ctx%context, field_space%fs)
+    legion_runtime_create_field_allocator%fa = legion_field_allocator_create_f(this%runtime, ctx%context, field_space%fs)
   end function legion_runtime_create_field_allocator
   
   function legion_runtime_create_logical_region(this, ctx, index_space, field_space)
@@ -1859,7 +1859,7 @@ contains
     type(FIndexSpace), intent(in) :: index_space
     type(FFieldSpace), intent(in) :: field_space
       
-    legion_runtime_create_logical_region%lr = legion_logical_region_create_c(this%runtime, ctx%context, &
+    legion_runtime_create_logical_region%lr = legion_logical_region_create_f(this%runtime, ctx%context, &
                                                 index_space%is, field_space%fs)
   end function legion_runtime_create_logical_region
   
@@ -1870,7 +1870,7 @@ contains
     type(FContext), intent(in)       :: ctx
     type(FLogicalRegion), intent(in) :: logical_region
       
-    call legion_logical_region_destroy_c(this%runtime, ctx%context, logical_region%lr)
+    call legion_logical_region_destroy_f(this%runtime, ctx%context, logical_region%lr)
   end subroutine legion_runtime_destroy_logical_region
   
   function legion_runtime_create_equal_partition(this, ctx, parent, color_space, granularity, color)
@@ -1890,7 +1890,7 @@ contains
     if (present(granularity)) tmp_granularity = granularity
     if (present(color)) tmp_color = color
     
-    legion_runtime_create_equal_partition%ip = legion_index_partition_create_equal_c(this%runtime, ctx%context, parent%is, &
+    legion_runtime_create_equal_partition%ip = legion_index_partition_create_equal_f(this%runtime, ctx%context, parent%is, &
                                                  color_space%is, tmp_granularity, tmp_color)
   end function legion_runtime_create_equal_partition
   
@@ -1914,7 +1914,7 @@ contains
     if (present(color)) tmp_color = color
     
     legion_runtime_create_partition_by_union%ip = &
-      legion_index_partition_create_by_union_c(this%runtime, ctx%context, &
+      legion_index_partition_create_by_union_f(this%runtime, ctx%context, &
       parent%is, handle1%ip, handle2%ip, color_space%is, tmp_part_kind, tmp_color)
   end function legion_runtime_create_partition_by_union
   
@@ -1938,7 +1938,7 @@ contains
     if (present(color)) tmp_color = color
     
     legion_runtime_create_partition_by_intersection%ip = &
-      legion_index_partition_create_by_intersection_c(this%runtime, ctx%context, &
+      legion_index_partition_create_by_intersection_f(this%runtime, ctx%context, &
       parent%is, handle1%ip, handle2%ip, color_space%is, tmp_part_kind, tmp_color)
   end function legion_runtime_create_partition_by_intersection
   
@@ -1963,7 +1963,7 @@ contains
     if (present(dominates)) tmp_dominates = dominates
     
     legion_runtime_create_partition_by_intersection_mirror%ip = &
-      legion_index_partition_create_by_intersection_mirror_c(this%runtime, ctx%context, &
+      legion_index_partition_create_by_intersection_mirror_f(this%runtime, ctx%context, &
       parent%is, partition%ip, tmp_part_kind, tmp_color, tmp_dominates)
   end function legion_runtime_create_partition_by_intersection_mirror
   
@@ -1987,7 +1987,7 @@ contains
     if (present(color)) tmp_color = color
     
     legion_runtime_create_partition_by_difference%ip = &
-      legion_index_partition_create_by_difference_c(this%runtime, ctx%context, &
+      legion_index_partition_create_by_difference_f(this%runtime, ctx%context, &
       parent%is, handle1%ip, handle2%ip, color_space%is, tmp_part_kind, tmp_color)
   end function legion_runtime_create_partition_by_difference
   
@@ -2012,7 +2012,7 @@ contains
     if (present(color)) tmp_color = color
     
     legion_runtime_create_partition_by_image%ip = &
-      legion_index_partition_create_by_image_c(this%runtime, ctx%context, &
+      legion_index_partition_create_by_image_f(this%runtime, ctx%context, &
       handle%is, projection%lp, parent%lr, fid, color_space%is, tmp_part_kind, tmp_color)
   end function legion_runtime_create_partition_by_image
   
@@ -2037,7 +2037,7 @@ contains
     if (present(color)) tmp_color = color
     
     legion_runtime_create_partition_by_image_range%ip = &
-      legion_index_partition_create_by_image_range_c(this%runtime, ctx%context, &
+      legion_index_partition_create_by_image_range_f(this%runtime, ctx%context, &
       handle%is, projection%lp, parent%lr, fid, color_space%is, tmp_part_kind, tmp_color)
   end function legion_runtime_create_partition_by_image_range
   
@@ -2062,7 +2062,7 @@ contains
     if (present(color)) tmp_color = color
     
     legion_runtime_create_partition_by_preimage%ip = &
-      legion_index_partition_create_by_preimage_c(this%runtime, ctx%context, &
+      legion_index_partition_create_by_preimage_f(this%runtime, ctx%context, &
       projection%ip, handle%lr, parent%lr, fid, color_space%is, tmp_part_kind, tmp_color)
   end function legion_runtime_create_partition_by_preimage
   
@@ -2087,7 +2087,7 @@ contains
     if (present(color)) tmp_color = color
     
     legion_runtime_create_partition_by_preimage_range%ip = &
-      legion_index_partition_create_by_preimage_range_c(this%runtime, ctx%context, &
+      legion_index_partition_create_by_preimage_range_f(this%runtime, ctx%context, &
       projection%ip, handle%lr, parent%lr, fid, color_space%is, tmp_part_kind, tmp_color)
   end function legion_runtime_create_partition_by_preimage_range
   
@@ -2112,7 +2112,7 @@ contains
     if (present(color)) tmp_color = color
     
     legion_runtime_create_partition_by_restriction_domain_transform%ip = &
-      legion_index_partition_create_by_restriction_c(this%runtime, ctx%context, parent%is, &
+      legion_index_partition_create_by_restriction_f(this%runtime, ctx%context, parent%is, &
       color_space%is, transform%transform, extent%domain, tmp_part_kind, tmp_color)
   end function legion_runtime_create_partition_by_restriction_domain_transform
   
@@ -2138,11 +2138,11 @@ contains
     if (present(part_kind)) tmp_part_kind = part_kind
     if (present(color)) tmp_color = color
     
-    domain = legion_domain_from_rect_1d_c(extent%rect)
-    domain_transform = legion_domain_transform_from_1x1_c(transform%transform)
+    domain = legion_domain_from_rect_1d_f(extent%rect)
+    domain_transform = legion_domain_transform_from_1x1_f(transform%transform)
     
     legion_runtime_create_partition_by_restriction_transform_1x1%ip = &
-      legion_index_partition_create_by_restriction_c(this%runtime, ctx%context, parent%is, &
+      legion_index_partition_create_by_restriction_f(this%runtime, ctx%context, parent%is, &
       color_space%is, domain_transform, domain, tmp_part_kind, tmp_color)
   end function legion_runtime_create_partition_by_restriction_transform_1x1
   
@@ -2168,11 +2168,11 @@ contains
     if (present(part_kind)) tmp_part_kind = part_kind
     if (present(color)) tmp_color = color
     
-    domain = legion_domain_from_rect_2d_c(extent%rect)
-    domain_transform = legion_domain_transform_from_2x2_c(transform%transform)
+    domain = legion_domain_from_rect_2d_f(extent%rect)
+    domain_transform = legion_domain_transform_from_2x2_f(transform%transform)
     
     legion_runtime_create_partition_by_restriction_transform_2x2%ip = &
-      legion_index_partition_create_by_restriction_c(this%runtime, ctx%context, parent%is, &
+      legion_index_partition_create_by_restriction_f(this%runtime, ctx%context, parent%is, &
       color_space%is, domain_transform, domain, tmp_part_kind, tmp_color)
   end function legion_runtime_create_partition_by_restriction_transform_2x2
   
@@ -2198,11 +2198,11 @@ contains
     if (present(part_kind)) tmp_part_kind = part_kind
     if (present(color)) tmp_color = color
     
-    domain = legion_domain_from_rect_3d_c(extent%rect)
-    domain_transform = legion_domain_transform_from_3x3_c(transform%transform)
+    domain = legion_domain_from_rect_3d_f(extent%rect)
+    domain_transform = legion_domain_transform_from_3x3_f(transform%transform)
     
     legion_runtime_create_partition_by_restriction_transform_3x3%ip = &
-      legion_index_partition_create_by_restriction_c(this%runtime, ctx%context, parent%is, &
+      legion_index_partition_create_by_restriction_f(this%runtime, ctx%context, parent%is, &
       color_space%is, domain_transform, domain, tmp_part_kind, tmp_color)
   end function legion_runtime_create_partition_by_restriction_transform_3x3
   
@@ -2215,7 +2215,7 @@ contains
     type(FLogicalRegion), intent(in)  :: parent
     type(FIndexPartition), intent(in) :: handle
       
-    legion_runtime_get_logical_partition%lp = legion_logical_partition_create_c(this%runtime, ctx%context, &
+    legion_runtime_get_logical_partition%lp = legion_logical_partition_create_f(this%runtime, ctx%context, &
                                                 parent%lr, handle%ip)
   end function legion_runtime_get_logical_partition
   
@@ -2227,7 +2227,7 @@ contains
     type(FContext), intent(in)      :: ctx
     type(FTaskLauncher), intent(in) :: launcher
       
-    legion_runtime_execute_task%future = legion_task_launcher_execute_c(this%runtime, ctx%context, launcher%launcher)
+    legion_runtime_execute_task%future = legion_task_launcher_execute_f(this%runtime, ctx%context, launcher%launcher)
   end function legion_runtime_execute_task
   
   function legion_runtime_execute_index_space(this, ctx, launcher)
@@ -2238,7 +2238,7 @@ contains
     type(FContext), intent(in)       :: ctx
     type(FIndexLauncher), intent(in) :: launcher
     
-    legion_runtime_execute_index_space%future_map = legion_index_launcher_execute_c(this%runtime, ctx%context, &
+    legion_runtime_execute_index_space%future_map = legion_index_launcher_execute_f(this%runtime, ctx%context, &
                                                       launcher%index_launcher)
   end function legion_runtime_execute_index_space
   
@@ -2250,7 +2250,7 @@ contains
     type(FContext), intent(in)        :: ctx
     type(FInlineLauncher), intent(in) :: launcher
       
-    legion_runtime_map_region%pr = legion_inline_launcher_execute_c( &
+    legion_runtime_map_region%pr = legion_inline_launcher_execute_f( &
       this%runtime, ctx%context, launcher%inline_launcher)
   end function legion_runtime_map_region
   
@@ -2261,7 +2261,7 @@ contains
     type(FContext), intent(in)        :: ctx
     type(FPhysicalRegion), intent(in) :: region
       
-    call legion_runtime_unmap_region_c( &
+    call legion_runtime_unmap_region_f( &
       this%runtime, ctx%context, region%pr)
   end subroutine legion_runtime_unmap_region
   
@@ -2272,7 +2272,7 @@ contains
     type(FContext), intent(in)        :: ctx
     type(FPhysicalRegion), intent(in) :: region
       
-    call legion_runtime_remap_region_c( &
+    call legion_runtime_remap_region_f( &
       this%runtime, ctx%context, region%pr)
   end subroutine legion_runtime_remap_region
   
@@ -2289,10 +2289,10 @@ contains
       
     type(legion_predicate_f_t) :: tmp_pred
     
-    tmp_pred = legion_predicate_true_c()
+    tmp_pred = legion_predicate_true_f()
     if (present(pred)) tmp_pred = pred%predicate
     
-    call legion_runtime_fill_field_c(this%runtime, ctx%context, &
+    call legion_runtime_fill_field_f(this%runtime, ctx%context, &
       handle%lr, parent%lr, fid, c_loc(value), c_sizeof(value), tmp_pred)
   end subroutine legion_runtime_fill_field_integer4
   
@@ -2309,10 +2309,10 @@ contains
       
     type(legion_predicate_f_t) :: tmp_pred
     
-    tmp_pred = legion_predicate_true_c()
+    tmp_pred = legion_predicate_true_f()
     if (present(pred)) tmp_pred = pred%predicate
     
-    call legion_runtime_fill_field_c(this%runtime, ctx%context, &
+    call legion_runtime_fill_field_f(this%runtime, ctx%context, &
       handle%lr, parent%lr, fid, c_loc(value), c_sizeof(value), tmp_pred)
   end subroutine legion_runtime_fill_field_integer8
   
@@ -2329,10 +2329,10 @@ contains
       
     type(legion_predicate_f_t) :: tmp_pred
     
-    tmp_pred = legion_predicate_true_c()
+    tmp_pred = legion_predicate_true_f()
     if (present(pred)) tmp_pred = pred%predicate
     
-    call legion_runtime_fill_field_c(this%runtime, ctx%context, &
+    call legion_runtime_fill_field_f(this%runtime, ctx%context, &
       handle%lr, parent%lr, fid, c_loc(value), c_sizeof(value), tmp_pred)
   end subroutine legion_runtime_fill_field_real4
   
@@ -2349,10 +2349,10 @@ contains
       
     type(legion_predicate_f_t) :: tmp_pred
     
-    tmp_pred = legion_predicate_true_c()
+    tmp_pred = legion_predicate_true_f()
     if (present(pred)) tmp_pred = pred%predicate
     
-    call legion_runtime_fill_field_c(this%runtime, ctx%context, &
+    call legion_runtime_fill_field_f(this%runtime, ctx%context, &
       handle%lr, parent%lr, fid, c_loc(value), c_sizeof(value), tmp_pred)
   end subroutine legion_runtime_fill_field_real8
   
@@ -2370,10 +2370,10 @@ contains
       
     type(legion_predicate_f_t) :: tmp_pred
     
-    tmp_pred = legion_predicate_true_c()
+    tmp_pred = legion_predicate_true_f()
     if (present(pred)) tmp_pred = pred%predicate
     
-    call legion_runtime_fill_field_c(this%runtime, ctx%context, &
+    call legion_runtime_fill_field_f(this%runtime, ctx%context, &
       handle%lr, parent%lr, fid, value, value_size, tmp_pred)
   end subroutine legion_runtime_fill_field_ptr
   
@@ -2384,7 +2384,7 @@ contains
     type(FContext), intent(in)      :: ctx
     type(FCopyLauncher), intent(in) :: launcher
       
-    call legion_copy_launcher_execute_c(this%runtime, &
+    call legion_copy_launcher_execute_f(this%runtime, &
       ctx%context, launcher%copy_launcher)
   end subroutine legion_runtime_issue_copy_operation_single
   
@@ -2395,7 +2395,7 @@ contains
     type(FContext), intent(in)           :: ctx
     type(FIndexCopyLauncher), intent(in) :: launcher
       
-    call legion_index_copy_launcher_execute_c(this%runtime, &
+    call legion_index_copy_launcher_execute_f(this%runtime, &
       ctx%context, launcher%index_copy_launcher)
   end subroutine legion_runtime_issue_copy_operation_index
   
@@ -2408,7 +2408,7 @@ contains
     type(FAttachLauncher), intent(in) :: launcher
       
     legion_runtime_attach_external_resource%pr = &
-      legion_attach_launcher_execute_c(this%runtime, ctx%context, launcher%attach_launcher)
+      legion_attach_launcher_execute_f(this%runtime, ctx%context, launcher%attach_launcher)
   end function legion_runtime_attach_external_resource
   
   function legion_runtime_detach_external_resource(this, ctx, handle)
@@ -2420,7 +2420,7 @@ contains
     type(FPhysicalRegion), intent(in) :: handle
       
     legion_runtime_detach_external_resource%future = &
-      legion_detach_external_resource_c(this%runtime, ctx%context, handle%pr)
+      legion_detach_external_resource_f(this%runtime, ctx%context, handle%pr)
   end function legion_runtime_detach_external_resource
   
   function legion_runtime_detach_external_resource_flush(this, ctx, handle, flush)
@@ -2436,7 +2436,7 @@ contains
     tmp_flush = flush
       
     legion_runtime_detach_external_resource_flush%future = &
-      legion_flush_detach_external_resource_c(this%runtime, ctx%context, handle%pr, tmp_flush)
+      legion_flush_detach_external_resource_f(this%runtime, ctx%context, handle%pr, tmp_flush)
   end function legion_runtime_detach_external_resource_flush
   
   function legion_runtime_detach_external_resource_unordered(this, ctx, handle, &
@@ -2456,7 +2456,7 @@ contains
     tmp_unordered = unordered
       
     legion_runtime_detach_external_resource_unordered%future = &
-      legion_unordered_detach_external_resource_c(this%runtime, ctx%context, handle%pr, &
+      legion_unordered_detach_external_resource_f(this%runtime, ctx%context, handle%pr, &
                                         tmp_flush, tmp_unordered)
   end function legion_runtime_detach_external_resource_unordered
   
@@ -2482,8 +2482,8 @@ contains
     integer(c_int), intent(in)  :: task_id
     
     legion_task_variant_registrar_constructor%task_id = task_id  
-    legion_task_variant_registrar_constructor%execution_constraints = legion_execution_constraint_set_create_c()
-    legion_task_variant_registrar_constructor%task_layout_constraints = legion_task_layout_constraint_set_create_c()
+    legion_task_variant_registrar_constructor%execution_constraints = legion_execution_constraint_set_create_f()
+    legion_task_variant_registrar_constructor%task_layout_constraints = legion_task_layout_constraint_set_create_f()
     legion_task_variant_registrar_constructor%config_options%leaf = .false.
     legion_task_variant_registrar_constructor%config_options%inner = .false.
     legion_task_variant_registrar_constructor%config_options%idempotent = .false.
@@ -2495,8 +2495,8 @@ contains
     
     class(FTaskVariantRegistrar), intent(in) :: this
       
-    call legion_execution_constraint_set_destroy_c(this%execution_constraints)
-    call legion_task_layout_constraint_set_destroy_c(this%task_layout_constraints)
+    call legion_execution_constraint_set_destroy_f(this%execution_constraints)
+    call legion_task_layout_constraint_set_destroy_f(this%task_layout_constraints)
   end subroutine legion_task_variant_registrar_destructor
   
   subroutine legion_task_variant_registrar_add_processor_constraint(this, proc_constraint)
@@ -2505,7 +2505,7 @@ contains
     class(FTaskVariantRegistrar), intent(in) :: this
     type(FProcessorConstraint), intent(in)   :: proc_constraint
     
-    call legion_execution_constraint_set_add_processor_constraint_c(this%execution_constraints, proc_constraint%proc_kind)
+    call legion_execution_constraint_set_add_processor_constraint_f(this%execution_constraints, proc_constraint%proc_kind)
   end subroutine legion_task_variant_registrar_add_processor_constraint
   
   subroutine legion_task_variant_registrar_set_leaf(this, is_leaf)
@@ -2588,7 +2588,7 @@ contains
     if (present(userdata)) tmp_userdata = c_null_ptr
     if (present(userlen)) tmp_userlen = userlen
       
-    call legion_task_preamble_c(tdata, tdatalen, proc_id, &
+    call legion_task_preamble_f(tdata, tdatalen, proc_id, &
                                 task%task, pr_list%region_ptr, pr_list%num_regions, &
                                 ctx%context, runtime%runtime)
   end subroutine legion_task_prolog
@@ -2610,7 +2610,7 @@ contains
     if (present(retval)) tmp_retval = retval
     if (present(retsize)) tmp_retsize = retsize
   
-    call legion_task_postamble_c(runtime%runtime, ctx%context, tmp_retval, tmp_retsize)
+    call legion_task_postamble_f(runtime%runtime, ctx%context, tmp_retval, tmp_retsize)
   end subroutine legion_task_epilog
   
   ! @see Legion::Runtime::set_top_level_task_id()
@@ -2619,7 +2619,7 @@ contains
     
     integer(c_int), intent(in) :: id
     
-    call legion_runtime_set_top_level_task_id_c(id)
+    call legion_runtime_set_top_level_task_id_f(id)
   end subroutine set_top_level_task_id
   
   subroutine preregister_task_variant(task_func_ptr, registrar, task_name, vid)
@@ -2637,7 +2637,7 @@ contains
     
     if (present(vid)) tmp_vid = vid
     c_func_ptr = c_funloc(task_func_ptr)
-    task_id_return = legion_runtime_preregister_task_variant_fnptr_c(registrar%task_id, &
+    task_id_return = legion_runtime_preregister_task_variant_fnptr_f(registrar%task_id, &
                        tmp_vid, task_name//c_null_char, &
                        c_char_"cpu_variant"//c_null_char, &
                        registrar%execution_constraints, &
@@ -2678,7 +2678,7 @@ contains
     else
       argv(0) = c_null_ptr
     end if
-    ret_val = legion_runtime_start_c(argc, argv, tmp_background)
+    ret_val = legion_runtime_start_f(argc, argv, tmp_background)
   end subroutine legion_runtime_start
   
 
