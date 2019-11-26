@@ -3011,7 +3011,7 @@ namespace Legion {
       : Collectable(), runtime(rt), task_id(tid), mapper_id(mid), kind(k), 
         shards_per_address_space(shards_per_space), 
         expected_local_arrivals(shards_per_space), expected_remote_arrivals(0),
-        local_shard_id(0), shard_manager(NULL)
+        local_shard_id(0), top_context(NULL), shard_manager(NULL)
     //--------------------------------------------------------------------------
     {
       // If we're the owner node, we also expect one arrival from
@@ -3035,11 +3035,6 @@ namespace Legion {
     ImplicitShardManager::~ImplicitShardManager(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(shard_manager != NULL);
-#endif
-      if (shard_manager->remove_reference())
-        delete shard_manager;
     }
 
     //--------------------------------------------------------------------------
@@ -3080,6 +3075,7 @@ namespace Legion {
                                                   const char *task_name)
     //--------------------------------------------------------------------------
     {
+      ShardTask *result = NULL;
       if (runtime->address_space == 0)
       {
         AutoLock m_lock(manager_lock);
@@ -3089,7 +3085,7 @@ namespace Legion {
         assert(local_shard_id < shards_per_address_space);
 #endif
         const ShardID shard_id = local_shard_id++;
-        return shard_manager->create_shard(shard_id, proxy);   
+        result = shard_manager->create_shard(shard_id, proxy);   
       }
       else
       {
@@ -3112,8 +3108,13 @@ namespace Legion {
 #endif
         const ShardID shard_id = runtime->address_space * 
           shards_per_address_space + local_shard_id++; 
-        return shard_manager->create_shard(shard_id, proxy);
+        result = shard_manager->create_shard(shard_id, proxy);
       }
+#ifdef DEBUG_LEGION
+      assert(top_context != NULL);
+#endif
+      result->set_context(top_context);
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -3122,14 +3123,25 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
+      assert(top_context == NULL);
       assert(shard_manager == NULL);
 #endif
       IndividualTask *implicit_top = 
        runtime->create_implicit_top_level(task_id, mapper_id, proxy, task_name);
+      top_context = implicit_top->get_context();
       // Now we need to make the shard manager
       const ReplicationID repl_context = runtime->get_unique_replication_id();
       const size_t total_shards = 
         runtime->total_address_spaces * shards_per_address_space;
+      // We also need a shard 
+      shard_manager = new ShardManager(runtime, repl_context, true/*cr*/,
+        true/*top level*/, total_shards, runtime->address_space, implicit_top);
+#ifdef DEBUG_LEGION
+      // This is a dummy shard_mapping for now since we won't actually need
+      // a real one, this just needs to make sure all the checks pass
+      std::vector<Processor> shard_mapping(total_shards, Processor::NO_PROC);
+      shard_manager->set_shard_mapping(shard_mapping);
+#endif
       std::vector<AddressSpaceID> address_spaces(total_shards);
       for (AddressSpaceID space = 0; 
             space < runtime->total_address_spaces; space++)
@@ -3137,9 +3149,6 @@ namespace Legion {
         for (unsigned idx = 0; idx < shards_per_address_space; idx++)
           address_spaces[space * shards_per_address_space + idx] = space;
       }
-      shard_manager = new ShardManager(runtime, repl_context, true/*cr*/,
-        true/*top level*/, total_shards, runtime->address_space, implicit_top);
-      shard_manager->add_reference();
       shard_manager->set_address_spaces(address_spaces);
       if (runtime->legion_spy_enabled)
         LegionSpy::log_replication(implicit_top->get_unique_id(), repl_context,
@@ -3159,6 +3168,7 @@ namespace Legion {
           {
             RezCheck z(rez);
             rez.serialize(it->second);
+            rez.serialize(top_context->get_context_uid());
             rez.serialize(repl_context);
           }
           runtime->send_control_replicate_implicit_response(it->first, rez);
@@ -3199,6 +3209,7 @@ namespace Legion {
         {
           RezCheck z(rez);
           rez.serialize(remote);
+          rez.serialize(top_context->get_context_uid());
           rez.serialize(shard_manager->repl_id);
         }
         runtime->send_control_replicate_implicit_response(space, rez);
@@ -3208,14 +3219,17 @@ namespace Legion {
     }
     
     //--------------------------------------------------------------------------
-    RtUserEvent ImplicitShardManager::process_implicit_response(ShardManager *m)
+    RtUserEvent ImplicitShardManager::process_implicit_response(ShardManager *m,
+                                                                InnerContext *c)
     //--------------------------------------------------------------------------
     {
       AutoLock m_lock(manager_lock);
 #ifdef DEBUG_LEGION
+      assert(top_context == NULL);
       assert(shard_manager == NULL);
       assert(manager_ready.exists());
 #endif
+      top_context = c;
       shard_manager = m;
       RtUserEvent to_trigger = manager_ready;
       manager_ready = RtUserEvent::NO_RT_USER_EVENT;
@@ -3253,12 +3267,17 @@ namespace Legion {
       DerezCheck z(derez);
       ImplicitShardManager *manager;
       derez.deserialize(manager);
+      UniqueID context_uid;
+      derez.deserialize(context_uid);
       ReplicationID repl_id;
       derez.deserialize(repl_id);
       ShardManager *shard_manager = runtime->find_shard_manager(repl_id);
+      RtEvent context_ready;
+      InnerContext *context = 
+        runtime->find_context(context_uid, false, &context_ready);
       RtUserEvent to_trigger = 
-        manager->process_implicit_response(shard_manager);
-      Runtime::trigger_event(to_trigger);
+        manager->process_implicit_response(shard_manager, context);
+      Runtime::trigger_event(to_trigger, context_ready);
     }
 
     /////////////////////////////////////////////////////////////

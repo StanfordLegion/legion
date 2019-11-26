@@ -992,6 +992,7 @@ namespace Legion {
     public:
       InstanceView* create_instance_top_view(PhysicalManager *manager,
                                              AddressSpaceID source);
+      inline void set_context(InnerContext *ctx) { parent_ctx = ctx; }
     public:
       const ShardID shard_id;
     protected:

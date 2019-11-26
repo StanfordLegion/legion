@@ -733,7 +733,8 @@ namespace Legion {
       void request_shard_manager(void);
     public:
       void process_implicit_request(void *remote, AddressSpaceID space);
-      RtUserEvent process_implicit_response(ShardManager *manager);
+      RtUserEvent process_implicit_response(ShardManager *manager,
+                                            InnerContext *context);
     public:
       static void handle_remote_request(Deserializer &derez, Runtime *runtime, 
                                         AddressSpaceID remote_space);
@@ -749,6 +750,7 @@ namespace Legion {
       unsigned expected_local_arrivals;
       unsigned expected_remote_arrivals;
       unsigned local_shard_id;
+      InnerContext *top_context;
       ShardManager *volatile shard_manager;
       RtUserEvent manager_ready;
       std::vector<std::pair<AddressSpaceID,void*> > remote_spaces;
