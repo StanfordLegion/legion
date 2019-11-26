@@ -2667,10 +2667,9 @@ contains
     
     argc = iargc()
     if (iargc() > 0) then
-      argv(0) = c_null_ptr ! somehow the first argv is not detected, so add a dummpy one
-      do i = 1, iargc()
+      do i = 0, iargc()
         call getarg(i, arg)
-        print *, "arg", arg
+        print *, "arg ", arg
         tmp_argv(i)%item = trim(arg) // c_null_char
         argv(i) = c_loc(tmp_argv(i)%item)
       end do
