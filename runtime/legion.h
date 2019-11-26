@@ -7075,6 +7075,7 @@ namespace Legion {
        * shard_per_address_space and defaults to one.
        */
       Context begin_implicit_task(TaskID top_task_id,
+                                  MapperID mapper_id,
                                   Processor::Kind proc_kind,
                                   const char *task_name = NULL,
                                   bool control_replicable = false,

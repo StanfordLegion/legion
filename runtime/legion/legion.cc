@@ -6801,14 +6801,15 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     Context Runtime::begin_implicit_task(TaskID top_task_id,
+                                         MapperID top_mapper_id,
                                          Processor::Kind proc_kind,
                                          const char *task_name,
                                          bool control_replicable,
                                          unsigned shard_per_address_space)
     //--------------------------------------------------------------------------
     {
-      return runtime->begin_implicit_task(top_task_id, proc_kind, task_name, 
-                                control_replicable, shard_per_address_space);
+      return runtime->begin_implicit_task(top_task_id, top_mapper_id, proc_kind,
+                        task_name, control_replicable, shard_per_address_space);
     }
 
     //--------------------------------------------------------------------------
