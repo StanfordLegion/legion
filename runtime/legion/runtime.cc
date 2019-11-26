@@ -374,7 +374,7 @@ namespace Legion {
         producer_uid(uid),
 #endif
         ready_event(Runtime::create_ap_user_event()), 
-        result(NULL), result_size(0), empty(true), sampled(false)
+        result(NULL),result_size(0),empty(true),sampled(false),triggered(false)
     //--------------------------------------------------------------------------
     {
       if (producer_op != NULL)
