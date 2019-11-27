@@ -153,14 +153,12 @@ endif
 USE_HALF ?= 0
 ifeq ($(strip $(USE_HALF)),1)
   CC_FLAGS += -DLEGION_REDOP_HALF
-  FC_FLAGS += -DLEGION_REDOP_HALF
   NVCC_FLAGS += -DLEGION_REDOP_HALF
 endif
 
 USE_COMPLEX ?= 0
 ifeq ($(strip $(USE_COMPLEX)),1)
   CC_FLAGS += -DLEGION_REDOP_COMPLEX
-  FC_FLAGS += -DLEGION_REDOP_COMPLEX
   NVCC_FLAGS += -DLEGION_REDOP_COMPLEX
 endif
 
@@ -169,7 +167,6 @@ ifeq ($(strip $(USE_HWLOC)),1)
     $(error HWLOC variable is not defined, aborting build)
   endif
   CC_FLAGS        += -DREALM_USE_HWLOC
-  FC_FLAGS        += -DREALM_USE_HWLOC
   INC_FLAGS   += -I$(HWLOC)/include
   LEGION_LD_FLAGS += -L$(HWLOC)/lib -lhwloc
 endif
@@ -183,7 +180,6 @@ ifeq ($(strip $(USE_PAPI)),1)
     endif
   endif
   CC_FLAGS        += -DREALM_USE_PAPI
-  FC_FLAGS        += -DREALM_USE_PAPI
   INC_FLAGS   += -I$(PAPI_ROOT)/include
   LEGION_LD_FLAGS += -L$(PAPI_ROOT)/lib -lpapi
 endif
@@ -292,11 +288,9 @@ ifeq ($(strip $(USE_PYTHON)),1)
         $(error cannot find libpython$(PYTHON_VERSION_MAJOR).$(PYTHON_VERSION_MINOR).$(PYTHON_EXT) - PYTHON_LIB set but file does not exist)
       else
         CC_FLAGS += -DREALM_PYTHON_LIB="\"$(PYTHON_LIB)\""
-        FC_FLAGS += -DREALM_PYTHON_LIB="\"$(PYTHON_LIB)\""
       endif
     else
       CC_FLAGS += -DREALM_PYTHON_LIB="\"$(PYTHON_LIB)\""
-      FC_FLAGS += -DREALM_PYTHON_LIB="\"$(PYTHON_LIB)\""
     endif
   endif
 
@@ -736,11 +730,6 @@ endif
 ifeq ($(strip $(LEGION_WITH_FORTRAN)),1)
 GEN_FORTRAN_OBJS	:= $(GEN_FORTRAN_SRC:.f90=.f90.o)
 LD_FLAGS	+= -lgfortran
-F90	:= gfortran
-endif
-
-ifeq ($(strip $(LEGION_WITH_C)),1)
-GEN_C_OBJS	:= $(GEN_C_SRC:.c=.o)
 endif
 
 # Provide build rules unless the user asks us not to
@@ -752,11 +741,7 @@ all: $(OUTFILE)
 endif
 
 # If we're using CUDA we have to link with nvcc
-ifeq ($(strip $(LEGION_WITH_C)),1)
-$(OUTFILE) : $(GEN_OBJS) $(GEN_C_OBJS) $(GEN_GPU_OBJS) $(SLIB_LEGION) $(SLIB_REALM)
-	@echo "---> Linking objects into one binary: $(OUTFILE)"
-	$(CXX) -o $(OUTFILE) $(GEN_OBJS) $(GEN_C_OBJS) $(GEN_GPU_OBJS) $(LD_FLAGS) $(LEGION_LIBS) $(LEGION_LD_FLAGS) $(GASNET_FLAGS)
-else ifeq ($(strip $(LEGION_WITH_FORTRAN)),1)
+ifeq ($(strip $(LEGION_WITH_FORTRAN)),1)
 $(OUTFILE) : $(SLIB_LEGION) $(SLIB_REALM) $(GEN_OBJS) $(GEN_FORTRAN_OBJS) $(GEN_GPU_OBJS)
 	@echo "---> Linking objects into one binary: $(OUTFILE)"
 	$(CXX) -o $(OUTFILE) $(GEN_OBJS) $(GEN_FORTRAN_OBJS) $(GEN_GPU_OBJS) $(LD_FLAGS) $(LEGION_LIBS) $(LEGION_LD_FLAGS) $(GASNET_FLAGS)
@@ -821,11 +806,6 @@ $(LEGION_FORTRAN_API_OBJS) : %.f90.o : %.f90 $(LG_RT_DIR)/legion/legion_f_c_inte
 ifeq ($(strip $(LEGION_WITH_FORTRAN)),1)	
 $(GEN_FORTRAN_OBJS) : %.f90.o : %.f90 $(LG_RT_DIR)/legion/legion_f_c_interface.f90.o $(LG_RT_DIR)/legion/legion_f_types.f90.o $(LEGION_FORTRAN_API_OBJS)
 	$(F90) -cpp -o $@ -c $< $(CC_FLAGS) $(INC_FLAGS)
-endif
-
-ifeq ($(strip $(LEGION_WITH_C)),1)
-$(GEN_C_OBJS) : %.o : %.c
-	gcc -o $@ -c $< $(CC_FLAGS) $(INC_FLAGS)
 endif
 
 # disable gmake's default rule for building % from %.o

@@ -10,7 +10,6 @@ module daxpy
   
 contains
   subroutine init_field_task(tdata, tdatalen, userdata, userlen, p)
-    use legion_fortran_c_interface
     implicit none
     
     type(c_ptr), value, intent(in) :: tdata

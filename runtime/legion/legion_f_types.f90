@@ -2,6 +2,15 @@ module legion_fortran_types
   use, intrinsic :: iso_c_binding
   implicit none
   
+  include "legion_defines.h"
+  
+#ifndef LEGION_MAX_DIM
+#define LEGION_MAX_DIM     3 // maximum number of dimensions for index spaces
+#endif
+
+#define MAX_POINT_DIM_F LEGION_MAX_DIM
+#define MAX_RECT_DIM_F LEGION_MAX_DIM
+  
   ! legion_privilege_mode_t
   integer(c_int), parameter :: NO_ACCESS = Z'00000000'
   integer(c_int), parameter :: READ_PRIV = Z'00000001'
@@ -105,9 +114,6 @@ module legion_fortran_types
   NEW_OPAQUE_TYPE_F(legion_mapper_context_f_t)
   NEW_OPAQUE_TYPE_F(legion_field_map_f_t)
 #undef NEW_OPAQUE_TYPE_F
-
-#define LEGION_MAX_DIM 3
-#define MAX_POINT_DIM_F 3
 
     ! point 1d, 2d, 3d
 #define NEW_POINT_TYPE_F(T, DIM) type, bind(C) :: T; integer(c_long_long), dimension(0:DIM-1) :: x; end type T
