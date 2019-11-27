@@ -1423,6 +1423,8 @@ namespace Legion {
         realm_index_space = *is;
         Runtime::trigger_event(realm_index_space_set);
       }
+      else
+        add_base_resource_ref(RUNTIME_REF);
     }
 
     //--------------------------------------------------------------------------
@@ -1488,7 +1490,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    void IndexSpaceNodeT<DIM,T>::set_realm_index_space(
+    bool IndexSpaceNodeT<DIM,T>::set_realm_index_space(
                   AddressSpaceID source, const Realm::IndexSpace<DIM,T> &value)
     //--------------------------------------------------------------------------
     {
@@ -1547,6 +1549,8 @@ namespace Legion {
       }
       // Now we can tighten it
       tighten_index_space();
+      // Remove the reference we were holding until this was set
+      return remove_base_resource_ref(RUNTIME_REF);
     }
 
     //--------------------------------------------------------------------------
@@ -1797,7 +1801,8 @@ namespace Legion {
                                         op, DEP_PART_UNION_REDUCTION);
         ApEvent result(Realm::IndexSpace<DIM,T>::compute_union(
               spaces, result_space, requests, precondition));
-        set_realm_index_space(context->runtime->address_space, result_space);
+        if (set_realm_index_space(context->runtime->address_space,result_space))
+          assert(false); // should never hit this
         return result;
       }
       else
@@ -1808,7 +1813,8 @@ namespace Legion {
                                 op, DEP_PART_INTERSECTION_REDUCTION);
         ApEvent result(Realm::IndexSpace<DIM,T>::compute_intersection(
               spaces, result_space, requests, precondition));
-        set_realm_index_space(context->runtime->address_space, result_space);
+        if (set_realm_index_space(context->runtime->address_space,result_space))
+          assert(false); // should never hit this
         return result;
       }
     }
@@ -1880,7 +1886,8 @@ namespace Legion {
                                         op, DEP_PART_UNION_REDUCTION);
         ApEvent result(Realm::IndexSpace<DIM,T>::compute_union(
               spaces, result_space, requests, precondition));
-        set_realm_index_space(context->runtime->address_space, result_space);
+        if (set_realm_index_space(context->runtime->address_space,result_space))
+          assert(false); // should never hit this
         return result;
       }
       else
@@ -1891,7 +1898,8 @@ namespace Legion {
                                 op, DEP_PART_INTERSECTION_REDUCTION);
         ApEvent result(Realm::IndexSpace<DIM,T>::compute_intersection(
               spaces, result_space, requests, precondition));
-        set_realm_index_space(context->runtime->address_space, result_space);
+        if (set_realm_index_space(context->runtime->address_space,result_space))
+          assert(false); // should never hit this
         return result;
       }
     }
@@ -1955,7 +1963,8 @@ namespace Legion {
       ApEvent result(Realm::IndexSpace<DIM,T>::compute_difference(
             lhs_space, rhs_space, result_space, diff_requests,
             Runtime::merge_events(NULL, lhs_ready, rhs_ready)));
-      set_realm_index_space(context->runtime->address_space, result_space);
+      if (set_realm_index_space(context->runtime->address_space, result_space))
+        assert(false); // should never hit this
       // Destroy the tempory rhs space once the computation is done
       rhs_space.destroy(result);
       return result;
@@ -2291,13 +2300,13 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    void IndexSpaceNodeT<DIM,T>::unpack_index_space(Deserializer &derez,
+    bool IndexSpaceNodeT<DIM,T>::unpack_index_space(Deserializer &derez,
                                                     AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
       Realm::IndexSpace<DIM,T> result_space;
       derez.deserialize(result_space);
-      set_realm_index_space(source, result_space);
+      return set_realm_index_space(source, result_space);
     }
 
     //--------------------------------------------------------------------------
@@ -2341,8 +2350,9 @@ namespace Legion {
         {
           IndexSpaceNodeT<DIM,T> *child = 
             static_cast<IndexSpaceNodeT<DIM,T>*>(partition->get_child(color));
-          child->set_realm_index_space(context->runtime->address_space,
-                                       subspaces[color]);
+          if (child->set_realm_index_space(context->runtime->address_space,
+                                           subspaces[color]))
+            assert(false); // should never hit this
         }
       }
       else
@@ -2358,8 +2368,9 @@ namespace Legion {
 #ifdef DEBUG_LEGION
           assert(subspace_index < subspaces.size());
 #endif
-          child->set_realm_index_space(context->runtime->address_space,
-                                       subspaces[subspace_index++]);
+          if (child->set_realm_index_space(context->runtime->address_space,
+                                           subspaces[subspace_index++]))
+            assert(false); // should never hit this
         }
         delete itr;
       }
@@ -2397,8 +2408,9 @@ namespace Legion {
             granularity, color, subspace, requests, index_space_ready));
           IndexSpaceNodeT<DIM,T> *child = 
             static_cast<IndexSpaceNodeT<DIM,T>*>(partition->get_child(color));
-          child->set_realm_index_space(context->runtime->address_space,
-                                       subspace);
+          if (child->set_realm_index_space(context->runtime->address_space,
+                                           subspace))
+            assert(false); // should never hit this
           done_events.insert(result);
         }
       }
@@ -2429,8 +2441,9 @@ namespace Legion {
             index_space_ready));
           IndexSpaceNodeT<DIM,T> *child = 
             static_cast<IndexSpaceNodeT<DIM,T>*>(partition->get_child(color));
-          child->set_realm_index_space(context->runtime->address_space,
-                                       subspace);
+          if (child->set_realm_index_space(context->runtime->address_space,
+                                           subspace))
+            assert(false); // should never hit this
           done_events.insert(result);
           // Skip ahead for the next color if necessary
           for (unsigned idx = 0; idx < (total_shards-1); idx++)
@@ -2549,8 +2562,9 @@ namespace Legion {
 #ifdef DEBUG_LEGION
           assert(subspace_index < subspaces.size());
 #endif
-          child->set_realm_index_space(context->runtime->address_space,
-                                       subspaces[subspace_index++]);
+          if (child->set_realm_index_space(context->runtime->address_space,
+                                           subspaces[subspace_index++]))
+            assert(false); // should never hit this
         }
       }
       else
@@ -2565,8 +2579,9 @@ namespace Legion {
 #ifdef DEBUG_LEGION
           assert(subspace_index < subspaces.size());
 #endif
-          child->set_realm_index_space(context->runtime->address_space,
-                                       subspaces[subspace_index++]);
+          if (child->set_realm_index_space(context->runtime->address_space,
+                                           subspaces[subspace_index++]))
+            assert(false); // should never hit this
         }
         delete itr;
       }
@@ -2674,8 +2689,9 @@ namespace Legion {
         IndexSpaceNodeT<DIM,T> *child = 
             static_cast<IndexSpaceNodeT<DIM,T>*>(
                 partition->get_child(colors[idx]));
-        child->set_realm_index_space(context->runtime->address_space,
-                                     subspaces[idx]);
+        if (child->set_realm_index_space(context->runtime->address_space,
+                                         subspaces[idx]))
+          assert(false); // should never hit this
       }
       return result;
     }
@@ -2780,8 +2796,9 @@ namespace Legion {
 #ifdef DEBUG_LEGION
           assert(subspace_index < subspaces.size());
 #endif
-          child->set_realm_index_space(context->runtime->address_space,
-                                       subspaces[subspace_index++]);
+          if (child->set_realm_index_space(context->runtime->address_space,
+                                           subspaces[subspace_index++]))
+            assert(false); // should never hit this
         }
       }
       else
@@ -2796,8 +2813,9 @@ namespace Legion {
 #ifdef DEBUG_LEGION
           assert(subspace_index < subspaces.size());
 #endif
-          child->set_realm_index_space(context->runtime->address_space,
-                                       subspaces[subspace_index++]);
+          if (child->set_realm_index_space(context->runtime->address_space,
+                                           subspaces[subspace_index++]))
+            assert(false); // should never hit this
         }
         delete itr;
       }
@@ -2905,8 +2923,9 @@ namespace Legion {
         IndexSpaceNodeT<DIM,T> *child = 
             static_cast<IndexSpaceNodeT<DIM,T>*>(
                 partition->get_child(colors[idx]));
-        child->set_realm_index_space(context->runtime->address_space,
-                                     subspaces[idx]);
+        if (child->set_realm_index_space(context->runtime->address_space,
+                                         subspaces[idx]))
+          assert(false); // should never hit this
       }
       return result;
     }
@@ -3032,8 +3051,9 @@ namespace Legion {
 #ifdef DEBUG_LEGION
           assert(subspace_index < subspaces.size());
 #endif
-          child->set_realm_index_space(context->runtime->address_space,
-                                       subspaces[subspace_index++]);
+          if (child->set_realm_index_space(context->runtime->address_space,
+                                           subspaces[subspace_index++]))
+            assert(false); // should never hit this
         }
       }
       else
@@ -3055,8 +3075,9 @@ namespace Legion {
 #ifdef DEBUG_LEGION
           assert(subspace_index < subspaces.size());
 #endif
-          child->set_realm_index_space(context->runtime->address_space,
-                                       subspaces[subspace_index++]);
+          if (child->set_realm_index_space(context->runtime->address_space,
+                                           subspaces[subspace_index++]))
+            assert(false); // should never hit this
           // Skip ahead for the next color if necessary
           for (unsigned idx = 0; idx < (total_shards-1); idx++)
           {
@@ -3170,8 +3191,9 @@ namespace Legion {
 #ifdef DEBUG_LEGION
           assert(subspace_index < subspaces.size());
 #endif
-          child->set_realm_index_space(context->runtime->address_space,
-                                       subspaces[subspace_index++]);
+          if (child->set_realm_index_space(context->runtime->address_space,
+                                           subspaces[subspace_index++]))
+            assert(false); // should never hit this
         }
       }
       else
@@ -3186,8 +3208,9 @@ namespace Legion {
 #ifdef DEBUG_LEGION
           assert(subspace_index < subspaces.size());
 #endif
-          child->set_realm_index_space(context->runtime->address_space,
-                                       subspaces[subspace_index++]);
+          if (child->set_realm_index_space(context->runtime->address_space,
+                                           subspaces[subspace_index++]))
+            assert(false); // should never hit this
         }
         delete itr;
       }
@@ -3288,8 +3311,9 @@ namespace Legion {
         IndexSpaceNodeT<DIM,T> *child = 
             static_cast<IndexSpaceNodeT<DIM,T>*>(
                 partition->get_child(colors[idx]));
-        child->set_realm_index_space(context->runtime->address_space,
-                                     subspaces[idx]);
+        if (child->set_realm_index_space(context->runtime->address_space,
+                                         subspaces[idx]))
+          assert(false); // should never hit this
       }
       return result;
     }
@@ -3367,8 +3391,9 @@ namespace Legion {
           IndexSpaceNodeT<M,T> *child = 
             static_cast<IndexSpaceNodeT<M,T>*>(partition->get_child(color));
           // Then set the new index space
-          child->set_realm_index_space(context->runtime->address_space, 
-                                       child_is);
+          if (child->set_realm_index_space(context->runtime->address_space, 
+                                           child_is))
+            assert(false); // should never hit this
         }
       }
       // Our only precondition is that the parent index space is computed
@@ -3483,8 +3508,9 @@ namespace Legion {
       {
         IndexSpaceNodeT<DIM,T> *child = static_cast<IndexSpaceNodeT<DIM,T>*>(
                                   partition->get_child(child_colors[idx]));
-        child->set_realm_index_space(context->runtime->address_space,
-                                     subspaces[idx]);
+        if (child->set_realm_index_space(context->runtime->address_space,
+                                         subspaces[idx]))
+          assert(false); // should never hit this
       }
       return result;
     }
@@ -3650,8 +3676,9 @@ namespace Legion {
         IndexSpaceNodeT<DIM1,T1> *child = 
           static_cast<IndexSpaceNodeT<DIM1,T1>*>(
               partition->get_child(child_colors[idx]));
-        child->set_realm_index_space(context->runtime->address_space,
-                                     subspaces[idx]);
+        if (child->set_realm_index_space(context->runtime->address_space,
+                                         subspaces[idx]))
+          assert(false); // should never hit this
       }
       return result;
     }
@@ -3817,8 +3844,9 @@ namespace Legion {
         IndexSpaceNodeT<DIM1,T1> *child = 
            static_cast<IndexSpaceNodeT<DIM1,T1>*>(
                partition->get_child(child_colors[idx]));
-        child->set_realm_index_space(context->runtime->address_space,
-                                     subspaces[idx]);
+        if (child->set_realm_index_space(context->runtime->address_space,
+                                         subspaces[idx]))
+          assert(false); // should never hit this
       }
       return result;
     }
@@ -3950,8 +3978,9 @@ namespace Legion {
           // Get the child of the projection partition
           IndexSpaceNodeT<DIM1,T1> *child = 
            static_cast<IndexSpaceNodeT<DIM1,T1>*>(partition->get_child(color));
-          child->set_realm_index_space(context->runtime->address_space,
-                                       subspaces[color]);
+          if (child->set_realm_index_space(context->runtime->address_space,
+                                           subspaces[color]))
+            assert(false); // should never hit this
         }
       }
       else
@@ -3968,8 +3997,9 @@ namespace Legion {
 #ifdef DEBUG_LEGION
           assert(index < subspaces.size());
 #endif
-          child->set_realm_index_space(context->runtime->address_space,
-                                       subspaces[index++]);
+          if (child->set_realm_index_space(context->runtime->address_space,
+                                           subspaces[index++]))
+            assert(false); // should never hit this
         }
         delete itr;
       }
@@ -4104,8 +4134,9 @@ namespace Legion {
           // Get the child of the projection partition
           IndexSpaceNodeT<DIM1,T1> *child = 
            static_cast<IndexSpaceNodeT<DIM1,T1>*>(partition->get_child(color));
-          child->set_realm_index_space(context->runtime->address_space,
-                                       subspaces[color]);
+          if (child->set_realm_index_space(context->runtime->address_space,
+                                           subspaces[color]))
+            assert(false); // should never hit this
         }
       }
       else
@@ -4122,8 +4153,9 @@ namespace Legion {
 #ifdef DEBUG_LEGION
           assert(index < subspaces.size());
 #endif
-          child->set_realm_index_space(context->runtime->address_space,
-                                       subspaces[index++]);
+          if (child->set_realm_index_space(context->runtime->address_space,
+                                           subspaces[index++]))
+            assert(false); // should never hit this
         }
         delete itr;
       }

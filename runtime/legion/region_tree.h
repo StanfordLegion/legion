@@ -1832,7 +1832,7 @@ namespace Legion {
     public:
       virtual void pack_index_space(Serializer &rez, 
                                     bool include_size) const = 0;
-      virtual void unpack_index_space(Deserializer &derez,
+      virtual bool unpack_index_space(Deserializer &derez,
                                       AddressSpaceID source) = 0;
     public:
       virtual ApEvent create_equal_children(Operation *op,
@@ -1983,7 +1983,7 @@ namespace Legion {
     public:
       ApEvent get_realm_index_space(Realm::IndexSpace<DIM,T> &result,
 				    bool need_tight_result);
-      void set_realm_index_space(AddressSpaceID source,
+      bool set_realm_index_space(AddressSpaceID source,
 				 const Realm::IndexSpace<DIM,T> &value);
     public:
       // From IndexSpaceExpression
@@ -2032,7 +2032,7 @@ namespace Legion {
       virtual ColorSpaceIterator* create_color_space_iterator(void);
     public:
       virtual void pack_index_space(Serializer &rez, bool include_size) const;
-      virtual void unpack_index_space(Deserializer &derez,
+      virtual bool unpack_index_space(Deserializer &derez,
                                       AddressSpaceID source);
     public:
       virtual ApEvent create_equal_children(Operation *op,
