@@ -519,6 +519,7 @@ namespace Legion {
                                     std::vector<InstanceSet> &valid_instances); 
       void replay_map_task_output(void);
       virtual InnerContext* create_implicit_context(void);
+      void set_shard_manager(ShardManager *manager);
     protected: // mapper helper calls
       void validate_target_processors(const std::vector<Processor> &prcs) const;
       void validate_variant_selection(MapperManager *local_mapper,

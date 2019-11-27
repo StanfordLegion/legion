@@ -3371,6 +3371,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void SingleTask::set_shard_manager(ShardManager *manager)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(shard_manager == NULL);
+#endif
+      shard_manager = manager;
+      shard_manager->add_reference();
+    }
+
+    //--------------------------------------------------------------------------
     void SingleTask::validate_target_processors(
                                  const std::vector<Processor> &processors) const
     //--------------------------------------------------------------------------

@@ -3113,6 +3113,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(top_context != NULL);
 #endif
+      top_context->increment_pending();
       result->set_context(top_context);
       return result;
     }
@@ -3136,6 +3137,7 @@ namespace Legion {
       // We also need a shard 
       shard_manager = new ShardManager(runtime, repl_context, true/*cr*/,
         true/*top level*/, total_shards, runtime->address_space, implicit_top);
+      implicit_top->set_shard_manager(shard_manager);
 #ifdef DEBUG_LEGION
       // This is a dummy shard_mapping for now since we won't actually need
       // a real one, this just needs to make sure all the checks pass
@@ -22820,7 +22822,6 @@ namespace Legion {
       top_task->initialize_task(top_context, launcher, false/*track parent*/,
                     true/*top level task*/, true/*implicit top level task*/);
       increment_outstanding_top_level_tasks();
-      top_context->increment_pending();
 #ifdef DEBUG_LEGION
       increment_total_outstanding_tasks(legion_main_id, false);
 #else
@@ -22922,8 +22923,12 @@ namespace Legion {
           delete implicit_shard_manager;
       }
       else
+      {
         local_task = create_implicit_top_level(top_task_id, top_mapper_id,
                                                proxy, task_name);
+        // Increment the pending count here
+        local_task->get_context()->increment_pending();
+      }
       InnerContext *execution_context = local_task->create_implicit_context();
       Legion::Runtime *dummy_rt;
       execution_context->begin_task(dummy_rt);
