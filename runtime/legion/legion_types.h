@@ -836,6 +836,8 @@ namespace Legion {
       SEND_CONTROL_REPLICATE_COLLECTIVE_MESSAGE,
       SEND_LIBRARY_MAPPER_REQUEST,
       SEND_LIBRARY_MAPPER_RESPONSE,
+      SEND_LIBRARY_TRACE_REQUEST,
+      SEND_LIBRARY_TRACE_RESPONSE,
       SEND_LIBRARY_PROJECTION_REQUEST,
       SEND_LIBRARY_PROJECTION_RESPONSE,
       SEND_LIBRARY_SHARDING_REQUEST,
@@ -1016,6 +1018,8 @@ namespace Legion {
         "Send Control Replication Collective Message",                \
         "Send Library Mapper Request",                                \
         "Send Library Mapper Response",                               \
+        "Send Library Trace Request",                                 \
+        "Send Library Trace Response",                                \
         "Send Library Projection Request",                            \
         "Send Library Projection Response",                           \
         "Send Library Sharding Request",                              \

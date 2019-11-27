@@ -6166,6 +6166,27 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    TraceID Runtime::generate_dynamic_trace_id(void)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->generate_dynamic_trace_id();
+    }
+
+    //--------------------------------------------------------------------------
+    TraceID Runtime::generate_library_trace_ids(const char *name, size_t count)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->generate_library_trace_ids(name, count);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ TraceID Runtime::generate_static_trace_id(void)
+    //--------------------------------------------------------------------------
+    {
+      return Internal::Runtime::generate_static_trace_id();
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::complete_frame(Context ctx)
     //--------------------------------------------------------------------------
     {

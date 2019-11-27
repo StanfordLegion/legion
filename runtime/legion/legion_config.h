@@ -156,6 +156,10 @@
 #ifndef MAX_APPLICATION_REDUCTION_ID
 #define MAX_APPLICATION_REDUCTION_ID    (1<<20)
 #endif
+// Maximum ID for an application trace ID
+#ifndef LEGION_MAX_APPLICATION_TRACE_ID
+#define LEGION_MAX_APPLICATION_TRACE_ID        (1<<20)
+#endif
 // Maximum ID for an application projection ID
 #ifndef MAX_APPLICATION_PROJECTION_ID // For backwards compatibility
 #ifndef LEGION_MAX_APPLICATION_PROJECTION_ID

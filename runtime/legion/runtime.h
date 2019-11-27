@@ -2354,6 +2354,10 @@ namespace Legion {
       void begin_static_trace(Context ctx, 
                               const std::set<RegionTreeID> *managed);
       void end_static_trace(Context ctx);
+      TraceID generate_dynamic_trace_id(void);
+      TraceID generate_library_trace_ids(const char *name, size_t count);
+      static TraceID& get_current_static_trace_id(void);
+      static TraceID generate_static_trace_id(void);
       void complete_frame(Context ctx);
       FutureMap execute_must_epoch(Context ctx, 
                                    const MustEpochLauncher &launcher);
@@ -2751,6 +2755,8 @@ namespace Legion {
                                                      Serializer &rez);
       void send_library_mapper_request(AddressSpaceID target, Serializer &rez);
       void send_library_mapper_response(AddressSpaceID target, Serializer &rez);
+      void send_library_trace_request(AddressSpaceID target, Serializer &rez);
+      void send_library_trace_response(AddressSpaceID target, Serializer &rez);
       void send_library_projection_request(AddressSpaceID target, 
                                            Serializer &rez);
       void send_library_projection_response(AddressSpaceID target,
@@ -3016,6 +3022,9 @@ namespace Legion {
       void handle_library_mapper_request(Deserializer &derez,
                                          AddressSpaceID source);
       void handle_library_mapper_response(Deserializer &derez);
+      void handle_library_trace_request(Deserializer &derez,
+                                        AddressSpaceID source);
+      void handle_library_trace_response(Deserializer &derez);
       void handle_library_projection_request(Deserializer &derez,
                                              AddressSpaceID source);
       void handle_library_projection_response(Deserializer &derez);
@@ -3463,6 +3472,7 @@ namespace Legion {
       unsigned unique_control_replication_id;
       unsigned unique_task_id;
       unsigned unique_mapper_id;
+      unsigned unique_trace_id;
       unsigned unique_projection_id;
       unsigned unique_sharding_id;
       unsigned unique_redop_id;
@@ -3479,6 +3489,16 @@ namespace Legion {
       std::map<std::string,LibraryMapperIDs> library_mapper_ids;
       // This is only valid on node 0
       unsigned unique_library_mapper_id;
+    protected:
+      struct LibraryTraceIDs {
+        TraceID result;
+        size_t count;
+        RtEvent ready;
+        bool result_set;
+      };
+      std::map<std::string,LibraryTraceIDs> library_trace_ids;
+      // This is only valid on node 0
+      unsigned unique_library_trace_id;
     protected:
       struct LibraryProjectionIDs {
       public:
