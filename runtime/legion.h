@@ -5960,6 +5960,33 @@ namespace Legion {
        * @param ctx the enclosing task context
        */
       void end_static_trace(Context ctx);
+
+      /**
+       * Dynamically generate a unique TraceID for use across the machine
+       * @reutrn a TraceID that is globally unique across the machine
+       */
+      TraceID generate_dynamic_trace_id(void);
+
+      /** 
+       * Generate a contiguous set of TraceIDs for use by a library.
+       * This call will always generate the same answer for the same library
+       * name no many how many times it is called or on how many nodes it
+       * is called. If the count passed in to this method differs for the 
+       * same library name the runtime will raise an error.
+       * @param name a unique null-terminated string that names the library
+       * @param count the number of trace IDs that should be generated
+       * @return the first TraceID that is allocated to the library
+       */
+      TraceID generate_library_trace_ids(const char *name, size_t count);
+
+      /**
+       * Statically generate a unique Trace ID for use across the machine.
+       * This can only be called prior to the runtime starting. It must be
+       * invoked symmetrically across all the nodes in the machine prior
+       * to starting the runtime.
+       * @return a TraceID that is globally unique across the machine
+       */
+      static TraceID generate_static_trace_id(void);
     public:
       //------------------------------------------------------------------------
       // Frame Operations 
