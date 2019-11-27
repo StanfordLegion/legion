@@ -7405,7 +7405,8 @@ namespace Legion {
       IndexSpace handle;
       derez.deserialize(handle);
       IndexSpaceNode *node = forest->get_node(handle);
-      node->unpack_index_space(derez, source);
+      if (node->unpack_index_space(derez, source))
+        delete node;
     } 
 
     //--------------------------------------------------------------------------
