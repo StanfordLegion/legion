@@ -12241,6 +12241,12 @@ namespace Legion {
                                               const MustEpochLauncher &launcher)
     //--------------------------------------------------------------------------
     {
+#ifdef SAFE_MUST_EPOCH_LAUNCHES
+      // See the comment in InnerContext::execute_must_epoch for why this
+      // particular call is here for safe must epoch launches
+      // Also see github issue #659
+      issue_execution_fence(); 
+#endif
       AutoRuntimeCall call(this);
       ReplMustEpochOp *epoch_op = runtime->get_available_repl_epoch_op();
       IndexSpace launch_space = launcher.launch_space;
