@@ -6558,9 +6558,7 @@ namespace Legion {
       {
         if (it->first != runtime->address_space)
         {
-          distribute_shards(it->first, it->second);
-          // Update the remote constituents count
-          remote_constituents++;
+          distribute_shards(it->first, it->second); 
           // Clean up the shards that are now sent remotely
           for (unsigned idx = 0; idx < it->second.size(); idx++)
             delete it->second[idx];
@@ -6636,6 +6634,8 @@ namespace Legion {
         }
       }
       runtime->send_replicate_launch(target, rez);
+      // Update the remote constituents count
+      remote_constituents++;
     }
 
     //--------------------------------------------------------------------------

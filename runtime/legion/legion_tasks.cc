@@ -7537,6 +7537,21 @@ namespace Legion {
       return repl_ctx->create_replicate_instance_top_view(manager, source);
     } 
 
+    //--------------------------------------------------------------------------
+    void ShardTask::initialize_implicit_task(InnerContext *context, TaskID tid,
+                                             MapperID mid, Processor proxy)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(parent_ctx == NULL);
+#endif
+      parent_ctx = context;
+      task_id = tid;
+      map_id = mid;
+      orig_proc = proxy;
+      current_proc = proxy;
+    }
+
     /////////////////////////////////////////////////////////////
     // Index Task 
     /////////////////////////////////////////////////////////////

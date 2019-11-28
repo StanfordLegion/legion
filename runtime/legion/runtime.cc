@@ -3114,7 +3114,9 @@ namespace Legion {
       assert(top_context != NULL);
 #endif
       top_context->increment_pending();
-      result->set_context(top_context);
+      result->initialize_implicit_task(top_context, task_id, mapper_id, proxy);
+      result->complete_mapping();
+      result->resolve_speculation();
       return result;
     }
 
@@ -23051,11 +23053,6 @@ namespace Legion {
       top_task->initialize_task(top_context, launcher, false/*track parent*/,
                     true/*top level task*/, true/*implicit top level task*/);
       increment_outstanding_top_level_tasks();
-#ifdef DEBUG_LEGION
-      increment_total_outstanding_tasks(legion_main_id, false);
-#else
-      increment_total_outstanding_tasks();
-#endif
       // Launch a task to deactivate the top-level context
       // when the top-level task is done
       TopFinishArgs args(top_context);
@@ -23158,6 +23155,11 @@ namespace Legion {
         // Increment the pending count here
         local_task->get_context()->increment_pending();
       }
+#ifdef DEBUG_LEGION
+      increment_total_outstanding_tasks(top_task_id, false);
+#else
+      increment_total_outstanding_tasks();
+#endif
       InnerContext *execution_context = local_task->create_implicit_context();
       Legion::Runtime *dummy_rt;
       execution_context->begin_task(dummy_rt);
