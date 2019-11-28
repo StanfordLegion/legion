@@ -727,7 +727,8 @@ namespace Legion {
       ImplicitShardManager& operator=(const ImplicitShardManager &rhs);
     public:
       bool record_arrival(bool local);
-      ShardTask* create_shard(Processor proxy, const char *task_name);
+      ShardTask* create_shard(int shard_id, Processor proxy, 
+                              const char *task_name);
     protected:
       void create_shard_manager(Processor proxy, const char *task_name);
       void request_shard_manager(void);

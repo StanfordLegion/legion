@@ -3071,7 +3071,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ShardTask* ImplicitShardManager::create_shard(Processor proxy,
+    ShardTask* ImplicitShardManager::create_shard(int shard_id, Processor proxy,
                                                   const char *task_name)
     //--------------------------------------------------------------------------
     {
@@ -3084,8 +3084,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(local_shard_id < shards_per_address_space);
 #endif
-        const ShardID shard_id = local_shard_id++;
-        result = shard_manager->create_shard(shard_id, proxy);   
+        const ShardID shard = (shard_id < 0) ? local_shard_id++ : shard_id;
+        result = shard_manager->create_shard(shard, proxy);
       }
       else
       {
@@ -3106,9 +3106,9 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(local_shard_id < shards_per_address_space);
 #endif
-        const ShardID shard_id = runtime->address_space * 
-          shards_per_address_space + local_shard_id++; 
-        result = shard_manager->create_shard(shard_id, proxy);
+        const ShardID shard = (shard_id < 0) ? (runtime->address_space * 
+          shards_per_address_space + local_shard_id++) : shard_id; 
+        result = shard_manager->create_shard(shard, proxy);
       }
 #ifdef DEBUG_LEGION
       assert(top_context != NULL);
@@ -23145,7 +23145,8 @@ namespace Legion {
         ImplicitShardManager *implicit_shard_manager = 
           find_implicit_shard_manager(top_task_id, top_mapper_id, proc_kind, 
                                       shards_per_address_space, true/*local*/);
-        local_task = implicit_shard_manager->create_shard(proxy, task_name);
+        local_task = 
+          implicit_shard_manager->create_shard(shard_id, proxy, task_name);
         if (implicit_shard_manager->remove_reference())
           delete implicit_shard_manager;
       }
