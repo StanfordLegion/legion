@@ -7097,14 +7097,20 @@ namespace Legion {
        * for supporting implicit top-level tasks for multi-node runs. For
        * the control replicable case we expect to see the same number of 
        * calls from every address space. This number is controlled by 
-       * shard_per_address_space and defaults to one.
+       * shard_per_address_space and defaults to one. The application can
+       * also optionally specify the shard ID for every implicit top level
+       * task for control replication settings. If it is specified, then
+       * the application must specify it for all shards. Otherwise the
+       * runtime will allocate shard IDs contiguously on each node before
+       * proceeding to the next node.
        */
       Context begin_implicit_task(TaskID top_task_id,
                                   MapperID mapper_id,
                                   Processor::Kind proc_kind,
                                   const char *task_name = NULL,
                                   bool control_replicable = false,
-                                  unsigned shard_per_address_space = 1);
+                                  unsigned shard_per_address_space = 1,
+                                  int shard_id = -1);
 
       /**
        * This is the final method for marking the end of an 

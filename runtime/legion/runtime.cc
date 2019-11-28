@@ -20552,7 +20552,8 @@ namespace Legion {
                                          Processor::Kind proc_kind,
                                          const char *task_name,
                                          bool control_replicable,
-                                         unsigned shards_per_address_space)
+                                         unsigned shards_per_address_space,
+                                         int shard_id)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
