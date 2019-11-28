@@ -3780,7 +3780,8 @@ namespace Legion {
                                   Processor::Kind proc_kind,
                                   const char *task_name,
                                   bool control_replicable,
-                                  unsigned shard_per_address_space);
+                                  unsigned shard_per_address_space,
+                                  int shard_id);
       void finish_implicit_task(Context ctx);
       static void set_top_level_task_id(TaskID top_id);
       static void set_top_level_task_mapper_id(MapperID mapper_id);
