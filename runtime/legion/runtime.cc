@@ -20626,7 +20626,7 @@ namespace Legion {
         increment_outstanding_top_level_tasks();
         top_context->increment_pending();
 #ifdef DEBUG_LEGION
-        increment_total_outstanding_tasks(legion_main_id, false);
+        increment_total_outstanding_tasks(top_task_id, false);
 #else
         increment_total_outstanding_tasks();
 #endif
