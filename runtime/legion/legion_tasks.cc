@@ -1742,6 +1742,8 @@ namespace Legion {
         {
           ProjectionFunction *function = 
             runtime->find_projection_function(regions[idx].projection);
+          if (function->is_invertible)
+            assert(false); // TODO: implement dependent launches for inline
           regions[idx].region = function->project_point(this, idx, runtime, 
                                                 index_domain, index_point);
           // Update the region requirement kind 
@@ -2372,6 +2374,7 @@ namespace Legion {
       virtual_mapped.clear();
       no_access_regions.clear();
       version_infos.clear();
+      intra_space_mapping_dependences.clear();
       map_applied_conditions.clear();
       task_profiling_requests.clear();
       copy_profiling_requests.clear();
@@ -3838,44 +3841,58 @@ namespace Legion {
     {
       DETAILED_PROFILER(runtime, MAP_ALL_REGIONS_CALL);
       // Only do this the first or second time through
-      if ((defer_args == NULL) || (defer_args->invocation_count < 2))
+      if ((defer_args == NULL) || (defer_args->invocation_count < 3))
       {
-        if (request_valid_instances)
+        if ((defer_args == NULL) || (defer_args->invocation_count < 2))
         {
-          // If the mapper wants valid instances we first need to do our
-          // versioning analysis and then call the mapper
-          if (defer_args == NULL/*first invocation*/)
+          if (request_valid_instances)
           {
-            const RtEvent version_ready_event = 
-              perform_versioning_analysis(false/*post mapper*/);
-            if (version_ready_event.exists() && 
-                !version_ready_event.has_triggered())
-            return defer_perform_mapping(version_ready_event, must_epoch_op,
-                                         defer_args, 1/*invocation count*/);
-          }
-          // Now do the mapping call
-          if (is_replicated())
-            invoke_mapper_replicated(must_epoch_op);
-          else
-            invoke_mapper(must_epoch_op);
-        }
-        else
-        {
-          // If the mapper doesn't need valid instances, we do the mapper
-          // call first and then see if we need to do any versioning analysis
-          if (defer_args == NULL/*first invocation*/)
-          {
+            // If the mapper wants valid instances we first need to do our
+            // versioning analysis and then call the mapper
+            if (defer_args == NULL/*first invocation*/)
+            {
+              const RtEvent version_ready_event = 
+                perform_versioning_analysis(false/*post mapper*/);
+              if (version_ready_event.exists() && 
+                  !version_ready_event.has_triggered())
+              return defer_perform_mapping(version_ready_event, must_epoch_op,
+                                           defer_args, 1/*invocation count*/);
+            }
+            // Now do the mapping call
             if (is_replicated())
               invoke_mapper_replicated(must_epoch_op);
             else
               invoke_mapper(must_epoch_op);
-            const RtEvent version_ready_event = 
-              perform_versioning_analysis(true/*post mapper*/);
-            if (version_ready_event.exists() && 
-                !version_ready_event.has_triggered())
-            return defer_perform_mapping(version_ready_event, must_epoch_op,
-                                         defer_args, 1/*invocation count*/);
           }
+          else
+          {
+            // If the mapper doesn't need valid instances, we do the mapper
+            // call first and then see if we need to do any versioning analysis
+            if (defer_args == NULL/*first invocation*/)
+            {
+              if (is_replicated())
+                invoke_mapper_replicated(must_epoch_op);
+              else
+                invoke_mapper(must_epoch_op);
+              const RtEvent version_ready_event = 
+                perform_versioning_analysis(true/*post mapper*/);
+              if (version_ready_event.exists() && 
+                  !version_ready_event.has_triggered())
+              return defer_perform_mapping(version_ready_event, must_epoch_op,
+                                           defer_args, 1/*invocation count*/);
+            }
+          }
+        }
+        // If we have any intra-space mapping dependences that haven't triggered
+        // then we need to defer ourselves until they have occurred
+        if (!intra_space_mapping_dependences.empty())
+        {
+          const RtEvent ready = 
+            Runtime::merge_events(intra_space_mapping_dependences);
+          intra_space_mapping_dependences.clear();
+          if (ready.exists() && !ready.has_triggered())
+            return defer_perform_mapping(ready, must_epoch_op,
+                                         defer_args, 2/*invocation count*/);
         }
         // See if we have a remote trace info to use, if we don't then make
         // our trace info and do the initialization
@@ -4002,9 +4019,9 @@ namespace Legion {
                 std::vector<ApEvent> *effects_copy = 
                   new std::vector<ApEvent>();
                 effects_copy->swap(effects);
-                // We'll restart down below with the second invocation
+                // We'll restart down below with the third possible invocation
                 return defer_perform_mapping(registration_post, must_epoch_op,
-                                            defer_args, 2/*invocation count*/, 
+                                            defer_args, 3/*invocation count*/, 
                                             performed_copy, effects_copy);
               }
             }
@@ -4023,10 +4040,10 @@ namespace Legion {
             perform_post_mapping(trace_info);
         } // if (!regions.empty())
       }
-      else // second invocation
+      else // third invocation
       {
 #ifdef DEBUG_LEGION
-        assert(defer_args->invocation_count == 2);
+        assert(defer_args->invocation_count == 3);
         assert(defer_args->performed_regions != NULL);
         assert(defer_args->effects != NULL);
 #endif
@@ -4700,6 +4717,7 @@ namespace Legion {
         predicate_false_size = 0;
       }
       predicate_false_future = Future();
+      intra_space_dependences.clear();
     }
 
     //--------------------------------------------------------------------------
@@ -6963,6 +6981,37 @@ namespace Legion {
         return TraceLocalID(trace_local_id, get_domain_point());
     }
 
+    //--------------------------------------------------------------------------
+    void PointTask::record_intra_space_dependences(unsigned index,
+                                    const std::vector<DomainPoint> &dependences)
+    //--------------------------------------------------------------------------
+    {
+      // Scan through the list until we find ourself
+      for (unsigned idx = 0; idx < dependences.size(); idx++)
+      {
+        if (dependences[idx] == index_point)
+        {
+          // If we've got a prior dependence then record it
+          if (idx > 0)
+          {
+            const DomainPoint &prev = dependences[idx-1];
+            const RtEvent pre = slice_owner->find_intra_space_dependence(prev);
+            intra_space_mapping_dependences.insert(pre);
+            if (runtime->legion_spy_enabled)
+              LegionSpy::log_intra_space_dependence(unique_op_id, prev);
+          }
+          // If we're not the last dependence, then send our mapping event
+          // so that others can record a dependence on us
+          if (idx < (dependences.size()-1))
+            slice_owner->record_intra_space_dependence(index_point,
+                                                       get_mapped_event());
+          return;
+        }
+      }
+      // We should never get here
+      assert(false);
+    }
+
     /////////////////////////////////////////////////////////////
     // Shard Task 
     /////////////////////////////////////////////////////////////
@@ -7645,6 +7694,7 @@ namespace Legion {
       interfering_requirements.clear();
       point_requirements.clear();
       assert(acquired_instances.empty());
+      assert(pending_intra_space_dependences.empty());
 #endif
       acquired_instances.clear();
     }
@@ -8576,6 +8626,49 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    RtEvent IndexTask::find_intra_space_dependence(const DomainPoint &point)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock o_lock(op_lock);
+      // Check to see if we already have it
+      std::map<DomainPoint,RtEvent>::const_iterator finder = 
+        intra_space_dependences.find(point);
+      if (finder != intra_space_dependences.end())
+        return finder->second;
+      // Otherwise make a temporary one and record it for now
+      const RtUserEvent pending_event = Runtime::create_rt_user_event();
+      intra_space_dependences[point] = pending_event;
+      pending_intra_space_dependences[point] = pending_event;
+      return pending_event;
+    }
+    
+    //--------------------------------------------------------------------------
+    void IndexTask::record_intra_space_dependence(const DomainPoint &point,
+                                                  RtEvent point_mapped)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock o_lock(op_lock);
+      std::map<DomainPoint,RtEvent>::iterator finder = 
+        intra_space_dependences.find(point);
+      if (finder != intra_space_dependences.end())
+      {
+#ifdef DEBUG_LEGION
+        assert(finder->second != point_mapped);
+#endif
+        std::map<DomainPoint,RtUserEvent>::iterator pending_finder = 
+          pending_intra_space_dependences.find(point);
+#ifdef DEBUG_LEGION
+        assert(pending_finder != pending_intra_space_dependences.end());
+#endif
+        Runtime::trigger_event(pending_finder->second, point_mapped);
+        pending_intra_space_dependences.erase(pending_finder);
+        finder->second = point_mapped;
+      }
+      else
+        intra_space_dependences[point] = point_mapped;
+    }
+
+    //--------------------------------------------------------------------------
     void IndexTask::record_reference_mutation_effect(RtEvent event)
     //--------------------------------------------------------------------------
     {
@@ -8906,6 +8999,35 @@ namespace Legion {
       task->unpack_slice_commit(derez);
     }
 
+    //--------------------------------------------------------------------------
+    /*static*/ void IndexTask::process_slice_find_intra_dependence(
+                                                            Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      IndexTask *task;
+      derez.deserialize(task);
+      DomainPoint point;
+      derez.deserialize(point);
+      RtUserEvent to_trigger;
+      derez.deserialize(to_trigger);
+      const RtEvent result = task->find_intra_space_dependence(point);
+      Runtime::trigger_event(to_trigger, result);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void IndexTask::process_slice_record_intra_dependence(
+                                                            Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      IndexTask *task;
+      derez.deserialize(task);
+      DomainPoint point;
+      derez.deserialize(point);
+      RtEvent mapped_event;
+      derez.deserialize(mapped_event);
+      task->record_intra_space_dependence(point, mapped_event);
+    }
+
 #ifdef DEBUG_LEGION
     //--------------------------------------------------------------------------
     void IndexTask::check_point_requirements(
@@ -8921,6 +9043,30 @@ namespace Legion {
         if (!IS_WRITE(req) || (req.must_premap() && !IS_EXCLUSIVE(req)))
           continue;
         local_interfering.insert(std::pair<unsigned,unsigned>(idx,idx));
+      }
+      // If the projection functions are invertible then we don't have to 
+      // worry about interference because the runtime knows how to hook
+      // up those kinds of dependences
+      for (std::set<std::pair<unsigned,unsigned> >::iterator it = 
+            local_interfering.begin(); it != local_interfering.end(); /*none*/)
+      {
+        if (it->first == it->second)
+        {
+          const RegionRequirement &req = regions[it->first];
+          if (req.handle_type != SINGULAR)
+          {
+            ProjectionFunction *func = 
+              runtime->find_projection_function(req.projection);   
+            if (func->is_invertible)
+            {
+              std::set<std::pair<unsigned,unsigned> >::iterator to_del = it++;
+              local_interfering.erase(to_del); 
+              continue;
+            }
+          }
+        }
+        // If we make it here then keep going
+        it++;
       }
       // Nothing to do if there are no interfering requirements
       if (local_interfering.empty())
@@ -10342,6 +10488,91 @@ namespace Legion {
     {
       for (unsigned idx = 0; idx < points.size(); idx++)
         points[idx]->complete_replay(instance_ready_event);
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent SliceTask::find_intra_space_dependence(const DomainPoint &point)
+    //--------------------------------------------------------------------------
+    {
+      // See if we can find or make it
+      {
+        AutoLock o_lock(op_lock);
+        std::map<DomainPoint,RtEvent>::const_iterator finder = 
+          intra_space_dependences.find(point);
+        // If we've already got it then we're done
+        if (finder != intra_space_dependences.end())
+          return finder->second;
+#ifdef DEBUG_LEGION
+        assert(!points.empty());
+#endif
+        // Next see if it is one of our local points
+        for (std::vector<PointTask*>::const_iterator it = 
+              points.begin(); it != points.end(); it++)
+        {
+          if ((*it)->index_point != point)
+            continue;
+          // Don't save this in our intra_space_dependences data structure!
+          // Doing so could mess up our optimization for detecting when 
+          // we need to send dependences back to the origin
+          // See SliceTask::record_intra_space_dependence
+          return (*it)->get_mapped_event();
+        }
+        // If we're remote, make up an event and send a message to go find it
+        if (is_remote())
+        {
+          const RtUserEvent temp_event = Runtime::create_rt_user_event();
+          // Send the message to the owner to go find it
+          Serializer rez;
+          rez.serialize(index_owner);
+          rez.serialize(point);
+          rez.serialize(temp_event);
+          runtime->send_slice_find_intra_space_dependence(orig_proc, rez);
+          // Save this is for ourselves
+          intra_space_dependences[point] = temp_event;
+          return temp_event;
+        }
+      }
+      // If we make it down here then we're on the same node as the 
+      // index_owner so we can just as it what the answer and save it
+      const RtEvent result = index_owner->find_intra_space_dependence(point);
+      AutoLock o_lock(op_lock);
+      intra_space_dependences[point] = result;
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    void SliceTask::record_intra_space_dependence(const DomainPoint &point,
+                                                  RtEvent point_mapped)
+    //--------------------------------------------------------------------------
+    {
+      // Check to see if we already sent it already
+      {
+        AutoLock o_lock(op_lock);
+        std::map<DomainPoint,RtEvent>::const_iterator finder = 
+          intra_space_dependences.find(point);
+        if (finder != intra_space_dependences.end())
+        {
+#ifdef DEBUG_LEGION
+          assert(finder->second == point_mapped);
+#endif
+          return;
+        }
+        // Otherwise save it and then let it flow back to the index owner
+        intra_space_dependences[point] = point_mapped;
+      }
+      if (is_remote())
+      {
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(index_owner);
+          rez.serialize(point);
+          rez.serialize(point_mapped);
+        }
+        runtime->send_slice_record_intra_space_dependence(orig_proc, rez);
+      }
+      else
+        index_owner->record_intra_space_dependence(point, point_mapped);
     }
 
   }; // namespace Internal 
