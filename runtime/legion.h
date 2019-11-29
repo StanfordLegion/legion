@@ -3271,6 +3271,16 @@ namespace Legion {
                                     unsigned index,
                                     LogicalPartition upper_bound,
                                     const DomainPoint &point);
+      /**
+       * Invert the projection function. Given a logical region
+       * for this operation return all of the points that alias
+       * with it. Dependences will be resolved in the order that
+       * they are returned to the runtime. The returned result 
+       * must not be empty because it must contain at least the
+       * point for the given operation.
+       */
+      virtual void invert(LogicalRegion region, const Domain &launch_domain,
+                          std::vector<DomainPoint> &ordered_points);
       
       /**
        * Indicate whether calls to this projection functor
@@ -3287,6 +3297,13 @@ namespace Legion {
        * is invoked by the runtime.
        */
       virtual bool is_functional(void) const { return false; }
+
+      /**
+       * Indicate whether this is an invertible projection 
+       * functor which can be used to handle dependences 
+       * between point tasks in the same index space launch.
+       */
+      virtual bool is_invertible(void) const { return false; }
 
       /**
        * Specify the depth which this projection function goes

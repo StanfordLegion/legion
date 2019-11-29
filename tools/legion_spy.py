@@ -5103,9 +5103,9 @@ class Operation(object):
                  'futures', 'index_owner', 'points', 'launch_rect', 'creator', 
                  'realm_copies', 'realm_fills', 'realm_depparts', 'version_numbers', 
                  'internal_idx', 'partition_kind', 'partition_node', 'node_name', 
-                 'cluster_name', 'generation',
-                 'transitive_warning_issued', 'arrival_barriers', 
-                 'wait_barriers', 'created_futures', 'used_futures', 'merged', "replayed"]
+                 'cluster_name', 'generation', 'transitive_warning_issued', 
+                 'arrival_barriers', 'wait_barriers', 'created_futures', 'used_futures', 
+                 'intra_space_dependences', 'merged', "replayed"]
                   # If you add a field here, you must update the merge method
     def __init__(self, state, uid):
         self.state = state
@@ -5161,6 +5161,8 @@ class Operation(object):
         # Future information
         self.created_futures = None
         self.used_futures = None
+        # Intra-space dependences
+        self.intra_space_dependences = None
         # Check if this operation was merged
         self.merged = False
         # Check if this operation was physical replayed
@@ -5483,6 +5485,11 @@ class Operation(object):
             for op in self.logical_incoming:
                 op.get_logical_reachable(reachable, False)
 
+    def add_intra_space_dependence(self, dep):
+        if self.intra_space_dependences is None:
+            self.intra_space_dependences = set()
+        self.intra_space_dependences.add(dep)
+
     def merge(self, other):
         if self.kind == NO_OP_KIND:
             self.kind = other.kind
@@ -5710,18 +5717,19 @@ class Operation(object):
         if self.kind == INDEX_TASK_KIND:
             for point_task in itervalues(self.points):
                 for req in itervalues(point_task.op.reqs):
-                    all_reqs.append(req)
+                    all_reqs.append((req,point_task.op))
         else:
             for point in itervalues(self.points):
                 for req in itervalues(point.reqs):
-                    all_reqs.append(req)
+                    all_reqs.append((req,point))
+        order_points = False
         # All requirements should be non interfering
         for idx1 in xrange(0, len(all_reqs)):
-            req1 = all_reqs[idx1]
+            req1,op1 = all_reqs[idx1]
             if req1.is_no_access():
                 continue
             for idx2 in xrange(idx1+1, len(all_reqs)):
-                req2 = all_reqs[idx2]
+                req2,op2 = all_reqs[idx2]
                 if req2.is_no_access():
                     continue
                 if req1.parent.tree_id != req2.parent.tree_id:
@@ -5733,7 +5741,7 @@ class Operation(object):
                         fields_disjoint = False
                         break
                 if fields_disjoint:
-                    continue
+                    continue 
                 # Check for interference at a common ancestor
                 aliased,ancestor = self.state.has_aliased_ancestor_tree_only(
                     req1.logical_node.get_index_node(),
@@ -5742,10 +5750,75 @@ class Operation(object):
                     assert ancestor
                     dep_type = compute_dependence_type(req1, req2)
                     if dep_type == TRUE_DEPENDENCE or dep_type == ANTI_DEPENDENCE:
-                        print(("Region requirements %d and %d of operation %s "+
-                               "are interfering in %s") %
-                               (req1.index,req2.index,str(self),str(self.context)))
+                        # Check for invertible projection functions which can 
+                        # the runtime knows how to handle their dependences
+                        if req1.index == req2.index and \
+                                self.reqs[req1.index].projection_function is not None and \
+                                self.reqs[req1.index].projection_function.invertible:
+                            # This should only happen for tasks right now
+                            assert op1.task is not None
+                            assert op2.task is not None
+                            # Check to make sure we find a dependence going one way or
+                            # the other between the two operations
+                            if op1.intra_space_dependences is not None and \
+                                    op2.task.point in op1.intra_space_dependences:
+                                order_points = True
+                                continue
+                            if op2.intra_space_dependences is not None and \
+                                    op1.task.point in op2.intra_space_dependences:
+                                order_points = True
+                                continue
+                            print(("Missing intra space dependence between requirements "+
+                                   "%d and %d of points %s and %s of %s in %s") %
+                                   (req1.index,req2.index,str(op1),str(op2),
+                                       str(self),str(self.context)))
+                        else:
+                            # The normal bad path
+                            print(("Region requirements %d and %d of operation %s "+
+                                   "are interfering in %s") %
+                                   (req1.index,req2.index,str(self),str(self.context)))
+                        # Everything here fails
                         return True
+        new_points = collections.OrderedDict()
+        if order_points:
+            # If we have intra-space dependences between points then put
+            # them in an ordered dictionary so that whenever we iterate
+            # over them we do them in an order consistent with their deps
+            # This should only happen for index task kinds currently
+            assert self.kind == INDEX_TASK_KIND 
+            satisfied_deps = set()
+            remaining_tasks = dict()
+            for point,task in iteritems(self.points):
+                if task.op.intra_space_dependences is None:
+                    new_points[point] = task
+                    satisfied_deps.add(point)
+                else:
+                    remaining_tasks[point] = task
+            while remaining_tasks:
+                next_remaining = dict()
+                for point,task in iteritems(remaining_tasks):
+                    satisfied = True
+                    for dep in task.op.intra_space_dependences:
+                        if dep not in satisfied_deps:
+                            satisfied = False
+                            break
+                    if satisfied:
+                        new_points[point] = task
+                        satisfied_deps.add(point)
+                    else:
+                        next_remaining[point] = task
+                remaining_tasks = next_remaining
+            
+        else:
+            # Let's put things in order by their UID
+            if self.kind == INDEX_TASK_KIND:
+                for point,task in sorted(iteritems(self.points), key=lambda x: x[1].op.uid):
+                    new_points[point] = task
+            else:
+                for point,op in sorted(iteritems(self.points), key=lambda x: x[1].uid):
+                    new_points[point] = op
+        assert len(new_points) == len(self.points)
+        self.points = new_points
         return False
 
     def analyze_logical_requirement(self, index, perform_checks):
@@ -6223,7 +6296,7 @@ class Operation(object):
                 prefix += '  '
         # If we are an index space task, only do our points
         if self.kind == INDEX_TASK_KIND:
-            for point in sorted(itervalues(self.points), key=lambda x: x.op.uid):
+            for point in itervalues(self.points):
                 if not point.op.perform_op_physical_verification(perform_checks):
                     return False
             return True
@@ -6242,7 +6315,7 @@ class Operation(object):
         if self.kind == COPY_OP_KIND:
             # Check to see if this is an index copy
             if self.points:
-                for point in sorted(itervalues(self.points), key=lambda x: x.uid):
+                for point in itervalues(self.points):
                     if not point.perform_op_physical_verification(perform_checks): 
                         return False
                 return True
@@ -6259,7 +6332,7 @@ class Operation(object):
         elif self.kind == FILL_OP_KIND:
             # Check to see if this is an index fill
             if self.points:
-                for point in sorted(itervalues(self.points), key=lambda x: x.uid):
+                for point in itervalues(self.points):
                     if not point.perform_op_physical_verification(perform_checks):
                         return False
                 return True
@@ -6271,7 +6344,7 @@ class Operation(object):
                     return False
         elif self.kind == DEP_PART_OP_KIND and self.points:
             # Index partition operation
-            for point in sorted(itervalues(self.points), key=lambda x: x.uid):
+            for point in itervalues(self.points):
                 if not point.perform_op_physical_verification(perform_checks):
                     return False
             return True
@@ -6626,17 +6699,24 @@ class Variant(object):
         self.name = name
 
 class ProjectionFunction(object):
-    __slots__ = ['state', 'pid', 'depth']
+    __slots__ = ['state', 'pid', 'depth', 'invertible']
     def __init__(self, state, pid):
         self.state = state
         self.pid = pid
         self.depth = None
+        self.invertible = None
 
     def set_depth(self, depth):
         if self.depth:
             assert self.depth == depth
         else:
             self.depth = depth
+
+    def set_invertible(self, invertible):
+        if self.invertible:
+            assert self.invertible == invertible
+        else:
+            self.invertible = invertible
 
 class Task(object):
     __slots__ = ['state', 'op', 'point', 'operations', 'depth', 
@@ -8970,6 +9050,8 @@ point_point_pat          = re.compile(
     prefix+"Point Point (?P<point1>[0-9]+) (?P<point2>[0-9]+)")
 index_point_pat          = re.compile(
     prefix+"Index Point (?P<index>[0-9]+) (?P<point>[0-9]+) (?P<dim>[0-9]+) (?P<rem>.*)")
+intra_space_pat          = re.compile(
+    prefix+"Intra Space Dependence (?P<point>[0-9]+) (?P<dim>[0-9]+) (?P<rem>.*)")
 op_index_pat             = re.compile(
     prefix+"Operation Index (?P<parent>[0-9]+) (?P<index>[0-9]+) (?P<child>[0-9]+)")
 close_index_pat          = re.compile(
@@ -8984,7 +9066,7 @@ requirement_pat         = re.compile(
 req_field_pat           = re.compile(
     prefix+"Logical Requirement Field (?P<uid>[0-9]+) (?P<index>[0-9]+) (?P<fid>[0-9]+)")
 projection_func_pat     = re.compile(
-    prefix+"Projection Function (?P<pid>[0-9]+) (?P<depth>[0-9]+)")
+    prefix+"Projection Function (?P<pid>[0-9]+) (?P<depth>[0-9]+) (?P<invertible>[0-1])")
 req_proj_pat            = re.compile(
     prefix+"Logical Requirement Projection (?P<uid>[0-9]+) (?P<index>[0-9]+) "+
            "(?P<pid>[0-9]+)")
@@ -9256,6 +9338,7 @@ def parse_legion_spy_line(line, state):
     if m is not None:
         func = state.get_projection_function(int(m.group('pid')))
         func.set_depth(int(m.group('depth')))
+        func.set_invertible(True if int(m.group('invertible')) != 0 else False)
         return True
     m = req_proj_pat.match(line)
     if m is not None:
@@ -9675,6 +9758,16 @@ def parse_legion_spy_line(line, state):
             index_point.vals[index] = int(values[index])
         index = state.get_operation(int(m.group('index')))
         index.add_point_op(point, index_point) 
+        return True
+    m = intra_space_pat.match(line)
+    if m is not None:
+        point = state.get_operation(int(m.group('point')))
+        dim = int(m.group('dim'))
+        index_point = Point(dim)
+        values = decimal_pat.findall(m.group('rem'))
+        for index in xrange(dim):
+            index_point.vals[index] = int(values[index])
+        point.add_intra_space_dependence(index_point)
         return True
     m = op_index_pat.match(line)
     if m is not None:

@@ -3244,6 +3244,15 @@ namespace Legion {
                           "FUNCTOR METHOD WITHOUT AN OVERRIDE!");
       return LogicalRegion::NO_REGION;
     }
+
+    //--------------------------------------------------------------------------
+    void ProjectionFunctor::invert(LogicalRegion region, 
+          const Domain &launch_domain, std::vector<DomainPoint> &ordered_points)
+    //--------------------------------------------------------------------------
+    {
+      // Must be override by derived classes
+      assert(false);
+    }
     
     /////////////////////////////////////////////////////////////
     // Coloring Serializer 

@@ -1427,7 +1427,8 @@ namespace Legion {
       LogicalRegion project_point(Task *task, unsigned idx, Runtime *runtime,
                                   const DomainPoint &point);
       void project_points(const RegionRequirement &req, unsigned idx,
-          Runtime *runtime, const std::vector<PointTask*> &point_tasks);
+          Runtime *runtime, const std::vector<PointTask*> &point_tasks,
+          IndexSpaceNode *launch_space_node);
       // Generalized and annonymized
       void project_points(Operation *op, unsigned idx, 
                           const RegionRequirement &req, Runtime *runtime,
@@ -1447,9 +1448,15 @@ namespace Legion {
       void check_projection_partition_result(const RegionRequirement &req,
                                           Operation *op, unsigned idx,
                                           LogicalRegion result, Runtime *rt);
+      // Checking for inversion
+      void check_inversion(const Task *task, unsigned idx,
+                           const std::vector<DomainPoint> &ordered_points);
+      void check_containment(const Task *task, unsigned idx,
+                             const std::vector<DomainPoint> &ordered_points);
     public:
       const int depth; 
       const bool is_exclusive;
+      const bool is_invertible;
       const ProjectionID projection_id;
       ProjectionFunctor *const functor;
     private:
@@ -2281,6 +2288,10 @@ namespace Legion {
       void send_slice_remote_mapped(Processor target, Serializer &rez);
       void send_slice_remote_complete(Processor target, Serializer &rez);
       void send_slice_remote_commit(Processor target, Serializer &rez);
+      void send_slice_find_intra_space_dependence(Processor target, 
+                                                  Serializer &rez);
+      void send_slice_record_intra_space_dependence(Processor target,
+                                                    Serializer &rez);
       void send_did_remote_registration(AddressSpaceID target, Serializer &rez);
       void send_did_remote_valid_update(AddressSpaceID target, Serializer &rez);
       void send_did_remote_gc_update(AddressSpaceID target, Serializer &rez);
@@ -2503,6 +2514,8 @@ namespace Legion {
                                       AddressSpaceID source);
       void handle_slice_remote_complete(Deserializer &derez);
       void handle_slice_remote_commit(Deserializer &derez);
+      void handle_slice_find_intra_dependence(Deserializer &derez);
+      void handle_slice_record_intra_dependence(Deserializer &derez);
       void handle_did_remote_registration(Deserializer &derez, 
                                           AddressSpaceID source);
       void handle_did_remote_valid_update(Deserializer &derez);

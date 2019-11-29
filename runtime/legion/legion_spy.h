@@ -847,6 +847,86 @@ namespace Legion {
 #endif
       }
 
+      static inline void log_intra_space_dependence(UniqueID point_id,
+                                                    const DomainPoint &point)
+      {
+#if LEGION_MAX_DIM == 1
+        log_spy.print("Intra Space Dependence %llu %u %lld", 
+		      point_id, point.dim, 
+                      (long long)point.point_data[0]);
+#elif LEGION_MAX_DIM == 2
+        log_spy.print("Intra Space Dependence %llu %u %lld %lld", 
+		      point_id, point.dim, 
+                      (long long)point.point_data[0],
+		      (long long)point.point_data[1]);
+#elif LEGION_MAX_DIM == 3
+        log_spy.print("Intra Space Dependence %llu %u %lld %lld %lld", 
+		      point_id, point.dim, 
+                      (long long)point.point_data[0],
+		      (long long)point.point_data[1], 
+                      (long long)point.point_data[2]);
+#elif LEGION_MAX_DIM == 4
+        log_spy.print("Intra Space Dependence %llu %u %lld %lld %lld %lld", 
+		      point_id, point.dim, 
+                      (long long)point.point_data[0],
+		      (long long)point.point_data[1], 
+                      (long long)point.point_data[2],
+                      (long long)point.point_data[3]);
+#elif LEGION_MAX_DIM == 5
+        log_spy.print("Intra Space Dependence %llu %u %lld %lld %lld %lld %lld", 
+		      point_id, point.dim, 
+                      (long long)point.point_data[0],
+		      (long long)point.point_data[1], 
+                      (long long)point.point_data[2],
+                      (long long)point.point_data[3],
+                      (long long)point.point_data[4]);
+#elif LEGION_MAX_DIM == 6
+        log_spy.print("Intra Space Dependence %llu %u %lld %lld %lld %lld %lld %lld",
+		      point_id, point.dim, 
+                      (long long)point.point_data[0],
+		      (long long)point.point_data[1], 
+                      (long long)point.point_data[2],
+                      (long long)point.point_data[3],
+                      (long long)point.point_data[4],
+                      (long long)point.point_data[5]);
+#elif LEGION_MAX_DIM == 7
+        log_spy.print("Intra Space Dependence %llu %u %lld %lld %lld %lld %lld %lld "
+                      "%lld", point_id, point.dim, 
+                      (long long)point.point_data[0],
+		      (long long)point.point_data[1], 
+                      (long long)point.point_data[2],
+                      (long long)point.point_data[3],
+                      (long long)point.point_data[4],
+                      (long long)point.point_data[5],
+                      (long long)point.point_data[6]);
+#elif LEGION_MAX_DIM == 8
+        log_spy.print("Intra Space Dependence %llu %u %lld %lld %lld %lld %lld %lld "
+                      "%lld %lld", point_id, point.dim, 
+                      (long long)point.point_data[0],
+		      (long long)point.point_data[1], 
+                      (long long)point.point_data[2],
+                      (long long)point.point_data[3],
+                      (long long)point.point_data[4],
+                      (long long)point.point_data[5],
+                      (long long)point.point_data[6],
+                      (long long)point.point_data[7]);
+#elif LEGION_MAX_DIM == 9
+        log_spy.print("Intra Space Dependence %llu %u %lld %lld %lld %lld %lld %lld "
+                      "%lld %lld %lld", point_id, point.dim, 
+                      (long long)point.point_data[0],
+		      (long long)point.point_data[1], 
+                      (long long)point.point_data[2],
+                      (long long)point.point_data[3],
+                      (long long)point.point_data[4],
+                      (long long)point.point_data[5],
+                      (long long)point.point_data[6],
+                      (long long)point.point_data[7],
+                      (long long)point.point_data[8]);
+#else
+#error "Illegal LEGION_MAX_DIM"
+#endif
+      }
+
       static inline void log_child_operation_index(UniqueID parent_id, 
                                        size_t index, UniqueID child_id)
       {
@@ -899,9 +979,10 @@ namespace Legion {
       }
 
       static inline void log_projection_function(ProjectionID pid,
-                                                 int depth)
+                                                 int depth, bool invertible)
       {
-        log_spy.print("Projection Function %u %d", pid, depth);
+        log_spy.print("Projection Function %u %d %d", pid, depth, 
+                      invertible ? 1 : 0);
       }
 
       static inline void log_requirement_projection(UniqueID unique_id,
