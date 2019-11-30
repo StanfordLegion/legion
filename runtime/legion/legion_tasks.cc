@@ -7004,6 +7004,7 @@ namespace Legion {
           // so that others can record a dependence on us
           if (idx < (dependences.size()-1))
             slice_owner->record_intra_space_dependence(index_point,
+                                                       dependences[idx+1], 
                                                        get_mapped_event());
           return;
         }
@@ -7515,6 +7516,22 @@ namespace Legion {
         static_cast<ReplicateContext*>(execution_context);
 #endif
       repl_ctx->handle_equivalence_set_request(derez);
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardTask::handle_intra_space_dependence(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(execution_context != NULL);
+      ReplicateContext *repl_ctx = 
+        dynamic_cast<ReplicateContext*>(execution_context);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = 
+        static_cast<ReplicateContext*>(execution_context);
+#endif
+      repl_ctx->handle_intra_space_dependence(derez);
     }
 
     //--------------------------------------------------------------------------
@@ -8644,6 +8661,7 @@ namespace Legion {
     
     //--------------------------------------------------------------------------
     void IndexTask::record_intra_space_dependence(const DomainPoint &point,
+                                                  const DomainPoint &next,
                                                   RtEvent point_mapped)
     //--------------------------------------------------------------------------
     {
@@ -8652,17 +8670,17 @@ namespace Legion {
         intra_space_dependences.find(point);
       if (finder != intra_space_dependences.end())
       {
+        if (finder->second != point_mapped)
+        {
+          std::map<DomainPoint,RtUserEvent>::iterator pending_finder = 
+            pending_intra_space_dependences.find(point);
 #ifdef DEBUG_LEGION
-        assert(finder->second != point_mapped);
+          assert(pending_finder != pending_intra_space_dependences.end());
 #endif
-        std::map<DomainPoint,RtUserEvent>::iterator pending_finder = 
-          pending_intra_space_dependences.find(point);
-#ifdef DEBUG_LEGION
-        assert(pending_finder != pending_intra_space_dependences.end());
-#endif
-        Runtime::trigger_event(pending_finder->second, point_mapped);
-        pending_intra_space_dependences.erase(pending_finder);
-        finder->second = point_mapped;
+          Runtime::trigger_event(pending_finder->second, point_mapped);
+          pending_intra_space_dependences.erase(pending_finder);
+          finder->second = point_mapped;
+        }
       }
       else
         intra_space_dependences[point] = point_mapped;
@@ -9021,11 +9039,12 @@ namespace Legion {
     {
       IndexTask *task;
       derez.deserialize(task);
-      DomainPoint point;
+      DomainPoint point, next;
       derez.deserialize(point);
+      derez.deserialize(next);
       RtEvent mapped_event;
       derez.deserialize(mapped_event);
-      task->record_intra_space_dependence(point, mapped_event);
+      task->record_intra_space_dependence(point, next, mapped_event);
     }
 
 #ifdef DEBUG_LEGION
@@ -9379,6 +9398,7 @@ namespace Legion {
       created_field_spaces.clear();
       created_index_spaces.clear();
       created_index_partitions.clear();
+      unique_intra_space_deps.clear();
       runtime->free_slice_task(this);
     }
 
@@ -10542,11 +10562,13 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void SliceTask::record_intra_space_dependence(const DomainPoint &point,
+                                                  const DomainPoint &next,
                                                   RtEvent point_mapped)
     //--------------------------------------------------------------------------
     {
       // Check to see if we already sent it already
       {
+        const std::pair<DomainPoint,DomainPoint> key(point, next);
         AutoLock o_lock(op_lock);
         std::map<DomainPoint,RtEvent>::const_iterator finder = 
           intra_space_dependences.find(point);
@@ -10555,10 +10577,20 @@ namespace Legion {
 #ifdef DEBUG_LEGION
           assert(finder->second == point_mapped);
 #endif
-          return;
+          // For control replication we need the index owner to see all
+          // the unique sets of dependences, see if we've seen this 
+          // combination before, if not, allow it to be sent back
+          // to the index owner for it's own visibility
+          std::set<std::pair<DomainPoint,DomainPoint> >::const_iterator
+            key_finder = unique_intra_space_deps.find(key);
+          if (key_finder != unique_intra_space_deps.end())
+            return;
         }
-        // Otherwise save it and then let it flow back to the index owner
-        intra_space_dependences[point] = point_mapped;
+        else
+          // Otherwise save it and then let it flow back to the index owner
+          intra_space_dependences[point] = point_mapped;
+        // Always save this if we make it here
+        unique_intra_space_deps.insert(key);
       }
       if (is_remote())
       {
@@ -10567,12 +10599,13 @@ namespace Legion {
           RezCheck z(rez);
           rez.serialize(index_owner);
           rez.serialize(point);
+          rez.serialize(next);
           rez.serialize(point_mapped);
         }
         runtime->send_slice_record_intra_space_dependence(orig_proc, rez);
       }
       else
-        index_owner->record_intra_space_dependence(point, point_mapped);
+        index_owner->record_intra_space_dependence(point, next, point_mapped);
     }
 
   }; // namespace Internal 

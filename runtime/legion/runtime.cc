@@ -7559,6 +7559,11 @@ namespace Legion {
               runtime->handle_control_replicate_eq_response(derez);
               break;
             }
+          case SEND_REPL_INTRA_SPACE_DEP:
+            {
+              runtime->handle_control_replicate_intra_space_dependence(derez);
+              break;
+            }
           case SEND_REPL_RESOURCE_UPDATE:
             {
               runtime->handle_control_replicate_resource_update(derez);
@@ -17004,6 +17009,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_control_replicate_intra_space_dependence(
+                                         AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_REPL_INTRA_SPACE_DEP,
+                                  DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_control_replicate_resource_update(AddressSpaceID target,
                                                          Serializer &rez)
     //--------------------------------------------------------------------------
@@ -18555,6 +18569,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       ReplicateContext::handle_eq_response(derez, this);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_control_replicate_intra_space_dependence(
+                                                            Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      ShardManager::handle_intra_space_dependence(derez, this);
     }
 
     //--------------------------------------------------------------------------

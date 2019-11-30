@@ -2653,6 +2653,8 @@ namespace Legion {
                                                           Serializer &rez);
       void send_control_replicate_equivalence_set_response(
                                         AddressSpaceID target, Serializer &rez);
+      void send_control_replicate_intra_space_dependence(AddressSpaceID target,
+                                                         Serializer &rez);
       void send_control_replicate_resource_update(AddressSpaceID target,
                                                   Serializer &rez);
       void send_control_replicate_trace_event_request(AddressSpaceID target,
@@ -3023,6 +3025,7 @@ namespace Legion {
       void handle_control_replicate_top_view_response(Deserializer &derez);
       void handle_control_replicate_eq_request(Deserializer &derez);
       void handle_control_replicate_eq_response(Deserializer &derez);
+      void handle_control_replicate_intra_space_dependence(Deserializer &derez);
       void handle_control_replicate_resource_update(Deserializer &derez);
       void handle_control_replicate_trace_event_request(Deserializer &derez,
                                                         AddressSpaceID source);

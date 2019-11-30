@@ -1355,6 +1355,11 @@ namespace Legion {
         FieldSpace handle;
         DistributedID did;
       };
+      struct IntraSpaceDeps {
+      public:
+        std::map<ShardID,RtEvent> ready_deps;
+        std::map<ShardID,RtUserEvent> pending_deps;
+      };
     public:
       ReplicateContext(Runtime *runtime, ShardTask *owner,int d,bool full_inner,
                        const std::vector<RegionRequirement> &reqs,
@@ -1686,6 +1691,9 @@ namespace Legion {
       void handle_trace_update(Deserializer &derez, AddressSpaceID source);
       ApBarrier handle_find_trace_shard_event(size_t temp_index, ApEvent event,
                                               ShardID remote_shard);
+      void record_intra_space_dependence(size_t context_index, 
+          const DomainPoint &point, RtEvent point_mapped, ShardID next_shard);
+      void handle_intra_space_dependence(Deserializer &derez);
     public:
       // Collective methods
       CollectiveID get_next_collective_index(CollectiveIndexLocation loc);
@@ -1745,6 +1753,8 @@ namespace Legion {
       // These barriers are used for signaling when future maps can be reclaimed
       std::vector<RtBarrier>  future_map_barriers;
       unsigned                next_future_map_bar_index;
+    protected:
+      std::map<std::pair<size_t,DomainPoint>,IntraSpaceDeps> intra_space_deps;
     protected:
       ShardID index_space_allocator_shard;
       ShardID index_partition_allocator_shard;

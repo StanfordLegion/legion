@@ -583,6 +583,7 @@ namespace Legion {
       if (sharding_collective != NULL)
         delete sharding_collective;
 #endif
+      unique_intra_space_deps.clear();
       runtime->free_repl_index_task(this);
     }
 
@@ -893,6 +894,98 @@ namespace Legion {
       // Make a replicate future map 
       return new ReplFutureMapImpl(repl_ctx, this, shard_domain, runtime,
           runtime->get_available_distributed_id(), runtime->address_space);
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent ReplIndexTask::find_intra_space_dependence(const DomainPoint &point)
+    //--------------------------------------------------------------------------
+    {
+
+      AutoLock o_lock(op_lock);
+      // Check to see if we already have it
+      std::map<DomainPoint,RtEvent>::const_iterator finder = 
+        intra_space_dependences.find(point);
+      if (finder != intra_space_dependences.end())
+        return finder->second;  
+      // Make a temporary event and then do different things depending on 
+      // whether we own this point or whether a remote shard owns it
+      const RtUserEvent pending_event = Runtime::create_rt_user_event();
+      intra_space_dependences[point] = pending_event;
+      // If not, check to see if this is a point that we expect to own
+#ifdef DEBUG_LEGION
+      assert(sharding_function != NULL);
+      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+      Domain launch_domain;
+      if (sharding_space.exists())
+        runtime->forest->find_launch_space_domain(sharding_space,launch_domain);
+      else
+        launch_space->get_launch_space_domain(launch_domain);
+      const ShardID point_shard = 
+        sharding_function->find_owner(point, launch_domain); 
+      if (point_shard != repl_ctx->owner_shard->shard_id)
+      {
+        // A different shard owns it so send a message to that shard 
+        // requesting it to fill in the dependence
+        Serializer rez;
+        rez.serialize(repl_ctx->shard_manager->repl_id);
+        rez.serialize(point_shard);
+        rez.serialize(context_index);
+        rez.serialize(point);
+        rez.serialize(pending_event);
+        rez.serialize(repl_ctx->owner_shard->shard_id);
+        repl_ctx->shard_manager->send_intra_space_dependence(point_shard, rez);
+      }
+      else // We own it so do the normal thing
+        pending_intra_space_dependences[point] = pending_event;
+      return pending_event; 
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplIndexTask::record_intra_space_dependence(const DomainPoint &point,
+                                  const DomainPoint &next, RtEvent point_mapped)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(sharding_function != NULL);
+      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+      // Determine if the next point is one that we own or is one that is
+      // going to be coming from a remote shard
+      Domain launch_domain;
+      if (sharding_space.exists())
+        runtime->forest->find_launch_space_domain(sharding_space,launch_domain);
+      else
+        launch_space->get_launch_space_domain(launch_domain);
+      const ShardID next_shard = 
+        sharding_function->find_owner(next, launch_domain); 
+      if (next_shard != repl_ctx->owner_shard->shard_id)
+      {
+        // Make sure we only send this to the repl_ctx once for each 
+        // unique shard ID that we see for this point task
+        const std::pair<DomainPoint,ShardID> key(point, next_shard); 
+        bool record_dependence = true;
+        {
+          AutoLock o_lock(op_lock);
+          std::set<std::pair<DomainPoint,ShardID> >::const_iterator finder = 
+            unique_intra_space_deps.find(key);
+          if (finder != unique_intra_space_deps.end())
+            record_dependence = false;
+          else
+            unique_intra_space_deps.insert(key);
+        }
+        if (record_dependence)
+          repl_ctx->record_intra_space_dependence(context_index, point, 
+                                                  point_mapped, next_shard);
+      }
+      else // The next shard is ourself, so we can do the normal thing
+        IndexTask::record_intra_space_dependence(point, next, point_mapped);
     }
 
     /////////////////////////////////////////////////////////////
@@ -7064,6 +7157,49 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void ShardManager::send_intra_space_dependence(ShardID target, 
+                                                   Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(target < address_spaces->size());
+#endif
+      AddressSpaceID target_space = (*address_spaces)[target];
+      // Check to see if this is a local shard
+      if (target_space == runtime->address_space)
+      {
+        Deserializer derez(rez.get_buffer(), rez.get_used_bytes());
+        // Have to unpack the preample we already know
+        ReplicationID local_repl;
+        derez.deserialize(local_repl);     
+        handle_intra_space_dependence(derez);
+      }
+      else
+        runtime->send_control_replicate_intra_space_dependence(target_space,
+                                                               rez);
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardManager::handle_intra_space_dependence(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      // Figure out which shard we are going to
+      ShardID target;
+      derez.deserialize(target);
+      for (std::vector<ShardTask*>::const_iterator it = 
+            local_shards.begin(); it != local_shards.end(); it++)
+      {
+        if ((*it)->shard_id == target)
+        {
+          (*it)->handle_intra_space_dependence(derez);
+          return;
+        }
+      }
+      // Should never get here
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
     RtEvent ShardManager::broadcast_resource_update(ShardTask *source, 
                                                     Serializer &rez)
     //--------------------------------------------------------------------------
@@ -7574,6 +7710,17 @@ namespace Legion {
       derez.deserialize(repl_id);
       ShardManager *manager = runtime->find_shard_manager(repl_id);
       manager->handle_equivalence_set_request(derez);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void ShardManager::handle_intra_space_dependence(
+                                          Deserializer &derez, Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      ReplicationID repl_id;
+      derez.deserialize(repl_id);
+      ShardManager *manager = runtime->find_shard_manager(repl_id);
+      manager->handle_intra_space_dependence(derez);
     }
 
     //--------------------------------------------------------------------------

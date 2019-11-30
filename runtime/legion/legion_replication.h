@@ -1069,10 +1069,18 @@ namespace Legion {
       void set_sharding_function(ShardingID functor,ShardingFunction *function);
       virtual FutureMapImpl* create_future_map(TaskContext *ctx,
                     IndexSpace launch_space, IndexSpace shard_space);
+    public:
+      // Methods for supporting intra-index-space mapping dependences
+      virtual RtEvent find_intra_space_dependence(const DomainPoint &point);
+      virtual void record_intra_space_dependence(const DomainPoint &point,
+                                                 const DomainPoint &next,
+                                                 RtEvent point_mapped);
     protected:
       ShardingID sharding_functor;
       ShardingFunction *sharding_function;
       FutureExchange *reduction_collective;
+    protected:
+      std::set<std::pair<DomainPoint,ShardID> > unique_intra_space_deps;
 #ifdef DEBUG_LEGION
     public:
       inline void set_sharding_collective(ShardingGatherCollective *collective)
@@ -1980,6 +1988,9 @@ namespace Legion {
       void send_equivalence_set_request(ShardID target, Serializer &rez);
       void handle_equivalence_set_request(Deserializer &derez);
     public:
+      void send_intra_space_dependence(ShardID target, Serializer &rez);
+      void handle_intra_space_dependence(Deserializer &derez);
+    public:
       RtEvent broadcast_resource_update(ShardTask *source, Serializer &rez);
       void handle_resource_update(Deserializer &derez);
     public:
@@ -2009,6 +2020,8 @@ namespace Legion {
                                           AddressSpaceID request_source);
       static void handle_top_view_response(Deserializer &derez, Runtime *rt);
       static void handle_eq_request(Deserializer &derez, Runtime *rt);
+      static void handle_intra_space_dependence(Deserializer &derez, 
+                                                Runtime *rt);
       static void handle_resource_update(Deserializer &derez, Runtime *rt);
       static void handle_trace_event_request(Deserializer &derez, Runtime *rt,
                                              AddressSpaceID request_source);

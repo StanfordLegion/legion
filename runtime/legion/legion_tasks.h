@@ -691,6 +691,7 @@ namespace Legion {
       // Methods for supporting intra-index-space mapping dependences
       virtual RtEvent find_intra_space_dependence(const DomainPoint &point) = 0;
       virtual void record_intra_space_dependence(const DomainPoint &point,
+                                                 const DomainPoint &next,
                                                  RtEvent point_mapped) = 0;
     public:
       void pack_multi_task(Serializer &rez, AddressSpaceID target);
@@ -996,6 +997,7 @@ namespace Legion {
       void handle_collective_message(Deserializer &derez);
       void handle_future_map_request(Deserializer &derez);
       void handle_equivalence_set_request(Deserializer &derez);
+      void handle_intra_space_dependence(Deserializer &derez);
       void handle_resource_update(Deserializer &derez,
                                   std::set<RtEvent> &applied);
       void handle_trace_update(Deserializer &derez, AddressSpaceID source);
@@ -1102,6 +1104,7 @@ namespace Legion {
       // Methods for supporting intra-index-space mapping dependences
       virtual RtEvent find_intra_space_dependence(const DomainPoint &point);
       virtual void record_intra_space_dependence(const DomainPoint &point,
+                                                 const DomainPoint &next,
                                                  RtEvent point_mapped);
     public:
       virtual void record_reference_mutation_effect(RtEvent event);
@@ -1277,6 +1280,7 @@ namespace Legion {
       // Methods for supporting intra-index-space mapping dependences
       virtual RtEvent find_intra_space_dependence(const DomainPoint &point);
       virtual void record_intra_space_dependence(const DomainPoint &point,
+                                                 const DomainPoint &next,
                                                  RtEvent point_mapped);
     protected:
       friend class IndexTask;
@@ -1299,6 +1303,8 @@ namespace Legion {
       std::set<RtEvent> map_applied_conditions;
       std::set<RtEvent> complete_preconditions;
       std::set<RtEvent> commit_preconditions;
+    protected:
+      std::set<std::pair<DomainPoint,DomainPoint> > unique_intra_space_deps;
     };
 
   }; // namespace Internal 

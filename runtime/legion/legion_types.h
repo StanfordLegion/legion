@@ -764,6 +764,7 @@ namespace Legion {
       SEND_REPL_TOP_VIEW_RESPONSE,
       SEND_REPL_EQ_REQUEST,
       SEND_REPL_EQ_RESPONSE,
+      SEND_REPL_INTRA_SPACE_DEP,
       SEND_REPL_RESOURCE_UPDATE,
       SEND_REPL_TRACE_EVENT_REQUEST,
       SEND_REPL_TRACE_EVENT_RESPONSE,
@@ -948,6 +949,7 @@ namespace Legion {
         "Send Replicate Top View Response",                           \
         "Send Replicate Equivalence Set Request",                     \
         "Send Replicate Equivalence Set Response",                    \
+        "Send Replicate Intra Space Dependence",                      \
         "Send Replicate Resource Update",                             \
         "Send Replicate Trace Event Request",                         \
         "Send Replicate Trace Event Response",                        \
