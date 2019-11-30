@@ -418,6 +418,19 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void ReplIndividualTask::resolve_false(bool speculated, bool launched)
+    //--------------------------------------------------------------------------
+    {
+      if (launched)
+        return;
+#ifdef DEBUG_LEGION
+      if (sharding_collective != NULL)
+        sharding_collective->elide_collective();
+#endif
+      IndividualTask::resolve_false(speculated, launched);
+    }
+
+    //--------------------------------------------------------------------------
     void ReplIndividualTask::handle_future(const void *res, 
                                            size_t res_size, bool owned)
     //--------------------------------------------------------------------------
@@ -600,23 +613,7 @@ namespace Legion {
       // We might be able to skip this if the sharding function was already
       // picked for us which occurs when we're part of a must-epoch launch
       if (sharding_function == NULL)
-      {
-        // Do the mapper call to get the sharding function to use
-        if (mapper == NULL)
-          mapper = runtime->find_mapper(current_proc, map_id); 
-        Mapper::SelectShardingFunctorInput* input = repl_ctx->shard_manager;
-        Mapper::SelectShardingFunctorOutput output;
-        output.chosen_functor = UINT_MAX;
-        mapper->invoke_task_select_sharding_functor(this, input, &output);
-        if (output.chosen_functor == UINT_MAX)
-          REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
-                        "Mapper %s failed to pick a valid sharding functor for "
-                        "task %s (UID %lld)", mapper->get_mapper_name(),
-                        get_task_name(), get_unique_id())
-        this->sharding_functor = output.chosen_functor;
-        sharding_function = 
-          repl_ctx->shard_manager->find_sharding_function(sharding_functor);
-      }
+        select_sharding_function(repl_ctx);
 #ifdef DEBUG_LEGION
       assert(sharding_function != NULL);
       assert(sharding_collective != NULL);
@@ -646,6 +643,27 @@ namespace Legion {
       }
       // Now we can do the normal prepipeline stage
       IndexTask::trigger_prepipeline_stage();
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplIndexTask::select_sharding_function(ReplicateContext *repl_ctx)
+    //--------------------------------------------------------------------------
+    {
+      // Do the mapper call to get the sharding function to use
+      if (mapper == NULL)
+        mapper = runtime->find_mapper(current_proc, map_id); 
+      Mapper::SelectShardingFunctorInput* input = repl_ctx->shard_manager;
+      Mapper::SelectShardingFunctorOutput output;
+      output.chosen_functor = UINT_MAX;
+      mapper->invoke_task_select_sharding_functor(this, input, &output);
+      if (output.chosen_functor == UINT_MAX)
+        REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                      "Mapper %s failed to pick a valid sharding functor for "
+                      "task %s (UID %lld)", mapper->get_mapper_name(),
+                      get_task_name(), get_unique_id())
+      this->sharding_functor = output.chosen_functor;
+      sharding_function = 
+        repl_ctx->shard_manager->find_sharding_function(sharding_functor);
     }
 
     //--------------------------------------------------------------------------
@@ -835,6 +853,20 @@ namespace Legion {
 #else
         ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
+        if (sharding_function == NULL)
+        {
+          select_sharding_function(repl_ctx);
+#ifdef DEBUG_LEGION
+          assert(future_map.impl != NULL);
+          ReplFutureMapImpl *impl = 
+            dynamic_cast<ReplFutureMapImpl*>(future_map.impl);
+          assert(impl != NULL);
+#else
+          ReplFutureMapImpl *impl = 
+            static_cast<ReplFutureMapImpl*>(future_map.impl);
+#endif
+          impl->set_sharding_function(sharding_function);
+        }
         // Compute the local index space of points for this shard
         if (sharding_space.exists())
           internal_space = 
@@ -845,6 +877,10 @@ namespace Legion {
             sharding_function->find_shard_space(repl_ctx->owner_shard->shard_id,
                                             launch_space, launch_space->handle);
       }
+#ifdef DEBUG_LEGION
+      if (sharding_collective != NULL)
+        sharding_collective->elide_collective();
+#endif
       // Now continue through and do the base case
       IndexTask::resolve_false(speculated, launched);
     }
@@ -1279,6 +1315,19 @@ namespace Legion {
         FillOp::replay_analysis();
     }
 
+    //--------------------------------------------------------------------------
+    void ReplFillOp::resolve_false(bool speculated, bool launched)
+    //--------------------------------------------------------------------------
+    {
+      if (launched)
+        return;
+#ifdef DEBUG_LEGION
+      if (sharding_collective != NULL)
+        sharding_collective->elide_collective();
+#endif
+      FillOp::resolve_false(speculated, launched);
+    }
+
     /////////////////////////////////////////////////////////////
     // Repl Index Fill Op 
     /////////////////////////////////////////////////////////////
@@ -1475,6 +1524,19 @@ namespace Legion {
         add_launch_space_reference(launch_space);
         IndexFillOp::replay_analysis();
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplIndexFillOp::resolve_false(bool speculated, bool launched)
+    //--------------------------------------------------------------------------
+    {
+      if (launched)
+        return;
+#ifdef DEBUG_LEGION
+      if (sharding_collective != NULL)
+        sharding_collective->elide_collective();
+#endif
+      IndexFillOp::resolve_false(speculated, launched);
     }
 
     //--------------------------------------------------------------------------
@@ -1683,6 +1745,19 @@ namespace Legion {
       }
       else // We own it, so do the base call
         CopyOp::replay_analysis();
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplCopyOp::resolve_false(bool speculated, bool launched)
+    //--------------------------------------------------------------------------
+    {
+      if (launched)
+        return;
+#ifdef DEBUG_LEGION
+      if (sharding_collective != NULL)
+        sharding_collective->elide_collective();
+#endif
+      CopyOp::resolve_false(speculated, launched);
     }
 
     /////////////////////////////////////////////////////////////
@@ -1938,6 +2013,19 @@ namespace Legion {
         add_launch_space_reference(launch_space);
         IndexCopyOp::replay_analysis();
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplIndexCopyOp::resolve_false(bool speculated, bool launched)
+    //--------------------------------------------------------------------------
+    {
+      if (launched)
+        return;
+#ifdef DEBUG_LEGION
+      if (sharding_collective != NULL)
+        sharding_collective->elide_collective();
+#endif
+      IndexCopyOp::resolve_false(speculated, launched);
     }
 
     //--------------------------------------------------------------------------

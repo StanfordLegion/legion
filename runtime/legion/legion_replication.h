@@ -1014,6 +1014,7 @@ namespace Legion {
       virtual void trigger_prepipeline_stage(void);
       virtual void trigger_ready(void);
       virtual void replay_analysis(void);
+      virtual void resolve_false(bool speculated, bool launched);
     public:
       // Override these so we can broadcast the future result
       virtual void handle_future(const void *res, size_t res_size, bool owned);
@@ -1069,6 +1070,7 @@ namespace Legion {
       void set_sharding_function(ShardingID functor,ShardingFunction *function);
       virtual FutureMapImpl* create_future_map(TaskContext *ctx,
                     IndexSpace launch_space, IndexSpace shard_space);
+      void select_sharding_function(ReplicateContext *repl_ctx);
     public:
       // Methods for supporting intra-index-space mapping dependences
       virtual RtEvent find_intra_space_dependence(const DomainPoint &point);
@@ -1134,6 +1136,7 @@ namespace Legion {
       virtual void trigger_prepipeline_stage(void);
       virtual void trigger_ready(void);
       virtual void replay_analysis(void);
+      virtual void resolve_false(bool speculated, bool launched);
     protected:
       ShardingID sharding_functor;
       ShardingFunction *sharding_function;
@@ -1170,6 +1173,7 @@ namespace Legion {
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
       virtual void replay_analysis(void);
+      virtual void resolve_false(bool speculated, bool launched);
     public:
       void initialize_replication(ReplicateContext *ctx);
     protected:
@@ -1206,6 +1210,7 @@ namespace Legion {
       virtual void trigger_prepipeline_stage(void);
       virtual void trigger_ready(void);
       virtual void replay_analysis(void);
+      virtual void resolve_false(bool speculated, bool launched);
     protected:
       ShardingID sharding_functor;
       ShardingFunction *sharding_function;
@@ -1241,6 +1246,7 @@ namespace Legion {
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
       virtual void replay_analysis(void);
+      virtual void resolve_false(bool speculated, bool launched);
       virtual ApEvent exchange_indirect_records(const unsigned index,
           const ApEvent local_done, const PhysicalTraceInfo &trace_info,
           const InstanceSet &instances, const IndexSpace space,
