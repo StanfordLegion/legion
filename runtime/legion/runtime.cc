@@ -10158,7 +10158,7 @@ namespace Legion {
               std::vector<DomainPoint> &region_deps = dependences[result];
               if (region_deps.empty())
               {
-                functor->invert(result, launch_domain, region_deps);
+                functor->invert(result,req.partition,launch_domain,region_deps);
                 check_inversion((*it), idx, region_deps);
               }
               else
@@ -10184,7 +10184,7 @@ namespace Legion {
               std::vector<DomainPoint> &region_deps = dependences[result];
               if (region_deps.empty())
               {
-                functor->invert(result, launch_domain, region_deps);
+                functor->invert(result, req.region, launch_domain, region_deps);
                 check_inversion((*it), idx, region_deps);
               }
               else
@@ -10214,7 +10214,7 @@ namespace Legion {
               std::vector<DomainPoint> &region_deps = dependences[result];
               if (region_deps.empty())
               {
-                functor->invert(result, launch_domain, region_deps);
+                functor->invert(result,req.partition,launch_domain,region_deps);
                 check_inversion((*it), idx, region_deps);
               }
               else
@@ -10240,7 +10240,7 @@ namespace Legion {
               std::vector<DomainPoint> &region_deps = dependences[result];
               if (region_deps.empty())
               {
-                functor->invert(result, launch_domain, region_deps);
+                functor->invert(result, req.region, launch_domain, region_deps);
                 check_inversion((*it), idx, region_deps);
               }
               else
