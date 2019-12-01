@@ -218,6 +218,7 @@ namespace Legion {
                                      const std::vector<unsigned> &field_indexes,
                                      const FieldID indirect_field,
                                      const TypeTag indirect_type,
+                                     const bool is_range,
                                      const PhysicalInstance indirect_instance,
                                      const LegionVector<
                                             IndirectRecord>::aligned &records,
@@ -249,8 +250,8 @@ namespace Legion {
       for (LegionList<FieldSet<IndirectRecord*> >::aligned::const_iterator it =
             field_sets.begin(); it != field_sets.end(); it++, index++)
       {
-        UnstructuredIndirectionHelper<DIM,T> helper(indirect_field,
-                                  indirect_instance, it->elements);
+        UnstructuredIndirectionHelper<DIM,T> helper(indirect_field, is_range,
+                                              indirect_instance, it->elements);
         NT_TemplateHelper::demux<UnstructuredIndirectionHelper<DIM,T> >(
             indirect_type, &helper);
         indirections[offset+index] = helper.result;
@@ -725,6 +726,7 @@ namespace Legion {
                                      const std::vector<unsigned> &field_indexes,
                                      const FieldID indirect_field,
                                      const TypeTag indirect_type,
+                                     const bool is_range,
                                      const PhysicalInstance indirect_instance,
                                      const LegionVector<
                                             IndirectRecord>::aligned &records,
@@ -733,8 +735,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       construct_indirections_internal<DIM,T>(field_indexes, indirect_field,
-                                 indirect_type, indirect_instance, records, 
-                                 indirections, indirect_indexes);
+                                 indirect_type, is_range, indirect_instance, 
+                                 records, indirections, indirect_indexes);
     }
 
     //--------------------------------------------------------------------------
@@ -4443,6 +4445,7 @@ namespace Legion {
                                      const std::vector<unsigned> &field_indexes,
                                      const FieldID indirect_field,
                                      const TypeTag indirect_type,
+                                     const bool is_range,
                                      const PhysicalInstance indirect_instance,
                                      const LegionVector<
                                             IndirectRecord>::aligned &records,
@@ -4451,8 +4454,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       construct_indirections_internal<DIM,T>(field_indexes, indirect_field,
-                                 indirect_type, indirect_instance, records, 
-                                 indirections, indirect_indexes);
+                                 indirect_type, is_range, indirect_instance,
+                                 records, indirections, indirect_indexes);
     }
 
     //--------------------------------------------------------------------------

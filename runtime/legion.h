@@ -1656,9 +1656,11 @@ namespace Legion {
     public:
       // Specify src/dst indirect requirements (must have exactly 1 field)
       inline void add_src_indirect_field(const RegionRequirement &src_idx_req,
-                                         FieldID src_idx_fid, bool inst = true);
+                                         FieldID src_idx_fid, bool inst = true,
+                                         bool is_range_indirection = false);
       inline void add_dst_indirect_field(const RegionRequirement &dst_idx_req,
-                                         FieldID dst_idx_fid, bool inst = true);
+                                         FieldID dst_idx_fid, bool inst = true,
+                                         bool is_range_indirection = false);
     public:
       inline void add_grant(Grant g);
       inline void add_wait_barrier(PhaseBarrier bar);
@@ -1670,6 +1672,8 @@ namespace Legion {
       std::vector<RegionRequirement>  dst_requirements;
       std::vector<RegionRequirement>  src_indirect_requirements;
       std::vector<RegionRequirement>  dst_indirect_requirements;
+      std::vector<bool>               src_indirect_is_range;
+      std::vector<bool>               dst_indirect_is_range;
       std::vector<Grant>              grants;
       std::vector<PhaseBarrier>       wait_barriers;
       std::vector<PhaseBarrier>       arrive_barriers;
@@ -1714,9 +1718,11 @@ namespace Legion {
     public:
       // Specify src/dst indirect requirements (must have exactly 1 field)
       inline void add_src_indirect_field(const RegionRequirement &src_idx_req,
-                                         FieldID src_idx_fid, bool inst = true);
+                                         FieldID src_idx_fid, bool inst = true,
+                                         bool is_range_indirection = false);
       inline void add_dst_indirect_field(const RegionRequirement &dst_idx_req,
-                                         FieldID dst_idx_fid, bool inst = true);
+                                         FieldID dst_idx_fid, bool inst = true,
+                                         bool is_range_indirection = false);
     public:
       inline void add_grant(Grant g);
       inline void add_wait_barrier(PhaseBarrier bar);
@@ -1728,6 +1734,8 @@ namespace Legion {
       std::vector<RegionRequirement>  dst_requirements;
       std::vector<RegionRequirement>  src_indirect_requirements;
       std::vector<RegionRequirement>  dst_indirect_requirements;
+      std::vector<bool>               src_indirect_is_range;
+      std::vector<bool>               dst_indirect_is_range;
       std::vector<Grant>              grants;
       std::vector<PhaseBarrier>       wait_barriers;
       std::vector<PhaseBarrier>       arrive_barriers;
