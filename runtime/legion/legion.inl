@@ -7487,20 +7487,22 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     inline void CopyLauncher::add_src_indirect_field(
-                 const RegionRequirement &req, FieldID src_idx_field, bool inst)
+     const RegionRequirement &req, FieldID src_idx_field, bool inst, bool range)
     //--------------------------------------------------------------------------
     {
       src_indirect_requirements.push_back(req);
       src_indirect_requirements.back().add_field(src_idx_field, inst);
+      src_indirect_is_range.push_back(range);
     }
 
     //--------------------------------------------------------------------------
     inline void CopyLauncher::add_dst_indirect_field(
-                 const RegionRequirement &req, FieldID dst_idx_field, bool inst)
+     const RegionRequirement &req, FieldID dst_idx_field, bool inst, bool range)
     //--------------------------------------------------------------------------
     {
       dst_indirect_requirements.push_back(req);
       dst_indirect_requirements.back().add_field(dst_idx_field, inst);
+      dst_indirect_is_range.push_back(range);
     }
 
     //--------------------------------------------------------------------------
@@ -7579,20 +7581,22 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     inline void IndexCopyLauncher::add_src_indirect_field(
-                   const RegionRequirement &r, FieldID src_idx_field, bool inst)
+       const RegionRequirement &r, FieldID src_idx_field, bool inst, bool range)
     //--------------------------------------------------------------------------
     {
       src_indirect_requirements.push_back(r);
       src_indirect_requirements.back().add_field(src_idx_field, inst);
+      src_indirect_is_range.push_back(range);
     }
 
     //--------------------------------------------------------------------------
     inline void IndexCopyLauncher::add_dst_indirect_field(
-                    const RegionRequirement &r, FieldID dst_idx_field,bool inst)
+       const RegionRequirement &r, FieldID dst_idx_field, bool inst, bool range)
     //--------------------------------------------------------------------------
     {
       dst_indirect_requirements.push_back(r);
       dst_indirect_requirements.back().add_field(dst_idx_field, inst);
+      dst_indirect_is_range.push_back(range);
     }
 
     //--------------------------------------------------------------------------
