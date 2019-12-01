@@ -3279,6 +3279,7 @@ namespace Legion {
                                     unsigned index,
                                     LogicalPartition upper_bound,
                                     const DomainPoint &point);
+      ///@{
       /**
        * Invert the projection function. Given a logical region
        * for this operation return all of the points that alias
@@ -3287,8 +3288,13 @@ namespace Legion {
        * must not be empty because it must contain at least the
        * point for the given operation.
        */
-      virtual void invert(LogicalRegion region, const Domain &launch_domain,
+      virtual void invert(LogicalRegion region, LogicalRegion upper_bound,
+                          const Domain &launch_domain,
                           std::vector<DomainPoint> &ordered_points);
+      virtual void invert(LogicalRegion region, LogicalPartition upper_bound,
+                          const Domain &launch_domain,
+                          std::vector<DomainPoint> &ordered_points);
+      ///@}
       
       /**
        * Indicate whether calls to this projection functor

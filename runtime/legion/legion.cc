@@ -3246,7 +3246,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ProjectionFunctor::invert(LogicalRegion region, 
+    void ProjectionFunctor::invert(LogicalRegion region, LogicalRegion upper, 
+          const Domain &launch_domain, std::vector<DomainPoint> &ordered_points)
+    //--------------------------------------------------------------------------
+    {
+      // Must be override by derived classes
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void ProjectionFunctor::invert(LogicalRegion region, LogicalPartition upper, 
           const Domain &launch_domain, std::vector<DomainPoint> &ordered_points)
     //--------------------------------------------------------------------------
     {
