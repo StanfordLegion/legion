@@ -554,7 +554,7 @@ extern "C" {
    * @see Legion::DomainPoint::nil()
    */
   legion_domain_point_t
-  legion_domain_point_nil();
+  legion_domain_point_nil(void);
 
   /**
    * @see Legion::DomainPoint::is_null()
@@ -4587,6 +4587,7 @@ extern "C" {
     const void *userdata,
     size_t userlen);
 
+#ifdef REALM_USE_LLVM
   /**
    * @see Legion::Runtime::register_task_variant()
    */
@@ -4619,7 +4620,9 @@ extern "C" {
     const char *entry_symbol,
     const void *userdata,
     size_t userlen);
+#endif
 
+#ifdef REALM_USE_PYTHON
   /**
    * @see Legion::Runtime::register_task_variant()
    */
@@ -4654,6 +4657,7 @@ extern "C" {
     size_t function_qualname_len,
     const void *userdata,
     size_t userlen);
+#endif
 
   /**
    * @see Legion::LegionTaskWrapper::legion_task_preamble()
