@@ -3741,9 +3741,12 @@ namespace Legion {
         dst_requirements[idx] = launcher.dst_requirements[idx];
         dst_requirements[idx].flags |= NO_ACCESS_FLAG;
         // If our privilege is not reduce, then shift it to write discard
-        // since we are going to write all over the region
-        if (dst_requirements[idx].privilege != REDUCE)
-          dst_requirements[idx].privilege = WRITE_ONLY;
+        // since we are going to write all over the region, although we
+        // can only do this safely now if there is no scatter region
+        // requirement, otherwise we're doing it onto
+        if ((dst_requirements[idx].privilege != REDUCE) &&
+            (idx >= launcher.dst_indirect_requirements.size()))
+          dst_requirements[idx].privilege = WRITE_DISCARD;
       }
       if (!launcher.src_indirect_requirements.empty())
       {
@@ -5935,8 +5938,8 @@ namespace Legion {
         // can only do this safely now if there is no scatter region
         // requirement, otherwise we're doing it onto
         if ((dst_requirements[idx].privilege != REDUCE) && 
-            (idx >= src_indirect_requirements.size()))
-          dst_requirements[idx].privilege = WRITE_ONLY;
+            (idx >= launcher.dst_indirect_requirements.size()))
+          dst_requirements[idx].privilege = WRITE_DISCARD;
       }
       if (!launcher.src_indirect_requirements.empty())
       {
