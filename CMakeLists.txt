@@ -252,6 +252,17 @@ if("${Legion_NETWORKS}" MATCHES .*gasnet1.*)
 endif()
 
 #------------------------------------------------------------------------------#
+# MPI configuration
+#------------------------------------------------------------------------------#
+if("${Legion_NETWORKS}" MATCHES .*mpi.*)
+  cmake_minimum_required(VERSION 3.9)
+  find_package(MPI REQUIRED)
+  # define variable for realm_defines.h
+  set(REALM_USE_MPI ON)
+  set(Legion_MPI_INTEROP ON)
+endif()
+
+#------------------------------------------------------------------------------#
 # LLVM configuration
 #------------------------------------------------------------------------------#
 option(Legion_USE_LLVM "Use LLVM JIT operations" OFF)
