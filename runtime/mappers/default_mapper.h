@@ -540,7 +540,8 @@ namespace Legion {
                                                procset_slices_cache,
                                                omp_slices_cache,
                                                py_slices_cache;
-      std::map<TaskID,VariantInfo>             preferred_variants; 
+      std::map<std::pair<TaskID,Processor::Kind>,
+               VariantInfo>                    preferred_variants;
       std::map<std::pair<TaskID,Processor>,
                std::list<CachedTaskMapping> >  cached_task_mappings;
       std::map<std::pair<Memory::Kind,FieldSpace>,
