@@ -86,34 +86,37 @@ namespace Realm {
   template <int N, typename T = int> struct IndexSpaceIterator;
   template <int N, typename T = int> class SparsityMap;
 
+  class IndirectionInfo;
+
   template <int N, typename T = int>
   class CopyIndirection {
   public:
     class Base {
     public:
-      virtual ~Base(void) { } 
-      // TODO: remove this
-      IndexSpace<N,T> target;
+      virtual ~Base(void) {}
+      virtual IndirectionInfo *create_info(const IndexSpace<N,T>& is) const = 0;
     };
 
     template <int N2, typename T2 = int>
     class Affine : public CopyIndirection<N,T>::Base {
     public:
-      virtual ~Affine(void) { }
-    public:
+      virtual ~Affine(void) {}
+
       Matrix<N,N2,T2> transform;
       Point<N2,T2> offset_lo, offset_hi;
       Point<N2,T2> divisor;
       Rect<N2,T2> wrap;
       std::vector<IndexSpace<N2,T2> > spaces;
       std::vector<RegionInstance> insts;
+
+      virtual IndirectionInfo *create_info(const IndexSpace<N,T>& is) const;
     };
 
     template <int N2, typename T2 = int>
     class Unstructured : public CopyIndirection<N,T>::Base {
     public:
-      virtual ~Unstructured(void) { }
-    public:
+      virtual ~Unstructured(void) {}
+
       FieldID field_id;
       RegionInstance inst;
       bool is_ranges;
@@ -122,6 +125,8 @@ namespace Realm {
       size_t subfield_offset;
       std::vector<IndexSpace<N2,T2> > spaces;
       std::vector<RegionInstance> insts;
+
+      virtual IndirectionInfo *create_info(const IndexSpace<N,T>& is) const;
     };
   };
 
