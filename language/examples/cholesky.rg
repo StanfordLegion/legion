@@ -313,8 +313,8 @@ task cholesky(n : int, np : int, verify : bool)
 end
 
 task toplevel()
-  var n = 80*40
-  var np = 40
+  var n = 200*20
+  var np = 20
   var verify = false
 
   var args = c.legion_runtime_get_input_args()
