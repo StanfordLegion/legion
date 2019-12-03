@@ -3019,7 +3019,7 @@ class State(object):
                 return potential_dir
             i += 1
 
-    def calculate_utilization_data(self, timepoints, owners):
+    def calculate_utilization_data(self, timepoints, owners, count):
         # we assume that the timepoints are sorted before this step
 
         # loop through all the timepoints. Get the earliest. If it's first,
@@ -3038,7 +3038,7 @@ class State(object):
             for mem in owners:
                 max_count += mem.capacity
         else:
-            max_count = len(owners)
+            max_count = count
 
         max_count = float(max_count)
 
@@ -3112,18 +3112,22 @@ class State(object):
         return proc_utilization
 
     # group by processor kind per node. Also compute the children relationships
-    def group_node_proc_kind_timepoints(self, timepoints_dict):
+    def group_node_proc_kind_timepoints(self, timepoints_dict, proc_count):
         # procs
         for proc in itervalues(self.processors):
-            if len(proc.tasks) > 0:
+            if len(proc.tasks) >= 0:
                 # add this processor kind to both all and the node group
                 groups = [str(proc.node_id), "all"]
                 for node in groups:
                     group = node + " (" + proc.kind + ")"
                     if group not in timepoints_dict:
-                        timepoints_dict[group] = [proc.util_time_points]
+                        if len(proc.tasks) > 0:
+                            timepoints_dict[group] = [proc.util_time_points]
+                        proc_count[group] = 1;
                     else:
-                        timepoints_dict[group].append(proc.util_time_points)
+                        if len(proc.tasks) > 0:
+                            timepoints_dict[group].append(proc.util_time_points)
+                        proc_count[group] = proc_count[group]+1;
         # memories
         for mem in itervalues(self.memories):
             if len(mem.time_points) > 0:
@@ -3169,8 +3173,8 @@ class State(object):
 
         # this is a map from node ids to a list of timepoints in that node
         timepoints_dict = {}
-
-        self.group_node_proc_kind_timepoints(timepoints_dict)
+        proc_count = {};
+        self.group_node_proc_kind_timepoints(timepoints_dict, proc_count)
 
         # now we compute the structure of the stats (the parent-child
         # relationships
@@ -3214,7 +3218,12 @@ class State(object):
                 print("WARNING: node " + str(tp_group) + " has no prof events. Is this what you expected?")
                 utilization = list()
             else:
-                utilization = self.calculate_utilization_data(sorted(itertools.chain(*utilizations)), owners)
+                count = 0
+                if tp_group in proc_count:
+                    count = proc_count[tp_group];
+                else:
+                    count = len(owners);
+                utilization = self.calculate_utilization_data(sorted(itertools.chain(*utilizations)), owners, count)
 
             util_tsv_filename = os.path.join(output_dirname, "tsv", str(tp_group) + "_util.tsv")
             with open(util_tsv_filename, "w") as util_tsv_file:
