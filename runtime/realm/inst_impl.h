@@ -74,22 +74,6 @@ namespace Realm {
       void notify_allocation(MemoryImpl::AllocationResult result, size_t offset);
       void notify_deallocation(void);
 
-#ifdef POINTER_CHECKS
-      void verify_access(unsigned ptr);
-      const ElementMask& get_element_mask(void);
-#endif
-      void get_bytes(int index, off_t byte_offset, void *dst, size_t size);
-      void put_bytes(int index, off_t byte_offset, const void *src, size_t size);
-
-#if 0
-      static Event copy(RegionInstance src, 
-			RegionInstance target,
-			IndexSpace isegion,
-			size_t elmt_size,
-			size_t bytes_to_copy,
-			Event after_copy = Event::NO_EVENT);
-#endif
-
       bool get_strided_parameters(void *&base, size_t &stride,
 				  off_t field_offset);
 

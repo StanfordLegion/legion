@@ -142,25 +142,6 @@ namespace Realm {
       return e;
     }
 
-    void MetadataBase::await_data(bool block /*= true*/)
-    {
-      // early out - valid data means no waiting
-      if(state == STATE_VALID) return;
-
-      // take lock to get event - must have already been requested (we don't have enough
-      //  information to do that now)
-      Event e = Event::NO_EVENT;
-      {
-	AutoLock<> a(mutex);
-
-	assert(state != STATE_INVALID);
-	e = valid_event;
-      }
-
-      if(!e.has_triggered())
-        e.wait(); // FIXME
-    }
-
     bool MetadataBase::initiate_cleanup(ID::IDType id)
     {
       NodeSet invals_to_send;

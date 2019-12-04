@@ -333,9 +333,9 @@ namespace Realm {
     {
       // request metadata (if needed), but don't block on it yet
       RegionInstanceImpl *i_impl = get_runtime()->get_instance_impl(*this);
-      // have to stall on metadata if it's not available...
-      if(!i_impl->metadata.is_valid())
-	i_impl->request_metadata().wait();
+      // metadata must already be available
+      assert(i_impl->metadata.is_valid() &&
+	     "instance metadata must be valid before accesses are performed");
       assert(i_impl->metadata.layout);
 	
       return LegionRuntime::Accessor::RegionAccessor<LegionRuntime::Accessor::AccessorType::Generic>(LegionRuntime::Accessor::AccessorType::Generic::Untyped(*this));
@@ -344,9 +344,9 @@ namespace Realm {
     const InstanceLayoutGeneric *RegionInstance::get_layout(void) const
     {
       RegionInstanceImpl *r_impl = get_runtime()->get_instance_impl(*this);
-      // have to stall on metadata if it's not available...
-      if(!r_impl->metadata.is_valid())
-	r_impl->request_metadata().wait();
+      // metadata must already be available
+      assert(r_impl->metadata.is_valid() &&
+	     "instance metadata must be valid before accesses are performed");
       assert(r_impl->metadata.layout);
       return r_impl->metadata.layout;
     }
@@ -354,9 +354,9 @@ namespace Realm {
     void RegionInstance::read_untyped(size_t offset, void *data, size_t datalen) const
     {
       RegionInstanceImpl *r_impl = get_runtime()->get_instance_impl(*this);
-      // have to stall on metadata if it's not available...
-      if(!r_impl->metadata.is_valid())
-	r_impl->request_metadata().wait();
+      // metadata must already be available
+      assert(r_impl->metadata.is_valid() &&
+	     "instance metadata must be valid before accesses are performed");
       assert(r_impl->metadata.layout);
       MemoryImpl *mem = get_runtime()->get_memory_impl(r_impl->memory);
       mem->get_bytes(r_impl->metadata.inst_offset + offset, data, datalen);
@@ -365,9 +365,9 @@ namespace Realm {
     void RegionInstance::write_untyped(size_t offset, const void *data, size_t datalen) const
     {
       RegionInstanceImpl *r_impl = get_runtime()->get_instance_impl(*this);
-      // have to stall on metadata if it's not available...
-      if(!r_impl->metadata.is_valid())
-	r_impl->request_metadata().wait();
+      // metadata must already be available
+      assert(r_impl->metadata.is_valid() &&
+	     "instance metadata must be valid before accesses are performed");
       assert(r_impl->metadata.layout);
       MemoryImpl *mem = get_runtime()->get_memory_impl(r_impl->memory);
       mem->put_bytes(r_impl->metadata.inst_offset + offset, data, datalen);
@@ -378,9 +378,9 @@ namespace Realm {
 					      bool exclusive /*= false*/) const
     {
       RegionInstanceImpl *r_impl = get_runtime()->get_instance_impl(*this);
-      // have to stall on metadata if it's not available...
-      if(!r_impl->metadata.is_valid())
-	r_impl->request_metadata().wait();
+      // metadata must already be available
+      assert(r_impl->metadata.is_valid() &&
+	     "instance metadata must be valid before accesses are performed");
       assert(r_impl->metadata.layout);
       MemoryImpl *mem = get_runtime()->get_memory_impl(r_impl->memory);
       const ReductionOpUntyped *redop = get_runtime()->reduce_op_table.get(redop_id, 0);
@@ -413,9 +413,9 @@ namespace Realm {
 					     bool exclusive /*= false*/) const
     {
       RegionInstanceImpl *r_impl = get_runtime()->get_instance_impl(*this);
-      // have to stall on metadata if it's not available...
-      if(!r_impl->metadata.is_valid())
-	r_impl->request_metadata().wait();
+      // metadata must already be available
+      assert(r_impl->metadata.is_valid() &&
+	     "instance metadata must be valid before accesses are performed");
       assert(r_impl->metadata.layout);
       MemoryImpl *mem = get_runtime()->get_memory_impl(r_impl->memory);
       const ReductionOpUntyped *redop = get_runtime()->reduce_op_table.get(redop_id, 0);
@@ -448,9 +448,9 @@ namespace Realm {
     void *RegionInstance::pointer_untyped(size_t offset, size_t datalen) const
     {
       RegionInstanceImpl *r_impl = get_runtime()->get_instance_impl(*this);
-      // have to stall on metadata if it's not available...
-      if(!r_impl->metadata.is_valid())
-	r_impl->request_metadata().wait();
+      // metadata must already be available
+      assert(r_impl->metadata.is_valid() &&
+	     "instance metadata must be valid before accesses are performed");
       assert(r_impl->metadata.layout);
       MemoryImpl *mem = get_runtime()->get_memory_impl(r_impl->memory);
       void *ptr = mem->get_direct_ptr(r_impl->metadata.inst_offset + offset,
@@ -831,67 +831,6 @@ namespace Realm {
 
       // set the offset back to the "unallocated" value
       inst_offset = INSTOFFSET_UNALLOCATED;
-    }
-
-#ifdef POINTER_CHECKS
-    void RegionInstanceImpl::verify_access(unsigned ptr)
-    {
-      StaticAccess<RegionInstanceImpl> data(this);
-      const ElementMask &mask = data->is.get_valid_mask();
-      if (!mask.is_set(ptr))
-      {
-        fprintf(stderr,"ERROR: Accessing invalid pointer %d in logical region " IDFMT "\n",ptr,data->is.id);
-        assert(false);
-      }
-    }
-#endif
-
-    static inline off_t calc_mem_loc(off_t alloc_offset, off_t field_start, int field_size, int elmt_size,
-				     int block_size, int index)
-    {
-      return (alloc_offset +                                      // start address
-	      ((index / block_size) * block_size * elmt_size) +   // full blocks
-	      (field_start * block_size) +                        // skip other fields
-	      ((index % block_size) * field_size));               // some some of our fields within our block
-    }
-
-    void RegionInstanceImpl::get_bytes(int index, off_t byte_offset, void *dst, size_t size)
-    {
-      // must have valid data by now - block if we have to
-      metadata.await_data();
-      off_t o;
-      if(metadata.block_size == 1) {
-	// no blocking - don't need to know about field boundaries
-	o = metadata.alloc_offset + (index * metadata.elmt_size) + byte_offset;
-      } else {
-	off_t field_start=0;
-	int field_size=0;
-	find_field_start(metadata.field_sizes, byte_offset, size, field_start, field_size);
-        o = calc_mem_loc(metadata.alloc_offset, field_start, field_size,
-                         metadata.elmt_size, metadata.block_size, index);
-
-      }
-      MemoryImpl *m = get_runtime()->get_memory_impl(memory);
-      m->get_bytes(o, dst, size);
-    }
-
-    void RegionInstanceImpl::put_bytes(int index, off_t byte_offset, const void *src, size_t size)
-    {
-      // must have valid data by now - block if we have to
-      metadata.await_data();
-      off_t o;
-      if(metadata.block_size == 1) {
-	// no blocking - don't need to know about field boundaries
-	o = metadata.alloc_offset + (index * metadata.elmt_size) + byte_offset;
-      } else {
-	off_t field_start=0;
-	int field_size=0;
-	find_field_start(metadata.field_sizes, byte_offset, size, field_start, field_size);
-        o = calc_mem_loc(metadata.alloc_offset, field_start, field_size,
-                         metadata.elmt_size, metadata.block_size, index);
-      }
-      MemoryImpl *m = get_runtime()->get_memory_impl(memory);
-      m->put_bytes(o, src, size);
     }
 
   template <int N, typename T>
