@@ -47,9 +47,10 @@ namespace Realm {
     // class MPIMemory
     //
 
-    /* A block of memory spread across multiple processes, essentially an MPI window.
-    * To spread the memory access evenly, it uses round-robin policy with "memory_stride" chunk size.
-    */
+    /* A block of memory spread across multiple processes
+     * To spread the memory access evenly, it uses round-robin policy with "memory_stride" chunk size.
+     * NOTE: the MPI window is assumed to be opened with MPI_Win_unlock_all and to be freed by "user"
+     */
     class MPIMemory : public MemoryImpl {
     public:
         static const size_t MEMORY_STRIDE = 1024;
@@ -105,12 +106,11 @@ namespace Realm {
 
     MPIMemory::~MPIMemory(void)
     {
-        CHECK_MPI( MPI_Win_free(&win) );
+        /* upper-layer's responsibility to free the window */
     }
 
     void MPIMemory::get_bytes(off_t offset, void *dst, size_t size)
     {
-        CHECK_MPI( MPI_Win_lock_all(MPI_LOCK_SHARED, win) );
         char *dst_c = (char *)dst;
         while(size > 0) {
             off_t blkid = (offset / memory_stride / num_nodes);
@@ -126,12 +126,11 @@ namespace Realm {
             dst_c += chunk_size;
             size -= chunk_size;
         }
-        CHECK_MPI( MPI_Win_unlock_all(win) );
+        CHECK_MPI( MPI_Win_flush_all(win) );
     }
 
     void MPIMemory::put_bytes(off_t offset, const void *src, size_t size)
     {
-        CHECK_MPI( MPI_Win_lock_all(MPI_LOCK_SHARED, win) );
         char *src_c = (char *)src; // dropping const on purpose...
         while(size > 0) {
             off_t blkid = (offset / memory_stride / num_nodes);
@@ -147,7 +146,7 @@ namespace Realm {
             src_c += chunk_size;
             size -= chunk_size;
         }
-        CHECK_MPI( MPI_Win_unlock_all(win) );
+        CHECK_MPI( MPI_Win_flush_all(win) );
     }
 
     void MPIMemory::apply_reduction_list(off_t offset, const ReductionOpUntyped *redop,
@@ -191,7 +190,6 @@ namespace Realm {
                                const off_t *offsets, void * const *dsts, 
                                const size_t *sizes)
     {
-        CHECK_MPI( MPI_Win_lock_all(MPI_LOCK_SHARED, win) );
         DetailedTimer::push_timer(10);
         for(size_t i = 0; i < batch_size; i++) {
             off_t offset = offsets[i];
@@ -219,7 +217,7 @@ namespace Realm {
         DetailedTimer::pop_timer();
 
         DetailedTimer::push_timer(11);
-        CHECK_MPI( MPI_Win_unlock_all(win) );
+        CHECK_MPI( MPI_Win_flush_all(win) );
         DetailedTimer::pop_timer();
     }
 
@@ -228,8 +226,6 @@ namespace Realm {
                                const void * const *srcs, 
                                const size_t *sizes)
     {
-        CHECK_MPI( MPI_Win_lock_all(MPI_LOCK_SHARED, win) );
-
         DetailedTimer::push_timer(14);
         for(size_t i = 0; i < batch_size; i++) {
             off_t offset = offsets[i];
@@ -257,7 +253,7 @@ namespace Realm {
         DetailedTimer::pop_timer();
 
         DetailedTimer::push_timer(15);
-        CHECK_MPI( MPI_Win_unlock_all(win) );
+        CHECK_MPI( MPI_Win_flush_all(win) );
         DetailedTimer::pop_timer();
     }
 
@@ -311,16 +307,14 @@ namespace Realm {
 
     void MPIRemoteMemory::get_bytes(off_t offset, void *dst, size_t size)
     {
-        CHECK_MPI( MPI_Win_lock(MPI_LOCK_SHARED, rank, 0, win) );
         CHECK_MPI( MPI_Get(dst, size, MPI_BYTE, rank, offset, size, MPI_BYTE, win) );
-        CHECK_MPI( MPI_Win_unlock(rank, win) );
+        CHECK_MPI( MPI_Win_flush(rank, win) );
     }
 
     void MPIRemoteMemory::put_bytes(off_t offset, const void *src, size_t size)
     {
-        CHECK_MPI( MPI_Win_lock(MPI_LOCK_SHARED, rank, 0, win) );
         CHECK_MPI( MPI_Put(src, size, MPI_BYTE, rank, offset, size, MPI_BYTE, win) );
-        CHECK_MPI( MPI_Win_unlock(rank, win) );
+        CHECK_MPI( MPI_Win_flush(rank, win) );
     }
 
     void *MPIRemoteMemory::get_remote_addr(off_t offset)
@@ -465,14 +459,20 @@ namespace Realm {
     class AM_Manager {
     public:
         AM_Manager(){
+            core_rsrv = NULL;
+            p_thread = NULL;
             shutdown_flag = false;
         }
         ~AM_Manager(void){}
         void init_corereservation(Realm::CoreReservationSet& crs){
             core_rsrv = new Realm::CoreReservation("AM workers", crs, Realm::CoreReservationParameters());
         }
+        void release_corereservation() {
+            delete core_rsrv;
+            core_rsrv = NULL;
+        }
         void start_thread(){
-            auto tlp = Realm::ThreadLaunchParameters();
+            Realm::ThreadLaunchParameters tlp;
             p_thread = Realm::Thread::create_kernel_thread<AM_Manager, &AM_Manager::thread_loop>(this, tlp, *core_rsrv);
         }
         void thread_loop(void){
@@ -488,6 +488,7 @@ namespace Realm {
             shutdown_flag = true;
             p_thread->join();
             delete p_thread;
+            p_thread = NULL;
         }
     protected:
         Realm::CoreReservation *core_rsrv;
@@ -577,6 +578,7 @@ namespace Realm {
 
     void *baseptr;
     CHECK_MPI( MPI_Win_allocate(attach_size, 1, MPI_INFO_NULL, MPI_COMM_WORLD, &baseptr, &g_am_win) );
+    CHECK_MPI( MPI_Win_lock_all(0, g_am_win) );
     AM_init_long_messages(g_am_win, baseptr);
 
     activemsg_handler_table.construct_handler_table();
@@ -601,9 +603,11 @@ namespace Realm {
 			     std::vector<NetworkSegment *>& segments)
   {
     if (g_am_win != MPI_WIN_NULL) {
+        CHECK_MPI( MPI_Win_unlock_all(g_am_win) );
         CHECK_MPI( MPI_Win_free(&g_am_win) );
     }
     g_am_manager.stop_threads();
+    g_am_manager.release_corereservation();
     AM_Finalize();
   }
 

@@ -1,5 +1,5 @@
 
-/* Copyright 2019 Stanford University, NVIDIA Corporation
+/* Copyright 2019 Stanford University, NVIDIA Corporation, Argonne National Laboratory
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-// MPI-1 network module implementation for Realm
+// MPI network module implementation for Realm
 
 #ifndef MPI_MODULE_H
 #define MPI_MODULE_H

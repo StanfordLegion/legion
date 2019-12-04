@@ -16,17 +16,16 @@
 #include "am_mpi.h"
 
 
-MPI_Win g_am_win = MPI_WIN_NULL;
-void *g_am_base = NULL;
-thread_local int thread_id = 0;
-std::atomic_uint num_threads;
-unsigned char buf_recv_list[AM_BUF_COUNT][1024];
-int i_buf_recv = 0;
-unsigned char *buf_recv = buf_recv_list[0];
-MPI_Request req_recv_list[AM_BUF_COUNT];
-int n_am_mult_recv = 5;
-int node_size;
-int node_this;
+static MPI_Win g_am_win = MPI_WIN_NULL;
+static void *g_am_base = NULL;
+static thread_local int thread_id = 0;
+static std::atomic_uint num_threads;
+static unsigned char buf_recv_list[AM_BUF_COUNT][1024];
+static unsigned char *buf_recv = buf_recv_list[0];
+static MPI_Request req_recv_list[AM_BUF_COUNT];
+static int n_am_mult_recv = 5;
+static int node_size;
+static int node_this;
 
 #define AM_MSG_HEADER_SIZE 4 * sizeof(int)
 
@@ -123,7 +122,7 @@ void AMPoll()
             payload = (char *) g_am_base + offset;
         }
 
-        auto handler = Realm::activemsg_handler_table.lookup_message_handler(msg->msgid);
+        Realm::ActiveMessageHandlerTable::MessageHandler handler = Realm::activemsg_handler_table.lookup_message_handler(msg->msgid);
         (*handler) (tn_src, header, payload, msg->payload_size);
         if (need_free) {
             free(payload);
