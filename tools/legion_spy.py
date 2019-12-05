@@ -2396,7 +2396,7 @@ class IndexSpace(object):
         self.name = name
 
     def set_expr(self, expr):
-        assert self.expr is None or self.expr is expr
+        assert self.expr is None or self.expr == expr
         self.expr = expr
 
     def set_parent(self, parent, color):

@@ -40,6 +40,11 @@ except NameError:
     long = int  # Python 3
 
 try:
+    basestring # Python 2
+except NameError:
+    basestring = str # Python 3
+
+try:
     xrange # Python 2
 except NameError:
     xrange = range # Python 3
