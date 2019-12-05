@@ -7506,6 +7506,26 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    inline RegionRequirement& CopyLauncher::add_src_indirect_field(
+                                       const RegionRequirement &req, bool range)
+    //--------------------------------------------------------------------------
+    {
+      src_indirect_requirements.push_back(req);
+      src_indirect_is_range.push_back(range);
+      return src_indirect_requirements.back();
+    }
+
+    //--------------------------------------------------------------------------
+    inline RegionRequirement& CopyLauncher::add_dst_indirect_field(
+                                       const RegionRequirement &req, bool range)
+    //--------------------------------------------------------------------------
+    {
+      dst_indirect_requirements.push_back(req);
+      dst_indirect_is_range.push_back(range);
+      return dst_indirect_requirements.back();
+    }
+
+    //--------------------------------------------------------------------------
     inline void CopyLauncher::add_grant(Grant g)
     //--------------------------------------------------------------------------
     {
@@ -7597,6 +7617,26 @@ namespace Legion {
       dst_indirect_requirements.push_back(r);
       dst_indirect_requirements.back().add_field(dst_idx_field, inst);
       dst_indirect_is_range.push_back(range);
+    }
+
+    //--------------------------------------------------------------------------
+    inline RegionRequirement& IndexCopyLauncher::add_src_indirect_field(
+                                       const RegionRequirement &req, bool range)
+    //--------------------------------------------------------------------------
+    {
+      src_indirect_requirements.push_back(req);
+      src_indirect_is_range.push_back(range);
+      return src_indirect_requirements.back();
+    }
+
+    //--------------------------------------------------------------------------
+    inline RegionRequirement& IndexCopyLauncher::add_dst_indirect_field(
+                                       const RegionRequirement &req, bool range)
+    //--------------------------------------------------------------------------
+    {
+      dst_indirect_requirements.push_back(req);
+      dst_indirect_is_range.push_back(range);
+      return dst_indirect_requirements.back();
     }
 
     //--------------------------------------------------------------------------

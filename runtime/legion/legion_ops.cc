@@ -4398,6 +4398,8 @@ namespace Legion {
       Mapper::MapCopyOutput output;
       input.src_instances.resize(src_requirements.size());
       input.dst_instances.resize(dst_requirements.size());
+      input.src_indirect_instances.resize(src_indirect_requirements.size());
+      input.dst_indirect_instances.resize(dst_indirect_requirements.size());
       output.src_instances.resize(src_requirements.size());
       output.dst_instances.resize(dst_requirements.size());
       output.src_indirect_instances.resize(src_indirect_requirements.size());
