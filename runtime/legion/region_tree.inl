@@ -43,7 +43,19 @@ namespace Legion {
     {
       DETAILED_PROFILER(forest->runtime, REALM_ISSUE_FILL_CALL);
 #ifdef DEBUG_LEGION
-      assert(!space.empty());
+      // We should only have empty spaces for fills that are indirections
+      if (space.empty())
+      {
+        bool is_indirect = false;
+        for (unsigned idx = 0; idx < dst_fields.size(); idx++)
+        {
+          if (dst_fields[idx].indirect_index < 0)
+            continue;
+          is_indirect = true;
+          break;
+        }
+        assert(is_indirect);
+      }
 #endif
       // Now that we know we're going to do this fill add any profiling requests
       Realm::ProfilingRequestSet requests;
@@ -136,7 +148,30 @@ namespace Legion {
     {
       DETAILED_PROFILER(forest->runtime, REALM_ISSUE_COPY_CALL);
 #ifdef DEBUG_LEGION
-      assert(!space.empty());
+      // We should only have empty spaces for copies that are indirections
+      if (space.empty())
+      {
+        // Only check for non-empty spaces on copies without indirections
+        bool is_indirect = false;
+        for (unsigned idx = 0; idx < src_fields.size(); idx++)
+        {
+          if (src_fields[idx].indirect_index < 0)
+            continue;
+          is_indirect = true;
+          break;
+        }
+        if (!is_indirect)
+        {
+          for (unsigned idx = 0; idx < dst_fields.size(); idx++)
+          {
+            if (dst_fields[idx].indirect_index < 0)
+              continue;
+            is_indirect = true;
+            break;
+          }
+          assert(is_indirect);
+        }
+      }
 #endif
       // Now that we know we're going to do this copy add any profling requests
       Realm::ProfilingRequestSet requests;
