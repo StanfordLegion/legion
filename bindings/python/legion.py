@@ -1219,6 +1219,41 @@ def fill(region, field_name, value):
         field_id, raw_value, field_type.size,
         c.legion_predicate_true())
 
+def copy(src_region, src_field_name, dst_region, dst_field_name, redop=None):
+    assert(isinstance(src_region, Region))
+    assert(isinstance(dst_region, Region))
+
+    launcher = c.legion_copy_launcher_create(c.legion_predicate_true(), 0, 0)
+
+    c.legion_copy_launcher_add_src_region_requirement_logical_region(
+        launcher,
+        src_region.raw_value(),
+        R._legion_privilege(), 0, # EXCLUSIVE
+        src_region.parent.raw_value() if src_region.parent is not None else src_region.raw_value(),
+        0, False)
+    src_field_id = src_region.fspace.field_ids[src_field_name]
+    c.legion_copy_launcher_add_src_field(launcher, 0, src_field_id, True)
+
+    if redop is None:
+        dst_privilege = RW._legion_privilege()
+        add_dst_requirement = c.legion_copy_launcher_add_dst_region_requirement_logical_region
+    else:
+        dst_field_type = dst_region.fspace.field_types[dst_field_name]
+        dst_privilege = Reduce(redop, [dst_field_name])._legion_redop_id(dst_field_type)
+        add_dst_requirement = c.legion_copy_launcher_add_dst_region_requirement_logical_region_reduction
+    add_dst_requirement(
+        launcher,
+        dst_region.raw_value(),
+        dst_privilege, 0, # EXCLUSIVE
+        dst_region.parent.raw_value() if dst_region.parent is not None else dst_region.raw_value(),
+        0, False)
+    dst_field_id = dst_region.fspace.field_ids[dst_field_name]
+    c.legion_copy_launcher_add_dst_field(launcher, 0, dst_field_id, True)
+
+    c.legion_copy_launcher_execute(_my.ctx.runtime, _my.ctx.context, launcher)
+
+    c.legion_copy_launcher_destroy(launcher)
+
 # Hack: Can't pickle static methods.
 def _Ipartition_unpickle(tid, id, type_tag, parent, color_space):
     handle = ffi.new('legion_index_partition_t *')
