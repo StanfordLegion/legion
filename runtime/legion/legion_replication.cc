@@ -2087,14 +2087,8 @@ namespace Legion {
           if (src_exchange_events[index].size() == points.size())
           {
             to_trigger = src_exchanged[index];
-            if ((index >= dst_indirect_requirements.size()) ||
-                (dst_exchange_events[index].size() == points.size()))
-            {
-              arrival_events.insert(src_exchange_events[index].begin(),
-                  src_exchange_events[index].end());
-              arrival_events.insert(dst_exchange_events[index].begin(),
-                  dst_exchange_events[index].end());
-            }
+            arrival_events.insert(src_exchange_events[index].begin(),
+                src_exchange_events[index].end());
           }
           else
             wait_on = src_exchanged[index];
@@ -2137,14 +2131,8 @@ namespace Legion {
           if (dst_exchange_events[index].size() == points.size())
           {
             to_trigger = dst_exchanged[index];
-            if ((index >= src_indirect_requirements.size()) ||
-                (src_exchange_events[index].size() == points.size()))
-            {
-              arrival_events.insert(src_exchange_events[index].begin(),
-                  src_exchange_events[index].end());
-              arrival_events.insert(dst_exchange_events[index].begin(),
-                  dst_exchange_events[index].end());
-            }
+            arrival_events.insert(dst_exchange_events[index].begin(),
+                dst_exchange_events[index].end());
           }
           else
             wait_on = dst_exchanged[index];
