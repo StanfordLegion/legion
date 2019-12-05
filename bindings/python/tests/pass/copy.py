@@ -23,15 +23,19 @@ import numpy
 
 @task
 def main():
-    R = Region([4, 4], {'x': legion.int32, 'y': legion.int32})
+    R = Region([4, 4], {'x': legion.int32, 'y': legion.int32, 'z': legion.int32, 'w': legion.int32})
     legion.fill(R, 'x', 1)
     legion.fill(R, 'y', 20)
+    legion.fill(R, ['z', 'w'], 100)
 
+    legion.copy(R, ['x', 'y'], R, ['z', 'w'], redop='+')
     legion.copy(R, 'x', R, 'y', redop='+')
     legion.copy(R, 'y', R, 'x')
 
     assert R.x[0, 0] == 21
     assert R.y[0, 0] == 21
+    assert R.z[0, 0] == 101
+    assert R.w[0, 0] == 120
 
 if __name__ == '__main__':
     main()
