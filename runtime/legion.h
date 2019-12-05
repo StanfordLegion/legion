@@ -1664,6 +1664,12 @@ namespace Legion {
       inline void add_dst_indirect_field(const RegionRequirement &dst_idx_req,
                                          FieldID dst_idx_fid, bool inst = true,
                                          bool is_range_indirection = false);
+      inline RegionRequirement& add_src_indirect_field(
+                                         const RegionRequirement &src_idx_req,
+                                         bool is_range_indirection = false);
+      inline RegionRequirement& add_dst_indirect_field(
+                                         const RegionRequirement &dst_idx_req,
+                                         bool is_range_indirection = false);
     public:
       inline void add_grant(Grant g);
       inline void add_wait_barrier(PhaseBarrier bar);
@@ -1725,6 +1731,12 @@ namespace Legion {
                                          bool is_range_indirection = false);
       inline void add_dst_indirect_field(const RegionRequirement &dst_idx_req,
                                          FieldID dst_idx_fid, bool inst = true,
+                                         bool is_range_indirection = false);
+      inline RegionRequirement& add_src_indirect_field(
+                                         const RegionRequirement &src_idx_req,
+                                         bool is_range_indirection = false);
+      inline RegionRequirement& add_dst_indirect_field(
+                                         const RegionRequirement &dst_idx_req,
                                          bool is_range_indirection = false);
     public:
       inline void add_grant(Grant g);
