@@ -30,8 +30,8 @@
 
 #include "legion/legion_config.h"
 
-#ifndef LEGION_USE_PYTHON_CFFI
 #include <stdbool.h>
+#ifndef LEGION_USE_PYTHON_CFFI
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -554,7 +554,7 @@ extern "C" {
    * @see Legion::DomainPoint::nil()
    */
   legion_domain_point_t
-  legion_domain_point_nil();
+  legion_domain_point_nil(void);
 
   /**
    * @see Legion::DomainPoint::is_null()
@@ -2679,9 +2679,10 @@ extern "C" {
   /**
    * @see Legion::IndexTaskLauncher::region_requirements
    */
-  unsigned
+  void
   legion_index_launcher_set_region_requirement_logical_region(
     legion_index_launcher_t launcher,
+    unsigned idx,
     legion_logical_region_t handle,
     legion_projection_id_t proj /* = 0 */,
     legion_privilege_mode_t priv,
@@ -2693,9 +2694,10 @@ extern "C" {
   /**
    * @see Legion::IndexTaskLauncher::region_requirements
    */
-  unsigned
+  void
   legion_index_launcher_set_region_requirement_logical_partition(
     legion_index_launcher_t launcher,
+    unsigned idx,
     legion_logical_partition_t handle,
     legion_projection_id_t proj /* = 0 */,
     legion_privilege_mode_t priv,
@@ -2707,9 +2709,10 @@ extern "C" {
   /**
    * @see Legion::IndexTaskLauncher::region_requirements
    */
-  unsigned
+  void
   legion_index_launcher_set_region_requirement_logical_region_reduction(
     legion_index_launcher_t launcher,
+    unsigned idx,
     legion_logical_region_t handle,
     legion_projection_id_t proj /* = 0 */,
     legion_reduction_op_id_t redop,
@@ -2721,9 +2724,10 @@ extern "C" {
   /**
    * @see Legion::IndexTaskLauncher::region_requirements
    */
-  unsigned
+  void
   legion_index_launcher_set_region_requirement_logical_partition_reduction(
     legion_index_launcher_t launcher,
+    unsigned idx,
     legion_logical_partition_t handle,
     legion_projection_id_t proj /* = 0 */,
     legion_reduction_op_id_t redop,
@@ -2995,7 +2999,7 @@ extern "C" {
   legion_runtime_index_fill_field_future_with_domain(
     legion_runtime_t runtime,
     legion_context_t ctx,
-    legion_index_space_t domain,
+    legion_domain_t domain,
     legion_logical_partition_t handle,
     legion_logical_region_t parent,
     legion_field_id_t fid,
@@ -4593,6 +4597,7 @@ extern "C" {
     const void *userdata,
     size_t userlen);
 
+#ifdef REALM_USE_LLVM
   /**
    * @see Legion::Runtime::register_task_variant()
    */
@@ -4625,7 +4630,9 @@ extern "C" {
     const char *entry_symbol,
     const void *userdata,
     size_t userlen);
+#endif
 
+#ifdef REALM_USE_PYTHON
   /**
    * @see Legion::Runtime::register_task_variant()
    */
@@ -4660,6 +4667,7 @@ extern "C" {
     size_t function_qualname_len,
     const void *userdata,
     size_t userlen);
+#endif
 
   /**
    * @see Legion::LegionTaskWrapper::legion_task_preamble()

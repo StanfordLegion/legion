@@ -1,5 +1,6 @@
 #include "realm.h"
-#include <realm/id.h>
+#include "realm/id.h"
+#include "realm/cmdline.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -52,9 +53,12 @@ void copy_profiling_task(const void *args, size_t arglen,
   }
 }
 
-static size_t buffer_size = 64 << 20; // should be bigger than any cache in system
-static bool do_tasks = true;   // should tasks accessing memories be tested
-static bool do_copies = true;  // should DMAs between memories be tested
+namespace TestConfig {
+  size_t buffer_size = 64 << 20; // should be bigger than any cache in system
+  bool do_tasks = true;   // should tasks accessing memories be tested
+  bool do_copies = true;  // should DMAs between memories be tested
+  bool slow_mems = false;  // show slow memories be tested?
+};
 
 void memspeed_cpu_task(const void *args, size_t arglen, 
 		       const void *userdata, size_t userlen, Processor p)
@@ -215,7 +219,7 @@ void top_level_task(const void *args, size_t arglen,
 {
   log_app.print() << "Realm memory speed test";
 
-  size_t elements = buffer_size / sizeof(void *);
+  size_t elements = TestConfig::buffer_size / sizeof(void *);
   IndexSpace<1> d = Rect<1>(0, elements - 1);
 
   // build the list of memories that we want to test
@@ -225,11 +229,11 @@ void top_level_task(const void *args, size_t arglen,
     Memory m = *it;
     size_t capacity = m.capacity();
     // we need two instances if we're doing copy testing
-    if(capacity < (buffer_size * (do_copies ? 2 : 1))) {
+    if(capacity < (TestConfig::buffer_size * (TestConfig::do_copies ? 2 : 1))) {
       log_app.info() << "skipping memory " << m << " (kind=" << m.kind() << ") - insufficient capacity";
       continue;
     }
-    if(m.kind() == Memory::GLOBAL_MEM) {
+    if((m.kind() == Memory::GLOBAL_MEM) && !TestConfig::slow_mems) {
       log_app.info() << "skipping memory " << m << " (kind=" << m.kind() << ") - slow global memory";
       continue;
     }
@@ -243,7 +247,7 @@ void top_level_task(const void *args, size_t arglen,
   }
   
   // iterate over memories, create an instance, and then let each processor beat on it
-  if(do_tasks) {
+  if(TestConfig::do_tasks) {
     for(std::vector<Memory>::const_iterator it = memories.begin();
 	it != memories.end();
 	++it) {
@@ -293,7 +297,7 @@ void top_level_task(const void *args, size_t arglen,
     }
   }
 
-  if(do_copies) {
+  if(TestConfig::do_copies) {
     std::vector<size_t> field_sizes(1, sizeof(void *));
 
     void *fill_value = 0;
@@ -394,13 +398,13 @@ int main(int argc, char **argv)
 
   rt.init(&argc, &argv);
 
-  for(int i = 1; i < argc; i++) {
-    if(!strcmp(argv[i], "-b")) {
-      buffer_size = strtoll(argv[++i], 0, 10);
-      continue;
-    }
-
-  }
+  CommandLineParser cp;
+  cp.add_option_int_units("-b", TestConfig::buffer_size, 'M')
+    .add_option_int("-tasks", TestConfig::do_tasks)
+    .add_option_int("-copies", TestConfig::do_copies)
+    .add_option_int("-slowmem", TestConfig::slow_mems);
+  bool ok = cp.parse_command_line(argc, const_cast<const char **>(argv));
+  assert(ok);
 
   rt.register_task(TOP_LEVEL_TASK, top_level_task);
 

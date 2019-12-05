@@ -1198,6 +1198,8 @@ namespace Legion {
       std::vector<RegionTreePath>           scatter_privilege_paths;
       std::vector<unsigned>                 gather_parent_indexes;
       std::vector<unsigned>                 scatter_parent_indexes;
+      std::vector<bool>                     gather_is_range;
+      std::vector<bool>                     scatter_is_range;
       LegionVector<VersionInfo>::aligned    gather_versions;
       LegionVector<VersionInfo>::aligned    scatter_versions;
     protected: // for support with mapping

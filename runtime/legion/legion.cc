@@ -3244,6 +3244,24 @@ namespace Legion {
                           "FUNCTOR METHOD WITHOUT AN OVERRIDE!");
       return LogicalRegion::NO_REGION;
     }
+
+    //--------------------------------------------------------------------------
+    void ProjectionFunctor::invert(LogicalRegion region, LogicalRegion upper, 
+          const Domain &launch_domain, std::vector<DomainPoint> &ordered_points)
+    //--------------------------------------------------------------------------
+    {
+      // Must be override by derived classes
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void ProjectionFunctor::invert(LogicalRegion region, LogicalPartition upper, 
+          const Domain &launch_domain, std::vector<DomainPoint> &ordered_points)
+    //--------------------------------------------------------------------------
+    {
+      // Must be override by derived classes
+      assert(false);
+    }
     
     /////////////////////////////////////////////////////////////
     // Coloring Serializer 
@@ -6123,6 +6141,27 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    TraceID Runtime::generate_dynamic_trace_id(void)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->generate_dynamic_trace_id();
+    }
+
+    //--------------------------------------------------------------------------
+    TraceID Runtime::generate_library_trace_ids(const char *name, size_t count)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->generate_library_trace_ids(name, count);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ TraceID Runtime::generate_static_trace_id(void)
+    //--------------------------------------------------------------------------
+    {
+      return Internal::Runtime::generate_static_trace_id();
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::complete_frame(Context ctx)
     //--------------------------------------------------------------------------
     {
@@ -6760,13 +6799,16 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     Context Runtime::begin_implicit_task(TaskID top_task_id,
+                                         MapperID top_mapper_id,
                                          Processor::Kind proc_kind,
                                          const char *task_name,
-                                         bool control_replicable)
+                                         bool control_replicable,
+                                         unsigned shard_per_address_space,
+                                         int shard_id)
     //--------------------------------------------------------------------------
     {
-      return runtime->begin_implicit_task(top_task_id, proc_kind,
-                                          task_name, control_replicable);
+      return runtime->begin_implicit_task(top_task_id, top_mapper_id, proc_kind,
+              task_name, control_replicable, shard_per_address_space, shard_id);
     }
 
     //--------------------------------------------------------------------------

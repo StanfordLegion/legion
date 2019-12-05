@@ -2244,6 +2244,7 @@ namespace Legion {
                                             const InstanceRef &idx_target,
                                             const InstanceSet &dst_targets,
                                             CopyOp *op, unsigned dst_index,
+                                            const bool gather_is_range,
                                             const ApEvent precondition, 
                                             const PredEvent pred_guard,
                                             const PhysicalTraceInfo &trace_info)
@@ -2283,7 +2284,7 @@ namespace Legion {
       std::vector<unsigned> indirection_indexes;
       copy_expr->construct_indirections(src_indexes, idx_field, 
                src_req.region.get_index_space().get_type_tag(), 
-               idx_target.get_manager()->get_instance(),
+               gather_is_range, idx_target.get_manager()->get_instance(),
                src_records, indirections, indirection_indexes);
 #ifdef DEBUG_LEGION
       assert(indirection_indexes.size() == src_req.instance_fields.size());
@@ -2367,6 +2368,7 @@ namespace Legion {
                                              const InstanceRef &idx_target,
                     const LegionVector<IndirectRecord>::aligned &dst_records,
                                              CopyOp *op, unsigned src_index,
+                                             const bool scatter_is_range,
                                              const ApEvent precondition, 
                                              const PredEvent pred_guard,
                                             const PhysicalTraceInfo &trace_info)
@@ -2402,7 +2404,7 @@ namespace Legion {
       std::vector<unsigned> indirection_indexes;
       copy_expr->construct_indirections(dst_indexes, idx_field, 
                dst_req.region.get_index_space().get_type_tag(), 
-               idx_target.get_manager()->get_instance(),
+               scatter_is_range, idx_target.get_manager()->get_instance(),
                dst_records, indirections, indirection_indexes);
 #ifdef DEBUG_LEGION
       assert(indirection_indexes.size() == dst_req.instance_fields.size());
@@ -2487,6 +2489,7 @@ namespace Legion {
                               const InstanceRef &src_idx_target,
                       const LegionVector<IndirectRecord>::aligned &dst_records,
                               const InstanceRef &dst_idx_target,
+                              const bool both_are_range,
                               const ApEvent precondition, 
                               const PredEvent pred_guard,
                               const PhysicalTraceInfo &trace_info)
@@ -2527,7 +2530,7 @@ namespace Legion {
       std::vector<unsigned> src_indirection_indexes;
       copy_expr->construct_indirections(src_indexes, src_idx_field,
                src_req.region.get_index_space().get_type_tag(),
-               src_idx_target.get_manager()->get_instance(),
+               both_are_range, src_idx_target.get_manager()->get_instance(),
                src_records, indirections, src_indirection_indexes);
 #ifdef DEBUG_LEGION
       assert(src_indirection_indexes.size() == src_req.instance_fields.size());
@@ -2535,7 +2538,7 @@ namespace Legion {
       std::vector<unsigned> dst_indirection_indexes;
       copy_expr->construct_indirections(dst_indexes, dst_idx_field,
                dst_req.region.get_index_space().get_type_tag(),
-               dst_idx_target.get_manager()->get_instance(),
+               both_are_range, dst_idx_target.get_manager()->get_instance(),
                dst_records, indirections, dst_indirection_indexes);
 #ifdef DEBUG_LEGION
       assert(dst_indirection_indexes.size() == dst_req.instance_fields.size());
@@ -7405,7 +7408,8 @@ namespace Legion {
       IndexSpace handle;
       derez.deserialize(handle);
       IndexSpaceNode *node = forest->get_node(handle);
-      node->unpack_index_space(derez, source);
+      if (node->unpack_index_space(derez, source))
+        delete node;
     } 
 
     //--------------------------------------------------------------------------

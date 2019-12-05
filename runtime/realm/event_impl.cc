@@ -1770,6 +1770,10 @@ namespace Realm {
   
     void GenEventImpl::external_wait(gen_t gen_needed, bool& poisoned)
     {
+      // if the event is remote, make sure we've subscribed
+      if(this->owner != Network::my_node_id)
+	this->subscribe(gen_needed);
+
       {
 	AutoLock<> a(mutex);
 
@@ -2634,10 +2638,11 @@ static void *bytedup(const void *data, size_t datalen)
       }
     }
   
-    // TODO: this is identical to GenEventImpl versions - lift back up into
-    //   EventImpl?
     void BarrierImpl::external_wait(gen_t gen_needed, bool& poisoned)
     {
+      // make sure we're subscribed to a (potentially-remote) trigger
+      this->subscribe(gen_needed);
+
       {
 	AutoLock<> a(mutex);
 

@@ -688,8 +688,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Do a quick test to see if we have cached the result
-      std::map<TaskID,VariantInfo>::const_iterator finder = 
-                                        preferred_variants.find(task.task_id);
+      std::map<std::pair<TaskID,Processor::Kind>, VariantInfo>::const_iterator
+          finder = preferred_variants.find(std::make_pair(task.task_id, specific));
       if (finder != preferred_variants.end() && 
           (!needs_tight_bound || finder->second.tight_bound))
         return finder->second;
@@ -896,7 +896,7 @@ namespace Legion {
               }
             }
           }
-          preferred_variants[task.task_id] = result;
+          preferred_variants[std::make_pair(task.task_id, specific)] = result;
         }
         return result;
       }

@@ -221,7 +221,7 @@ int main(int argc, char **argv)
   // Get the runtime now that we've started it
   Runtime *runtime = Runtime::get_runtime();
   // Then we can bind make this thread into an implicit top-level task
-  Context ctx = runtime->begin_implicit_task(TOP_LEVEL_TASK_ID, 
+  Context ctx = runtime->begin_implicit_task(TOP_LEVEL_TASK_ID, 0/*mapper id*/, 
                                         Processor::LOC_PROC, "top_level",
                                         true/*control replicable*/);
   // Run the normal stencil program

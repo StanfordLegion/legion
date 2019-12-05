@@ -3741,9 +3741,12 @@ namespace Legion {
         dst_requirements[idx] = launcher.dst_requirements[idx];
         dst_requirements[idx].flags |= NO_ACCESS_FLAG;
         // If our privilege is not reduce, then shift it to write discard
-        // since we are going to write all over the region
-        if (dst_requirements[idx].privilege != REDUCE)
-          dst_requirements[idx].privilege = WRITE_ONLY;
+        // since we are going to write all over the region, although we
+        // can only do this safely now if there is no scatter region
+        // requirement, otherwise we're doing it onto
+        if ((dst_requirements[idx].privilege != REDUCE) &&
+            (idx >= launcher.dst_indirect_requirements.size()))
+          dst_requirements[idx].privilege = WRITE_DISCARD;
       }
       if (!launcher.src_indirect_requirements.empty())
       {
@@ -3755,6 +3758,35 @@ namespace Legion {
           src_indirect_requirements[idx] = 
             launcher.src_indirect_requirements[idx];
           src_indirect_requirements[idx].flags |= NO_ACCESS_FLAG;
+        }
+        if (launcher.src_indirect_is_range.size() != gather_size)
+          REPORT_LEGION_ERROR(ERROR_COPY_GATHER_REQUIREMENT,
+              "Invalid 'src_indirect_is_range' size in launcher. The "
+              "number of entries (%zd) does not match the number of "
+              "'src_indirect_requirments' (%zd) for copy operation in "
+              "parent task %s (ID %lld)", 
+              launcher.src_indirect_is_range.size(), gather_size, 
+              parent_ctx->get_task_name(), parent_ctx->get_unique_id())
+        gather_is_range = launcher.src_indirect_is_range;
+        for (unsigned idx = 0; idx < gather_size; idx++)
+        {
+          if (!gather_is_range[idx])
+            continue;
+          // For anything that is a gather by range we either need 
+          // it also to be a scatter by range or we need a reduction
+          // on the destination region requirement so we know how
+          // to handle reducing down all the values
+          if ((idx < launcher.dst_indirect_is_range.size()) &&
+              launcher.dst_indirect_is_range[idx])
+            continue;
+          if (dst_requirements[idx].privilege != REDUCE)
+            REPORT_LEGION_ERROR(ERROR_DESTINATION_REGION_REQUIREMENT,
+                "Invalid privileges for destination region requirement %d "
+                " for copy across in parent task %s (ID %lld). Destination "
+                "region requirements must use reduction privileges when "
+                "there is a range-based source indirection field and there "
+                "is no corresponding range indirection on the destination.",
+                idx, parent_ctx->get_task_name(), parent_ctx->get_unique_id())
         }
       }
       if (!launcher.dst_indirect_requirements.empty())
@@ -3768,6 +3800,15 @@ namespace Legion {
             launcher.dst_indirect_requirements[idx];
           dst_indirect_requirements[idx].flags |= NO_ACCESS_FLAG;
         }
+        if (launcher.dst_indirect_is_range.size() != scatter_size)
+          REPORT_LEGION_ERROR(ERROR_COPY_GATHER_REQUIREMENT,
+              "Invalid 'dst_indirect_is_range' size in launcher. The "
+              "number of entries (%zd) does not match the number of "
+              "'dst_indirect_requirments' (%zd) for copy operation in "
+              "parent task %s (ID %lld)", 
+              launcher.dst_indirect_is_range.size(), scatter_size, 
+              parent_ctx->get_task_name(), parent_ctx->get_unique_id())
+        scatter_is_range = launcher.dst_indirect_is_range;
         if (!src_indirect_requirements.empty())
         {
           // Full indirections need to have the same index space
@@ -3974,6 +4015,8 @@ namespace Legion {
       dst_versions.clear();
       gather_versions.clear();
       scatter_versions.clear();
+      gather_is_range.clear();
+      scatter_is_range.clear();
 #ifdef DEBUG_LEGION
       assert(acquired_instances.empty());
 #endif
@@ -4340,6 +4383,8 @@ namespace Legion {
       Mapper::MapCopyOutput output;
       input.src_instances.resize(src_requirements.size());
       input.dst_instances.resize(dst_requirements.size());
+      input.src_indirect_instances.resize(src_indirect_requirements.size());
+      input.dst_indirect_instances.resize(dst_indirect_requirements.size());
       output.src_instances.resize(src_requirements.size());
       output.dst_instances.resize(dst_requirements.size());
       output.src_indirect_instances.resize(src_indirect_requirements.size());
@@ -4758,7 +4803,7 @@ namespace Legion {
               src_requirements[index], src_indirect_requirements[index],
               dst_requirements[index], src_records,
               (*gather_targets)[0], dst_targets, this, 
-              src_requirements.size() + index,
+              src_requirements.size() + index, gather_is_range[index],
               local_init_precondition, predication_guard, trace_info);
           Runtime::trigger_event(indirect_done, local_done);
         }
@@ -4770,19 +4815,22 @@ namespace Legion {
           // Scatter copy
           const ApEvent local_done = runtime->forest->scatter_across(
               src_requirements[index], dst_indirect_requirements[index],
-              dst_requirements[index], src_targets,
-              (*scatter_targets)[0], dst_records, this, index,
+              dst_requirements[index], src_targets, (*scatter_targets)[0],
+              dst_records, this, index, scatter_is_range[index],
               local_init_precondition, predication_guard, trace_info);
           Runtime::trigger_event(indirect_done, local_done);
         }
         else
         {
+#ifdef DEBUG_LEGION
+          assert(gather_is_range[index] == scatter_is_range[index]);
+#endif
           // Full indirection copy
           const ApEvent local_done = runtime->forest->indirect_across(
               src_requirements[index], src_indirect_requirements[index],
               dst_requirements[index], dst_indirect_requirements[index],
               src_records, (*gather_targets)[0],
-              dst_records, (*scatter_targets)[0],
+              dst_records, (*scatter_targets)[0], gather_is_range[index],
               local_init_precondition, predication_guard, trace_info);
           Runtime::trigger_event(indirect_done, local_done);
         }
@@ -5892,8 +5940,8 @@ namespace Legion {
         // can only do this safely now if there is no scatter region
         // requirement, otherwise we're doing it onto
         if ((dst_requirements[idx].privilege != REDUCE) && 
-            (idx >= src_indirect_requirements.size()))
-          dst_requirements[idx].privilege = WRITE_ONLY;
+            (idx >= launcher.dst_indirect_requirements.size()))
+          dst_requirements[idx].privilege = WRITE_DISCARD;
       }
       if (!launcher.src_indirect_requirements.empty())
       {
@@ -5905,6 +5953,35 @@ namespace Legion {
           src_indirect_requirements[idx] = 
             launcher.src_indirect_requirements[idx];
           src_indirect_requirements[idx].flags |= NO_ACCESS_FLAG;
+        }
+        if (launcher.src_indirect_is_range.size() != gather_size)
+          REPORT_LEGION_ERROR(ERROR_COPY_GATHER_REQUIREMENT,
+              "Invalid 'src_indirect_is_range' size in launcher. The "
+              "number of entries (%zd) does not match the number of "
+              "'src_indirect_requirments' (%zd) for copy operation in "
+              "parent task %s (ID %lld)", 
+              launcher.src_indirect_is_range.size(), gather_size, 
+              parent_ctx->get_task_name(), parent_ctx->get_unique_id())
+        gather_is_range = launcher.src_indirect_is_range;
+        for (unsigned idx = 0; idx < gather_size; idx++)
+        {
+          if (!gather_is_range[idx])
+            continue;
+          // For anything that is a gather by range we either need 
+          // it also to be a scatter by range or we need a reduction
+          // on the destination region requirement so we know how
+          // to handle reducing down all the values
+          if ((idx < launcher.dst_indirect_is_range.size()) &&
+              launcher.dst_indirect_is_range[idx])
+            continue;
+          if (dst_requirements[idx].privilege != REDUCE)
+            REPORT_LEGION_ERROR(ERROR_DESTINATION_REGION_REQUIREMENT,
+                "Invalid privileges for destination region requirement %d "
+                " for copy across in parent task %s (ID %lld). Destination "
+                "region requirements must use reduction privileges when "
+                "there is a range-based source indirection field and there "
+                "is no corresponding range indirection on the destination.",
+                idx, parent_ctx->get_task_name(), parent_ctx->get_unique_id())
         }
         src_records.resize(gather_size);
         src_exchange_events.resize(gather_size);
@@ -5922,6 +5999,15 @@ namespace Legion {
             launcher.dst_indirect_requirements[idx];
           dst_indirect_requirements[idx].flags |= NO_ACCESS_FLAG;
         }
+        if (launcher.dst_indirect_is_range.size() != scatter_size)
+          REPORT_LEGION_ERROR(ERROR_COPY_GATHER_REQUIREMENT,
+              "Invalid 'dst_indirect_is_range' size in launcher. The "
+              "number of entries (%zd) does not match the number of "
+              "'dst_indirect_requirments' (%zd) for copy operation in "
+              "parent task %s (ID %lld)", 
+              launcher.dst_indirect_is_range.size(), scatter_size, 
+              parent_ctx->get_task_name(), parent_ctx->get_unique_id())
+        scatter_is_range = launcher.dst_indirect_is_range;
         dst_records.resize(scatter_size);
         dst_exchange_events.resize(scatter_size);
         dst_merged.resize(scatter_size);
@@ -6677,6 +6763,8 @@ namespace Legion {
       dst_parent_indexes        = owner->dst_parent_indexes;
       gather_parent_indexes     = owner->gather_parent_indexes;
       scatter_parent_indexes    = owner->scatter_parent_indexes;
+      gather_is_range           = owner->gather_is_range;
+      scatter_is_range          = owner->scatter_is_range;
       predication_guard         = owner->predication_guard;
       if (runtime->legion_spy_enabled)
         LegionSpy::log_index_point(owner->get_unique_op_id(), unique_op_id, p);

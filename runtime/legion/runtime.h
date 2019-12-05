@@ -1427,7 +1427,8 @@ namespace Legion {
       LogicalRegion project_point(Task *task, unsigned idx, Runtime *runtime,
                                   const DomainPoint &point);
       void project_points(const RegionRequirement &req, unsigned idx,
-          Runtime *runtime, const std::vector<PointTask*> &point_tasks);
+          Runtime *runtime, const std::vector<PointTask*> &point_tasks,
+          IndexSpaceNode *launch_space_node);
       // Generalized and annonymized
       void project_points(Operation *op, unsigned idx, 
                           const RegionRequirement &req, Runtime *runtime,
@@ -1447,9 +1448,15 @@ namespace Legion {
       void check_projection_partition_result(const RegionRequirement &req,
                                           Operation *op, unsigned idx,
                                           LogicalRegion result, Runtime *rt);
+      // Checking for inversion
+      void check_inversion(const Task *task, unsigned idx,
+                           const std::vector<DomainPoint> &ordered_points);
+      void check_containment(const Task *task, unsigned idx,
+                             const std::vector<DomainPoint> &ordered_points);
     public:
       const int depth; 
       const bool is_exclusive;
+      const bool is_invertible;
       const ProjectionID projection_id;
       ProjectionFunctor *const functor;
     private:
@@ -2065,6 +2072,10 @@ namespace Legion {
       void begin_static_trace(Context ctx, 
                               const std::set<RegionTreeID> *managed);
       void end_static_trace(Context ctx);
+      TraceID generate_dynamic_trace_id(void);
+      TraceID generate_library_trace_ids(const char *name, size_t count);
+      static TraceID& get_current_static_trace_id(void);
+      static TraceID generate_static_trace_id(void);
       void complete_frame(Context ctx);
       FutureMap execute_must_epoch(Context ctx, 
                                    const MustEpochLauncher &launcher);
@@ -2277,6 +2288,10 @@ namespace Legion {
       void send_slice_remote_mapped(Processor target, Serializer &rez);
       void send_slice_remote_complete(Processor target, Serializer &rez);
       void send_slice_remote_commit(Processor target, Serializer &rez);
+      void send_slice_find_intra_space_dependence(Processor target, 
+                                                  Serializer &rez);
+      void send_slice_record_intra_space_dependence(Processor target,
+                                                    Serializer &rez);
       void send_did_remote_registration(AddressSpaceID target, Serializer &rez);
       void send_did_remote_valid_update(AddressSpaceID target, Serializer &rez);
       void send_did_remote_gc_update(AddressSpaceID target, Serializer &rez);
@@ -2407,6 +2422,8 @@ namespace Legion {
       void send_mpi_rank_exchange(AddressSpaceID target, Serializer &rez);
       void send_library_mapper_request(AddressSpaceID target, Serializer &rez);
       void send_library_mapper_response(AddressSpaceID target, Serializer &rez);
+      void send_library_trace_request(AddressSpaceID target, Serializer &rez);
+      void send_library_trace_response(AddressSpaceID target, Serializer &rez);
       void send_library_projection_request(AddressSpaceID target, 
                                            Serializer &rez);
       void send_library_projection_response(AddressSpaceID target,
@@ -2497,6 +2514,8 @@ namespace Legion {
                                       AddressSpaceID source);
       void handle_slice_remote_complete(Deserializer &derez);
       void handle_slice_remote_commit(Deserializer &derez);
+      void handle_slice_find_intra_dependence(Deserializer &derez);
+      void handle_slice_record_intra_dependence(Deserializer &derez);
       void handle_did_remote_registration(Deserializer &derez, 
                                           AddressSpaceID source);
       void handle_did_remote_valid_update(Deserializer &derez);
@@ -2645,6 +2664,9 @@ namespace Legion {
       void handle_library_mapper_request(Deserializer &derez,
                                          AddressSpaceID source);
       void handle_library_mapper_response(Deserializer &derez);
+      void handle_library_trace_request(Deserializer &derez,
+                                        AddressSpaceID source);
+      void handle_library_trace_response(Deserializer &derez);
       void handle_library_projection_request(Deserializer &derez,
                                              AddressSpaceID source);
       void handle_library_projection_response(Deserializer &derez);
@@ -3030,6 +3052,7 @@ namespace Legion {
       unsigned unique_is_expr_id;
       unsigned unique_task_id;
       unsigned unique_mapper_id;
+      unsigned unique_trace_id;
       unsigned unique_projection_id;
       unsigned unique_redop_id;
       unsigned unique_serdez_id;
@@ -3045,6 +3068,16 @@ namespace Legion {
       std::map<std::string,LibraryMapperIDs> library_mapper_ids;
       // This is only valid on node 0
       unsigned unique_library_mapper_id;
+    protected:
+      struct LibraryTraceIDs {
+        TraceID result;
+        size_t count;
+        RtEvent ready;
+        bool result_set;
+      };
+      std::map<std::string,LibraryTraceIDs> library_trace_ids;
+      // This is only valid on node 0
+      unsigned unique_library_trace_id;
     protected:
       struct LibraryProjectionIDs {
       public:
@@ -3270,9 +3303,12 @@ namespace Legion {
       static int wait_for_shutdown(void);
       Future launch_top_level_task(const TaskLauncher &launcher);
       Context begin_implicit_task(TaskID top_task_id,
+                                  MapperID top_mapper_id,
                                   Processor::Kind proc_kind,
                                   const char *task_name,
-                                  bool control_replicable);
+                                  bool control_replicable,
+                                  unsigned shard_per_address_space,
+                                  int shard_id);
       void finish_implicit_task(Context ctx);
       static void set_top_level_task_id(TaskID top_id);
       static void set_top_level_task_mapper_id(MapperID mapper_id);

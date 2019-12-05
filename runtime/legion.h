@@ -1659,9 +1659,17 @@ namespace Legion {
     public:
       // Specify src/dst indirect requirements (must have exactly 1 field)
       inline void add_src_indirect_field(const RegionRequirement &src_idx_req,
-                                         FieldID src_idx_fid, bool inst = true);
+                                         FieldID src_idx_fid, bool inst = true,
+                                         bool is_range_indirection = false);
       inline void add_dst_indirect_field(const RegionRequirement &dst_idx_req,
-                                         FieldID dst_idx_fid, bool inst = true);
+                                         FieldID dst_idx_fid, bool inst = true,
+                                         bool is_range_indirection = false);
+      inline RegionRequirement& add_src_indirect_field(
+                                         const RegionRequirement &src_idx_req,
+                                         bool is_range_indirection = false);
+      inline RegionRequirement& add_dst_indirect_field(
+                                         const RegionRequirement &dst_idx_req,
+                                         bool is_range_indirection = false);
     public:
       inline void add_grant(Grant g);
       inline void add_wait_barrier(PhaseBarrier bar);
@@ -1673,6 +1681,8 @@ namespace Legion {
       std::vector<RegionRequirement>  dst_requirements;
       std::vector<RegionRequirement>  src_indirect_requirements;
       std::vector<RegionRequirement>  dst_indirect_requirements;
+      std::vector<bool>               src_indirect_is_range;
+      std::vector<bool>               dst_indirect_is_range;
       std::vector<Grant>              grants;
       std::vector<PhaseBarrier>       wait_barriers;
       std::vector<PhaseBarrier>       arrive_barriers;
@@ -1717,9 +1727,17 @@ namespace Legion {
     public:
       // Specify src/dst indirect requirements (must have exactly 1 field)
       inline void add_src_indirect_field(const RegionRequirement &src_idx_req,
-                                         FieldID src_idx_fid, bool inst = true);
+                                         FieldID src_idx_fid, bool inst = true,
+                                         bool is_range_indirection = false);
       inline void add_dst_indirect_field(const RegionRequirement &dst_idx_req,
-                                         FieldID dst_idx_fid, bool inst = true);
+                                         FieldID dst_idx_fid, bool inst = true,
+                                         bool is_range_indirection = false);
+      inline RegionRequirement& add_src_indirect_field(
+                                         const RegionRequirement &src_idx_req,
+                                         bool is_range_indirection = false);
+      inline RegionRequirement& add_dst_indirect_field(
+                                         const RegionRequirement &dst_idx_req,
+                                         bool is_range_indirection = false);
     public:
       inline void add_grant(Grant g);
       inline void add_wait_barrier(PhaseBarrier bar);
@@ -1731,6 +1749,8 @@ namespace Legion {
       std::vector<RegionRequirement>  dst_requirements;
       std::vector<RegionRequirement>  src_indirect_requirements;
       std::vector<RegionRequirement>  dst_indirect_requirements;
+      std::vector<bool>               src_indirect_is_range;
+      std::vector<bool>               dst_indirect_is_range;
       std::vector<Grant>              grants;
       std::vector<PhaseBarrier>       wait_barriers;
       std::vector<PhaseBarrier>       arrive_barriers;
@@ -3271,6 +3291,22 @@ namespace Legion {
                                     unsigned index,
                                     LogicalPartition upper_bound,
                                     const DomainPoint &point);
+      ///@{
+      /**
+       * Invert the projection function. Given a logical region
+       * for this operation return all of the points that alias
+       * with it. Dependences will be resolved in the order that
+       * they are returned to the runtime. The returned result 
+       * must not be empty because it must contain at least the
+       * point for the given operation.
+       */
+      virtual void invert(LogicalRegion region, LogicalRegion upper_bound,
+                          const Domain &launch_domain,
+                          std::vector<DomainPoint> &ordered_points);
+      virtual void invert(LogicalRegion region, LogicalPartition upper_bound,
+                          const Domain &launch_domain,
+                          std::vector<DomainPoint> &ordered_points);
+      ///@}
       
       /**
        * Indicate whether calls to this projection functor
@@ -3287,6 +3323,13 @@ namespace Legion {
        * is invoked by the runtime.
        */
       virtual bool is_functional(void) const { return false; }
+
+      /**
+       * Indicate whether this is an invertible projection 
+       * functor which can be used to handle dependences 
+       * between point tasks in the same index space launch.
+       */
+      virtual bool is_invertible(void) const { return false; }
 
       /**
        * Specify the depth which this projection function goes
@@ -5960,6 +6003,33 @@ namespace Legion {
        * @param ctx the enclosing task context
        */
       void end_static_trace(Context ctx);
+
+      /**
+       * Dynamically generate a unique TraceID for use across the machine
+       * @reutrn a TraceID that is globally unique across the machine
+       */
+      TraceID generate_dynamic_trace_id(void);
+
+      /** 
+       * Generate a contiguous set of TraceIDs for use by a library.
+       * This call will always generate the same answer for the same library
+       * name no many how many times it is called or on how many nodes it
+       * is called. If the count passed in to this method differs for the 
+       * same library name the runtime will raise an error.
+       * @param name a unique null-terminated string that names the library
+       * @param count the number of trace IDs that should be generated
+       * @return the first TraceID that is allocated to the library
+       */
+      TraceID generate_library_trace_ids(const char *name, size_t count);
+
+      /**
+       * Statically generate a unique Trace ID for use across the machine.
+       * This can only be called prior to the runtime starting. It must be
+       * invoked symmetrically across all the nodes in the machine prior
+       * to starting the runtime.
+       * @return a TraceID that is globally unique across the machine
+       */
+      static TraceID generate_static_trace_id(void);
     public:
       //------------------------------------------------------------------------
       // Frame Operations 
@@ -7068,13 +7138,22 @@ namespace Legion {
        * top-level task running on a specific kind of processor. Users can 
        * also mark that this implicit top-level task is control replicable 
        * for supporting implicit top-level tasks for multi-node runs. For
-       * the control replicable case we expect to see one of these calls
-       * from every single address space.
+       * the control replicable case we expect to see the same number of 
+       * calls from every address space. This number is controlled by 
+       * shard_per_address_space and defaults to one. The application can
+       * also optionally specify the shard ID for every implicit top level
+       * task for control replication settings. If it is specified, then
+       * the application must specify it for all shards. Otherwise the
+       * runtime will allocate shard IDs contiguously on each node before
+       * proceeding to the next node.
        */
       Context begin_implicit_task(TaskID top_task_id,
+                                  MapperID mapper_id,
                                   Processor::Kind proc_kind,
                                   const char *task_name = NULL,
-                                  bool control_replicable = false);
+                                  bool control_replicable = false,
+                                  unsigned shard_per_address_space = 1,
+                                  int shard_id = -1);
 
       /**
        * This is the final method for marking the end of an 

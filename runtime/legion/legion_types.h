@@ -696,6 +696,8 @@ namespace Legion {
       SLICE_REMOTE_MAPPED,
       SLICE_REMOTE_COMPLETE,
       SLICE_REMOTE_COMMIT,
+      SLICE_FIND_INTRA_DEP,
+      SLICE_RECORD_INTRA_DEP,
       DISTRIBUTED_REMOTE_REGISTRATION,
       DISTRIBUTED_VALID_UPDATE,
       DISTRIBUTED_GC_UPDATE,
@@ -787,6 +789,8 @@ namespace Legion {
       SEND_MPI_RANK_EXCHANGE,
       SEND_LIBRARY_MAPPER_REQUEST,
       SEND_LIBRARY_MAPPER_RESPONSE,
+      SEND_LIBRARY_TRACE_REQUEST,
+      SEND_LIBRARY_TRACE_RESPONSE,
       SEND_LIBRARY_PROJECTION_REQUEST,
       SEND_LIBRARY_PROJECTION_RESPONSE,
       SEND_LIBRARY_TASK_REQUEST,
@@ -854,6 +858,8 @@ namespace Legion {
         "Slice Remote Mapped",                                        \
         "Slice Remote Complete",                                      \
         "Slice Remote Commit",                                        \
+        "Slice Find Intra-Space Dependence",                          \
+        "Slice Record Intra-Space Dependence",                        \
         "Distributed Remote Registration",                            \
         "Distributed Valid Update",                                   \
         "Distributed GC Update",                                      \
@@ -945,6 +951,8 @@ namespace Legion {
         "Send MPI Rank Exchange",                                     \
         "Send Library Mapper Request",                                \
         "Send Library Mapper Response",                               \
+        "Send Library Trace Request",                                 \
+        "Send Library Trace Response",                                \
         "Send Library Projection Request",                            \
         "Send Library Projection Response",                           \
         "Send Library Task Request",                                  \

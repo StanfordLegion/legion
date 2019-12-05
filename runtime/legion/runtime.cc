@@ -6648,6 +6648,16 @@ namespace Legion {
               runtime->handle_slice_remote_commit(derez);
               break;
             }
+          case SLICE_FIND_INTRA_DEP:
+            {
+              runtime->handle_slice_find_intra_dependence(derez);
+              break;
+            }
+          case SLICE_RECORD_INTRA_DEP:
+            {
+              runtime->handle_slice_record_intra_dependence(derez);
+              break;
+            }
           case DISTRIBUTED_REMOTE_REGISTRATION:
             {
               runtime->handle_did_remote_registration(derez, 
@@ -7144,6 +7154,16 @@ namespace Legion {
           case SEND_LIBRARY_MAPPER_RESPONSE:
             {
               runtime->handle_library_mapper_response(derez);
+              break;
+            }
+          case SEND_LIBRARY_TRACE_REQUEST:
+            {
+              runtime->handle_library_trace_request(derez,remote_address_space);
+              break;
+            }
+          case SEND_LIBRARY_TRACE_RESPONSE:
+            {
+              runtime->handle_library_trace_response(derez);
               break;
             }
           case SEND_LIBRARY_PROJECTION_REQUEST:
@@ -9173,7 +9193,7 @@ namespace Legion {
     ProjectionFunction::ProjectionFunction(ProjectionID pid, 
                                            ProjectionFunctor *func)
       : depth(func->get_depth()), is_exclusive(func->is_exclusive()),
-        projection_id(pid), functor(func)
+        is_invertible(func->is_invertible()), projection_id(pid), functor(func)
     //--------------------------------------------------------------------------
     {
     }
@@ -9181,7 +9201,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     ProjectionFunction::ProjectionFunction(const ProjectionFunction &rhs)
       : depth(rhs.depth), is_exclusive(rhs.is_exclusive), 
-        projection_id(rhs.projection_id), functor(rhs.functor)
+        is_invertible(rhs.is_invertible), projection_id(rhs.projection_id), 
+        functor(rhs.functor)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -9249,7 +9270,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ProjectionFunction::project_points(const RegionRequirement &req, 
-     unsigned idx, Runtime *runtime, const std::vector<PointTask*> &point_tasks)
+                                    unsigned idx, Runtime *runtime, 
+                                    const std::vector<PointTask*> &point_tasks,
+                                    IndexSpaceNode *launch_space)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -9268,7 +9291,11 @@ namespace Legion {
         }
         return;
       }
-
+      std::map<LogicalRegion,std::vector<DomainPoint> > dependences;
+      const bool find_dependences = is_invertible && IS_WRITE(req);
+      Domain launch_domain;
+      if (find_dependences)
+        launch_space->get_launch_space_domain(launch_domain);
       if (!is_exclusive)
       {
         AutoLock p_lock(projection_reservation);
@@ -9282,6 +9309,18 @@ namespace Legion {
             check_projection_partition_result(req, static_cast<Task*>(*it), 
                                               idx, result, runtime);
             (*it)->set_projection_result(idx, result);
+            if (find_dependences)
+            {
+              std::vector<DomainPoint> &region_deps = dependences[result];
+              if (region_deps.empty())
+              {
+                functor->invert(result,req.partition,launch_domain,region_deps);
+                check_inversion((*it), idx, region_deps);
+              }
+              else
+                check_containment((*it), idx, region_deps);
+              (*it)->record_intra_space_dependences(idx, region_deps);
+            }
           }
         }
         else
@@ -9294,6 +9333,18 @@ namespace Legion {
             check_projection_region_result(req, static_cast<Task*>(*it), 
                                            idx, result, runtime);
             (*it)->set_projection_result(idx, result);
+            if (find_dependences)
+            {
+              std::vector<DomainPoint> &region_deps = dependences[result];
+              if (region_deps.empty())
+              {
+                functor->invert(result, req.region, launch_domain, region_deps);
+                check_inversion((*it), idx, region_deps);
+              }
+              else
+                check_containment((*it), idx, region_deps);
+              (*it)->record_intra_space_dependences(idx, region_deps);
+            }
           }
         }
       }
@@ -9309,6 +9360,18 @@ namespace Legion {
             check_projection_partition_result(req, static_cast<Task*>(*it), 
                                               idx, result, runtime);
             (*it)->set_projection_result(idx, result);
+            if (find_dependences)
+            {
+              std::vector<DomainPoint> &region_deps = dependences[result];
+              if (region_deps.empty())
+              {
+                functor->invert(result,req.partition,launch_domain,region_deps);
+                check_inversion((*it), idx, region_deps);
+              }
+              else
+                check_containment((*it), idx, region_deps);
+              (*it)->record_intra_space_dependences(idx, region_deps);
+            }
           }
         }
         else
@@ -9321,6 +9384,18 @@ namespace Legion {
             check_projection_region_result(req, static_cast<Task*>(*it), 
                                            idx, result, runtime);
             (*it)->set_projection_result(idx, result);
+            if (find_dependences)
+            {
+              std::vector<DomainPoint> &region_deps = dependences[result];
+              if (region_deps.empty())
+              {
+                functor->invert(result, req.region, launch_domain, region_deps);
+                check_inversion((*it), idx, region_deps);
+              }
+              else
+                check_containment((*it), idx, region_deps);
+              (*it)->record_intra_space_dependences(idx, region_deps);
+            }
           }
         }
       }
@@ -9350,6 +9425,9 @@ namespace Legion {
         }
         return;
       }
+      // TODO: support for invertible point operations
+      if (is_invertible && (req.privilege == READ_WRITE))
+        assert(false);
 
       if (!is_exclusive)
       {
@@ -9556,6 +9634,56 @@ namespace Legion {
 #endif
     }
 
+    //--------------------------------------------------------------------------
+    void ProjectionFunction::check_inversion(const Task *task, unsigned index,
+                                         const std::vector<DomainPoint> &points)
+    //--------------------------------------------------------------------------
+    {
+      if (points.empty())
+        REPORT_LEGION_ERROR(ERROR_INVALID_PROJECTION_RESULT,
+            "Projection functor %d produced an empty inversion result "
+            "while inverting region requirement %d of task %s (UID %lld). "
+            "Empty inversions are never legal because the point task that "
+            "produced the region must always be included.",
+            projection_id, index, task->get_task_name(), task->get_unique_id())
+#ifdef DEBUG_LEGION
+      std::set<DomainPoint> unique_points(points.begin(), points.end());
+      if (unique_points.size() != points.size())
+        REPORT_LEGION_ERROR(ERROR_INVALID_PROJECTION_RESULT,
+            "Projection functor %d produced an invalid inversion result "
+            "containing duplicate points for region requirement %d of "
+            "task %s (UID %lld). Each point is only permitted to "
+            "appear once in an inversion.", projection_id, index,
+            task->get_task_name(), task->get_unique_id())
+      if (unique_points.find(task->index_point) == unique_points.end())
+        REPORT_LEGION_ERROR(ERROR_INVALID_PROJECTION_RESULT,
+            "Projection functor %d produced an invalid inversion result "
+            "that does not contain the original point for region requirement "
+            "%d of task %s (UID %lld).", projection_id, index,
+            task->get_task_name(), task->get_unique_id())
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    void ProjectionFunction::check_containment(const Task *task, unsigned index,
+                                         const std::vector<DomainPoint> &points)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      for (std::vector<DomainPoint>::const_iterator it = 
+            points.begin(); it != points.end(); it++)
+      {
+        if ((*it) == task->index_point)
+          return;
+      }
+      REPORT_LEGION_ERROR(ERROR_INVALID_PROJECTION_RESULT,
+          "Projection functor %d produced an invalid inversion result "
+          "that does not contain the original point for region requirement "
+          "%d of task %s (UID %lld).", projection_id, index,
+          task->get_task_name(), task->get_unique_id())
+#endif
+    }
+
     /////////////////////////////////////////////////////////////
     // Legion Runtime 
     /////////////////////////////////////////////////////////////
@@ -9642,10 +9770,12 @@ namespace Legion {
         unique_is_expr_id((unique == 0) ? runtime_stride : unique),
         unique_task_id(get_current_static_task_id()+unique),
         unique_mapper_id(get_current_static_mapper_id()+unique),
+        unique_trace_id(get_current_static_trace_id()+unique),
         unique_projection_id(get_current_static_projection_id()+unique),
         unique_redop_id(get_current_static_reduction_id()+unique),
         unique_serdez_id(get_current_static_serdez_id()+unique),
         unique_library_mapper_id(LEGION_INITIAL_LIBRARY_ID_OFFSET),
+        unique_library_trace_id(LEGION_INITIAL_LIBRARY_ID_OFFSET),
         unique_library_projection_id(LEGION_INITIAL_LIBRARY_ID_OFFSET),
         unique_library_task_id(LEGION_INITIAL_LIBRARY_ID_OFFSET),
         unique_library_redop_id(LEGION_INITIAL_LIBRARY_ID_OFFSET),
@@ -12505,6 +12635,148 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    TraceID Runtime::generate_dynamic_trace_id(void)
+    //--------------------------------------------------------------------------
+    {
+      TraceID result = __sync_fetch_and_add(&unique_trace_id, runtime_stride);
+      // Check for hitting the library limit
+      if (result >= LEGION_INITIAL_LIBRARY_ID_OFFSET)
+        REPORT_LEGION_FATAL(LEGION_FATAL_EXCEEDED_LIBRARY_ID_OFFSET,
+            "Dynamic Trace IDs exceeded library ID offset %d",
+            LEGION_INITIAL_LIBRARY_ID_OFFSET)
+      return result;
+    }
+    
+    //--------------------------------------------------------------------------
+    TraceID Runtime::generate_library_trace_ids(const char *name, size_t count)
+    //--------------------------------------------------------------------------
+    {
+      // Easy case if the user asks for no IDs
+      if (count == 0)
+        return AUTO_GENERATE_ID;
+      const std::string library_name(name); 
+      // Take the lock in read only mode and see if we can find the result
+      RtEvent wait_on;
+      {
+        AutoLock l_lock(library_lock,1,false/*exclusive*/);
+        std::map<std::string,LibraryTraceIDs>::const_iterator finder = 
+          library_trace_ids.find(library_name);
+        if (finder != library_trace_ids.end())
+        {
+          // First do a check to see if the counts match
+          if (finder->second.count != count)
+            REPORT_LEGION_ERROR(ERROR_LIBRARY_COUNT_MISMATCH,
+                "TraceID generation counts %zd and %zd differ for library %s",
+                finder->second.count, count, name)
+          if (finder->second.result_set)
+            return finder->second.result;
+          // This should never happen unless we are on a node other than 0
+#ifdef DEBUG_LEGION
+          assert(address_space > 0);
+#endif
+          wait_on = finder->second.ready;
+        }
+      }
+      RtUserEvent request_event;
+      if (!wait_on.exists())
+      {
+        AutoLock l_lock(library_lock);
+        // Check to make sure we didn't lose the race
+        std::map<std::string,LibraryTraceIDs>::const_iterator finder = 
+          library_trace_ids.find(library_name);
+        if (finder != library_trace_ids.end())
+        {
+          // First do a check to see if the counts match
+          if (finder->second.count != count)
+            REPORT_LEGION_ERROR(ERROR_LIBRARY_COUNT_MISMATCH,
+                "TraceID generation counts %zd and %zd differ for library %s",
+                finder->second.count, count, name)
+          if (finder->second.result_set)
+            return finder->second.result;
+          // This should never happen unless we are on a node other than 0
+#ifdef DEBUG_LEGION
+          assert(address_space > 0);
+#endif
+          wait_on = finder->second.ready;
+        }
+        if (!wait_on.exists())
+        {
+          LibraryTraceIDs &record = library_trace_ids[library_name];
+          record.count = count;
+          if (address_space == 0)
+          {
+            // We're going to make the result
+            record.result = unique_library_trace_id;
+            unique_library_trace_id += count;
+#ifdef DEBUG_LEGION
+            assert(unique_library_trace_id > record.result);
+#endif
+            record.result_set = true;
+            return record.result;
+          }
+          else
+          {
+            // We're going to request the result
+            request_event = Runtime::create_rt_user_event();
+            record.ready = request_event;
+            record.result_set = false;
+            wait_on = request_event;
+          }
+        }
+      }
+      // Should only get here on nodes other than 0
+#ifdef DEBUG_LEGION
+      assert(address_space > 0);
+      assert(wait_on.exists());
+#endif
+      if (request_event.exists())
+      {
+        // Include the null terminator in length
+        const size_t string_length = strlen(name) + 1;
+        // Send the request to node 0 for the result
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize<size_t>(string_length);
+          rez.serialize(name, string_length);
+          rez.serialize<size_t>(count);
+          rez.serialize(request_event);
+        }
+        send_library_trace_request(0/*target*/, rez);
+      }
+      wait_on.wait();
+      // When we wake up we should be able to find the result
+      AutoLock l_lock(library_lock,1,false/*exclusive*/);
+      std::map<std::string,LibraryTraceIDs>::const_iterator finder = 
+          library_trace_ids.find(library_name);
+#ifdef DEBUG_LEGION
+      assert(finder != library_trace_ids.end());
+      assert(finder->second.result_set);
+#endif
+      return finder->second.result;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ TraceID& Runtime::get_current_static_trace_id(void)
+    //--------------------------------------------------------------------------
+    {
+      static TraceID next_trace_id = LEGION_MAX_APPLICATION_TRACE_ID;
+      return next_trace_id;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ TraceID Runtime::generate_static_trace_id(void)
+    //--------------------------------------------------------------------------
+    {
+      TraceID &next_trace = get_current_static_trace_id();
+      if (runtime_started)
+        REPORT_LEGION_ERROR(ERROR_STATIC_CALL_POST_RUNTIME_START, 
+                      "Illegal call to 'generate_static_trace_id' after "
+                      "the runtime has been started!")
+      return next_trace++;
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::complete_frame(Context ctx)
     //--------------------------------------------------------------------------
     {
@@ -13175,7 +13447,8 @@ namespace Legion {
                       "the region projection table\n", pid)
       projection_functions[pid] = function;
       if (legion_spy_enabled)
-        LegionSpy::log_projection_function(pid, function->depth);
+        LegionSpy::log_projection_function(pid, function->depth, 
+                                           function->is_invertible);
     }
 
     //--------------------------------------------------------------------------
@@ -14706,8 +14979,6 @@ namespace Legion {
                                                         Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      // Very important that this goes on the physical state channel
-      // so that it is properly serialized with state updates
       find_messenger(target)->send_message(rez, INDIVIDUAL_REMOTE_COMPLETE,
                   TASK_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
     }
@@ -14733,8 +15004,6 @@ namespace Legion {
     void Runtime::send_slice_remote_complete(Processor target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      // Very important that this goes on the physical state channel
-      // so that it is properly serialized with state updates
       find_messenger(target)->send_message(rez, SLICE_REMOTE_COMPLETE,
                 TASK_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
     }
@@ -14745,6 +15014,24 @@ namespace Legion {
     {
       find_messenger(target)->send_message(rez, SLICE_REMOTE_COMMIT,
                 TASK_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_slice_find_intra_space_dependence(Processor target,
+                                                         Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SLICE_FIND_INTRA_DEP,
+                              DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_slice_record_intra_space_dependence(Processor target,
+                                                           Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SLICE_RECORD_INTRA_DEP,
+                                DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -15537,6 +15824,24 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_library_trace_request(AddressSpaceID target, 
+                                             Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_LIBRARY_TRACE_REQUEST,
+                                     DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_library_trace_response(AddressSpaceID target,
+                                               Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_LIBRARY_TRACE_RESPONSE,
+                   DEFAULT_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_library_projection_request(AddressSpaceID target, 
                                                   Serializer &rez)
     //--------------------------------------------------------------------------
@@ -16121,6 +16426,20 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       IndexTask::process_slice_commit(derez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_slice_find_intra_dependence(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      IndexTask::process_slice_find_intra_dependence(derez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_slice_record_intra_dependence(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      IndexTask::process_slice_record_intra_dependence(derez);
     }
 
     //--------------------------------------------------------------------------
@@ -16972,6 +17291,63 @@ namespace Legion {
           library_mapper_ids.find(library_name);
 #ifdef DEBUG_LEGION
         assert(finder != library_mapper_ids.end());
+        assert(!finder->second.result_set);
+        assert(finder->second.ready == done);
+#endif
+        finder->second.result = result;
+        finder->second.result_set = true;
+      }
+      Runtime::trigger_event(done);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_library_trace_request(Deserializer &derez,
+                                               AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      size_t string_length;
+      derez.deserialize(string_length);
+      const char *name = (const char*)derez.get_current_pointer();
+      derez.advance_pointer(string_length);
+      size_t count;
+      derez.deserialize(count);
+      RtUserEvent done;
+      derez.deserialize(done);
+      
+      TraceID result = generate_library_trace_ids(name, count);
+      Serializer rez;
+      {
+        RezCheck z2(rez);
+        rez.serialize(string_length);
+        rez.serialize(name, string_length);
+        rez.serialize(result);
+        rez.serialize(done);
+      }
+      send_library_trace_response(source, rez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_library_trace_response(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      size_t string_length;
+      derez.deserialize(string_length);
+      const char *name = (const char*)derez.get_current_pointer();
+      derez.advance_pointer(string_length);
+      TraceID result;
+      derez.deserialize(result);
+      RtUserEvent done;
+      derez.deserialize(done);
+
+      const std::string library_name(name);
+      {
+        AutoLock l_lock(library_lock); 
+        std::map<std::string,LibraryTraceIDs>::iterator finder = 
+          library_trace_ids.find(library_name);
+#ifdef DEBUG_LEGION
+        assert(finder != library_trace_ids.end());
         assert(!finder->second.result_set);
         assert(finder->second.ready == done);
 #endif
@@ -20319,9 +20695,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     Context Runtime::begin_implicit_task(TaskID top_task_id,
+                                         MapperID top_mapper_id,
                                          Processor::Kind proc_kind,
                                          const char *task_name,
-                                         bool control_replicable)
+                                         bool control_replicable,
+                                         unsigned shards_per_address_space,
+                                         int shard_id)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -20387,15 +20766,15 @@ namespace Legion {
         assert(proxy.exists());
 #endif
         top_context->set_executing_processor(proxy);
-        TaskLauncher launcher(legion_main_id, TaskArgument(),
-                              Predicate::TRUE_PRED, legion_main_mapper_id);
+        TaskLauncher launcher(top_task_id, TaskArgument(),
+                              Predicate::TRUE_PRED, top_mapper_id);
         // Mark that this task is the top-level task
         top_task->initialize_task(top_context, launcher, false/*track parent*/,
                       true/*top level task*/, true/*implicit top level task*/);
         increment_outstanding_top_level_tasks();
         top_context->increment_pending();
 #ifdef DEBUG_LEGION
-        increment_total_outstanding_tasks(legion_main_id, false);
+        increment_total_outstanding_tasks(top_task_id, false);
 #else
         increment_total_outstanding_tasks();
 #endif
