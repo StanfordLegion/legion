@@ -120,6 +120,7 @@ legion_python_cxx_tests = [
 
     ['bindings/python/legion_python', ['tests/fail/privileges.py', '-ll:py', '1', '-ll:cpu', '0']],
 
+    ['bindings/python/legion_python', ['tests/pass/copy.py', '-ll:py', '1', '-ll:cpu', '0']],
     ['bindings/python/legion_python', ['tests/pass/empty_region.py', '-ll:py', '1', '-ll:cpu', '0']],
     ['bindings/python/legion_python', ['tests/pass/print_once.py', '-ll:py', '1', '-ll:cpu', '0']],
     ['bindings/python/legion_python', ['tests/pass/privileges.py', '-ll:py', '1', '-ll:cpu', '0']],
