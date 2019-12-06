@@ -1090,6 +1090,19 @@ namespace Legion {
       }
     }
 
+    //--------------------------------------------------------------------------
+    /*static*/ ApEvent PhysicalManager::fetch_metadata(PhysicalInstance inst, 
+                                                       ApEvent use_event)
+    //--------------------------------------------------------------------------
+    {
+      ApEvent ready(inst.fetch_metadata(Processor::get_executing_processor()));
+      if (!use_event.exists())
+        return ready;
+      if (!ready.exists())
+        return use_event;
+      return Runtime::merge_events(NULL, ready, use_event);
+    }
+
     /////////////////////////////////////////////////////////////
     // InstanceManager 
     /////////////////////////////////////////////////////////////
@@ -1107,7 +1120,7 @@ namespace Legion {
       : PhysicalManager(ctx, mem, desc, constraint, 
                         encode_instance_did(did, external_instance),owner_space,
                         node, inst, footprint,instance_domain,tid,register_now),
-        use_event(u_event)
+        use_event(fetch_metadata(inst, u_event))
     //--------------------------------------------------------------------------
     {
       if (!is_owner())
@@ -1470,7 +1483,7 @@ namespace Legion {
                                        bool register_now)
       : PhysicalManager(ctx, mem, desc, constraint, did, owner_space, 
                         node, inst, footprint, inst_domain, tid, register_now),
-        op(o), redop(red), use_event(u_event)
+        op(o), redop(red), use_event(fetch_metadata(inst, u_event))
     //--------------------------------------------------------------------------
     {  
       if (runtime->legion_spy_enabled)

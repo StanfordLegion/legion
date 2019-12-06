@@ -239,6 +239,7 @@ namespace Legion {
       static inline bool is_reduction_fold_did(DistributedID did);
       static inline bool is_reduction_list_did(DistributedID did);
       static inline bool is_external_did(DistributedID did);
+      static ApEvent fetch_metadata(PhysicalInstance inst, ApEvent use_event);
     public:
       RegionTreeForest *const context;
       MemoryManager *const memory_manager;
