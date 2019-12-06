@@ -1654,7 +1654,7 @@ namespace Legion {
       {
         // Log subspaces being set on the owner
         const AddressSpaceID owner_space = get_owner_space();
-        if (owner_space != context->runtime->address_space)
+        if (owner_space == context->runtime->address_space)
         {
           if (context->runtime->legion_spy_enabled)
             this->log_index_space_points(tight_space);
