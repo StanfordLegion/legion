@@ -1,5 +1,5 @@
 module hello_world
-  use legion_fortran_object_oriented
+  use legion_fortran
   use iso_c_binding
   implicit none
   
@@ -33,7 +33,7 @@ end module hello_world
   
 
 Program hello_world_main
-  use legion_fortran_object_oriented
+  use legion_fortran
   use iso_c_binding
   use hello_world
   implicit none

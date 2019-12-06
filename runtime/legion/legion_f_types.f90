@@ -2,10 +2,14 @@ module legion_fortran_types
   use, intrinsic :: iso_c_binding
   implicit none
   
-  include "legion_defines.h"
+ ! include "legion_defines.h"
   
 #ifndef LEGION_MAX_DIM
-#define LEGION_MAX_DIM     3 // maximum number of dimensions for index spaces
+#define LEGION_MAX_DIM     3
+#endif
+
+#if LEGION_MAX_DIM >= 4
+#error "Illegal value of LEGION_MAX_DIM"
 #endif
 
 #define MAX_POINT_DIM_F LEGION_MAX_DIM
@@ -118,14 +122,16 @@ module legion_fortran_types
     ! point 1d, 2d, 3d
 #define NEW_POINT_TYPE_F(T, DIM) type, bind(C) :: T; integer(c_long_long), dimension(0:DIM-1) :: x; end type T
   NEW_POINT_TYPE_F(legion_point_1d_f_t, 1)
+#if LEGION_MAX_DIM >= 2
   NEW_POINT_TYPE_F(legion_point_2d_f_t, 2)
+#endif
+#if LEGION_MAX_DIM >= 3  
   NEW_POINT_TYPE_F(legion_point_3d_f_t, 3)
+#endif
 #undef NEW_POINT_TYPE_F
 
-! #define LEGION_FOREACH_FN(__func__) \
-!    __func__(1); \
-!    __func__(2); \
-!    __func__(3)
+! #define LEGION_FOREACH_FN(__func__) __func__(1); __func__(2); __func__(3)
+!
 ! #ifdef __GFORTRAN__
 ! #define NEW_POINT_TYPE_F(DIM) type, bind(C) :: legion_point_/**/DIM/**/d_f_t; integer(c_long_long), dimension(0:DIM-1) :: x; end type legion_point_/**/DIM/**/d_f_t
 !    LEGION_FOREACH_FN(NEW_POINT_TYPE_F)
@@ -141,16 +147,28 @@ module legion_fortran_types
     ! rect 1d, 2d, 3d
 #define NEW_RECT_TYPE_F(T, PT) type, bind(C) :: T; type(PT) :: lo, hi; end type T
   NEW_RECT_TYPE_F(legion_rect_1d_f_t, legion_point_1d_f_t)
+#if LEGION_MAX_DIM >= 2
   NEW_RECT_TYPE_F(legion_rect_2d_f_t, legion_point_2d_f_t)
+#endif
+#if LEGION_MAX_DIM >= 3
   NEW_RECT_TYPE_F(legion_rect_3d_f_t, legion_point_3d_f_t)
-#undef NEW_RECT_TYPE_F
+#endif
 
     ! transform 1x1,2x2,3x3
 #define NEW_TRANSFORM_TYPE_F(T, D1, D2) type, bind(C) :: T; integer(c_long_long) :: trans(0:D1-1, 0:D2-1); end type T
   NEW_TRANSFORM_TYPE_F(legion_transform_1x1_f_t, 1, 1)
+#if LEGION_MAX_DIM >= 2  
+  NEW_TRANSFORM_TYPE_F(legion_transform_1x2_f_t, 1, 2)
+  NEW_TRANSFORM_TYPE_F(legion_transform_2x1_f_t, 2, 1)
   NEW_TRANSFORM_TYPE_F(legion_transform_2x2_f_t, 2, 2)
+#endif
+#if LEGION_MAX_DIM >= 3  
+  NEW_TRANSFORM_TYPE_F(legion_transform_1x3_f_t, 1, 3)
+  NEW_TRANSFORM_TYPE_F(legion_transform_2x3_f_t, 2, 3)
+  NEW_TRANSFORM_TYPE_F(legion_transform_3x1_f_t, 3, 1)
+  NEW_TRANSFORM_TYPE_F(legion_transform_3x2_f_t, 3, 2)
   NEW_TRANSFORM_TYPE_F(legion_transform_3x3_f_t, 3, 3)
-#undef NEW_TRANSFORM_TYPE_F
+#endif
 
   ! Legion::Domain
   type, bind(C) :: legion_domain_f_t

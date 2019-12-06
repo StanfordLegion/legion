@@ -2,7 +2,15 @@ module legion_fortran_c_interface
   use, intrinsic :: iso_c_binding
   use legion_fortran_types
   implicit none
-  
+
+#ifndef LEGION_MAX_DIM
+#define LEGION_MAX_DIM     3
+#endif
+
+#if LEGION_MAX_DIM >= 4
+#error "Illegal value of LEGION_MAX_DIM"
+#endif
+    
   interface
     ! -----------------------------------------------------------------------
     ! Task Launcher
@@ -472,6 +480,7 @@ module legion_fortran_c_interface
       type(legion_rect_1d_f_t), value, intent(in) :: r
     end function legion_domain_from_rect_1d_f
 
+#if LEGION_MAX_DIM >= 2
     ! @see Legion::Domain::from_rect()
     function legion_domain_from_rect_2d_f(r) &
         bind(C, name="legion_domain_from_rect_2d")
@@ -483,7 +492,9 @@ module legion_fortran_c_interface
       type(legion_domain_f_t)                     :: legion_domain_from_rect_2d_f
       type(legion_rect_2d_f_t), value, intent(in) :: r
     end function legion_domain_from_rect_2d_f
+#endif
 
+#if LEGION_MAX_DIM >= 3
     ! @see Legion::Domain::from_rect()
     function legion_domain_from_rect_3d_f(r) &
         bind(C, name="legion_domain_from_rect_3d")
@@ -495,7 +506,8 @@ module legion_fortran_c_interface
       type(legion_domain_f_t)                     :: legion_domain_from_rect_3d_f
       type(legion_rect_3d_f_t), value, intent(in) :: r
     end function legion_domain_from_rect_3d_f
-
+#endif
+    
     ! @see Legion::Domain::get_rect()
     function legion_domain_get_rect_1d_f(d) &
         bind(C, name="legion_domain_get_rect_1d")
@@ -508,6 +520,7 @@ module legion_fortran_c_interface
       type(legion_domain_f_t), value, intent(in) :: d
     end function legion_domain_get_rect_1d_f
 
+#if LEGION_MAX_DIM >= 2
     ! @see Legion::Domain::get_rect()
     function legion_domain_get_rect_2d_f(d) &
         bind(C, name="legion_domain_get_rect_2d")
@@ -519,7 +532,9 @@ module legion_fortran_c_interface
       type(legion_rect_2d_f_t)                   :: legion_domain_get_rect_2d_f
       type(legion_domain_f_t), value, intent(in) :: d
     end function legion_domain_get_rect_2d_f
+#endif
 
+#if LEGION_MAX_DIM >= 3
     ! @see Legion::Domain::get_rect()
     function legion_domain_get_rect_3d_f(d) &
         bind(C, name="legion_domain_get_rect_3d")
@@ -531,6 +546,7 @@ module legion_fortran_c_interface
       type(legion_rect_3d_f_t)                   :: legion_domain_get_rect_3d_f
       type(legion_domain_f_t), value, intent(in) :: d
     end function legion_domain_get_rect_3d_f
+#endif
 
     ! @see Legion::Domain::get_volume()
     function legion_domain_get_volume_f(d) &
@@ -555,7 +571,8 @@ module legion_fortran_c_interface
       type(legion_domain_transform_f_t)                 :: legion_domain_transform_from_1x1_f
       type(legion_transform_1x1_f_t), value, intent(in) :: t
     end function legion_domain_transform_from_1x1_f
-    
+
+#if LEGION_MAX_DIM >= 2    
     function legion_domain_transform_from_2x2_f(t) &
         bind(C, name="legion_domain_transform_from_2x2")
       use iso_c_binding
@@ -565,7 +582,9 @@ module legion_fortran_c_interface
       type(legion_domain_transform_f_t)                 :: legion_domain_transform_from_2x2_f
       type(legion_transform_2x2_f_t), value, intent(in) :: t
     end function legion_domain_transform_from_2x2_f
-    
+#endif
+
+#if LEGION_MAX_DIM >= 3    
     function legion_domain_transform_from_3x3_f(t) &
         bind(C, name="legion_domain_transform_from_3x3")
       use iso_c_binding
@@ -575,6 +594,7 @@ module legion_fortran_c_interface
       type(legion_domain_transform_f_t)                 :: legion_domain_transform_from_3x3_f
       type(legion_transform_3x3_f_t), value, intent(in) :: t
     end function legion_domain_transform_from_3x3_f
+#endif
 
     ! -----------------------------------------------------------------------
     ! Domain Point Operations
@@ -591,6 +611,7 @@ module legion_fortran_c_interface
       type(legion_point_1d_f_t), value, intent(in) :: p
     end function legion_domain_point_from_point_1d_f
 
+#if LEGION_MAX_DIM >= 2
     ! @see Legion::Domain::from_point()
     function legion_domain_point_from_point_2d_f(p) &
         bind(C, name="legion_domain_point_from_point_2d")
@@ -602,7 +623,9 @@ module legion_fortran_c_interface
       type(legion_domain_point_f_t)                :: legion_domain_point_from_point_2d_f
       type(legion_point_2d_f_t), value, intent(in) :: p
     end function legion_domain_point_from_point_2d_f
+#endif
 
+#if LEGION_MAX_DIM >= 3
     ! @see Legion::Domain::from_point()
     function legion_domain_point_from_point_3d_f(p) &
         bind(C, name="legion_domain_point_from_point_3d")
@@ -614,6 +637,7 @@ module legion_fortran_c_interface
       type(legion_domain_point_f_t)                :: legion_domain_point_from_point_3d_f
       type(legion_point_3d_f_t), value, intent(in) :: p
     end function legion_domain_point_from_point_3d_f
+#endif
     
     ! @see Legion::DomainPoint::get_point()
     function legion_domain_point_get_point_1d_f(p) &
@@ -626,7 +650,8 @@ module legion_fortran_c_interface
       type(legion_point_1d_f_t)                        :: legion_domain_point_get_point_1d_f
       type(legion_domain_point_f_t), value, intent(in) :: p
     end function legion_domain_point_get_point_1d_f
-    
+
+#if LEGION_MAX_DIM >= 2    
     ! @see Legion::DomainPoint::get_point()
     function legion_domain_point_get_point_2d_f(p) &
         bind(C, name="legion_domain_point_get_point_2d")
@@ -638,7 +663,9 @@ module legion_fortran_c_interface
       type(legion_point_2d_f_t)                        :: legion_domain_point_get_point_2d_f
       type(legion_domain_point_f_t), value, intent(in) :: p
     end function legion_domain_point_get_point_2d_f
+#endif
     
+#if LEGION_MAX_DIM >= 3
     ! @see Legion::DomainPoint::get_point()
     function legion_domain_point_get_point_3d_f(p) &
         bind(C, name="legion_domain_point_get_point_3d")
@@ -649,6 +676,7 @@ module legion_fortran_c_interface
       type(legion_point_3d_f_t)                        :: legion_domain_point_get_point_3d_f
       type(legion_domain_point_f_t), value, intent(in) :: p
     end function legion_domain_point_get_point_3d_f
+#endif
     
     ! -----------------------------------------------------------------------
     ! Domain Point Iterator
@@ -1383,6 +1411,7 @@ module legion_fortran_c_interface
       integer(c_int), value, intent(in)                   :: fid
     end function legion_physical_region_get_field_accessor_array_1d_f
 
+#if LEGION_MAX_DIM >= 2
     ! @see Legion::PhysicalRegion::get_field_accessor()
     function legion_physical_region_get_field_accessor_array_2d_f(handle, fid) &
         bind(C, name="legion_physical_region_get_field_accessor_array_2d")
@@ -1395,7 +1424,9 @@ module legion_fortran_c_interface
       type(legion_physical_region_f_t), value, intent(in) :: handle
       integer(c_int), value, intent(in)                   :: fid
     end function legion_physical_region_get_field_accessor_array_2d_f
+#endif
 
+#if LEGION_MAX_DIM >= 3
     ! @see Legion::PhysicalRegion::get_field_accessor()
     function legion_physical_region_get_field_accessor_array_3d_f(handle, fid) &
         bind(C, name="legion_physical_region_get_field_accessor_array_3d")
@@ -1408,6 +1439,7 @@ module legion_fortran_c_interface
       type(legion_physical_region_f_t), value, intent(in) :: handle
       integer(c_int), value, intent(in)                   :: fid
     end function legion_physical_region_get_field_accessor_array_3d_f
+#endif
 
     ! @see Legion::UnsafeFieldAccessor::ptr
     function legion_accessor_array_1d_raw_rect_ptr_f(handle, rect, subrect, offset) &
@@ -1425,6 +1457,7 @@ module legion_fortran_c_interface
       type(legion_byte_offset_f_t), intent(out)             :: offset  ! pass reference
     end function legion_accessor_array_1d_raw_rect_ptr_f
 
+#if LEGION_MAX_DIM >= 2
     ! @see Legion::UnsafeFieldAccessor::ptr
     function legion_accessor_array_2d_raw_rect_ptr_f(handle, rect, subrect, offset) &
         bind(C, name="legion_accessor_array_2d_raw_rect_ptr")
@@ -1440,7 +1473,9 @@ module legion_fortran_c_interface
       type(legion_rect_2d_f_t), intent(out)                 :: subrect ! pass reference
       type(legion_byte_offset_f_t), intent(out)             :: offset(2)  ! pass reference
     end function legion_accessor_array_2d_raw_rect_ptr_f
+#endif
 
+#if LEGION_MAX_DIM >= 3
     ! @see Legion::UnsafeFieldAccessor::ptr
     function legion_accessor_array_3d_raw_rect_ptr_f(handle, rect, subrect, offset) &
         bind(C, name="legion_accessor_array_3d_raw_rect_ptr")
@@ -1456,6 +1491,7 @@ module legion_fortran_c_interface
       type(legion_rect_3d_f_t), intent(out)                 :: subrect ! pass reference
       type(legion_byte_offset_f_t), intent(out)             :: offset(3)  ! pass reference
     end function legion_accessor_array_3d_raw_rect_ptr_f
+#endif
 
     ! @see Legion::UnsafeFieldAccessor::ptr
     subroutine legion_accessor_array_1d_read_point_f(handle, point, dst, bytes) &
@@ -1471,6 +1507,7 @@ module legion_fortran_c_interface
       integer(c_size_t), value, intent(in)                  :: bytes
     end subroutine legion_accessor_array_1d_read_point_f
 
+#if LEGION_MAX_DIM >= 2
     ! @see Legion::UnsafeFieldAccessor::ptr
     subroutine legion_accessor_array_2d_read_point_f(handle, point, dst, bytes) &
         bind(C, name="legion_accessor_array_2d_read_point")
@@ -1484,7 +1521,9 @@ module legion_fortran_c_interface
       type(c_ptr), value, intent(in)                        :: dst ! should be OUT, set to IN to cheat compiler
       integer(c_size_t), value, intent(in)                  :: bytes
     end subroutine legion_accessor_array_2d_read_point_f
+#endif
 
+#if LEGION_MAX_DIM >= 3
     ! @see Legion::UnsafeFieldAccessor::ptr
     subroutine legion_accessor_array_3d_read_point_f(handle, point, dst, bytes) &
         bind(C, name="legion_accessor_array_3d_read_point")
@@ -1498,6 +1537,7 @@ module legion_fortran_c_interface
       type(c_ptr), value, intent(in)                        :: dst ! should be OUT, set to IN to cheat compiler
       integer(c_size_t), value, intent(in)                  :: bytes
     end subroutine legion_accessor_array_3d_read_point_f
+#endif
 
     ! @see Legion::UnsafeFieldAccessor::ptr
     subroutine legion_accessor_array_1d_write_point_f(handle, point, src, bytes) &
@@ -1513,6 +1553,7 @@ module legion_fortran_c_interface
       integer(c_size_t), value, intent(in)                  :: bytes
     end subroutine legion_accessor_array_1d_write_point_f
 
+#if LEGION_MAX_DIM >= 2
     ! @see Legion::UnsafeFieldAccessor::ptr
     subroutine legion_accessor_array_2d_write_point_f(handle, point, src, bytes) &
         bind(C, name="legion_accessor_array_2d_write_point")
@@ -1526,7 +1567,9 @@ module legion_fortran_c_interface
       type(c_ptr), value, intent(in)                        :: src
       integer(c_size_t), value, intent(in)                  :: bytes
     end subroutine legion_accessor_array_2d_write_point_f
+#endif
 
+#if LEGION_MAX_DIM >= 3
     ! @see Legion::UnsafeFieldAccessor::ptr
     subroutine legion_accessor_array_3d_write_point_f(handle, point, src, bytes) &
         bind(C, name="legion_accessor_array_3d_write_point")
@@ -1540,6 +1583,7 @@ module legion_fortran_c_interface
       type(c_ptr), value, intent(in)                        :: src
       integer(c_size_t), value, intent(in)                  :: bytes
     end subroutine legion_accessor_array_3d_write_point_f
+#endif
     
     ! -----------------------------------------------------------------------
     ! Fill Field Operations

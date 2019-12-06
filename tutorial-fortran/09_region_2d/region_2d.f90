@@ -1,6 +1,5 @@
 module region_2d
   use legion_fortran
-  use legion_fortran_object_oriented
   use iso_c_binding
   implicit none
   
@@ -204,7 +203,7 @@ end module region_2d
 
 Program daxpy_1d_accessor
   use iso_c_binding
-  use legion_fortran_object_oriented
+  use legion_fortran
   use region_2d
   implicit none
   

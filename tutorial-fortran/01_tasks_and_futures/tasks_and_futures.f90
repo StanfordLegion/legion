@@ -1,5 +1,5 @@
 module tasks_and_futures
-  use legion_fortran_object_oriented
+  use legion_fortran
   use iso_c_binding
   implicit none
   
@@ -127,7 +127,7 @@ end module tasks_and_futures
 
 Program tasks_and_futures_main
   use iso_c_binding
-  use legion_fortran_object_oriented
+  use legion_fortran
   use tasks_and_futures
   implicit none
   

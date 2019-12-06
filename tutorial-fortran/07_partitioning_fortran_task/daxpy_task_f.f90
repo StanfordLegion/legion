@@ -1,6 +1,6 @@
 subroutine daxpy_task_f(task_c, regionptr_c, num_regions, ctx_c, runtime_c) bind(C)
     use iso_c_binding
-    use legion_fortran_object_oriented
+    use legion_fortran
     implicit none
     
     type(legion_task_f_t), value, intent(in) :: task_c
@@ -69,7 +69,7 @@ end subroutine daxpy_task_f
 
 subroutine daxpy_task_f2(tdata, tdatalen, userdata, userlen, p) bind(C)
   use iso_c_binding
-  use legion_fortran_object_oriented
+  use legion_fortran
   implicit none
   
   type(c_ptr), value, intent(in) :: tdata

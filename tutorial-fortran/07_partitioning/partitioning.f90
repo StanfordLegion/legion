@@ -1,6 +1,5 @@
 module daxpy
   use legion_fortran
-  use legion_fortran_object_oriented
   use iso_c_binding
   implicit none
   
@@ -345,7 +344,7 @@ end module daxpy
 
 Program daxpy_1d_accessor
   use iso_c_binding
-  use legion_fortran_object_oriented
+  use legion_fortran
   use daxpy
   implicit none
   

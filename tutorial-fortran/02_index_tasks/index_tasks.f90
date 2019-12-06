@@ -1,5 +1,5 @@
 module index_space_test
-  use legion_fortran_object_oriented
+  use legion_fortran
   use iso_c_binding
   implicit none
   
@@ -108,7 +108,7 @@ end module index_space_test
 
 Program index_space_main
   use iso_c_binding
-  use legion_fortran_object_oriented
+  use legion_fortran
   use index_space_test
   implicit none
   

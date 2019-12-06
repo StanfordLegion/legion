@@ -1,6 +1,5 @@
 module attach_array
   use legion_fortran
-  use legion_fortran_object_oriented
   use iso_c_binding
   implicit none
   
@@ -86,7 +85,7 @@ contains
     type(FFieldSpace) :: input_fs
     type(FFieldAllocator) :: ifs_allocator
     type(FLogicalRegion) :: input_lr
-    type(FTaskLauncher) :: init_launcher_x, check_launcher
+    type(FTaskLauncher) :: check_launcher
     type(FFuture) :: task_future, detach_future
     type(FAttachLauncher) :: attach_launcher
     type(FPhysicalRegion) :: pr
@@ -140,7 +139,6 @@ contains
     call runtime%destroy_logical_region(ctx, input_lr)
     call runtime%destroy_field_space(ctx, input_fs)
     call runtime%destroy_index_space(ctx, is)
-    call init_launcher_x%destroy()
     call check_launcher%destroy()
     call attach_launcher%destroy()
     
@@ -150,7 +148,7 @@ end module attach_array
 
 Program attach_array_main
   use iso_c_binding
-  use legion_fortran_object_oriented
+  use legion_fortran
   use attach_array
   implicit none
   

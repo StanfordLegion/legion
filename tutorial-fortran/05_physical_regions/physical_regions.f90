@@ -1,5 +1,5 @@
 module physical_regions
-  use legion_fortran_object_oriented
+  use legion_fortran
   use iso_c_binding
   implicit none
   
@@ -125,7 +125,7 @@ end module physical_regions
   
 
 Program physical_regions_main
-  use legion_fortran_object_oriented
+  use legion_fortran
   use iso_c_binding
   use physical_regions
   implicit none
