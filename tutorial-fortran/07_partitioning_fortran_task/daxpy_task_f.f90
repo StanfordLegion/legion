@@ -28,6 +28,8 @@ subroutine daxpy_task_f(task_c, regionptr_c, num_regions, ctx_c, runtime_c) bind
     type(FRect1D) :: rect_1d
     type(FDomainPointIterator) :: pir
     type(FDomainPoint) :: dp
+      
+    integer(kind=4) :: i4 =1
     
     task%task = task_c
     pr_list%region_ptr = regionptr_c
@@ -52,7 +54,7 @@ subroutine daxpy_task_f(task_c, regionptr_c, num_regions, ctx_c, runtime_c) bind
     index_space = logical_region%get_index_space()
     rect_1d = runtime%get_index_space_domain(ctx, index_space)
     
-    Print *, "Daxpy Task!", alpha
+    Print *, "Daxpy Task!", alpha, " ", huge(i4)
     
     pir = FDomainPointIterator(rect_1d)
     

@@ -43,7 +43,7 @@
 //==========================================================================
 
 #ifndef AUTO_GENERATE_ID
-#define AUTO_GENERATE_ID   65536
+#define AUTO_GENERATE_ID   INT_MAX
 #else
 #error "legion.h requires the ability to define the macro 'AUTO_GENERATE_ID' but it has already been defined"
 #endif

@@ -65,7 +65,8 @@ module legion_fortran_types
   integer(c_int), parameter :: EXTERNAL_HDF5_FILE = 1
   integer(c_int), parameter :: EXTERNAL_INSTANCE = 2
   
-  integer(c_int), parameter :: AUTO_GENERATE_ID = 65536
+  integer(c_int), parameter :: I4_MAX = 1
+  integer(c_int), parameter :: AUTO_GENERATE_ID = huge(I4_MAX)
     
     ! C NEW_OPAQUE_TYPE_F
 #define NEW_OPAQUE_TYPE_F(T) type, bind(C) :: T; type(c_ptr) :: impl; end type T

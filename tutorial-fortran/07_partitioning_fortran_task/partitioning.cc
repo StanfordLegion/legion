@@ -323,7 +323,7 @@ void check_task(const Task *task,
       all_passed = false;
   }
   if (all_passed)
-    printf("SUCCESS!\n");
+    printf("SUCCESS!, %lld, %ld\n", INT_MAX, UINT_MAX);
   else
     printf("FAILURE!\n");
 }
