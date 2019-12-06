@@ -341,6 +341,26 @@ namespace Realm {
       return LegionRuntime::Accessor::RegionAccessor<LegionRuntime::Accessor::AccessorType::Generic>(LegionRuntime::Accessor::AccessorType::Generic::Untyped(*this));
     }
 
+    // before you can get an instance's index space or construct an accessor for
+    //  a given processor, the necessary metadata for the instance must be
+    //  available on to that processor
+    // this can require network communication and/or completion of the actual
+    //  allocation, so an event is returned and (as always) the application
+    //  must decide when/where to handle this precondition
+    Event RegionInstance::fetch_metadata(Processor target) const
+    {
+      RegionInstanceImpl *r_impl = get_runtime()->get_instance_impl(*this);
+
+      NodeID target_node = ID(target).proc_owner_node();
+      if(target_node == Network::my_node_id) {
+	// local metadata request
+	return r_impl->request_metadata();
+      } else {
+	// prefetch on other node's behalf
+	return r_impl->prefetch_metadata(target_node);
+      }
+    }
+
     const InstanceLayoutGeneric *RegionInstance::get_layout(void) const
     {
       RegionInstanceImpl *r_impl = get_runtime()->get_instance_impl(*this);
@@ -652,6 +672,12 @@ namespace Realm {
 	// send any remaining incomplete profiling responses
 	measurements.send_responses(requests);
 
+	// flush the remote prefetch cache
+	{
+	  AutoLock<> al(mutex);
+	  prefetch_events.clear();
+	}
+
 	// send any required invalidation messages for metadata
 	bool recycle_now = metadata.initiate_cleanup(me.id);
 	if(recycle_now)
@@ -678,6 +704,56 @@ namespace Realm {
       MemoryImpl *m_impl = get_runtime()->get_memory_impl(memory);
       m_impl->release_instance(me);
     }
+
+    Event RegionInstanceImpl::prefetch_metadata(NodeID target_node)
+    {
+      assert(target_node != Network::my_node_id);
+
+      Event e = Event::NO_EVENT;
+      {
+	AutoLock<> al(mutex);
+	std::map<NodeID, Event>::iterator it = prefetch_events.find(target_node);
+	if(it != prefetch_events.end())
+	  return it->second;
+
+	// have to make a new one
+	e = GenEventImpl::create_genevent()->current_event();
+	prefetch_events.insert(std::make_pair(target_node, e));
+      }
+
+      // send a message to the target node to fetch metadata
+      // TODO: save a hop by sending request to owner directly?
+      ActiveMessage<InstanceMetadataPrefetchRequest> amsg(target_node, 0);
+      amsg->inst = me;
+      amsg->valid_event = e;
+      amsg.commit();
+
+      return e;
+    }
+
+    /*static*/ void InstanceMetadataPrefetchRequest::handle_message(NodeID sender,
+								    const InstanceMetadataPrefetchRequest& msg,
+								    const void *data,
+								    size_t datalen)
+    {
+      // make a local request and trigger the remote event based on the local one
+      RegionInstanceImpl *r_impl = get_runtime()->get_instance_impl(msg.inst);
+      Event e = r_impl->request_metadata();
+      log_inst.info() << "metadata prefetch: inst=" << msg.inst
+		      << " local=" << e << " remote=" << msg.valid_event;
+
+      if(e.exists()) {
+	GenEventImpl *e_impl = get_runtime()->get_genevent_impl(msg.valid_event);
+	EventMerger *m = &(e_impl->merger);
+	m->prepare_merger(msg.valid_event, false/*!ignore faults*/, 1);
+	m->add_precondition(e);
+	m->arm_merger();
+      } else {
+	GenEventImpl::trigger(msg.valid_event, false /*!poisoned*/);
+      }	
+    }
+
+    ActiveMessageHandlerReg<InstanceMetadataPrefetchRequest> inst_prefetch_msg_handler;
 
     // helper function to figure out which field we're in
     void find_field_start(const std::vector<size_t>& field_sizes, off_t byte_offset,

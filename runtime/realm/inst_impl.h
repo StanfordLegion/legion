@@ -79,6 +79,9 @@ namespace Realm {
 
       Event request_metadata(void) { return metadata.request_data(ID(me).instance_creator_node(), me.id); }
 
+      // ensures metadata is available on the specified node
+      Event prefetch_metadata(NodeID target);
+
       // called once storage has been released and all remote metadata is invalidated
       void recycle_instance(void);
 
@@ -129,6 +132,8 @@ namespace Realm {
       // used for atomic access to metadata
       Mutex mutex;
       Metadata metadata;
+      // cache of prefetch events for other nodes
+      std::map<NodeID, Event> prefetch_events;
 
       // used for serialized application access to contents of instance
       ReservationImpl lock;
@@ -137,7 +142,18 @@ namespace Realm {
     // helper function to figure out which field we're in
     void find_field_start(const std::vector<size_t>& field_sizes, off_t byte_offset,
 			  size_t size, off_t& field_start, int& field_size);
-    
+
+    // active messages
+
+    struct InstanceMetadataPrefetchRequest {
+      RegionInstance inst;
+      Event valid_event;
+
+      static void handle_message(NodeID sender,
+				 const InstanceMetadataPrefetchRequest& msg,
+				 const void *data, size_t datalen);
+    };
+      
 }; // namespace Realm
 
 #endif // ifndef REALM_INST_IMPL_H
