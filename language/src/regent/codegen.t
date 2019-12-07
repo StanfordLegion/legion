@@ -8442,6 +8442,7 @@ local function collect_symbols(cx, node, cuda)
       local absolute_field_paths = field_paths:map(
         function(field_path) return prefix .. field_path end)
       absolute_field_paths:map(function(field_path)
+        field_path = std.extract_privileged_prefix(region:fspace(), field_path)
         base_pointers[cx:region(region):base_pointer(field_path)] = true
         local stride = cx:region(region):stride(field_path)
         for idx = 2, #stride do strides[stride[idx]] = true end
