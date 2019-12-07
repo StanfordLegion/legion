@@ -37,7 +37,9 @@ namespace Realm {
     if((s >> hlp->bounds) &&
        (s >> hlp->filename) &&
        (s >> hlp->dsetname) &&
-       (s >> hlp->offset)) {
+       (s >> hlp->offset) &&
+       (s >> hlp->dim_order) &&
+       (s >> hlp->read_only)) {
       return hlp;
     } else {
       delete hlp;
@@ -70,7 +72,9 @@ namespace Realm {
     return ((s << this->bounds) &&
 	    (s << filename) &&
 	    (s << dsetname) &&
-	    (s << offset));
+	    (s << offset) &&
+	    (s << dim_order) &&
+	    (s << read_only));
   }
 
 
