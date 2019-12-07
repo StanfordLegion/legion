@@ -466,7 +466,7 @@ end
 
 function analyze_access.expr_index_access(cx, node, privilege, field_path)
   local expr_type = node.expr_type
-  if std.is_ref(expr_type) then
+  if std.is_ref(expr_type) and #expr_type.field_path == 0 then
     analyze_access.expr(cx, node.value, nil)
     local private, center = analyze_access.expr(cx, node.index, std.reads)
     cx:update_privileges(node, expr_type:bounds(), field_path, privilege, center)

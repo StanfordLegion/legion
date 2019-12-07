@@ -601,10 +601,6 @@ function type_check.expr_field_access(cx, node)
       report.error(node, "no field '" .. node.field_name .. "' in type " ..
                   tostring(std.as_read(value_type)))
     end
-
-    if std.as_read(unpack_type):isstruct() and std.as_read(unpack_type).__no_field_slicing then
-      field_type = std.rawref(&std.as_read(field_type))
-    end
   end
 
   return ast.typed.expr.FieldAccess {
@@ -629,7 +625,7 @@ end
 
 function type_check.expr_index_access(cx, node)
   local value = type_check.expr(cx, node.value)
-  local value_type = std.check_read(cx, value)
+  local value_type = std.as_read(value.expr_type)
   local index = type_check.expr(cx, node.index)
   local index_type = std.check_read(cx, index)
 
@@ -814,7 +810,11 @@ function type_check.expr_index_access(cx, node)
 
     -- Hack: Fix up the type to be a reference if the original was.
     if std.is_ref(value.expr_type) then
-      result_type = std.rawref(&result_type)
+      local value_type = value.expr_type
+      local index = affine_helper.is_constant_expr(index) and
+                    affine_helper.convert_constant_expr(index) or false
+      result_type = std.ref(value_type.pointer_type.index_type(value_type.refers_to_type, unpack(value_type.bounds_symbols)),
+                            unpack(value_type.field_path .. data.newtuple(index)))
     elseif std.is_rawref(value.expr_type) then
       result_type = std.rawref(&result_type)
     end
