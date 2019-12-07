@@ -48,6 +48,20 @@ namespace Realm {
   }
 
   template <int N, typename T>
+  inline InstanceLayoutPiece<N,T> *HDF5LayoutPiece<N,T>::clone(void) const
+  {
+    HDF5LayoutPiece<N,T> *copy = new HDF5LayoutPiece<N,T>;
+    copy->bounds = this->bounds;
+    copy->filename = this->filename;
+    copy->dsetname = this->dsetname;
+    copy->offset = this->offset;
+    for(int i = 0; i < N; i++)
+      copy->dim_order[i] = this->dim_order[i];
+    copy->read_only = this->read_only;
+    return copy;
+  }
+
+  template <int N, typename T>
   inline size_t HDF5LayoutPiece<N,T>::calculate_offset(const Point<N,T>& p) const
   {
     assert(0);
