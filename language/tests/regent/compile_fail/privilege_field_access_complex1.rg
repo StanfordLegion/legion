@@ -13,7 +13,7 @@
 -- limitations under the License.
 
 -- fails-with:
--- complex_write_privileges.rg:25: invalid privilege writes($r.x) for dereference of ptr(test(), $r)
+-- privilege_field_access_complex1.rg:25: invalid privilege writes($r.x) for dereference of ptr(test(), $r)
 
 import "regent"
 

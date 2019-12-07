@@ -13,7 +13,7 @@
 -- limitations under the License.
 
 -- fails-with:
--- array_write_privileges.rg:28: invalid privilege writes($r.x) for dereference of ptr(test(), $r)
+-- privilege_array_access1.rg:28: invalid privilege writes($r.x) for dereference of ptr(test(), $r)
 
 import "regent"
 
