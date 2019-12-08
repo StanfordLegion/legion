@@ -712,6 +712,13 @@ namespace Realm {
        * submitting requests
        */
       virtual long available();
+
+      virtual bool supports_path(Memory src_mem, Memory dst_mem,
+				 CustomSerdezID src_serdez_id,
+				 CustomSerdezID dst_serdez_id,
+				 ReductionOpID redop_id,
+				 unsigned *bw_ret = 0,
+				 unsigned *lat_ret = 0);
     };
 
     template <typename S>
