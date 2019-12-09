@@ -370,7 +370,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Remote the extra reference on a remote set future if there is one
-      if (result_set_space != local_space)
+      if (empty && (result_set_space != local_space))
       {
         Serializer rez;
         {
@@ -517,7 +517,7 @@ namespace Legion {
     {
       AutoLock f_lock(future_lock);
 #ifdef DEBUG_LEGION
-      assert(result == NULL);
+      assert(empty);
 #endif
       if (own)
       {
@@ -559,7 +559,7 @@ namespace Legion {
       DerezCheck z(derez);
       AutoLock f_lock(future_lock);
 #ifdef DEBUG_LEGION
-      assert(result == NULL);
+      assert(empty);
 #endif
       derez.deserialize(result_size);
       result = malloc(result_size);
@@ -570,8 +570,18 @@ namespace Legion {
       {
 #ifdef DEBUG_LEGION
         assert(is_owner());
+        assert(result_set_space != local_space);
 #endif
         subscribed_futures.clear();
+        // Send a message to the result set space future to remove its
+        // reference now that we no longer need it
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(did);
+          rez.serialize<size_t>(0);
+        }
+        runtime->send_future_broadcast(result_set_space, rez);
       }
     }
 
@@ -608,7 +618,8 @@ namespace Legion {
         if (empty)
         {
           AutoLock f_lock(future_lock);
-          if (result == NULL)
+          // Check to make sure we didn't lose the race
+          if (empty)
           {
             std::map<AddressSpaceID,ApUserEvent>::const_iterator finder = 
               subscribed_futures.find(local_space);
@@ -776,7 +787,7 @@ namespace Legion {
       {
         AutoLock f_lock(future_lock);
         // Check to see if we have the result
-        if (result == NULL)
+        if (empty)
         {
           // See if we know who has the result
           if (result_set_space != local_space)
@@ -15419,16 +15430,20 @@ namespace Legion {
                                            Serializer &rez)
     //--------------------------------------------------------------------------
     {
+      // This also has to happen on the reference virtual channel to prevent
+      // the owner from being deleted before its references are removed
       find_messenger(target)->send_message(rez, SEND_FUTURE_NOTIFICATION,
-                DEFAULT_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
+              REFERENCE_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
     }
 
     //--------------------------------------------------------------------------
     void Runtime::send_future_broadcast(AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
+      // We need all these to be ordered, preferably with respect to 
+      // reference removals too so put them on the reference virtual channel
       find_messenger(target)->send_message(rez, SEND_FUTURE_BROADCAST,
-                                DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+                            REFERENCE_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------

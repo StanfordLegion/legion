@@ -16077,6 +16077,7 @@ namespace Legion {
     void DetachOp::trigger_complete(void)
     //--------------------------------------------------------------------------
     {
+      result.impl->set_result(NULL, 0, true/*own*/);
       complete_operation();
     }
 
