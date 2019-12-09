@@ -240,7 +240,8 @@ namespace Legion {
       };
     public:
       FutureImpl(Runtime *rt, bool register_future, DistributedID did, 
-                 AddressSpaceID owner_space, Operation *op = NULL);
+                 AddressSpaceID owner_space, ApEvent complete_event,
+                 Operation *op = NULL);
       FutureImpl(const FutureImpl &rhs);
       virtual ~FutureImpl(void);
     public:
@@ -254,22 +255,21 @@ namespace Legion {
       bool is_empty(bool block, bool silence_warnings = true,
                     const char *warning_string = NULL,
                     bool internal = false);
-      bool is_ready(void) const;
       size_t get_untyped_size(bool internal = false);
-      ApEvent get_ready_event(void) const { return ready_event; }
+      ApEvent get_ready_event(void) const { return future_complete; }
     public:
       // This will simply save the value of the future
       void set_result(const void *args, size_t arglen, bool own);
       // This will save the value of the future locally
       void unpack_future(Deserializer &derez);
-      // Cause the future value to complete
-      void complete_future(void);
       // Reset the future in case we need to restart the
       // computation for resiliency reasons
       bool reset_future(void);
       // A special function for predicates to peek
       // at the boolean value of a future if it is set
       bool get_boolean_value(bool &valid);
+      // Request that the value be made ready on this node
+      ApEvent request_future_value(void);
     public:
       virtual void notify_active(ReferenceMutator *mutator);
       virtual void notify_valid(ReferenceMutator *mutator);
@@ -277,15 +277,21 @@ namespace Legion {
       virtual void notify_inactive(ReferenceMutator *mutator);
     public:
       void register_dependence(Operation *consumer_op);
-      void register_waiter(AddressSpaceID sid, ReferenceMutator *mutator);
+      void subscribe(AddressSpaceID sid, ApUserEvent subscribe_event,
+                     ReferenceMutator *mutator);
     protected:
       void mark_sampled(void);
-      void broadcast_result(void);
+      void broadcast_result(std::map<AddressSpaceID,ApUserEvent> &targets,
+                            ApEvent complete, const bool need_lock = true);
+      void notify_remote_set(AddressSpaceID remote_space);
     public:
       void record_future_registered(void);
       static void handle_future_result(Deserializer &derez, Runtime *rt);
       static void handle_future_subscription(Deserializer &derez, Runtime *rt,
                                              AddressSpaceID source);
+      static void handle_future_notification(Deserializer &derez, Runtime *rt,
+                                             AddressSpaceID source);
+      static void handle_future_broadcast(Deserializer &derez, Runtime *rt);
     public:
       void contribute_to_collective(const DynamicCollective &dc,unsigned count);
       static void handle_contribute_to_collective(const void *args);
@@ -301,14 +307,14 @@ namespace Legion {
     private:
       FRIEND_ALL_RUNTIME_CLASSES
       mutable LocalLock future_lock;
-      ApUserEvent ready_event;
+      ApEvent future_complete;
       void *result; 
       size_t result_size;
+      AddressSpaceID result_set_space; // space on which the result was set
       volatile bool empty;
       volatile bool sampled;
-      volatile bool triggered;
       // On the owner node, keep track of the registered waiters
-      std::set<AddressSpaceID> registered_waiters;
+      std::map<AddressSpaceID,ApUserEvent> subscribed_futures;
     };
 
     /**
@@ -346,7 +352,6 @@ namespace Legion {
                             const char *warning_string = NULL);
       void wait_all_results(bool silence_warnings = true,
                             const char *warning_string = NULL);
-      void complete_all_futures(void);
       bool reset_all_futures(void);
     public:
       void get_all_futures(std::map<DomainPoint,Future> &futures) const;
@@ -1625,10 +1630,10 @@ namespace Legion {
       public:
         SelectTunableArgs(UniqueID uid, MapperID mid, MappingTagID t,
                           TunableID tune, const void *arg, size_t size,
-                          TaskContext *c, FutureImpl *f)
+                          TaskContext *c, FutureImpl *f, ApUserEvent trig)
           : LgTaskArgs<SelectTunableArgs>(uid), mapper_id(mid), tag(t),
             tunable_id(tune), args((size > 0) ? malloc(size) : NULL),
-            argsize(size), ctx(c), result(f) 
+            argsize(size), ctx(c), result(f), to_trigger(trig)
             { if (argsize > 0) memcpy(args, arg, argsize); }
       public:
         const MapperID mapper_id;
@@ -1639,6 +1644,7 @@ namespace Legion {
         unsigned tunable_index; // only valid for LegionSpy
         TaskContext *const ctx;
         FutureImpl *const result;
+        const ApUserEvent to_trigger;
       }; 
     public:
       struct ProcessorGroupInfo {
@@ -2328,6 +2334,8 @@ namespace Legion {
 #endif
       void send_future_result(AddressSpaceID target, Serializer &rez);
       void send_future_subscription(AddressSpaceID target, Serializer &rez);
+      void send_future_notification(AddressSpaceID target, Serializer &rez);
+      void send_future_broadcast(AddressSpaceID target, Serializer &rez);
       void send_future_map_request_future(AddressSpaceID target, 
                                           Serializer &rez);
       void send_future_map_response_future(AddressSpaceID target,
@@ -2559,6 +2567,9 @@ namespace Legion {
       void handle_future_result(Deserializer &derez);
       void handle_future_subscription(Deserializer &derez, 
                                       AddressSpaceID source);
+      void handle_future_notification(Deserializer &derez,
+                                      AddressSpaceID source);
+      void handle_future_broadcast(Deserializer &derez);
       void handle_future_map_future_request(Deserializer &derez,
                                             AddressSpaceID source);
       void handle_future_map_future_response(Deserializer &derez);
@@ -2929,8 +2940,7 @@ namespace Legion {
                                          FieldID &bad_field);
     public:
       // Methods for helping with dumb nested class scoping problems
-      Future help_create_future(Operation *op = NULL);
-      void help_complete_future(const Future &f);
+      Future help_create_future(ApEvent complete, Operation *op = NULL);
       bool help_reset_future(const Future &f);
       IndexSpace help_create_index_space_handle(TypeTag type_tag);
     public:

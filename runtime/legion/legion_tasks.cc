@@ -4944,7 +4944,7 @@ namespace Legion {
       // Get a future from the parent context to use as the result
       result = Future(new FutureImpl(runtime, true/*register*/,
             runtime->get_available_distributed_id(), 
-            runtime->address_space, this));
+            runtime->address_space, get_completion_event(), this));
       check_empty_field_requirements(); 
       // If this is the top-level task we can record some extra properties
       if (top_level)
@@ -5385,8 +5385,6 @@ namespace Legion {
             execution_context->return_resources(parent_ctx, 
                                   completion_preconditions);
         }
-        // The future has already been set so just trigger it
-        result.impl->complete_future();
       }
       else
       {
@@ -5662,7 +5660,7 @@ namespace Legion {
       for (unsigned idx = 0; idx < futures.size(); idx++)
       {
         FutureImpl *impl = futures[idx].impl; 
-        wait_on_events.insert(impl->ready_event);
+        wait_on_events.insert(impl->get_ready_event());
       }
       for (unsigned idx = 0; idx < grants.size(); idx++)
       {
@@ -5717,7 +5715,6 @@ namespace Legion {
     {
       // Save the future result and trigger it
       result.impl->set_result(res, res_size, owned);
-      result.impl->complete_future();
       // Trigger our completion event
       Runtime::trigger_event(completion_event);
       // Now we're done, someone else will deactivate us
@@ -6854,7 +6851,7 @@ namespace Legion {
                              launcher.predicate_false_result);
       reduction_future = Future(new FutureImpl(runtime,
             true/*register*/, runtime->get_available_distributed_id(), 
-            runtime->address_space, this));
+            runtime->address_space, get_completion_event(), this));
       check_empty_field_requirements();
       if (runtime->legion_spy_enabled)
       {
@@ -7301,10 +7298,7 @@ namespace Legion {
                                             reduction_state_size, 
                                             false/*owner*/);
         }
-        reduction_future.impl->complete_future();
       }
-      else
-        future_map.impl->complete_all_futures();
       if (must_epoch != NULL)
       {
         if (!complete_preconditions.empty())
@@ -7392,7 +7386,7 @@ namespace Legion {
       for (unsigned idx = 0; idx < futures.size(); idx++)
       {
         FutureImpl *impl = futures[idx].impl; 
-        wait_on_events.insert(impl->ready_event);
+        wait_on_events.insert(impl->get_ready_event());
       }
       for (unsigned idx = 0; idx < grants.size(); idx++)
       {
@@ -7471,14 +7465,9 @@ namespace Legion {
         // Then we can delete the inline context
         delete inline_ctx;
       }
-      if (redop == 0)
-        future_map.impl->complete_all_futures();
-      else
-      {
+      if (redop != 0)
         reduction_future.impl->set_result(reduction_state,
                                           reduction_state_size,false/*owner*/);
-        reduction_future.impl->complete_future();
-      }
       // Trigger all our events event
       Runtime::trigger_event(completion_event);
     }
