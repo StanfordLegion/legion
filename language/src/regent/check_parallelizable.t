@@ -50,7 +50,7 @@
 --     In case that happens, the outer loop is tagged as non-parallelizable.
 --   - No region access can appear outside parallelizable for loops.
 --
--- * Partition Driven Auto-Parallelizer
+-- * Constraint-Based Auto-Parallelizer
 --   - Inadmissible statements are not allowed in anywhere in the task, except the return
 --     statement that returns a scalar reduction variable is allowed. This return statement
 --     must appear at the end of the task.

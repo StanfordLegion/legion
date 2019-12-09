@@ -8571,14 +8571,23 @@ function codegen.stat_for_list(cx, node)
                (node.metadata and node.metadata.parallelizable) and
                not node.annotations.cuda:is(ast.annotation.Forbid)
   local openmp = not cx.variant:is_cuda() and
-                 node.annotations.openmp:is(ast.annotation.Demand) and
-                 openmphelper.check_openmp_available()
-  if node.annotations.openmp:is(ast.annotation.Demand) then
+                 openmphelper.check_openmp_available() and
+                 not node.annotations.openmp:is(ast.annotation.Forbid)
+
+  if node.annotations.openmp:is(ast.annotation.Demand) or
+     node.annotations.openmp:is(ast.annotation.Allow)
+  then
     local available, error_message = openmphelper.check_openmp_available()
     if not available then
-      report.warn(node,
-        "ignoring demand pragma at " .. node.span.source ..
-        ":" .. tostring(node.span.start.line) .. " since " .. error_message)
+      if node.annotations.openmp:is(ast.annotation.Demand) then
+        report.error(node,
+          "code generation failed at " .. node.span.source ..
+          ":" .. tostring(node.span.start.line) .. " since " .. error_message)
+      else
+        report.warn(node,
+          "ignoring pragma at " .. node.span.source ..
+          ":" .. tostring(node.span.start.line) .. " since " .. error_message)
+      end
     end
   end
 
@@ -11094,12 +11103,20 @@ function codegen.top(cx, node)
         end, node)
     end
 
-    if node.annotations.cuda:is(ast.annotation.Demand) then 
+    if node.annotations.cuda:is(ast.annotation.Demand) or
+       node.annotations.cuda:is(ast.annotation.Allow)
+    then
       local available, error_message = cudahelper.check_cuda_available()
       if not available then
-        report.warn(node,
-          "ignoring demand pragma at " .. node.span.source ..
-          ":" .. tostring(node.span.start.line) .. " since " .. error_message)
+        if node.annotations.cuda:is(ast.annotation.Demand) then
+          report.error(node,
+            "code generation failed at " .. node.span.source ..
+            ":" .. tostring(node.span.start.line) .. " since " .. error_message)
+        else
+          report.warn(node,
+            "ignoring pragma at " .. node.span.source ..
+            ":" .. tostring(node.span.start.line) .. " since " .. error_message)
+        end
       else
         local cuda_variant = task:make_variant("cuda")
         cuda_variant:set_is_cuda(true)
@@ -11107,6 +11124,7 @@ function codegen.top(cx, node)
         task:set_cuda_variant(cuda_variant)
       end
     end
+
     return task
 
   elseif node:is(ast.typed.top.Fspace) then

@@ -113,15 +113,16 @@ ast.annotation:leaf("Set", {"cuda", "external", "idempotent", "index_launch",
 
 function ast.default_annotations()
   local allow = ast.annotation.Allow { value = false }
+  local forbid = ast.annotation.Forbid { value = false }
   return ast.annotation.Set {
-    cuda = allow,
+    cuda = forbid,
     external = allow,
     idempotent = allow,
     index_launch = allow,
     inline = allow,
     inner = allow,
     leaf = allow,
-    openmp = allow,
+    openmp = forbid,
     optimize = allow,
     parallel = allow,
     replicable = allow,
