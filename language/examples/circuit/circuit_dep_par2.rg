@@ -52,7 +52,7 @@ fspace Wire(rpn : region(Node),
 local CktConfig = require("circuit_config")
 local helper = require("circuit_helper_dep")
 
-__demand(__cuda)
+__allow(__cuda)
 task calculate_new_currents(steps : uint,
                             rpn : region(Node),
                             rsn : region(Node),
@@ -111,7 +111,7 @@ do
   end
 end
 
-__demand(__cuda)
+__allow(__cuda)
 task distribute_charge(rpn : region(Node),
                        rsn : region(Node),
                        rgn : region(Node),
@@ -127,7 +127,7 @@ do
   end
 end
 
-__demand(__cuda)
+__allow(__cuda)
 task update_voltages(rn : region(Node))
 where reads(rn.{node_cap, leakage}),
       reads writes(rn.{node_voltage, charge})

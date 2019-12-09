@@ -58,7 +58,7 @@ where writes(r.y) do
   return 0
 end
 
-__demand(__cuda)
+__allow(__cuda)
 task consumer_x(r : region(ispace(int3d), fs))
 where reads(r.x) do
   return 0

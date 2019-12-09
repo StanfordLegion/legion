@@ -58,7 +58,7 @@ function make_tasks(ty)
     end
   end
 
-  __demand(__cuda)
+  __allow(__cuda)
   task prefix_task(r : region(ispace(int1d), fs_type))
   where
     reads(r.input), reads writes(r.output_gpu)
