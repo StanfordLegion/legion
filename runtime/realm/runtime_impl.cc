@@ -1077,11 +1077,12 @@ namespace Realm {
       PartitioningOpQueue::configure_from_cmdline(cmdline);
 
       // low-level runtime parameters
-#ifdef USE_GASNET
-      size_t reg_ib_mem_size = 256 << 20;
-#else
-      size_t reg_ib_mem_size = 64 << 20; // for transposes/serdez
-#endif
+      size_t reg_ib_mem_size;
+      if(Network::max_node_id > 0)
+	reg_ib_mem_size = 256 << 20; // for inter-node copies
+      else
+	reg_ib_mem_size = 64 << 20; // for local transposes/serdez
+
       size_t reg_mem_size = 0;
       size_t disk_mem_size = 0;
       // Static variable for stack size since we need to 

@@ -37,12 +37,28 @@ namespace Realm {
     if((s >> hlp->bounds) &&
        (s >> hlp->filename) &&
        (s >> hlp->dsetname) &&
-       (s >> hlp->offset)) {
+       (s >> hlp->offset) &&
+       (s >> hlp->dim_order) &&
+       (s >> hlp->read_only)) {
       return hlp;
     } else {
       delete hlp;
       return 0;
     }
+  }
+
+  template <int N, typename T>
+  inline InstanceLayoutPiece<N,T> *HDF5LayoutPiece<N,T>::clone(void) const
+  {
+    HDF5LayoutPiece<N,T> *copy = new HDF5LayoutPiece<N,T>;
+    copy->bounds = this->bounds;
+    copy->filename = this->filename;
+    copy->dsetname = this->dsetname;
+    copy->offset = this->offset;
+    for(int i = 0; i < N; i++)
+      copy->dim_order[i] = this->dim_order[i];
+    copy->read_only = this->read_only;
+    return copy;
   }
 
   template <int N, typename T>
@@ -70,7 +86,9 @@ namespace Realm {
     return ((s << this->bounds) &&
 	    (s << filename) &&
 	    (s << dsetname) &&
-	    (s << offset));
+	    (s << offset) &&
+	    (s << dim_order) &&
+	    (s << read_only));
   }
 
 
