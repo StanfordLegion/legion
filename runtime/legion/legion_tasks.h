@@ -658,6 +658,7 @@ namespace Legion {
     protected:
       IndexSpaceNode *launch_space; // global set of points
       IndexSpace internal_space; // local set of points
+      FutureMap future_map;
       ReductionOpID redop;
       bool deterministic_redop;
       const ReductionOp *reduction_op;
@@ -702,6 +703,8 @@ namespace Legion {
                              const TaskLauncher &launcher, 
                              bool track = true, bool top_level=false,
                              bool implicit_top_level = false);
+      void initialize_must_epoch(MustEpochOp *epoch, unsigned index,
+                                 bool do_registration);
     public:
       virtual bool has_prepipeline_stage(void) const
         { return need_prepipeline_stage; }
@@ -759,8 +762,6 @@ namespace Legion {
       static void process_unpack_remote_complete(Deserializer &derez);
       static void process_unpack_remote_commit(Deserializer &derez);
     protected: 
-      void *future_store;
-      size_t future_size;
       Future result; 
       std::set<Operation*>        child_operations;
       std::vector<RegionTreePath> privilege_paths;
@@ -904,6 +905,8 @@ namespace Legion {
                              bool track = true);
       void initialize_predicate(const Future &pred_future,
                                 const TaskArgument &pred_arg);
+      void initialize_must_epoch(MustEpochOp *epoch, unsigned index,
+                                 bool do_registration);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -980,7 +983,6 @@ namespace Legion {
       static void process_slice_record_intra_dependence(Deserializer &derez);
     protected:
       friend class SliceTask;
-      FutureMap future_map;
       Future reduction_future;
       unsigned total_points;
       unsigned mapped_points;

@@ -708,6 +708,7 @@ namespace Legion {
     {
       Operation::set_must_epoch(epoch, do_registration);
       must_epoch_index = index;
+      must_epoch_task = true;
     }
 
     //--------------------------------------------------------------------------
@@ -3981,7 +3982,7 @@ namespace Legion {
       for (unsigned idx = 0; idx < futures.size(); idx++)
       {
         FutureImpl *impl = futures[idx].impl; 
-        wait_on_events.insert(impl->get_ready_event());
+        wait_on_events.insert(impl->subscribe());
       }
       for (unsigned idx = 0; idx < grants.size(); idx++)
       {
@@ -4334,6 +4335,8 @@ namespace Legion {
       deactivate_task();
       if (remove_launch_space_reference(launch_space))
         delete launch_space;
+      // Remove our reference to the future map
+      future_map = FutureMap();
       if (reduction_state != NULL)
       {
         legion_free(REDUCTION_ALLOC, reduction_state, reduction_state_size);
@@ -4538,6 +4541,7 @@ namespace Legion {
       this->launch_space = rhs->launch_space;
       add_launch_space_reference(this->launch_space);
       this->internal_space = is;
+      this->future_map = future_map;
       this->must_epoch_task = rhs->must_epoch_task;
       this->sliced = !recurse;
       this->redop = rhs->redop;
@@ -4794,8 +4798,6 @@ namespace Legion {
     {
       DETAILED_PROFILER(runtime, ACTIVATE_INDIVIDUAL_CALL);
       activate_single();
-      future_store = NULL;
-      future_size = 0;
       predicate_false_result = NULL;
       predicate_false_size = 0;
       orig_task = this;
@@ -4828,12 +4830,6 @@ namespace Legion {
           runtime->send_remote_context_free(it->first, rez);
         }
         remote_instances.clear();
-      }
-      if (future_store != NULL)
-      {
-        legion_free(FUTURE_RESULT_ALLOC, future_store, future_size);
-        future_store = NULL;
-        future_size = 0;
       }
       if (predicate_false_result != NULL)
       {
@@ -4974,6 +4970,16 @@ namespace Legion {
               result.impl->get_ready_event(), index_point);
       }
       return result;
+    }
+
+    //--------------------------------------------------------------------------
+    void IndividualTask::initialize_must_epoch(MustEpochOp *epoch, 
+                                           unsigned index, bool do_registration)
+    //--------------------------------------------------------------------------
+    {
+      set_must_epoch(epoch, index, do_registration);
+      FutureMap map = epoch->get_future_map();
+      result = map.impl->get_future(index_point);
     }
 
     //--------------------------------------------------------------------------
@@ -5452,29 +5458,7 @@ namespace Legion {
                                        bool owned)
     //--------------------------------------------------------------------------
     {
-      // Save our future value so we can set it or send it back later
-      if (is_remote())
-      {
-        if (owned)
-        {
-          future_store = const_cast<void*>(res);
-          future_size = res_size;
-        }
-        else
-        {
-          future_size = res_size;
-          future_store = legion_malloc(FUTURE_RESULT_ALLOC, future_size);
-          memcpy(future_store,res,future_size);
-        }
-      }
-      else
-      {
-        // Set our future, but don't trigger it yet
-        if (must_epoch == NULL)
-          result.impl->set_result(res, res_size, owned);
-        else
-          must_epoch->set_future(index_point, res, res_size, owned);
-      }
+      result.impl->set_result(res, res_size, owned);
     }
 
     //--------------------------------------------------------------------------
@@ -5563,6 +5547,7 @@ namespace Legion {
       rez.serialize(remote_unique_id);
       rez.serialize(remote_owner_uid);
       rez.serialize(top_level_task);
+      rez.serialize(result.impl->did);
       if (predicate_false_future.impl != NULL)
         rez.serialize(predicate_false_future.impl->did);
       else
@@ -5607,6 +5592,15 @@ namespace Legion {
         runtime->add_to_ready_queue(current_proc, orig_task);
         deactivate();
         return false;
+      }
+      DistributedID future_did;
+      derez.deserialize(future_did);
+      {
+        WrapperReferenceMutator mutator(ready_events);
+        FutureImpl *impl = 
+          runtime->find_or_create_future(future_did, &mutator);
+        impl->add_base_gc_ref(FUTURE_HANDLE_REF, &mutator);
+        result = Future(impl, false/*need reference*/);
       }
       // Unpack the predicate false infos
       DistributedID pred_false_did;
@@ -5734,12 +5728,6 @@ namespace Legion {
       RezCheck z(rez);
       // Pack the privilege state
       execution_context->pack_resources_return(rez, target);
-      // Then pack the future result
-      {
-        RezCheck z2(rez);
-        rez.serialize(future_size);
-        rez.serialize(future_store,future_size);
-      }
     }
     
     //--------------------------------------------------------------------------
@@ -5751,11 +5739,6 @@ namespace Legion {
       // First unpack the privilege state
       const RtEvent resources_returned = 
         ResourceTracker::unpack_resources_return(derez, parent_ctx);
-      // Unpack the future result
-      if (must_epoch == NULL)
-        result.impl->unpack_future(derez);
-      else
-        must_epoch->unpack_future(index_point, derez);
       // Mark that we have both finished executing and that our
       // children are complete
       complete_execution(resources_returned);
@@ -6494,7 +6477,7 @@ namespace Legion {
       // Get our argument
       if (point_arguments.impl != NULL)
       {
-        Future f = point_arguments.impl->get_future(point, true/*allow empty*/);
+        Future f = point_arguments.impl->get_future(point);
         if (f.impl != NULL)
         {
           ApEvent ready = f.impl->get_ready_event();
@@ -6682,8 +6665,6 @@ namespace Legion {
         }
         origin_mapped_slices.clear();
       } 
-      // Remove our reference to the future map
-      future_map = FutureMap(); 
       // Remove our reference to the reduction future
       reduction_future = Future();
       map_applied_conditions.clear();
@@ -6922,6 +6903,15 @@ namespace Legion {
                  predicate_false_size);
         }
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexTask::initialize_must_epoch(MustEpochOp *epoch, 
+                                          unsigned index, bool do_registration)
+    //--------------------------------------------------------------------------
+    {
+      set_must_epoch(epoch, index, do_registration);
+      future_map = epoch->get_future_map();
     }
 
     //--------------------------------------------------------------------------
@@ -7530,52 +7520,40 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, INDEX_HANDLE_FUTURE);
-      // Need to hold the lock when doing this since it could
-      // be going in parallel with other users
-      if (reduction_op != NULL)
+#ifdef DEBUG_LEGION
+      assert(reduction_op != NULL);
+#endif
+      // If we're doing a deterministic reduction then we need to 
+      // buffer up these future values until we get all of them so
+      // that we can fold them in a deterministic way
+      if (deterministic_redop)
       {
-        // If we're doing a deterministic reduction then we need to 
-        // buffer up these future values until we get all of them so
-        // that we can fold them in a deterministic way
-        if (deterministic_redop)
+        // Store it in our temporary futures
+        if (owner)
         {
-          // Store it in our temporary futures
-          if (owner)
-          {
-            // Hold the lock to protect the data structure
-            AutoLock o_lock(op_lock);
+          // Hold the lock to protect the data structure
+          AutoLock o_lock(op_lock);
 #ifdef DEBUG_LEGION
-            assert(temporary_futures.find(point) == temporary_futures.end());
+          assert(temporary_futures.find(point) == temporary_futures.end());
 #endif
-            temporary_futures[point] = 
-              std::pair<void*,size_t>(const_cast<void*>(result),result_size);
-          }
-          else
-          {
-            void *copy = legion_malloc(FUTURE_RESULT_ALLOC, result_size);
-            memcpy(copy,result,result_size);
-            // Hold the lock to protect the data structure
-            AutoLock o_lock(op_lock);
-#ifdef DEBUG_LEGION
-            assert(temporary_futures.find(point) == temporary_futures.end());
-#endif
-            temporary_futures[point] = 
-              std::pair<void*,size_t>(copy,result_size);
-          }
+          temporary_futures[point] = 
+            std::pair<void*,size_t>(const_cast<void*>(result),result_size);
         }
         else
-          fold_reduction_future(result, result_size, owner, false/*exclusive*/);
+        {
+          void *copy = legion_malloc(FUTURE_RESULT_ALLOC, result_size);
+          memcpy(copy,result,result_size);
+          // Hold the lock to protect the data structure
+          AutoLock o_lock(op_lock);
+#ifdef DEBUG_LEGION
+          assert(temporary_futures.find(point) == temporary_futures.end());
+#endif
+          temporary_futures[point] = 
+            std::pair<void*,size_t>(copy,result_size);
+        }
       }
       else
-      {
-        if (must_epoch == NULL)
-        {
-          Future f = future_map.get_future(point);
-          f.impl->set_result(result, result_size, owner);
-        }
-        else
-          must_epoch->set_future(point, result, result_size, owner);
-      }
+        fold_reduction_future(result, result_size, owner, false/*exclusive*/);
     }
 
     //--------------------------------------------------------------------------
@@ -7833,52 +7811,39 @@ namespace Legion {
       derez.deserialize(complete_precondition);
       const RtEvent resources_returned =
         ResourceTracker::unpack_resources_return(derez, parent_ctx);
-      if (redop == 0)
+      if (redop > 0)
       {
-        // No reduction so we can unpack these futures directly
-        for (unsigned idx = 0; idx < points; idx++)
+        if (deterministic_redop)
         {
-          DomainPoint p;
-          derez.deserialize(p);
-          if (must_epoch == NULL)
+#ifdef DEBUG_LEGION
+          assert(reduction_op != NULL);
+#endif
+          // Unpack these futures and save them so we can do a
+          // deterministic reduction fold operation later
+          for (unsigned idx = 0; idx < points; idx++)
           {
-            Future f = future_map.impl->get_future(p);
-            f.impl->unpack_future(derez);
+            DomainPoint p;
+            derez.deserialize(p);
+            size_t size;
+            derez.deserialize(size);
+            const void *ptr = derez.get_current_pointer();
+            handle_future(p, ptr, size, false/*owner*/);
+            derez.advance_pointer(size);
           }
-          else
-            must_epoch->unpack_future(p, derez);
         }
-      }
-      else if (deterministic_redop)
-      {
-#ifdef DEBUG_LEGION
-        assert(reduction_op != NULL);
-#endif
-        // Unpack these futures and save them so we can do a
-        // deterministic reduction fold operation later
-        for (unsigned idx = 0; idx < points; idx++)
+        else
         {
-          DomainPoint p;
-          derez.deserialize(p);
-          size_t size;
-          derez.deserialize(size);
-          const void *ptr = derez.get_current_pointer();
-          handle_future(p, ptr, size, false/*owner*/);
-          derez.advance_pointer(size);
-        }
-      }
-      else
-      {
 #ifdef DEBUG_LEGION
-        assert(reduction_op != NULL);
+          assert(reduction_op != NULL);
 #endif
-        size_t reduc_size;
-        derez.deserialize(reduc_size);
-        const void *reduc_ptr = derez.get_current_pointer();
-        fold_reduction_future(reduc_ptr, reduc_size,
-                              false /*owner*/, false/*exclusive*/);
-        // Advance the pointer on the deserializer
-        derez.advance_pointer(reduc_size);
+          size_t reduc_size;
+          derez.deserialize(reduc_size);
+          const void *reduc_ptr = derez.get_current_pointer();
+          fold_reduction_future(reduc_ptr, reduc_size,
+                                false /*owner*/, false/*exclusive*/);
+          // Advance the pointer on the deserializer
+          derez.advance_pointer(reduc_size);
+        }
       }
       if (resources_returned.exists())
       {
@@ -8541,6 +8506,13 @@ namespace Legion {
       rez.serialize(origin_mapped);
       rez.serialize(remote_owner_uid);
       rez.serialize(internal_space);
+      if (redop == 0)
+      {
+#ifdef DEBUG_LEGION
+        assert(future_map.impl != NULL);
+#endif
+        rez.serialize(future_map.impl->did);
+      }
       if (predicate_false_future.impl != NULL)
         rez.serialize(predicate_false_future.impl->did);
       else
@@ -8638,6 +8610,15 @@ namespace Legion {
       }
       else
         parent_ctx = index_owner->parent_ctx;
+      if (redop == 0)
+      {
+        DistributedID future_map_did;
+        derez.deserialize(future_map_did);
+        WrapperReferenceMutator mutator(ready_events);
+        future_map = FutureMap(
+            runtime->find_or_create_future_map(future_map_did, 
+                                               parent_ctx, &mutator)); 
+      }
       // Unpack the predicate false infos
       DistributedID pred_false_did;
       derez.deserialize(pred_false_did);
@@ -8730,44 +8711,50 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, SLICE_HANDLE_FUTURE_CALL);
-      // If we're remote, just handle it ourselves, otherwise pass
-      // it back to the enclosing index owner
-      if (is_remote())
+      if (redop > 0)
       {
-        // Store the future result in our temporary futures unless we're 
-        // doing a non-deterministic reduction in which case we can eagerly
-        // fold this now into our reduction buffer
-        if ((redop == 0) || deterministic_redop)
+        if (is_remote())
         {
-          // Store it in our temporary futures
-          if (owner)
+          // Store the future result in our temporary futures unless we're 
+          // doing a non-deterministic reduction in which case we can eagerly
+          // fold this now into our reduction buffer
+          if (deterministic_redop)
           {
-            // Hold the lock to protect the data structure
-            AutoLock o_lock(op_lock);
+            // Store it in our temporary futures
+            if (owner)
+            {
+              // Hold the lock to protect the data structure
+              AutoLock o_lock(op_lock);
 #ifdef DEBUG_LEGION
-            assert(temporary_futures.find(point) == temporary_futures.end());
+              assert(temporary_futures.find(point) == temporary_futures.end());
 #endif
-            temporary_futures[point] = 
-              std::pair<void*,size_t>(const_cast<void*>(result),result_size);
+              temporary_futures[point] = 
+                std::pair<void*,size_t>(const_cast<void*>(result),result_size);
+            }
+            else
+            {
+              void *copy = legion_malloc(FUTURE_RESULT_ALLOC, result_size);
+              memcpy(copy,result,result_size);
+              // Hold the lock to protect the data structure
+              AutoLock o_lock(op_lock);
+#ifdef DEBUG_LEGION
+              assert(temporary_futures.find(point) == temporary_futures.end());
+#endif
+              temporary_futures[point] = 
+                std::pair<void*,size_t>(copy,result_size);
+            }
           }
           else
-          {
-            void *copy = legion_malloc(FUTURE_RESULT_ALLOC, result_size);
-            memcpy(copy,result,result_size);
-            // Hold the lock to protect the data structure
-            AutoLock o_lock(op_lock);
-#ifdef DEBUG_LEGION
-            assert(temporary_futures.find(point) == temporary_futures.end());
-#endif
-            temporary_futures[point] = 
-              std::pair<void*,size_t>(copy,result_size);
-          }
+            fold_reduction_future(result, result_size,owner,false/*exclusive*/);
         }
         else
-          fold_reduction_future(result, result_size, owner, false/*exclusive*/);
+          index_owner->handle_future(point, result, result_size, owner);
       }
       else
-        index_owner->handle_future(point, result, result_size, owner);
+      {
+        Future f = future_map.impl->get_future(point);
+        f.impl->set_result(result, result_size, owner);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -9159,39 +9146,28 @@ namespace Legion {
       // Serialize the privilege state
       pack_resources_return(rez, target); 
       // Now pack up the future results
-      if (redop == 0)
+      if (redop > 0)
       {
-        // Already know how many futures we are packing 
-#ifdef DEBUG_LEGION
-        assert(temporary_futures.size() == points.size());
-#endif
-        for (std::map<DomainPoint,std::pair<void*,size_t> >::const_iterator it =
-              temporary_futures.begin(); it != temporary_futures.end(); it++)
+        if (deterministic_redop)
         {
-          rez.serialize(it->first);
-          RezCheck z2(rez);
-          rez.serialize(it->second.second);
-          rez.serialize(it->second.first,it->second.second);
-        }
-      }
-      else if (deterministic_redop)
-      {
-        // Same as above but without the extra rez check
+          // Same as above but without the extra rez check
 #ifdef DEBUG_LEGION
-        assert(temporary_futures.size() == points.size());
+          assert(temporary_futures.size() == points.size());
 #endif
-        for (std::map<DomainPoint,std::pair<void*,size_t> >::const_iterator it =
-              temporary_futures.begin(); it != temporary_futures.end(); it++)
-        {
-          rez.serialize(it->first);
-          rez.serialize(it->second.second);
-          rez.serialize(it->second.first,it->second.second);
+          for (std::map<DomainPoint,std::pair<void*,size_t> >::const_iterator 
+                it = temporary_futures.begin(); 
+                it != temporary_futures.end(); it++)
+          {
+            rez.serialize(it->first);
+            rez.serialize(it->second.second);
+            rez.serialize(it->second.first,it->second.second);
+          }
         }
-      }
-      else
-      {
-        rez.serialize<size_t>(reduction_state_size);
-        rez.serialize(reduction_state,reduction_state_size);
+        else
+        {
+          rez.serialize<size_t>(reduction_state_size);
+          rez.serialize(reduction_state,reduction_state_size);
+        }
       }
     }
 

@@ -2123,6 +2123,8 @@ namespace Legion {
     public:
       MustEpochOp& operator=(const MustEpochOp &rhs);
     public:
+      inline FutureMap get_future_map(void) const { return result_map; }
+    public:
       FutureMap initialize(InnerContext *ctx,
                            const MustEpochLauncher &launcher);
       void find_conflicted_regions(
@@ -2155,9 +2157,6 @@ namespace Legion {
       void add_mapping_dependence(RtEvent precondition);
       void register_single_task(SingleTask *single, unsigned index);
       void register_slice_task(SliceTask *slice);
-      void set_future(const DomainPoint &point, 
-                      const void *result, size_t result_size, bool owned);
-      void unpack_future(const DomainPoint &point, Deserializer &derez);
     public:
       // Methods for keeping track of when we can complete and commit
       void register_subop(Operation *op);

@@ -11065,11 +11065,10 @@ namespace Legion {
         indiv_tasks[idx] = runtime->get_available_individual_task();
         indiv_tasks[idx]->initialize_task(ctx, launcher.single_tasks[idx],
                                           false/*track*/);
-        indiv_tasks[idx]->set_must_epoch(this, idx, true/*register*/);
+        indiv_tasks[idx]->initialize_must_epoch(this, idx, true/*register*/);
         // If we have a trace, set it for this operation as well
         if (trace != NULL)
           indiv_tasks[idx]->set_trace(trace, !trace->is_fixed(), NULL);
-        indiv_tasks[idx]->must_epoch_task = true;
       }
       indiv_triggered.resize(indiv_tasks.size(), false);
       index_tasks.resize(launcher.index_tasks.size());
@@ -11082,11 +11081,10 @@ namespace Legion {
         index_tasks[idx] = runtime->get_available_index_task();
         index_tasks[idx]->initialize_task(ctx, launcher.index_tasks[idx],
                                           launch_space, false/*track*/);
-        index_tasks[idx]->set_must_epoch(this, indiv_tasks.size()+idx, 
-                                         true/*register*/);
+        index_tasks[idx]->initialize_must_epoch(this, 
+            indiv_tasks.size() + idx, true/*register*/);
         if (trace != NULL)
           index_tasks[idx]->set_trace(trace, !trace->is_fixed(), NULL);
-        index_tasks[idx]->must_epoch_task = true;
       }
       index_triggered.resize(index_tasks.size(), false);
       mapper_id = launcher.map_id;
@@ -11630,24 +11628,6 @@ namespace Legion {
     {
       AutoLock o_lock(op_lock);
       slice_tasks.insert(slice);
-    }
-
-    //--------------------------------------------------------------------------
-    void MustEpochOp::set_future(const DomainPoint &point, const void *result, 
-                                 size_t result_size, bool owner)
-    //--------------------------------------------------------------------------
-    {
-      Future f = result_map.impl->get_future(point);
-      f.impl->set_result(result, result_size, owner);
-    }
-
-    //--------------------------------------------------------------------------
-    void MustEpochOp::unpack_future(const DomainPoint &point, 
-                                    Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      Future f = result_map.impl->get_future(point);
-      f.impl->unpack_future(derez);
     }
 
     //--------------------------------------------------------------------------

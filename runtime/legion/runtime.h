@@ -269,7 +269,7 @@ namespace Legion {
       // at the boolean value of a future if it is set
       bool get_boolean_value(bool &valid);
       // Request that the value be made ready on this node
-      ApEvent request_future_value(void);
+      ApEvent subscribe(void);
     public:
       virtual void notify_active(ReferenceMutator *mutator);
       virtual void notify_valid(ReferenceMutator *mutator);
@@ -277,15 +277,15 @@ namespace Legion {
       virtual void notify_inactive(ReferenceMutator *mutator);
     public:
       void register_dependence(Operation *consumer_op);
-      void subscribe(AddressSpaceID sid, ApUserEvent subscribe_event,
-                     ReferenceMutator *mutator);
+      void register_remote(AddressSpaceID sid, ReferenceMutator *mutator);
     protected:
       void mark_sampled(void);
-      void broadcast_result(std::map<AddressSpaceID,ApUserEvent> &targets,
-                            ApEvent complete, const bool need_lock = true);
+      void broadcast_result(std::set<AddressSpaceID> &targets,
+                            ApEvent complete, const bool need_lock);
+      void record_subscription(AddressSpaceID subscriber, bool need_lock);
       void notify_remote_set(AddressSpaceID remote_space);
     public:
-      void record_future_registered(void);
+      void record_future_registered(ReferenceMutator *mutator);
       static void handle_future_result(Deserializer &derez, Runtime *rt);
       static void handle_future_subscription(Deserializer &derez, Runtime *rt,
                                              AddressSpaceID source);
@@ -308,13 +308,14 @@ namespace Legion {
       FRIEND_ALL_RUNTIME_CLASSES
       mutable LocalLock future_lock;
       ApEvent future_complete;
+      ApUserEvent subscription_event;
+      // On the owner node, keep track of the registered waiters
+      std::set<AddressSpaceID> subscribers;
       void *result; 
       size_t result_size;
       AddressSpaceID result_set_space; // space on which the result was set
       volatile bool empty;
       volatile bool sampled;
-      // On the owner node, keep track of the registered waiters
-      std::map<AddressSpaceID,ApUserEvent> subscribed_futures;
     };
 
     /**
