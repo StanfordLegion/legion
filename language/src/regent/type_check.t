@@ -18,7 +18,7 @@ local affine_helper = require("regent/affine_helper")
 local ast = require("regent/ast")
 local data = require("common/data")
 local pretty = require("regent/pretty")
-local report = require("common/report")
+local report = require("regent/report")
 local std = require("regent/std")
 local symbol_table = require("regent/symbol_table")
 

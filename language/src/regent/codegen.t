@@ -21,7 +21,7 @@ local data = require("common/data")
 local log = require("common/log")
 local openmphelper = require("regent/openmphelper")
 local pretty = require("regent/pretty")
-local report = require("common/report")
+local report = require("regent/report")
 local std = require("regent/std")
 local symbol_table = require("regent/symbol_table")
 
@@ -6962,7 +6962,7 @@ function codegen.expr_attach_hdf5(cx, node)
   local field_map = node.field_map and codegen.expr(cx, node.field_map):read(cx, field_map_type)
 
   if not cx.variant:get_config_options().inner then
-    report.warn(node, "WARNING: Attach invalidates region contents. DO NOT attempt to access region after using attach.")
+    report.info(node, "WARNING: Attach invalidates region contents. DO NOT attempt to access region after using attach.")
   end
 
   assert(cx:has_region(region_type))
@@ -7022,7 +7022,7 @@ function codegen.expr_detach_hdf5(cx, node)
   local region = codegen.expr_region_root(cx, node.region):read(cx, region_type)
 
   if not cx.variant:get_config_options().inner then
-    report.warn(node, "WARNING: Detach invalidates region contents. DO NOT attempt to access region after using detach.")
+    report.info(node, "WARNING: Detach invalidates region contents. DO NOT attempt to access region after using detach.")
   end
 
   assert(cx:has_region(region_type))
@@ -10648,7 +10648,7 @@ function codegen.top_task(cx, node)
   local task_name = task.name:mkstring("", ".", "")
   local bounds_checks = needs_bounds_checks(task_name)
   if bounds_checks and std.config["bounds-checks-targets"] ~= ".*" then
-    report.warn(node, "bounds checks are enabled for task " .. task_name)
+    report.info(node, "bounds checks are enabled for task " .. task_name)
   end
   local cx = cx:new_task_scope(return_type,
                                task:get_constraints(),

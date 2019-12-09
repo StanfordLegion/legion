@@ -84,6 +84,7 @@ local default_options = {
   ["aligned-instances"] = false,
   ["cached-iterators"] = false,
   ["debug"] = false,
+  ["warn-as-error"] = false,
   ["no-dynamic-branches"] = true,
   ["no-dynamic-branches-assert"] = false,
   ["override-demand-index-launch"] = false,
