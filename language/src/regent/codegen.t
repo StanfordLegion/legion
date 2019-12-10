@@ -6968,6 +6968,15 @@ function codegen.expr_attach_hdf5(cx, node)
   assert(cx:has_region(region_type))
 
   local fm = terralib.newsymbol(c.legion_field_map_t, "fm")
+  local field_types = node.region.fields:map(function(field_path)
+      return std.get_field_path(region_type:fspace(), field_path)
+    end)
+  local absolute_field_paths = data.flatmap(function(pair)
+      local field_type, field_path = unpack(pair)
+      return std.flatten_struct_fields(field_type):map(function(suffix)
+        return field_path .. suffix
+      end)
+    end, data.zip(field_types, node.region.fields))
   local fm_setup = quote
     var [fm] = c.legion_field_map_create()
     [data.mapi(
@@ -6979,7 +6988,7 @@ function codegen.expr_attach_hdf5(cx, node)
                [(field_map and `([field_map.value][ [i-1] ])) or field_path:concat(".")])
          end
        end,
-       node.region.fields)]
+       absolute_field_paths)]
   end
   local fm_teardown = quote
     c.legion_field_map_destroy([fm])
@@ -7003,7 +7012,7 @@ function codegen.expr_attach_hdf5(cx, node)
       [filename.value], [region.value].impl, [parent], [fm], [mode.value])
     [fm_teardown]
 
-    [node.region.fields:map(
+    [absolute_field_paths:map(
        function(field_path)
          return quote
            -- FIXME: This is redundant (since the same physical region
