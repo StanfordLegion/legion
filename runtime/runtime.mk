@@ -74,11 +74,6 @@ CONDUIT ?= aries
 GPU_ARCH ?= pascal
 endif
 ifeq ($(findstring excalibur,$(shell uname -n)),excalibur)
-CXX=CC
-F90=ftn
-# Cray's magic wrappers automatically provide LAPACK goodness?
-LAPACK_LIBS=
-CC_FLAGS += -DGASNETI_BUG1389_WORKAROUND=1
 CONDUIT=aries
 endif
 ifeq ($(findstring cori,$(shell uname -n)),cori)
@@ -120,8 +115,6 @@ CXX=CC
 F90=ftn
 # Cray's magic wrappers automatically provide LAPACK goodness?
 LAPACK_LIBS ?=
-CC_FLAGS += -DGASNETI_BUG1389_WORKAROUND=1
-CONDUIT=aries
 LEGION_LD_FLAGS += ${CRAY_UGNI_POST_LINK_OPTS}
 LEGION_LD_FLAGS += ${CRAY_UDREG_POST_LINK_OPTS}
 LEGION_LD_FLAGS += ${CRAY_PMI_POST_LINK_OPTS}
@@ -496,7 +489,7 @@ ifeq ($(strip $(USE_MPI)),1)
   ifeq ($(filter-out $(SKIP_MACHINES),$(shell uname -n)),$(shell uname -n))
     CC		:= mpicc
     CXX		:= mpicxx
-    F90   := mpif90
+    F90		:= mpif90
     # Summit/Summitdev are strange and link this automatically (but still uses mpicxx).
     # FIXME: Unfortunately you can't match against the Summit hostname right now...
     ifneq ($(findstring ppc64le,$(shell uname -p)),ppc64le)
@@ -666,8 +659,8 @@ LEGION_SRC 	+= $(LG_RT_DIR)/legion/legion.cc \
 LEGION_INST_SRC  += $(LG_RT_DIR)/legion/region_tree_tmpl.cc
 
 LEGION_FORTRAN_SRC += $(LG_RT_DIR)/legion/legion_f_types.f90 \
-      $(LG_RT_DIR)/legion/legion_f_c_interface.f90 \
-			$(LG_RT_DIR)/legion/legion_f.f90
+											$(LG_RT_DIR)/legion/legion_f_c_interface.f90 \
+											$(LG_RT_DIR)/legion/legion_f.f90
 
 # General shell commands
 SHELL	:= /bin/sh
@@ -714,7 +707,7 @@ GPU_RUNTIME_OBJS:=
 endif
 
 ifeq ($(strip $(LEGION_WITH_FORTRAN)),1)
-LEGION_FORTRAN_OBJS	:= $(LEGION_FORTRAN_SRC:.f90=.f90.o)
+LEGION_FORTRAN_OBJS := $(LEGION_FORTRAN_SRC:.f90=.f90.o)
 GEN_FORTRAN_OBJS := $(GEN_FORTRAN_SRC:.f90=.f90.o)
 FC_FLAGS := $(CC_FLAGS)
 FC_FLAGS += -cpp
