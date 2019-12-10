@@ -470,7 +470,7 @@ if(Legion_BUILD_ALL OR Legion_BUILD_APPS OR Legion_BUILD_BINDINGS OR Legion_BUIL
     add_subdirectory(examples)
   endif()
   if(Legion_BUILD_ALL OR Legion_BUILD_TUTORIAL)
-    #add_subdirectory(tutorial)
+    add_subdirectory(tutorial)
     if(Legion_USE_Fortran)
       add_subdirectory(tutorial-fortran)
     endif()
