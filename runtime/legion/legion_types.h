@@ -726,6 +726,8 @@ namespace Legion {
       SEND_MANAGER_REQUEST,
       SEND_FUTURE_RESULT,
       SEND_FUTURE_SUBSCRIPTION,
+      SEND_FUTURE_NOTIFICATION,
+      SEND_FUTURE_BROADCAST,
       SEND_FUTURE_MAP_REQUEST,
       SEND_FUTURE_MAP_RESPONSE,
       SEND_MAPPER_MESSAGE,
@@ -888,6 +890,8 @@ namespace Legion {
         "Send Manager Request",                                       \
         "Send Future Result",                                         \
         "Send Future Subscription",                                   \
+        "Send Future Notification",                                   \
+        "Send Future Broadcast",                                      \
         "Send Future Map Future Request",                             \
         "Send Future Map Future Response",                            \
         "Send Mapper Message",                                        \
