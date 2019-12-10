@@ -638,6 +638,9 @@ namespace Legion {
         if (!subscription_event.exists())
         {
           subscription_event = Runtime::create_ap_user_event();
+          // Add a reference to prevent us from being collected
+          // until we get the result of the subscription
+          add_base_resource_ref(RUNTIME_REF);
           if (!is_owner())
           {
 #ifdef DEBUG_LEGION
@@ -883,10 +886,6 @@ namespace Legion {
     {
       DistributedID did;
       derez.deserialize(did);
-      ApUserEvent to_trigger;
-      derez.deserialize(to_trigger);
-      ApEvent complete_event;
-      derez.deserialize(complete_event);
       DistributedCollectable *dc = runtime->find_distributed_collectable(did);
 #ifdef DEBUG_LEGION
       FutureImpl *future = dynamic_cast<FutureImpl*>(dc);
@@ -895,7 +894,6 @@ namespace Legion {
       FutureImpl *future = static_cast<FutureImpl*>(dc);
 #endif
       future->unpack_future(derez);
-      Runtime::trigger_event(to_trigger, complete_event);
       // Now we can remove the reference that we added from before we
       // sent the subscription message
       if (future->remove_base_resource_ref(RUNTIME_REF))
