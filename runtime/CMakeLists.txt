@@ -335,8 +335,17 @@ foreach(N1 RANGE 1 ${LEGION_MAX_DIM})
     list(APPEND LEGION_SRC region_tree_${N1}_${N2}.cc)
   endforeach()
 endforeach()
+              
+# Legion Fortran
+if(Legion_USE_Fortran)
+  list(APPEND LEGION_FORTRAN_SRC
+    legion/legion_f_types.f90
+    legion/legion_f_c_interface.f90
+    legion/legion_f.f90              
+  )
+endif()               
 
-add_library(LegionRuntime ${MAPPER_SRC} ${LEGION_SRC})
+add_library(LegionRuntime ${MAPPER_SRC} ${LEGION_SRC} ${LEGION_FORTRAN_SRC})
 target_link_libraries(LegionRuntime PUBLIC RealmRuntime)
 if(Legion_USE_ZLIB)
   target_link_libraries(LegionRuntime PRIVATE ZLIB::ZLIB)

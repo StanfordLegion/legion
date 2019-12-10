@@ -15,15 +15,15 @@
 #------------------------------------------------------------------------------#
 
 cmake_minimum_required(VERSION 3.1)
-project(LegionExample_00_hello_world)
+project(LegionExample_00_hello_world_fortran)
 
 # Only search if were building stand-alone and not as part of Legion
 if(NOT Legion_SOURCE_DIR)
   find_package(Legion REQUIRED)
 endif()
 
-add_executable(hello_world hello_world.cc)
-target_link_libraries(hello_world Legion::Legion)
+add_executable(hello_world_fortran hello_world.f90)
+target_link_libraries(hello_world_fortran Legion::Legion)
 if(Legion_ENABLE_TESTING)
-  add_test(NAME hello_world COMMAND $<TARGET_FILE:hello_world>) 
+  add_test(NAME hello_world_fortran COMMAND $<TARGET_FILE:hello_world_fortran>) 
 endif()

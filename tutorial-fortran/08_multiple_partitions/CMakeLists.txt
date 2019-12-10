@@ -1,5 +1,5 @@
 #------------------------------------------------------------------------------#
-# Copyright 2017 Kitware, Inc.
+# Copyright 2019 Kitware, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -15,15 +15,15 @@
 #------------------------------------------------------------------------------#
 
 cmake_minimum_required(VERSION 3.1)
-project(LegionExample_00_hello_world)
+project(LegionExample_08_multiple_partitions_fortran)
 
 # Only search if were building stand-alone and not as part of Legion
 if(NOT Legion_SOURCE_DIR)
   find_package(Legion REQUIRED)
 endif()
 
-add_executable(hello_world hello_world.cc)
-target_link_libraries(hello_world Legion::Legion)
+add_executable(multiple_partitions_fortran multiple_partitions.f90)
+target_link_libraries(multiple_partitions_fortran Legion::Legion)
 if(Legion_ENABLE_TESTING)
-  add_test(NAME hello_world COMMAND $<TARGET_FILE:hello_world>) 
+  add_test(NAME multiple_partitions_fortran COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:multiple_partitions_fortran> ${Legion_TEST_ARGS})
 endif()

@@ -15,15 +15,15 @@
 #------------------------------------------------------------------------------#
 
 cmake_minimum_required(VERSION 3.1)
-project(LegionExample_07_partitioning)
+project(LegionExample_07_partitioning_fortran_task)
 
 # Only search if were building stand-alone and not as part of Legion
 if(NOT Legion_SOURCE_DIR)
   find_package(Legion REQUIRED)
 endif()
 
-add_executable(partitioning partitioning.cc)
-target_link_libraries(partitioning Legion::Legion)
+add_executable(partitioning_fortran_task partitioning.cc daxpy_task_f.f90)
+target_link_libraries(partitioning_fortran_task Legion::Legion)
 if(Legion_ENABLE_TESTING)
-  add_test(NAME partitioning COMMAND $<TARGET_FILE:partitioning>) 
+  add_test(NAME partitioning_fortran_task COMMAND $<TARGET_FILE:partitioning_fortran_task>) 
 endif()

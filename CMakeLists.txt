@@ -309,6 +309,18 @@ if(Legion_USE_ZLIB)
   # define variable for legion_defines.h
   set(USE_ZLIB ON)
 endif()
+                                                                                          
+#------------------------------------------------------------------------------#
+# Fortran configuration
+#------------------------------------------------------------------------------#
+option(Legion_USE_Fortran "Enable support for Fortran" OFF)
+if(Legion_USE_Fortran)
+  enable_language(Fortran)
+  set(CMAKE_Fortran_FLAGS_RELEASE "${CMAKE_Fortran_FLAGS_RELEASE}")
+  set(CMAKE_Fortran_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG}")
+  set(CMAKE_Fortran_FLAGS "${CMAKE_CXX_FLAGS}")
+  set(CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS} -cpp")
+endif()
 
 #------------------------------------------------------------------------------#
 # Miscelaneous other options
@@ -458,7 +470,10 @@ if(Legion_BUILD_ALL OR Legion_BUILD_APPS OR Legion_BUILD_BINDINGS OR Legion_BUIL
     add_subdirectory(examples)
   endif()
   if(Legion_BUILD_ALL OR Legion_BUILD_TUTORIAL)
-    add_subdirectory(tutorial)
+    #add_subdirectory(tutorial)
+    if(Legion_USE_Fortran)
+      add_subdirectory(tutorial-fortran)
+    endif()
   endif()
   if(Legion_BUILD_ALL OR Legion_BUILD_TESTS)
     add_subdirectory(test)
