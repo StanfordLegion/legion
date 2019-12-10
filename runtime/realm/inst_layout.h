@@ -62,6 +62,8 @@ namespace Realm {
     static InstanceLayoutGeneric *deserialize_new(S& deserializer);
 
     virtual ~InstanceLayoutGeneric(void);
+    
+    virtual InstanceLayoutGeneric *clone(void) const = 0;
 
     // adjusts offsets of all pieces by 'adjust_amt'
     virtual void relocate(size_t adjust_amt) = 0;
@@ -95,6 +97,8 @@ namespace Realm {
   class InstanceLayoutOpaque : public InstanceLayoutGeneric {
   public:
     InstanceLayoutOpaque(size_t _bytes_used, size_t _alignment_reqd);
+
+    virtual InstanceLayoutGeneric *clone(void) const;
   };
 
   template <int N, typename T>
@@ -113,6 +117,8 @@ namespace Realm {
     static InstanceLayoutPiece<N,T> *deserialize_new(S& deserializer);
 
     virtual ~InstanceLayoutPiece(void);
+
+    virtual InstanceLayoutPiece<N,T> *clone(void) const = 0;
 
     virtual size_t calculate_offset(const Point<N,T>& p) const = 0;
 
@@ -134,6 +140,8 @@ namespace Realm {
 
     template <typename S>
     static InstanceLayoutPiece<N,T> *deserialize_new(S& deserializer);
+
+    virtual InstanceLayoutPiece<N,T> *clone(void) const;
 
     virtual size_t calculate_offset(const Point<N,T>& p) const;
 
@@ -181,6 +189,8 @@ namespace Realm {
     static InstanceLayoutGeneric *deserialize_new(S& deserializer);
 
     virtual ~InstanceLayout(void);
+
+    virtual InstanceLayoutGeneric *clone(void) const;
 
     // adjusts offsets of pieces to start from 'base_offset'
     virtual void relocate(size_t base_offset);

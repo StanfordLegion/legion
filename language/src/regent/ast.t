@@ -113,6 +113,7 @@ ast.annotation:leaf("Set", {"cuda", "external", "idempotent", "index_launch",
 
 function ast.default_annotations()
   local allow = ast.annotation.Allow { value = false }
+  local forbid = ast.annotation.Forbid { value = false }
   return ast.annotation.Set {
     cuda = allow,
     external = allow,
@@ -121,13 +122,53 @@ function ast.default_annotations()
     inline = allow,
     inner = allow,
     leaf = allow,
-    openmp = allow,
+    openmp = forbid,
     optimize = allow,
     parallel = allow,
     replicable = allow,
     spmd = allow,
     trace = allow,
     vectorize = allow,
+  }
+end
+
+function ast.default_annotations_top()
+  local allow = ast.annotation.Allow { value = false }
+  local forbid = ast.annotation.Forbid { value = false }
+  return ast.annotation.Set {
+    cuda = forbid,
+    external = allow,
+    idempotent = allow,
+    index_launch = allow,
+    inline = allow,
+    inner = allow,
+    leaf = allow,
+    openmp = forbid,
+    optimize = allow,
+    parallel = allow,
+    replicable = allow,
+    spmd = allow,
+    trace = allow,
+    vectorize = allow,
+  }
+end
+
+function ast.empty_annotations()
+  return ast.annotation.Set {
+    cuda = false,
+    external = false,
+    idempotent = false,
+    index_launch = false,
+    inline = false,
+    inner = false,
+    leaf = false,
+    openmp = false,
+    optimize = false,
+    parallel = false,
+    replicable = false,
+    spmd = false,
+    trace = false,
+    vectorize = false,
   }
 end
 

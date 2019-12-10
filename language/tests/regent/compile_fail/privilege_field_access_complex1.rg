@@ -13,17 +13,20 @@
 -- limitations under the License.
 
 -- fails-with:
--- vectorize_loops11.rg:27: vectorization failed: loop body has an expression as a statement
---     regentlib.c.printf("test\n")
---              ^
+-- privilege_field_access_complex1.rg:25: invalid privilege writes($r.x) for dereference of ptr(test(), $r)
 
 import "regent"
 
-task f(r : region(int))
-where reads writes(r)
-do
-  __demand(__vectorize)
-  for e in r do
-    regentlib.c.printf("test\n")
-  end
+fspace test {
+  x : complex64,
+}
+
+task foo(r : region(test))
+  r[0].x.real = 1
 end
+
+task main()
+  var r = region(ispace(ptr, 5), test)
+  foo(r)
+end
+regentlib.start(main)

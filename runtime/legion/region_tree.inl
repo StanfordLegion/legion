@@ -341,9 +341,6 @@ namespace Legion {
                                  ApEvent precondition, PredEvent pred_guard)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(!space.empty());
-#endif
       // Now that we know we're going to do this copy add any profling requests
       Realm::ProfilingRequestSet requests;
       if (trace_info.op != NULL)

@@ -43,7 +43,7 @@ __demand(__parallel)
 task stencil(r : region(ispace(int2d), fs))
 where reads(r.f), reads writes(r.g)
 do
-  __demand(__openmp)
+  __allow(__openmp)
   for e in r do
     e.g = 0.5 * (e.f +
                  r[(e + {-2, 0}) % r.bounds].f +

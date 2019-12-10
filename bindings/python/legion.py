@@ -40,6 +40,11 @@ except NameError:
     long = int  # Python 3
 
 try:
+    basestring # Python 2
+except NameError:
+    basestring = str # Python 3
+
+try:
     xrange # Python 2
 except NameError:
     xrange = range # Python 3
@@ -1208,16 +1213,71 @@ class _RegionNdarray(object):
             'strides': strides,
         }
 
-def fill(region, field_name, value):
+def fill(region, field_names, value):
     assert(isinstance(region, Region))
-    field_id = region.fspace.field_ids[field_name]
-    field_type = region.fspace.field_types[field_name]
-    raw_value = ffi.new('{} *'.format(field_type.cffi_type), value)
-    c.legion_runtime_fill_field(
-        _my.ctx.runtime, _my.ctx.context,
-        region.raw_value(), region.parent.raw_value() if region.parent is not None else region.raw_value(),
-        field_id, raw_value, field_type.size,
-        c.legion_predicate_true())
+    if isinstance(field_names, basestring):
+        field_names = [field_names]
+
+    for field_name in field_names:
+        field_id = region.fspace.field_ids[field_name]
+        field_type = region.fspace.field_types[field_name]
+        raw_value = ffi.new('{} *'.format(field_type.cffi_type), value)
+        c.legion_runtime_fill_field(
+            _my.ctx.runtime, _my.ctx.context,
+            region.raw_value(), region.parent.raw_value() if region.parent is not None else region.raw_value(),
+            field_id, raw_value, field_type.size,
+            c.legion_predicate_true())
+
+def copy(src_region, src_field_names, dst_region, dst_field_names, redop=None):
+    assert(isinstance(src_region, Region))
+    assert(isinstance(dst_region, Region))
+
+    if isinstance(src_field_names, basestring):
+        src_field_names = [src_field_names]
+    if isinstance(dst_field_names, basestring):
+        dst_field_names = [dst_field_names]
+
+    launcher = c.legion_copy_launcher_create(c.legion_predicate_true(), 0, 0)
+
+    if redop is None:
+        src_groups = [src_field_names]
+        dst_groups = [dst_field_names]
+        add_dst_requirement = c.legion_copy_launcher_add_dst_region_requirement_logical_region
+    else:
+        src_groups = zip(src_field_names)
+        dst_groups = zip(dst_field_names)
+        add_dst_requirement = c.legion_copy_launcher_add_dst_region_requirement_logical_region_reduction
+
+    for idx, group in enumerate(src_groups):
+        c.legion_copy_launcher_add_src_region_requirement_logical_region(
+            launcher,
+            src_region.raw_value(),
+            R._legion_privilege(), 0, # EXCLUSIVE
+            src_region.parent.raw_value() if src_region.parent is not None else src_region.raw_value(),
+            0, False)
+        for src_field_name in group:
+            src_field_id = src_region.fspace.field_ids[src_field_name]
+            c.legion_copy_launcher_add_src_field(launcher, idx, src_field_id, True)
+
+    for idx, group in enumerate(dst_groups):
+        if redop is None:
+            dst_privilege = RW._legion_privilege()
+        else:
+            dst_field_type = dst_region.fspace.field_types[group[0]]
+            dst_privilege = Reduce(redop, [group[0]])._legion_redop_id(dst_field_type)
+        add_dst_requirement(
+            launcher,
+            dst_region.raw_value(),
+            dst_privilege, 0, # EXCLUSIVE
+            dst_region.parent.raw_value() if dst_region.parent is not None else dst_region.raw_value(),
+            0, False)
+        for dst_field_name in group:
+            dst_field_id = dst_region.fspace.field_ids[dst_field_name]
+            c.legion_copy_launcher_add_dst_field(launcher, idx, dst_field_id, True)
+
+    c.legion_copy_launcher_execute(_my.ctx.runtime, _my.ctx.context, launcher)
+
+    c.legion_copy_launcher_destroy(launcher)
 
 # Hack: Can't pickle static methods.
 def _Ipartition_unpickle(tid, id, type_tag, parent, color_space):

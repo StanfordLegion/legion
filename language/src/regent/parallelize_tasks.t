@@ -131,7 +131,7 @@ end
 
 local function bounds_checks(res)
   local checks = quote end
-  if std.config["bounds-checks"] then
+  if std.config["parallelize-debug"] then
     checks = quote
       std.assert(
         [res].lo <= [res].hi,
@@ -1393,7 +1393,7 @@ local function create_equal_partition(caller_cx, region_symbol, pparam)
     local colors_expr = ast_util.mk_expr_colors_access(partition_symbol)
     stats:insert(ast_util.mk_stat_var(color_space_symbol, nil, colors_expr))
     caller_cx:add_color_space(pparam, color_space_symbol)
-  elseif std.config["bounds-checks"] then
+  elseif std.config["parallelize-debug"] then
     local bounds = ast_util.mk_expr_bounds_access(color_space_symbol)
     local my_bounds = ast_util.mk_expr_bounds_access(
       ast_util.mk_expr_colors_access(partition_symbol))
@@ -1506,7 +1506,7 @@ local function create_image_partition(caller_cx, pr, pp, stencil, pparam)
                                          coloring_expr,
                                          true)))
 
-  if std.config["bounds-checks"] then
+  if std.config["parallelize-debug"] then
     local bounds = ast_util.mk_expr_bounds_access(color_space_symbol)
     local my_bounds = ast_util.mk_expr_bounds_access(
       ast_util.mk_expr_colors_access(gp_symbol))
@@ -1593,7 +1593,7 @@ local function create_subset_partition(caller_cx, sr, pp, pparam)
                                          coloring_expr,
                                          true)))
 
-  if std.config["bounds-checks"] then
+  if std.config["parallelize-debug"] then
     local bounds = ast_util.mk_expr_bounds_access(color_space_symbol)
     local my_bounds = ast_util.mk_expr_bounds_access(
       ast_util.mk_expr_colors_access(sp_symbol))
@@ -2194,7 +2194,7 @@ local function transform_task_launches(parallelizable, caller_cx, call_stats)
         stats:insert(ast_util.mk_stat_var(color_space_symbol, nil, colors_expr))
         caller_cx:add_color_space(param, color_space_symbol)
 
-        if std.config["bounds-checks"] and not color_space_symbol:gettype():is_opaque() then
+        if std.config["parallelize-debug"] and not color_space_symbol:gettype():is_opaque() then
           for idx = 2, #node.hints do
             local bounds = ast_util.mk_expr_bounds_access(color_space_symbol)
             local my_partition_type = partition_type_from_hint(node.hints[idx])
@@ -3142,7 +3142,7 @@ function parallelize_tasks.stat(task_cx)
         end
 
         assert(case_split_if)
-        if std.config["bounds-checks"] then
+        if std.config["parallelize-debug"] then
           local index_symbol = get_new_tmp_var(std.as_read(stencil_expr.expr_type), "__index")
           case_split_if.else_block.stats:insertall(terralib.newlist {
             ast_util.mk_stat_var(index_symbol, nil, stencil_expr),

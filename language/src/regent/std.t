@@ -270,13 +270,25 @@ function std.check_privilege(cx, privilege, region, field_path)
     if std.search_privilege(cx, privilege, region, field_path:slice(1, i), {}) then
       return true
     end
-    if std.is_reduce(privilege) then
-      if std.search_privilege(cx, std.reads, region, field_path:slice(1, i), {}) and
-        std.search_privilege(cx, std.writes, region, field_path:slice(1, i), {})
-      then
-        return true
+  end
+  if std.is_reduce(privilege) then
+    local found_read = false
+    local found_write = false
+    for i = #field_path, 0, -1 do
+      if std.search_privilege(cx, std.reads, region, field_path:slice(1, i), {}) then
+        found_read = true
+        break
       end
     end
+    if found_read then
+      for i = #field_path, 0, -1 do
+        if std.search_privilege(cx, std.writes, region, field_path:slice(1, i), {}) then
+          found_write = true
+          break
+        end
+      end
+    end
+    if found_read and found_write then return true end
   end
   return false
 end
@@ -1217,12 +1229,35 @@ function std.unpack_fields(fs, symbols)
   return result_type, new_constraints
 end
 
+function std.extract_privileged_prefix(field_type, field_path)
+  local fields = terralib.newlist()
+  for _, field in ipairs(field_path) do
+    if field_type.__no_field_slicing or type(field) ~= "string" then
+      break
+    end
+    field_type = std.get_field(field_type, field)
+    fields:insert(field)
+  end
+  return data.newtuple(unpack(fields))
+end
+
 function std.as_read(t)
   assert(terralib.types.istype(t))
   if std.is_ref(t) then
     local field_type = t.refers_to_type
     for _, field in ipairs(t.field_path) do
-      field_type = std.get_field(field_type, field)
+      if type(field) == "string" then
+        field_type = std.get_field(field_type, field)
+      else
+        assert(field == false or type(field) == "number")
+        assert(std.is_regent_array(field_type) or
+               field_type:isarray() or field_type:isvector())
+        if std.is_regent_array(field_type) then
+          field_type = field_type.elem_type
+        else
+          field_type = field_type.type
+        end
+      end
       if not field_type then
         return nil
       end
@@ -1248,7 +1283,8 @@ function std.check_read(cx, node)
         local regions = t.bounds_symbols
         local ref_as_ptr = t.pointer_type.index_type(t.refers_to_type, unpack(regions))
         report.error(node, "invalid privilege reads(" ..
-                  (data.newtuple(regions[i]) .. field_path):mkstring(".") ..
+                  (data.newtuple(regions[i]) ..
+                   std.extract_privileged_prefix(t.refers_to_type, field_path)):mkstring(".") ..
                   ") for dereference of " .. tostring(ref_as_ptr))
       end
     end
@@ -1268,7 +1304,8 @@ function std.check_write(cx, node)
         local regions = t.bounds_symbols
         local ref_as_ptr = t.pointer_type.index_type(t.refers_to_type, unpack(regions))
         report.error(node, "invalid privilege writes(" ..
-                  (data.newtuple(regions[i]) .. field_path):mkstring(".") ..
+                  (data.newtuple(regions[i]) ..
+                   std.extract_privileged_prefix(t.refers_to_type, field_path)):mkstring(".") ..
                   ") for dereference of " .. tostring(ref_as_ptr))
       end
     end
@@ -1292,7 +1329,8 @@ function std.check_reduce(cx, op, node)
         local regions = t.bounds_symbols
         local ref_as_ptr = t.pointer_type.index_type(t.refers_to_type, unpack(regions))
         report.error(node, "invalid privilege " .. tostring(std.reduces(op)) .. "(" ..
-                  (data.newtuple(regions[i]) .. field_path):mkstring(".") ..
+                  (data.newtuple(regions[i]) ..
+                   std.extract_privileged_prefix(t.refers_to_type, field_path)):mkstring(".") ..
                   ") for dereference of " .. tostring(ref_as_ptr))
       end
     end

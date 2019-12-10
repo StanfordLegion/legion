@@ -184,7 +184,7 @@ do
   return left_bound
 end
 
-__demand(__cuda)
+__allow(__cuda)
 task pagerank(nodes : region(ispace(int1d), NodeStruct),
               edges : region(ispace(int1d), EdgeStruct),
               pr_old : region(ispace(int1d), float),

@@ -320,6 +320,16 @@ namespace Realm {
   }
 
   template <int N, typename T>
+  inline InstanceLayoutPiece<N,T> *AffineLayoutPiece<N,T>::clone(void) const
+  {
+    AffineLayoutPiece<N,T> *copy = new AffineLayoutPiece<N,T>;
+    copy->bounds = this->bounds;
+    copy->strides = this->strides;
+    copy->offset = this->offset;
+    return copy;
+  }
+
+  template <int N, typename T>
   inline size_t AffineLayoutPiece<N,T>::calculate_offset(const Point<N,T>& p) const
   {
     return offset + strides.dot(p);
@@ -468,6 +478,23 @@ namespace Realm {
   template <int N, typename T>
   InstanceLayout<N,T>::~InstanceLayout(void)
   {}
+
+  template <int N, typename T>
+  InstanceLayoutGeneric *InstanceLayout<N,T>::clone(void) const
+  {
+    InstanceLayout<N,T> *copy = new InstanceLayout<N,T>;
+    copy->bytes_used = bytes_used;
+    copy->alignment_reqd = alignment_reqd;
+    copy->fields = fields;
+    copy->space = space;
+    copy->piece_lists.resize(piece_lists.size());
+    for(size_t i = 0; i < piece_lists.size(); i++) {
+      copy->piece_lists[i].pieces.resize(piece_lists[i].pieces.size());
+      for(size_t j = 0; j < piece_lists[i].pieces.size(); j++)
+	copy->piece_lists[i].pieces[j] = piece_lists[i].pieces[j]->clone();
+    }
+    return copy;
+  }
 
   // adjusts offsets of pieces to start from 'base_offset'
   template <int N, typename T>

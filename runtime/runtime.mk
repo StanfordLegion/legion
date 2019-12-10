@@ -92,10 +92,18 @@ GPU_ARCH ?= pascal
 CONDUIT ?= ibv #not sure if this is true
 endif
 
-# defaults for GASNet
-CONDUIT ?= auto
+# backwards-compatibility for GASNet builds - any of GASNET_ROOT, GASNET, or
+#  USE_GASNET=1 will set REALM_NETWORKS=gasnet1
 ifdef GASNET_ROOT
-GASNET ?= $(GASNET_ROOT)
+  GASNET ?= $(GASNET_ROOT)
+endif
+ifneq ($(strip $(GASNET)),)
+  ifneq ($(strip $(USE_GASNET)),0)
+    REALM_NETWORKS ?= gasnet1
+  endif
+endif
+ifeq ($(strip $(USE_GASNET)),1)
+  REALM_NETWORKS ?= gasnet1
 endif
 
 # defaults for CUDA
@@ -399,17 +407,13 @@ NVCC_FLAGS += $(foreach X,$(subst $(COMMA), ,$(GPU_ARCH)),-gencode arch=compute_
 endif
 
 # Realm uses GASNet if requested
-ifeq ($(strip $(GASNET)),)
-  USE_GASNET ?= 0
-  ifeq ($(strip $(USE_GASNET)),1)
+ifneq ($(findstring gasnet1,$(REALM_NETWORKS)),)
+  ifeq ($(GASNET),)
     $(error GASNET variable is not defined, aborting build)
   endif
-else
-  USE_GASNET ?= 1
-endif
 
-ifeq ($(strip $(USE_GASNET)),1)
   # Detect conduit, if requested
+  CONDUIT ?= auto
   ifeq ($(strip $(CONDUIT)),auto)
     GASNET_PREFERRED_CONDUITS = ibv aries gemini pami mpi udp ofi psm mxm portals4 smp
     GASNET_LIBS_FOUND := $(wildcard $(GASNET_PREFERRED_CONDUITS:%=$(GASNET)/lib/libgasnet-%-par.*))
@@ -430,9 +434,9 @@ ifeq ($(strip $(USE_GASNET)),1)
   else
     LEGION_LD_FLAGS	+= -L$(GASNET)/lib -lrt -lm
   endif
-  REALM_CC_FLAGS	+= -DUSE_GASNET
+  REALM_CC_FLAGS	+= -DREALM_USE_GASNET1
   # newer versions of gasnet seem to need this
-  REALM_CC_FLAGS	+= -DGASNETI_BUG1389_WORKAROUND=1
+  CC_FLAGS	+= -DGASNETI_BUG1389_WORKAROUND=1
 
   # GASNET conduit variables
   ifeq ($(strip $(CONDUIT)),ibv)
@@ -494,7 +498,7 @@ ifeq ($(strip $(USE_HDF)), 1)
 endif
 
 SKIP_MACHINES= titan% daint% excalibur% cori%
-#Extra options for MPI support in GASNet
+# use mpi{cc,cxx,f90} compiler wrappers if USE_MPI=1
 ifeq ($(strip $(USE_MPI)),1)
   # Skip any machines on this list list
   ifeq ($(filter-out $(SKIP_MACHINES),$(shell uname -n)),$(shell uname -n))
@@ -606,7 +610,7 @@ REALM_INST_SRC  += $(LG_RT_DIR)/realm/deppart/image_tmpl.cc \
 	           $(LG_RT_DIR)/realm/deppart/byfield_tmpl.cc
 REALM_SRC 	+= $(LG_RT_DIR)/realm/numa/numa_module.cc \
 		   $(LG_RT_DIR)/realm/numa/numasysif.cc
-ifeq ($(strip $(USE_GASNET)),1)
+ifneq ($(findstring gasnet1,$(REALM_NETWORKS)),)
 REALM_SRC 	+= $(LG_RT_DIR)/realm/gasnet1/gasnet1_module.cc \
                    $(LG_RT_DIR)/realm/gasnet1/gasnetmsg.cc
 endif

@@ -2101,6 +2101,25 @@ namespace Realm {
 	return 0;
       }
 
+      bool RemoteChannel::supports_path(Memory src_mem, Memory dst_mem,
+					CustomSerdezID src_serdez_id,
+					CustomSerdezID dst_serdez_id,
+					ReductionOpID redop_id,
+					unsigned *bw_ret /*= 0*/,
+					unsigned *lat_ret /*= 0*/)
+      {
+	// simultaneous serialization/deserialization not
+	//  allowed anywhere right now
+	if((src_serdez_id != 0) && (dst_serdez_id != 0))
+	  return false;
+
+	// fall through to normal checks
+	return Channel::supports_path(src_mem, dst_mem,
+				      src_serdez_id, dst_serdez_id,
+				      redop_id,
+				      bw_ret, lat_ret);
+      }
+
       /*static*/ void* MemcpyThread::start(void* arg)
       {
         MemcpyThread* worker = (MemcpyThread*) arg;

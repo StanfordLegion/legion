@@ -50,7 +50,7 @@
 #ifdef USE_HDF
 #include "realm/hdf5/hdf5_module.h"
 #endif
-#ifdef USE_GASNET
+#ifdef REALM_USE_GASNET1
 #include "realm/gasnet1/gasnet1_module.h"
 #endif
 
