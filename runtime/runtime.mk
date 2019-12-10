@@ -74,7 +74,7 @@ CONDUIT ?= aries
 GPU_ARCH ?= pascal
 endif
 ifeq ($(findstring excalibur,$(shell uname -n)),excalibur)
-CONDUIT=aries
+CONDUIT ?=aries
 endif
 ifeq ($(findstring cori,$(shell uname -n)),cori)
 CONDUIT ?= aries
@@ -659,8 +659,8 @@ LEGION_SRC 	+= $(LG_RT_DIR)/legion/legion.cc \
 LEGION_INST_SRC  += $(LG_RT_DIR)/legion/region_tree_tmpl.cc
 
 LEGION_FORTRAN_SRC += $(LG_RT_DIR)/legion/legion_f_types.f90 \
-											$(LG_RT_DIR)/legion/legion_f_c_interface.f90 \
-											$(LG_RT_DIR)/legion/legion_f.f90
+					  $(LG_RT_DIR)/legion/legion_f_c_interface.f90 \
+					  $(LG_RT_DIR)/legion/legion_f.f90
 
 # General shell commands
 SHELL	:= /bin/sh
