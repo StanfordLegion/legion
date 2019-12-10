@@ -4716,7 +4716,8 @@ namespace Legion {
           return launcher.predicate_false_future;
         // Otherwise check to see if we have a value
         FutureImpl *result = new FutureImpl(runtime, true/*register*/,
-          runtime->get_available_distributed_id(), runtime->address_space);
+          runtime->get_available_distributed_id(), 
+          runtime->address_space, ApEvent::NO_AP_EVENT);
         if (launcher.predicate_false_result.get_size() > 0)
           result->set_result(launcher.predicate_false_result.get_ptr(),
                              launcher.predicate_false_result.get_size(),
@@ -4737,8 +4738,6 @@ namespace Legion {
                           "TaskLauncher struct.", impl->get_name(), 
                           get_task_name(), get_unique_id())
         }
-        // Now we can fix the future result
-        result->complete_future();
         return Future(result);
       }
       IndividualTask *task = runtime->get_available_individual_task();
@@ -4774,7 +4773,7 @@ namespace Legion {
       {
         FutureMapImpl *result = new FutureMapImpl(this, runtime,
             runtime->get_available_distributed_id(),
-            runtime->address_space);
+            runtime->address_space, ApEvent::NO_AP_EVENT);
         if (launcher.predicate_false_future.impl != NULL)
         {
           ApEvent ready_event = 
@@ -4791,7 +4790,6 @@ namespace Legion {
               Future f = result->get_future(itr.p);
               f.impl->set_result(f_result, f_result_size, false/*own*/);
             }
-            result->complete_all_futures();
           }
           else
           {
@@ -4841,7 +4839,6 @@ namespace Legion {
             f.impl->set_result(ptr, ptr_size, false/*own*/);
           }
         }
-        result->complete_all_futures();
         return FutureMap(result);
       }
       if (launcher.launch_domain.exists() && 
@@ -4884,7 +4881,8 @@ namespace Legion {
           return launcher.predicate_false_future;
         // Otherwise check to see if we have a value
         FutureImpl *result = new FutureImpl(runtime, true/*register*/, 
-          runtime->get_available_distributed_id(), runtime->address_space);
+          runtime->get_available_distributed_id(), 
+          runtime->address_space, ApEvent::NO_AP_EVENT);
         if (launcher.predicate_false_result.get_size() > 0)
           result->set_result(launcher.predicate_false_result.get_ptr(),
                              launcher.predicate_false_result.get_size(),
@@ -4906,8 +4904,6 @@ namespace Legion {
                           "IndexTaskLauncher struct.", impl->get_name(), 
                           get_task_name(), get_unique_id())
         }
-        // Now we can fix the future result
-        result->complete_future();
         return Future(result);
       }
       if (launcher.launch_domain.exists() &&
@@ -5557,18 +5553,16 @@ namespace Legion {
       AutoRuntimeCall call(this); 
       if (p == Predicate::TRUE_PRED)
       {
-        Future result = runtime->help_create_future();
+        Future result = runtime->help_create_future(ApEvent::NO_AP_EVENT);
         const bool value = true;
         result.impl->set_result(&value, sizeof(value), false/*owned*/);
-        result.impl->complete_future();
         return result;
       }
       else if (p == Predicate::FALSE_PRED)
       {
-        Future result = runtime->help_create_future();
+        Future result = runtime->help_create_future(ApEvent::NO_AP_EVENT);
         const bool value = false;
         result.impl->set_result(&value, sizeof(value), false/*owned*/);
-        result.impl->complete_future();
         return result;
       }
       else

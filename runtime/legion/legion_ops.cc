@@ -1940,20 +1940,17 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Also check to see if we need to complete our future
-      bool complete_future = false;
+      bool set_future = false;
       {
         AutoLock o_lock(op_lock);
         if (result_future.impl != NULL)
-          complete_future = true;
+          set_future = true;
         else
           can_result_future_complete = true;
       }
-      if (complete_future)
-      {
+      if (set_future)
         result_future.impl->set_result(&predicate_value, 
                                        sizeof(predicate_value), false/*own*/);
-        result_future.impl->complete_future();
-      }
       complete_operation();
     }
 
@@ -2091,28 +2088,25 @@ namespace Legion {
     Future PredicateImpl::get_future_result(void)
     //--------------------------------------------------------------------------
     {
-      bool complete_future = false;
+      bool set_future = false;
       if (result_future.impl == NULL)
       {
         Future temp = Future(
               new FutureImpl(runtime, true/*register*/,
                 runtime->get_available_distributed_id(),
-                runtime->address_space, this));
+                runtime->address_space, get_completion_event(), this));
         AutoLock o_lock(op_lock);
         // See if we lost the race
         if (result_future.impl == NULL)
         {
           result_future = temp; 
           // if the predicate is complete we can complete the future
-          complete_future = can_result_future_complete; 
+          set_future = can_result_future_complete; 
         }
       }
-      if (complete_future)
-      {
+      if (set_future)
         result_future.impl->set_result(&predicate_value, 
                                 sizeof(predicate_value), false/*owned*/);
-        result_future.impl->complete_future();
-      }
       return result_future;
     }
 
@@ -10264,7 +10258,7 @@ namespace Legion {
       initialize_memoizable();
       future = Future(new FutureImpl(runtime, true/*register*/,
             runtime->get_available_distributed_id(), 
-            runtime->address_space, this));
+            runtime->address_space, get_completion_event(), this));
       collective = dc;
       if (runtime->legion_spy_enabled)
       {
@@ -10391,7 +10385,6 @@ namespace Legion {
     void DynamicCollectiveOp::trigger_complete(void)
     //--------------------------------------------------------------------------
     {
-      future.impl->complete_future();
 #ifdef LEGION_SPY
       LegionSpy::log_operation_events(unique_op_id,
           ApEvent::NO_AP_EVENT, ApEvent::NO_AP_EVENT);
@@ -10525,7 +10518,7 @@ namespace Legion {
         add_predicate_reference();
         ResolveFuturePredArgs args(this);
         runtime->issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY,
-                    Runtime::protect_event(future.impl->get_ready_event()));
+                      Runtime::protect_event(future.impl->subscribe()));
       }
       // Mark that we completed mapping this operation
       complete_mapping();
@@ -11062,6 +11055,11 @@ namespace Legion {
     {
       // Initialize this operation
       initialize_operation(ctx, true/*track*/);
+      // Make a new future map for storing our results
+      // We'll fill it in later
+      result_map = FutureMap(new FutureMapImpl(ctx, this, runtime,
+            runtime->get_available_distributed_id(),
+            runtime->address_space));
       // Initialize operations for everything in the launcher
       // Note that we do not track these operations as we want them all to
       // appear as a single operation to the parent context in order to
@@ -11072,11 +11070,10 @@ namespace Legion {
         indiv_tasks[idx] = runtime->get_available_individual_task();
         indiv_tasks[idx]->initialize_task(ctx, launcher.single_tasks[idx],
                                           false/*track*/);
-        indiv_tasks[idx]->set_must_epoch(this, idx, true/*register*/);
+        indiv_tasks[idx]->initialize_must_epoch(this, idx, true/*register*/);
         // If we have a trace, set it for this operation as well
         if (trace != NULL)
           indiv_tasks[idx]->set_trace(trace, !trace->is_fixed(), NULL);
-        indiv_tasks[idx]->must_epoch_task = true;
       }
       indiv_triggered.resize(indiv_tasks.size(), false);
       index_tasks.resize(launcher.index_tasks.size());
@@ -11089,20 +11086,14 @@ namespace Legion {
         index_tasks[idx] = runtime->get_available_index_task();
         index_tasks[idx]->initialize_task(ctx, launcher.index_tasks[idx],
                                           launch_space, false/*track*/);
-        index_tasks[idx]->set_must_epoch(this, indiv_tasks.size()+idx, 
-                                         true/*register*/);
+        index_tasks[idx]->initialize_must_epoch(this, 
+            indiv_tasks.size() + idx, true/*register*/);
         if (trace != NULL)
           index_tasks[idx]->set_trace(trace, !trace->is_fixed(), NULL);
-        index_tasks[idx]->must_epoch_task = true;
       }
       index_triggered.resize(index_tasks.size(), false);
       mapper_id = launcher.map_id;
-      mapper_tag = launcher.mapping_tag;
-      // Make a new future map for storing our results
-      // We'll fill it in later
-      result_map = FutureMap(new FutureMapImpl(ctx, this, runtime,
-            runtime->get_available_distributed_id(),
-            runtime->address_space));
+      mapper_tag = launcher.mapping_tag; 
 #ifdef DEBUG_LEGION
       for (unsigned idx = 0; idx < indiv_tasks.size(); idx++)
         result_map.impl->add_valid_point(indiv_tasks[idx]->index_point);
@@ -11412,7 +11403,6 @@ namespace Legion {
       }
       if (need_complete)
       {
-        result_map.impl->complete_all_futures();
 #ifdef LEGION_SPY
         // Still need this for Legion Spy
         LegionSpy::log_operation_events(unique_op_id,
@@ -11641,24 +11631,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MustEpochOp::set_future(const DomainPoint &point, const void *result, 
-                                 size_t result_size, bool owner)
-    //--------------------------------------------------------------------------
-    {
-      Future f = result_map.impl->get_future(point);
-      f.impl->set_result(result, result_size, owner);
-    }
-
-    //--------------------------------------------------------------------------
-    void MustEpochOp::unpack_future(const DomainPoint &point, 
-                                    Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      Future f = result_map.impl->get_future(point);
-      f.impl->unpack_future(derez);
-    }
-
-    //--------------------------------------------------------------------------
     void MustEpochOp::register_subop(Operation *op)
     //--------------------------------------------------------------------------
     {
@@ -11682,8 +11654,6 @@ namespace Legion {
       }
       if (need_complete)
       {
-        // Complete all our futures
-        result_map.impl->complete_all_futures();
 #ifdef LEGION_SPY
         // Still need this for Legion Spy
         LegionSpy::log_operation_events(unique_op_id,
@@ -15888,7 +15858,7 @@ namespace Legion {
       // Create the future result that we will complete when we're done
       result = Future(new FutureImpl(runtime, true/*register*/,
                   runtime->get_available_distributed_id(),
-                  runtime->address_space, this));
+                  runtime->address_space, get_completion_event(), this));
       if (runtime->legion_spy_enabled)
         LegionSpy::log_detach_operation(parent_ctx->get_unique_id(),
                                         unique_op_id);
@@ -16087,7 +16057,7 @@ namespace Legion {
     void DetachOp::trigger_complete(void)
     //--------------------------------------------------------------------------
     {
-      result.impl->complete_future(); 
+      result.impl->set_result(NULL, 0, true/*own*/);
       complete_operation();
     }
 
@@ -16200,7 +16170,7 @@ namespace Legion {
       }
       result = Future(new FutureImpl(runtime, true/*register*/,
                   runtime->get_available_distributed_id(),
-                  runtime->address_space, this));
+                  runtime->address_space, get_completion_event(), this));
       if (runtime->legion_spy_enabled)
       {
         LegionSpy::log_timing_operation(ctx->get_unique_id(), unique_op_id);
@@ -16265,8 +16235,11 @@ namespace Legion {
       std::set<ApEvent> pre_events;
       for (std::set<Future>::const_iterator it = preconditions.begin();
             it != preconditions.end(); it++)
-        if (!it->impl->ready_event.has_triggered())
-          pre_events.insert(it->impl->get_ready_event());
+      {
+        const ApEvent ready = it->impl->get_ready_event();
+        if (!ready.has_triggered())
+          pre_events.insert(ready);
+      }
       // Also make sure we wait for any execution fences that we have
       if (execution_fence_event.exists())
         pre_events.insert(execution_fence_event);
@@ -16319,7 +16292,6 @@ namespace Legion {
     void TimingOp::trigger_complete(void)
     //--------------------------------------------------------------------------
     {
-      result.impl->complete_future(); 
       complete_operation();
     } 
 
