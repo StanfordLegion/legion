@@ -50,7 +50,7 @@
 --     In case that happens, the outer loop is tagged as non-parallelizable.
 --   - No region access can appear outside parallelizable for loops.
 --
--- * Partition Driven Auto-Parallelizer
+-- * Constraint-Based Auto-Parallelizer
 --   - Inadmissible statements are not allowed in anywhere in the task, except the return
 --     statement that returns a scalar reduction variable is allowed. This return statement
 --     must appear at the end of the task.
@@ -466,7 +466,7 @@ end
 
 function analyze_access.expr_index_access(cx, node, privilege, field_path)
   local expr_type = node.expr_type
-  if std.is_ref(expr_type) then
+  if std.is_ref(expr_type) and #expr_type.field_path == 0 then
     analyze_access.expr(cx, node.value, nil)
     local private, center = analyze_access.expr(cx, node.index, std.reads)
     cx:update_privileges(node, expr_type:bounds(), field_path, privilege, center)
@@ -526,6 +526,7 @@ local whitelist = {
   [vectorof]                                = true,
   [std.assert]                              = true,
   [std.assert_error]                        = true,
+  [std.c.printf]                            = true,
 }
 
 local function is_admissible_function(cx, fn)

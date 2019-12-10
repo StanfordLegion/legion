@@ -19,7 +19,7 @@
 
 // include gasnet header files before mutex.h to make sure we have
 //  definitions for gasnet_hsl_t and gasnett_cond_t
-#ifdef USE_GASNET
+#ifdef REALM_USE_GASNET1
 
 // so OpenMPI borrowed gasnet's platform-detection code and didn't change
 //  the define names - work around it by undef'ing anything set via mpi.h

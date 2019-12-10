@@ -210,10 +210,21 @@ if(Legion_USE_CUDA)
 endif()
 
 #------------------------------------------------------------------------------#
-# GASNet configuration
+# network interface configuration
 #------------------------------------------------------------------------------#
+set(Legion_NETWORKS "" CACHE STRING "Network backend(s) to use")
+separate_arguments(Legion_NETWORKS)
+
+# compatibility mode - Legion_USE_GASNet==ON -> Legion_NETWORKS=gasnet1
 option(Legion_USE_GASNet "Enable the distributed GASNet backend" OFF)
 if(Legion_USE_GASNet)
+  list(APPEND Legion_NETWORKS gasnet1)
+endif()
+
+#------------------------------------------------------------------------------#
+# GASNet configuration
+#------------------------------------------------------------------------------#
+if("${Legion_NETWORKS}" MATCHES .*gasnet1.*)
   set(GASNet_THREADING par)
   set(GASNet_PREFERRED_CONDUITS aries gemini ibv)
   find_package(GASNet REQUIRED)
@@ -225,10 +236,13 @@ if(Legion_USE_GASNet)
   )
 
   # define variable for realm_defines.h
-  set(USE_GASNET ON)
-  set(GASNETI_BUG1389_WORKAROUND "1")
+  set(REALM_USE_GASNET1 ON)
   string(TOUPPER ${GASNet_CONDUIT} CONDUIT)
   set(GASNET_CONDUIT_${CONDUIT} ON)
+  # conduits other than udp support MPI interop
+  if(NOT ${GASNet_CONDUIT} STREQUAL "udp")
+    set(Legion_MPI_INTEROP ON)
+  endif()
 endif()
 
 #------------------------------------------------------------------------------#

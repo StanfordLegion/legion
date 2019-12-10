@@ -12,18 +12,23 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
--- fails-with:
--- vectorize_loops11.rg:27: vectorization failed: loop body has an expression as a statement
---     regentlib.c.printf("test\n")
---              ^
+-- Error Reporting in Regent
 
-import "regent"
+local common_report = require("common/report")
+local std = require("regent/std")
 
-task f(r : region(int))
-where reads writes(r)
-do
-  __demand(__vectorize)
-  for e in r do
-    regentlib.c.printf("test\n")
+local report = {}
+
+report.info = common_report.warn
+
+report.warn = function(node, ...)
+  if std.config["warn-as-error"] then
+    common_report.error(node, ...)
+  else
+    common_report.warn(node, ...)
   end
 end
+
+report.error = common_report.error
+
+return report

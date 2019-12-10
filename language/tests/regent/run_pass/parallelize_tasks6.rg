@@ -38,11 +38,11 @@ __demand(__parallel)
 task init(r : region(ispace(int3d), fs))
 where reads writes(r)
 do
-  __demand(__openmp)
+  __allow(__openmp)
   for e in r do e.f = 0.3 * (e.x + 1) + 0.3 * (e.y + 1) + 0.4 * (e.z + 1) end
-  __demand(__openmp)
+  __allow(__openmp)
   for e in r do e.g = 0 end
-  __demand(__openmp)
+  __allow(__openmp)
   for e in r do e.h = 0 end
 end
 
@@ -51,7 +51,7 @@ task stencil1(interior : region(ispace(int3d), fs),
                      r : region(ispace(int3d), fs))
 where reads(r.f), reads writes(r.g), interior <= r
 do
-  __demand(__openmp)
+  __allow(__openmp)
   for e in interior do
     r[e].g = 0.5 * (r[e].f +
                     r[e + {0, -2, 0}].f + r[e + {2, 0, -1}].f +
@@ -64,7 +64,7 @@ task stencil2(interior : region(ispace(int3d), fs),
                      r : region(ispace(int3d), fs))
 where reads(r.f), reads writes(r.g), interior <= r
 do
-  __demand(__openmp)
+  __allow(__openmp)
   for e in interior do
     r[e].g = 0.5 * (r[e].f +
                     r[e + {1, -1, 0}].f + r[e + {0, 0, -1}].f +
@@ -76,7 +76,7 @@ __demand(__parallel)
 task stencil3(r : region(ispace(int3d), fs))
 where reads(r.f), reads writes(r.g)
 do
-  __demand(__openmp)
+  __allow(__openmp)
   for e in r do
     r[e].g = 0.5 * (r[e].f + r[(e + {1, 2, 0}) % r.bounds].f)
   end

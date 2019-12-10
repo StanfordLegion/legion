@@ -45,6 +45,7 @@ local language = {
   name = "legion",
   entrypoints = {
     "__demand",
+    "__allow",
     "__forbid",
     "extern",
     "fspace",
