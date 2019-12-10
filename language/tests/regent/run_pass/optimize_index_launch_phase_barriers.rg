@@ -45,7 +45,7 @@ task main()
     end
     z = advance(z)
     __demand(__index_launch)
-    for i = 0, n do
+    for i = n, 2*n do
       k2(z)
     end
     -- Sanity check this is actually working by launching a single

@@ -334,18 +334,21 @@ namespace Legion {
                     Runtime *rt, DistributedID did, AddressSpaceID owner_space);
       FutureMapImpl(TaskContext *ctx, Runtime *rt, 
                     DistributedID did, AddressSpaceID owner_space,
-                    bool register_now = true); // empty map
+                    ApEvent ready_event, bool register_now = true); // remote
       FutureMapImpl(const FutureMapImpl &rhs);
       virtual ~FutureMapImpl(void);
     public:
       FutureMapImpl& operator=(const FutureMapImpl &rhs);
+    public:
+      inline ApEvent get_ready_event(void) const { return ready_event; }
     public:
       virtual void notify_active(ReferenceMutator *mutator);
       virtual void notify_valid(ReferenceMutator *mutator);
       virtual void notify_invalid(ReferenceMutator *mutator);
       virtual void notify_inactive(ReferenceMutator *mutator);
     public:
-      Future get_future(const DomainPoint &point, bool allow_empty = false);
+      Future get_future(const DomainPoint &point, RtEvent *wait_on = NULL);
+      void set_all_futures(const std::map<DomainPoint,Future> &others);
       void set_future(const DomainPoint &point, FutureImpl *impl,
                       ReferenceMutator *mutator);
       void get_void_result(const DomainPoint &point, 
@@ -356,7 +359,6 @@ namespace Legion {
       bool reset_all_futures(void);
     public:
       void get_all_futures(std::map<DomainPoint,Future> &futures) const;
-      void set_all_futures(const std::map<DomainPoint,Future> &futures);
 #ifdef DEBUG_LEGION
     public:
       void add_valid_domain(const Domain &d);
@@ -377,7 +379,6 @@ namespace Legion {
       mutable LocalLock future_map_lock;
       ApEvent ready_event;
       std::map<DomainPoint,Future> futures;
-      bool valid;
 #ifdef DEBUG_LEGION
     private:
       std::vector<Domain> valid_domains;
@@ -2800,7 +2801,7 @@ namespace Legion {
       FutureImpl* find_or_create_future(DistributedID did,
                                         ReferenceMutator *mutator);
       FutureMapImpl* find_or_create_future_map(DistributedID did, 
-                      TaskContext *ctx, ReferenceMutator *mutator);
+                TaskContext *ctx, ApEvent complete, ReferenceMutator *mutator);
       IndexSpace find_or_create_index_slice_space(const Domain &launch_domain);
       IndexSpace find_or_create_index_slice_space(const Domain &launch_domain,
                                                   const void *realm_is,

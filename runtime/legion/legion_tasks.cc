@@ -4541,7 +4541,7 @@ namespace Legion {
       this->launch_space = rhs->launch_space;
       add_launch_space_reference(this->launch_space);
       this->internal_space = is;
-      this->future_map = future_map;
+      this->future_map = rhs->future_map;
       this->must_epoch_task = rhs->must_epoch_task;
       this->sliced = !recurse;
       this->redop = rhs->redop;
@@ -4979,6 +4979,9 @@ namespace Legion {
     {
       set_must_epoch(epoch, index, do_registration);
       FutureMap map = epoch->get_future_map();
+#ifdef DEBUG_LEGION
+      map.impl->add_valid_point(index_point);
+#endif
       result = map.impl->get_future(index_point);
     }
 
@@ -6912,6 +6915,11 @@ namespace Legion {
     {
       set_must_epoch(epoch, index, do_registration);
       future_map = epoch->get_future_map();
+#ifdef DEBUG_LEGION
+      Domain launch_domain;
+      launch_space->get_launch_space_domain(launch_domain);
+      future_map.impl->add_valid_domain(launch_domain);
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -7071,7 +7079,7 @@ namespace Legion {
               predicate_false_future.impl->get_untyped_result(true, NULL, true);
             for (Domain::DomainPointIterator itr(index_domain); itr; itr++)
             {
-              Future f = future_map.get_future(itr.p);
+              Future f = future_map.impl->get_future(itr.p);
               if (result_size > 0)
                 f.impl->set_result(result, result_size, false/*own*/);
             }
@@ -7093,7 +7101,7 @@ namespace Legion {
         {
           for (Domain::DomainPointIterator itr(index_domain); itr; itr++)
           {
-            Future f = future_map.get_future(itr.p);
+            Future f = future_map.impl->get_future(itr.p);
             if (predicate_false_size > 0)
               f.impl->set_result(predicate_false_result,
                                  predicate_false_size, false/*own*/);
@@ -8512,6 +8520,7 @@ namespace Legion {
         assert(future_map.impl != NULL);
 #endif
         rez.serialize(future_map.impl->did);
+        rez.serialize(future_map.impl->get_ready_event());
       }
       if (predicate_false_future.impl != NULL)
         rez.serialize(predicate_false_future.impl->did);
@@ -8556,7 +8565,10 @@ namespace Legion {
 #endif
         }
         if (point_arguments.impl != NULL)
+        {
           rez.serialize(point_arguments.impl->did);
+          rez.serialize(point_arguments.impl->get_ready_event());
+        }
         else
           rez.serialize<DistributedID>(0);
       }
@@ -8614,10 +8626,12 @@ namespace Legion {
       {
         DistributedID future_map_did;
         derez.deserialize(future_map_did);
+        ApEvent ready_event;
+        derez.deserialize(ready_event);
         WrapperReferenceMutator mutator(ready_events);
         future_map = FutureMap(
-            runtime->find_or_create_future_map(future_map_did, 
-                                               parent_ctx, &mutator)); 
+            runtime->find_or_create_future_map(future_map_did, parent_ctx, 
+                                               ready_event, &mutator)); 
       }
       // Unpack the predicate false infos
       DistributedID pred_false_did;
@@ -8662,9 +8676,11 @@ namespace Legion {
         derez.deserialize(future_map_did);
         if (future_map_did > 0)
         {
+          ApEvent ready_event;
+          derez.deserialize(ready_event);
           WrapperReferenceMutator mutator(ready_events);
           FutureMapImpl *impl = runtime->find_or_create_future_map(
-                                  future_map_did, parent_ctx, &mutator);
+                  future_map_did, parent_ctx, ready_event, &mutator);
           impl->add_base_gc_ref(FUTURE_HANDLE_REF, &mutator);
           point_arguments = FutureMap(impl, false/*need reference*/);
         }

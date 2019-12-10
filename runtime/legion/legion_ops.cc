@@ -11055,6 +11055,11 @@ namespace Legion {
     {
       // Initialize this operation
       initialize_operation(ctx, true/*track*/);
+      // Make a new future map for storing our results
+      // We'll fill it in later
+      result_map = FutureMap(new FutureMapImpl(ctx, this, runtime,
+            runtime->get_available_distributed_id(),
+            runtime->address_space));
       // Initialize operations for everything in the launcher
       // Note that we do not track these operations as we want them all to
       // appear as a single operation to the parent context in order to
@@ -11088,12 +11093,7 @@ namespace Legion {
       }
       index_triggered.resize(index_tasks.size(), false);
       mapper_id = launcher.map_id;
-      mapper_tag = launcher.mapping_tag;
-      // Make a new future map for storing our results
-      // We'll fill it in later
-      result_map = FutureMap(new FutureMapImpl(ctx, this, runtime,
-            runtime->get_available_distributed_id(),
-            runtime->address_space));
+      mapper_tag = launcher.mapping_tag; 
 #ifdef DEBUG_LEGION
       for (unsigned idx = 0; idx < indiv_tasks.size(); idx++)
         result_map.impl->add_valid_point(indiv_tasks[idx]->index_point);
