@@ -615,8 +615,64 @@ local expr_region_root = normalize_expr_factory("region", false, false)
 
 local expr_unary = normalize_expr_factory("rhs", false, true)
 
-local expr_binary =
-  normalize_expr_factory_full({"lhs", "rhs"}, {true, true})
+local function expr_binary(stats, expr)
+  if expr.op == "and" or expr.op == "or" then
+    local lhs = normalize.expr(stats, expr.lhs, true)
+    local rhs_stats = terralib.newlist()
+    local rhs = normalize.expr(rhs_stats, expr.rhs, true)
+    if #rhs_stats == 0 then
+      return expr {
+        lhs = lhs,
+        rhs = rhs,
+      }
+    else
+      local temp_var = std.newsymbol()
+      local cond = ast.specialized.expr.ID {
+        value = temp_var,
+        annotations = ast.default_annotations(),
+        span = expr.span,
+      }
+      stats:insert(ast.specialized.stat.Var {
+        symbols = temp_var,
+        values = lhs,
+        annotations = ast.default_annotations(),
+        span = expr.span,
+      })
+      rhs_stats:insert(ast.specialized.stat.Assignment {
+        lhs = cond,
+        rhs = rhs,
+        annotations = ast.default_annotations(),
+        span = expr.span,
+      })
+      stats:insert(ast.specialized.stat.If {
+        cond = (expr.op == "or" and ast.specialized.expr.Unary {
+          rhs = cond,
+          op = "not",
+          annotations = ast.default_annotations(),
+          span = expr.span,
+        }) or cond,
+        then_block = ast.specialized.Block {
+          stats = rhs_stats,
+          span = expr.span,
+        },
+        elseif_blocks = terralib.newlist(),
+        else_block = ast.specialized.Block {
+          stats = terralib.newlist(),
+          span = expr.span,
+        },
+        annotations = ast.default_annotations(),
+        span = expr.span,
+      })
+      return cond
+    end
+
+  else
+    return expr {
+      lhs = normalize.expr(stats, expr.lhs, true),
+      rhs = normalize.expr(stats, expr.rhs, true),
+    }
+  end
+end
 
 local expr_deref = normalize_expr_factory("value", false, true)
 
