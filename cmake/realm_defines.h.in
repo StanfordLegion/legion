@@ -47,30 +47,14 @@
 #cmakedefine USE_CUDA
 #endif
 
-#ifndef USE_GASNET
-#cmakedefine USE_GASNET
-#endif
-#ifndef GASNET_CONDUIT_MPI
+#cmakedefine REALM_USE_GASNET1
+
 #cmakedefine GASNET_CONDUIT_MPI
-#endif
-#ifndef GASNET_CONDUIT_IBV
 #cmakedefine GASNET_CONDUIT_IBV
-#endif
-#ifndef GASNET_CONDUIT_UDP
 #cmakedefine GASNET_CONDUIT_UDP
-#endif
-#ifndef GASNET_CONDUIT_ARIES
 #cmakedefine GASNET_CONDUIT_ARIES
-#endif
-#ifndef GASNET_CONDUIT_GEMINI
 #cmakedefine GASNET_CONDUIT_GEMINI
-#endif
-#ifndef GASNET_CONDUIT_PSM
 #cmakedefine GASNET_CONDUIT_PSM
-#endif
-#ifndef GASNETI_BUG1389_WORKAROUND
-#cmakedefine GASNETI_BUG1389_WORKAROUND @GASNETI_BUG1389_WORKAROUND@
-#endif
 
 #ifndef REALM_USE_LLVM
 #cmakedefine REALM_USE_LLVM

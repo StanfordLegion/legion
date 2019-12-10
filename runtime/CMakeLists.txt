@@ -115,7 +115,7 @@ if (Legion_USE_Python)
   )
 endif()
 
-if(Legion_USE_GASNet)
+if(REALM_USE_GASNET1)
   list(APPEND REALM_SRC
     realm/gasnet1/gasnet1_module.h
     realm/gasnet1/gasnet1_module.cc
@@ -208,7 +208,7 @@ if(Legion_USE_HWLOC)
   target_link_libraries(RealmRuntime PRIVATE HWLOC::HWLOC)
 endif()
 
-if(Legion_USE_GASNet)
+if(REALM_USE_GASNET1)
   target_link_libraries(RealmRuntime PRIVATE GASNet::GASNet)
 endif()
 

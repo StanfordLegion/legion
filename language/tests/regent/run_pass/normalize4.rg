@@ -12,18 +12,28 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
--- fails-with:
--- vectorize_loops11.rg:27: vectorization failed: loop body has an expression as a statement
---     regentlib.c.printf("test\n")
---              ^
-
 import "regent"
 
-task f(r : region(int))
-where reads writes(r)
+task f(r : region(ispace(int1d), int))
+where writes(r)
 do
-  __demand(__vectorize)
-  for e in r do
-    regentlib.c.printf("test\n")
-  end
+  r[0] = 10
+  return true
 end
+
+task main()
+  var r = region(ispace(int1d, 1), int)
+  fill(r, 1)
+
+  if false and f(r) then end
+
+  if true or f(r) then end
+
+  if (false or true) or f(r) then end
+
+  if (true and false) and (f(r) and f(r)) then end
+
+  regentlib.assert(r[0] == 1, "test failed")
+end
+
+regentlib.start(main)

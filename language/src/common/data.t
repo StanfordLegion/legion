@@ -289,6 +289,13 @@ function data.tuple:starts_with(t)
   return self:slice(1, data.min(#self, #t)) == t
 end
 
+function data.tuple:contains(f)
+  for i = 1, #self do
+    if self[i] == f then return true end
+  end
+  return false
+end
+
 function data.tuple:mkstring(first, sep, last)
   if first and sep and last then
     return first .. self:map(tostring):concat(sep) .. last

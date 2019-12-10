@@ -89,7 +89,7 @@ normalize_access.expr_address_of = normalize_expr_factory("value", false)
 
 function normalize_access.expr_index_access(stats, expr)
   local index = normalize_access.expr(stats, expr.index, true)
-  local value = normalize_access.expr(stats, expr.value, std.is_ref(expr.expr_type))
+  local value = normalize_access.expr(stats, expr.value, false)
   return expr {
     index = index,
     value = value,

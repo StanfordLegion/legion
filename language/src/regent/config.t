@@ -79,11 +79,13 @@ local default_options = {
   ["parallelize"] = true,
   ["parallelize-dop"] = "4",
   ["parallelize-global"] = true,
+  ["parallelize-debug"] = false,
 
   -- Miscellaneous, internal or special-purpose flags:
   ["aligned-instances"] = false,
   ["cached-iterators"] = false,
   ["debug"] = false,
+  ["warn-as-error"] = false,
   ["no-dynamic-branches"] = true,
   ["no-dynamic-branches-assert"] = false,
   ["override-demand-index-launch"] = false,

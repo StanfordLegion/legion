@@ -59,7 +59,7 @@ local function render_option(option, value)
   return "__" .. value_name .. "(__" .. tostring(option) .. ")"
 end
 
-local function check(node, allowed_set)
+local function check(node, allowed_set, default)
   -- Sanity check the allowed set.
   for option, _ in pairs(allowed_set) do
     assert(node.annotations[option]:is(ast.annotation))
@@ -67,7 +67,7 @@ local function check(node, allowed_set)
 
   -- Check that only options in the allowed_set are enabled.
   for option, value in pairs(node.annotations) do
-    if ast.is_node(value) and not value:is(ast.annotation.Allow) and
+    if ast.is_node(value) and not value:is(default[option].node_type) and
       not allowed_set[option]
     then
       report.error(node, "option " .. render_option(option, value) ..
@@ -76,13 +76,15 @@ local function check(node, allowed_set)
   end
 end
 
-local function allow(allowed_list)
+local function allow(allowed_list, default)
+  local default = default or ast.default_annotations()
   local allowed_set = data.set(allowed_list)
   return function(node)
-    check(node, allowed_set)
+    check(node, allowed_set, default)
   end
 end
 local deny_all = allow({})
+local deny_all_top = allow({}, ast.default_annotations_top())
 
 local function pass(node)
 end
@@ -216,17 +218,17 @@ local node_allow_annotations = {
     "optimize",
     "parallel",
     "replicable",
-  }),
+  }, ast.default_annotations_top()),
 
-  [ast.typed.top.Fspace] = deny_all,
+  [ast.typed.top.Fspace] = deny_all_top,
 
   -- Specialized ASTs:
   [ast.specialized.region] = pass,
   [ast.specialized.expr] = pass,
   [ast.specialized.stat] = pass,
   [ast.specialized.Block] = pass,
-  [ast.specialized.top.QuoteExpr] = deny_all,
-  [ast.specialized.top.QuoteStat] = deny_all,
+  [ast.specialized.top.QuoteExpr] = deny_all_top,
+  [ast.specialized.top.QuoteStat] = deny_all_top,
 
   -- Miscellaneous:
   [ast.typed.Block] = pass,

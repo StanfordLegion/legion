@@ -34,7 +34,7 @@ task stencil(r : region(ispace(int2d), double))
 where reads(r)
 do
   var sum : double = 0.03
-  __demand(__openmp)
+  __allow(__openmp)
   for e in r do
     sum += 0.5 * (@e +
                   r[(e - {0, 1}) % r.bounds] +

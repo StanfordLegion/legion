@@ -147,7 +147,6 @@ void ActiveMessage<T>::cancel(void)
 template <typename T>
 ActiveMessageHandlerTable::MessageID ActiveMessageHandlerTable::lookup_message_id(void) const
 {
-#ifdef USE_GASNET
   // first convert the type name into a hash
   TypeHash h = 0;
   const char *name = typeid(T).name();
@@ -168,8 +167,6 @@ ActiveMessageHandlerTable::MessageID ActiveMessageHandlerTable::lookup_message_i
       return mid;
   }
   assert(0);
-#endif
-  return 0;
 }
 
 
