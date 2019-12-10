@@ -10518,7 +10518,7 @@ namespace Legion {
         add_predicate_reference();
         ResolveFuturePredArgs args(this);
         runtime->issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY,
-                    Runtime::protect_event(future.impl->get_ready_event()));
+                      Runtime::protect_event(future.impl->subscribe()));
       }
       // Mark that we completed mapping this operation
       complete_mapping();
