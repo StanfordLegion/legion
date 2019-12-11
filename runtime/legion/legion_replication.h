@@ -618,7 +618,8 @@ namespace Legion {
      */
     class FutureBroadcast : public BroadcastCollective {
     public:
-      FutureBroadcast(ReplicateContext *ctx, CollectiveID id, ShardID source);
+      FutureBroadcast(ReplicateContext *ctx, CollectiveID id, 
+                      ShardID source, FutureImpl *impl);
       FutureBroadcast(const FutureBroadcast &rhs);
       virtual ~FutureBroadcast(void);
     public:
@@ -627,11 +628,10 @@ namespace Legion {
       virtual void pack_collective(Serializer &rez) const;
       virtual void unpack_collective(Deserializer &derez);
     public:
-      void broadcast_future(const void *result, size_t result_size);
-      void receive_future(FutureImpl *f);
+      void broadcast_future(void);
     protected:
-      void *result;
-      size_t result_size;
+      FutureImpl *const impl;
+      RtEvent ready;
     };
 
     /**
@@ -954,7 +954,7 @@ namespace Legion {
     class ConsensusMatchExchange : ConsensusMatchBase {
     public:
       ConsensusMatchExchange(ReplicateContext *ctx, CollectiveIndexLocation loc,
-                             Future to_complete, void *output);
+                      Future to_complete, void *output, ApUserEvent to_trigger);
       ConsensusMatchExchange(const ConsensusMatchExchange &rhs);
       virtual ~ConsensusMatchExchange(void);
     public:
@@ -968,6 +968,7 @@ namespace Legion {
     protected:
       Future to_complete;
       T *const output;
+      const ApUserEvent to_trigger;
       std::map<T,size_t> element_counts;
 #ifdef DEBUG_LEGION
       size_t max_elements;
@@ -1017,7 +1018,6 @@ namespace Legion {
       virtual void resolve_false(bool speculated, bool launched);
     public:
       // Override these so we can broadcast the future result
-      virtual void handle_future(const void *res, size_t res_size, bool owned);
       virtual void trigger_task_complete(bool deferred = false);
     public:
       void initialize_replication(ReplicateContext *ctx);

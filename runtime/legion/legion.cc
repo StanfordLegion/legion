@@ -2440,7 +2440,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (impl != NULL)
-        return impl->is_ready();
+        return impl->get_ready_event().has_triggered();
       return true; // Empty futures are always ready
     }
 
@@ -6802,11 +6802,10 @@ namespace Legion {
                                         size_t value_size, bool owned)
     //--------------------------------------------------------------------------
     {
-      Future result = runtime->help_create_future();
+      Future result = 
+        runtime->help_create_future(Internal::ApEvent::NO_AP_EVENT);
       // Set the future result
       result.impl->set_result(value, value_size, owned);
-      // Complete the future right away so that it is always complete
-      result.impl->complete_future();
       return result;
     }
 

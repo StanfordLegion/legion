@@ -431,30 +431,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplIndividualTask::handle_future(const void *res, 
-                                           size_t res_size, bool owned)
-    //--------------------------------------------------------------------------
-    {
-      // If we're not remote then we have to save the future locally 
-      // for when we go to broadcast it
-      if (!is_remote())
-      {
-        if (owned)
-        {
-          future_store = const_cast<void*>(res);
-          future_size = res_size;
-        }
-        else
-        {
-          future_size = res_size;
-          future_store = legion_malloc(FUTURE_RESULT_ALLOC, future_size);
-          memcpy(future_store, res, future_size);
-        }
-      }
-      IndividualTask::handle_future(future_store, future_size, false/*owned*/);
-    }
-
-    //--------------------------------------------------------------------------
     void ReplIndividualTask::trigger_task_complete(bool deferred /*=false*/)
     //--------------------------------------------------------------------------
     {
@@ -474,26 +450,19 @@ namespace Legion {
           assert(!deferred);
           assert(future_collective == NULL);
 #endif
-          future_collective = 
-            new FutureBroadcast(repl_ctx, future_collective_id, owner_shard);
-          future_collective->broadcast_future(future_store, future_size);
+          future_collective = new FutureBroadcast(repl_ctx, 
+                  future_collective_id, owner_shard, result.impl);
+          future_collective->broadcast_future();
         }
         else
         {
-          if (deferred)
-          {
-#ifdef DEBUG_LEGION
-            assert(future_collective != NULL);
-#endif
-            future_collective->receive_future(result.impl);
-          }
-          else
+          if (!deferred)
           {
 #ifdef DEBUG_LEGION
             assert(future_collective == NULL);
 #endif
-            future_collective = 
-              new FutureBroadcast(repl_ctx, future_collective_id, owner_shard);
+            future_collective = new FutureBroadcast(repl_ctx, 
+                    future_collective_id, owner_shard, result.impl);
             const RtEvent future_ready = 
               future_collective->perform_collective_wait(false/*block*/);
             if (future_ready.exists() && !future_ready.has_triggered())
@@ -503,8 +472,6 @@ namespace Legion {
                   LG_LATENCY_DEFERRED_PRIORITY, future_ready);
               return;
             }
-            // Otherwise we fall through and we can do the receive now 
-            future_collective->receive_future(result.impl);
           }
         }
       }
@@ -9809,15 +9776,17 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FutureBroadcast::FutureBroadcast(ReplicateContext *ctx, CollectiveID id,
-                                     ShardID source)
-      : BroadcastCollective(ctx, id, source), result(NULL), result_size(0)
+                                     ShardID source, FutureImpl *i)
+      : BroadcastCollective(ctx, id, source), impl(i)
     //--------------------------------------------------------------------------
     {
+      if (source == ctx->owner_shard->shard_id)
+        ready = Runtime::protect_event(impl->subscribe());
     }
 
     //--------------------------------------------------------------------------
     FutureBroadcast::FutureBroadcast(const FutureBroadcast &rhs)
-      : BroadcastCollective(rhs)
+      : BroadcastCollective(rhs), impl(rhs.impl)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -9828,8 +9797,6 @@ namespace Legion {
     FutureBroadcast::~FutureBroadcast(void)
     //--------------------------------------------------------------------------
     {
-      if (result != NULL)
-        free(result);
     }
 
     //--------------------------------------------------------------------------
@@ -9845,53 +9812,35 @@ namespace Legion {
     void FutureBroadcast::pack_collective(Serializer &rez) const
     //--------------------------------------------------------------------------
     {
+      const size_t result_size = impl->get_untyped_size(); 
       rez.serialize(result_size);
       if (result_size > 0)
-        rez.serialize(result, result_size);
+        rez.serialize(impl->get_untyped_result(true, NULL, true), result_size);
     }
 
     //--------------------------------------------------------------------------
     void FutureBroadcast::unpack_collective(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
+      size_t result_size;
       derez.deserialize(result_size);
       if (result_size > 0)
       {
-#ifdef DEBUG_LEGION
-        assert(result == NULL);
-#endif
-        result = malloc(result_size);
-        derez.deserialize(result, result_size);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void FutureBroadcast::broadcast_future(const void *res, size_t size)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(result == NULL); 
-#endif
-      result_size = size;
-      if (result_size > 0)
-      {
-        result = malloc(result_size);
-        memcpy(result, res, result_size);
-      }
-      perform_collective_async();
-    }
-
-    //--------------------------------------------------------------------------
-    void FutureBroadcast::receive_future(FutureImpl *f)
-    //--------------------------------------------------------------------------
-    {
-      if (result != NULL)
-      {
-        f->set_result(result, result_size, true/*own*/);
-        result = NULL;
+        const void *ptr = derez.get_current_pointer();  
+        impl->set_result(ptr, result_size, false/*owned*/);
+        derez.advance_pointer(result_size);
       }
       else
-        f->set_result(NULL, 0, false/*own*/);
+        impl->set_result(NULL, 0, false/*owned*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void FutureBroadcast::broadcast_future(void)
+    //--------------------------------------------------------------------------
+    {
+      if (ready.exists() && !ready.has_triggered())
+        ready.wait();
+      perform_collective_async();
     }
 
     /////////////////////////////////////////////////////////////
@@ -11346,8 +11295,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<typename T>
     ConsensusMatchExchange<T>::ConsensusMatchExchange(ReplicateContext *ctx,
-                               CollectiveIndexLocation loc, Future f, void *out)
-      : ConsensusMatchBase(ctx, loc),to_complete(f),output(static_cast<T*>(out))
+             CollectiveIndexLocation loc, Future f, void *out, ApUserEvent trig)
+      : ConsensusMatchBase(ctx, loc), to_complete(f),
+        output(static_cast<T*>(out)), to_trigger(trig)
     //--------------------------------------------------------------------------
     {
     }
@@ -11356,7 +11306,8 @@ namespace Legion {
     template<typename T>
     ConsensusMatchExchange<T>::ConsensusMatchExchange(
                                               const ConsensusMatchExchange &rhs)
-      : ConsensusMatchBase(rhs), to_complete(rhs.to_complete),output(rhs.output)
+      : ConsensusMatchBase(rhs), to_complete(rhs.to_complete),
+        output(rhs.output), to_trigger(rhs.to_trigger)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -11472,6 +11423,7 @@ namespace Legion {
       // A little bit of help from the replicate context to complete the future
       context->help_complete_future(to_complete, &next_index, 
                         sizeof(next_index), false/*own*/);
+      Runtime::trigger_event(to_trigger);
     }
 
     template class ConsensusMatchExchange<uint8_t>;

@@ -228,10 +228,15 @@ namespace Legion {
       // Otherwise we have to make a future map and set all the futures
       // We know that they are already completed 
       DistributedID did = runtime->get_available_distributed_id();
-      future_map = new FutureMapImpl(ctx, runtime, did, 
-                                     runtime->address_space);
+      future_map = new FutureMapImpl(ctx, runtime, did,
+          runtime->address_space, ApEvent::NO_AP_EVENT);
       future_map->add_base_gc_ref(FUTURE_HANDLE_REF);
       future_map->set_all_futures(arguments);
+#ifdef DEBUG_LEGION
+      for (std::map<DomainPoint,Future>::const_iterator it = 
+            arguments.begin(); it != arguments.end(); it++)
+        future_map->add_valid_point(it->first);
+#endif
       equivalent = true; // mark that these are equivalent
       return future_map;
     }
@@ -338,7 +343,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FutureImpl::FutureImpl(Runtime *rt, bool register_now, DistributedID did,
-                           AddressSpaceID own_space, Operation *o /*= NULL*/)
+            AddressSpaceID own_space, ApEvent complete, Operation *o /*= NULL*/)
       : DistributedCollectable(rt, 
           LEGION_DISTRIBUTED_HELP_ENCODE(did, FUTURE_DC), 
           own_space, register_now),
@@ -347,8 +352,8 @@ namespace Legion {
 #ifdef LEGION_SPY
         producer_uid((o == NULL) ? 0 : o->get_unique_op_id()),
 #endif
-        ready_event(Runtime::create_ap_user_event()), 
-        result(NULL),result_size(0),empty(true),sampled(false),triggered(false)
+        future_complete(complete), result(NULL), result_size(0), 
+        result_set_space(local_space), empty(true), sampled(false)
     //--------------------------------------------------------------------------
     {
       if (producer_op != NULL)
@@ -361,7 +366,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FutureImpl::FutureImpl(Runtime *rt, bool register_now, DistributedID did,
-                       AddressSpaceID own_space, Operation *o, GenerationID gen,
+                       AddressSpaceID own_space, ApEvent complete,
+                       Operation *o, GenerationID gen,
 #ifdef LEGION_SPY
                        UniqueID uid,
 #endif
@@ -373,8 +379,8 @@ namespace Legion {
 #ifdef LEGION_SPY
         producer_uid(uid),
 #endif
-        ready_event(Runtime::create_ap_user_event()), 
-        result(NULL),result_size(0),empty(true),sampled(false),triggered(false)
+        future_complete(complete), result(NULL), result_size(0), 
+        result_set_space(local_space), empty(true), sampled(false)
     //--------------------------------------------------------------------------
     {
       if (producer_op != NULL)
@@ -402,9 +408,20 @@ namespace Legion {
     FutureImpl::~FutureImpl(void)
     //--------------------------------------------------------------------------
     {
-      // don't want to leak events
-      if (!triggered)
-        Runtime::trigger_event(ready_event);
+#ifdef DEBUG_LEGION
+      assert(!subscription_event.exists());
+#endif
+      // Remote the extra reference on a remote set future if there is one
+      if (empty && (result_set_space != local_space))
+      {
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(did);
+          rez.serialize<size_t>(0);
+        }
+        runtime->send_future_broadcast(result_set_space, rez);
+      }
       if (result != NULL)
       {
         free(result);
@@ -448,17 +465,21 @@ namespace Legion {
         if ((implicit_context != NULL) && !runtime->separate_runtime_instances)
           implicit_context->record_blocking_call();
       }
-      if (!ready_event.has_triggered())
+      if (empty)
       {
-        TaskContext *context = implicit_context;
-        if (context != NULL)
+        const ApEvent ready_event = subscribe();
+        if (!ready_event.has_triggered())
         {
-          context->begin_task_wait(false/*from runtime*/);
-          ready_event.wait();
-          context->end_task_wait();
+          TaskContext *context = implicit_context;
+          if (context != NULL)
+          {
+            context->begin_task_wait(false/*from runtime*/);
+            ready_event.wait();
+            context->end_task_wait();
+          }
+          else
+            ready_event.wait();
         }
-        else
-          ready_event.wait();
       }
       if (check_size)
       {
@@ -511,42 +532,39 @@ namespace Legion {
         if (block && producer_op != NULL && Internal::implicit_context != NULL)
           Internal::implicit_context->record_blocking_call();
       }
-      if (block && !ready_event.has_triggered())
+      if (empty && block)
       {
-        TaskContext *context =
-          (producer_op == NULL) ? NULL : producer_op->get_context();
-        if (context != NULL)
+        const ApEvent ready_event = subscribe();
+        if (!ready_event.has_triggered())
         {
-          context->begin_task_wait(false/*from runtime*/);
-          ready_event.wait();
-          context->end_task_wait();
+          TaskContext *context =
+            (producer_op == NULL) ? NULL : producer_op->get_context();
+          if (context != NULL)
+          {
+            context->begin_task_wait(false/*from runtime*/);
+            ready_event.wait();
+            context->end_task_wait();
+          }
+          else
+            ready_event.wait();
         }
-        else
-          ready_event.wait();
-      }
-      if (block)
         mark_sampled();
+      }
       return empty;
-    }
-
-    //--------------------------------------------------------------------------
-    bool FutureImpl::is_ready(void) const
-    //--------------------------------------------------------------------------
-    {
-      return (triggered || ready_event.has_triggered());
     }
 
     //--------------------------------------------------------------------------
     void FutureImpl::set_result(const void *args, size_t arglen, bool own)
     //--------------------------------------------------------------------------
     {
-      // Should only happen on the owner
-#ifdef DEBUG_LEGION
-      assert(is_owner());
-#endif
-      // Clean out any previous results we've save
-      if (result != NULL)
-        free(result);
+      AutoLock f_lock(future_lock);
+      if (!empty)
+        REPORT_LEGION_ERROR(ERROR_DUPLICATE_FUTURE_SET,
+            "Duplicate future set! This can be either a runtime bug or a "
+            "user error. If you have a must epoch launch in this program "
+            "please check that all of the point tasks that it creates have "
+            "unique index points. If your program has no must epoch launches "
+            "then this is likely a runtime bug.")
       if (own)
       {
         result = const_cast<void*>(args);
@@ -559,55 +577,70 @@ namespace Legion {
         memcpy(result,args,result_size);
       }
       empty = false; 
+      if (!is_owner())
+      {
+        // Add an extra reference to prevent this from being collected
+        // until the owner is also deleted, the owner will notify us
+        // they are deleted with a broadcast of size 0 when they are deleted
+        add_base_resource_ref(RUNTIME_REF);
+        // If we're the first set then we need to tell the owner
+        // that we are the ones with the value
+        // This is literally an empty message
+        Serializer rez;
+        rez.serialize(did);
+        runtime->send_future_notification(owner_space, rez); 
+      }
+      else if (!subscribers.empty())
+      {
+        broadcast_result(subscribers, future_complete, false/*need lock*/);
+        subscribers.clear();
+      }
     }
 
     //--------------------------------------------------------------------------
     void FutureImpl::unpack_future(Deserializer &derez)
     //-------------------------------------------------------------------------
     {
-      // Should only happen on the owner
-      // Clean out any previous results we've save
       DerezCheck z(derez);
-      derez.deserialize(result_size);
-      // Handle the case where we get a double send of the
-      // result once from another remote node and once
-      // from the original owner
-      if (result == NULL)
-        result = malloc(result_size);
-      if (!is_ready())
-      {
-        derez.deserialize(result,result_size);
-        empty = false;
-      }
-      else
-        derez.advance_pointer(result_size);
-    }
-
-    //--------------------------------------------------------------------------
-    void FutureImpl::complete_future(void)
-    //--------------------------------------------------------------------------
-    {
+      AutoLock f_lock(future_lock);
 #ifdef DEBUG_LEGION
-      assert(!triggered);
-      assert(!ready_event.has_triggered());
+      assert(empty);
+      assert(subscription_event.exists());
 #endif
-      Runtime::trigger_event(ready_event);
-      __sync_synchronize();
-      triggered = true;
-      // If we're the owner send our result to any remote spaces
+      derez.deserialize(result_size);
+      if (result_size > 0)
+      {
+        result = malloc(result_size);
+        derez.deserialize(result,result_size);
+      }
+      empty = false;
+      ApEvent complete;
+      derez.deserialize(complete);
+      Runtime::trigger_event(subscription_event, complete);
+      subscription_event = ApUserEvent::NO_AP_USER_EVENT;
       if (is_owner())
-        broadcast_result();
+      {
+#ifdef DEBUG_LEGION
+        assert(result_set_space != local_space);
+#endif
+        // Send a message to the result set space future to remove its
+        // reference now that we no longer need it
+        Serializer rez;
+        {
+          RezCheck z2(rez);
+          rez.serialize(did);
+          rez.serialize<size_t>(0);
+        }
+        runtime->send_future_broadcast(result_set_space, rez);
+      }
     }
 
     //--------------------------------------------------------------------------
     bool FutureImpl::reset_future(void)
     //--------------------------------------------------------------------------
     {
-      if (!is_ready())
-      {
-        ready_event = Runtime::create_ap_user_event();
-        triggered = false;
-      }
+      // TODO: update this for resilience
+      assert(false);
       bool was_sampled = sampled;
       sampled = false;
       return was_sampled;
@@ -617,13 +650,49 @@ namespace Legion {
     bool FutureImpl::get_boolean_value(bool &valid)
     //--------------------------------------------------------------------------
     {
-      if (result != NULL)
+      if (!empty)
       {
-        valid = is_ready();
+        valid = future_complete.has_triggered();
         return *((const bool*)result); 
       }
       valid = false;
       return false; 
+    }
+
+    //--------------------------------------------------------------------------
+    ApEvent FutureImpl::subscribe(void)
+    //--------------------------------------------------------------------------
+    {
+      if (!empty)
+        return future_complete;
+      AutoLock f_lock(future_lock);
+      // See if we lost the race
+      if (empty)
+      {
+        if (!subscription_event.exists())
+        {
+          subscription_event = Runtime::create_ap_user_event();
+          // Add a reference to prevent us from being collected
+          // until we get the result of the subscription
+          add_base_resource_ref(RUNTIME_REF);
+          if (!is_owner())
+          {
+#ifdef DEBUG_LEGION
+            assert(!future_complete.exists());
+#endif
+            future_complete = subscription_event;
+            // Send a request to the owner node to subscribe
+            Serializer rez;
+            rez.serialize(did);
+            runtime->send_future_subscription(owner_space, rez);
+          }
+          else
+            record_subscription(local_space, false/*need lock*/);
+        }
+        return subscription_event;
+      }
+      else
+        return future_complete;
     }
 
     //--------------------------------------------------------------------------
@@ -699,86 +768,133 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void FutureImpl::broadcast_result(void)
+    void FutureImpl::broadcast_result(std::set<AddressSpaceID> &targets,
+                                      ApEvent complete, const bool need_lock)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(is_owner());
-#endif
-      // Need to hold the lock when reading the set of remote spaces
-      AutoLock f_lock(future_lock,1,false/*exclusive*/);
-      if (!registered_waiters.empty())
+      if (need_lock)
       {
-        Serializer rez;
-        {
-          rez.serialize(did);
-          RezCheck z(rez);
-          rez.serialize(result_size);
-          rez.serialize(result,result_size);
-        }
-        for (std::set<AddressSpaceID>::const_iterator it = 
-              registered_waiters.begin(); it != registered_waiters.end(); it++)
-        {
-          runtime->send_future_result(*it, rez); 
-        }
+        AutoLock f_lock(future_lock,1,false/*exclusive*/);
+        broadcast_result(targets, complete, false/*need lock*/);
+        return;
       }
-    }
-
-    //--------------------------------------------------------------------------
-    void FutureImpl::register_waiter(AddressSpaceID sid, 
-                                     ReferenceMutator *mutator)
-    //--------------------------------------------------------------------------
-    {
-      if (is_owner())
+#ifdef DEBUG_LEGION
+      assert(!empty);
+#endif
+      for (std::set<AddressSpaceID>::const_iterator it = 
+            targets.begin(); it != targets.end(); it++)
       {
-        bool send_result;
+        if ((*it) == local_space)
         {
-          AutoLock f_lock(future_lock);
-          if (registered_waiters.find(sid) == registered_waiters.end())
-          {
-            send_result = is_ready();
-            if (!send_result)
-              registered_waiters.insert(sid);
-          }
-          else
-            send_result = false;
+#ifdef DEBUG_LEGION
+          assert(subscription_event.exists());
+#endif
+          Runtime::trigger_event(subscription_event, complete);
+          subscription_event = ApUserEvent::NO_AP_USER_EVENT;
         }
-        if (send_result)
+        else
         {
           Serializer rez;
           {
             rez.serialize(did);
             RezCheck z(rez);
             rez.serialize(result_size);
-            rez.serialize(result,result_size);
+            if (result_size > 0)
+              rez.serialize(result,result_size);
+            rez.serialize(complete);
           }
-          runtime->send_future_result(sid, rez);
+          runtime->send_future_result(*it, rez);
         }
-      }
-      else
-      {
-#ifdef DEBUG_LEGION
-        assert(mutator != NULL);
-#endif
-        // Add a reference to the future to prevent it from being
-        // collected until the response comes back
-        add_base_resource_ref(RUNTIME_REF);
-        // not the owner so send a message to the owner
-        Serializer rez;
-        rez.serialize(did);
-        rez.serialize(sid);
-        // We fuse the subscription with the remote registration for futures
-        // so this has to do the same thing that 
-        // DistributedCollectable::send_remote_registration would do
-        RtUserEvent registered_event = Runtime::create_rt_user_event();
-        rez.serialize(registered_event);
-        runtime->send_future_subscription(owner_space, rez);
-        mutator->record_reference_mutation_effect(registered_event);
       }
     }
 
     //--------------------------------------------------------------------------
-    void FutureImpl::record_future_registered(void)
+    void FutureImpl::record_subscription(AddressSpaceID subscriber, 
+                                         bool need_lock)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(is_owner());
+#endif
+      if (need_lock)
+      {
+        AutoLock f_lock(future_lock);
+        record_subscription(subscriber, false/*need lock*/);
+        return;
+      }
+      if (empty)
+      {
+        // See if we know who has the result
+        if (result_set_space != local_space)
+        {
+          // We don't have the result, but we know who does so 
+          // request that they send it out to the target
+          Serializer rez;
+          {
+            RezCheck z(rez);
+            rez.serialize(did);
+            rez.serialize<size_t>(1); // size
+            rez.serialize(subscriber);
+            rez.serialize(future_complete);
+          }
+          runtime->send_future_broadcast(result_set_space, rez);
+        }
+        else
+        {
+          // We don't know yet, so save this for later
+#ifdef DEBUG_LEGION
+          assert(subscribers.find(subscriber) == subscribers.end());
+#endif
+          subscribers.insert(subscriber);
+        }
+      }
+      else
+      {
+        // We've got the result so we can't send it back right away
+        Serializer rez;
+        {
+          rez.serialize(did);
+          RezCheck z(rez);
+          rez.serialize(result_size);
+          if (result_size > 0)
+            rez.serialize(result,result_size);
+          rez.serialize(future_complete);
+        }
+        runtime->send_future_result(subscriber, rez);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void FutureImpl::notify_remote_set(AddressSpaceID remote_space)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock f_lock(future_lock);
+#ifdef DEBUG_LEGION
+      assert(is_owner());
+      assert(result_set_space == local_space);
+      assert(result_set_space != remote_space);
+#endif
+      result_set_space = remote_space;
+      if (!subscribers.empty())
+      {
+        // Pack these up and send them to the remote space
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(did);
+          rez.serialize<size_t>(subscribers.size());
+          for (std::set<AddressSpaceID>::const_iterator it = 
+               subscribers.begin(); it != subscribers.end(); it++)
+            rez.serialize(*it);
+          rez.serialize(future_complete);
+        }
+        runtime->send_future_broadcast(remote_space, rez);
+        subscribers.clear();
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void FutureImpl::record_future_registered(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
       // Similar to DistributedCollectable::register_with_runtime but
@@ -788,8 +904,13 @@ namespace Legion {
       assert(!registered_with_runtime);
 #endif
       registered_with_runtime = true;
-      // If we're not the owner don't bother with sending the remote
-      // registration as that is fused with the future subscription message
+      if (!is_owner())
+      {
+#ifdef DEBUG_LEGION
+        assert(mutator != NULL);
+#endif
+        send_remote_registration(mutator);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -807,7 +928,6 @@ namespace Legion {
       FutureImpl *future = static_cast<FutureImpl*>(dc);
 #endif
       future->unpack_future(derez);
-      future->complete_future();
       // Now we can remove the reference that we added from before we
       // sent the subscription message
       if (future->remove_base_resource_ref(RUNTIME_REF))
@@ -821,10 +941,6 @@ namespace Legion {
     {
       DistributedID did;
       derez.deserialize(did);
-      AddressSpaceID subscriber;
-      derez.deserialize(subscriber);
-      RtUserEvent registered_event;
-      derez.deserialize(registered_event);
       DistributedCollectable *dc = runtime->find_distributed_collectable(did);
 #ifdef DEBUG_LEGION
       FutureImpl *future = dynamic_cast<FutureImpl*>(dc);
@@ -832,12 +948,60 @@ namespace Legion {
 #else
       FutureImpl *future = static_cast<FutureImpl*>(dc);
 #endif
-      // Record the remote instance
-      future->update_remote_instances(source);
-      // Register this as a waiter
-      LocalReferenceMutator mutator;
-      future->register_waiter(subscriber, &mutator); 
-      Runtime::trigger_event(registered_event, mutator.get_done_event());
+      future->record_subscription(source, true/*need lock*/);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void FutureImpl::handle_future_notification(
+                   Deserializer &derez, Runtime *runtime, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      DistributedID did;
+      derez.deserialize(did);
+      DistributedCollectable *dc = runtime->find_distributed_collectable(did);
+#ifdef DEBUG_LEGION
+      FutureImpl *future = dynamic_cast<FutureImpl*>(dc);
+      assert(future != NULL);
+#else
+      FutureImpl *future = static_cast<FutureImpl*>(dc);
+#endif
+      future->notify_remote_set(source);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void FutureImpl::handle_future_broadcast(
+                                          Deserializer &derez, Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      DistributedID did;
+      derez.deserialize(did);
+      DistributedCollectable *dc = runtime->find_distributed_collectable(did);
+#ifdef DEBUG_LEGION
+      FutureImpl *future = dynamic_cast<FutureImpl*>(dc);
+      assert(future != NULL);
+#else
+      FutureImpl *future = static_cast<FutureImpl*>(dc);
+#endif
+      size_t num_subscribers;
+      derez.deserialize(num_subscribers);
+      // Special case for removing our final reference
+      if (num_subscribers == 0)
+      {
+        if (future->remove_base_resource_ref(RUNTIME_REF))
+          delete future;
+        return;
+      }
+      std::set<AddressSpaceID> subscribers;
+      for (unsigned idx = 0; idx < num_subscribers; idx++)
+      {
+        AddressSpaceID subscriber;
+        derez.deserialize(subscriber);
+        subscribers.insert(subscriber);
+      }
+      ApEvent complete_event;
+      derez.deserialize(complete_event);
+      future->broadcast_result(subscribers, complete_event, true/*need lock*/);
     }
 
     //--------------------------------------------------------------------------
@@ -845,7 +1009,8 @@ namespace Legion {
                                               unsigned count)
     //--------------------------------------------------------------------------
     {
-      if (!is_ready())
+      const ApEvent ready = subscribe();
+      if (!ready.has_triggered())
       {
         // If we're not done then defer the operation until we are triggerd
         // First add a garbage collection reference so we don't get
@@ -854,7 +1019,7 @@ namespace Legion {
         ContributeCollectiveArgs args(this, dc, count);
         // Spawn the task dependent on the future being ready
         runtime->issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY,
-                                         Runtime::protect_event(ready_event));
+                                         Runtime::protect_event(ready));
       }
       else // If we've already triggered, then we can do the arrival now
         Runtime::phase_barrier_arrive(dc, count, ApEvent::NO_AP_EVENT,
@@ -884,7 +1049,7 @@ namespace Legion {
       : DistributedCollectable(rt, 
           LEGION_DISTRIBUTED_HELP_ENCODE(did, FUTURE_MAP_DC),  owner_space), 
         context(ctx), op(o), op_gen(o->get_generation()),
-        ready_event(o->get_completion_event()), valid(true)
+        ready_event(o->get_completion_event())
     //--------------------------------------------------------------------------
     {
 #ifdef LEGION_GC
@@ -896,12 +1061,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     FutureMapImpl::FutureMapImpl(TaskContext *ctx, Runtime *rt,
                                  DistributedID did, AddressSpaceID owner_space,
-                                 bool register_now)
+                                 ApEvent ready, bool register_now)
       : DistributedCollectable(rt, 
           LEGION_DISTRIBUTED_HELP_ENCODE(did, FUTURE_MAP_DC), 
           owner_space, register_now), 
-        context(ctx), op(NULL), op_gen(0),
-        ready_event(ApEvent::NO_AP_EVENT), valid(!is_owner())
+        context(ctx), op(NULL), op_gen(0), ready_event(ready)
     //--------------------------------------------------------------------------
     {
 #ifdef LEGION_GC
@@ -912,8 +1076,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FutureMapImpl::FutureMapImpl(const FutureMapImpl &rhs)
-      : DistributedCollectable(rhs), context(NULL), op(NULL), 
-        op_gen(0), valid(false)
+      : DistributedCollectable(rhs), context(NULL), op(NULL), op_gen(0)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -972,7 +1135,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     Future FutureMapImpl::get_future(const DomainPoint &point, 
-                                     bool internal, bool allow_empty)
+                                     bool internal, RtEvent *wait_on)
     //--------------------------------------------------------------------------
     {
       if (!is_owner())
@@ -993,17 +1156,19 @@ namespace Legion {
           RezCheck z(rez);
           rez.serialize(did);
           rez.serialize(point);
-          rez.serialize<bool>(allow_empty);
           rez.serialize(ready_event);
         }
         runtime->send_future_map_request_future(owner_space, rez);
+        if (wait_on != NULL)
+        {
+          *wait_on = ready_event;
+          return Future();
+        }
         ready_event.wait(); 
         // When we wake up it should be here
         AutoLock fm_lock(future_map_lock,1,false/*exlusive*/);
         std::map<DomainPoint,Future>::const_iterator finder = 
                                               futures.find(point);
-        if (allow_empty && (finder == futures.end()))
-          return Future();
 #ifdef DEBUG_LEGION
         assert(finder != futures.end());
 #endif
@@ -1014,7 +1179,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
 #ifndef NDEBUG
         // Check to make sure we are asking for something in the domain
-        if (!allow_empty && (valid_points.find(point) == valid_points.end()))
+        if (valid_points.find(point) == valid_points.end())
         {
           bool is_valid_point = false;
           for (std::vector<Domain>::const_iterator it = 
@@ -1030,34 +1195,20 @@ namespace Legion {
         }
 #endif
 #endif
-        if (allow_empty && ready_event.exists())
-          ready_event.wait();
-        if (valid)
-        {
-          Future result;
-          {
-            AutoLock fm_lock(future_map_lock);
-            // Check to see if we already have a future for the point
-            std::map<DomainPoint,Future>::const_iterator finder = 
-                                                  futures.find(point);
-            if (finder != futures.end())
-              return finder->second;
-            if (allow_empty)
-              return Future();
-            // Otherwise we need a future from the context to use for
-            // the point that we will fill in later
-            result = runtime->help_create_future(op);
-            futures[point] = result;
-          }
-          if (runtime->legion_spy_enabled)
-            LegionSpy::log_future_creation(op->get_unique_op_id(),
-                           result.impl->get_ready_event(), point);
-          return result;
-        }
-        else if (allow_empty)
-          return Future();
-        else
-          return runtime->help_create_future(op);
+        AutoLock fm_lock(future_map_lock);
+        // Check to see if we already have a future for the point
+        std::map<DomainPoint,Future>::const_iterator finder = 
+                                              futures.find(point);
+        if (finder != futures.end())
+          return finder->second;
+        // Otherwise we need a future from the context to use for
+        // the point that we will fill in later
+        Future result = runtime->help_create_future(ready_event, op);
+        futures[point] = result;
+        if (runtime->legion_spy_enabled)
+          LegionSpy::log_future_creation(op->get_unique_op_id(),
+                         result.impl->get_ready_event(), point);
+        return result;
       }
     }
 
@@ -1100,10 +1251,10 @@ namespace Legion {
             context->get_task_name(),
             context->get_unique_id(),
             (warning_string == NULL) ? "" : warning_string)
-      if (op != NULL && Internal::implicit_context != NULL)
+      if ((op != NULL) && (Internal::implicit_context != NULL))
         Internal::implicit_context->record_blocking_call();
       // Wait on the event that indicates the entire task has finished
-      if (valid && !ready_event.has_triggered())
+      if (!ready_event.has_triggered())
       {
         if (context != NULL)
         {
@@ -1117,28 +1268,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void FutureMapImpl::complete_all_futures(void)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(is_owner());
-      assert(valid);
-#endif
-      AutoLock fm_lock(future_map_lock);
-      for (std::map<DomainPoint,Future>::const_iterator it = 
-            futures.begin(); it != futures.end(); it++)
-      {
-        runtime->help_complete_future(it->second);
-      }
-    }
-
-    //--------------------------------------------------------------------------
     bool FutureMapImpl::reset_all_futures(void)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(is_owner());
-      assert(valid);
 #endif
       bool result = false;
       AutoLock fm_lock(future_map_lock);
@@ -1158,7 +1292,6 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(is_owner());
-      assert(valid);
 #endif
       if (op != NULL && Internal::implicit_context != NULL)
         Internal::implicit_context->record_blocking_call();
@@ -1184,11 +1317,9 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(is_owner());
-      assert(!valid);
 #endif
       // No need for the lock here since we're initializing
       futures = others;
-      valid = true;
     }
 
 #ifdef DEBUG_LEGION
@@ -1235,19 +1366,18 @@ namespace Legion {
       derez.deserialize(did);
       DomainPoint point;
       derez.deserialize(point);
-      bool allow_empty;
-      derez.deserialize(allow_empty);
       RtUserEvent done;
       derez.deserialize(done);
       
       // Should always find it since this is the owner node
-      FutureMapImpl *impl = runtime->find_or_create_future_map(did, NULL, NULL);
-      Future f = impl->get_future(point, false/*internal*/, allow_empty);
-      if (allow_empty && (f.impl == NULL))
-      {
-        Runtime::trigger_event(done);
-        return;
-      }
+      DistributedCollectable *dc = runtime->find_distributed_collectable(did);
+#ifdef DEBUG_LEGION
+      FutureMapImpl *impl = dynamic_cast<FutureMapImpl*>(dc);
+      assert(impl != NULL);
+#else
+      FutureMapImpl *impl = static_cast<FutureMapImpl*>(dc);
+#endif
+      Future f = impl->get_future(point, false/*internal*/);
       Serializer rez;
       {
         RezCheck z2(rez);
@@ -1275,7 +1405,13 @@ namespace Legion {
       derez.deserialize(done);
       
       // Should always find it since this is the source node
-      FutureMapImpl *impl = runtime->find_or_create_future_map(did, NULL, NULL);
+      DistributedCollectable *dc = runtime->find_distributed_collectable(did);
+#ifdef DEBUG_LEGION
+      FutureMapImpl *impl = dynamic_cast<FutureMapImpl*>(dc);
+      assert(impl != NULL);
+#else
+      FutureMapImpl *impl = static_cast<FutureMapImpl*>(dc);
+#endif
       std::set<RtEvent> done_events;
       WrapperReferenceMutator mutator(done_events);
       FutureImpl *future = runtime->find_or_create_future(future_did, &mutator);
@@ -1385,7 +1521,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     Future ReplFutureMapImpl::get_future(const DomainPoint &point,
-                                         bool internal, bool allow_empty)
+                                         bool internal, RtEvent *wait_on)
     //--------------------------------------------------------------------------
     {
       if (!internal)
@@ -1414,27 +1550,27 @@ namespace Legion {
         rez.serialize(owner_shard);
         rez.serialize<RtEvent>(future_map_barrier);
         rez.serialize(point);
-        rez.serialize<bool>(allow_empty);
         rez.serialize(did);
         rez.serialize(done_event);
         repl_ctx->shard_manager->send_future_map_request(owner_shard, rez);
+        if (wait_on != NULL)
+        {
+          *wait_on = done_event;
+          return Future();
+        }
         // Wait for the event
         done_event.wait();
         // Now we can wake up see if we found it
         AutoLock f_lock(future_map_lock,1,false/*exclusive*/);
         std::map<DomainPoint,Future>::const_iterator finder = 
           futures.find(point);
-        if (finder == futures.end())
-        {
-          if (allow_empty)
-            return Future();
-          else
-            assert(false);
-        }
+#ifdef DEBUG_LEGION
+        assert(finder != futures.end());
+#endif
         return finder->second;
       }
       else // If we're the owner shard we can just do the normal thing
-        return FutureMapImpl::get_future(point, internal, allow_empty);
+        return FutureMapImpl::get_future(point, internal, wait_on);
     }
 
     //--------------------------------------------------------------------------
@@ -1492,27 +1628,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplFutureMapImpl::complete_all_futures(void)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(is_owner());
-      assert(valid);
-      assert(sharding_function_ready.has_triggered());
-      assert(sharding_function != NULL);
-#endif
-      const ShardID local_sid = repl_ctx->owner_shard->shard_id;
-      AutoLock fm_lock(future_map_lock);
-      for (std::map<DomainPoint,Future>::const_iterator it = 
-            futures.begin(); it != futures.end(); it++)
-      {
-        // Only complete futures that came from our shard
-        if (sharding_function->find_owner(it->first, shard_domain) == local_sid)
-          runtime->help_complete_future(it->second);
-      }
-    }
-
-    //--------------------------------------------------------------------------
     void ReplFutureMapImpl::set_sharding_function(ShardingFunction *function)
     //--------------------------------------------------------------------------
     {
@@ -1531,8 +1646,7 @@ namespace Legion {
       {
         for (std::vector<PendingRequest>::const_iterator it = 
               to_perform.begin(); it != to_perform.end(); it++)
-          process_future_map_request(it->point, it->allow_empty,
-                                     it->src_did, it->done_event);
+          process_future_map_request(it->point, it->src_did, it->done_event);
       }
     }
 
@@ -1542,8 +1656,6 @@ namespace Legion {
     {
       DomainPoint point;
       derez.deserialize(point);
-      bool allow_empty;
-      derez.deserialize(allow_empty);
       DistributedID src_did;
       derez.deserialize(src_did);
       RtUserEvent done_event;
@@ -1556,17 +1668,16 @@ namespace Legion {
         if (sharding_function == NULL)
         {
           pending_future_map_requests.push_back(
-              PendingRequest(point, src_did, done_event, allow_empty));
+              PendingRequest(point, src_did, done_event));
           return;
         }
         // If we have a sharding function now we can fall through and continue
       }
-      process_future_map_request(point, allow_empty, src_did, done_event);
+      process_future_map_request(point, src_did, done_event);
     }
 
     //--------------------------------------------------------------------------
     void ReplFutureMapImpl::process_future_map_request(const DomainPoint &point,
-                                                       bool allow_empty,
                                                        DistributedID src_did,
                                                        RtUserEvent done_event)
     //--------------------------------------------------------------------------
@@ -1575,7 +1686,7 @@ namespace Legion {
       assert(sharding_function != NULL);
 #endif
       const AddressSpaceID source = runtime->determine_owner(src_did);
-      Future result = get_future(point, false/*internal*/, allow_empty);
+      Future result = get_future(point, false/*internal*/);
       if (source != runtime->address_space)
       {
         // Remote future map so send the answer back
@@ -1595,8 +1706,14 @@ namespace Legion {
       else
       {
         // Local future map so we should be able to find it and set it
-        FutureMapImpl *target = 
-          runtime->find_or_create_future_map(src_did, NULL, NULL);
+        DistributedCollectable *dc = 
+          runtime->find_distributed_collectable(src_did);
+#ifdef DEBUG_LEGION
+        ReplFutureMapImpl *target = dynamic_cast<ReplFutureMapImpl*>(dc);
+        assert(target != NULL);
+#else
+        ReplFutureMapImpl *target = static_cast<ReplFutureMapImpl*>(dc);
+#endif
         std::set<RtEvent> preconditions;
         WrapperReferenceMutator mutator(preconditions);
         target->set_future(point, result.impl, &mutator);
@@ -1624,14 +1741,13 @@ namespace Legion {
       derez.deserialize(done_event);
 
       // It should already exist so we're just finding it
-      FutureMapImpl *temp = 
-        runtime->find_or_create_future_map(map_did, NULL, NULL);
-      // This better be a ReplFutureMap
+      DistributedCollectable *dc = 
+          runtime->find_distributed_collectable(map_did);
 #ifdef DEBUG_LEGION
-      ReplFutureMapImpl *target = dynamic_cast<ReplFutureMapImpl*>(temp);
+      ReplFutureMapImpl *target = dynamic_cast<ReplFutureMapImpl*>(dc);
       assert(target != NULL);
 #else
-      ReplFutureMapImpl *target = static_cast<ReplFutureMapImpl*>(temp);
+      ReplFutureMapImpl *target = static_cast<ReplFutureMapImpl*>(dc);
 #endif
       std::set<RtEvent> done_events;
       WrapperReferenceMutator mutator(done_events);
@@ -7515,6 +7631,16 @@ namespace Legion {
           case SEND_FUTURE_SUBSCRIPTION:
             {
               runtime->handle_future_subscription(derez, remote_address_space);
+              break;
+            }
+          case SEND_FUTURE_NOTIFICATION:
+            {
+              runtime->handle_future_notification(derez, remote_address_space);
+              break;
+            }
+          case SEND_FUTURE_BROADCAST:
+            {
+              runtime->handle_future_broadcast(derez);
               break;
             }
           case SEND_FUTURE_MAP_REQUEST:
@@ -14230,14 +14356,16 @@ namespace Legion {
                     "task %s (ID %lld)", tid, ctx->get_task_name(),
                     ctx->get_unique_id());
 #endif
+      const ApUserEvent to_trigger = Runtime::create_ap_user_event();
       FutureImpl *result = new FutureImpl(this, true/*register*/,
                               get_available_distributed_id(),
-                              address_space, ctx->get_owner_task());
+                              address_space, to_trigger,
+                              ctx->get_owner_task());
       // Make this here to get a local reference on it now
       Future result_future(result);
       result->add_base_gc_ref(FUTURE_HANDLE_REF);
       SelectTunableArgs task_args(ctx->get_owner_task()->get_unique_op_id(),
-          mid, tag, tid, args, argsize, ctx, result);
+          mid, tag, tid, args, argsize, ctx, result, to_trigger);
       if (legion_spy_enabled)
         task_args.tunable_index = ctx->get_tunable_index();
       issue_runtime_meta_task(task_args, LG_LATENCY_WORK_PRIORITY); 
@@ -14290,7 +14418,7 @@ namespace Legion {
       if ((output.value != NULL) && (output.size > 0))
         args->result->set_result(output.value, output.size, 
                                  output.take_ownership);
-      args->result->complete_future(); 
+      Runtime::trigger_event(args->to_trigger);
     }
 
     //--------------------------------------------------------------------------
@@ -16916,11 +17044,8 @@ namespace Legion {
     void Runtime::send_future_result(AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      // This has to go on the same channel as the reference updates
-      // so that we can make sure it's handled before any references
-      // are removed on the destination node
       find_messenger(target)->send_message(rez, SEND_FUTURE_RESULT,
-            REFERENCE_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
+            DEFAULT_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
     }
 
     //--------------------------------------------------------------------------
@@ -16933,6 +17058,27 @@ namespace Legion {
       // send_did_remote_registration which is the REFERENCE_VIRTUAL_CHANNEL 
       find_messenger(target)->send_message(rez, SEND_FUTURE_SUBSCRIPTION,
                                 REFERENCE_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_future_notification(AddressSpaceID target,
+                                           Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      // This also has to happen on the reference virtual channel to prevent
+      // the owner from being deleted before its references are removed
+      find_messenger(target)->send_message(rez, SEND_FUTURE_NOTIFICATION,
+              REFERENCE_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_future_broadcast(AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      // We need all these to be ordered, preferably with respect to 
+      // reference removals too so put them on the reference virtual channel
+      find_messenger(target)->send_message(rez, SEND_FUTURE_BROADCAST,
+                            REFERENCE_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -18539,6 +18685,21 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       ReplFutureMapImpl::handle_future_map_response(derez, this);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_future_notification(Deserializer &derez, 
+                                             AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      FutureImpl::handle_future_notification(derez, this, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_future_broadcast(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      FutureImpl::handle_future_broadcast(derez, this);
     }
 
     //--------------------------------------------------------------------------
@@ -20339,10 +20500,15 @@ namespace Legion {
           return result;
         }
       }
-      AddressSpaceID owner_space = determine_owner(did);
+      const AddressSpaceID owner_space = determine_owner(did);
+#ifdef DEBUG_LEGION
+      assert(owner_space != address_space);
+#endif
       FutureImpl *result = (op == NULL) ? 
-        new FutureImpl(this, false/*register*/, did, owner_space) : 
-        new FutureImpl(this, false/*register*/, did, owner_space, op, gen,
+        new FutureImpl(this, false/*register*/, did, owner_space,
+                       ApEvent::NO_AP_EVENT) : 
+        new FutureImpl(this, false/*register*/, did, owner_space, 
+                       ApEvent::NO_AP_EVENT, op, gen,
 #ifdef LEGION_SPY
                        op_uid,
 #endif
@@ -20366,18 +20532,15 @@ namespace Legion {
 #endif
           return result;
         }
-        result->record_future_registered();
+        result->record_future_registered(mutator);
         dist_collectables[did] = result;
       }
-      // If we're not the owner send the subscription message
-      if (!result->is_owner())
-        result->register_waiter(address_space, mutator);
       return result;
     }
 
     //--------------------------------------------------------------------------
     FutureMapImpl* Runtime::find_or_create_future_map(DistributedID did,
-                                    TaskContext *ctx, ReferenceMutator *mutator)
+                  TaskContext *ctx, ApEvent complete, ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
       did &= LEGION_DISTRIBUTED_ID_MASK;
@@ -20396,9 +20559,12 @@ namespace Legion {
           return result;
         }
       }
-      AddressSpaceID owner_space = determine_owner(did);
-      FutureMapImpl *result = new FutureMapImpl(ctx, this, did,
-                                    owner_space, false/*register now */);
+      const AddressSpaceID owner_space = determine_owner(did);
+#ifdef DEBUG_LEGION
+      assert(owner_space != address_space);
+#endif
+      FutureMapImpl *result = new FutureMapImpl(ctx, this, did, owner_space,
+                                          complete, false/*register now */);
       // Retake the lock and see if we lost the race
       {
         AutoLock d_lock(distributed_collectable_lock);
@@ -22251,24 +22417,19 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Future Runtime::help_create_future(Operation *op /*= NULL*/)
+    Future Runtime::help_create_future(ApEvent complete_event, 
+                                       Operation *op /*= NULL*/)
     //--------------------------------------------------------------------------
     {
       if ((op == NULL) && (implicit_context != NULL))
         return Future(new FutureImpl(this, true/*register*/,
                                    get_available_distributed_id(),
-                                   address_space,implicit_context->owner_task));
+                                   address_space, complete_event,
+                                   implicit_context->owner_task));
       else
         return Future(new FutureImpl(this, true/*register*/,
                                      get_available_distributed_id(),
-                                     address_space, op));
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::help_complete_future(const Future &f)
-    //--------------------------------------------------------------------------
-    {
-      f.impl->complete_future();
+                                     address_space, complete_event, op));
     }
 
     //--------------------------------------------------------------------------
@@ -24768,7 +24929,6 @@ namespace Legion {
               if (result_size > 0)
                 f.impl->set_result(result, result_size, false/*own*/);
             }
-            future_args->future_map->complete_all_futures();
             if (future_args->future_map->remove_base_gc_ref(
                                                         DEFERRED_TASK_REF))
               delete (future_args->future_map);
