@@ -408,12 +408,14 @@ namespace Legion {
       struct PendingRequest {
       public:
         PendingRequest(void) { }
-        PendingRequest(const DomainPoint &p,DistributedID src,RtUserEvent done)
-          : point(p), src_did(src), done_event(done) { }
+        PendingRequest(const DomainPoint &p, DistributedID src,
+                       RtUserEvent done, bool intern)
+          : point(p), src_did(src), done_event(done), internal(intern) { }
       public:
         DomainPoint point;
         DistributedID src_did;
         RtUserEvent done_event;
+        bool internal;
       };
       struct ReclaimFutureMapArgs :
         public LgTaskArgs<ReclaimFutureMapArgs> {
@@ -452,6 +454,7 @@ namespace Legion {
     protected:
       void process_future_map_request(const DomainPoint &point,
                                       DistributedID src_did,
+                                      const bool internal,
                                       RtUserEvent done_event);
     public:
       static void handle_future_map_response(Deserializer &derez,

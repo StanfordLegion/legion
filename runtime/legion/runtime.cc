@@ -1157,6 +1157,7 @@ namespace Legion {
           rez.serialize(did);
           rez.serialize(point);
           rez.serialize(ready_event);
+          rez.serialize<bool>(internal);
         }
         runtime->send_future_map_request_future(owner_space, rez);
         if (wait_on != NULL)
@@ -1368,6 +1369,8 @@ namespace Legion {
       derez.deserialize(point);
       RtUserEvent done;
       derez.deserialize(done);
+      bool internal;
+      derez.deserialize(internal);
       
       // Should always find it since this is the owner node
       DistributedCollectable *dc = runtime->find_distributed_collectable(did);
@@ -1377,7 +1380,7 @@ namespace Legion {
 #else
       FutureMapImpl *impl = static_cast<FutureMapImpl*>(dc);
 #endif
-      Future f = impl->get_future(point, false/*internal*/);
+      Future f = impl->get_future(point, internal);
       Serializer rez;
       {
         RezCheck z2(rez);
@@ -1552,6 +1555,7 @@ namespace Legion {
         rez.serialize(point);
         rez.serialize(did);
         rez.serialize(done_event);
+        rez.serialize<bool>(internal);
         repl_ctx->shard_manager->send_future_map_request(owner_shard, rez);
         if (wait_on != NULL)
         {
@@ -1646,7 +1650,8 @@ namespace Legion {
       {
         for (std::vector<PendingRequest>::const_iterator it = 
               to_perform.begin(); it != to_perform.end(); it++)
-          process_future_map_request(it->point, it->src_did, it->done_event);
+          process_future_map_request(it->point, it->src_did, 
+                                     it->internal, it->done_event);
       }
     }
 
@@ -1660,6 +1665,8 @@ namespace Legion {
       derez.deserialize(src_did);
       RtUserEvent done_event;
       derez.deserialize(done_event);
+      bool internal;
+      derez.deserialize(internal);
       // We can't actually process this until we get our sharding function
       if (sharding_function == NULL)
       {
@@ -1668,17 +1675,18 @@ namespace Legion {
         if (sharding_function == NULL)
         {
           pending_future_map_requests.push_back(
-              PendingRequest(point, src_did, done_event));
+              PendingRequest(point, src_did, done_event, internal));
           return;
         }
         // If we have a sharding function now we can fall through and continue
       }
-      process_future_map_request(point, src_did, done_event);
+      process_future_map_request(point, src_did, internal, done_event);
     }
 
     //--------------------------------------------------------------------------
     void ReplFutureMapImpl::process_future_map_request(const DomainPoint &point,
                                                        DistributedID src_did,
+                                                       const bool internal,
                                                        RtUserEvent done_event)
     //--------------------------------------------------------------------------
     {
@@ -1686,7 +1694,7 @@ namespace Legion {
       assert(sharding_function != NULL);
 #endif
       const AddressSpaceID source = runtime->determine_owner(src_did);
-      Future result = get_future(point, false/*internal*/);
+      Future result = get_future(point, internal);
       if (source != runtime->address_space)
       {
         // Remote future map so send the answer back
