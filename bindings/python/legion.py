@@ -2024,11 +2024,15 @@ class _TaskLauncher(object):
         return future
 
 class _IndexLauncher(_TaskLauncher):
-    __slots__ = ['task', 'domain', 'global_args', 'local_args', 'region_args', 'future_args', 'reduction_op', 'future_map']
+    __slots__ = ['task', 'domain', 'mapper', 'tag',
+                 'global_args', 'local_args', 'region_args', 'future_args',
+                 'reduction_op', 'future_map']
 
-    def __init__(self, task, domain):
+    def __init__(self, task, domain, mapper, tag):
         super(_IndexLauncher, self).__init__(task)
         self.domain = domain
+        self.mapper = mapper
+        self.tag = tag
         self.global_args = None
         self.local_args = c.legion_argument_map_create()
         self.region_args = None
@@ -2039,7 +2043,7 @@ class _IndexLauncher(_TaskLauncher):
     def __del__(self):
         c.legion_argument_map_destroy(self.local_args)
 
-    def spawn_task(self, *args):
+    def spawn_task(self, *args, **kwargs):
         raise Exception('IndexLaunch does not support spawn_task')
 
     def attach_local_args(self, index, *args):
@@ -2074,7 +2078,7 @@ class _IndexLauncher(_TaskLauncher):
         launcher = c.legion_index_launcher_create(
             self.task.task_id, self.domain.raw_value(),
             global_args[0], self.local_args,
-            c.legion_predicate_true(), False, 0, 0)
+            c.legion_predicate_true(), False, self.mapper, self.tag)
 
         assert (self.global_args is not None) != (self.region_args is not None)
         if self.global_args is not None:
@@ -2124,7 +2128,7 @@ class _MustEpochLauncher(object):
     def __del__(self):
         c.legion_must_epoch_launcher_destroy(self.launcher)
 
-    def spawn_task(self, *args):
+    def spawn_task(self, *args, **kwargs):
         raise Exception('MustEpochLaunch does not support spawn_task')
 
     def attach_task_launcher(self, task_launcher, point, root=None):
@@ -2246,9 +2250,9 @@ class ConcreteLoopIndex(SymbolicExpr):
         return self.value
 
 def index_launch(domain, task, *args, **kwargs):
-    def parse_kwargs(reduce=None):
-        return reduce
-    reduce = parse_kwargs(**kwargs)
+    def parse_kwargs(reduce=None, mapper=0, tag=0):
+        return reduce, mapper, tag
+    reduce, mapper, tag = parse_kwargs(**kwargs)
 
     if isinstance(domain, Domain):
         domain = domain
@@ -2256,7 +2260,7 @@ def index_launch(domain, task, *args, **kwargs):
         domain = domain.domain
     else:
         domain = Domain(domain)
-    launcher = _IndexLauncher(task=task, domain=domain)
+    launcher = _IndexLauncher(task=task, domain=domain, mapper=mapper, tag=tag)
     args, futures = launcher.gather_futures(args)
     launcher.attach_global_args(*args)
     launcher.attach_future_args(*futures)
@@ -2265,16 +2269,23 @@ def index_launch(domain, task, *args, **kwargs):
     return launcher.future_map
 
 class IndexLaunch(object):
-    __slots__ = ['domain', 'launcher', 'point',
+    __slots__ = ['domain', 'mapper', 'tag', 'launcher', 'point',
                  'saved_task', 'saved_args']
 
-    def __init__(self, domain):
+    def __init__(self, domain, **kwargs):
+        # Hack: workaround for Python 2 not having keyword-only arguments
+        def validate_spawn_task_args(mapper=0, tag=0):
+            return mapper, tag
+        mapper, tag = validate_spawn_task_args(**kwargs)
+
         if isinstance(domain, Domain):
             self.domain = domain
         elif isinstance(domain, Ispace):
             self.domain = domain.domain
         else:
             self.domain = Domain(domain)
+        self.mapper = mapper
+        self.tag = tag
         self.launcher = None
         self.point = None
         self.saved_task = None
@@ -2291,7 +2302,8 @@ class IndexLaunch(object):
 
     def ensure_launcher(self, task):
         if self.launcher is None:
-            self.launcher = _IndexLauncher(task=task, domain=self.domain)
+            self.launcher = _IndexLauncher(
+                task=task, domain=self.domain, mapper=self.mapper, tag=self.tag)
 
     def check_compatibility(self, task, *args):
         # The tasks in a launch must conform to the following constraints:

@@ -18,7 +18,7 @@
 from __future__ import print_function
 
 import legion
-from legion import task
+from legion import index_launch, task, IndexLaunch
 import numpy
 
 @task
@@ -28,6 +28,11 @@ def some_task():
 @task
 def main():
     some_task(mapper=0, tag=0)
+
+    for i in IndexLaunch([2], mapper=0, tag=0):
+        some_task()
+
+    index_launch([2], some_task, mapper=0, tag=0)
 
 if __name__ == '__main__':
     main()
