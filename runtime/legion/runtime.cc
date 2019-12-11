@@ -605,7 +605,7 @@ namespace Legion {
       AutoLock f_lock(future_lock);
 #ifdef DEBUG_LEGION
       assert(empty);
-      assert(subscription_event.exists());
+      assert(subscription_event.exists() || subscription_internal.exists());
 #endif
       derez.deserialize(result_size);
       if (result_size > 0)
