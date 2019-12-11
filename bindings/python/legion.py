@@ -1980,9 +1980,9 @@ class _TaskLauncher(object):
 
     def spawn_task(self, *args, **kwargs):
         # Hack: workaround for Python 2 not having keyword-only arguments
-        def validate_spawn_task_args(point=None):
-            return point
-        point = validate_spawn_task_args(**kwargs)
+        def validate_spawn_task_args(point=None, mapper=0, tag=0):
+            return point, mapper, tag
+        point, mapper, tag = validate_spawn_task_args(**kwargs)
 
         assert(isinstance(_my.ctx, Context))
 
@@ -1992,7 +1992,7 @@ class _TaskLauncher(object):
 
         # Construct the task launcher.
         launcher = c.legion_task_launcher_create(
-            self.task.task_id, task_args[0], c.legion_predicate_true(), 0, 0)
+            self.task.task_id, task_args[0], c.legion_predicate_true(), mapper, tag)
         if point is not None:
             point = DomainPoint.coerce(point)
             c.legion_task_launcher_set_point(launcher, point.raw_value())
