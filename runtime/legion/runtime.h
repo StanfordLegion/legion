@@ -277,6 +277,10 @@ namespace Legion {
       bool get_boolean_value(bool &valid);
       // Request that the value be made ready on this node
       ApEvent subscribe(void);
+      // Request the value be made ready on this node for
+      // internal use which means we can see the value before
+      // the future actually completes
+      RtEvent subscribe_internal(void);
     public:
       virtual void notify_active(ReferenceMutator *mutator);
       virtual void notify_valid(ReferenceMutator *mutator);
@@ -316,6 +320,7 @@ namespace Legion {
       mutable LocalLock future_lock;
       ApEvent future_complete;
       ApUserEvent subscription_event;
+      RtUserEvent subscription_internal;
       // On the owner node, keep track of the registered waiters
       std::set<AddressSpaceID> subscribers;
       void *result; 

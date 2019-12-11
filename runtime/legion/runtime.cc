@@ -616,8 +616,13 @@ namespace Legion {
       empty = false;
       ApEvent complete;
       derez.deserialize(complete);
-      Runtime::trigger_event(subscription_event, complete);
-      subscription_event = ApUserEvent::NO_AP_USER_EVENT;
+      if (subscription_event.exists())
+      {
+        Runtime::trigger_event(subscription_event, complete);
+        subscription_event = ApUserEvent::NO_AP_USER_EVENT;
+      }
+      if (subscription_internal.exists())
+        Runtime::trigger_event(subscription_internal);
       if (is_owner())
       {
 #ifdef DEBUG_LEGION
@@ -672,27 +677,69 @@ namespace Legion {
         if (!subscription_event.exists())
         {
           subscription_event = Runtime::create_ap_user_event();
-          // Add a reference to prevent us from being collected
-          // until we get the result of the subscription
-          add_base_resource_ref(RUNTIME_REF);
-          if (!is_owner())
+          if (!subscription_internal.exists())
           {
+            // Add a reference to prevent us from being collected
+            // until we get the result of the subscription
+            add_base_resource_ref(RUNTIME_REF);
+            if (!is_owner())
+            {
 #ifdef DEBUG_LEGION
-            assert(!future_complete.exists());
+              assert(!future_complete.exists());
 #endif
-            future_complete = subscription_event;
-            // Send a request to the owner node to subscribe
-            Serializer rez;
-            rez.serialize(did);
-            runtime->send_future_subscription(owner_space, rez);
+              future_complete = subscription_event;
+              // Send a request to the owner node to subscribe
+              Serializer rez;
+              rez.serialize(did);
+              runtime->send_future_subscription(owner_space, rez);
+            }
+            else
+              record_subscription(local_space, false/*need lock*/);
           }
-          else
-            record_subscription(local_space, false/*need lock*/);
         }
         return subscription_event;
       }
       else
         return future_complete;
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent FutureImpl::subscribe_internal(void)
+    //--------------------------------------------------------------------------
+    {
+      if (!empty)
+        return RtEvent::NO_RT_EVENT;
+      AutoLock f_lock(future_lock);
+      // See if we lost the race
+      if (empty)
+      {
+        if (!subscription_internal.exists())
+        {
+          subscription_internal = Runtime::create_rt_user_event();
+          if (!subscription_event.exists())
+          {
+            // Add a reference to prevent us from being collected
+            // until we get the result of the subscription
+            add_base_resource_ref(RUNTIME_REF);
+            if (!is_owner())
+            {
+#ifdef DEBUG_LEGION
+              assert(!future_complete.exists());
+#endif
+              future_complete = subscription_event;
+              // Send a request to the owner node to subscribe
+              Serializer rez;
+              rez.serialize(did);
+              runtime->send_future_subscription(owner_space, rez);
+            }
+            else
+              record_subscription(local_space, false/*need lock*/);
+          }
+        }
+        return subscription_internal;
+      }
+      else
+        return RtEvent::NO_RT_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -787,10 +834,15 @@ namespace Legion {
         if ((*it) == local_space)
         {
 #ifdef DEBUG_LEGION
-          assert(subscription_event.exists());
+          assert(subscription_event.exists() || subscription_internal.exists());
 #endif
-          Runtime::trigger_event(subscription_event, complete);
-          subscription_event = ApUserEvent::NO_AP_USER_EVENT;
+          if (subscription_event.exists())
+          {
+            Runtime::trigger_event(subscription_event, complete);
+            subscription_event = ApUserEvent::NO_AP_USER_EVENT;
+          }
+          if (subscription_internal.exists())
+            Runtime::trigger_event(subscription_internal);
         }
         else
         {

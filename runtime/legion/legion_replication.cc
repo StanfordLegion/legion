@@ -9781,7 +9781,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (source == ctx->owner_shard->shard_id)
-        ready = Runtime::protect_event(impl->subscribe());
+        ready = impl->subscribe_internal();
     }
 
     //--------------------------------------------------------------------------
