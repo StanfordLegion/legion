@@ -19,21 +19,6 @@ local ast = require("regent/ast")
 local data = require("common/data")
 local std = require("regent/std")
 
-local function merge_annotations(default, user)
-  local values = {}
-  for option, value in pairs(default) do
-    if ast.is_node(value) then
-        values[option] = value
-    end
-  end
-  for option, value in pairs(user) do
-    if value and ast.is_node(value) then
-      values[option] = value
-    end
-  end
-  return ast.annotation.Set(values)
-end
-
 local parser = {}
 
 function parser.lookaheadif(p, tok)
@@ -105,7 +90,7 @@ end
 
 function parser.annotations(p, allow_expr, allow_stat)
   assert(allow_expr or allow_stat)
-  local annotations = ast.empty_annotations()
+  local annotations = ast.default_annotations()
 
   local level = p:annotation_level()
   if not level then return annotations end
@@ -123,8 +108,6 @@ function parser.annotations(p, allow_expr, allow_stat)
       elseif allow_expr then
         local expr = p:expr()
         p:expect(")")
-        local annotations =
-          merge_annotations(ast.default_annotations(), annotations)
         return expr { annotations = annotations }
       end
     end
@@ -2045,8 +2028,6 @@ function parser.stat(p)
       span = annotations.span,
     }
   end
-  local annotations =
-    merge_annotations(ast.default_annotations(), annotations)
 
   if p:matches("if") then
     return p:stat_if(annotations)
@@ -2277,8 +2258,6 @@ end
 
 function parser.top_stat(p)
   local annotations = p:annotations(false, true)
-  local annotations =
-    merge_annotations(ast.default_annotations_top(), annotations)
 
   if p:matches("extern") or p:matches("task") then
     return p:top_task(annotations)
@@ -2319,8 +2298,6 @@ end
 
 function parser.top_expr(p)
   local annotations = p:annotations(false, true)
-  local annotations =
-    merge_annotations(ast.default_annotations_top(), annotations)
 
   if p:matches("rexpr") then
     return p:top_quote_expr(annotations)
