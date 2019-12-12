@@ -17,7 +17,16 @@ local std = require("regent/std")
 
 local omp = {}
 
-local has_openmp = std.config["openmp"] and std.config["openmp-offline"]
+-- Exit early if the user turned off OpenMP code generation
+
+if std.config["openmp"] == 0 then
+  function omp.check_openmp_available()
+    return false
+  end
+  return omp
+end
+
+local has_openmp = true
 if not std.config["openmp-offline"] then
   local dlfcn = terralib.includec("dlfcn.h")
   local terra find_openmp_symbols()
@@ -33,25 +42,16 @@ if not std.config["openmp-offline"] then
   has_openmp = find_openmp_symbols()
 end
 
-if not (std.config["openmp"] and has_openmp) then
-  if not std.config["openmp"] then
-    function omp.check_openmp_available()
-      return false, "OpenMP code generation is turned off (-fopenmp 0)"
-    end
-  else
-    assert(not has_openmp)
-    function omp.check_openmp_available()
-      return false, "Regent is installed without OpenMP support"
-    end
+if not has_openmp then
+  function omp.check_openmp_available()
+    return false, "Regent is installed without OpenMP support"
   end
-  terra omp.get_num_threads() return 1 end
-  terra omp.get_max_threads() return 1 end
-  terra omp.get_thread_num() return 0 end
-  local omp_worker_type =
-    terralib.types.functype(terralib.newlist({&opaque}), terralib.types.unit, false)
-  terra omp.launch(fnptr : &omp_worker_type, data : &opaque, nthreads : int32, flags : uint32)
-    fnptr(data)
+  if std.config["openmp"] == 1 then
+    local available, message = omp.check_openmp_available()
+    print("OpenMP code generation failed since " .. message)
+    os.exit(-1)
   end
+
 else
   omp.check_openmp_available = function() return true end
   local omp_abi = terralib.includecstring [[

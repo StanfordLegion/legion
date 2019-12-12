@@ -166,6 +166,7 @@ namespace Realm {
       // a pointer to the owning xfer descriptor
       // this should set at Request creation
       XferDes* xd;
+      int src_port_idx, dst_port_idx;
       // src/dst offset in the src/dst instance
       off_t src_off, dst_off;
       // src/dst (line) strides
@@ -202,7 +203,7 @@ namespace Realm {
       size_t add_span(size_t pos, size_t count);
 
     protected:
-      Mutex mutex;
+      Mutex *mutex;
       size_t contig_amount;  // everything from [0, contig_amount) is covered
       size_t first_noncontig; // nothing in [contig_amount, first_noncontig) 
       std::map<size_t, size_t> spans;  // noncontiguous spans
@@ -225,7 +226,7 @@ namespace Realm {
 
     class RemoteWriteRequest : public Request {
     public:
-      NodeID dst_node;
+      //NodeID dst_node;
       const void *src_base;
       void *dst_base;
       //size_t nbytes;
@@ -246,7 +247,7 @@ namespace Realm {
     public:
       const void *src_base;
       void *dst_base;
-      off_t src_gpu_off, dst_gpu_off;
+      //off_t src_gpu_off, dst_gpu_off;
       Cuda::GPU* dst_gpu;
       GPUCompletionEvent event;
     };
@@ -261,15 +262,6 @@ namespace Realm {
     };
 #endif
 
-    class XferOrder {
-    public:
-      enum Type {
-        SRC_FIFO,
-        DST_FIFO,
-        ANY_ORDER
-      };
-    };
-
     class XferDesFence : public Realm::Operation::AsyncWorkItem {
     public:
       XferDesFence(Realm::Operation *op) : Realm::Operation::AsyncWorkItem(op) {}
@@ -279,27 +271,24 @@ namespace Realm {
       virtual void print(std::ostream& os) const { os << "XferDesFence"; }
     };
 
-    class XferDes {
-    public:
-      enum XferKind {
-        XFER_NONE,
-        XFER_DISK_READ,
-        XFER_DISK_WRITE,
-        XFER_SSD_READ,
-        XFER_SSD_WRITE,
-        XFER_GPU_TO_FB,
-        XFER_GPU_FROM_FB,
-        XFER_GPU_IN_FB,
-        XFER_GPU_PEER_FB,
-        XFER_MEM_CPY,
-        XFER_GASNET_READ,
-        XFER_GASNET_WRITE,
-        XFER_REMOTE_WRITE,
-        XFER_HDF_READ,
-        XFER_HDF_WRITE,
-        XFER_FILE_READ,
-        XFER_FILE_WRITE
+    struct XferDesPortInfo {
+      enum /*PortType*/ {
+	DATA_PORT,
+	GATHER_CONTROL_PORT,
+	SCATTER_CONTROL_PORT,
       };
+      int port_type;
+      XferDesID peer_guid;
+      int peer_port_idx;
+      int indirect_port_idx;
+      Memory mem;
+      RegionInstance inst;
+      size_t ib_offset, ib_size;
+      TransferIterator *iter;
+      CustomSerdezID serdez_id;
+    };
+
+    class XferDes {
     public:
       // a pointer to the DmaRequest that contains this XferDes
       DmaRequest* dma_request;
@@ -309,29 +298,41 @@ namespace Realm {
       NodeID launch_node;
       //uint64_t /*bytes_submit, */bytes_read, bytes_write/*, bytes_total*/;
       bool iteration_completed;
-      uint64_t read_bytes_total, write_bytes_total; // not valid until iteration_completed == true
-      uint64_t read_bytes_cons, write_bytes_cons; // used for serdez, updated atomically
-      uint64_t pre_bytes_total;
-      //uint64_t next_bytes_read;
-      MemoryImpl *src_mem;
-      MemoryImpl *dst_mem;
-      TransferIterator *src_iter;
-      TransferIterator *dst_iter;
-      const CustomSerdezUntyped *src_serdez_op;
-      const CustomSerdezUntyped *dst_serdez_op;
-      size_t src_ib_offset, src_ib_size;
+      // current input and output port mask
+      uint64_t current_in_port_mask, current_out_port_mask;
+      uint64_t current_in_port_remain, current_out_port_remain;
+      struct XferPort {
+	MemoryImpl *mem;
+	TransferIterator *iter;
+	const CustomSerdezUntyped *serdez_op;
+	XferDesID peer_guid;
+	int peer_port_idx;
+	int indirect_port_idx;
+	uint64_t local_bytes_total, local_bytes_cons, remote_bytes_total;
+	SequenceAssembler seq_local, seq_remote;
+	// used to free up intermediate input buffers as soon as all data
+	//  has been read (rather than waiting for overall transfer chain
+	//  to complete)
+	Memory ib_mem;
+	size_t ib_offset, ib_size;
+      };
+      std::vector<XferPort> input_ports, output_ports;
+      struct ControlPortState {
+	int control_port_idx;
+	int current_io_port;
+	size_t remaining_count; // units of bytes for normal (elements for serialized data?)
+	bool eos_received;
+      };
+      ControlPortState input_control, output_control;
       // maximum size for a single request
       uint64_t max_req_size;
       // priority of the containing XferDes
       int priority;
       // current, previous and next XferDes in the chain, XFERDES_NO_GUID
       // means this XferDes is the first/last one.
-      XferDesID guid, pre_xd_guid, next_xd_guid;
-      // XferKind of the Xfer Descriptor
-      XferKind kind;
-      // XferOrder of the Xfer Descriptor
-      XferOrder::Type order;
-      SequenceAssembler seq_read, seq_write, seq_pre_write, seq_next_read;
+      XferDesID guid;//, pre_xd_guid, next_xd_guid;
+      // XferDesKind of the Xfer Descriptor
+      XferDesKind kind;
       // queue that contains all available free requests
       std::queue<Request*> available_reqs;
       enum {
@@ -347,19 +348,19 @@ namespace Realm {
       Mutex xd_lock, update_read_lock, update_write_lock;
       // default iterators provided to generate requests
       //Layouts::GenericLayoutIterator<DIM>* li;
-      unsigned offset_idx;
+      // SJT:what is this for?
+      //unsigned offset_idx;
     public:
-      XferDes(DmaRequest* _dma_request, NodeID _launch_node,
-              XferDesID _guid, XferDesID _pre_xd_guid, XferDesID _next_xd_guid,
-	      uint64_t _next_max_rw_gap, size_t src_ib_offset, size_t src_ib_size,
-              bool _mark_start,
-	      Memory _src_mem, Memory _dst_mem,
-	      TransferIterator *_src_iter, TransferIterator *_dst_iter,
-	      CustomSerdezID _src_serdez_id, CustomSerdezID _dst_serdez_id,
+      XferDes(DmaRequest *_dma_request, NodeID _launch_node, XferDesID _guid,
+	      const std::vector<XferDesPortInfo>& inputs_info,
+	      const std::vector<XferDesPortInfo>& outputs_info,
+	      bool _mark_start,
               uint64_t _max_req_size, int _priority,
-              XferOrder::Type _order, XferKind _kind, XferDesFence* _complete_fence);
+              XferDesFence* _complete_fence);
 
       virtual ~XferDes();
+
+      virtual Event request_metadata();
 
       virtual long get_requests(Request** requests, long nr) = 0;
 
@@ -373,10 +374,10 @@ namespace Realm {
       void default_notify_request_read_done(Request* req);
       void default_notify_request_write_done(Request* req);
 
-      virtual void update_bytes_read(size_t offset, size_t size);
-      virtual void update_bytes_write(size_t offset, size_t size);
-      void update_pre_bytes_write(size_t offset, size_t size, size_t pre_bytes_total);
-      void update_next_bytes_read(size_t offset, size_t size);
+      virtual void update_bytes_read(int port_idx, size_t offset, size_t size);
+      virtual void update_bytes_write(int port_idx, size_t offset, size_t size);
+      void update_pre_bytes_write(int port_idx, size_t offset, size_t size, size_t pre_bytes_total);
+      void update_next_bytes_read(int port_idx, size_t offset, size_t size);
 
       bool is_completed(void);
 
@@ -436,15 +437,12 @@ namespace Realm {
 
     class MemcpyXferDes : public XferDes {
     public:
-      MemcpyXferDes(DmaRequest* _dma_request, NodeID _launch_node,
-                    XferDesID _guid, XferDesID _pre_xd_guid, XferDesID _next_xd_guid,
-		    uint64_t _next_max_rw_gap, size_t src_ib_offset, size_t src_ib_size,
-                    bool mark_started,
-		    Memory _src_mem, Memory _dst_mem,
-		    TransferIterator *_src_iter, TransferIterator *_dst_iter,
-		    CustomSerdezID _src_serdez_id, CustomSerdezID _dst_serdez_id,
-                    uint64_t max_req_size, long max_nr, int _priority,
-                    XferOrder::Type _order, XferDesFence* _complete_fence);
+      MemcpyXferDes(DmaRequest *_dma_request, NodeID _launch_node, XferDesID _guid,
+		    const std::vector<XferDesPortInfo>& inputs_info,
+		    const std::vector<XferDesPortInfo>& outputs_info,
+		    bool _mark_start,
+		    uint64_t _max_req_size, long max_nr, int _priority,
+		    XferDesFence* _complete_fence);
 
       ~MemcpyXferDes()
       {
@@ -463,15 +461,12 @@ namespace Realm {
 
     class GASNetXferDes : public XferDes {
     public:
-      GASNetXferDes(DmaRequest* _dma_request, NodeID _launch_node,
-                    XferDesID _guid, XferDesID _pre_xd_guid, XferDesID _next_xd_guid,
-		    uint64_t _next_max_rw_gap, size_t src_ib_offset, size_t src_ib_size,
-                    bool mark_started,
-		    Memory _src_mem, Memory _dst_mem,
-		    TransferIterator *_src_iter, TransferIterator *_dst_iter,
-		    CustomSerdezID _src_serdez_id, CustomSerdezID _dst_serdez_id,
-                    uint64_t _max_req_size, long max_nr, int _priority,
-                    XferOrder::Type _order, XferKind _kind, XferDesFence* _complete_fence);
+      GASNetXferDes(DmaRequest *_dma_request, NodeID _launch_node, XferDesID _guid,
+		    const std::vector<XferDesPortInfo>& inputs_info,
+		    const std::vector<XferDesPortInfo>& outputs_info,
+		    bool _mark_start,
+		    uint64_t _max_req_size, long max_nr, int _priority,
+		    XferDesFence* _complete_fence);
 
       ~GASNetXferDes()
       {
@@ -489,15 +484,12 @@ namespace Realm {
 
     class RemoteWriteXferDes : public XferDes {
     public:
-      RemoteWriteXferDes(DmaRequest* _dma_request, NodeID _launch_node,
-                         XferDesID _guid, XferDesID _pre_xd_guid, XferDesID _next_xd_guid,
-			 uint64_t _next_max_rw_gap, size_t src_ib_offset, size_t src_ib_size,
-                         bool mark_started,
-			 Memory _src_mem, Memory _dst_mem,
-			 TransferIterator *_src_iter, TransferIterator *_dst_iter,
-			 CustomSerdezID _src_serdez_id, CustomSerdezID _dst_serdez_id,
-                         uint64_t max_req_size, long max_nr, int _priority,
-                         XferOrder::Type _order, XferDesFence* _complete_fence);
+      RemoteWriteXferDes(DmaRequest *_dma_request, NodeID _launch_node, XferDesID _guid,
+			 const std::vector<XferDesPortInfo>& inputs_info,
+			 const std::vector<XferDesPortInfo>& outputs_info,
+			 bool _mark_start,
+			 uint64_t _max_req_size, long max_nr, int _priority,
+			 XferDesFence* _complete_fence);
 
       ~RemoteWriteXferDes()
       {
@@ -511,25 +503,23 @@ namespace Realm {
 
       // doesn't do pre_bytes_write updates, since the remote write message
       //  takes care of it with lower latency
-      virtual void update_bytes_write(size_t offset, size_t size);
+      virtual void update_bytes_write(int port_idx, size_t offset, size_t size);
 
     private:
       RemoteWriteRequest* requests;
-      char *dst_buf_base;
+      //char *dst_buf_base;
     };
 
 #ifdef USE_CUDA
     class GPUXferDes : public XferDes {
     public:
-      GPUXferDes(DmaRequest* _dma_request, NodeID _launch_node,
-                 XferDesID _guid, XferDesID _pre_xd_guid, XferDesID _next_xd_guid,
-		 uint64_t _next_max_rw_gap, size_t src_ib_offset, size_t src_ib_size,
-                 bool mark_started,
-		 Memory _src_mem, Memory _dst_mem,
-		 TransferIterator *_src_iter, TransferIterator *_dst_iter,
-		 CustomSerdezID _src_serdez_id, CustomSerdezID _dst_serdez_id,
-                 uint64_t _max_req_size, long max_nr, int _priority,
-                 XferOrder::Type _order, XferKind _kind, XferDesFence* _complete_fence);
+      GPUXferDes(DmaRequest *_dma_request, NodeID _launch_node, XferDesID _guid,
+		 const std::vector<XferDesPortInfo>& inputs_info,
+		 const std::vector<XferDesPortInfo>& outputs_info,
+		 bool _mark_start,
+		 uint64_t _max_req_size, long max_nr, int _priority,
+		 XferDesFence* _complete_fence);
+
       ~GPUXferDes()
       {
         while (!available_reqs.empty()) {
@@ -555,16 +545,13 @@ namespace Realm {
 #ifdef USE_HDF
     class HDFXferDes : public XferDes {
     public:
-      HDFXferDes(DmaRequest* _dma_request, NodeID _launch_node,
-                 XferDesID _guid, XferDesID _pre_xd_guid, XferDesID _next_xd_guid,
-		 uint64_t _next_max_rw_gap, size_t src_ib_offset, size_t src_ib_size,
-                 bool mark_started,
-                 RegionInstance inst,
-		 Memory _src_mem, Memory _dst_mem,
-		 TransferIterator *_src_iter, TransferIterator *_dst_iter,
-		 CustomSerdezID _src_serdez_id, CustomSerdezID _dst_serdez_id,
-                 uint64_t _max_req_size, long max_nr, int _priority,
-                 XferOrder::Type _order, XferKind _kind, XferDesFence* _complete_fence);
+      HDFXferDes(DmaRequest *_dma_request, NodeID _launch_node, XferDesID _guid,
+		 const std::vector<XferDesPortInfo>& inputs_info,
+		 const std::vector<XferDesPortInfo>& outputs_info,
+		 bool _mark_start,
+		 uint64_t _max_req_size, long max_nr, int _priority,
+		 XferDesFence* _complete_fence);
+
       ~HDFXferDes()
       {
         free(hdf_reqs);
@@ -590,14 +577,18 @@ namespace Realm {
 
     class Channel {
     public:
-      Channel(XferDes::XferKind _kind)
+      Channel(XferDesKind _kind)
 	: node(Network::my_node_id), kind(_kind) {}
       virtual ~Channel() {};
     public:
       // which node manages this channel
       NodeID node;
       // the kind of XferDes this channel can accept
-      XferDes::XferKind kind;
+      XferDesKind kind;
+
+      // attempt to make progress on the specified xferdes
+      virtual long progress_xd(XferDes *xd, long max_nr);
+      
       /*
        * Submit nr asynchronous requests into the channel instance.
        * This is supposed to be a non-blocking function call, and
@@ -780,7 +771,7 @@ namespace Realm {
 
     class GASNetChannel : public Channel {
     public:
-      GASNetChannel(long max_nr, XferDes::XferKind _kind);
+      GASNetChannel(long max_nr, XferDesKind _kind);
       ~GASNetChannel();
       long submit(Request** requests, long nr);
       void pull();
@@ -809,7 +800,7 @@ namespace Realm {
 #ifdef USE_CUDA
     class GPUChannel : public Channel {
     public:
-      GPUChannel(Cuda::GPU* _src_gpu, long max_nr, XferDes::XferKind _kind);
+      GPUChannel(Cuda::GPU* _src_gpu, long max_nr, XferDesKind _kind);
       ~GPUChannel();
       long submit(Request** requests, long nr);
       void pull();
@@ -824,7 +815,7 @@ namespace Realm {
 #ifdef USE_HDF
     class HDFChannel : public Channel {
     public:
-      HDFChannel(long max_nr, XferDes::XferKind _kind);
+      HDFChannel(long max_nr, XferDesKind _kind);
       ~HDFChannel();
       long submit(Request** requests, long nr);
       void pull();
@@ -837,6 +828,17 @@ namespace Realm {
     class FileChannel;
     class DiskChannel;
 
+    class AddressSplitChannel : public Channel {
+    public:
+      AddressSplitChannel();
+      virtual ~AddressSplitChannel();
+      
+      virtual long progress_xd(XferDes *xd, long max_nr);
+      virtual long submit(Request** requests, long nr);
+      virtual void pull();
+      virtual long available();
+    };
+  
     class ChannelManager {
     public:
       ChannelManager(void) {
@@ -851,6 +853,7 @@ namespace Realm {
         hdf_read_channel = NULL;
         hdf_write_channel = NULL;
 #endif
+	addr_split_channel = 0;
       }
       ~ChannelManager(void);
       MemcpyChannel* create_memcpy_channel(long max_nr);
@@ -861,6 +864,7 @@ namespace Realm {
       DiskChannel* create_disk_write_channel(long max_nr);
       FileChannel* create_file_read_channel(long max_nr);
       FileChannel* create_file_write_channel(long max_nr);
+      AddressSplitChannel *create_addr_split_channel();
 #ifdef USE_CUDA
       GPUChannel* create_gpu_to_fb_channel(long max_nr, Cuda::GPU* src_gpu);
       GPUChannel* create_gpu_from_fb_channel(long max_nr, Cuda::GPU* src_gpu);
@@ -895,6 +899,9 @@ namespace Realm {
       }
       FileChannel* get_file_write_channel() {
         return file_write_channel;
+      }
+      AddressSplitChannel *get_address_split_channel() {
+	return addr_split_channel;
       }
 #ifdef USE_CUDA
       GPUChannel* get_gpu_to_fb_channel(Cuda::GPU* gpu) {
@@ -942,6 +949,7 @@ namespace Realm {
 #ifdef USE_HDF
       HDFChannel *hdf_read_channel, *hdf_write_channel;
 #endif
+      AddressSplitChannel *addr_split_channel;
     };
 
     class CompareXferDes {
@@ -1037,7 +1045,9 @@ namespace Realm {
     struct XferDesRemoteWriteMessage {
       RemoteWriteRequest *req;
       XferDesID next_xd_guid;
-      size_t span_start, span_size, pre_bytes_total;
+      int next_port_idx;
+      unsigned span_size; // 32 bits to fit in packet size
+      size_t span_start, /*span_size,*/ pre_bytes_total;
 
       static void handle_message(NodeID sender,
 				 const XferDesRemoteWriteMessage &args,
@@ -1048,6 +1058,7 @@ namespace Realm {
                                const void *src_buf, size_t nbytes,
                                RemoteWriteRequest* req,
 			       XferDesID next_xd_guid,
+			       int next_port_idx,
 			       size_t span_start,
 			       size_t span_size,
 			       size_t pre_bytes_total) 
@@ -1055,7 +1066,9 @@ namespace Realm {
 	ActiveMessage<XferDesRemoteWriteMessage> amsg(target, nbytes, dst_buf);
 	amsg->req = req;
 	amsg->next_xd_guid = next_xd_guid;
+	amsg->next_port_idx = next_port_idx;
 	amsg->span_start = span_start;
+	assert(span_size <= UINT_MAX);
 	amsg->span_size = span_size;
 	amsg->pre_bytes_total = pre_bytes_total;
         //TODO: need to ask Sean what payload mode we should use
@@ -1067,6 +1080,7 @@ namespace Realm {
                                const void *src_buf, size_t nbytes, off_t src_str,
                                size_t nlines, RemoteWriteRequest* req,
 			       XferDesID next_xd_guid,
+			       int next_port_idx,
 			       size_t span_start,
 			       size_t span_size,
 			       size_t pre_bytes_total) 
@@ -1075,6 +1089,7 @@ namespace Realm {
 	ActiveMessage<XferDesRemoteWriteMessage> amsg(target, payload_size, dst_buf);
 	amsg->req = req;
 	amsg->next_xd_guid = next_xd_guid;
+	amsg->next_port_idx = next_port_idx;
 	amsg->span_start = span_start;
 	amsg->span_size = span_size;
 	amsg->pre_bytes_total = pre_bytes_total;
@@ -1100,47 +1115,6 @@ namespace Realm {
       }
     };
 
-    struct XferDesCreateMessage {
-        RegionInstance inst;
-        Memory src_mem, dst_mem;
-        XferDesFence* fence;
-
-      // TODO: replace with new serialization stuff
-      struct Payload {
-        DmaRequest* dma_request;
-        NodeID launch_node;
-        XferDesID guid, pre_xd_guid, next_xd_guid;
-        bool mark_started;
-        uint64_t max_req_size;
-        long max_nr;
-        int priority;
-        XferOrder::Type order;
-        XferDes::XferKind kind;
-        //Domain domain;
-        int src_buf_bits[Buffer::MAX_SERIALIZATION_LEN], dst_buf_bits[Buffer::MAX_SERIALIZATION_LEN];
-        size_t oas_vec_size; // as long as it needs to be
-        OffsetsAndSize oas_vec_start;
-        const OffsetsAndSize &oas_vec(int idx) const { return *((&oas_vec_start)+idx); }
-        OffsetsAndSize &oas_vec(int idx) { return *((&oas_vec_start)+idx); }
-      };
-
-      static void handle_message(NodeID sender,
-				 const XferDesCreateMessage &args,
-				 const void *data,
-				 size_t datalen);
-
-      static void send_request(NodeID target, DmaRequest* dma_request, NodeID launch_node,
-                               XferDesID guid, XferDesID pre_xd_guid, XferDesID next_xd_guid,
-			       uint64_t next_max_rw_gap, size_t src_ib_offset, size_t src_ib_size,
-                               bool mark_started,
-			       Memory _src_mem, Memory _dst_mem,
-			       TransferIterator *_src_iter, TransferIterator *_dst_iter,
-			       CustomSerdezID _src_serdez_id, CustomSerdezID _dst_serdez_id,
-                               uint64_t max_req_size, long max_nr, int priority,
-                               XferOrder::Type order, XferDes::XferKind kind,
-                               XferDesFence* fence, RegionInstance inst = RegionInstance::NO_INST);
-    };
-
     struct XferDesDestroyMessage {
       XferDesID guid;
       static void handle_message(NodeID sender,
@@ -1157,17 +1131,22 @@ namespace Realm {
 
     struct UpdateBytesWriteMessage {
       XferDesID guid;
+      int port_idx;
       size_t span_start, span_size, pre_bytes_total;
+
       static void handle_message(NodeID sender,
 				 const UpdateBytesWriteMessage &args,
 				 const void *data,
 				 size_t datalen);
+
       static void send_request(NodeID target, XferDesID guid,
+			       int port_idx,
 			       size_t span_start, size_t span_size,
 			       size_t pre_bytes_total)
       {
 	ActiveMessage<UpdateBytesWriteMessage> amsg(target);
         amsg->guid = guid;
+	amsg->port_idx = port_idx;
 	amsg->span_start = span_start;
 	amsg->span_size = span_size;
 	amsg->pre_bytes_total = pre_bytes_total;
@@ -1177,29 +1156,93 @@ namespace Realm {
 
     struct UpdateBytesReadMessage {
       XferDesID guid;
+      int port_idx;
       size_t span_start, span_size;
+
       static void handle_message(NodeID sender,
 				 const UpdateBytesReadMessage &args,
 				 const void *data,
 				 size_t datalen);
+
       static void send_request(NodeID target, XferDesID guid,
+			       int port_idx,
 			       size_t span_start, size_t span_size)
       {
 	ActiveMessage<UpdateBytesReadMessage> amsg(target);
         amsg->guid = guid;
+	amsg->port_idx = port_idx;
 	amsg->span_start = span_start;
 	amsg->span_size = span_size;
 	amsg.commit();
       }
     };
 
+    class XferDesFactory {
+    protected:
+      // do not destroy directly - use release()
+      virtual ~XferDesFactory() {}
+
+    public:
+      virtual void release() = 0;
+
+      virtual void create_xfer_des(DmaRequest *dma_request,
+				   NodeID launch_node,
+				   NodeID target_node,
+				   XferDesID guid,
+				   const std::vector<XferDesPortInfo>& inputs_info,
+				   const std::vector<XferDesPortInfo>& outputs_info,
+				   bool mark_started,
+				   uint64_t max_req_size, long max_nr, int priority,
+				   XferDesFence *complete_fence,
+				   RegionInstance inst = RegionInstance::NO_INST) = 0;
+    };
+
+    struct XferDesCreateMessageBase {
+      RegionInstance inst;
+      XferDesFence *complete_fence;
+      DmaRequest *dma_request;
+      XferDesID guid;
+      NodeID launch_node;
+    };
+
+    template <typename T>
+    struct XferDesCreateMessage : public XferDesCreateMessageBase {
+      static void handle_message(NodeID sender,
+				 const XferDesCreateMessage<T> &args,
+				 const void *data,
+				 size_t datalen);
+    };
+
+    template <typename T>
+    class SimpleXferDesFactory : public XferDesFactory {
+    protected:
+      // simple factories use singletons, so no direct construction/destruction
+      SimpleXferDesFactory();
+      ~SimpleXferDesFactory();
+
+    public:
+      static SimpleXferDesFactory<T> *get_singleton();
+      virtual void release();
+
+      virtual void create_xfer_des(DmaRequest *dma_request,
+				   NodeID launch_node,
+				   NodeID target_node,
+				   XferDesID guid,
+				   const std::vector<XferDesPortInfo>& inputs_info,
+				   const std::vector<XferDesPortInfo>& outputs_info,
+				   bool mark_started,
+				   uint64_t max_req_size, long max_nr, int priority,
+				   XferDesFence *complete_fence,
+				   RegionInstance inst = RegionInstance::NO_INST);
+    };
+      
     class XferDesQueue {
     public:
       struct XferDesWithUpdates{
-        XferDesWithUpdates(void): xd(NULL), pre_bytes_total((size_t)-1) {}
+        XferDesWithUpdates(void): xd(NULL) {}
         XferDes* xd;
-	size_t pre_bytes_total;
-	SequenceAssembler seq_pre_write;
+	std::map<int, size_t> pre_bytes_total;
+	std::map<int, SequenceAssembler> seq_pre_write;
       };
       enum {
         NODE_BITS = 16,
@@ -1252,7 +1295,7 @@ namespace Realm {
         return (((XferDesID)execution_node << (NODE_BITS + INDEX_BITS)) | ((XferDesID)Network::my_node_id << INDEX_BITS) | idx);
       }
 
-      void update_pre_bytes_write(XferDesID xd_guid,
+      void update_pre_bytes_write(XferDesID xd_guid, int port_idx,
 				  size_t span_start, size_t span_size,
 				  size_t pre_bytes_total)
       {
@@ -1267,21 +1310,25 @@ namespace Realm {
           if (it != guid_to_xd.end()) {
             if (it->second.xd != NULL) {
               //it->second.xd->update_pre_bytes_write(bytes_write);
-	      it->second.xd->update_pre_bytes_write(span_start, span_size, pre_bytes_total);
+	      it->second.xd->update_pre_bytes_write(port_idx, span_start, span_size, pre_bytes_total);
             } else {
-              // if (bytes_write > it->second.pre_bytes_write)
-              //   it->second.pre_bytes_write = bytes_write;
-	      it->second.seq_pre_write.add_span(span_start, span_size);
-	      if(pre_bytes_total != ((size_t)-1)) {
-		assert((it->second.pre_bytes_total == pre_bytes_total) ||
-		       (it->second.pre_bytes_total == (size_t)-1));
-		it->second.pre_bytes_total = pre_bytes_total;
-	      }
+	      it->second.seq_pre_write[port_idx].add_span(span_start, span_size);
+
+	      std::map<int, size_t>::iterator it2 = it->second.pre_bytes_total.find(port_idx);
+	      if(it2 != it->second.pre_bytes_total.end()) {
+		if(pre_bytes_total != size_t(-1)) {
+		  assert((it2->second == pre_bytes_total) ||
+			 (it2->second == size_t(-1)));
+		  it2->second = pre_bytes_total;
+		}
+	      } else
+		it->second.pre_bytes_total[port_idx] = pre_bytes_total;
+
             }
           } else {
             XferDesWithUpdates& xdup = guid_to_xd[xd_guid];
-	    xdup.seq_pre_write.add_span(span_start, span_size);
-	    xdup.pre_bytes_total = pre_bytes_total;
+	    xdup.seq_pre_write[port_idx].add_span(span_start, span_size);
+	    xdup.pre_bytes_total[port_idx] = pre_bytes_total;
           }
 #ifdef REALM_USE_SUBPROCESSES
 	  guid_lock.unlock();
@@ -1292,12 +1339,13 @@ namespace Realm {
         else {
           // send a active message to remote node
           UpdateBytesWriteMessage::send_request(execution_node, xd_guid,
+						port_idx,
 						span_start, span_size,
 						pre_bytes_total);
         }
       }
 
-      void update_next_bytes_read(XferDesID xd_guid,
+      void update_next_bytes_read(XferDesID xd_guid, int port_idx,
 				  size_t span_start, size_t span_size)
       {
         NodeID execution_node = xd_guid >> (NODE_BITS + INDEX_BITS);
@@ -1310,7 +1358,7 @@ namespace Realm {
           std::map<XferDesID, XferDesWithUpdates>::iterator it = guid_to_xd.find(xd_guid);
           if (it != guid_to_xd.end()) {
 	    assert(it->second.xd != NULL);
-	    it->second.xd->update_next_bytes_read(span_start, span_size);
+	    it->second.xd->update_next_bytes_read(port_idx, span_start, span_size);
 	  } else {
             // This means this update goes slower than future updates, which marks
             // completion of xfer des (ID = xd_guid). In this case, it is safe to drop the update
@@ -1324,6 +1372,7 @@ namespace Realm {
         else {
           // send a active message to remote node
           UpdateBytesReadMessage::send_request(execution_node, xd_guid,
+					       port_idx,
 					       span_start, span_size);
         }
       }
@@ -1358,81 +1407,9 @@ namespace Realm {
         delete xd;
       }
 
-      void enqueue_xferDes_local(XferDes* xd) {
-#ifdef REALM_USE_SUBPROCESSES
-	guid_lock.lock();
-#else
-        pthread_rwlock_wrlock(&guid_lock);
-#endif
-        std::map<XferDesID, XferDesWithUpdates>::iterator git = guid_to_xd.find(xd->guid);
-        if (git != guid_to_xd.end()) {
-          // xerDes_queue has received updates of this xferdes
-          // need to integrate these updates into xferdes
-          assert(git->second.xd == NULL);
-	  git->second.xd = xd;
-	  xd->pre_bytes_total = git->second.pre_bytes_total;
-	  xd->seq_pre_write.swap(git->second.seq_pre_write);
-        } else {
-	  XferDesWithUpdates& xdup = guid_to_xd[xd->guid];
-	  xdup.xd = xd;
-        }
-#ifdef REALM_USE_SUBPROCESSES
-	guid_lock.unlock();
-#else
-        pthread_rwlock_unlock(&guid_lock);
-#endif
-        std::map<Channel*, DMAThread*>::iterator it;
-        it = channel_to_dma_thread.find(xd->channel);
-        assert(it != channel_to_dma_thread.end());
-        DMAThread* dma_thread = it->second;
-	dma_thread->enqueue_lock.lock();
-	queues_lock.lock();
-        std::map<Channel*, PriorityXferDesQueue*>::iterator it2;
-        it2 = queues.find(xd->channel);
-        assert(it2 != queues.end());
-        // push ourself into the priority queue
-        it2->second->insert(xd);
-	queues_lock.unlock();
-        if (dma_thread->sleep) {
-          dma_thread->sleep = false;
-	  dma_thread->enqueue_cond.signal();
-        }
-	dma_thread->enqueue_lock.unlock();
-      }
+      void enqueue_xferDes_local(XferDes* xd);
 
-      bool dequeue_xferDes(DMAThread* dma_thread, bool wait_on_empty) {
-	dma_thread->enqueue_lock.lock();
-        std::map<Channel*, PriorityXferDesQueue*>::iterator it;
-        if (wait_on_empty) {
-          bool empty = true;
-          for(it = dma_thread->channel_to_xd_pool.begin(); it != dma_thread->channel_to_xd_pool.end(); it++) {
-	    queues_lock.lock();
-            std::map<Channel*, PriorityXferDesQueue*>::iterator it2;
-            it2 = queues.find(it->first);
-            assert(it2 != queues.end());
-            if (it2->second->size() > 0)
-              empty = false;
-	    queues_lock.unlock();
-          }
-
-          if (empty && !dma_thread->is_stopped) {
-            dma_thread->sleep = true;
-	    dma_thread->enqueue_cond.wait();
-          }
-        }
-
-        for(it = dma_thread->channel_to_xd_pool.begin(); it != dma_thread->channel_to_xd_pool.end(); it++) {
-	  queues_lock.lock();
-          std::map<Channel*, PriorityXferDesQueue*>::iterator it2;
-          it2 = queues.find(it->first);
-          assert(it2 != queues.end());
-          it->second->insert(it2->second->begin(), it2->second->end());
-          it2->second->clear();
-	  queues_lock.unlock();
-        }
-	dma_thread->enqueue_lock.unlock();
-        return true;
-      }
+      bool dequeue_xferDes(DMAThread* dma_thread, bool wait_on_empty);
 
       void start_worker(int count, int max_nr, ChannelManager* channel_manager);
 
@@ -1465,21 +1442,10 @@ namespace Realm {
     void start_channel_manager(int count, bool pinned, int max_nr, CoreReservationSet& crs);
     void stop_channel_manager();
 
-    void create_xfer_des(DmaRequest* _dma_request,
-			 NodeID _launch_node,
-			 NodeID _target_node,
-                         XferDesID _guid, XferDesID _pre_xd_guid, XferDesID _next_xd_guid,
-			 uint64_t _next_max_rw_gap, size_t src_ib_offset, size_t src_ib_size,
-                         bool mark_started,
-			 Memory _src_mem, Memory _dst_mem,
-			 TransferIterator *_src_iter, TransferIterator *_dst_iter,
-			 CustomSerdezID _src_serdez_id, CustomSerdezID _dst_serdez_id,
-                         uint64_t _max_req_size, long max_nr, int _priority,
-                         XferOrder::Type _order, XferDes::XferKind _kind,
-                         XferDesFence* _complete_fence, RegionInstance inst = RegionInstance::NO_INST);
-
     void destroy_xfer_des(XferDesID _guid);
 }; // namespace Realm
+
+#include "realm/transfer/channel.inl"
 
 #endif
 

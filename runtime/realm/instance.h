@@ -24,6 +24,7 @@
 
 #include "realm/event.h"
 #include "realm/memory.h"
+#include "realm/processor.h"
 #include "realm/point.h"
 
 #include "realm/custom_serdez.h"
@@ -103,8 +104,6 @@ namespace Realm {
 		     bool exclusive = false) const;
     template <typename T>
     T *pointer(size_t offset) const;
-
-    Event get_ready_event(void) const;
 
     // calls to create_instance return immediately with a handle, but also
     //  return an event that must be used as a precondition for any use (or
@@ -194,6 +193,14 @@ namespace Realm {
     void destroy(Event wait_on = Event::NO_EVENT) const;
 
     AddressSpace address_space(void) const;
+
+    // before you can get an instance's index space or construct an accessor for
+    //  a given processor, the necessary metadata for the instance must be
+    //  available on to that processor
+    // this can require network communication and/or completion of the actual
+    //  allocation, so an event is returned and (as always) the application
+    //  must decide when/where to handle this precondition
+    Event fetch_metadata(Processor target) const;
 
     // apparently we can't use default template parameters on methods without C++11, but we
     //  can provide templates of two different arities...

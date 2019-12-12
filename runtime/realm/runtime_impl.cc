@@ -68,7 +68,7 @@ TYPE_IS_SERIALIZABLE(Realm::NodeAnnounceTag);
 TYPE_IS_SERIALIZABLE(Realm::Memory);
 TYPE_IS_SERIALIZABLE(Realm::Memory::Kind);
 TYPE_IS_SERIALIZABLE(Realm::Channel::SupportedPath);
-TYPE_IS_SERIALIZABLE(Realm::XferDes::XferKind);
+TYPE_IS_SERIALIZABLE(Realm::XferDesKind);
 
 namespace LegionRuntime {
   namespace Accessor {
@@ -395,7 +395,7 @@ namespace Realm {
 
       Event merged = Event::merge_events(events);
       log_taskreg.info() << "waiting on event: " << merged;
-      merged.wait();
+      merged.external_wait();
       return true;
 #if 0
       if(((RuntimeImpl *)impl)->task_table.count(taskid) > 0)

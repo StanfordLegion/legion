@@ -51,12 +51,19 @@ foreach(test IN LISTS REALM_TESTS)
   target_link_libraries(${test} Legion::Realm)
 endforeach()
 
+# scatter uses C++11 lambdas
+#target_compile_features(scatter PUBLIC cxx_std_11)
+set_target_properties(scatter PROPERTIES CXX_STANDARD 11
+                                         CXX_STANDARD_REQUIRED YES
+                                         CXX_EXTENSIONS NO)
+
 # some tests need test-specific arguments
 set(TESTARGS_ctxswitch         -ll:io 1 -t 20 -i 10000)
 set(TESTARGS_proc_group        -ll:cpu 4)
 set(TESTARGS_compqueue         -ll:cpu 4)
 set(TESTARGS_event_subscribe   -ll:cpu 4)
 set(TESTARGS_deferred_allocs   -ll:gsize 0 -all)
+set(TESTARGS_scatter           -p1 2 -p2 2)
 
 if(Legion_ENABLE_TESTING)
   foreach(test IN LISTS REALM_TESTS)

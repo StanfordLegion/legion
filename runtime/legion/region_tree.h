@@ -1717,7 +1717,6 @@ namespace Legion {
       virtual IndexSpaceNode* find_or_create_node(TaskContext *ctx) 
         { return this; }
     public:
-      virtual void log_index_space_points(void) = 0;
       virtual ApEvent compute_pending_space(Operation *op,
             const std::vector<IndexSpace> &handles, bool is_union) = 0;
       virtual ApEvent compute_pending_space(Operation *op,
@@ -1882,7 +1881,6 @@ namespace Legion {
                                              AddressSpaceID target,
                                              const bool top);
     public:
-      virtual void log_index_space_points(void);
       void log_index_space_points(const Realm::IndexSpace<DIM,T> &space) const;
       void log_profiler_index_space_points(
                             const Realm::IndexSpace<DIM,T> &tight_space) const;

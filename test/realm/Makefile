@@ -66,6 +66,7 @@ TESTARGS_proc_group := -ll:cpu 4
 TESTARGS_compqueue := -ll:cpu 4
 TESTARGS_event_subscribe := -ll:cpu 4
 TESTARGS_deferred_allocs := -ll:gsize 0 -all
+TESTARGS_scatter := -p1 2 -p2 2
 
 REALM_OBJS := $(patsubst %.cc,%.o,$(notdir $(REALM_SRC))) \
               $(patsubst %.cc.o,%.o,$(notdir $(REALM_INST_OBJS))) \
@@ -91,8 +92,11 @@ build : $(TESTS)
 clean :
 	rm -f $(REALM_LIB) $(REALM_OBJS) $(TESTS)
 
-$(TESTS) : % : %.cc librealm.a
-	$(CXX) -o $@ $< $(EXTRAOBJS_$*) -L. -lrealm $(INC_FLAGS) $(CC_FLAGS) $(LEGION_LD_FLAGS)
+# scatter uses C++11 lambdas
+scatter.o : CC_FLAGS += -std=c++11
+
+$(TESTS) : % : %.o librealm.a
+	$(CXX) -o $@ $< $(EXTRAOBJS_$*) -L. -lrealm $(LEGION_LD_FLAGS)
 
 $(REALM_LIB) : $(REALM_OBJS)
 	rm -f $(REALM_LIB)

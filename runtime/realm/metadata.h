@@ -49,7 +49,7 @@ namespace Realm {
 
       // returns an Event for when data will be valid
       Event request_data(int owner, ID::IDType id);
-      void await_data(bool block = true);  // request must have already been made
+
       void handle_response(void);
       void handle_invalidate(void);
 

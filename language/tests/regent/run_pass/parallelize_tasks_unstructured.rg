@@ -14,7 +14,6 @@
 
 -- runs-with:
 -- [["-ll:cpu", "4"],
---  ["-ll:cpu", "4", "-fopenmp", "1"],
 --  ["-ll:cpu", "4", "-fbounds-checks", "1", "-fparallelize-dop", "2,2"],
 --  ["-ll:cpu", "4", "-fbounds-checks", "1", "-fparallelize-dop", "4,2,2"]]
 
@@ -32,9 +31,9 @@ __demand(__parallel)
 task init(r : region(fs))
 where reads writes(r)
 do
-  __allow(__openmp)
+  __demand(__openmp)
   for e in r do e.f = 0 end
-  __allow(__openmp)
+  __demand(__openmp)
   for e in r do e.g = 0 end
 end
 
@@ -42,7 +41,7 @@ __demand(__parallel)
 task increment(r : region(fs), c : double)
 where reads writes(r.f)
 do
-  __allow(__openmp)
+  __demand(__openmp)
   for e in r do e.f += e.f + c end
 end
 
@@ -51,7 +50,7 @@ task reduce(r : region(fs))
 where reads writes(r.f)
 do
   var sum = 0
-  __allow(__openmp)
+  __demand(__openmp)
   for e in r do sum += e.f end
   return sum
 end
