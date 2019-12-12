@@ -3681,7 +3681,7 @@ local lift_cast_to_futures = terralib.memoize(
       region_divergence = false,
       metadata = false,
       prototype = task,
-      annotations = ast.default_annotations_top(),
+      annotations = ast.default_annotations(),
       span = ast.trivial_span(),
     }
     task:set_type(
@@ -7260,7 +7260,7 @@ local lift_unary_op_to_futures = terralib.memoize(
       region_divergence = false,
       metadata = false,
       prototype = task,
-      annotations = ast.default_annotations_top(),
+      annotations = ast.default_annotations(),
       span = ast.trivial_span(),
     }
     task:set_type(
