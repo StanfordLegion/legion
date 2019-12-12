@@ -20,6 +20,13 @@ Version 19.12.0 (December ??, 2019)
         `Event` triggers to be efficiently handled by a single consumer
     - Support for `omp_get_level`, `omp_in_parallel`, and
         `omp_set_num_threads` in tasks running on OpenMP processors
+    - Support for unstructured scatter and/or gather in copies.  (Handling
+        structured cases as well as fills/reductions remains a work in
+	progress.)
+    - Removed all calls to `Event::wait` from inside other Realm API calls.
+        Applications now must make sure that index spaces and instance
+	metadata are valid before use.  For details, see:
+	https://github.com/StanfordLegion/legion/issues/465
 
 Version 19.09.0 (September 9, 2019)
   * Regent
