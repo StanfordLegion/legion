@@ -10945,8 +10945,7 @@ class State(object):
         return result
 
     def get_task(self, uid):
-        assert self.top_level_ctx_uid is not None
-        if uid != self.top_level_ctx_uid:
+        if self.top_level_ctx_uid is None or uid != self.top_level_ctx_uid:
             op = self.get_operation(uid)
             if op in self.tasks:
                 return self.tasks[op]
