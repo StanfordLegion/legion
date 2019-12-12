@@ -41,13 +41,15 @@ for _, expect_var in ipairs(expect_vars) do
   end
 end
 
+config.UNSPECIFIED = -1
+
 local default_options = {
   -- Main user-facing correctness flags:
   ["bounds-checks"] = false,
   ["bounds-checks-targets"] = ".*",
 
   -- Main user-facing optimization flags:
-  ["cuda"] = true,
+  ["cuda"] = config.UNSPECIFIED,
   ["cuda-offline"] = not data.is_luajit(),
   ["cuda-arch"] = os.getenv("GPU_ARCH") or "fermi",
   ["index-launch"] = true,
@@ -58,7 +60,7 @@ local default_options = {
   ["idempotent"] = true,
   ["replicable"] = true,
   ["mapping"] = true,
-  ["openmp"] = false,
+  ["openmp"] = config.UNSPECIFIED,
   ["openmp-offline"] = not data.is_luajit(),
   ["openmp-strict"] = false,
   ["skip-empty-tasks"] = true,

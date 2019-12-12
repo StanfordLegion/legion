@@ -8581,22 +8581,14 @@ function codegen.stat_for_list(cx, node)
                not node.annotations.cuda:is(ast.annotation.Forbid)
   local openmp = not cx.variant:is_cuda() and
                  openmphelper.check_openmp_available() and
-                 not node.annotations.openmp:is(ast.annotation.Forbid)
+                 node.annotations.openmp:is(ast.annotation.Demand)
 
-  if node.annotations.openmp:is(ast.annotation.Demand) or
-     node.annotations.openmp:is(ast.annotation.Allow)
-  then
+  if node.annotations.openmp:is(ast.annotation.Demand) then
     local available, error_message = openmphelper.check_openmp_available()
-    if not available then
-      if node.annotations.openmp:is(ast.annotation.Demand) then
-        report.error(node,
-          "code generation failed at " .. node.span.source ..
-          ":" .. tostring(node.span.start.line) .. " since " .. error_message)
-      else
-        report.warn(node,
-          "ignoring pragma at " .. node.span.source ..
-          ":" .. tostring(node.span.start.line) .. " since " .. error_message)
-      end
+    if std.config["openmp"] ~= 0 and not available then
+      report.warn(node,
+        "ignoring pragma at " .. node.span.source ..
+        ":" .. tostring(node.span.start.line) .. " since " .. error_message)
     end
   end
 
@@ -11112,25 +11104,19 @@ function codegen.top(cx, node)
         end, node)
     end
 
-    if node.annotations.cuda:is(ast.annotation.Demand) or
-       node.annotations.cuda:is(ast.annotation.Allow)
-    then
+    if node.annotations.cuda:is(ast.annotation.Demand) then
       local available, error_message = cudahelper.check_cuda_available()
-      if not available then
-        if node.annotations.cuda:is(ast.annotation.Demand) then
-          report.error(node,
-            "code generation failed at " .. node.span.source ..
-            ":" .. tostring(node.span.start.line) .. " since " .. error_message)
-        else
-          report.warn(node,
-            "ignoring pragma at " .. node.span.source ..
-            ":" .. tostring(node.span.start.line) .. " since " .. error_message)
-        end
-      else
+      if available then
         local cuda_variant = task:make_variant("cuda")
         cuda_variant:set_is_cuda(true)
         std.register_variant(cuda_variant)
         task:set_cuda_variant(cuda_variant)
+      elseif std.config["cuda"] ~= 0 and
+             node.annotations.cuda:is(ast.annotation.Demand)
+      then
+        report.warn(node,
+          "ignoring pragma at " .. node.span.source ..
+          ":" .. tostring(node.span.start.line) .. " since " .. error_message)
       end
     end
 
