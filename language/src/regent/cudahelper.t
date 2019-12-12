@@ -200,11 +200,15 @@ do
   end
 end
 
-if config["cuda"] == 1 then
+do
   local available, error_message = cudahelper.check_cuda_available()
   if not available then
-    print("CUDA code generation failed since " .. error_message)
-    os.exit(-1)
+    if config["cuda"] == 1 then
+      print("CUDA code generation failed since " .. error_message)
+      os.exit(-1)
+    else
+      return cudahelper
+    end
   end
 end
 
