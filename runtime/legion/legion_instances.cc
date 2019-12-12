@@ -305,7 +305,7 @@ namespace Legion {
       int next_start = 0;
       const PhysicalInstance instance = manager->instance;
 #ifdef LEGION_SPY
-      const ApEvent inst_event = manager->get_use_event();
+      const ApEvent inst_event = manager->get_unique_event();
 #endif
       for (int idx = 0; idx < pop_count; idx++)
       {
@@ -337,7 +337,7 @@ namespace Legion {
       // have to fill them in when we add the field info
       fields.back().inst = manager->instance;
 #ifdef LEGION_SPY
-      fields.back().inst_event = manager->get_use_event();
+      fields.back().inst_event = manager->get_unique_event();
 #endif
     }
 
@@ -352,7 +352,7 @@ namespace Legion {
       fields.resize(offset + copy_fields.size());
       const PhysicalInstance instance = manager->instance;
 #ifdef LEGION_SPY
-      const ApEvent inst_event = manager->get_use_event();
+      const ApEvent inst_event = manager->get_unique_event();
 #endif
       for (unsigned idx = 0; idx < copy_fields.size(); idx++)
       {
@@ -608,7 +608,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(runtime->legion_spy_enabled);
 #endif
-      const ApEvent inst_event = get_use_event();
+      const ApEvent inst_event = get_unique_event();
       LegionSpy::log_physical_instance_creator(inst_event, creator_id, proc.id);
       for (unsigned idx = 0; idx < regions.size(); idx++)
         LegionSpy::log_physical_instance_creation_region(inst_event, 
@@ -1120,7 +1120,7 @@ namespace Legion {
       : PhysicalManager(ctx, mem, desc, constraint, 
                         encode_instance_did(did, external_instance),owner_space,
                         node, inst, footprint,instance_domain,tid,register_now),
-        use_event(fetch_metadata(inst, u_event))
+        use_event(fetch_metadata(inst, u_event)), unique_event(u_event)
     //--------------------------------------------------------------------------
     {
       if (!is_owner())
@@ -1136,11 +1136,11 @@ namespace Legion {
       if (runtime->legion_spy_enabled)
       {
 #ifdef DEBUG_LEGION
-        assert(use_event.exists());
+        assert(unique_event.exists());
 #endif
-        LegionSpy::log_physical_instance(use_event, inst.id, mem->memory.id, 
+        LegionSpy::log_physical_instance(unique_event, inst.id, mem->memory.id, 
            instance_domain->expr_id, field_space_node->handle, tid, 0/*redop*/);
-        layout->log_instance_layout(use_event);
+        layout->log_instance_layout(unique_event);
       }
     }
 
@@ -1148,7 +1148,7 @@ namespace Legion {
     InstanceManager::InstanceManager(const InstanceManager &rhs)
       : PhysicalManager(NULL, NULL, NULL, rhs.pointer_constraint, 0, 0, NULL,
                         PhysicalInstance::NO_INST, 0, NULL, 0, false),
-        use_event(ApEvent::NO_AP_EVENT)
+        use_event(ApEvent::NO_AP_EVENT), unique_event(ApEvent::NO_AP_EVENT)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -1315,7 +1315,7 @@ namespace Legion {
         instance_domain->pack_expression(rez, target);
         rez.serialize(field_space_node->handle);
         rez.serialize(tree_id);
-        rez.serialize(use_event);
+        rez.serialize(unique_event);
         layout->pack_layout_description(rez, target);
         pointer_constraint.serialize(rez);
       }
@@ -1352,8 +1352,8 @@ namespace Legion {
       FieldSpaceNode *space_node = runtime->forest->get_node(handle, &fs_ready);
       RegionTreeID tree_id;
       derez.deserialize(tree_id);
-      ApEvent use_event;
-      derez.deserialize(use_event);
+      ApEvent unique_event;
+      derez.deserialize(unique_event);
       LayoutConstraintID layout_id;
       derez.deserialize(layout_id);
       RtEvent layout_ready;
@@ -1372,7 +1372,7 @@ namespace Legion {
           DeferInstanceManagerArgs args(did, owner_space, mem, inst,
               inst_footprint, local_is, inst_domain, domain_is, domain_handle, 
               domain_expr_id, handle, tree_id, layout_id, pointer_constraint, 
-              use_event);
+              unique_event);
           runtime->issue_runtime_meta_task(args,
               LG_LATENCY_RESPONSE_PRIORITY, precondition);
           return;
@@ -1391,7 +1391,7 @@ namespace Legion {
       // If we fall through here we can create the manager now
       create_remote_manager(runtime, did, owner_space, mem, inst,inst_footprint,
                             inst_domain, space_node, tree_id, constraints, 
-                            use_event, pointer_constraint);
+                            unique_event, pointer_constraint);
     }
 
     //--------------------------------------------------------------------------
@@ -1483,7 +1483,8 @@ namespace Legion {
                                        bool register_now)
       : PhysicalManager(ctx, mem, desc, constraint, did, owner_space, 
                         node, inst, footprint, inst_domain, tid, register_now),
-        op(o), redop(red), use_event(fetch_metadata(inst, u_event))
+        op(o), redop(red), use_event(fetch_metadata(inst, u_event)), 
+        unique_event(u_event)
     //--------------------------------------------------------------------------
     {  
       if (runtime->legion_spy_enabled)
@@ -1491,9 +1492,9 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(use_event.exists());
 #endif
-        LegionSpy::log_physical_instance(use_event, inst.id, mem->memory.id, 
+        LegionSpy::log_physical_instance(u_event, inst.id, mem->memory.id, 
                             inst_domain->expr_id, node->handle, tid, redop);
-        layout->log_instance_layout(use_event);
+        layout->log_instance_layout(u_event);
       }
     }
 
@@ -1524,7 +1525,7 @@ namespace Legion {
         rez.serialize(tree_id);
         rez.serialize<bool>(is_foldable());
         rez.serialize(get_pointer_space());
-        rez.serialize(use_event);
+        rez.serialize(unique_event);
         layout->pack_layout_description(rez, target);
         pointer_constraint.serialize(rez);
       }
@@ -1568,8 +1569,8 @@ namespace Legion {
       derez.deserialize(foldable);
       Domain ptr_space;
       derez.deserialize(ptr_space);
-      ApEvent use_event;
-      derez.deserialize(use_event);
+      ApEvent unique_event;
+      derez.deserialize(unique_event);
       LayoutConstraintID layout_id;
       derez.deserialize(layout_id);
       RtEvent layout_ready;
@@ -1588,7 +1589,7 @@ namespace Legion {
           DeferReductionManagerArgs args(did, owner_space, mem, inst,
               inst_footprint, local_is, inst_domain, domain_is, 
               domain_handle, domain_expr_id, handle, tree_id, layout_id, 
-              pointer_constraint, use_event, foldable, ptr_space, redop);
+              pointer_constraint, unique_event, foldable, ptr_space, redop);
           runtime->issue_runtime_meta_task(args,
               LG_LATENCY_RESPONSE_PRIORITY, precondition);
           return;
@@ -1607,7 +1608,7 @@ namespace Legion {
       // If we fall through here we can create the manager now
       create_remote_manager(runtime, did, owner_space, mem, inst, 
           inst_footprint, inst_domain, field_node, tree_id, constraints,
-          use_event, pointer_constraint, foldable, ptr_space, redop);
+          unique_event, pointer_constraint, foldable, ptr_space, redop);
     }
 
     //--------------------------------------------------------------------------
@@ -2034,6 +2035,13 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ApEvent VirtualManager::get_use_event(void) const
+    //--------------------------------------------------------------------------
+    {
+      return ApEvent::NO_AP_EVENT;
+    }
+
+    //--------------------------------------------------------------------------
+    ApEvent VirtualManager::get_unique_event(void) const
     //--------------------------------------------------------------------------
     {
       return ApEvent::NO_AP_EVENT;
