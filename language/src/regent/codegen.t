@@ -3681,7 +3681,7 @@ local lift_cast_to_futures = terralib.memoize(
       region_divergence = false,
       metadata = false,
       prototype = task,
-      annotations = ast.default_annotations_top(),
+      annotations = ast.default_annotations(),
       span = ast.trivial_span(),
     }
     task:set_type(
@@ -7260,7 +7260,7 @@ local lift_unary_op_to_futures = terralib.memoize(
       region_divergence = false,
       metadata = false,
       prototype = task,
-      annotations = ast.default_annotations_top(),
+      annotations = ast.default_annotations(),
       span = ast.trivial_span(),
     }
     task:set_type(
@@ -8581,22 +8581,14 @@ function codegen.stat_for_list(cx, node)
                not node.annotations.cuda:is(ast.annotation.Forbid)
   local openmp = not cx.variant:is_cuda() and
                  openmphelper.check_openmp_available() and
-                 not node.annotations.openmp:is(ast.annotation.Forbid)
+                 node.annotations.openmp:is(ast.annotation.Demand)
 
-  if node.annotations.openmp:is(ast.annotation.Demand) or
-     node.annotations.openmp:is(ast.annotation.Allow)
-  then
+  if node.annotations.openmp:is(ast.annotation.Demand) then
     local available, error_message = openmphelper.check_openmp_available()
-    if not available then
-      if node.annotations.openmp:is(ast.annotation.Demand) then
-        report.error(node,
-          "code generation failed at " .. node.span.source ..
-          ":" .. tostring(node.span.start.line) .. " since " .. error_message)
-      else
-        report.warn(node,
-          "ignoring pragma at " .. node.span.source ..
-          ":" .. tostring(node.span.start.line) .. " since " .. error_message)
-      end
+    if std.config["openmp"] ~= 0 and not available then
+      report.warn(node,
+        "ignoring pragma at " .. node.span.source ..
+        ":" .. tostring(node.span.start.line) .. " since " .. error_message)
     end
   end
 
@@ -8725,9 +8717,11 @@ function codegen.stat_for_list(cx, node)
       if std.config["bounds-checks"] then
         preamble = quote
           [preamble];
-          [lrs:map_list(function(lr) return
-            quote
-              var p = [lr.type:ispace().index_type:zero()]
+          [lrs:map_list(function(lr)
+            local index_type = lr.type:ispace().index_type
+            if index_type:is_opaque() then index_type = std.int1d end
+            return quote
+              var p = [index_type:zero()]
               c.legion_domain_point_safe_cast([cx.runtime], [cx.context],
                 p:to_domain_point(), [lr].impl)
             end
@@ -11112,25 +11106,19 @@ function codegen.top(cx, node)
         end, node)
     end
 
-    if node.annotations.cuda:is(ast.annotation.Demand) or
-       node.annotations.cuda:is(ast.annotation.Allow)
-    then
+    if node.annotations.cuda:is(ast.annotation.Demand) then
       local available, error_message = cudahelper.check_cuda_available()
-      if not available then
-        if node.annotations.cuda:is(ast.annotation.Demand) then
-          report.error(node,
-            "code generation failed at " .. node.span.source ..
-            ":" .. tostring(node.span.start.line) .. " since " .. error_message)
-        else
-          report.warn(node,
-            "ignoring pragma at " .. node.span.source ..
-            ":" .. tostring(node.span.start.line) .. " since " .. error_message)
-        end
-      else
+      if available then
         local cuda_variant = task:make_variant("cuda")
         cuda_variant:set_is_cuda(true)
         std.register_variant(cuda_variant)
         task:set_cuda_variant(cuda_variant)
+      elseif std.config["cuda"] ~= 0 and
+             node.annotations.cuda:is(ast.annotation.Demand)
+      then
+        report.warn(node,
+          "ignoring pragma at " .. node.span.source ..
+          ":" .. tostring(node.span.start.line) .. " since " .. error_message)
       end
     end
 

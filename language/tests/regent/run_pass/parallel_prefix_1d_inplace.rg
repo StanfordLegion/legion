@@ -45,7 +45,7 @@ function make_tasks(ty)
   local init_task, prefix_task, check_task
   local fs_type = fs_types[ty]
 
-  __allow(__cuda)
+  __demand(__cuda)
   task init_task(r : region(ispace(int1d), fs_type))
   where
     reads writes(r)
@@ -59,7 +59,7 @@ function make_tasks(ty)
     end
   end
 
-  __allow(__cuda)
+  __demand(__cuda)
   task prefix_task(r : region(ispace(int1d), fs_type))
   where
     reads(r.input), reads writes(r.output_gpu)
