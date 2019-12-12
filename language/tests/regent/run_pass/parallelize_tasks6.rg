@@ -14,8 +14,7 @@
 
 -- runs-with:
 -- [
---  ["-ll:cpu", "4"],
---  ["-ll:cpu", "4", "-fparallelize-dop", "4", "-fopenmp", "1"]
+--  ["-ll:cpu", "4"]
 -- ]
 
 -- FIXME: Breaks runtime
