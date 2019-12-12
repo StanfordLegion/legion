@@ -18,84 +18,59 @@
 
 namespace Realm {
 
-    FileXferDes::FileXferDes(DmaRequest* _dma_request,
-			     NodeID _launch_node,
-			     XferDesID _guid,
-			     XferDesID _pre_xd_guid,
-			     XferDesID _next_xd_guid,
-			     uint64_t next_max_rw_gap,
-			     size_t src_ib_offset, 
-			     size_t src_ib_size,
-			     bool mark_started,
-			     RegionInstance inst,
-			     Memory _src_mem, Memory _dst_mem,
-			     TransferIterator *_src_iter, TransferIterator *_dst_iter,
-			     CustomSerdezID _src_serdez_id, CustomSerdezID _dst_serdez_id,
-			     uint64_t _max_req_size,
-			     long max_nr,
-			     int _priority,
-			     XferOrder::Type _order,
-			     XferKind _kind,
+    FileXferDes::FileXferDes(DmaRequest *_dma_request, NodeID _launch_node, XferDesID _guid,
+			     const std::vector<XferDesPortInfo>& inputs_info,
+			     const std::vector<XferDesPortInfo>& outputs_info,
+			     bool _mark_start,
+			     uint64_t _max_req_size, long max_nr, int _priority,
 			     XferDesFence* _complete_fence)
-      : XferDes(_dma_request, _launch_node, _guid, _pre_xd_guid,
-                _next_xd_guid, next_max_rw_gap, src_ib_offset, src_ib_size,
-		mark_started,
-		//_src_buf, _dst_buf, _domain, _oas_vec,
-		_src_mem, _dst_mem, _src_iter, _dst_iter,
-		_src_serdez_id, _dst_serdez_id,
+      : XferDes(_dma_request, _launch_node, _guid,
+		inputs_info, outputs_info,
+		_mark_start,
 		_max_req_size, _priority,
-                _order, _kind, _complete_fence)
+                _complete_fence)
       , fd(-1) // defer file open
     {
-      // grab the file's name from the instance metadata
+      RegionInstance inst;
+      if((inputs_info.size() == 1) &&
+	 (input_ports[0].mem->kind == MemoryImpl::MKIND_FILE)) {
+	kind = XFER_FILE_READ;
+	inst = inputs_info[0].inst;
+	assert(inst.exists());
+	channel = get_channel_manager()->get_file_read_channel();
+      } else if((outputs_info.size() == 1) &&
+		(output_ports[0].mem->kind == MemoryImpl::MKIND_FILE)) {
+	kind = XFER_FILE_WRITE;
+	inst = outputs_info[0].inst;
+	assert(inst.exists());
+	channel = get_channel_manager()->get_file_write_channel();
+      } else {
+	assert(0 && "neither source nor dest of FileXferDes is file!?");
+      }
+	
+      // grab the file's name from the instance metadata - TODO: defer!
       RegionInstanceImpl *impl = get_runtime()->get_instance_impl(inst);
       filename = impl->metadata.filename;
 
-      //MemoryImpl* src_mem_impl = get_runtime()->get_memory_impl(_src_buf.memory);
-      //MemoryImpl* dst_mem_impl = get_runtime()->get_memory_impl(_dst_buf.memory);
-      switch (kind) {
-        case XferDes::XFER_FILE_READ:
-        {
-          //ID src_id(inst);
-          //unsigned src_index = src_id.instance.inst_idx;
-          //fd = ((FileMemory*)src_mem)->get_file_des(src_index);
-          channel = get_channel_manager()->get_file_read_channel();
-          //buf_base = (const char*) dst_mem_impl->get_direct_ptr(_dst_buf.alloc_offset, 0);
-          assert(src_mem->kind == MemoryImpl::MKIND_FILE);
-          break;
-        }
-        case XferDes::XFER_FILE_WRITE:
-        {
-          //ID dst_id(inst);
-          //unsigned dst_index = dst_id.instance.inst_idx;
-          //fd = ((FileMemory*)dst_mem)->get_file_des(dst_index);
-          channel = get_channel_manager()->get_file_write_channel();
-          //buf_base = (const char*) src_mem_impl->get_direct_ptr(_src_buf.alloc_offset, 0);
-          assert(dst_mem->kind == MemoryImpl::MKIND_FILE);
-          break;
-        }
-        default:
-          assert(0);
-      }
       file_reqs = (FileRequest*) calloc(max_nr, sizeof(DiskRequest));
       for (int i = 0; i < max_nr; i++) {
         file_reqs[i].xd = this;
         enqueue_request(&file_reqs[i]);
       }
     }
-
+    
     long FileXferDes::get_requests(Request** requests, long nr)
     {
       FileRequest** reqs = (FileRequest**) requests;
       long new_nr = default_get_requests(requests, nr);
       switch (kind) {
-        case XferDes::XFER_FILE_READ:
+        case XFER_FILE_READ:
         {
           for (long i = 0; i < new_nr; i++) {
             reqs[i]->file_off = reqs[i]->src_off;
             //reqs[i]->mem_base = (char*)(buf_base + reqs[i]->dst_off);
-	    reqs[i]->mem_base = dst_mem->get_direct_ptr(reqs[i]->dst_off,
-							reqs[i]->nbytes);
+	    reqs[i]->mem_base = output_ports[reqs[i]->dst_port_idx].mem->get_direct_ptr(reqs[i]->dst_off,
+											reqs[i]->nbytes);
 	    assert(reqs[i]->mem_base != 0);
 
 	    // have we opened the file yet?
@@ -113,12 +88,12 @@ namespace Realm {
           }
           break;
         }
-        case XferDes::XFER_FILE_WRITE:
+        case XFER_FILE_WRITE:
         {
           for (long i = 0; i < new_nr; i++) {
             //reqs[i]->mem_base = (char*)(buf_base + reqs[i]->src_off);
-	    reqs[i]->mem_base = src_mem->get_direct_ptr(reqs[i]->src_off,
-							reqs[i]->nbytes);
+	    reqs[i]->mem_base = input_ports[reqs[i]->src_port_idx].mem->get_direct_ptr(reqs[i]->src_off,
+										       reqs[i]->nbytes);
 	    assert(reqs[i]->mem_base != 0);
             reqs[i]->file_off = reqs[i]->dst_off;
 
@@ -161,55 +136,39 @@ namespace Realm {
       }
     }
 
-    DiskXferDes::DiskXferDes(DmaRequest* _dma_request,
-			     NodeID _launch_node,
-			     XferDesID _guid,
-			     XferDesID _pre_xd_guid,
-			     XferDesID _next_xd_guid,
-			     uint64_t next_max_rw_gap,
-			     size_t src_ib_offset, 
-			     size_t src_ib_size,
-			     bool mark_started,
-			     Memory _src_mem, Memory _dst_mem,
-			     TransferIterator *_src_iter, TransferIterator *_dst_iter,
-			     CustomSerdezID _src_serdez_id, CustomSerdezID _dst_serdez_id,
-			     uint64_t _max_req_size,
-			     long max_nr,
-			     int _priority,
-			     XferOrder::Type _order,
-			     XferKind _kind,
+    DiskXferDes::DiskXferDes(DmaRequest *_dma_request, NodeID _launch_node, XferDesID _guid,
+			     const std::vector<XferDesPortInfo>& inputs_info,
+			     const std::vector<XferDesPortInfo>& outputs_info,
+			     bool _mark_start,
+			     uint64_t _max_req_size, long max_nr, int _priority,
 			     XferDesFence* _complete_fence)
-      : XferDes(_dma_request, _launch_node, _guid, _pre_xd_guid,
-                _next_xd_guid, next_max_rw_gap, src_ib_offset, src_ib_size,
-		mark_started,
-		//_src_buf, _dst_buf, _domain, _oas_vec,
-		_src_mem, _dst_mem, _src_iter, _dst_iter,
-		_src_serdez_id, _dst_serdez_id,
+      : XferDes(_dma_request, _launch_node, _guid,
+		inputs_info, outputs_info,
+		_mark_start,
 		_max_req_size, _priority,
-                _order, _kind, _complete_fence)
+                _complete_fence)
+      , fd(-1) // defer file open
     {
-      //MemoryImpl* src_mem_impl = get_runtime()->get_memory_impl(_src_buf.memory);
-      //MemoryImpl* dst_mem_impl = get_runtime()->get_memory_impl(_dst_buf.memory);
-      switch (kind) {
-        case XferDes::XFER_DISK_READ:
-        {
-          channel = get_channel_manager()->get_disk_read_channel();
-          fd = ((Realm::DiskMemory*)src_mem)->fd;
-          //buf_base = (const char*) dst_mem_impl->get_direct_ptr(_dst_buf.alloc_offset, 0);
-          assert(src_mem->kind == MemoryImpl::MKIND_DISK);
-          break;
-        }
-        case XferDes::XFER_DISK_WRITE:
-        {
-          channel = get_channel_manager()->get_disk_write_channel();
-          fd = ((Realm::DiskMemory*)dst_mem)->fd;
-          //buf_base = (const char*) src_mem_impl->get_direct_ptr(_src_buf.alloc_offset, 0);
-          assert(dst_mem->kind == MemoryImpl::MKIND_DISK);
-          break;
-        }
-        default:
-          assert(0);
+      if((inputs_info.size() >= 1) &&
+	 (input_ports[0].mem->kind == MemoryImpl::MKIND_DISK)) {
+	kind = XFER_DISK_READ;
+	channel = get_channel_manager()->get_disk_read_channel();
+	// all input ports should agree on which fd they target
+	fd = ((Realm::DiskMemory*)(input_ports[0].mem))->fd;
+	for(size_t i = 1; i < input_ports.size(); i++)
+	  assert(input_ports[i].mem == input_ports[0].mem);
+      } else if((outputs_info.size() >= 1) &&
+		(output_ports[0].mem->kind == MemoryImpl::MKIND_DISK)) {
+	kind = XFER_DISK_WRITE;
+	channel = get_channel_manager()->get_disk_write_channel();
+	// all output ports should agree on which fd they target
+	fd = ((Realm::DiskMemory*)(output_ports[0].mem))->fd;
+	for(size_t i = 1; i < output_ports.size(); i++)
+	  assert(output_ports[i].mem == output_ports[0].mem);
+      } else {
+	assert(0 && "neither source nor dest of DiskXferDes is disk!?");
       }
+
       disk_reqs = (DiskRequest*) calloc(max_nr, sizeof(DiskRequest));
       for (int i = 0; i < max_nr; i++) {
         disk_reqs[i].xd = this;
@@ -217,29 +176,29 @@ namespace Realm {
         enqueue_request(&disk_reqs[i]);
       }
     }
-
+    
     long DiskXferDes::get_requests(Request** requests, long nr)
     {
       DiskRequest** reqs = (DiskRequest**) requests;
       long new_nr = default_get_requests(requests, nr);
       switch (kind) {
-        case XferDes::XFER_DISK_READ:
+        case XFER_DISK_READ:
         {
           for (long i = 0; i < new_nr; i++) {
             reqs[i]->disk_off = /*src_buf.alloc_offset +*/ reqs[i]->src_off;
             //reqs[i]->mem_base = (char*)(buf_base + reqs[i]->dst_off);
-	    reqs[i]->mem_base = dst_mem->get_direct_ptr(reqs[i]->dst_off,
-							reqs[i]->nbytes);
+	    reqs[i]->mem_base = output_ports[reqs[i]->dst_port_idx].mem->get_direct_ptr(reqs[i]->dst_off,
+											reqs[i]->nbytes);
 	    assert(reqs[i]->mem_base != 0);
           }
           break;
         }
-        case XferDes::XFER_DISK_WRITE:
+        case XFER_DISK_WRITE:
         {
           for (long i = 0; i < new_nr; i++) {
             //reqs[i]->mem_base = (char*)(buf_base + reqs[i]->src_off);
-	    reqs[i]->mem_base = src_mem->get_direct_ptr(reqs[i]->src_off,
-							reqs[i]->nbytes);
+	    reqs[i]->mem_base = input_ports[reqs[i]->src_port_idx].mem->get_direct_ptr(reqs[i]->src_off,
+										       reqs[i]->nbytes);
 	    assert(reqs[i]->mem_base != 0);
             reqs[i]->disk_off = /*dst_buf.alloc_offset +*/ reqs[i]->dst_off;
           }
@@ -271,14 +230,14 @@ namespace Realm {
 						    Memory::Z_COPY_MEM };
       static const size_t num_cpu_mem_kinds = sizeof(cpu_mem_kinds) / sizeof(cpu_mem_kinds[0]);
 
-    FileChannel::FileChannel(long max_nr, XferDes::XferKind _kind)
+    FileChannel::FileChannel(long max_nr, XferDesKind _kind)
       : Channel(_kind)
     {
       unsigned bw = 0; // TODO
       unsigned latency = 0;
       // any combination of SYSTEM/REGDMA/Z_COPY_MEM
       for(size_t i = 0; i < num_cpu_mem_kinds; i++)
-	if(_kind == XferDes::XFER_FILE_READ)
+	if(_kind == XFER_FILE_READ)
 	  add_path(Memory::FILE_MEM, false,
 		   cpu_mem_kinds[i], false,
 		   bw, latency, false, false);
@@ -297,13 +256,15 @@ namespace Realm {
       AsyncFileIOContext* aio_ctx = AsyncFileIOContext::get_singleton();
       for (long i = 0; i < nr; i++) {
         FileRequest* req = (FileRequest*) requests[i];
-	assert(!req->xd->src_serdez_op && !req->xd->dst_serdez_op); // no serdez support
+	// no serdez support
+	assert(req->xd->input_ports[req->src_port_idx].serdez_op == 0);
+	assert(req->xd->output_ports[req->dst_port_idx].serdez_op == 0);
         switch (kind) {
-          case XferDes::XFER_FILE_READ:
+          case XFER_FILE_READ:
             aio_ctx->enqueue_read(req->fd, req->file_off,
                                   req->nbytes, req->mem_base, req);
             break;
-          case XferDes::XFER_FILE_WRITE:
+          case XFER_FILE_WRITE:
             aio_ctx->enqueue_write(req->fd, req->file_off,
                                    req->nbytes, req->mem_base, req);
             break;
@@ -324,14 +285,14 @@ namespace Realm {
       return AsyncFileIOContext::get_singleton()->available();
     }
 
-    DiskChannel::DiskChannel(long max_nr, XferDes::XferKind _kind)
+    DiskChannel::DiskChannel(long max_nr, XferDesKind _kind)
       : Channel(_kind)
     {
       unsigned bw = 0; // TODO
       unsigned latency = 0;
       // any combination of SYSTEM/REGDMA/Z_COPY_MEM
       for(size_t i = 0; i < num_cpu_mem_kinds; i++)
-	if(_kind == XferDes::XFER_DISK_READ)
+	if(_kind == XFER_DISK_READ)
 	  add_path(Memory::DISK_MEM, false,
 		   cpu_mem_kinds[i], false,
 		   bw, latency, false, false);
@@ -350,13 +311,15 @@ namespace Realm {
       AsyncFileIOContext* aio_ctx = AsyncFileIOContext::get_singleton();
       for (long i = 0; i < nr; i++) {
         DiskRequest* req = (DiskRequest*) requests[i];
-	assert(!req->xd->src_serdez_op && !req->xd->dst_serdez_op); // no serdez support
+	// no serdez support
+	assert(req->xd->input_ports[req->src_port_idx].serdez_op == 0);
+	assert(req->xd->output_ports[req->dst_port_idx].serdez_op == 0);
         switch (kind) {
-          case XferDes::XFER_DISK_READ:
+          case XFER_DISK_READ:
             aio_ctx->enqueue_read(req->fd, req->disk_off,
                                   req->nbytes, req->mem_base, req);
             break;
-          case XferDes::XFER_DISK_WRITE:
+          case XFER_DISK_WRITE:
             aio_ctx->enqueue_write(req->fd, req->disk_off,
                                    req->nbytes, req->mem_base, req);
             break;

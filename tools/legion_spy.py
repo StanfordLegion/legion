@@ -7006,9 +7006,11 @@ class Task(object):
                 assert idx in self.op.mappings
                 mappings = self.op.mappings[idx]
                 # If we are doing restricted analysis then add any restrictions
+                # We treat all reduction instances as restricted to eagerly flush
+                # back reductions to this instance for now
                 add_restrictions = \
-                        (req.priv == READ_WRITE or req.priv == READ_ONLY) and \
-                        req.coher == SIMULTANEOUS
+                        ((req.priv == READ_WRITE or req.priv == READ_ONLY) and \
+                        req.coher == SIMULTANEOUS) or (req.priv == REDUCE)
                 for field in req.fields:
                     assert field.fid in mappings
                     inst = mappings[field.fid]

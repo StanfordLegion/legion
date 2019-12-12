@@ -114,8 +114,10 @@ namespace Realm {
 
     Memory RegionInstance::get_location(void) const
     {
-      return ID::make_memory(ID(id).instance_owner_node(),
-			     ID(id).instance_mem_idx()).convert<Memory>();
+      return (exists() ?
+	        ID::make_memory(ID(id).instance_owner_node(),
+				ID(id).instance_mem_idx()).convert<Memory>() :
+	        Memory::NO_MEMORY);
     }
 
     /*static*/ Event RegionInstance::create_instance(RegionInstance& inst,

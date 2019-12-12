@@ -30,20 +30,23 @@ namespace Realm {
 
     struct RemoteIBAllocRequestAsync {
       Memory memory;
-      void* req;
-      int idx;
-      ID::IDType src_inst_id, dst_inst_id;
+      void *req;
+      void *ibinfo;
+      size_t size;
+      //int idx;
+      //ID::IDType src_inst_id, dst_inst_id;
 
       static void handle_message(NodeID sender, const RemoteIBAllocRequestAsync &args,
 				 const void *data, size_t msglen);
-
     };
 
     struct RemoteIBAllocResponseAsync {
-      void* req;
-      int idx;
-      ID::IDType src_inst_id, dst_inst_id;
+      void *req;
+      void *ibinfo;
+      //int idx;
+      //ID::IDType src_inst_id, dst_inst_id;
       off_t offset;
+      size_t size;
 
       static void handle_message(NodeID sender, const RemoteIBAllocResponseAsync &args,
 				 const void *data, size_t msglen);
@@ -57,9 +60,6 @@ namespace Realm {
       static void handle_message(NodeID sender, const RemoteIBFreeRequestAsync &args,
 				 const void *data, size_t msglen);
     };
-
-    void find_shortest_path(Memory src_mem, Memory dst_mem,
-			    CustomSerdezID serdez_id, std::vector<Memory>& path);
 
     struct RemoteCopyMessage {
       ReductionOpID redop_id;
@@ -117,8 +117,41 @@ namespace Realm {
     class DmaRequestQueue;
     // for now we use a single queue for all (local) dmas
     extern DmaRequestQueue *dma_queue;
-    
+
+    // include files are all tangled up, so some XferDes stuff here...  :(
     typedef unsigned long long XferDesID;
+    class XferDesFactory;
+    enum XferDesKind {
+      XFER_NONE,
+      XFER_DISK_READ,
+      XFER_DISK_WRITE,
+      XFER_SSD_READ,
+      XFER_SSD_WRITE,
+      XFER_GPU_TO_FB,
+      XFER_GPU_FROM_FB,
+      XFER_GPU_IN_FB,
+      XFER_GPU_PEER_FB,
+      XFER_MEM_CPY,
+      XFER_GASNET_READ,
+      XFER_GASNET_WRITE,
+      XFER_REMOTE_WRITE,
+      XFER_HDF_READ,
+      XFER_HDF_WRITE,
+      XFER_FILE_READ,
+      XFER_FILE_WRITE,
+      XFER_ADDR_SPLIT
+    };
+
+    struct MemPathInfo {
+      std::vector<Memory> path;
+      std::vector<XferDesKind> xd_kinds;
+      std::vector<NodeID> xd_target_nodes;
+    };
+    
+    bool find_shortest_path(Memory src_mem, Memory dst_mem,
+			    CustomSerdezID serdez_id,
+			    MemPathInfo& info);
+
     class DmaRequest : public Realm::Operation {
     public:
       DmaRequest(int _priority,
@@ -147,6 +180,7 @@ namespace Realm {
 	STATE_DST_FETCH,
 	STATE_GEN_PATH,
 	STATE_ALLOC_IB,
+	STATE_WAIT_IB,
 	STATE_BEFORE_EVENT,
 	STATE_INST_LOCK,
 	STATE_READY,
@@ -158,20 +192,8 @@ namespace Realm {
       int priority;
       // <NEWDMA>
       Mutex request_lock;
-      std::vector<XferDesID> path;
-      std::set<XferDesID> complete_xd;
+      std::vector<XferDesID> xd_ids;
 
-      // Returns true if all xfer des of this DmaRequest
-      // have been marked completed
-      // This return val is a signal for delete this DmaRequest
-      bool notify_xfer_des_completion(XferDesID guid)
-      {
-	request_lock.lock();
-        complete_xd.insert(guid);
-        bool all_completed = (complete_xd.size() == path.size());
-	request_lock.unlock();
-        return all_completed;
-      }
       Event tgt_fetch_completion;
       // </NEWDMA>
 
@@ -209,6 +231,7 @@ namespace Realm {
 
     class MemPairCopier;
 
+#if 0
     struct PendingIBInfo {
       Memory memory;
       int idx;
@@ -226,27 +249,37 @@ namespace Realm {
           return a.memory.id < b.memory.id;
       }
     };
+#endif
 
     struct IBInfo {
+#if 0
       enum Status {
         INIT,
         SENT,
         COMPLETED
       };
+#endif
       Memory memory;
       off_t offset;
       size_t size;
-      Status status;
+      //Status status;
       //IBFence* fence;
-      Event event;
+      //Event event;
+
+      void set(Memory _memory, size_t _size);
     };
 
-    typedef std::set<PendingIBInfo, ComparePendingIBInfo> PriorityIBQueue;
+    // helper - should come from channels eventually
+    XferDesFactory *get_xd_factory_by_kind(XferDesKind kind);
+    
+  //typedef std::set<PendingIBInfo, ComparePendingIBInfo> PriorityIBQueue;
     typedef std::vector<IBInfo> IBVec;
     typedef std::map<InstPair, IBVec> IBByInst;
+    typedef std::map<Memory, std::vector<IBInfo *> > PendingIBRequests;
 
     class TransferDomain;
     class TransferIterator;
+    class IndirectionInfo;
 
     // dma requests come in two flavors:
     // 1) CopyRequests, which are per memory pair, and
@@ -261,6 +294,8 @@ namespace Realm {
 
       CopyRequest(const TransferDomain *_domain, //const Domain& _domain,
 		  OASByInst *_oas_by_inst,
+		  IndirectionInfo *_gather_info,
+		  IndirectionInfo *_scatter_info,
 		  Event _before_copy,
 		  GenEventImpl *_after_copy, EventImpl::gen_t _after_gen,
 		  int _priority,
@@ -284,22 +319,84 @@ namespace Realm {
       TransferDomain *domain;
       //Domain domain;
       OASByInst *oas_by_inst;
+      IndirectionInfo *gather_info;
+      IndirectionInfo *scatter_info;
 
       // <NEW_DMA>
       void alloc_intermediate_buffer(InstPair inst_pair, Memory tgt_mem, int idx);
 
-      void handle_ib_response(int idx, InstPair inst_pair, size_t ib_size, off_t ib_offset);
+      void handle_ib_response(//int idx, InstPair inst_pair, size_t ib_size,
+			      IBInfo *ibinfo, off_t ib_offset);
 
-      PriorityIBQueue priority_ib_queue;
+      //PriorityIBQueue priority_ib_queue;
+      //PendingIBRequests pending_ib_requests;
+      size_t ib_responses_needed;
       // operations on ib_by_inst are protected by ib_mutex
-      IBByInst ib_by_inst;
-      Mutex ib_mutex;
-      std::vector<Memory> mem_path;
+      //IBByInst ib_by_inst;
+      //Mutex ib_mutex;
+      //std::vector<Memory> mem_path;
       // </NEW_DMA>
+
+      // copies with generalized scatter and gather have a DAG that describes
+      //  the overall transfer: nodes are transfer descriptors and edges are
+      //  intermediate buffers
+      struct XDTemplate {
+	NodeID target_node;
+	XferDesKind kind;
+	XferDesFactory *factory;
+	int gather_control_input;
+	int scatter_control_input;
+	enum { // special edge numbers
+	  SRC_INST = -1,
+	  DST_INST = -2,
+	  INDIRECT_BASE = -1000,
+	};
+	struct IO {
+	  int edge_id;
+	  RegionInstance indirect_inst;
+	};
+	std::vector<IO> inputs;  // TODO: short vectors
+	std::vector<IO> outputs;
+
+	// helper functions for initializing these things
+	void set_simple(NodeID _target_node, XferDesKind _kind,
+			int _in_edge, int _out_edge);
+      };
+      std::vector<XDTemplate> xd_nodes;
+      std::vector<IBInfo> ib_edges;
 
       Event before_copy;
       Waiter waiter; // if we need to wait on events
     };
+
+    class IndirectionInfo {
+    public:
+      virtual ~IndirectionInfo(void) {}
+      virtual Event request_metadata(void) = 0;
+      virtual Memory generate_gather_paths(Memory dst_mem, int dst_edge_id,
+					   size_t bytes_per_element,
+					   CustomSerdezID serdez_id,
+					   std::vector<CopyRequest::XDTemplate>& xd_nodes,
+					   std::vector<IBInfo>& ib_edges) = 0;
+
+      virtual Memory generate_scatter_paths(Memory src_mem, int src_edge_id,
+					    size_t bytes_per_element,
+					    CustomSerdezID serdez_id,
+					    std::vector<CopyRequest::XDTemplate>& xd_nodes,
+					    std::vector<IBInfo>& ib_edges) = 0;
+
+      virtual RegionInstance get_pointer_instance(void) const = 0;
+      
+      virtual TransferIterator *create_address_iterator(RegionInstance peer) const = 0;
+
+      virtual TransferIterator *create_indirect_iterator(Memory addrs_mem,
+							 RegionInstance inst,
+							 const std::vector<FieldID>& fields) const = 0;
+
+      virtual void print(std::ostream& os) const = 0;
+    };
+
+    std::ostream& operator<<(std::ostream& os, const IndirectionInfo& ii);
 
     class ReduceRequest : public DmaRequest {
     public:
