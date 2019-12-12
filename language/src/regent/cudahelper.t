@@ -19,45 +19,38 @@ local report = require("common/report")
 
 local cudahelper = {}
 
-if not terralib.cudacompile then
+-- Exit early if the user turned off CUDA code generation
+
+if config["cuda"] == 0 then
   function cudahelper.check_cuda_available()
-    return false, "Terra is built without CUDA support"
+    return false
   end
   return cudahelper
 end
 
-if not config["cuda"] then
-  function cudahelper.check_cuda_available()
-    return false, "CUDA code generation is turned off (-fcuda 0)"
-  end
-  return cudahelper
-end
-
--- copied and modified from cudalib.lua in Terra interpreter
-
-local ffi = require('ffi')
-
+local c = base.c
+local ef = terralib.externfunction
+local externcall_builtin = terralib.externfunction
 local cudapaths = { OSX = "/usr/local/cuda/lib/libcuda.dylib";
                     Linux =  "libcuda.so";
                     Windows = "nvcuda.dll"; }
 
-local cudaruntimelinked = false
-function cudahelper.link_driver_library()
-    if cudaruntimelinked then return end
-    local path = assert(cudapaths[ffi.os],"unknown OS?")
-    terralib.linklibrary(path)
-    cudaruntimelinked = true
-end
+-- #####################################
+-- ## CUDA Hijack API
+-- #################
 
---
-
-local ef = terralib.externfunction
-local externcall_builtin = terralib.externfunction
-
-local RuntimeAPI = terralib.includec("cuda_runtime.h")
 local HijackAPI = terralib.includec("regent_cudart_hijack.h")
 
-local C = base.c
+struct fat_bin_t {
+  magic : int,
+  versions : int,
+  data : &opaque,
+  filename : &opaque,
+}
+
+-- #####################################
+-- ## CUDA Device API
+-- #################
 
 local struct CUctx_st
 local struct CUmod_st
@@ -80,122 +73,122 @@ local DriverAPI = {
     {&int32,&int32,int32} -> uint32);
 }
 
-local dlfcn = terralib.includec("dlfcn.h")
-local terra has_symbol(symbol : rawstring)
-  var lib = dlfcn.dlopen([&int8](0), dlfcn.RTLD_LAZY)
-  var has_symbol = dlfcn.dlsym(lib, symbol) ~= [&opaque](0)
-  dlfcn.dlclose(lib)
-  return has_symbol
-end
-
+local RuntimeAPI = false
 do
-  if not config["cuda-offline"] then
-    if has_symbol("cuInit") then
-      local r = DriverAPI.cuInit(0)
-      if r == 0 then
-        function cudahelper.check_cuda_available()
-          return true
+  if not terralib.cudacompile then
+    function cudahelper.check_cuda_available()
+      return false, "Terra is built without CUDA support"
+    end
+  else
+    -- Try to load the CUDA runtime header
+    pcall(function() RuntimeAPI = terralib.includec("cuda_runtime.h") end)
+
+    if RuntimeAPI == nil then
+      function cudahelper.check_cuda_available()
+        return false, "cuda_runtime.h does not exist in INCLUDE_PATH"
+      end
+    elseif config["cuda-offline"] then
+      function cudahelper.check_cuda_available()
+        return true
+      end
+    else
+      local dlfcn = terralib.includec("dlfcn.h")
+      local terra has_symbol(symbol : rawstring)
+        var lib = dlfcn.dlopen([&int8](0), dlfcn.RTLD_LAZY)
+        var has_symbol = dlfcn.dlsym(lib, symbol) ~= [&opaque](0)
+        dlfcn.dlclose(lib)
+        return has_symbol
+      end
+
+      if has_symbol("cuInit") then
+        local r = DriverAPI.cuInit(0)
+        if r == 0 then
+          function cudahelper.check_cuda_available()
+            return true
+          end
+        else
+          function cudahelper.check_cuda_available()
+            return false, "calling cuInit(0) failed for some reason (CUDA devices might not exist)"
+          end
         end
       else
         function cudahelper.check_cuda_available()
-          return false, "calling cuInit(0) failed for some reason (CUDA devices might not exist)"
+          return false, "the cuInit function is missing (Regent might have been installed without CUDA support)"
         end
       end
+    end
+  end
+end
+
+do
+  local available, error_message = cudahelper.check_cuda_available()
+  if not available then
+    if config["cuda"] == 1 then
+      print("CUDA code generation failed since " .. error_message)
+      os.exit(-1)
     else
-      function cudahelper.check_cuda_available()
-        return false, "the cuInit function is missing (Regent might have been installed without CUDA support)"
-      end
-    end
-  else
-    function cudahelper.check_cuda_available()
-      return true
+      return cudahelper
     end
   end
 end
 
--- copied and modified from cudalib.lua in Terra interpreter
-
-local c = terralib.includec("unistd.h")
-
-local lua_assert = assert
-local terra assert(x : bool, message : rawstring)
-  if not x then
-    var stderr = C.fdopen(2, "w")
-    C.fprintf(stderr, "assertion failed: %s\n", message)
-    -- Just because it's stderr doesn't mean it's unbuffered...
-    C.fflush(stderr)
-    C.abort()
-  end
-end
-
-local terra get_cuda_version_terra() : uint64
-  var cx : &CUctx_st
-  var cx_created = false
-  var r = DriverAPI.cuCtxGetCurrent(&cx)
-  assert(r == 0, "CUDA error in cuCtxGetCurrent")
-  var device : int32
-  if cx ~= nil then
-    r = DriverAPI.cuCtxGetDevice(&device)
-    assert(r == 0, "CUDA error in cuCtxGetDevice")
-  else
-    r = DriverAPI.cuDeviceGet(&device, 0)
-    assert(r == 0, "CUDA error in cuDeviceGet")
-    r = DriverAPI.cuCtxCreate_v2(&cx, 0, device)
-    assert(r == 0, "CUDA error in cuCtxCreate_v2")
-    cx_created = true
-  end
-
-  var major : int, minor : int
-  r = DriverAPI.cuDeviceComputeCapability(&major, &minor, device)
-  assert(r == 0, "CUDA error in cuDeviceComputeCapability")
-  var version = [uint64](major * 10 + minor)
-  if cx_created then
-    DriverAPI.cuCtxDestroy(cx)
-  end
-  return version
-end
-
---
-
-struct fat_bin_t {
-  magic : int,
-  versions : int,
-  data : &opaque,
-  filename : &opaque,
+-- Declare the API calls that are deprecated in CUDA SDK 10
+-- TODO: We must move on to the new execution control API as these old functions
+--       can be dropped in the future.
+local ExecutionAPI = {
+  cudaConfigureCall =
+    ef("cudaConfigureCall", {RuntimeAPI.dim3, RuntimeAPI.dim3, uint64, RuntimeAPI.cudaStream_t} -> uint32);
+  cudaSetupArgument = ef("cudaSetupArgument", {&opaque, uint64, uint64} -> uint32);
+  cudaLaunch = ef("cudaLaunch", {&opaque} -> uint32);
 }
 
-local terra register_ptx(ptxc : rawstring, ptxSize : uint32, version : uint64) : &&opaque
-  var fat_bin : &fat_bin_t
-  var fat_size = sizeof(fat_bin_t)
-  -- TODO: this line is leaking memory
-  fat_bin = [&fat_bin_t](C.malloc(fat_size))
-  base.assert(fat_size == 0 or fat_bin ~= nil, "malloc failed in register_ptx")
-  fat_bin.magic = 1234
-  fat_bin.versions = 5678
-  var fat_data_size = ptxSize + 1
-  fat_bin.data = C.malloc(fat_data_size)
-  base.assert(fat_data_size == 0 or fat_bin.data ~= nil, "malloc failed in register_ptx")
-  fat_bin.data = ptxc
-  var handle = HijackAPI.hijackCudaRegisterFatBinary(fat_bin)
-  return handle
-end
-
-local terra register_function(handle : &&opaque, id : int, name : &int8)
-  HijackAPI.hijackCudaRegisterFunction(handle, [&int8](id), name)
-end
-
-local function find_device_library(target)
-  local device_lib_dir = terralib.cudahome .. "/nvvm/libdevice/"
-  local libdevice = nil
-  for f in io.popen("ls " .. device_lib_dir):lines() do
-    local version = tonumber(string.match(string.match(f, "[0-9][0-9][.]"), "[0-9][0-9]"))
-    if version <= target then
-      libdevice = device_lib_dir .. f
-    end
+do
+  local ffi = require('ffi')
+  local cudaruntimelinked = false
+  function cudahelper.link_driver_library()
+    if cudaruntimelinked then return end
+    local path = assert(cudapaths[ffi.os],"unknown OS?")
+    terralib.linklibrary(path)
+    cudaruntimelinked = true
   end
-  lua_assert(libdevice ~= nil, "Failed to find a device library")
-  return libdevice
 end
+
+-- #####################################
+-- ## Printf for CUDA (not exposed to the user for the moment)
+-- #################
+
+local vprintf = ef("cudart:vprintf", {&int8,&int8} -> int)
+
+local function createbuffer(args)
+  local Buf = terralib.types.newstruct()
+  for i,e in ipairs(args) do
+    local typ = e:gettype()
+    local field = "_"..tonumber(i)
+    typ = typ == float and double or typ
+    table.insert(Buf.entries,{field,typ})
+  end
+  return quote
+    var buf : Buf
+    escape
+        for i,e in ipairs(args) do
+            emit quote
+               buf.["_"..tonumber(i)] = e
+            end
+        end
+    end
+  in
+    [&int8](&buf)
+  end
+end
+
+local cuda_printf = macro(function(fmt,...)
+  local buf = createbuffer({...})
+  return `vprintf(fmt,buf)
+end)
+
+-- #####################################
+-- ## Supported CUDA compute versions
+-- #################
 
 local supported_archs = {
   ["fermi"]   = 20,
@@ -221,9 +214,73 @@ local function parse_cuda_arch(arch)
   return sm
 end
 
+-- #####################################
+-- ## Registration functions
+-- #################
+
+local terra register_ptx(ptxc : rawstring, ptxSize : uint32, version : uint64) : &&opaque
+  var fat_bin : &fat_bin_t
+  var fat_size = sizeof(fat_bin_t)
+  -- TODO: this line is leaking memory
+  fat_bin = [&fat_bin_t](c.malloc(fat_size))
+  base.assert(fat_size == 0 or fat_bin ~= nil, "malloc failed in register_ptx")
+  fat_bin.magic = 1234
+  fat_bin.versions = 5678
+  var fat_data_size = ptxSize + 1
+  fat_bin.data = c.malloc(fat_data_size)
+  base.assert(fat_data_size == 0 or fat_bin.data ~= nil, "malloc failed in register_ptx")
+  fat_bin.data = ptxc
+  var handle = HijackAPI.hijackCudaRegisterFatBinary(fat_bin)
+  return handle
+end
+
+local terra register_function(handle : &&opaque, id : int, name : &int8)
+  HijackAPI.hijackCudaRegisterFunction(handle, [&int8](id), name)
+end
+
+local function find_device_library(target)
+  local device_lib_dir = terralib.cudahome .. "/nvvm/libdevice/"
+  local libdevice = nil
+  for f in io.popen("ls " .. device_lib_dir):lines() do
+    local version = tonumber(string.match(string.match(f, "[0-9][0-9][.]"), "[0-9][0-9]"))
+    if version <= target then
+      libdevice = device_lib_dir .. f
+    end
+  end
+  assert(libdevice ~= nil, "Failed to find a device library")
+  return libdevice
+end
+
 local get_cuda_version
 do
   local cached_cuda_version = nil
+  local terra get_cuda_version_terra() : uint64
+    var cx : &CUctx_st
+    var cx_created = false
+    var r = DriverAPI.cuCtxGetCurrent(&cx)
+    base.assert(r == 0, "CUDA error in cuCtxGetCurrent")
+    var device : int32
+    if cx ~= nil then
+      r = DriverAPI.cuCtxGetDevice(&device)
+      base.assert(r == 0, "CUDA error in cuCtxGetDevice")
+    else
+      r = DriverAPI.cuDeviceGet(&device, 0)
+      base.assert(r == 0, "CUDA error in cuDeviceGet")
+      r = DriverAPI.cuCtxCreate_v2(&cx, 0, device)
+      base.assert(r == 0, "CUDA error in cuCtxCreate_v2")
+      cx_created = true
+    end
+
+    var major : int, minor : int
+    r = DriverAPI.cuDeviceComputeCapability(&major, &minor, device)
+    base.assert(r == 0, "CUDA error in cuDeviceComputeCapability")
+    var version = [uint64](major * 10 + minor)
+    if cx_created then
+      DriverAPI.cuCtxDestroy(cx)
+    end
+    return version
+  end
+
   get_cuda_version = function()
     if cached_cuda_version ~= nil then
       return cached_cuda_version
@@ -266,10 +323,14 @@ function cudahelper.jit_compile_kernels_and_register(kernels)
   return register
 end
 
+-- #####################################
+-- ## Primitives
+-- #################
+
 local THREAD_BLOCK_SIZE = 128
 local MAX_NUM_BLOCK = 32768
 local GLOBAL_RED_BUFFER = 256
-lua_assert(GLOBAL_RED_BUFFER % THREAD_BLOCK_SIZE == 0)
+assert(GLOBAL_RED_BUFFER % THREAD_BLOCK_SIZE == 0)
 
 local tid_x   = cudalib.nvvm_read_ptx_sreg_tid_x
 local n_tid_x = cudalib.nvvm_read_ptx_sreg_ntid_x
@@ -339,7 +400,7 @@ function cudahelper.generate_atomic_update(op, typ)
     cas_type = uint32
     cas_func = cas_uint32
   else
-    lua_assert(sizeof(typ) == 8)
+    assert(sizeof(typ) == 8)
     cas_type = uint64
     cas_func = cas_uint64
   end
@@ -367,34 +428,9 @@ function cudahelper.generate_atomic_update(op, typ)
   return atomic_op
 end
 
-local vprintf = ef("cudart:vprintf", {&int8,&int8} -> int)
-
-local function createbuffer(args)
-  local Buf = terralib.types.newstruct()
-  for i,e in ipairs(args) do
-    local typ = e:gettype()
-    local field = "_"..tonumber(i)
-    typ = typ == float and double or typ
-    table.insert(Buf.entries,{field,typ})
-  end
-  return quote
-    var buf : Buf
-    escape
-        for i,e in ipairs(args) do
-            emit quote
-               buf.["_"..tonumber(i)] = e
-            end
-        end
-    end
-  in
-    [&int8](&buf)
-  end
-end
-
-local cuda_printf = macro(function(fmt,...)
-  local buf = createbuffer({...})
-  return `vprintf(fmt,buf)
-end)
+-- #####################################
+-- ## Code generation for scalar reduction
+-- #################
 
 function cudahelper.compute_reduction_buffer_size(node, reductions)
   local size = 0
@@ -496,21 +532,21 @@ function cudahelper.generate_reduction_preamble(reductions)
       var [device_ptr] = [&red_var.type](nil)
       var [host_ptr] = [&red_var.type](nil)
       do
-        var bounds : C.legion_rect_1d_t
+        var bounds : c.legion_rect_1d_t
         bounds.lo.x[0] = 0
         bounds.hi.x[0] = [sizeof(red_var.type) * GLOBAL_RED_BUFFER - 1]
-        var buffer = C.legion_deferred_buffer_char_1d_create(bounds, C.GPU_FB_MEM, [&int8](nil))
+        var buffer = c.legion_deferred_buffer_char_1d_create(bounds, c.GPU_FB_MEM, [&int8](nil))
         [device_ptr] =
-          [&red_var.type]([&opaque](C.legion_deferred_buffer_char_1d_ptr(buffer, bounds.lo)))
+          [&red_var.type]([&opaque](c.legion_deferred_buffer_char_1d_ptr(buffer, bounds.lo)))
         [cudahelper.codegen_kernel_call(init_kernel_id, GLOBAL_RED_BUFFER, init_args, 0, true)]
       end
       do
-        var bounds : C.legion_rect_1d_t
+        var bounds : c.legion_rect_1d_t
         bounds.lo.x[0] = 0
         bounds.hi.x[0] = [sizeof(red_var.type) - 1]
-        var buffer = C.legion_deferred_buffer_char_1d_create(bounds, C.Z_COPY_MEM, [&int8](nil))
+        var buffer = c.legion_deferred_buffer_char_1d_create(bounds, c.Z_COPY_MEM, [&int8](nil))
         [host_ptr] =
-          [&red_var.type]([&opaque](C.legion_deferred_buffer_char_1d_ptr(buffer, bounds.lo)))
+          [&red_var.type]([&opaque](c.legion_deferred_buffer_char_1d_ptr(buffer, bounds.lo)))
       end
     end
     device_ptrs:insert(device_ptr)
@@ -1098,16 +1134,6 @@ function cudahelper.generate_parallel_prefix_op(variant, total, lhs_wr, lhs_rd, 
   return launch
 end
 
--- Declare the API calls that are deprecated in CUDA SDK 10
--- TODO: We must move on to the new execution control API as these old functions
---       can be dropped in the future.
-local ExecutionAPI = {
-  cudaConfigureCall =
-    ef("cudaConfigureCall", {RuntimeAPI.dim3, RuntimeAPI.dim3, uint64, RuntimeAPI.cudaStream_t} -> uint32);
-  cudaSetupArgument = ef("cudaSetupArgument", {&opaque, uint64, uint64} -> uint32);
-  cudaLaunch = ef("cudaLaunch", {&opaque} -> uint32);
-}
-
 function cudahelper.codegen_kernel_call(kernel_id, count, args, shared_mem_size, tight)
   local setupArguments = terralib.newlist()
 
@@ -1157,7 +1183,7 @@ function cudahelper.codegen_kernel_call(kernel_id, count, args, shared_mem_size,
 end
 
 local function get_nv_fn_name(name, type)
-  lua_assert(type:isfloat())
+  assert(type:isfloat())
   local nv_name = "__nv_" .. name
 
   -- Okay. a little divergence from the C standard...
@@ -1186,7 +1212,7 @@ local function get_cuda_definition(self)
   else
     local fn_type = self.super:get_definition().type
     local fn_name = get_nv_fn_name(self:get_name(), self:get_arg_type())
-    lua_assert(fn_name ~= nil)
+    assert(fn_name ~= nil)
     local fn = externcall_builtin(fn_name, fn_type)
     self:set_variant("cuda", fn)
     return fn

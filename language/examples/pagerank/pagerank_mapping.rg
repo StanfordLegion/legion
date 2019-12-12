@@ -183,7 +183,7 @@ do
   return nodes[node_is.bounds.hi].index
 end
 
-__allow(__cuda)
+__demand(__cuda)
 task pagerank(nodes : region(ispace(int1d), NodeStruct),
               edges : region(ispace(int1d), EdgeStruct),
               pr_old : region(ispace(int1d), float),
