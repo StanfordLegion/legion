@@ -1379,14 +1379,14 @@ namespace Legion {
   }
 
   //----------------------------------------------------------------------------
-  template<int DIM, typename COORD_T>
+  template<int DIM, typename COORD_T> __CUDA_HD__
   inline PointInRectIterator<DIM,COORD_T>::PointInRectIterator(void)
   //----------------------------------------------------------------------------
   {
   }
 
   //----------------------------------------------------------------------------
-  template<int DIM, typename COORD_T>
+  template<int DIM, typename COORD_T> __CUDA_HD__
   inline PointInRectIterator<DIM,COORD_T>::PointInRectIterator(
              const Rect<DIM,COORD_T> &r, bool column_major_order)
     : itr(Realm::PointInRectIterator<DIM,COORD_T>(r, column_major_order))
@@ -1396,7 +1396,7 @@ namespace Legion {
   }
 
   //----------------------------------------------------------------------------
-  template<int DIM, typename COORD_T>
+  template<int DIM, typename COORD_T> __CUDA_HD__
   inline bool PointInRectIterator<DIM,COORD_T>::valid(void) const
   //----------------------------------------------------------------------------
   {
@@ -1404,7 +1404,7 @@ namespace Legion {
   }
 
   //----------------------------------------------------------------------------
-  template<int DIM, typename COORD_T>
+  template<int DIM, typename COORD_T> __CUDA_HD__
   inline bool PointInRectIterator<DIM,COORD_T>::step(void)
   //----------------------------------------------------------------------------
   {
@@ -1414,7 +1414,7 @@ namespace Legion {
   }
 
   //----------------------------------------------------------------------------
-  template<int DIM, typename COORD_T>
+  template<int DIM, typename COORD_T> __CUDA_HD__
   inline bool PointInRectIterator<DIM,COORD_T>::operator()(void) const
   //----------------------------------------------------------------------------
   {
@@ -1422,7 +1422,7 @@ namespace Legion {
   }
 
   //----------------------------------------------------------------------------
-  template<int DIM, typename COORD_T>
+  template<int DIM, typename COORD_T> __CUDA_HD__
   inline Point<DIM,COORD_T> 
                          PointInRectIterator<DIM,COORD_T>::operator*(void) const
   //----------------------------------------------------------------------------
@@ -1431,7 +1431,7 @@ namespace Legion {
   }
 
   //----------------------------------------------------------------------------
-  template<int DIM, typename COORD_T>
+  template<int DIM, typename COORD_T> __CUDA_HD__
   inline COORD_T 
               PointInRectIterator<DIM,COORD_T>::operator[](unsigned index) const
   //----------------------------------------------------------------------------
@@ -1440,7 +1440,7 @@ namespace Legion {
   }
 
   //----------------------------------------------------------------------------
-  template<int DIM, typename COORD_T>
+  template<int DIM, typename COORD_T> __CUDA_HD__
   inline const Point<DIM,COORD_T>* 
                         PointInRectIterator<DIM,COORD_T>::operator->(void) const
   //----------------------------------------------------------------------------
@@ -1449,7 +1449,7 @@ namespace Legion {
   }
 
   //----------------------------------------------------------------------------
-  template<int DIM, typename COORD_T>
+  template<int DIM, typename COORD_T> __CUDA_HD__
   inline PointInRectIterator<DIM,COORD_T>&
                               PointInRectIterator<DIM,COORD_T>::operator++(void)
   //----------------------------------------------------------------------------
@@ -1459,7 +1459,7 @@ namespace Legion {
   }
 
   //----------------------------------------------------------------------------
-  template<int DIM, typename COORD_T>
+  template<int DIM, typename COORD_T> __CUDA_HD__
   inline PointInRectIterator<DIM,COORD_T>
                     PointInRectIterator<DIM,COORD_T>::operator++(int/*postfix*/)
   //----------------------------------------------------------------------------
