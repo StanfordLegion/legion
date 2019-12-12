@@ -8717,9 +8717,11 @@ function codegen.stat_for_list(cx, node)
       if std.config["bounds-checks"] then
         preamble = quote
           [preamble];
-          [lrs:map_list(function(lr) return
-            quote
-              var p = [lr.type:ispace().index_type:zero()]
+          [lrs:map_list(function(lr)
+            local index_type = lr.type:ispace().index_type
+            if index_type:is_opaque() then index_type = std.int1d end
+            return quote
+              var p = [index_type:zero()]
               c.legion_domain_point_safe_cast([cx.runtime], [cx.context],
                 p:to_domain_point(), [lr].impl)
             end
