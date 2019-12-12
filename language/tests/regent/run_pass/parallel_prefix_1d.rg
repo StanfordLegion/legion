@@ -91,7 +91,7 @@ function make_tasks(ty)
     -- __parallel_prefix(r.output_cpu.v_max, r.output_cpu.v_min, max, -1)
   end
 
-  __allow(__cuda)
+  __demand(__cuda)
   task gpu_prefix_task(r : region(ispace(int1d), fs_type))
   where
     reads(r.input), reads writes(r.output_gpu)

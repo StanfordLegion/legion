@@ -44,7 +44,7 @@ task stencil1(interior : region(ispace(int2d), fs),
                      r : region(ispace(int2d), fs))
 where reads(r.f), reads writes(r.g), interior <= r
 do
-  __allow(__openmp)
+  __demand(__openmp)
   for e in interior do
     r[e].g = 0.5 * (r[e].f +
                     r[e + {-2, 0}].f + r[e + {0, -1}].f +
@@ -57,7 +57,7 @@ task stencil2(interior : region(ispace(int2d), fs),
                      r : region(ispace(int2d), fs))
 where reads(r.f), reads writes(r.g), interior <= r
 do
-  __allow(__openmp)
+  __demand(__openmp)
   for e in interior do
     r[e].g = 0.5 * (r[e].f +
                     r[e + {-1, 0}].f + r[e + {0, -1}].f +
@@ -69,7 +69,7 @@ __demand(__parallel)
 task stencil3(r : region(ispace(int2d), fs))
 where reads(r.f), reads writes(r.g)
 do
-  __allow(__openmp)
+  __demand(__openmp)
   for e in r do
     r[e].g = 0.5 * (r[e].f + r[(e + {2, 0}) % r.bounds].f)
   end
