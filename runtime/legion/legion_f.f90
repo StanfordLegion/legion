@@ -4,6 +4,8 @@ module legion_fortran
   use legion_fortran_c_interface
   implicit none
   
+#include "legion_defines.h"
+  
 #ifndef LEGION_MAX_DIM
 #define LEGION_MAX_DIM     3
 #endif

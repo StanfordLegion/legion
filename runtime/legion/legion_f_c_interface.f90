@@ -2,6 +2,8 @@ module legion_fortran_c_interface
   use, intrinsic :: iso_c_binding
   use legion_fortran_types
   implicit none
+  
+#include "legion_defines.h"
 
 #ifndef LEGION_MAX_DIM
 #define LEGION_MAX_DIM     3

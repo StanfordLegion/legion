@@ -2,7 +2,7 @@ module legion_fortran_types
   use, intrinsic :: iso_c_binding
   implicit none
   
- ! include "legion_defines.h"
+#include "legion_defines.h"
   
 #ifndef LEGION_MAX_DIM
 #define LEGION_MAX_DIM     3
