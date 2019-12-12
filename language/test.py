@@ -306,7 +306,7 @@ def get_test_specs(legion_dir, use_run, use_spy, use_prof, use_hdf5, use_openmp,
     ]
     spy = [
         ('spy', (test_spy, ([] + extra_flags, base_env)),
-          os.path.join('tests', 'regent', 'run_pass'),
+         (os.path.join('tests', 'regent', 'run_pass'),
           os.path.join('tests', 'regent', 'perf'),
           os.path.join('tests', 'regent', 'bugs'),
           os.path.join('tests', 'regent', 'layout'),
