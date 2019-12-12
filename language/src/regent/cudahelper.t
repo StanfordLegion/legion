@@ -17,10 +17,11 @@ local config = require("regent/config").args()
 local data = require("common/data")
 local report = require("common/report")
 
+local cudahelper = {}
+
 -- Exit early if the user turned off CUDA code generation
 
 if config["cuda"] == 0 then
-  local cudahelper = {}
   function cudahelper.check_cuda_available()
     return false
   end
@@ -34,6 +35,86 @@ local cudapaths = { OSX = "/usr/local/cuda/lib/libcuda.dylib";
                     Linux =  "libcuda.so";
                     Windows = "nvcuda.dll"; }
 
+local RuntimeAPI = false
+do
+  if not terralib.cudacompile then
+    function cudahelper.check_cuda_available()
+      return false, "Terra is built without CUDA support"
+    end
+  else
+    -- Try to load the CUDA runtime header
+    pcall(function() RuntimeAPI = terralib.includec("cuda_runtime.h") end)
+
+    if RuntimeAPI == nil then
+      function cudahelper.check_cuda_available()
+        return false, "cuda_runtime.h does not exist in INCLUDE_PATH"
+      end
+    elseif config["cuda-offline"] then
+      function cudahelper.check_cuda_available()
+        return true
+      end
+    else
+      local dlfcn = terralib.includec("dlfcn.h")
+      local terra has_symbol(symbol : rawstring)
+        var lib = dlfcn.dlopen([&int8](0), dlfcn.RTLD_LAZY)
+        var has_symbol = dlfcn.dlsym(lib, symbol) ~= [&opaque](0)
+        dlfcn.dlclose(lib)
+        return has_symbol
+      end
+
+      if has_symbol("cuInit") then
+        local r = DriverAPI.cuInit(0)
+        if r == 0 then
+          function cudahelper.check_cuda_available()
+            return true
+          end
+        else
+          function cudahelper.check_cuda_available()
+            return false, "calling cuInit(0) failed for some reason (CUDA devices might not exist)"
+          end
+        end
+      else
+        function cudahelper.check_cuda_available()
+          return false, "the cuInit function is missing (Regent might have been installed without CUDA support)"
+        end
+      end
+    end
+  end
+end
+
+do
+  local available, error_message = cudahelper.check_cuda_available()
+  if not available then
+    if config["cuda"] == 1 then
+      print("CUDA code generation failed since " .. error_message)
+      os.exit(-1)
+    else
+      return cudahelper
+    end
+  end
+end
+
+-- Declare the API calls that are deprecated in CUDA SDK 10
+-- TODO: We must move on to the new execution control API as these old functions
+--       can be dropped in the future.
+local ExecutionAPI = {
+  cudaConfigureCall =
+    ef("cudaConfigureCall", {RuntimeAPI.dim3, RuntimeAPI.dim3, uint64, RuntimeAPI.cudaStream_t} -> uint32);
+  cudaSetupArgument = ef("cudaSetupArgument", {&opaque, uint64, uint64} -> uint32);
+  cudaLaunch = ef("cudaLaunch", {&opaque} -> uint32);
+}
+
+do
+  local ffi = require('ffi')
+  local cudaruntimelinked = false
+  function cudahelper.link_driver_library()
+    if cudaruntimelinked then return end
+    local path = assert(cudapaths[ffi.os],"unknown OS?")
+    terralib.linklibrary(path)
+    cudaruntimelinked = true
+  end
+end
+
 -- #####################################
 -- ## CUDA Hijack API
 -- #################
@@ -45,27 +126,6 @@ struct fat_bin_t {
   versions : int,
   data : &opaque,
   filename : &opaque,
-}
-
--- #####################################
--- ## CUDA Runtime API
--- #################
-
--- Try to load the CUDA runtime header
-local RuntimeAPI = false
-
-do
-  pcall(function() RuntimeAPI = terralib.includec("cuda_runtime.h") end)
-end
-
--- Declare the API calls that are deprecated in CUDA SDK 10
--- TODO: We must move on to the new execution control API as these old functions
---       can be dropped in the future.
-local ExecutionAPI = RuntimeAPI and {
-  cudaConfigureCall =
-    ef("cudaConfigureCall", {RuntimeAPI.dim3, RuntimeAPI.dim3, uint64, RuntimeAPI.cudaStream_t} -> uint32);
-  cudaSetupArgument = ef("cudaSetupArgument", {&opaque, uint64, uint64} -> uint32);
-  cudaLaunch = ef("cudaLaunch", {&opaque} -> uint32);
 }
 
 -- #####################################
@@ -152,75 +212,6 @@ local function parse_cuda_arch(arch)
     os.exit(1)
   end
   return sm
-end
-
-local cudahelper = {}
-
-do
-  if RuntimeAPI == nil then
-    function cudahelper.check_cuda_available()
-      return false, "cuda_runtime.h does not exist in INCLUDE_PATH"
-    end
-
-  elseif not terralib.cudacompile then
-    function cudahelper.check_cuda_available()
-      return false, "Terra is built without CUDA support"
-    end
-
-  elseif config["cuda-offline"] then
-    function cudahelper.check_cuda_available()
-      return true
-    end
-
-  else
-    local dlfcn = terralib.includec("dlfcn.h")
-    local terra has_symbol(symbol : rawstring)
-      var lib = dlfcn.dlopen([&int8](0), dlfcn.RTLD_LAZY)
-      var has_symbol = dlfcn.dlsym(lib, symbol) ~= [&opaque](0)
-      dlfcn.dlclose(lib)
-      return has_symbol
-    end
-
-    if has_symbol("cuInit") then
-      local r = DriverAPI.cuInit(0)
-      if r == 0 then
-        function cudahelper.check_cuda_available()
-          return true
-        end
-      else
-        function cudahelper.check_cuda_available()
-          return false, "calling cuInit(0) failed for some reason (CUDA devices might not exist)"
-        end
-      end
-    else
-      function cudahelper.check_cuda_available()
-        return false, "the cuInit function is missing (Regent might have been installed without CUDA support)"
-      end
-    end
-  end
-end
-
-do
-  local available, error_message = cudahelper.check_cuda_available()
-  if not available then
-    if config["cuda"] == 1 then
-      print("CUDA code generation failed since " .. error_message)
-      os.exit(-1)
-    else
-      return cudahelper
-    end
-  end
-end
-
-do
-  local ffi = require('ffi')
-  local cudaruntimelinked = false
-  function cudahelper.link_driver_library()
-    if cudaruntimelinked then return end
-    local path = assert(cudapaths[ffi.os],"unknown OS?")
-    terralib.linklibrary(path)
-    cudaruntimelinked = true
-  end
 end
 
 -- #####################################
