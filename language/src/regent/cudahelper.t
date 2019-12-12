@@ -35,6 +35,44 @@ local cudapaths = { OSX = "/usr/local/cuda/lib/libcuda.dylib";
                     Linux =  "libcuda.so";
                     Windows = "nvcuda.dll"; }
 
+-- #####################################
+-- ## CUDA Hijack API
+-- #################
+
+local HijackAPI = terralib.includec("regent_cudart_hijack.h")
+
+struct fat_bin_t {
+  magic : int,
+  versions : int,
+  data : &opaque,
+  filename : &opaque,
+}
+
+-- #####################################
+-- ## CUDA Device API
+-- #################
+
+local struct CUctx_st
+local struct CUmod_st
+local struct CUlinkState_st
+local struct CUfunc_st
+local CUdevice = int32
+local CUjit_option = uint32
+local CU_JIT_ERROR_LOG_BUFFER = 5
+local CU_JIT_ERROR_LOG_BUFFER_SIZE_BYTES = 6
+local CU_JIT_INPUT_PTX = 1
+local CU_JIT_TARGET = 9
+local DriverAPI = {
+  cuInit = ef("cuInit", {uint32} -> uint32);
+  cuCtxGetCurrent = ef("cuCtxGetCurrent", {&&CUctx_st} -> uint32);
+  cuCtxGetDevice = ef("cuCtxGetDevice",{&int32} -> uint32);
+  cuDeviceGet = ef("cuDeviceGet",{&int32,int32} -> uint32);
+  cuCtxCreate_v2 = ef("cuCtxCreate_v2",{&&CUctx_st,uint32,int32} -> uint32);
+  cuCtxDestroy = ef("cuCtxDestroy",{&CUctx_st} -> uint32);
+  cuDeviceComputeCapability = ef("cuDeviceComputeCapability",
+    {&int32,&int32,int32} -> uint32);
+}
+
 local RuntimeAPI = false
 do
   if not terralib.cudacompile then
@@ -114,44 +152,6 @@ do
     cudaruntimelinked = true
   end
 end
-
--- #####################################
--- ## CUDA Hijack API
--- #################
-
-local HijackAPI = terralib.includec("regent_cudart_hijack.h")
-
-struct fat_bin_t {
-  magic : int,
-  versions : int,
-  data : &opaque,
-  filename : &opaque,
-}
-
--- #####################################
--- ## CUDA Device API
--- #################
-
-local struct CUctx_st
-local struct CUmod_st
-local struct CUlinkState_st
-local struct CUfunc_st
-local CUdevice = int32
-local CUjit_option = uint32
-local CU_JIT_ERROR_LOG_BUFFER = 5
-local CU_JIT_ERROR_LOG_BUFFER_SIZE_BYTES = 6
-local CU_JIT_INPUT_PTX = 1
-local CU_JIT_TARGET = 9
-local DriverAPI = {
-  cuInit = ef("cuInit", {uint32} -> uint32);
-  cuCtxGetCurrent = ef("cuCtxGetCurrent", {&&CUctx_st} -> uint32);
-  cuCtxGetDevice = ef("cuCtxGetDevice",{&int32} -> uint32);
-  cuDeviceGet = ef("cuDeviceGet",{&int32,int32} -> uint32);
-  cuCtxCreate_v2 = ef("cuCtxCreate_v2",{&&CUctx_st,uint32,int32} -> uint32);
-  cuCtxDestroy = ef("cuCtxDestroy",{&CUctx_st} -> uint32);
-  cuDeviceComputeCapability = ef("cuDeviceComputeCapability",
-    {&int32,&int32,int32} -> uint32);
-}
 
 -- #####################################
 -- ## Printf for CUDA (not exposed to the user for the moment)
