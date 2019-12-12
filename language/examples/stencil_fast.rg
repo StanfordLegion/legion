@@ -362,7 +362,7 @@ local function make_stencil_interior(private, interior, radius)
 end
 
 local function make_stencil(radius)
-  local --__allow(__cuda)
+  local --__demand(__cuda)
         task stencil(private : region(ispace(int2d), point),
                      interior : region(ispace(int2d), point),
                      xm : region(ispace(int2d), point),
@@ -432,7 +432,7 @@ local function make_increment_interior(private, exterior)
   end
 end
 
-__allow(__cuda)
+__demand(__cuda)
 task increment(private : region(ispace(int2d), point),
                exterior : region(ispace(int2d), point),
                xm : region(ispace(int2d), point),

@@ -161,6 +161,7 @@ namespace Legion {
       inline VirtualManager* as_virtual_manager(void) const;
     public:
       virtual ApEvent get_use_event(void) const = 0;
+      virtual ApEvent get_unique_event(void) const = 0;
       virtual void notify_active(ReferenceMutator *mutator);
       virtual void notify_inactive(ReferenceMutator *mutator);
       virtual void notify_valid(ReferenceMutator *mutator);
@@ -239,6 +240,7 @@ namespace Legion {
       static inline bool is_reduction_fold_did(DistributedID did);
       static inline bool is_reduction_list_did(DistributedID did);
       static inline bool is_external_did(DistributedID did);
+      static ApEvent fetch_metadata(PhysicalInstance inst, ApEvent use_event);
     public:
       RegionTreeForest *const context;
       MemoryManager *const memory_manager;
@@ -343,6 +345,7 @@ namespace Legion {
           get_field_accessor(FieldID fid) const;
     public:
       virtual ApEvent get_use_event(void) const { return use_event; }
+      virtual ApEvent get_unique_event(void) const { return unique_event; }
     public:
       virtual InstanceView* create_instance_top_view(InnerContext *context,
                                             AddressSpaceID logical_owner);
@@ -372,6 +375,8 @@ namespace Legion {
       // Event that needs to trigger before we can start using
       // this physical instance.
       const ApEvent use_event; 
+      // Unique identifier event that is common across nodes
+      const ApEvent unique_event;
     };
 
     /**
@@ -436,6 +441,7 @@ namespace Legion {
       virtual Domain get_pointer_space(void) const = 0;
     public:
       virtual ApEvent get_use_event(void) const { return use_event; }
+      virtual ApEvent get_unique_event(void) const { return unique_event; }
     public:
       virtual void send_manager(AddressSpaceID target);
     public:
@@ -457,6 +463,7 @@ namespace Legion {
       const ReductionOp *const op;
       const ReductionOpID redop;
       const ApEvent use_event;
+      const ApEvent unique_event;
     protected:
       mutable LocalLock manager_lock;
     };
@@ -563,6 +570,7 @@ namespace Legion {
           get_field_accessor(FieldID fid) const;
     public: 
       virtual ApEvent get_use_event(void) const;
+      virtual ApEvent get_unique_event(void) const;
       virtual void send_manager(AddressSpaceID target);
       virtual InstanceView* create_instance_top_view(InnerContext *context,
                                             AddressSpaceID logical_owner);

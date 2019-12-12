@@ -373,6 +373,9 @@ public:
   {
     const InitDataArgs& i_args = *(const InitDataArgs *)args;
 
+    i_args.ri_cells.fetch_metadata(p).wait();
+    i_args.ri_faces.fetch_metadata(p).wait();
+
     log_app.info() << "init task #" << i_args.index << " (ri_cells=" << i_args.ri_cells << ", ri_faces=" << i_args.ri_faces << ")";
 
     IndexSpace<1> is_cells = i_args.ri_cells.get_indexspace<1>();
@@ -897,6 +900,9 @@ public:
     const InitDataArgs& i_args = *(const InitDataArgs *)args;
 
     log_app.info() << "init task #" << i_args.index << " (ri_nodes=" << i_args.ri_nodes << ", ri_edges=" << i_args.ri_edges << ")";
+
+    i_args.ri_nodes.fetch_metadata(p).wait();
+    i_args.ri_edges.fetch_metadata(p).wait();
 
     IndexSpace<1> is_nodes = i_args.ri_nodes.get_indexspace<1>();
     IndexSpace<1> is_edges = i_args.ri_edges.get_indexspace<1>();
@@ -1533,6 +1539,9 @@ public:
 
     log_app.info() << "init task #" << i_args.index << " (ri_zones=" << i_args.ri_zones << ", ri_sides=" << i_args.ri_sides << ")";
 
+    i_args.ri_zones.fetch_metadata(p).wait();
+    i_args.ri_sides.fetch_metadata(p).wait();
+
     IndexSpace<1> is_zones = i_args.ri_zones.get_indexspace<1>();
     IndexSpace<1> is_sides = i_args.ri_sides.get_indexspace<1>();
 
@@ -2048,7 +2057,7 @@ Event RandomTest<N1,T1,N2,T2,FT>::perform_partitioning(void)
 {
   // start by filtering root1 by color
   std::vector<FT> piece_colors(colors.begin(), colors.begin() + num_pieces);
-  std::vector<IndexSpace<N1,T1> > ss_by_color(num_pieces);
+  std::vector<IndexSpace<N1,T1> > ss_by_color;
   Event e1 = root1.create_subspaces_by_field(fd_vals1,
 					     piece_colors,
 					     ss_by_color,

@@ -107,14 +107,10 @@ function loop_context.new_scope(task, loop, loop_var)
   local cx = {
     loop = loop,
     loop_var = loop_var,
-    demand_vectorize = std.config["vectorize"] and
-                       loop.annotations.vectorize:is(ast.annotation.Demand),
-    demand_openmp = std.config["openmp"] and
-                  loop.annotations.openmp:is(ast.annotation.Demand),
-    demand_cuda = std.config["cuda"] and
-                  task.annotations.cuda:is(ast.annotation.Demand),
-    demand_parallel = std.config["parallelize"] and
-                  task.annotations.parallel:is(ast.annotation.Demand),
+    demand_vectorize = loop.annotations.vectorize:is(ast.annotation.Demand),
+    demand_openmp = loop.annotations.openmp:is(ast.annotation.Demand),
+    demand_cuda = task.annotations.cuda:is(ast.annotation.Demand),
+    demand_parallel = task.annotations.parallel:is(ast.annotation.Demand),
     needs_iterator = needs_iterator,
     -- Tracks variables that have the same value as the loop variable
     centers = data.newmap(),
@@ -321,10 +317,8 @@ end
 function context.new_task_scope(task)
   local cx = {
     task = task,
-    demand_cuda = std.config["cuda"] and
-                  task.annotations.cuda:is(ast.annotation.Demand),
-    demand_parallel = std.config["parallelize"] and
-                      task.annotations.parallel:is(ast.annotation.Demand),
+    demand_cuda = task.annotations.cuda:is(ast.annotation.Demand),
+    demand_parallel = task.annotations.parallel:is(ast.annotation.Demand),
     contexts = terralib.newlist({loop_context.new_scope(task, task, false)}),
   }
   cx.contexts[1]:set_outermost(true)
@@ -981,10 +975,8 @@ function check_region_access_contained.block(cx, node)
 end
 
 function check_region_access_contained.top_task(node)
-  local demand_cuda = std.config["cuda"] and
-    node.annotations.cuda:is(ast.annotation.Demand)
-  local demand_parallel = std.config["parallelize"] and
-    node.annotations.parallel:is(ast.annotation.Demand)
+  local demand_cuda = node.annotations.cuda:is(ast.annotation.Demand)
+  local demand_parallel = node.annotations.parallel:is(ast.annotation.Demand)
   if not node.body or not (demand_cuda or demand_parallel) then
     return
   end

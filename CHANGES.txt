@@ -1,7 +1,7 @@
 This file lists the major changes as they appear in the stable branch.  No
 attempt is made to keep this list accurate for the master branch.
 
-Version ??.??.? (?? ??, ????)
+Version 19.12.0 (December ??, 2019)
   * Regent
     - __demand(__index_launch) has been added as an alternative to
         __demand(__parallel) on for loops that avoids confusion with the
@@ -13,6 +13,13 @@ Version ??.??.? (?? ??, ????)
     - Substantially improved the generality of the index launch
       optimization. Task arguments of the form p[i+k] may now be used,
       where k is a variable defined outside of the loop.
+  * Realm
+    - `Event::subscribe` allows polling via `Event::has_triggered` to
+        (eventually) succeed
+    - Addition of `CompletionQueue` objects that allow multiple unordered
+        `Event` triggers to be efficiently handled by a single consumer
+    - Support for `omp_get_level`, `omp_in_parallel`, and
+        `omp_set_num_threads` in tasks running on OpenMP processors
 
 Version 19.09.0 (September 9, 2019)
   * Regent

@@ -1558,11 +1558,6 @@ namespace Legion {
       }
       else
       {
-        // Log subspaces being set on the owner
-        if (implicit_runtime->legion_spy_enabled && (parent != NULL))
-          this->log_index_space_points(realm_index_space);
-	if ((implicit_runtime->profiler) && (parent != NULL))
-          this->log_profiler_index_space_points(realm_index_space);
         // Hold the lock while walking over the node set
         AutoLock n_lock(node_lock);
         // Now we can trigger the event while holding the lock
@@ -1660,6 +1655,19 @@ namespace Legion {
       }
       Runtime::trigger_event(tight_index_space_set);
       old_space.destroy();
+      if (context->runtime->legion_spy_enabled || 
+          (context->runtime->profiler != NULL))
+      {
+        // Log subspaces being set on the owner
+        const AddressSpaceID owner_space = get_owner_space();
+        if (owner_space == context->runtime->address_space)
+        {
+          if (context->runtime->legion_spy_enabled)
+            this->log_index_space_points(tight_space);
+          if (context->runtime->profiler != NULL)
+            this->log_profiler_index_space_points(tight_space);
+        }
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -1720,19 +1728,6 @@ namespace Legion {
       add_base_gc_ref(REMOTE_DID_REF, &mutator);
     }
 
-    //--------------------------------------------------------------------------
-    template<int DIM, typename T>
-    void IndexSpaceNodeT<DIM,T>::log_index_space_points(void)
-    //--------------------------------------------------------------------------
-    {
-      Realm::IndexSpace<DIM,T> tight_space;
-      get_realm_index_space(tight_space, true/*tight*/);
-      if (context->runtime->legion_spy_enabled)
-        log_index_space_points(tight_space);
-      if (context->runtime->profiler != NULL)
-        log_profiler_index_space_points(tight_space);
-    }
-      
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     void IndexSpaceNodeT<DIM,T>::log_index_space_points(

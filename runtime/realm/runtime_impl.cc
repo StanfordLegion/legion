@@ -395,7 +395,7 @@ namespace Realm {
 
       Event merged = Event::merge_events(events);
       log_taskreg.info() << "waiting on event: " << merged;
-      merged.wait();
+      merged.external_wait();
       return true;
 #if 0
       if(((RuntimeImpl *)impl)->task_table.count(taskid) > 0)

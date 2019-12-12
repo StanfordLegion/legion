@@ -80,8 +80,6 @@ namespace Legion {
       IndexSpaceNode *node = 
         create_node(handle, realm_is, NULL/*parent*/, 0/*color*/, did, 
                     ApEvent::NO_AP_EVENT, expr_id, notify_remote);
-      if (runtime->legion_spy_enabled || (runtime->profiler != NULL))
-        node->log_index_space_points();
       return node;
     }
 
@@ -3406,10 +3404,10 @@ namespace Legion {
         {
           if (postmapping)
             LegionSpy::log_post_mapping_decision(uid, index, *it,
-                                                 manager->get_use_event());
+                                                 manager->get_unique_event());
           else
             LegionSpy::log_mapping_decision(uid, index, *it,
-                                            manager->get_use_event());
+                                            manager->get_unique_event());
         }
       }
     }

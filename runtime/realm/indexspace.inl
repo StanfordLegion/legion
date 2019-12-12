@@ -391,10 +391,9 @@ namespace Realm {
     if(sparsity.exists()) {
       SparsityMapPublicImpl<N,T> *impl = sparsity.impl();
 
-      // if we don't have the data, we need to wait for it
-      if(!impl->is_valid(precise)) {
-	impl->make_valid(precise).wait();
-      }
+      // if we don't have the data, it's too late - somebody should have waited
+      assert(impl->is_valid(precise) &&
+	     "IndexSpace<N,T>::tighten called without waiting for valid metadata");
 
       // always use precise info if it's available
       if(impl->is_valid(true /*precise*/)) {

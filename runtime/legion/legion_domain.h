@@ -428,18 +428,28 @@ namespace Legion {
   template<int DIM, typename COORD_T = coord_t>
   class PointInRectIterator {
   public:
+    __CUDA_HD__
     PointInRectIterator(void);
+    __CUDA_HD__
     PointInRectIterator(const Rect<DIM,COORD_T> &r,
                         bool column_major_order = true);
   public:
+    __CUDA_HD__
     inline bool valid(void) const;
+    __CUDA_HD__
     inline bool step(void);
   public:
+    __CUDA_HD__
     inline bool operator()(void) const;
+    __CUDA_HD__
     inline Point<DIM,COORD_T> operator*(void) const;
+    __CUDA_HD__
     inline COORD_T operator[](unsigned index) const;
+    __CUDA_HD__
     inline const Point<DIM,COORD_T>* operator->(void) const;
+    __CUDA_HD__
     inline PointInRectIterator<DIM,COORD_T>& operator++(void);
+    __CUDA_HD__
     inline PointInRectIterator<DIM,COORD_T> operator++(int/*postfix*/);
   protected:
     Realm::PointInRectIterator<DIM,COORD_T> itr;
