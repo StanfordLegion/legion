@@ -35,17 +35,12 @@ namespace Realm {
 
     class FileXferDes : public XferDes {
     public:
-      FileXferDes(
-          DmaRequest* _dma_request, NodeID _launch_node,
-          XferDesID _guid, XferDesID _pre_guid, XferDesID _next_guid,
-	  uint64_t next_max_rw_gap,
-	  size_t src_ib_offset, size_t src_ib_size,
-          bool mark_started, RegionInstance inst,
-	  Memory _src_mem, Memory _dst_mem,
-	  TransferIterator *_src_iter, TransferIterator *_dst_iter,
-	  CustomSerdezID _src_serdez_id, CustomSerdezID _dst_serdez_id,
-          uint64_t max_req_size, long max_nr, int _priority,
-          XferOrder::Type _order, XferKind _kind, XferDesFence* _complete_fence);
+      FileXferDes(DmaRequest *_dma_request, NodeID _launch_node, XferDesID _guid,
+		  const std::vector<XferDesPortInfo>& inputs_info,
+		  const std::vector<XferDesPortInfo>& outputs_info,
+		  bool _mark_start,
+		  uint64_t _max_req_size, long max_nr, int _priority,
+		  XferDesFence* _complete_fence);
 
       ~FileXferDes()
       {
@@ -65,16 +60,12 @@ namespace Realm {
 
     class DiskXferDes : public XferDes {
     public:
-      DiskXferDes(DmaRequest* _dma_request, NodeID _launch_node,
-                  XferDesID _guid, XferDesID _pre_xd_guid, XferDesID _next_xd_guid,
-		  uint64_t next_max_rw_gap,
-		  size_t src_ib_offset, size_t src_ib_size,
-                  bool mark_started,
-		  Memory _src_mem, Memory _dst_mem,
-		  TransferIterator *_src_iter, TransferIterator *_dst_iter,
-		  CustomSerdezID _src_serdez_id, CustomSerdezID _dst_serdez_id,
-                  uint64_t _max_req_size, long max_nr, int _priority,
-                  XferOrder::Type _order, XferKind _kind, XferDesFence* _complete_fence);
+      DiskXferDes(DmaRequest *_dma_request, NodeID _launch_node, XferDesID _guid,
+		  const std::vector<XferDesPortInfo>& inputs_info,
+		  const std::vector<XferDesPortInfo>& outputs_info,
+		  bool _mark_start,
+		  uint64_t _max_req_size, long max_nr, int _priority,
+		  XferDesFence* _complete_fence);
 
       ~DiskXferDes() {
         free(disk_reqs);
@@ -93,7 +84,7 @@ namespace Realm {
 
     class FileChannel : public Channel {
     public:
-      FileChannel(long max_nr, XferDes::XferKind _kind);
+      FileChannel(long max_nr, XferDesKind _kind);
       ~FileChannel();
       long submit(Request** requests, long nr);
       void pull();
@@ -102,7 +93,7 @@ namespace Realm {
 
     class DiskChannel : public Channel {
     public:
-      DiskChannel(long max_nr, XferDes::XferKind _kind);
+      DiskChannel(long max_nr, XferDesKind _kind);
       ~DiskChannel();
       long submit(Request** requests, long nr);
       void pull();

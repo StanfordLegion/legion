@@ -27,7 +27,7 @@ TYPE_IS_SERIALIZABLE(Realm::NodeAnnounceTag);
 TYPE_IS_SERIALIZABLE(Realm::Memory);
 TYPE_IS_SERIALIZABLE(Realm::Memory::Kind);
 TYPE_IS_SERIALIZABLE(Realm::Channel::SupportedPath);
-TYPE_IS_SERIALIZABLE(Realm::XferDes::XferKind);
+TYPE_IS_SERIALIZABLE(Realm::XferDesKind);
 
 namespace Realm {
 
