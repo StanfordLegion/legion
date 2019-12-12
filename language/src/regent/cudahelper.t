@@ -48,6 +48,27 @@ struct fat_bin_t {
 }
 
 -- #####################################
+-- ## CUDA Runtime API
+-- #################
+
+-- Try to load the CUDA runtime header
+local RuntimeAPI = false
+
+do
+  pcall(function() RuntimeAPI = terralib.includec("cuda_runtime.h") end)
+end
+
+-- Declare the API calls that are deprecated in CUDA SDK 10
+-- TODO: We must move on to the new execution control API as these old functions
+--       can be dropped in the future.
+local ExecutionAPI = RuntimeAPI and {
+  cudaConfigureCall =
+    ef("cudaConfigureCall", {RuntimeAPI.dim3, RuntimeAPI.dim3, uint64, RuntimeAPI.cudaStream_t} -> uint32);
+  cudaSetupArgument = ef("cudaSetupArgument", {&opaque, uint64, uint64} -> uint32);
+  cudaLaunch = ef("cudaLaunch", {&opaque} -> uint32);
+}
+
+-- #####################################
 -- ## CUDA Device API
 -- #################
 
@@ -201,27 +222,6 @@ do
     cudaruntimelinked = true
   end
 end
-
--- #####################################
--- ## CUDA Runtime API
--- #################
-
--- Try to load the CUDA runtime header
-local RuntimeAPI = false
-
-do
-  pcall(function() RuntimeAPI = terralib.includec("cuda_runtime.h") end)
-end
-
--- Declare the API calls that are deprecated in CUDA SDK 10
--- TODO: We must move on to the new execution control API as these old functions
---       can be dropped in the future.
-local ExecutionAPI = RuntimeAPI and {
-  cudaConfigureCall =
-    ef("cudaConfigureCall", {RuntimeAPI.dim3, RuntimeAPI.dim3, uint64, RuntimeAPI.cudaStream_t} -> uint32);
-  cudaSetupArgument = ef("cudaSetupArgument", {&opaque, uint64, uint64} -> uint32);
-  cudaLaunch = ef("cudaLaunch", {&opaque} -> uint32);
-}
 
 -- #####################################
 -- ## Registration functions
