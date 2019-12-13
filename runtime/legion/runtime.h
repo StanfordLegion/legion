@@ -247,6 +247,8 @@ namespace Legion {
     public:
       FutureImpl& operator=(const FutureImpl &rhs);
     public:
+      // Wait without subscribing to the payload
+      void wait(bool silence_warnings, const char *warning_string);
       void* get_untyped_result(bool silence_warnings = true,
                                const char *warning_string = NULL,
                                bool internal = false,

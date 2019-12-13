@@ -2392,7 +2392,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (impl != NULL)
-        impl->get_untyped_result(silence_warnings, warning_string);
+        impl->wait(silence_warnings, warning_string);
     }
 
     //--------------------------------------------------------------------------

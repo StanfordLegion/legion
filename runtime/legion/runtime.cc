@@ -406,6 +406,40 @@ namespace Legion {
       assert(false);
       return *this;
     }
+
+    //--------------------------------------------------------------------------
+    void FutureImpl::wait(bool silence_warnings, const char *warning_string)
+    //--------------------------------------------------------------------------
+    {
+      if (runtime->runtime_warnings && !silence_warnings && 
+          (implicit_context != NULL))
+      {
+        if (!implicit_context->is_leaf_context())
+          REPORT_LEGION_WARNING(LEGION_WARNING_WAITING_FUTURE_NONLEAF, 
+             "Waiting on a future in non-leaf task %s "
+             "(UID %lld) is a violation of Legion's deferred execution model "
+             "best practices. You may notice a severe performance "
+             "degradation. Warning string: %s",
+             implicit_context->get_task_name(), 
+             implicit_context->get_unique_id(),
+             (warning_string == NULL) ? "" : warning_string)
+      }
+      if ((implicit_context != NULL) && !runtime->separate_runtime_instances)
+        implicit_context->record_blocking_call();
+      if (!future_complete.has_triggered())
+      {
+        TaskContext *context = implicit_context;
+        if (context != NULL)
+        {
+          context->begin_task_wait(false/*from runtime*/);
+          future_complete.wait();
+          context->end_task_wait();
+        }
+        else
+          future_complete.wait();
+      }
+      mark_sampled();
+    }
     
     //--------------------------------------------------------------------------
     void* FutureImpl::get_untyped_result(bool silence_warnings,
