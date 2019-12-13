@@ -2295,6 +2295,12 @@ extern "C" {
   legion_future_is_ready(legion_future_t handle);
 
   /**
+   * @see Legion::Future::is_ready()
+   */
+  bool
+  legion_future_is_ready_subscribe(legion_future_t handle, bool subscribe);
+
+  /**
    * @see Legion::Future::get_untyped_pointer()
    */
   const void *
@@ -3761,6 +3767,12 @@ extern "C" {
   legion_processor_t
   legion_runtime_get_executing_processor(legion_runtime_t runtime,
                                          legion_context_t ctx);
+
+  /**
+   * @see Legion::Runtime::yield()
+   */
+  void
+  legion_runtime_yield(legion_runtime_t runtime, legion_context_t ctx);
 
   void
   legion_runtime_enable_scheduler_lock(void);

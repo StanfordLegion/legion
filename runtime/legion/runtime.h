@@ -254,6 +254,8 @@ namespace Legion {
     public:
       FutureImpl& operator=(const FutureImpl &rhs);
     public:
+      // Wait without subscribing to the payload
+      void wait(bool silence_warnings, const char *warning_string);
       void* get_untyped_result(bool silence_warnings = true,
                                const char *warning_string = NULL,
                                bool internal = false,
@@ -2398,6 +2400,7 @@ namespace Legion {
       Processor get_executing_processor(Context ctx);
       void raise_region_exception(Context ctx, PhysicalRegion region, 
                                   bool nuclear);
+      void yield(Context ctx);
     public:
       void print_once(Context ctx, FILE *f, const char *message);
       void log_once(Context ctx, Realm::LoggerMessage &message);

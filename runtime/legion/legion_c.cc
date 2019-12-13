@@ -2687,6 +2687,14 @@ legion_future_is_ready(legion_future_t handle_)
   return handle->is_ready();
 }
 
+bool
+legion_future_is_ready_subscribe(legion_future_t handle_, bool subscribe)
+{
+  Future *handle = CObjectWrapper::unwrap(handle_);
+
+  return handle->is_ready(subscribe);
+}
+
 const void *
 legion_future_get_untyped_pointer(legion_future_t handle_)
 {
@@ -4685,6 +4693,15 @@ legion_runtime_get_executing_processor(legion_runtime_t runtime_,
 
   Processor proc = runtime->get_executing_processor(ctx);
   return CObjectWrapper::wrap(proc);
+}
+
+void
+legion_runtime_yield(legion_runtime_t runtime_, legion_context_t ctx_)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+
+  runtime->yield(ctx);
 }
 
 void

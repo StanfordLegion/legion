@@ -2937,6 +2937,19 @@ namespace Legion {
           std::pair<void*,void (*)(void*)>(const_cast<void*>(value),destructor);
     }
 
+    //--------------------------------------------------------------------------
+    void TaskContext::yield(void)
+    //--------------------------------------------------------------------------
+    {
+      YieldArgs args(owner_task->get_unique_id());
+      // Run this task with minimum priority to allow other things to run
+      const RtEvent wait_for = 
+        runtime->issue_runtime_meta_task(args, LG_MIN_PRIORITY);
+      begin_task_wait(false/*from runtime*/);
+      wait_for.wait();
+      end_task_wait();
+    }
+
     /////////////////////////////////////////////////////////////
     // Inner Context 
     /////////////////////////////////////////////////////////////

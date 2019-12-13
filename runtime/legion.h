@@ -1193,8 +1193,9 @@ namespace Legion {
        * true if the future can be used without blocking to wait
        * on the computation that the future represents, otherwise
        * it will return false.
+       * @param subscribe ask for the payload to be brought here when ready
        */
-      bool is_ready(void) const;
+      bool is_ready(bool subscribe = false) const;
     public:
       /**
        * Return a const reference to the future.
@@ -6239,6 +6240,18 @@ namespace Legion {
        */
       void raise_region_exception(Context ctx, PhysicalRegion region, 
                                   bool nuclear);
+
+      /**
+       * Yield the task to allow other tasks on the processor. In most
+       * Legion programs calling this should never be necessary. However,
+       * sometimes an application may want to put its own polling loop 
+       * inside a task. If it does it may need to yield the processor that
+       * it is running on to allow other tasks to run on that processor.
+       * This can be accomplished by invoking this method. The task will
+       * be pre-empted and other eligible tasks will be permitted to run on 
+       * this processor.
+       */
+      void yield(Context ctx);
     public:
       //------------------------------------------------------------------------
       // MPI Interoperability 
