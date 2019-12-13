@@ -4696,6 +4696,15 @@ legion_runtime_get_executing_processor(legion_runtime_t runtime_,
 }
 
 void
+legion_runtime_yield(legion_runtime_t runtime_, legion_context_t ctx_)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+
+  runtime->yield(ctx);
+}
+
+void
 legion_runtime_enable_scheduler_lock()
 {
   Processor::enable_scheduler_lock();

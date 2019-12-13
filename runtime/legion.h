@@ -6238,6 +6238,18 @@ namespace Legion {
        */
       void raise_region_exception(Context ctx, PhysicalRegion region, 
                                   bool nuclear);
+
+      /**
+       * Yield the task to allow other tasks on the processor. In most
+       * Legion programs calling this should never be necessary. However,
+       * sometimes an application may want to put its own polling loop 
+       * inside a task. If it does it may need to yield the processor that
+       * it is running on to allow other tasks to run on that processor.
+       * This can be accomplished by invoking this method. The task will
+       * be pre-empted and other eligible tasks will be permitted to run on 
+       * this processor.
+       */
+      void yield(Context ctx);
     public:
       //------------------------------------------------------------------------
       // MPI Interoperability 

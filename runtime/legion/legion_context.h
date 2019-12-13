@@ -41,6 +41,13 @@ namespace Legion {
       public:
         TaskContext *const ctx;
       };
+      // This is a no-op task for yield operations
+      struct YieldArgs : public LgTaskArgs<YieldArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_YIELD_TASK_ID;
+      public:
+        YieldArgs(UniqueID uid) : LgTaskArgs<YieldArgs>(uid) { }
+      };
     public:
       TaskContext(Runtime *runtime, TaskOp *owner, int depth,
                   const std::vector<RegionRequirement> &reqs);
@@ -557,6 +564,8 @@ namespace Legion {
       void* get_local_task_variable(LocalVariableID id);
       void set_local_task_variable(LocalVariableID id, const void *value,
                                    void (*destructor)(void*));
+    public:
+      void yield(void);
     public:
       Runtime *const runtime;
       TaskOp *const owner_task;

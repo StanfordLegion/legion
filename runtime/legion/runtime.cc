@@ -13141,6 +13141,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::yield(Context ctx)
+    //--------------------------------------------------------------------------
+    {
+      if (ctx == DUMMY_CONTEXT)
+        REPORT_DUMMY_CONTEXT("Illegal dummy context yield");
+      ctx->yield();
+    }
+
+    //--------------------------------------------------------------------------
     bool Runtime::is_MPI_interop_configured(void)
     //--------------------------------------------------------------------------
     {
@@ -22806,6 +22815,8 @@ namespace Legion {
             ReductionManager::handle_defer_manager(args, runtime);
             break;
           }
+        case LG_YIELD_TASK_ID:
+          break; // nothing to do here
         case LG_RETRY_SHUTDOWN_TASK_ID:
           {
             const ShutdownManager::RetryShutdownArgs *shutdown_args = 

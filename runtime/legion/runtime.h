@@ -2107,6 +2107,7 @@ namespace Legion {
       Processor get_executing_processor(Context ctx);
       void raise_region_exception(Context ctx, PhysicalRegion region, 
                                   bool nuclear);
+      void yield(Context ctx);
     public:
       const std::map<int,AddressSpace>& find_forward_MPI_mapping(void);
       const std::map<AddressSpace,int>& find_reverse_MPI_mapping(void);
