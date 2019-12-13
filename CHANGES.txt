@@ -7,32 +7,37 @@ Version 19.12.0 (December ??, 2019)
         `realm_defines.h`. By default these headers are generated in
         the source directory (Make) or build directory (CMake). This
         means that languages such as Regent and Python no longer
-        require MAX_DIM to be specified explicitly.
+        require MAX_DIM to be specified explicitly
   * Regent
-    - Support for CUDA 10.
-    - Support for field polymorphic tasks.
+    - Support for CUDA 10
+    - Support for field polymorphic tasks
     - Substantially improved the generality of the index launch
         optimization. Task arguments of the form p[i+k] may now be
-        used, where k is a variable defined outside of the loop.
+        used, where k is a variable defined outside of the loop
     - Add flag `-foverride-demand-index-launch` which can be used to
         force loops to be index launched in cases where the compiler
         cannot prove the disjointness of read-write region
-        arguments.
-    - Added reductions for complex64.
+        arguments
+    - Added reductions for complex64
     - The scripts `install.py` and `setup_env.py` now use CMake to
         build Terra by default, which should improve portability on
-        most machines.
+        most machines
     - The behavior of `-fcuda 1` has changed: this flag will now issue
         an error if CUDA cannot be enabled (e.g. because the build
         does not support CUDA, or because the machine has no
         GPUs). Omitting this flag will now enable CUDA if it is
-        available (and will not error if it is not available).
+        available (and will not error if it is not available)
     - The behavior of `__demand(__cuda)` has changed. This will now
         issue an error if a loop is not eligible for the CUDA
         transformation, regardless of whether CUDA is actually
-        available on the current machine or not.
+        available on the current machine or not
     - The annotation `__allow(__cuda)` is now permitted, and permits
-        (but does not require) tasks to be optimized with CUDA.
+        (but does not require) tasks to be optimized with CUDA
+  * Python
+    - Add support for copies
+    - Copies and fills now support multiple fields
+    - Tasks (including index launches) now support setting the mapper
+        ID and tag
   * Realm
     - `Event::subscribe` allows polling via `Event::has_triggered` to
         (eventually) succeed
