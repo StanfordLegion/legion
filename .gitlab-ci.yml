@@ -453,10 +453,10 @@ gcc49_cxx98_debug_hdf5_gasnet_regent:
   variables:
     <<: [*gcc49, *terra38, *debug, *cxx98_normal, *hdf5, *gasnet, *regent]
 # Multi-node Legion Spy
-gcc49_cxx98_debug_spy_gasnet_regent:
-  <<: [*linux_compute, *image, *tests]
-  variables:
-    <<: [*gcc49, *terra38, *cxx98_spy, *gasnet, *regent]
+#gcc49_cxx98_debug_spy_gasnet_regent:
+#  <<: [*linux_compute, *image, *tests]
+#  variables:
+#    <<: [*gcc49, *terra38, *cxx98_spy, *gasnet, *regent]
 # * Different architectures
 gcc49_cxx98_32bit_debug_legion:
   <<: [*linux, *image, *tests]
