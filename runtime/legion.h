@@ -1196,8 +1196,9 @@ namespace Legion {
        * true if the future can be used without blocking to wait
        * on the computation that the future represents, otherwise
        * it will return false.
+       * @param subscribe ask for the payload to be brought here when ready
        */
-      bool is_ready(void) const;
+      bool is_ready(bool subscribe = false) const;
     public:
       /**
        * Return a const reference to the future.

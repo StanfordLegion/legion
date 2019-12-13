@@ -2295,6 +2295,12 @@ extern "C" {
   legion_future_is_ready(legion_future_t handle);
 
   /**
+   * @see Legion::Future::is_ready()
+   */
+  bool
+  legion_future_is_ready_subscribe(legion_future_t handle, bool subscribe);
+
+  /**
    * @see Legion::Future::get_untyped_pointer()
    */
   const void *

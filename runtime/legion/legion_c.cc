@@ -2687,6 +2687,14 @@ legion_future_is_ready(legion_future_t handle_)
   return handle->is_ready();
 }
 
+bool
+legion_future_is_ready_subscribe(legion_future_t handle_, bool subscribe)
+{
+  Future *handle = CObjectWrapper::unwrap(handle_);
+
+  return handle->is_ready(subscribe);
+}
+
 const void *
 legion_future_get_untyped_pointer(legion_future_t handle_)
 {

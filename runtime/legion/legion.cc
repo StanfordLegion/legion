@@ -2407,11 +2407,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool Future::is_ready(void) const
+    bool Future::is_ready(bool subscribe) const
     //--------------------------------------------------------------------------
     {
       if (impl != NULL)
-        return impl->get_ready_event().has_triggered();
+      {
+        const Internal::ApEvent ready = subscribe ? 
+          impl->subscribe() : impl->get_ready_event();
+        // Always subscribe to the Realm event to know when it triggers
+        ready.subscribe();
+        return ready.has_triggered();
+      }
       return true; // Empty futures are always ready
     }
 
