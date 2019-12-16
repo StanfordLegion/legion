@@ -8415,9 +8415,6 @@ namespace Legion {
       if (owner_space == runtime->address_space)
         return InnerContext::compute_equivalence_sets(manager, tree_id, handle,
                                                       expr, mask, source);
-#ifdef DEBUG_LEGION
-      assert(source == runtime->address_space); // should always be local
-#endif
       // Send off a request to the owner node to handle it
       RtUserEvent ready_event = Runtime::create_rt_user_event();
       Serializer rez;
