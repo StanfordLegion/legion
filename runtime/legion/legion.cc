@@ -6103,14 +6103,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::issue_mapping_fence(Context ctx)
+    Future Runtime::issue_mapping_fence(Context ctx)
     //--------------------------------------------------------------------------
     {
       return runtime->issue_mapping_fence(ctx);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::issue_execution_fence(Context ctx)
+    Future Runtime::issue_execution_fence(Context ctx)
     //--------------------------------------------------------------------------
     {
       return runtime->issue_execution_fence(ctx);

@@ -3695,14 +3695,14 @@ extern "C" {
   /**
    * @see Legion::Runtime::issue_mapping_fence()
    */
-  void
+  legion_future_t
   legion_runtime_issue_mapping_fence(legion_runtime_t runtime,
                                      legion_context_t ctx);
 
   /**
    * @see Legion::Runtime::issue_execution_fence()
    */
-  void
+  legion_future_t
   legion_runtime_issue_execution_fence(legion_runtime_t runtime,
                                        legion_context_t ctx);
 

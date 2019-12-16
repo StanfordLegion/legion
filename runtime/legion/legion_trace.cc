@@ -1139,7 +1139,7 @@ namespace Legion {
     void TraceCaptureOp::initialize_capture(InnerContext *ctx, bool has_block)
     //--------------------------------------------------------------------------
     {
-      initialize(ctx, EXECUTION_FENCE);
+      initialize(ctx, EXECUTION_FENCE, false/*need future*/);
 #ifdef DEBUG_LEGION
       assert(trace != NULL);
       assert(trace->is_dynamic_trace());
@@ -1270,7 +1270,7 @@ namespace Legion {
     void TraceCompleteOp::initialize_complete(InnerContext *ctx, bool has_block)
     //--------------------------------------------------------------------------
     {
-      initialize(ctx, EXECUTION_FENCE);
+      initialize(ctx, EXECUTION_FENCE, false/*need future*/);
 #ifdef DEBUG_LEGION
       assert(trace != NULL);
 #endif
@@ -1443,7 +1443,7 @@ namespace Legion {
     void TraceReplayOp::initialize_replay(InnerContext *ctx, LegionTrace *trace)
     //--------------------------------------------------------------------------
     {
-      initialize(ctx, EXECUTION_FENCE);
+      initialize(ctx, EXECUTION_FENCE, false/*need future*/);
 #ifdef DEBUG_LEGION
       assert(trace != NULL);
 #endif
@@ -1595,7 +1595,7 @@ namespace Legion {
     void TraceBeginOp::initialize_begin(InnerContext *ctx, LegionTrace *trace)
     //--------------------------------------------------------------------------
     {
-      initialize(ctx, MAPPING_FENCE);
+      initialize(ctx, MAPPING_FENCE, false/*need future*/);
 #ifdef DEBUG_LEGION
       assert(trace != NULL);
 #endif

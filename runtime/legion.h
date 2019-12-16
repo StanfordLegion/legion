@@ -5952,7 +5952,7 @@ namespace Legion {
        * useful as a performance optimization to minimize the
        * number of mapping independence tests required.
        */
-      void issue_mapping_fence(Context ctx);
+      Future issue_mapping_fence(Context ctx);
 
       /**
        * Issue a Legion execution fence in the current context.  A 
@@ -5963,7 +5963,7 @@ namespace Legion {
        * such as modifications to the region tree made prior
        * to the fence visible to tasks issued after the fence.
        */
-      void issue_execution_fence(Context ctx); 
+      Future issue_execution_fence(Context ctx); 
     public:
       //------------------------------------------------------------------------
       // Tracing Operations 
