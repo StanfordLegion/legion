@@ -7026,14 +7026,25 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void FenceOp::initialize(InnerContext *ctx, FenceKind kind)
+    Future FenceOp::initialize(InnerContext *ctx, FenceKind kind,
+                               bool need_future)
     //--------------------------------------------------------------------------
     {
       initialize_operation(ctx, true/*track*/);
       fence_kind = kind;
+      if (need_future)
+      {
+        result = Future(new FutureImpl(runtime, true/*register*/,
+              runtime->get_available_distributed_id(),
+              runtime->address_space, completion_event));
+        // We can set the future result right now because we know that it
+        // will not be complete until we are complete ourselves
+        result.impl->set_result(NULL, 0, true/*own*/); 
+      }
       if (runtime->legion_spy_enabled)
         LegionSpy::log_fence_operation(parent_ctx->get_unique_id(),
                                        unique_op_id);
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -7048,6 +7059,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       deactivate_operation();
+      result = Future(); // clear out our future reference
     }
 
     //--------------------------------------------------------------------------
@@ -7212,7 +7224,7 @@ namespace Legion {
     void FrameOp::initialize(InnerContext *ctx)
     //--------------------------------------------------------------------------
     {
-      FenceOp::initialize(ctx, EXECUTION_FENCE);
+      FenceOp::initialize(ctx, EXECUTION_FENCE, false/*need future*/);
       parent_ctx->issue_frame(this, completion_event); 
     }
 

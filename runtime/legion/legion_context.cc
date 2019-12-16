@@ -5510,7 +5510,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InnerContext::issue_mapping_fence(void)
+    Future InnerContext::issue_mapping_fence(void)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -5519,12 +5519,13 @@ namespace Legion {
       log_run.debug("Issuing a mapping fence in task %s (ID %lld)",
                     get_task_name(), get_unique_id());
 #endif
-      fence_op->initialize(this, FenceOp::MAPPING_FENCE);
+      Future f = fence_op->initialize(this, FenceOp::MAPPING_FENCE, true);
       runtime->add_to_dependence_queue(this, executing_processor, fence_op);
+      return f;
     }
 
     //--------------------------------------------------------------------------
-    void InnerContext::issue_execution_fence(void)
+    Future InnerContext::issue_execution_fence(void)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -5533,8 +5534,9 @@ namespace Legion {
       log_run.debug("Issuing an execution fence in task %s (ID %lld)",
                     get_task_name(), get_unique_id());
 #endif
-      fence_op->initialize(this, FenceOp::EXECUTION_FENCE);
+      Future f = fence_op->initialize(this, FenceOp::EXECUTION_FENCE, true);
       runtime->add_to_dependence_queue(this, executing_processor, fence_op);
+      return f; 
     }
 
     //--------------------------------------------------------------------------
@@ -8628,9 +8630,6 @@ namespace Legion {
       if (owner_space == runtime->address_space)
         return InnerContext::compute_equivalence_sets(manager, tree_id, handle,
                                                       expr, mask, source);
-#ifdef DEBUG_LEGION
-      assert(source == runtime->address_space); // should always be local
-#endif
       // Send off a request to the owner node to handle it
       RtUserEvent ready_event = Runtime::create_rt_user_event();
       Serializer rez;
@@ -12333,7 +12332,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplicateContext::issue_mapping_fence(void)
+    Future ReplicateContext::issue_mapping_fence(void)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -12343,12 +12342,14 @@ namespace Legion {
                       get_task_name(), get_unique_id());
 #endif
       ReplFenceOp *fence_op = runtime->get_available_repl_fence_op();
-      fence_op->initialize_repl_fence(this, FenceOp::MAPPING_FENCE);
+      Future result = 
+        fence_op->initialize_repl_fence(this, FenceOp::MAPPING_FENCE, true);
       runtime->add_to_dependence_queue(this, executing_processor, fence_op);
+      return result;
     }
 
     //--------------------------------------------------------------------------
-    void ReplicateContext::issue_execution_fence(void)
+    Future ReplicateContext::issue_execution_fence(void)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -12358,8 +12359,10 @@ namespace Legion {
                       get_task_name(), get_unique_id());
 #endif
       ReplFenceOp *fence_op = runtime->get_available_repl_fence_op();
-      fence_op->initialize_repl_fence(this, FenceOp::EXECUTION_FENCE);
+      Future result = 
+        fence_op->initialize_repl_fence(this, FenceOp::EXECUTION_FENCE, true);
       runtime->add_to_dependence_queue(this, executing_processor, fence_op);
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -15438,21 +15441,23 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LeafContext::issue_mapping_fence(void)
+    Future LeafContext::issue_mapping_fence(void)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_LEGION_MAPPING_FENCE_CALL,
         "Illegal legion mapping fence call in leaf task %s "
                      "(ID %lld)", get_task_name(), get_unique_id())
+      return Future();
     }
 
     //--------------------------------------------------------------------------
-    void LeafContext::issue_execution_fence(void)
+    Future LeafContext::issue_execution_fence(void)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_LEGION_EXECUTION_FENCE_CALL,
         "Illegal Legion execution fence call in leaf task %s "
                      "(ID %lld)", get_task_name(), get_unique_id())
+      return Future();
     }
 
     //--------------------------------------------------------------------------
@@ -16771,17 +16776,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InlineContext::issue_mapping_fence(void)
+    Future InlineContext::issue_mapping_fence(void)
     //--------------------------------------------------------------------------
     {
-      enclosing->issue_mapping_fence();
+      return enclosing->issue_mapping_fence();
     }
 
     //--------------------------------------------------------------------------
-    void InlineContext::issue_execution_fence(void)
+    Future InlineContext::issue_execution_fence(void)
     //--------------------------------------------------------------------------
     {
-      enclosing->issue_execution_fence();
+      return enclosing->issue_execution_fence();
     }
 
     //--------------------------------------------------------------------------

@@ -4325,13 +4325,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplFenceOp::initialize_repl_fence(ReplicateContext *ctx, FenceKind k)
+    Future ReplFenceOp::initialize_repl_fence(ReplicateContext *ctx, 
+                                              FenceKind k, bool need_future)
     //--------------------------------------------------------------------------
     {
-      initialize(ctx, k);
+      Future f = initialize(ctx, k, need_future);
       mapping_fence_barrier = ctx->get_next_mapping_fence_barrier();
       if (fence_kind == EXECUTION_FENCE)
         execution_fence_barrier = ctx->get_next_execution_fence_barrier();
+      return f;
     }
 
     //--------------------------------------------------------------------------
@@ -5522,7 +5524,7 @@ namespace Legion {
                                                 bool has_block)
     //--------------------------------------------------------------------------
     {
-      initialize_repl_fence(ctx, EXECUTION_FENCE);
+      initialize_repl_fence(ctx, EXECUTION_FENCE, false/*need future*/);
 #ifdef DEBUG_LEGION
       assert(trace != NULL);
       assert(trace->is_dynamic_trace());
@@ -5731,7 +5733,7 @@ namespace Legion {
                                                   bool has_block)
     //--------------------------------------------------------------------------
     {
-      initialize_repl_fence(ctx, EXECUTION_FENCE);
+      initialize_repl_fence(ctx, EXECUTION_FENCE, false/*need future*/);
 #ifdef DEBUG_LEGION
       assert(trace != NULL);
 #endif
@@ -6002,7 +6004,7 @@ namespace Legion {
                                               LegionTrace *trace)
     //--------------------------------------------------------------------------
     {
-      initialize_repl_fence(ctx, EXECUTION_FENCE);
+      initialize_repl_fence(ctx, EXECUTION_FENCE, false/*need future*/);
 #ifdef DEBUG_LEGION
       assert(trace != NULL);
 #endif
@@ -6237,7 +6239,7 @@ namespace Legion {
                                             LegionTrace *trace)
     //--------------------------------------------------------------------------
     {
-      initialize_repl_fence(ctx, MAPPING_FENCE);
+      initialize_repl_fence(ctx, MAPPING_FENCE, false/*need future*/);
 #ifdef DEBUG_LEGION
       assert(trace != NULL);
 #endif
@@ -6316,7 +6318,7 @@ namespace Legion {
                                                 Operation *invalidator)
     //--------------------------------------------------------------------------
     {
-      initialize_repl_fence(ctx, MAPPING_FENCE);
+      initialize_repl_fence(ctx, MAPPING_FENCE, false/*need future*/);
       context_index = invalidator->get_ctx_index();
       current_template = tpl;
       // The summary could have been marked as being traced,

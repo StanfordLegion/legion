@@ -4635,24 +4635,26 @@ legion_runtime_complete_frame(legion_runtime_t runtime_,
 // Fence Operations
 // -----------------------------------------------------------------------
 
-void
+legion_future_t
 legion_runtime_issue_mapping_fence(legion_runtime_t runtime_,
                                    legion_context_t ctx_)
 {
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_)->context();
 
-  runtime->issue_mapping_fence(ctx);
+  Future *result = new Future(runtime->issue_mapping_fence(ctx));
+  return CObjectWrapper::wrap(result);
 }
 
-void
+legion_future_t
 legion_runtime_issue_execution_fence(legion_runtime_t runtime_,
                                      legion_context_t ctx_)
 {
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_)->context();
 
-  runtime->issue_execution_fence(ctx);
+  Future *result = new Future(runtime->issue_execution_fence(ctx));
+  return CObjectWrapper::wrap(result);
 }
 
 // -----------------------------------------------------------------------

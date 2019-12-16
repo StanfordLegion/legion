@@ -1351,7 +1351,7 @@ namespace Legion {
     public:
       FenceOp& operator=(const FenceOp &rhs);
     public:
-      void initialize(InnerContext *ctx, FenceKind kind);
+      Future initialize(InnerContext *ctx, FenceKind kind, bool need_future);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -1371,6 +1371,7 @@ namespace Legion {
     protected:
       FenceKind fence_kind;
       ApEvent execution_precondition;
+      Future result;
     };
 
     /**

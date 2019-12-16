@@ -499,21 +499,18 @@ namespace Legion {
         if ((implicit_context != NULL) && !runtime->separate_runtime_instances)
           implicit_context->record_blocking_call();
       }
-      if (empty)
+      const ApEvent ready_event = empty ? subscribe() : future_complete;
+      if (!ready_event.has_triggered())
       {
-        const ApEvent ready_event = subscribe();
-        if (!ready_event.has_triggered())
+        TaskContext *context = implicit_context;
+        if (context != NULL)
         {
-          TaskContext *context = implicit_context;
-          if (context != NULL)
-          {
-            context->begin_task_wait(false/*from runtime*/);
-            ready_event.wait();
-            context->end_task_wait();
-          }
-          else
-            ready_event.wait();
+          context->begin_task_wait(false/*from runtime*/);
+          ready_event.wait();
+          context->end_task_wait();
         }
+        else
+          ready_event.wait();
       }
       if (check_size)
       {
@@ -566,9 +563,9 @@ namespace Legion {
         if (block && producer_op != NULL && Internal::implicit_context != NULL)
           Internal::implicit_context->record_blocking_call();
       }
-      if (empty && block)
+      if (block)
       {
-        const ApEvent ready_event = subscribe();
+        const ApEvent ready_event = empty ? subscribe() : future_complete;
         if (!ready_event.has_triggered())
         {
           TaskContext *context =
@@ -14207,23 +14204,23 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::issue_mapping_fence(Context ctx)
+    Future Runtime::issue_mapping_fence(Context ctx)
     //--------------------------------------------------------------------------
     {
       if (ctx == DUMMY_CONTEXT)
         REPORT_DUMMY_CONTEXT(
             "Illegal dummy context issue mapping fence!");
-      ctx->issue_mapping_fence(); 
+      return ctx->issue_mapping_fence(); 
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::issue_execution_fence(Context ctx)
+    Future Runtime::issue_execution_fence(Context ctx)
     //--------------------------------------------------------------------------
     {
       if (ctx == DUMMY_CONTEXT)
         REPORT_DUMMY_CONTEXT(
             "Illegal dummy context issue execution fence!");
-      ctx->issue_execution_fence(); 
+      return ctx->issue_execution_fence(); 
     }
 
     //--------------------------------------------------------------------------

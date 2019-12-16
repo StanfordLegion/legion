@@ -316,8 +316,8 @@ namespace Legion {
                                  const MustEpochLauncher &launcher) = 0;
       virtual Future issue_timing_measurement(
                                     const TimingLauncher &launcher) = 0;
-      virtual void issue_mapping_fence(void) = 0;
-      virtual void issue_execution_fence(void) = 0;
+      virtual Future issue_mapping_fence(void) = 0;
+      virtual Future issue_execution_fence(void) = 0;
       virtual void complete_frame(void) = 0;
       virtual Predicate create_predicate(const Future &f) = 0;
       virtual Predicate predicate_not(const Predicate &p) = 0;
@@ -1011,8 +1011,8 @@ namespace Legion {
       virtual void progress_unordered_operations(void);
       virtual FutureMap execute_must_epoch(const MustEpochLauncher &launcher);
       virtual Future issue_timing_measurement(const TimingLauncher &launcher);
-      virtual void issue_mapping_fence(void);
-      virtual void issue_execution_fence(void);
+      virtual Future issue_mapping_fence(void);
+      virtual Future issue_execution_fence(void);
       virtual void complete_frame(void);
       virtual Predicate create_predicate(const Future &f);
       virtual Predicate predicate_not(const Predicate &p);
@@ -1640,8 +1640,8 @@ namespace Legion {
                                      const bool unordered);
       virtual FutureMap execute_must_epoch(const MustEpochLauncher &launcher);
       virtual Future issue_timing_measurement(const TimingLauncher &launcher);
-      virtual void issue_mapping_fence(void);
-      virtual void issue_execution_fence(void);
+      virtual Future issue_mapping_fence(void);
+      virtual Future issue_execution_fence(void);
       virtual void begin_trace(TraceID tid, bool logical_only);
       virtual void end_trace(TraceID tid);
     public:
@@ -2176,8 +2176,8 @@ namespace Legion {
       virtual void progress_unordered_operations(void);
       virtual FutureMap execute_must_epoch(const MustEpochLauncher &launcher);
       virtual Future issue_timing_measurement(const TimingLauncher &launcher);
-      virtual void issue_mapping_fence(void);
-      virtual void issue_execution_fence(void);
+      virtual Future issue_mapping_fence(void);
+      virtual Future issue_execution_fence(void);
       virtual void complete_frame(void);
       virtual Predicate create_predicate(const Future &f);
       virtual Predicate predicate_not(const Predicate &p);
@@ -2530,8 +2530,8 @@ namespace Legion {
       virtual void progress_unordered_operations(void);
       virtual FutureMap execute_must_epoch(const MustEpochLauncher &launcher);
       virtual Future issue_timing_measurement(const TimingLauncher &launcher);
-      virtual void issue_mapping_fence(void);
-      virtual void issue_execution_fence(void);
+      virtual Future issue_mapping_fence(void);
+      virtual Future issue_execution_fence(void);
       virtual void complete_frame(void);
       virtual Predicate create_predicate(const Future &f);
       virtual Predicate predicate_not(const Predicate &p);
