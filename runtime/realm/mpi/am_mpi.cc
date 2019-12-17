@@ -27,6 +27,9 @@ static int n_am_mult_recv = 5;
 static int node_size;
 static int node_this;
 
+namespace Realm {
+namespace MPI {
+
 #define AM_MSG_HEADER_SIZE 4 * sizeof(int)
 
 
@@ -241,3 +244,6 @@ void AMSend(int tgt, int msgid, int header_size, int payload_size, const char *h
         }
     }
 }
+
+} /* namespace MPI */
+} /* namespace Realm */

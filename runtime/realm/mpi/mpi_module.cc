@@ -37,7 +37,7 @@ void enqueue_message(int target, int msgid,
                      const void *payload, size_t payload_size,
                      void *dstptr)
 {
-    AMSend(target, msgid, arg_size, payload_size, (const char *) args, (const char *) payload, (MPI_Aint)(dstptr));
+    Realm::MPI::AMSend(target, msgid, arg_size, payload_size, (const char *) args, (const char *) payload, (MPI_Aint)(dstptr));
 }
 
 namespace Realm {
@@ -476,12 +476,12 @@ namespace Realm {
             p_thread = Realm::Thread::create_kernel_thread<AM_Manager, &AM_Manager::thread_loop>(this, tlp, *core_rsrv);
         }
         void thread_loop(void){
-            AMPoll_init();
+            Realm::MPI::AMPoll_init();
             while (true) {
                 if (shutdown_flag) {
                     break;
                 }
-                AMPoll();
+                Realm::MPI::AMPoll();
             }
         }
         void stop_threads(){
@@ -529,7 +529,7 @@ namespace Realm {
     }
 #endif
     int mpi_rank, mpi_size;
-    AM_Init(&mpi_rank, &mpi_size);
+    Realm::MPI::AM_Init(&mpi_rank, &mpi_size);
     Network::my_node_id = mpi_rank;
     Network::max_node_id = mpi_size - 1;
 #ifdef DEBUG_REALM_STARTUP
@@ -579,7 +579,7 @@ namespace Realm {
     void *baseptr;
     CHECK_MPI( MPI_Win_allocate(attach_size, 1, MPI_INFO_NULL, MPI_COMM_WORLD, &baseptr, &g_am_win) );
     CHECK_MPI( MPI_Win_lock_all(0, g_am_win) );
-    AM_init_long_messages(g_am_win, baseptr);
+    Realm::MPI::AM_init_long_messages(g_am_win, baseptr);
 
     activemsg_handler_table.construct_handler_table();
     g_am_manager.init_corereservation(*(runtime->core_reservations));
@@ -608,7 +608,7 @@ namespace Realm {
     }
     g_am_manager.stop_threads();
     g_am_manager.release_corereservation();
-    AM_Finalize();
+    Realm::MPI::AM_Finalize();
   }
 
   // collective communication within this network

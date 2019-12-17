@@ -27,6 +27,10 @@
 
 #define AM_BUF_COUNT 128
 
+
+namespace Realm {
+namespace MPI {
+
 struct AM_msg {
     int type;
     int msgid;
@@ -42,5 +46,9 @@ void AMPoll();
 void AMPoll_init();
 void AMPoll_cancel();
 void AMSend(int tgt, int msgid, int header_size, int payload_size, const char *header, const char *payload, MPI_Aint dest);
+
+
+} /* namespace MPI */
+} /* namespace Realm */
 
 #endif /* AM_MPI_H_INCLUDED */
