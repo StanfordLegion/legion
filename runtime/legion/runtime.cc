@@ -499,18 +499,38 @@ namespace Legion {
         if ((implicit_context != NULL) && !runtime->separate_runtime_instances)
           implicit_context->record_blocking_call();
       }
-      const ApEvent ready_event = empty ? subscribe() : future_complete;
-      if (!ready_event.has_triggered())
+      if (internal)
       {
-        TaskContext *context = implicit_context;
-        if (context != NULL)
+        const RtEvent ready_event = empty ? 
+          subscribe_internal() : RtEvent::NO_RT_EVENT;
+        if (!ready_event.has_triggered())
         {
-          context->begin_task_wait(false/*from runtime*/);
-          ready_event.wait();
-          context->end_task_wait();
+          TaskContext *context = implicit_context;
+          if (context != NULL)
+          {
+            context->begin_task_wait(false/*from runtime*/);
+            ready_event.wait();
+            context->end_task_wait();
+          }
+          else
+            ready_event.wait();
         }
-        else
-          ready_event.wait();
+      }
+      else
+      {
+        const ApEvent ready_event = empty ? subscribe() : future_complete;
+        if (!ready_event.has_triggered())
+        {
+          TaskContext *context = implicit_context;
+          if (context != NULL)
+          {
+            context->begin_task_wait(false/*from runtime*/);
+            ready_event.wait();
+            context->end_task_wait();
+          }
+          else
+            ready_event.wait();
+        }
       }
       if (check_size)
       {

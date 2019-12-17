@@ -9814,7 +9814,7 @@ namespace Legion {
     void FutureBroadcast::pack_collective(Serializer &rez) const
     //--------------------------------------------------------------------------
     {
-      const size_t result_size = impl->get_untyped_size(); 
+      const size_t result_size = impl->get_untyped_size(true/*internal*/); 
       rez.serialize(result_size);
       if (result_size > 0)
         rez.serialize(impl->get_untyped_result(true, NULL, true), result_size);
