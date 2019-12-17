@@ -2063,6 +2063,14 @@ extern "C" {
   legion_argument_map_create(void);
 
   /**
+   * @return Caller takes ownership of return value.
+   *
+   * @see Legion::ArgumentMap::ArgumentMap()
+   */
+  legion_argument_map_t
+  legion_argument_map_from_future_map(legion_future_map_t map);
+
+  /**
    * @see Legion::ArgumentMap::set_point()
    */
   void
