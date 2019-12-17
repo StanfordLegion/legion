@@ -2408,6 +2408,14 @@ legion_argument_map_create()
   return CObjectWrapper::wrap(new ArgumentMap());
 }
 
+legion_argument_map_t
+legion_argument_map_from_future_map(legion_future_map_t map_)
+{
+  FutureMap *map = CObjectWrapper::unwrap(map_);
+
+  return CObjectWrapper::wrap(new ArgumentMap(*map));
+}
+
 void
 legion_argument_map_set_point(legion_argument_map_t map_,
                               legion_domain_point_t dp_,
