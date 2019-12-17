@@ -712,6 +712,7 @@ namespace Legion {
       bool deterministic_redop;
       const ReductionOp *reduction_op;
       FutureMap point_arguments;
+      std::vector<FutureMap> point_futures;
       // For handling reductions of types with serdez methods
       const SerdezRedopFns *serdez_redop_fns;
       size_t reduction_state_size;
@@ -900,7 +901,8 @@ namespace Legion {
       virtual void set_projection_result(unsigned idx, LogicalRegion result);
     public:
       void initialize_point(SliceTask *owner, const DomainPoint &point,
-                            const FutureMap &point_arguments);
+                            const FutureMap &point_arguments,
+                            const std::vector<FutureMap> &point_futures);
       void send_back_created_state(AddressSpaceID target);
     public:
       virtual void record_reference_mutation_effect(RtEvent event);

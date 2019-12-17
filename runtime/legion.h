@@ -660,6 +660,14 @@ namespace Legion {
       void set_point(const DomainPoint &point, const TaskArgument &arg,
                      bool replace = true);
       /**
+       * Associate a future with a domain point
+       * @param point the point to associate with the task argument
+       * @param future the future argument
+       * @param replace specify whether to overwrite an existing value
+       */
+      void set_point(const DomainPoint &point, const Future &f,
+                     bool replace = true);
+      /**
        * Remove a point from the argument map
        * @param point the point to be removed
        * @return true if the point was removed
@@ -1542,6 +1550,9 @@ namespace Legion {
       std::vector<IndexSpaceRequirement> index_requirements;
       std::vector<RegionRequirement>     region_requirements;
       std::vector<Future>                futures;
+      // These are appended to the futures for the point
+      // task after the futures sent to all points above
+      std::vector<ArgumentMap>           point_futures;
       std::vector<Grant>                 grants;
       std::vector<PhaseBarrier>          wait_barriers;
       std::vector<PhaseBarrier>          arrive_barriers;

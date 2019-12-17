@@ -180,6 +180,33 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void ArgumentMapImpl::set_point(const DomainPoint &point, 
+                                    const Future &f, bool replace)
+    //--------------------------------------------------------------------------
+    {
+      if (future_map != NULL)
+        unfreeze();
+      std::map<DomainPoint,Future>::iterator finder = arguments.find(point);
+      if (finder != arguments.end())
+      {
+        // If it already exists and we're not replacing it then we're done
+        if (!replace)
+          return;
+        finder->second = f; 
+      }
+      else
+        arguments[point] = f;
+      // If we modified things then they are no longer equivalent
+      if (future_map != NULL)
+      {
+        equivalent = false;
+        if (future_map->remove_base_gc_ref(FUTURE_HANDLE_REF))
+          delete (future_map);
+        future_map = NULL;
+      }
+    }
+
+    //--------------------------------------------------------------------------
     bool ArgumentMapImpl::remove_point(const DomainPoint &point)
     //--------------------------------------------------------------------------
     {

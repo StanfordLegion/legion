@@ -797,6 +797,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void ArgumentMap::set_point(const DomainPoint &point, 
+                                const Future &f, bool replace/*= true*/)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(impl != NULL);
+#endif
+      impl->set_point(point, f, replace);
+    }
+
+    //--------------------------------------------------------------------------
     bool ArgumentMap::remove_point(const DomainPoint &point)
     //--------------------------------------------------------------------------
     {
