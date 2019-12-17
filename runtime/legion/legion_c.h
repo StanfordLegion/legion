@@ -2072,6 +2072,15 @@ extern "C" {
                                 bool replace /* = true */);
 
   /**
+   * @see Legion::ArgumentMap::set_point()
+   */
+  void
+  legion_argument_map_set_future(legion_argument_map_t map,
+                                 legion_domain_point_t dp,
+                                 legion_future_t future,
+                                 bool replace /* = true */);
+
+  /**
    * @param handle Caller must have ownership of parameter `handle`.
    *
    * @see Legion::ArgumentMap::~ArgumentMap()
@@ -2792,6 +2801,13 @@ extern "C" {
   void
   legion_index_launcher_add_arrival_barrier(legion_index_launcher_t launcher,
                                             legion_phase_barrier_t bar);
+
+  /**
+   * @see Legion::IndexTaskLauncher::point_futures
+   */
+  void
+  legion_index_launcher_add_point_future(legion_index_launcher_t launcher,
+                                         legion_argument_map_t map);
 
   /**
    * @see Legion::IndexTaskLauncher::sharding_space

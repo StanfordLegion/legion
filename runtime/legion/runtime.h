@@ -166,6 +166,7 @@ namespace Legion {
       bool has_point(const DomainPoint &point);
       void set_point(const DomainPoint &point, const TaskArgument &arg,
                      bool replace);
+      void set_point(const DomainPoint &point, const Future &f, bool replace);
       bool remove_point(const DomainPoint &point);
       TaskArgument get_point(const DomainPoint &point);
     public:

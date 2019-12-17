@@ -2422,6 +2422,19 @@ legion_argument_map_set_point(legion_argument_map_t map_,
 }
 
 void
+legion_argument_map_set_future(legion_argument_map_t map_,
+                               legion_domain_point_t dp_,
+                               legion_future_t future_,
+                               bool replace)
+{
+  ArgumentMap *map = CObjectWrapper::unwrap(map_);
+  DomainPoint dp = CObjectWrapper::unwrap(dp_);
+  Future *future = CObjectWrapper::unwrap(future_);
+
+  map->set_point(dp, *future, replace);
+}
+
+void
 legion_argument_map_destroy(legion_argument_map_t map_)
 {
   ArgumentMap *map = CObjectWrapper::unwrap(map_);
@@ -3361,6 +3374,16 @@ legion_index_launcher_add_arrival_barrier(legion_index_launcher_t launcher_,
   PhaseBarrier bar = CObjectWrapper::unwrap(bar_);
 
   launcher->add_arrival_barrier(bar);
+}
+
+void
+legion_index_launcher_add_point_future(legion_index_launcher_t launcher_,
+                                       legion_argument_map_t map_)
+{
+  IndexTaskLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+  ArgumentMap *map = CObjectWrapper::unwrap(map_);
+
+  launcher->point_futures.push_back(*map);
 }
 
 void
