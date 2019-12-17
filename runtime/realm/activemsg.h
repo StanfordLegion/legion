@@ -27,6 +27,12 @@
 
 namespace Realm {
 
+  namespace Config {
+    // if true, the number and min/max/avg/stddev duration of handler per
+    //  message type is recorded and printed
+    extern bool profile_activemsg_handlers;
+  };
+
 enum { PAYLOAD_NONE, // no payload in packet
        PAYLOAD_KEEP, // use payload pointer, guaranteed to be stable
        PAYLOAD_FREE, // take ownership of payload, free when done
@@ -93,6 +99,13 @@ public:
 
 class ActiveMessageHandlerRegBase;
 
+struct ActiveMessageHandlerStats {
+  size_t count, sum, sum2, minval, maxval;
+
+  ActiveMessageHandlerStats(void);
+  void record(long long t_start, long long t_end);
+};
+
 // singleton class that can convert message type->ID and ID->handler
 class ActiveMessageHandlerTable {
 public:
@@ -108,6 +121,9 @@ public:
 
   MessageHandler lookup_message_handler(MessageID id);
   const char *lookup_message_name(MessageID id);
+  void record_message_handler_call(MessageID id,
+				   long long t_start, long long t_end);
+  void report_message_handler_stats();
 
   static void append_handler_reg(ActiveMessageHandlerRegBase *new_reg);
 
@@ -120,6 +136,7 @@ public:
     const char *name;
     bool must_free;
     MessageHandler handler;
+    ActiveMessageHandlerStats stats;
   };
 
 protected:

@@ -1133,6 +1133,7 @@ namespace Realm {
       cp.add_option_bool("-ll:frsrv_fallback", Config::use_fast_reservation_fallback);
       cp.add_option_int("-ll:machine_query_cache", Config::use_machine_query_cache);
       cp.add_option_int("-ll:defalloc", Config::deferred_instance_allocation);
+      cp.add_option_int("-ll:amprofile", Config::profile_activemsg_handlers);
 
       bool cmdline_ok = cp.parse_command_line(cmdline);
 
@@ -2115,6 +2116,9 @@ namespace Realm {
 	(*it)->detach(this, network_segments);
 
       sampling_profiler.shutdown();
+
+      if(Config::profile_activemsg_handlers)
+	activemsg_handler_table.report_message_handler_stats();
 
       {
 	std::vector<ProcessorImpl *>& local_procs = nodes[Network::my_node_id].processors;

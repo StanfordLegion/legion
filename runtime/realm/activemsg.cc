@@ -21,9 +21,18 @@
 #include "realm/cmdline.h"
 #include "realm/logging.h"
 
+#include <math.h>
+
 namespace Realm {
 
   Realm::Logger log_amhandler("amhandler");
+
+  namespace Config {
+    // if true, the number and min/max/avg/stddev duration of handler per
+    //  message type is recorded and printed
+    bool profile_activemsg_handlers = false;
+  };
+
 
 ////////////////////////////////////////////////////////////////////////
 //
@@ -91,6 +100,29 @@ void SpanPayload::copy_data(void *dest)
 
 ////////////////////////////////////////////////////////////////////////
 //
+// struct ActiveMessageHandlerStats
+//
+
+  ActiveMessageHandlerStats::ActiveMessageHandlerStats(void)
+    : count(0), sum(0), sum2(0), minval(0), maxval(0)
+  {}
+
+  void ActiveMessageHandlerStats::record(long long t_start, long long t_end)
+  {
+    // TODO: thread safety?
+    long long delta = t_end - t_start;
+    if(delta < 0) delta = 0;
+    size_t val = (delta > 0) ? delta : 0;
+    if(!count || (val < minval)) minval = val;
+    if(!count || (val > maxval)) maxval = val;
+    count++;
+    sum += val;
+    sum2 += val * val; // TODO: smarter math to avoid overflow
+  }
+
+
+////////////////////////////////////////////////////////////////////////
+//
 // class ActiveMessageHandlerTable
 //
 
@@ -116,6 +148,35 @@ const char *ActiveMessageHandlerTable::lookup_message_name(ActiveMessageHandlerT
 {
   assert(id < handlers.size());
   return handlers[id].name;
+}
+
+void ActiveMessageHandlerTable::record_message_handler_call(MessageID id,
+							    long long t_start,
+							    long long t_end)
+{
+  assert(id < handlers.size());
+  handlers[id].stats.record(t_start, t_end);
+}
+
+void ActiveMessageHandlerTable::report_message_handler_stats()
+{
+  if(Config::profile_activemsg_handlers) {
+    for(size_t i = 0; i < handlers.size(); i++) {
+      const ActiveMessageHandlerStats& stats = handlers[i].stats;
+      if(stats.count == 0)
+	continue;
+
+      double avg = double(stats.sum) / double(stats.count);
+      double stddev = sqrt((double(stats.sum2) / double(stats.count)) -
+			   (avg * avg));
+      log_amhandler.print() << "handler " << std::hex << i << std::dec << ": " << handlers[i].name
+			    << " count=" << stats.count
+			    << " avg=" << avg
+			    << " dev=" << stddev
+			    << " min=" << stats.minval
+			    << " max=" << stats.maxval;
+    }
+  }
 }
 
 /*static*/ void ActiveMessageHandlerTable::append_handler_reg(ActiveMessageHandlerRegBase *new_reg)
