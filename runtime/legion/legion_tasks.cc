@@ -1233,6 +1233,13 @@ namespace Legion {
         }
         // For some reason we don't trace these, not sure why
         result = Runtime::merge_events(NULL, sync_preconditions);
+        if (!result.exists() ||
+            sync_preconditions.find(result) != sync_preconditions.end())
+        {
+          ApUserEvent rename = Runtime::create_ap_user_event();
+          Runtime::trigger_event(rename, result);
+          result = rename;
+        }
       }
       if ((info != NULL) && info->recording)
         info->record_op_sync_event(result);
