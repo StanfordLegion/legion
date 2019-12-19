@@ -385,6 +385,7 @@ namespace Realm {
         , is_multicast(true)
         , dest_payload_addr(0)
         , header_size(_header_size)
+        , msgid(_msgid)
     {
         if(_max_payload_size) {
             payload_base = reinterpret_cast<char *>(malloc(_max_payload_size));
