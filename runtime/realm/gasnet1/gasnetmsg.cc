@@ -2686,8 +2686,6 @@ void init_endpoints(int gasnet_mem_size,
   record_am_handler(MSGID_RELEASE_SRCPTR, "Release Source Pointer AM");
 #endif
 
-  activemsg_handler_table.construct_handler_table();
-
   CHECK_GASNET( gasnet_attach(handlers, hcount,
 			      attach_size, 0) );
 
