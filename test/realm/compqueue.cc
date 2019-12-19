@@ -208,7 +208,9 @@ int main(int argc, const char **argv)
   config.max_to_pop = 10;
   config.min_exec_time = 10;  // 10us
   config.max_exec_time = 10000; // 10ms
-  config.watchdog_timeout = 20; // 20 seconds
+  // above parameters results in ~1000 * 10ms = 10s of work per processor
+  // if we take more than ~5x that, something's wrong
+  config.watchdog_timeout = 60; // 60 seconds
 
   CommandLineParser clp;
   clp.add_option_int("-t", config.tasks_per_proc);
