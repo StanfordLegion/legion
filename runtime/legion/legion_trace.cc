@@ -2109,7 +2109,7 @@ namespace Legion {
            views_by_regions.begin(); it != views_by_regions.end(); ++it)
       {
         views.push_back(it->second);
-        version_infos[idx++].record_equivalence_set(NULL, UINT_MAX,
+        version_infos[idx++].record_equivalence_set(NULL,
             it->first.second, it->second.get_valid_mask());
       }
     }
