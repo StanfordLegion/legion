@@ -16,13 +16,12 @@
 #ifndef AM_MPI_H_INCLUDED
 #define AM_MPI_H_INCLUDED
 
-#include <thread>
 #include <cstring>
 #include <cstdlib>
 #include <cstdio>
 #include <mpi.h>
-#include <atomic>
 #include <cassert>
+#include "realm/atomics.h"
 #include "realm/activemsg.h"
 
 #define AM_BUF_COUNT 128

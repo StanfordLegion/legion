@@ -18,8 +18,8 @@
 
 static MPI_Win g_am_win = MPI_WIN_NULL;
 static void *g_am_base = NULL;
-static thread_local int thread_id = 0;
-static std::atomic_uint num_threads;
+static __thread int thread_id = 0;
+static Realm::atomic<unsigned int> num_threads(0);
 static unsigned char buf_recv_list[AM_BUF_COUNT][1024];
 static unsigned char *buf_recv = buf_recv_list[0];
 static MPI_Request req_recv_list[AM_BUF_COUNT];
@@ -198,6 +198,9 @@ void AMSend(int tgt, int msgid, int header_size, int payload_size, const char *h
     } else if (!dest) {
         msg->type = 1;
         int msg_tag = 0x0;
+        if (thread_id == 0) {
+            thread_id = num_threads.fetch_add_acqrel(1) + 1;
+        }
         msg_tag = thread_id << 1;
         memcpy(msg_header, &msg_tag, 4);
         memcpy(msg_header + 4, header, header_size);
