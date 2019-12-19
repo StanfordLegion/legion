@@ -94,16 +94,18 @@ variables:
 .cuda: &cuda
   USE_CUDA: "1"
 .gasnet: &gasnet
-  USE_GASNET: "1"
+  REALM_NETWORKS: "gasnet1"
 .gasnetdbg: &gasnetdbg
-  USE_GASNET: "1"
+  REALM_NETWORKS: "gasnet1"
   GASNET_DEBUG: "1"
 .gasnetex: &gasnetex
-  USE_GASNET: "1"
+  REALM_NETWORKS: "gasnet1"
   GASNET_VERSION: "GASNet-EX-snapshot"
   # source URL is set by a GitLab CI variable as the GASNet-EX team prefers
   #  it not to be public at this time
   #GASNETEX_SNAPSHOT_SOURCE_URL: ...
+.mpi: &mpi
+  REALM_NETWORKS: "mpi"
 .cmake: &cmake
   USE_CMAKE: "1"
 
@@ -155,21 +157,23 @@ before_script:
   #     brew install pypy homebrew/versions/llvm35
   #   fi
   - |
-    if [[ "$USE_GASNET" -eq 1 && "$(hostname)" != n0003 ]]; then
-      export CONDUIT=mpi
-      if [[ "$GASNET_DEBUG" -eq 1 ]]; then
-        export GASNET_ROOT="$PWD/gasnet/debug"
-      else
-        export GASNET_ROOT="$PWD/gasnet/release"
-      fi
+    if [[ "$REALM_NETWORKS" != "" && "$(hostname)" != n0003 ]]; then
       # OpenMPI:
       # export LAUNCHER="mpirun -n 2 -x TERRA_PATH -x INCLUDE_PATH -x LD_LIBRARY_PATH -x LG_RT_DIR -x USE_RDIR"
       # MPICH:
       export LAUNCHER="mpirun -n 2"
       unset WARN_AS_ERROR
       export MPICH_CXX=${CXX}
-      git clone https://github.com/StanfordLegion/gasnet.git gasnet
-      make -C gasnet -j$THREADS
+      if [[ "$REALM_NETWORKS" = "gasnet1" ]]; then
+        export CONDUIT=mpi
+        if [[ "$GASNET_DEBUG" -eq 1 ]]; then
+          export GASNET_ROOT="$PWD/gasnet/debug"
+        else
+          export GASNET_ROOT="$PWD/gasnet/release"
+        fi
+        git clone https://github.com/StanfordLegion/gasnet.git gasnet
+        make -C gasnet -j$THREADS
+      fi
     fi
   - |
     if [[ "$(hostname)" = n0003 ]]; then
@@ -179,8 +183,10 @@ before_script:
       module load cuda/8.0
       export OMPI_CXX=${CXX}
 
-      if [[ "$USE_GASNET" -eq 1 ]]; then
+      if [[ "$REALM_NETWORKS" = "gasnet1" ]]; then
         module load gasnet/1.30.0-openmpi
+      fi
+      if [[ "$REALM_NETWORKS" != "" ]]; then
         export LAUNCHER="mpirun -n 2 -x TERRA_PATH -x INCLUDE_PATH -x LD_LIBRARY_PATH -x LG_RT_DIR -x USE_RDIR"
       fi
     fi
@@ -204,7 +210,7 @@ before_script:
       module load cmake/3.12.4
       export OMPI_CXX=${CXX}
 
-      if [[ "$USE_GASNET" -eq 1 ]]; then
+      if [[ "$REALM_NETWORKS" != "" ]]; then
         export LAUNCHER="mpirun -n 2 -x TERRA_PATH -x INCLUDE_PATH -x LD_LIBRARY_PATH -x LG_RT_DIR -x USE_RDIR"
       fi
     fi
@@ -429,6 +435,19 @@ gcc49_cxx98_debug_gasnetex_regent:
   <<: [*linux_compute, *image, *tests]
   variables:
     <<: [*gcc49, *terra38, *debug, *cxx98_normal, *gasnetex, *regent, *incremental]
+#   * MPI
+gcc49_cxx98_release_mpi_legion:
+  <<: [*linux_compute, *image, *tests]
+  variables:
+    <<: [*gcc49, *terra38, *release, *cxx98_normal, *mpi, *legion]
+gcc49_cxx98_debug_mpi_cmake_legion:
+  <<: [*linux_compute, *image, *tests]
+  variables:
+    <<: [*gcc49, *terra38, *debug, *cxx98_normal, *mpi, *cmake, *legion, *ctest]
+gcc49_cxx98_debug_mpi_regent:
+  <<: [*linux_compute, *image, *tests]
+  variables:
+    <<: [*gcc49, *terra38, *debug, *cxx98_normal, *mpi, *regent, *incremental]
 # * Integration: Python + Regent
 gcc49_cxx98_debug_python2_regent:
   <<: [*linux, *image, *tests]
@@ -447,6 +466,15 @@ gcc49_cxx98_debug_llvm_gasnet_regent:
   <<: [*linux_compute, *image, *tests]
   variables:
     <<: [*gcc49, *terra38, *debug, *cxx98_normal, *llvm, *gasnet, *regent, *incremental]
+# * Integration: LLVM + MPI
+gcc49_cxx98_debug_llvm_mpi_legion:
+  <<: [*linux_compute, *image, *tests]
+  variables:
+    <<: [*gcc49, *terra38, *debug, *cxx98_normal, *llvm, *mpi, *legion]
+gcc49_cxx98_debug_llvm_mpi_regent:
+  <<: [*linux_compute, *image, *tests]
+  variables:
+    <<: [*gcc49, *terra38, *debug, *cxx98_normal, *llvm, *mpi, *regent, *incremental]
 # * Integration: HDF5 + GASNet
 gcc49_cxx98_debug_hdf5_gasnet_legion:
   <<: [*linux_compute, *image, *tests]
@@ -456,11 +484,24 @@ gcc49_cxx98_debug_hdf5_gasnet_regent:
   <<: [*linux_compute, *image, *tests]
   variables:
     <<: [*gcc49, *terra38, *debug, *cxx98_normal, *hdf5, *gasnet, *regent]
+# * Integration: HDF5 + MPI
+gcc49_cxx98_debug_hdf5_mpi_legion:
+  <<: [*linux_compute, *image, *tests]
+  variables:
+    <<: [*gcc49, *terra38, *debug, *cxx98_normal, *hdf5, *mpi, *legion]
+gcc49_cxx98_debug_hdf5_mpi_regent:
+  <<: [*linux_compute, *image, *tests]
+  variables:
+    <<: [*gcc49, *terra38, *debug, *cxx98_normal, *hdf5, *mpi, *regent]
 # Multi-node Legion Spy
 gcc49_cxx98_debug_spy_gasnet_regent:
   <<: [*linux_compute, *image, *tests]
   variables:
     <<: [*gcc49, *terra38, *cxx98_spy, *gasnet, *regent]
+gcc49_cxx98_debug_spy_mpi_regent:
+  <<: [*linux_compute, *image, *tests]
+  variables:
+    <<: [*gcc49, *terra38, *cxx98_spy, *mpi, *regent]
 # * Different architectures
 gcc49_cxx98_32bit_debug_legion:
   <<: [*linux, *image, *tests]
@@ -553,6 +594,15 @@ clang38_cxx98_debug_gasnet_regent:
   <<: [*linux_compute, *image_clang, *tests]
   variables:
     <<: [*clang38, *terra38, *debug, *cxx98_normal, *gasnet, *regent, *incremental]
+#   * MPI
+clang38_cxx98_debug_mpi_cmake_legion:
+  <<: [*linux_compute, *image_clang, *tests]
+  variables:
+    <<: [*clang38, *terra38, *debug, *cxx98_normal, *mpi, *cmake, *legion, *ctest]
+clang38_cxx98_debug_mpi_regent:
+  <<: [*linux_compute, *image_clang, *tests]
+  variables:
+    <<: [*clang38, *terra38, *debug, *cxx98_normal, *mpi, *regent, *incremental]
 # * Integration: Python + Regent
 clang38_cxx98_debug_python2_regent:
   <<: [*linux, *image_clang, *tests]
@@ -571,6 +621,15 @@ clang38_cxx98_debug_llvm_gasnet_regent:
   <<: [*linux_compute, *image_clang, *tests]
   variables:
     <<: [*clang38, *terra38, *debug, *cxx98_normal, *llvm, *gasnet, *regent, *incremental]
+# * Integration: LLVM + MPI
+clang38_cxx98_debug_llvm_mpi_legion:
+  <<: [*linux_compute, *image_clang, *tests]
+  variables:
+    <<: [*clang38, *terra38, *debug, *cxx98_normal, *llvm, *mpi, *legion]
+clang38_cxx98_debug_llvm_mpi_regent:
+  <<: [*linux_compute, *image_clang, *tests]
+  variables:
+    <<: [*clang38, *terra38, *debug, *cxx98_normal, *llvm, *mpi, *regent, *incremental]
 # * Integration: HDF5 + GASNet
 clang38_cxx98_debug_hdf5_gasnet_legion:
   <<: [*linux_compute, *image_clang, *tests]
@@ -580,6 +639,15 @@ clang38_cxx98_debug_hdf5_gasnet_regent:
   <<: [*linux_compute, *image_clang, *tests]
   variables:
     <<: [*clang38, *terra38, *debug, *cxx98_normal, *hdf5, *gasnet, *regent, *incremental]
+# * Integration: HDF5 + MPI
+clang38_cxx98_debug_hdf5_mpi_legion:
+  <<: [*linux_compute, *image_clang, *tests]
+  variables:
+    <<: [*clang38, *terra38, *debug, *cxx98_normal, *hdf5, *mpi, *legion]
+clang38_cxx98_debug_hdf5_mpi_regent:
+  <<: [*linux_compute, *image_clang, *tests]
+  variables:
+    <<: [*clang38, *terra38, *debug, *cxx98_normal, *hdf5, *mpi, *regent, *incremental]
 # * Integration: HDF5 + GASNet
 # clang38_cxx98_debug_spy_gasnet_regent:
 #   <<: [*linux_compute, *image_clang, *tests]

@@ -78,7 +78,7 @@ if platform.system() != 'Darwin':
         ['test/attach_file_mini/attach_file_mini', []],
     ]
 
-legion_gasnet_cxx_tests = [
+legion_network_cxx_tests = [
     # Examples
     ['examples/mpi_interop/mpi_interop', []],
 ]
@@ -250,11 +250,11 @@ def run_test_legion_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count,
         flags.extend(['-ll:gpu', '1'])
     run_cxx(legion_cxx_tests, flags, launcher, root_dir, bin_dir, env, thread_count, timelimit)
 
-def run_test_legion_gasnet_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit):
+def run_test_legion_network_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit):
     flags = ['-logfile', 'out_%.log']
     if env['USE_CUDA'] == '1':
         flags.extend(['-ll:gpu', '1'])
-    run_cxx(legion_gasnet_cxx_tests, flags, launcher, root_dir, bin_dir, env, thread_count, timelimit)
+    run_cxx(legion_network_cxx_tests, flags, launcher, root_dir, bin_dir, env, thread_count, timelimit)
 
 def run_test_legion_openmp_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit):
     flags = ['-logfile', 'out_%.log']
@@ -585,7 +585,7 @@ def check_test_legion_cxx(root_dir):
     assert len(should_tests) > 0
 
     # These are the tests we ACTUALLY have coverage for.
-    tests = legion_cxx_tests + legion_gasnet_cxx_tests + \
+    tests = legion_cxx_tests + legion_network_cxx_tests + \
             legion_openmp_cxx_tests + legion_python_cxx_tests + \
             legion_hdf_cxx_tests
     actual_tests = set()
@@ -618,8 +618,7 @@ def build_cmake(root_dir, tmp_dir, env, thread_count,
     cmdline.append('-DCMAKE_BUILD_TYPE=%s' % ('Debug' if env['DEBUG'] == '1' else
                                               'Release'))
     cmdline.append('-DLegion_MAX_DIM=%s' % env['MAX_DIM'])
-    cmdline.append('-DLegion_USE_GASNet=%s' % ('ON' if env['USE_GASNET'] == '1' else
-                                               'OFF'))
+    cmdline.append('-DLegion_NETWORKS=%s' % env['REALM_NETWORKS'])
     cmdline.append('-DLegion_USE_CUDA=%s' % ('ON' if env['USE_CUDA'] == '1' else 'OFF'))
     cmdline.append('-DLegion_USE_Python=%s' % ('ON' if env['USE_PYTHON'] == '1' else 'OFF'))
     cmdline.append('-DBUILD_SHARED_LIBS=%s' % ('ON' if env['USE_PYTHON'] == '1' else 'OFF'))
@@ -696,7 +695,7 @@ class Stage(object):
 
 def report_mode(debug, max_dim, launcher,
                 test_regent, test_legion_cxx, test_fuzzer, test_realm,
-                test_external, test_private, test_perf, test_ctest, use_gasnet,
+                test_external, test_private, test_perf, test_ctest, networks,
                 use_cuda, use_openmp, use_python, use_llvm, use_hdf, use_spy, use_prof,
                 use_gcov, use_cmake, use_rdir):
     print()
@@ -720,7 +719,7 @@ def report_mode(debug, max_dim, launcher,
     print('###   * CTest:      %s' % test_ctest)
     print('###')
     print('### Build Flags:')
-    print('###   * GASNet:     %s' % use_gasnet)
+    print('###   * Networks:   %s' % networks)
     print('###   * CUDA:       %s' % use_cuda)
     print('###   * OpenMP:     %s' % use_openmp)
     print('###   * Python:     %s' % use_python)
@@ -740,6 +739,7 @@ def run_tests(test_modules=None,
               debug=True,
               max_dim=3,
               use_features=None,
+              networks='',
               launcher=None,
               thread_count=None,
               root_dir=None,
@@ -772,7 +772,6 @@ def run_tests(test_modules=None,
     # Determine which features to build with.
     def feature_enabled(feature, default=True):
         return option_enabled(feature, use_features, 'USE_', default)
-    use_gasnet = feature_enabled('gasnet', False)
     use_cuda = feature_enabled('cuda', False)
     use_openmp = feature_enabled('openmp', False)
     use_python = feature_enabled('python', False)
@@ -799,8 +798,8 @@ def run_tests(test_modules=None,
     if test_ctest and not use_cmake:
         raise Exception('CTest cannot be used without CMake')
 
-    if use_gasnet and launcher is None:
-        raise Exception('GASNet is enabled but launcher is not set (use --launcher or LAUNCHER)')
+    if networks and launcher is None:
+        raise Exception('Network(s) is enabled but launcher is not set (use --launcher or LAUNCHER)')
     launcher = launcher.split() if launcher is not None else []
 
     gcov_flags = ' -ftest-coverage -fprofile-arcs'
@@ -812,7 +811,7 @@ def run_tests(test_modules=None,
     report_mode(debug, max_dim, launcher,
                 test_regent, test_legion_cxx, test_fuzzer, test_realm,
                 test_external, test_private, test_perf, test_ctest,
-                use_gasnet,
+                networks,
                 use_cuda, use_openmp, use_python, use_llvm, use_hdf, use_spy, use_prof,
                 use_gcov, use_cmake, use_rdir)
 
@@ -825,8 +824,7 @@ def run_tests(test_modules=None,
     env = dict(list(os.environ.items()) + [
         ('DEBUG', '1' if debug else '0'),
         ('LAUNCHER', ' '.join(launcher)),
-        ('USE_GASNET', '1' if use_gasnet else '0'),
-        ('TEST_GASNET', '1' if use_gasnet else '0'),
+        ('REALM_NETWORKS', networks),
         ('USE_CUDA', '1' if use_cuda else '0'),
         ('TEST_CUDA', '1' if use_cuda else '0'),
         ('USE_OPENMP', '1' if use_openmp else '0'),
@@ -878,8 +876,8 @@ def run_tests(test_modules=None,
         if test_legion_cxx:
             with Stage('legion_cxx'):
                 run_test_legion_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit)
-                if use_gasnet:
-                    run_test_legion_gasnet_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit)
+                if networks:
+                    run_test_legion_network_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit)
                 if use_openmp:
                     run_test_legion_openmp_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit)
                 if use_python:
@@ -982,6 +980,10 @@ def driver():
         type=lambda s: s.split(','),
         default=None,
         help='Build Legion with features (also via USE_*).')
+    parser.add_argument(
+        '--network', dest='networks', action='store',
+        default=os.environ.get('REALM_NETWORKS', 'gasnet1' if os.environ.get('USE_GASNET', '0') == '1' else ''),
+        help='Network backend(s) to build with')
     parser.add_argument(
         '--launcher', dest='launcher', action='store',
         default=os.environ['LAUNCHER'] if 'LAUNCHER' in os.environ else None,
