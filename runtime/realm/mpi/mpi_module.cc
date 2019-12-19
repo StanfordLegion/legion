@@ -579,7 +579,17 @@ namespace Realm {
     void *baseptr;
     CHECK_MPI( MPI_Win_allocate(attach_size, 1, MPI_INFO_NULL, MPI_COMM_WORLD, &baseptr, &g_am_win) );
     CHECK_MPI( MPI_Win_lock_all(0, g_am_win) );
+
     Realm::MPI::AM_init_long_messages(g_am_win, baseptr);
+
+    int num_nodes = Network::max_node_id + 1;
+    int size_p = sizeof(baseptr);
+    g_am_bases = (void **) malloc(size_p * num_nodes);
+    CHECK_MPI( MPI_Allgather(&baseptr, size_p, MPI_BYTE, g_am_bases, size_p, MPI_BYTE, MPI_COMM_WORLD) );
+
+    for(std::vector<NetworkSegment *>::iterator it = segments.begin(); it != segments.end(); ++it) {
+        (*it)->base = (char *) ((*it)->base) + (ptrdiff_t) baseptr;
+    }
 
     activemsg_handler_table.construct_handler_table();
     g_am_manager.init_corereservation(*(runtime->core_reservations));
@@ -658,11 +668,16 @@ namespace Realm {
 							    size_t storage_size)
   {
     assert(storage_size >= sizeof(MPIMessageImpl));
+    void * disp = NULL;
+    if (dest_payload_addr) {
+        /* use displacement for remote memory */
+        disp = (char *)dest_payload_addr - (ptrdiff_t) (g_am_bases[target]);
+    }
     MPIMessageImpl *impl = new(storage_base) MPIMessageImpl(target,
 						              msgid,
 							      header_size,
 							      max_payload_size,
-							      dest_payload_addr);
+							      disp);
     return impl;
   }
 

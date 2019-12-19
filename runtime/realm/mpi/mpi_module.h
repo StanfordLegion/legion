@@ -81,6 +81,7 @@ namespace Realm {
 
   protected:
     MPI_Win g_am_win; /* global window for RMA memory */;
+    void ** g_am_bases;
     size_t global_mem_size;
   };
 
