@@ -141,59 +141,6 @@ namespace Realm {
       };
     };
 
-    template <typename T>
-    class StaticAccess {
-    public:
-      typedef typename T::StaticData StaticData;
-
-      StaticAccess(T* thing_with_data, bool already_valid = false);
-
-      ~StaticAccess(void) {}
-
-      const StaticData *operator->(void) { return data; }
-
-    protected:
-      StaticData *data;
-    };
-
-    template <typename T>
-    class SharedAccess {
-    public:
-      typedef typename T::CoherentData CoherentData;
-
-      SharedAccess(T* thing_with_data, bool already_held = false);
-
-      ~SharedAccess(void)
-      {
-	lock->release();
-      }
-
-      const CoherentData *operator->(void) { return data; }
-
-    protected:
-      CoherentData *data;
-      ReservationImpl *lock;
-    };
-
-    template <class T>
-    class ExclusiveAccess {
-    public:
-      typedef typename T::CoherentData CoherentData;
-
-      ExclusiveAccess(T* thing_with_data, bool already_held = false);
-
-      ~ExclusiveAccess(void)
-      {
-	lock->release();
-      }
-
-      CoherentData *operator->(void) { return data; }
-
-    protected:
-      CoherentData *data;
-      ReservationImpl *lock;
-    };
-
   // active messages
   struct LockRequestMessage {
     NodeID node;
@@ -229,8 +176,6 @@ namespace Realm {
   };
 
 }; // namespace Realm
-
-#include "realm/rsrv_impl.inl"
 
 #endif // ifndef REALM_RSRV_IMPL_H
 

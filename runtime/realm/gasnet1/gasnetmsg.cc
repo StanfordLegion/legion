@@ -23,9 +23,6 @@
 
 #include <queue>
 #include <assert.h>
-#ifdef REALM_PROFILE_AM_HANDLERS
-#include <math.h>
-#endif
 
 #ifdef DETAILED_MESSAGE_TIMING
 #include <sys/stat.h>
@@ -79,34 +76,6 @@ enum { MSGID_CHANNEL_CLOSE = 250,
     exit(1); \
   } \
 } while(0)
-
-#ifdef REALM_PROFILE_AM_HANDLERS
-struct ActiveMsgHandlerStats {
-  size_t count, sum, sum2, minval, maxval;
-
-  ActiveMsgHandlerStats(void)
-  : count(0), sum(0), sum2(0), minval(0), maxval(0) {}
-
-  void record(const struct timespec& ts_start, const struct timespec& ts_end)
-  {
-    size_t val = 1000000000LL * (ts_end.tv_sec - ts_start.tv_sec) + ts_end.tv_nsec - ts_start.tv_nsec;
-    if(!count || (val < minval)) minval = val;
-    if(!count || (val > maxval)) maxval = val;
-    count++;
-    sum += val;
-    sum2 += val * val;
-  }
-};
-
-static ActiveMsgHandlerStats handler_stats[256];
-
-void record_activemsg_profiling(int msgid,
-				const struct timespec& ts_start,
-				const struct timespec& ts_end)
-{
-  handler_stats[msgid].record(ts_start, ts_end);
-}
-#endif
 
 NodeID get_message_source(token_t token)
 {
@@ -845,7 +814,7 @@ public:
   {
     if((index >= 0) && (index < message_max_count)) {
       MessageTimingData &mtd(message_timing[index]);
-      mtd.msg_id = msg_id || (write_lmb << 12);
+      mtd.msg_id = msg_id | (write_lmb << 12);
       //mtd.write_lmb = write_lmb;
       mtd.target = peer;
       mtd.msg_size = msg_size;
@@ -2541,8 +2510,21 @@ IncomingMessageNew::IncomingMessageNew(NodeID _src, void *_buf, size_t _nbytes,
 
 void IncomingMessageNew::run_handler(void)
 {
+  long long t_start = 0;
+  if(Config::profile_activemsg_handlers)
+    t_start = Clock::current_time_in_nanoseconds();
+
   (*handler)(header.hdr.sender, header.args+6, buf, nbytes);
+
+  long long t_end = 0;
+  if(Config::profile_activemsg_handlers)
+    t_end = Clock::current_time_in_nanoseconds();
+
   handle_long_msgptr(src, buf);
+
+  if(Config::profile_activemsg_handlers)
+    activemsg_handler_table.record_message_handler_call(header.hdr.msgid,
+							t_start, t_end);
 }
 
 int IncomingMessageNew::get_peer(void)
@@ -2716,15 +2698,6 @@ void init_endpoints(int gasnet_mem_size,
   }
 #endif
 
-  // once we've attached, attempt to synchronize all node's clocks
-  gasnet_barrier_notify(0, GASNET_BARRIERFLAG_ANONYMOUS);
-  gasnet_barrier_wait(0, GASNET_BARRIERFLAG_ANONYMOUS);
-  gasnet_barrier_notify(0, GASNET_BARRIERFLAG_ANONYMOUS);
-  gasnet_barrier_wait(0, GASNET_BARRIERFLAG_ANONYMOUS);
-  Realm::Clock::set_zero_time();
-  gasnet_barrier_notify(0, GASNET_BARRIERFLAG_ANONYMOUS);
-  gasnet_barrier_wait(0, GASNET_BARRIERFLAG_ANONYMOUS);
-  
   segment_info = new gasnet_seginfo_t[gasnet_nodes()];
   CHECK_GASNET( gasnet_getSegmentInfo(segment_info, gasnet_nodes()) );
 
@@ -2861,18 +2834,6 @@ void stop_activemsg_threads(void)
 
   delete endpoint_manager;
   delete incoming_message_manager;
-
-#ifdef REALM_PROFILE_AM_HANDLERS
-  for(int i = 0; i < 256; i++) {
-    if(!handler_stats[i].count) continue;
-    double avg = ((double)handler_stats[i].sum) / ((double)handler_stats[i].count);
-    double stddev = sqrt((((double)handler_stats[i].sum2) / ((double)handler_stats[i].count)) -
-                         avg * avg);
-    printf("AM profiling: node %d, msg %d: count = %10zd, avg = %8.2f, dev = %8.2f, min = %8zd, max = %8zd\n",
-           gasnet_mynode(), i,
-           handler_stats[i].count, avg, stddev, handler_stats[i].minval, handler_stats[i].maxval);
-  }
-#endif
 
 #ifdef DETAILED_MESSAGE_TIMING
   // dump timing data from all the endpoints to a file

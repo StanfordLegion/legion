@@ -786,6 +786,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void ArgumentMap::set_point(const DomainPoint &point, 
+                                const Future &f, bool replace/*= true*/)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(impl != NULL);
+#endif
+      impl->set_point(point, f, replace);
+    }
+
+    //--------------------------------------------------------------------------
     bool ArgumentMap::remove_point(const DomainPoint &point)
     //--------------------------------------------------------------------------
     {
@@ -2392,7 +2403,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (impl != NULL)
-        impl->get_untyped_result(silence_warnings, warning_string);
+        impl->wait(silence_warnings, warning_string);
     }
 
     //--------------------------------------------------------------------------
@@ -2407,11 +2418,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool Future::is_ready(void) const
+    bool Future::is_ready(bool subscribe) const
     //--------------------------------------------------------------------------
     {
       if (impl != NULL)
-        return impl->is_ready();
+      {
+        const Internal::ApEvent ready = subscribe ? 
+          impl->subscribe() : impl->get_ready_event();
+        // Always subscribe to the Realm event to know when it triggers
+        ready.subscribe();
+        return ready.has_triggered();
+      }
       return true; // Empty futures are always ready
     }
 
@@ -3243,6 +3260,24 @@ namespace Legion {
                           "INVOCATION OF DEPRECATED PROJECTION "
                           "FUNCTOR METHOD WITHOUT AN OVERRIDE!");
       return LogicalRegion::NO_REGION;
+    }
+
+    //--------------------------------------------------------------------------
+    void ProjectionFunctor::invert(LogicalRegion region, LogicalRegion upper, 
+          const Domain &launch_domain, std::vector<DomainPoint> &ordered_points)
+    //--------------------------------------------------------------------------
+    {
+      // Must be override by derived classes
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void ProjectionFunctor::invert(LogicalRegion region, LogicalPartition upper, 
+          const Domain &launch_domain, std::vector<DomainPoint> &ordered_points)
+    //--------------------------------------------------------------------------
+    {
+      // Must be override by derived classes
+      assert(false);
     }
     
     /////////////////////////////////////////////////////////////
@@ -6079,14 +6114,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::issue_mapping_fence(Context ctx)
+    Future Runtime::issue_mapping_fence(Context ctx)
     //--------------------------------------------------------------------------
     {
       return runtime->issue_mapping_fence(ctx);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::issue_execution_fence(Context ctx)
+    Future Runtime::issue_execution_fence(Context ctx)
     //--------------------------------------------------------------------------
     {
       return runtime->issue_execution_fence(ctx);
@@ -6120,6 +6155,27 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       runtime->end_static_trace(ctx);
+    }
+
+    //--------------------------------------------------------------------------
+    TraceID Runtime::generate_dynamic_trace_id(void)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->generate_dynamic_trace_id();
+    }
+
+    //--------------------------------------------------------------------------
+    TraceID Runtime::generate_library_trace_ids(const char *name, size_t count)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->generate_library_trace_ids(name, count);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ TraceID Runtime::generate_static_trace_id(void)
+    //--------------------------------------------------------------------------
+    {
+      return Internal::Runtime::generate_static_trace_id();
     }
 
     //--------------------------------------------------------------------------
@@ -6250,6 +6306,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       runtime->raise_region_exception(ctx, region, nuclear);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::yield(Context ctx)
+    //--------------------------------------------------------------------------
+    {
+      runtime->yield(ctx);
     }
 
     //--------------------------------------------------------------------------
@@ -6722,11 +6785,10 @@ namespace Legion {
                                         size_t value_size, bool owned)
     //--------------------------------------------------------------------------
     {
-      Future result = runtime->help_create_future();
+      Future result = 
+        runtime->help_create_future(Internal::ApEvent::NO_AP_EVENT);
       // Set the future result
       result.impl->set_result(value, value_size, owned);
-      // Complete the future right away so that it is always complete
-      result.impl->complete_future();
       return result;
     }
 
@@ -6752,23 +6814,31 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ Context Runtime::start_implicit(int argc, char **argv,
-                                               TaskID top_task_id,
-                                               Processor::Kind proc_kind,
-                                               const char *task_name,
-                                               bool control_replicable)
+    Future Runtime::launch_top_level_task(const TaskLauncher &launcher)
     //--------------------------------------------------------------------------
     {
-      return Internal::Runtime::start_implicit(argc, argv, top_task_id,
-                              proc_kind, task_name, control_replicable);
+      return runtime->launch_top_level_task(launcher);
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void Runtime::finish_implicit(Context ctx)
+    Context Runtime::begin_implicit_task(TaskID top_task_id,
+                                         MapperID top_mapper_id,
+                                         Processor::Kind proc_kind,
+                                         const char *task_name,
+                                         bool control_replicable,
+                                         unsigned shard_per_address_space,
+                                         int shard_id)
     //--------------------------------------------------------------------------
     {
-      // this is just a normal finish operation
-      ctx->end_task(NULL, 0, false/*owned*/);
+      return runtime->begin_implicit_task(top_task_id, top_mapper_id, proc_kind,
+              task_name, control_replicable, shard_per_address_space, shard_id);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::finish_implicit_task(Context ctx)
+    //--------------------------------------------------------------------------
+    {
+      runtime->finish_implicit_task(ctx);
     }
 
     //--------------------------------------------------------------------------
@@ -6873,7 +6943,9 @@ namespace Legion {
     /*static*/ const InputArgs& Runtime::get_input_args(void)
     //--------------------------------------------------------------------------
     {
-      // If we have an implicit runtime we use that
+      if (!Internal::Runtime::runtime_started)
+        REPORT_LEGION_ERROR(ERROR_DYNAMIC_CALL_PRE_RUNTIME_START,
+            "Illegal call to 'get_input_args' before the runtime is started")
       if (Internal::implicit_runtime != NULL)
         return Internal::implicit_runtime->input_args;
       // Otherwise this is not from a Legion task, so fallback to the_runtime
@@ -6884,6 +6956,9 @@ namespace Legion {
     /*static*/ Runtime* Runtime::get_runtime(Processor p)
     //--------------------------------------------------------------------------
     {
+      if (!Internal::Runtime::runtime_started)
+        REPORT_LEGION_ERROR(ERROR_DYNAMIC_CALL_PRE_RUNTIME_START,
+            "Illegal call to 'get_runtime' before the runtime is started")
       // If we have an implicit runtime we use that
       if (Internal::implicit_runtime != NULL)
         return Internal::implicit_runtime->external;

@@ -563,6 +563,7 @@ namespace Legion {
       TaskPriority                          task_priority;
       bool                                  perform_postmap;
     protected:
+      std::set<RtEvent>                     intra_space_mapping_dependences;
       // Events that must be triggered before we are done mapping
       std::set<RtEvent>                     map_applied_conditions; 
       RtUserEvent                           deferred_complete_mapping;
@@ -639,6 +640,11 @@ namespace Legion {
                                  size_t result_size, bool owner) = 0;
       virtual void register_must_epoch(void) = 0;
     public:
+      // Methods for supporting intra-index-space mapping dependences
+      virtual RtEvent find_intra_space_dependence(const DomainPoint &point) = 0;
+      virtual void record_intra_space_dependence(const DomainPoint &point,
+                                                 RtEvent point_mapped) = 0;
+    public:
       void pack_multi_task(Serializer &rez, AddressSpaceID target);
       void unpack_multi_task(Deserializer &derez,
                              std::set<RtEvent> &ready_events);
@@ -652,10 +658,12 @@ namespace Legion {
     protected:
       IndexSpaceNode *launch_space; // global set of points
       IndexSpace internal_space; // local set of points
+      FutureMap future_map;
       ReductionOpID redop;
       bool deterministic_redop;
       const ReductionOp *reduction_op;
       FutureMap point_arguments;
+      std::vector<FutureMap> point_futures;
       // For handling reductions of types with serdez methods
       const SerdezRedopFns *serdez_redop_fns;
       size_t reduction_state_size;
@@ -669,6 +677,8 @@ namespace Legion {
       Future predicate_false_future;
       void *predicate_false_result;
       size_t predicate_false_size;
+    protected:
+      std::map<DomainPoint,RtEvent> intra_space_dependences;
     };
 
     /**
@@ -692,7 +702,10 @@ namespace Legion {
     public:
       Future initialize_task(InnerContext *ctx,
                              const TaskLauncher &launcher, 
-                             bool track = true, bool top_level=false);
+                             bool track = true, bool top_level=false,
+                             bool implicit_top_level = false);
+      void initialize_must_epoch(MustEpochOp *epoch, unsigned index,
+                                 bool do_registration);
     public:
       virtual bool has_prepipeline_stage(void) const
         { return need_prepipeline_stage; }
@@ -750,8 +763,6 @@ namespace Legion {
       static void process_unpack_remote_complete(Deserializer &derez);
       static void process_unpack_remote_commit(Deserializer &derez);
     protected: 
-      void *future_store;
-      size_t future_size;
       Future result; 
       std::set<Operation*>        child_operations;
       std::vector<RegionTreePath> privilege_paths;
@@ -771,6 +782,7 @@ namespace Legion {
       friend class Internal;
       // Special field for the top level task
       bool top_level_task;
+      bool implicit_top_level_task;
       // Whether we have to do intra-task alias analysis
       bool need_intra_task_alias_analysis;
     protected:
@@ -839,7 +851,8 @@ namespace Legion {
       virtual void set_projection_result(unsigned idx, LogicalRegion result);
     public:
       void initialize_point(SliceTask *owner, const DomainPoint &point,
-                            const FutureMap &point_arguments);
+                            const FutureMap &point_arguments,
+                            const std::vector<FutureMap> &point_futures);
       void send_back_created_state(AddressSpaceID target);
     public:
       virtual void record_reference_mutation_effect(RtEvent event);
@@ -850,6 +863,9 @@ namespace Legion {
     public:
       // From Memoizable
       virtual TraceLocalID get_trace_local_id(void) const;
+    public:
+      void record_intra_space_dependences(unsigned index, 
+             const std::vector<DomainPoint> &dependences);
     protected:
       friend class SliceTask;
       SliceTask                   *slice_owner;
@@ -891,6 +907,8 @@ namespace Legion {
                              bool track = true);
       void initialize_predicate(const Future &pred_future,
                                 const TaskArgument &pred_arg);
+      void initialize_must_epoch(MustEpochOp *epoch, unsigned index,
+                                 bool do_registration);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -937,6 +955,11 @@ namespace Legion {
     public:
       virtual void register_must_epoch(void);
     public:
+      // Methods for supporting intra-index-space mapping dependences
+      virtual RtEvent find_intra_space_dependence(const DomainPoint &point);
+      virtual void record_intra_space_dependence(const DomainPoint &point,
+                                                 RtEvent point_mapped);
+    public:
       virtual void record_reference_mutation_effect(RtEvent event);
     public:
       void record_origin_mapped_slice(SliceTask *local_slice);
@@ -958,9 +981,10 @@ namespace Legion {
                                        AddressSpaceID source);
       static void process_slice_complete(Deserializer &derez);
       static void process_slice_commit(Deserializer &derez);
+      static void process_slice_find_intra_dependence(Deserializer &derez);
+      static void process_slice_record_intra_dependence(Deserializer &derez);
     protected:
       friend class SliceTask;
-      FutureMap future_map;
       Future reduction_future;
       unsigned total_points;
       unsigned mapped_points;
@@ -975,6 +999,8 @@ namespace Legion {
       std::set<RtEvent> complete_preconditions;
       std::set<RtEvent> commit_preconditions;
       std::map<PhysicalManager*,std::pair<unsigned,bool> > acquired_instances;
+    protected:
+      std::map<DomainPoint,RtUserEvent> pending_intra_space_dependences;
     protected:
       // Whether we have to do intra-task alias analysis
       bool need_intra_task_alias_analysis;
@@ -1099,6 +1125,11 @@ namespace Legion {
       // From MemoizableOp
       virtual void replay_analysis(void);
       virtual void complete_replay(ApEvent instance_ready_event);
+    public:
+      // Methods for supporting intra-index-space mapping dependences
+      virtual RtEvent find_intra_space_dependence(const DomainPoint &point);
+      virtual void record_intra_space_dependence(const DomainPoint &point,
+                                                 RtEvent point_mapped);
     protected:
       friend class IndexTask;
       friend class PointTask;
@@ -1117,7 +1148,6 @@ namespace Legion {
     protected: 
       std::map<PhysicalManager*,std::pair<unsigned,bool> > acquired_instances;
       std::set<RtEvent> map_applied_conditions;
-      std::set<ApEvent> effects_postconditions;
       std::set<RtEvent> complete_preconditions;
       std::set<RtEvent> commit_preconditions;
     };

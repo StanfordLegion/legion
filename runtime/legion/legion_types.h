@@ -369,6 +369,7 @@ namespace Legion {
       LG_DEFER_PERFORM_OUTPUT_TASK_ID,
       LG_DEFER_INSTANCE_MANAGER_TASK_ID,
       LG_DEFER_REDUCTION_MANAGER_TASK_ID,
+      LG_YIELD_TASK_ID,
       LG_MESSAGE_ID, // These two must be the last two
       LG_RETRY_SHUTDOWN_TASK_ID,
       LG_LAST_TASK_ID, // This one should always be last
@@ -493,6 +494,7 @@ namespace Legion {
         "Defer Physical Analysis Output Stage",                   \
         "Defer Instance Manager Registration",                    \
         "Defer Reduction Manager Registration",                   \
+        "Yield",                                                  \
         "Remote Message",                                         \
         "Retry Shutdown",                                         \
       };
@@ -696,6 +698,8 @@ namespace Legion {
       SLICE_REMOTE_MAPPED,
       SLICE_REMOTE_COMPLETE,
       SLICE_REMOTE_COMMIT,
+      SLICE_FIND_INTRA_DEP,
+      SLICE_RECORD_INTRA_DEP,
       DISTRIBUTED_REMOTE_REGISTRATION,
       DISTRIBUTED_VALID_UPDATE,
       DISTRIBUTED_GC_UPDATE,
@@ -724,6 +728,8 @@ namespace Legion {
       SEND_MANAGER_REQUEST,
       SEND_FUTURE_RESULT,
       SEND_FUTURE_SUBSCRIPTION,
+      SEND_FUTURE_NOTIFICATION,
+      SEND_FUTURE_BROADCAST,
       SEND_FUTURE_MAP_REQUEST,
       SEND_FUTURE_MAP_RESPONSE,
       SEND_MAPPER_MESSAGE,
@@ -787,6 +793,8 @@ namespace Legion {
       SEND_MPI_RANK_EXCHANGE,
       SEND_LIBRARY_MAPPER_REQUEST,
       SEND_LIBRARY_MAPPER_RESPONSE,
+      SEND_LIBRARY_TRACE_REQUEST,
+      SEND_LIBRARY_TRACE_RESPONSE,
       SEND_LIBRARY_PROJECTION_REQUEST,
       SEND_LIBRARY_PROJECTION_RESPONSE,
       SEND_LIBRARY_TASK_REQUEST,
@@ -854,6 +862,8 @@ namespace Legion {
         "Slice Remote Mapped",                                        \
         "Slice Remote Complete",                                      \
         "Slice Remote Commit",                                        \
+        "Slice Find Intra-Space Dependence",                          \
+        "Slice Record Intra-Space Dependence",                        \
         "Distributed Remote Registration",                            \
         "Distributed Valid Update",                                   \
         "Distributed GC Update",                                      \
@@ -882,6 +892,8 @@ namespace Legion {
         "Send Manager Request",                                       \
         "Send Future Result",                                         \
         "Send Future Subscription",                                   \
+        "Send Future Notification",                                   \
+        "Send Future Broadcast",                                      \
         "Send Future Map Future Request",                             \
         "Send Future Map Future Response",                            \
         "Send Mapper Message",                                        \
@@ -945,6 +957,8 @@ namespace Legion {
         "Send MPI Rank Exchange",                                     \
         "Send Library Mapper Request",                                \
         "Send Library Mapper Response",                               \
+        "Send Library Trace Request",                                 \
+        "Send Library Trace Response",                                \
         "Send Library Projection Request",                            \
         "Send Library Projection Response",                           \
         "Send Library Task Request",                                  \
@@ -1422,7 +1436,7 @@ namespace Legion {
     extern __thread ::legion_unique_id_t implicit_provenance;
     // Use this global variable to track if we're an
     // implicit top-level task that needs to do external waits
-    extern __thread bool implicit_top_level_task;
+    extern __thread bool external_implicit_task;
 
     /**
      * \class LgTaskArgs
@@ -2289,7 +2303,7 @@ namespace Legion {
         const Realm::UserEvent done = Realm::UserEvent::create_user_event();
         local_lock_list_copy->advise_sleep_entry(done);
         // Now we can do the wait
-        if (implicit_top_level_task)
+        if (external_implicit_task)
           Realm::Event::external_wait();
         else
           Realm::Event::wait();
@@ -2305,7 +2319,7 @@ namespace Legion {
       }
       else // Just do the normal wait
       {
-        if (implicit_top_level_task)
+        if (external_implicit_task)
           Realm::Event::external_wait();
         else
           Realm::Event::wait();

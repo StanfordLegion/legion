@@ -2872,6 +2872,19 @@ namespace Legion {
           std::pair<void*,void (*)(void*)>(const_cast<void*>(value),destructor);
     }
 
+    //--------------------------------------------------------------------------
+    void TaskContext::yield(void)
+    //--------------------------------------------------------------------------
+    {
+      YieldArgs args(owner_task->get_unique_id());
+      // Run this task with minimum priority to allow other things to run
+      const RtEvent wait_for = 
+        runtime->issue_runtime_meta_task(args, LG_MIN_PRIORITY);
+      begin_task_wait(false/*from runtime*/);
+      wait_for.wait();
+      end_task_wait();
+    }
+
     /////////////////////////////////////////////////////////////
     // Inner Context 
     /////////////////////////////////////////////////////////////
@@ -4716,7 +4729,8 @@ namespace Legion {
           return launcher.predicate_false_future;
         // Otherwise check to see if we have a value
         FutureImpl *result = new FutureImpl(runtime, true/*register*/,
-          runtime->get_available_distributed_id(), runtime->address_space);
+          runtime->get_available_distributed_id(), 
+          runtime->address_space, ApEvent::NO_AP_EVENT);
         if (launcher.predicate_false_result.get_size() > 0)
           result->set_result(launcher.predicate_false_result.get_ptr(),
                              launcher.predicate_false_result.get_size(),
@@ -4737,8 +4751,6 @@ namespace Legion {
                           "TaskLauncher struct.", impl->get_name(), 
                           get_task_name(), get_unique_id())
         }
-        // Now we can fix the future result
-        result->complete_future();
         return Future(result);
       }
       IndividualTask *task = runtime->get_available_individual_task();
@@ -4774,7 +4786,7 @@ namespace Legion {
       {
         FutureMapImpl *result = new FutureMapImpl(this, runtime,
             runtime->get_available_distributed_id(),
-            runtime->address_space);
+            runtime->address_space, ApEvent::NO_AP_EVENT);
         if (launcher.predicate_false_future.impl != NULL)
         {
           ApEvent ready_event = 
@@ -4791,7 +4803,6 @@ namespace Legion {
               Future f = result->get_future(itr.p);
               f.impl->set_result(f_result, f_result_size, false/*own*/);
             }
-            result->complete_all_futures();
           }
           else
           {
@@ -4841,7 +4852,6 @@ namespace Legion {
             f.impl->set_result(ptr, ptr_size, false/*own*/);
           }
         }
-        result->complete_all_futures();
         return FutureMap(result);
       }
       if (launcher.launch_domain.exists() && 
@@ -4884,7 +4894,8 @@ namespace Legion {
           return launcher.predicate_false_future;
         // Otherwise check to see if we have a value
         FutureImpl *result = new FutureImpl(runtime, true/*register*/, 
-          runtime->get_available_distributed_id(), runtime->address_space);
+          runtime->get_available_distributed_id(), 
+          runtime->address_space, ApEvent::NO_AP_EVENT);
         if (launcher.predicate_false_result.get_size() > 0)
           result->set_result(launcher.predicate_false_result.get_ptr(),
                              launcher.predicate_false_result.get_size(),
@@ -4906,8 +4917,6 @@ namespace Legion {
                           "IndexTaskLauncher struct.", impl->get_name(), 
                           get_task_name(), get_unique_id())
         }
-        // Now we can fix the future result
-        result->complete_future();
         return Future(result);
       }
       if (launcher.launch_domain.exists() &&
@@ -5355,6 +5364,18 @@ namespace Legion {
                                               const MustEpochLauncher &launcher)
     //--------------------------------------------------------------------------
     {
+#ifdef SAFE_MUST_EPOCH_LAUNCHES
+      // Must epoch launches can sometimes block on external resources which
+      // Realm does not know about. In theory this can lead to deadlock, so
+      // we provide this mechanism for ordering must epoch launches. By 
+      // inserting an execution fence before every must epoch launche we
+      // guarantee that it is ordered with respect to every other one. This
+      // is heavy-handed for sure, but it is effective and sound and gives
+      // us the property that we want until someone comes up with a use
+      // case that proves that they need something better.
+      // See github issue #659
+      issue_execution_fence();
+#endif
       AutoRuntimeCall call(this);
       MustEpochOp *epoch_op = runtime->get_available_epoch_op();
       FutureMap result = epoch_op->initialize(this, launcher);
@@ -5402,7 +5423,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InnerContext::issue_mapping_fence(void)
+    Future InnerContext::issue_mapping_fence(void)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -5411,12 +5432,13 @@ namespace Legion {
       log_run.debug("Issuing a mapping fence in task %s (ID %lld)",
                     get_task_name(), get_unique_id());
 #endif
-      fence_op->initialize(this, FenceOp::MAPPING_FENCE);
+      Future f = fence_op->initialize(this, FenceOp::MAPPING_FENCE, true);
       runtime->add_to_dependence_queue(this, executing_processor, fence_op);
+      return f;
     }
 
     //--------------------------------------------------------------------------
-    void InnerContext::issue_execution_fence(void)
+    Future InnerContext::issue_execution_fence(void)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -5425,8 +5447,9 @@ namespace Legion {
       log_run.debug("Issuing an execution fence in task %s (ID %lld)",
                     get_task_name(), get_unique_id());
 #endif
-      fence_op->initialize(this, FenceOp::EXECUTION_FENCE);
+      Future f = fence_op->initialize(this, FenceOp::EXECUTION_FENCE, true);
       runtime->add_to_dependence_queue(this, executing_processor, fence_op);
+      return f; 
     }
 
     //--------------------------------------------------------------------------
@@ -5545,18 +5568,16 @@ namespace Legion {
       AutoRuntimeCall call(this); 
       if (p == Predicate::TRUE_PRED)
       {
-        Future result = runtime->help_create_future();
+        Future result = runtime->help_create_future(ApEvent::NO_AP_EVENT);
         const bool value = true;
         result.impl->set_result(&value, sizeof(value), false/*owned*/);
-        result.impl->complete_future();
         return result;
       }
       else if (p == Predicate::FALSE_PRED)
       {
-        Future result = runtime->help_create_future();
+        Future result = runtime->help_create_future(ApEvent::NO_AP_EVENT);
         const bool value = false;
         result.impl->set_result(&value, sizeof(value), false/*owned*/);
-        result.impl->complete_future();
         return result;
       }
       else
@@ -7775,7 +7796,7 @@ namespace Legion {
       // Tell the parent context that we are ready for post-end
       // Make a copy of the results if necessary
       TaskContext *parent_ctx = owner_task->get_context();
-      RtEvent effects_done(!implicit_top_level_task ? 
+      RtEvent effects_done(!external_implicit_task ? 
           Processor::get_current_finish_event() : Realm::Event::NO_EVENT); 
       if (last_registration.exists() && !last_registration.has_triggered())
         effects_done = Runtime::merge_events(effects_done, last_registration);
@@ -8396,9 +8417,6 @@ namespace Legion {
       if (owner_space == runtime->address_space)
         return InnerContext::compute_equivalence_sets(manager, tree_id, handle,
                                                       expr, mask, source);
-#ifdef DEBUG_LEGION
-      assert(source == runtime->address_space); // should always be local
-#endif
       // Send off a request to the owner node to handle it
       RtUserEvent ready_event = Runtime::create_rt_user_event();
       Serializer rez;
@@ -9892,21 +9910,23 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LeafContext::issue_mapping_fence(void)
+    Future LeafContext::issue_mapping_fence(void)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_LEGION_MAPPING_FENCE_CALL,
         "Illegal legion mapping fence call in leaf task %s "
                      "(ID %lld)", get_task_name(), get_unique_id())
+      return Future();
     }
 
     //--------------------------------------------------------------------------
-    void LeafContext::issue_execution_fence(void)
+    Future LeafContext::issue_execution_fence(void)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_LEGION_EXECUTION_FENCE_CALL,
         "Illegal Legion execution fence call in leaf task %s "
                      "(ID %lld)", get_task_name(), get_unique_id())
+      return Future();
     }
 
     //--------------------------------------------------------------------------
@@ -11134,17 +11154,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InlineContext::issue_mapping_fence(void)
+    Future InlineContext::issue_mapping_fence(void)
     //--------------------------------------------------------------------------
     {
-      enclosing->issue_mapping_fence();
+      return enclosing->issue_mapping_fence();
     }
 
     //--------------------------------------------------------------------------
-    void InlineContext::issue_execution_fence(void)
+    Future InlineContext::issue_execution_fence(void)
     //--------------------------------------------------------------------------
     {
-      enclosing->issue_execution_fence();
+      return enclosing->issue_execution_fence();
     }
 
     //--------------------------------------------------------------------------

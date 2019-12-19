@@ -66,6 +66,8 @@ namespace Realm {
     T *front(void) const;
     T *pop_front(void);
 
+    size_t erase(T *entry);
+
     mutable LT lock;
     IntrusiveListLink<T> head;
     IntrusiveListLink<T> *lastlink;

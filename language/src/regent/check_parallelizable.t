@@ -50,7 +50,7 @@
 --     In case that happens, the outer loop is tagged as non-parallelizable.
 --   - No region access can appear outside parallelizable for loops.
 --
--- * Partition Driven Auto-Parallelizer
+-- * Constraint-Based Auto-Parallelizer
 --   - Inadmissible statements are not allowed in anywhere in the task, except the return
 --     statement that returns a scalar reduction variable is allowed. This return statement
 --     must appear at the end of the task.
@@ -107,14 +107,10 @@ function loop_context.new_scope(task, loop, loop_var)
   local cx = {
     loop = loop,
     loop_var = loop_var,
-    demand_vectorize = std.config["vectorize"] and
-                       loop.annotations.vectorize:is(ast.annotation.Demand),
-    demand_openmp = std.config["openmp"] and
-                  loop.annotations.openmp:is(ast.annotation.Demand),
-    demand_cuda = std.config["cuda"] and
-                  task.annotations.cuda:is(ast.annotation.Demand),
-    demand_parallel = std.config["parallelize"] and
-                  task.annotations.parallel:is(ast.annotation.Demand),
+    demand_vectorize = loop.annotations.vectorize:is(ast.annotation.Demand),
+    demand_openmp = loop.annotations.openmp:is(ast.annotation.Demand),
+    demand_cuda = task.annotations.cuda:is(ast.annotation.Demand),
+    demand_parallel = task.annotations.parallel:is(ast.annotation.Demand),
     needs_iterator = needs_iterator,
     -- Tracks variables that have the same value as the loop variable
     centers = data.newmap(),
@@ -321,10 +317,8 @@ end
 function context.new_task_scope(task)
   local cx = {
     task = task,
-    demand_cuda = std.config["cuda"] and
-                  task.annotations.cuda:is(ast.annotation.Demand),
-    demand_parallel = std.config["parallelize"] and
-                      task.annotations.parallel:is(ast.annotation.Demand),
+    demand_cuda = task.annotations.cuda:is(ast.annotation.Demand),
+    demand_parallel = task.annotations.parallel:is(ast.annotation.Demand),
     contexts = terralib.newlist({loop_context.new_scope(task, task, false)}),
   }
   cx.contexts[1]:set_outermost(true)
@@ -466,7 +460,7 @@ end
 
 function analyze_access.expr_index_access(cx, node, privilege, field_path)
   local expr_type = node.expr_type
-  if std.is_ref(expr_type) then
+  if std.is_ref(expr_type) and #expr_type.field_path == 0 then
     analyze_access.expr(cx, node.value, nil)
     local private, center = analyze_access.expr(cx, node.index, std.reads)
     cx:update_privileges(node, expr_type:bounds(), field_path, privilege, center)
@@ -526,6 +520,7 @@ local whitelist = {
   [vectorof]                                = true,
   [std.assert]                              = true,
   [std.assert_error]                        = true,
+  [std.c.printf]                            = true,
 }
 
 local function is_admissible_function(cx, fn)
@@ -981,10 +976,8 @@ function check_region_access_contained.block(cx, node)
 end
 
 function check_region_access_contained.top_task(node)
-  local demand_cuda = std.config["cuda"] and
-    node.annotations.cuda:is(ast.annotation.Demand)
-  local demand_parallel = std.config["parallelize"] and
-    node.annotations.parallel:is(ast.annotation.Demand)
+  local demand_cuda = node.annotations.cuda:is(ast.annotation.Demand)
+  local demand_parallel = node.annotations.parallel:is(ast.annotation.Demand)
   if not node.body or not (demand_cuda or demand_parallel) then
     return
   end

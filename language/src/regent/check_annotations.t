@@ -59,6 +59,8 @@ local function render_option(option, value)
   return "__" .. value_name .. "(__" .. tostring(option) .. ")"
 end
 
+local default = ast.default_annotations()
+
 local function check(node, allowed_set)
   -- Sanity check the allowed set.
   for option, _ in pairs(allowed_set) do
@@ -67,7 +69,7 @@ local function check(node, allowed_set)
 
   -- Check that only options in the allowed_set are enabled.
   for option, value in pairs(node.annotations) do
-    if ast.is_node(value) and not value:is(ast.annotation.Allow) and
+    if ast.is_node(value) and not value:is(default[option].node_type) and
       not allowed_set[option]
     then
       report.error(node, "option " .. render_option(option, value) ..

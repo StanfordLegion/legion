@@ -158,6 +158,8 @@ local function strip_casts(node)
   return node
 end
 
+affine.convert_constant_expr = convert_constant_expr
+
 function affine.analyze_index_noninterference_self(loop_index, arg, field_name)
   local arg_index = strip_casts(arg)
 

@@ -40,6 +40,11 @@ except NameError:
     long = int  # Python 3
 
 try:
+    basestring # Python 2
+except NameError:
+    basestring = str # Python 3
+
+try:
     xrange # Python 2
 except NameError:
     xrange = range # Python 3
@@ -1208,16 +1213,71 @@ class _RegionNdarray(object):
             'strides': strides,
         }
 
-def fill(region, field_name, value):
+def fill(region, field_names, value):
     assert(isinstance(region, Region))
-    field_id = region.fspace.field_ids[field_name]
-    field_type = region.fspace.field_types[field_name]
-    raw_value = ffi.new('{} *'.format(field_type.cffi_type), value)
-    c.legion_runtime_fill_field(
-        _my.ctx.runtime, _my.ctx.context,
-        region.raw_value(), region.parent.raw_value() if region.parent is not None else region.raw_value(),
-        field_id, raw_value, field_type.size,
-        c.legion_predicate_true())
+    if isinstance(field_names, basestring):
+        field_names = [field_names]
+
+    for field_name in field_names:
+        field_id = region.fspace.field_ids[field_name]
+        field_type = region.fspace.field_types[field_name]
+        raw_value = ffi.new('{} *'.format(field_type.cffi_type), value)
+        c.legion_runtime_fill_field(
+            _my.ctx.runtime, _my.ctx.context,
+            region.raw_value(), region.parent.raw_value() if region.parent is not None else region.raw_value(),
+            field_id, raw_value, field_type.size,
+            c.legion_predicate_true())
+
+def copy(src_region, src_field_names, dst_region, dst_field_names, redop=None):
+    assert(isinstance(src_region, Region))
+    assert(isinstance(dst_region, Region))
+
+    if isinstance(src_field_names, basestring):
+        src_field_names = [src_field_names]
+    if isinstance(dst_field_names, basestring):
+        dst_field_names = [dst_field_names]
+
+    launcher = c.legion_copy_launcher_create(c.legion_predicate_true(), 0, 0)
+
+    if redop is None:
+        src_groups = [src_field_names]
+        dst_groups = [dst_field_names]
+        add_dst_requirement = c.legion_copy_launcher_add_dst_region_requirement_logical_region
+    else:
+        src_groups = zip(src_field_names)
+        dst_groups = zip(dst_field_names)
+        add_dst_requirement = c.legion_copy_launcher_add_dst_region_requirement_logical_region_reduction
+
+    for idx, group in enumerate(src_groups):
+        c.legion_copy_launcher_add_src_region_requirement_logical_region(
+            launcher,
+            src_region.raw_value(),
+            R._legion_privilege(), 0, # EXCLUSIVE
+            src_region.parent.raw_value() if src_region.parent is not None else src_region.raw_value(),
+            0, False)
+        for src_field_name in group:
+            src_field_id = src_region.fspace.field_ids[src_field_name]
+            c.legion_copy_launcher_add_src_field(launcher, idx, src_field_id, True)
+
+    for idx, group in enumerate(dst_groups):
+        if redop is None:
+            dst_privilege = RW._legion_privilege()
+        else:
+            dst_field_type = dst_region.fspace.field_types[group[0]]
+            dst_privilege = Reduce(redop, [group[0]])._legion_redop_id(dst_field_type)
+        add_dst_requirement(
+            launcher,
+            dst_region.raw_value(),
+            dst_privilege, 0, # EXCLUSIVE
+            dst_region.parent.raw_value() if dst_region.parent is not None else dst_region.raw_value(),
+            0, False)
+        for dst_field_name in group:
+            dst_field_id = dst_region.fspace.field_ids[dst_field_name]
+            c.legion_copy_launcher_add_dst_field(launcher, idx, dst_field_id, True)
+
+    c.legion_copy_launcher_execute(_my.ctx.runtime, _my.ctx.context, launcher)
+
+    c.legion_copy_launcher_destroy(launcher)
 
 # Hack: Can't pickle static methods.
 def _Ipartition_unpickle(tid, id, type_tag, parent, color_space):
@@ -1920,9 +1980,9 @@ class _TaskLauncher(object):
 
     def spawn_task(self, *args, **kwargs):
         # Hack: workaround for Python 2 not having keyword-only arguments
-        def validate_spawn_task_args(point=None):
-            return point
-        point = validate_spawn_task_args(**kwargs)
+        def validate_spawn_task_args(point=None, mapper=0, tag=0):
+            return point, mapper, tag
+        point, mapper, tag = validate_spawn_task_args(**kwargs)
 
         assert(isinstance(_my.ctx, Context))
 
@@ -1932,7 +1992,7 @@ class _TaskLauncher(object):
 
         # Construct the task launcher.
         launcher = c.legion_task_launcher_create(
-            self.task.task_id, task_args[0], c.legion_predicate_true(), 0, 0)
+            self.task.task_id, task_args[0], c.legion_predicate_true(), mapper, tag)
         if point is not None:
             point = DomainPoint.coerce(point)
             c.legion_task_launcher_set_point(launcher, point.raw_value())
@@ -1964,11 +2024,15 @@ class _TaskLauncher(object):
         return future
 
 class _IndexLauncher(_TaskLauncher):
-    __slots__ = ['task', 'domain', 'global_args', 'local_args', 'region_args', 'future_args', 'reduction_op', 'future_map']
+    __slots__ = ['task', 'domain', 'mapper', 'tag',
+                 'global_args', 'local_args', 'region_args', 'future_args',
+                 'reduction_op', 'future_map']
 
-    def __init__(self, task, domain):
+    def __init__(self, task, domain, mapper, tag):
         super(_IndexLauncher, self).__init__(task)
         self.domain = domain
+        self.mapper = mapper
+        self.tag = tag
         self.global_args = None
         self.local_args = c.legion_argument_map_create()
         self.region_args = None
@@ -1979,7 +2043,7 @@ class _IndexLauncher(_TaskLauncher):
     def __del__(self):
         c.legion_argument_map_destroy(self.local_args)
 
-    def spawn_task(self, *args):
+    def spawn_task(self, *args, **kwargs):
         raise Exception('IndexLaunch does not support spawn_task')
 
     def attach_local_args(self, index, *args):
@@ -2014,7 +2078,7 @@ class _IndexLauncher(_TaskLauncher):
         launcher = c.legion_index_launcher_create(
             self.task.task_id, self.domain.raw_value(),
             global_args[0], self.local_args,
-            c.legion_predicate_true(), False, 0, 0)
+            c.legion_predicate_true(), False, self.mapper, self.tag)
 
         assert (self.global_args is not None) != (self.region_args is not None)
         if self.global_args is not None:
@@ -2064,7 +2128,7 @@ class _MustEpochLauncher(object):
     def __del__(self):
         c.legion_must_epoch_launcher_destroy(self.launcher)
 
-    def spawn_task(self, *args):
+    def spawn_task(self, *args, **kwargs):
         raise Exception('MustEpochLaunch does not support spawn_task')
 
     def attach_task_launcher(self, task_launcher, point, root=None):
@@ -2186,9 +2250,9 @@ class ConcreteLoopIndex(SymbolicExpr):
         return self.value
 
 def index_launch(domain, task, *args, **kwargs):
-    def parse_kwargs(reduce=None):
-        return reduce
-    reduce = parse_kwargs(**kwargs)
+    def parse_kwargs(reduce=None, mapper=0, tag=0):
+        return reduce, mapper, tag
+    reduce, mapper, tag = parse_kwargs(**kwargs)
 
     if isinstance(domain, Domain):
         domain = domain
@@ -2196,7 +2260,7 @@ def index_launch(domain, task, *args, **kwargs):
         domain = domain.domain
     else:
         domain = Domain(domain)
-    launcher = _IndexLauncher(task=task, domain=domain)
+    launcher = _IndexLauncher(task=task, domain=domain, mapper=mapper, tag=tag)
     args, futures = launcher.gather_futures(args)
     launcher.attach_global_args(*args)
     launcher.attach_future_args(*futures)
@@ -2205,16 +2269,23 @@ def index_launch(domain, task, *args, **kwargs):
     return launcher.future_map
 
 class IndexLaunch(object):
-    __slots__ = ['domain', 'launcher', 'point',
+    __slots__ = ['domain', 'mapper', 'tag', 'launcher', 'point',
                  'saved_task', 'saved_args']
 
-    def __init__(self, domain):
+    def __init__(self, domain, **kwargs):
+        # Hack: workaround for Python 2 not having keyword-only arguments
+        def validate_spawn_task_args(mapper=0, tag=0):
+            return mapper, tag
+        mapper, tag = validate_spawn_task_args(**kwargs)
+
         if isinstance(domain, Domain):
             self.domain = domain
         elif isinstance(domain, Ispace):
             self.domain = domain.domain
         else:
             self.domain = Domain(domain)
+        self.mapper = mapper
+        self.tag = tag
         self.launcher = None
         self.point = None
         self.saved_task = None
@@ -2231,7 +2302,8 @@ class IndexLaunch(object):
 
     def ensure_launcher(self, task):
         if self.launcher is None:
-            self.launcher = _IndexLauncher(task=task, domain=self.domain)
+            self.launcher = _IndexLauncher(
+                task=task, domain=self.domain, mapper=self.mapper, tag=self.tag)
 
     def check_compatibility(self, task, *args):
         # The tasks in a launch must conform to the following constraints:

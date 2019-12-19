@@ -206,13 +206,25 @@ if(Legion_USE_CUDA)
   # define variable for realm_defines.h
   set(REALM_USE_CUDA ON)
   set(USE_CUDA ON) # for backwards compatibility
+  set(REALM_USE_CUDART_HIJACK ON)
+endif()
+
+#------------------------------------------------------------------------------#
+# network interface configuration
+#------------------------------------------------------------------------------#
+set(Legion_NETWORKS "" CACHE STRING "Network backend(s) to use")
+separate_arguments(Legion_NETWORKS)
+
+# compatibility mode - Legion_USE_GASNet==ON -> Legion_NETWORKS=gasnet1
+option(Legion_USE_GASNet "Enable the distributed GASNet backend" OFF)
+if(Legion_USE_GASNet)
+  list(APPEND Legion_NETWORKS gasnet1)
 endif()
 
 #------------------------------------------------------------------------------#
 # GASNet configuration
 #------------------------------------------------------------------------------#
-option(Legion_USE_GASNet "Enable the distributed GASNet backend" OFF)
-if(Legion_USE_GASNet)
+if("${Legion_NETWORKS}" MATCHES .*gasnet1.*)
   set(GASNet_THREADING par)
   set(GASNet_PREFERRED_CONDUITS aries gemini ibv)
   find_package(GASNet REQUIRED)
@@ -224,10 +236,13 @@ if(Legion_USE_GASNet)
   )
 
   # define variable for realm_defines.h
-  set(USE_GASNET ON)
-  set(GASNETI_BUG1389_WORKAROUND "1")
+  set(REALM_USE_GASNET1 ON)
   string(TOUPPER ${GASNet_CONDUIT} CONDUIT)
   set(GASNET_CONDUIT_${CONDUIT} ON)
+  # conduits other than udp support MPI interop
+  if(NOT ${GASNet_CONDUIT} STREQUAL "udp")
+    set(Legion_MPI_INTEROP ON)
+  endif()
 endif()
 
 #------------------------------------------------------------------------------#
@@ -419,6 +434,7 @@ if(Legion_BUILD_ALL OR Legion_BUILD_APPS OR Legion_BUILD_BINDINGS OR Legion_BUIL
   # Make a namespaced alias so in-build examples can use it the same way as if
   # it were imported
   add_library(Legion::Legion ALIAS Legion)
+  add_library(Legion::Realm ALIAS Realm)
 
   if(Legion_USE_CUDA)
     # CUDA has some issues propogating target interface properties so we

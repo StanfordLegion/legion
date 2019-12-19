@@ -304,14 +304,55 @@ namespace Realm {
     , interpreter_ready(false)
   {}
 
-  void PythonThreadTaskScheduler::enqueue_taskreg(LocalPythonProcessor::TaskRegistration *treg)
+  // both real and internal tasks need to be wrapped with acquires of the GIL
+  bool PythonThreadTaskScheduler::execute_task(Task *task)
   {
-    AutoLock<> al(lock);
-    taskreg_queue.push_back(treg);
-    // we've added work to the system
-    work_counter.increment_counter();
-  }
+    // make our python thread state active, acquiring the GIL
+#ifdef USE_PYGILSTATE_CALLS
+    PyGILState_STATE gilstate = (pyproc->interpreter->api->PyGILState_Ensure)();
+#else
+    assert((pyproc->interpreter->api->PyThreadState_Swap)(0) == 0);
+    log_py.debug() << "RestoreThread <- " << pythread;
+    (pyproc->interpreter->api->PyEval_RestoreThread)(pythread);
+#endif
 
+    bool ok = KernelThreadTaskScheduler::execute_task(task);
+
+    // release the GIL
+#ifdef USE_PYGILSTATE_CALLS
+    (pyproc->interpreter->api->PyGILState_Release)(gilstate);
+#else
+    PyThreadState *saved = (pyproc->interpreter->api->PyEval_SaveThread)();
+    log_py.debug() << "SaveThread -> " << saved;
+    assert(saved == pythread);
+#endif
+
+    return ok;
+  }
+  
+  void PythonThreadTaskScheduler::execute_internal_task(InternalTask *task)
+  {
+    // make our python thread state active, acquiring the GIL
+#ifdef USE_PYGILSTATE_CALLS
+    PyGILState_STATE gilstate = (pyproc->interpreter->api->PyGILState_Ensure)();
+#else
+    assert((pyproc->interpreter->api->PyThreadState_Swap)(0) == 0);
+    log_py.debug() << "RestoreThread <- " << pythread;
+    (pyproc->interpreter->api->PyEval_RestoreThread)(pythread);
+#endif
+
+    KernelThreadTaskScheduler::execute_internal_task(task);
+
+    // release the GIL
+#ifdef USE_PYGILSTATE_CALLS
+    (pyproc->interpreter->api->PyGILState_Release)(gilstate);
+#else
+    PyThreadState *saved = (pyproc->interpreter->api->PyEval_SaveThread)();
+    log_py.debug() << "SaveThread -> " << saved;
+    assert(saved == pythread);
+#endif
+  }
+    
   void PythonThreadTaskScheduler::python_scheduler_loop(void)
   {
     // global startup of python interpreter if needed
@@ -335,6 +376,12 @@ namespace Realm {
     pythreads[Thread::self()] = pythread;
 #endif
 
+    // take lock and go into normal task scheduler loop
+    {
+      AutoLock<> al(lock);
+      KernelThreadTaskScheduler::scheduler_loop();
+    }
+#if 0
     // now go into main scheduler loop, holding scheduler lock for whole thing
     AutoLock<> al(lock);
     while(true) {
@@ -397,29 +444,11 @@ namespace Realm {
 	// release the lock while we run the task
 	lock.unlock();
 
-	// make our python thread state active, acquiring the GIL
-#ifdef USE_PYGILSTATE_CALLS
-	PyGILState_STATE gilstate = (pyproc->interpreter->api->PyGILState_Ensure)();
-#else
-	assert((pyproc->interpreter->api->PyThreadState_Swap)(0) == 0);
-	log_py.debug() << "RestoreThread <- " << pythread;
-	(pyproc->interpreter->api->PyEval_RestoreThread)(pythread);
-#endif
-
 #ifndef NDEBUG
 	bool ok =
 #endif
 	  execute_task(task);
 	assert(ok);  // no fault recovery yet
-
-	// release the GIL
-#ifdef USE_PYGILSTATE_CALLS
-	(pyproc->interpreter->api->PyGILState_Release)(gilstate);
-#else
-	PyThreadState *saved = (pyproc->interpreter->api->PyEval_SaveThread)();
-	log_py.debug() << "SaveThread -> " << saved;
-	assert(saved == pythread);
-#endif
 
 	lock.lock();
 
@@ -488,9 +517,9 @@ namespace Realm {
 	wait_for_work(old_work_counter);
       }
     }
-
     // should never get here
     assert(0);
+#endif
   }
 
   Thread *PythonThreadTaskScheduler::worker_create(bool make_active)
@@ -761,26 +790,8 @@ namespace Realm {
       assert(0);
     }
 
-    // perform import/compile on master thread
-#ifdef USE_PYGILSTATE_CALLS
-    PyGILState_STATE gilstate = (interpreter->api->PyGILState_Ensure)();
-    assert(gilstate == PyGILState_UNLOCKED);
-#else
-    assert((interpreter->api->PyThreadState_Swap)(0) == 0);
-    log_py.debug() << "RestoreThread <- " << master_thread;
-    (interpreter->api->PyEval_RestoreThread)(master_thread);
-#endif
-    
     PyObject *fnptr = interpreter->find_or_import_function(psi);
     assert(fnptr != 0);
-
-#ifdef USE_PYGILSTATE_CALLS
-    (interpreter->api->PyGILState_Release)(gilstate);
-#else
-    PyThreadState *saved = (interpreter->api->PyEval_SaveThread)();
-    log_py.debug() << "SaveThread -> " << saved;
-    assert(saved == master_thread);
-#endif
 
     log_py.info() << "task " << treg->func_id << " registered on " << me << ": " << *(treg->codedesc);
 
@@ -831,38 +842,11 @@ namespace Realm {
                                            const ByteArrayRef& user_data)
   {
     TaskRegistration *treg = new TaskRegistration;
+    treg->proc = this;
     treg->func_id = func_id;
     treg->codedesc = new CodeDescriptor(codedesc);
     treg->user_data = user_data;
-    sched->enqueue_taskreg(treg);
-#if 0
-    {
-      AutoLock<> al(mutex);
-      bool was_empty = taskreg_queue.empty() && task_queue.empty();
-      taskreg_queue.push_back(treg);
-      if(was_empty)
-	condvar.signal();
-    }
-#endif
-#if 0
-    // first, make sure we haven't seen this task id before
-    if(task_table.count(func_id) > 0) {
-      log_py.fatal() << "duplicate task registration: proc=" << me << " func=" << func_id;
-      assert(0);
-    }
-
-    // next, get see if we have a Python function to register
-    const PythonSourceImplementation *psi = codedesc.find_impl<PythonSourceImplementation>();
-    assert(psi != 0);
-
-    PyObject *fnptr = interpreter->find_or_import_function(psi);
-
-    log_py.info() << "task " << func_id << " registered on " << me << ": " << codedesc;
-
-    TaskTableEntry &tte = task_table[func_id];
-    tte.fnptr = fnptr;
-    tte.user_data = user_data;
-#endif
+    sched->add_internal_task(treg);
   }
 
   void LocalPythonProcessor::execute_task(Processor::TaskFuncID func_id,

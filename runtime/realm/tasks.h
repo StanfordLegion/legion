@@ -145,6 +145,20 @@ namespace Realm {
       void enqueue_tasks(Task::TaskList& tasks);
     };
 
+    // an internal task is an arbitrary blob of work that needs to happen on
+    //  a processor's actual thread(s)
+    class InternalTask {
+    protected:
+      // cannot be destroyed directly
+      virtual ~InternalTask() {}
+
+    public:
+      virtual void execute_on_processor(Processor p) = 0;
+
+      IntrusiveListLink<InternalTask> tl_link;
+      typedef IntrusiveList<InternalTask, &InternalTask::tl_link, Mutex> TaskList;
+    };
+
     // a task scheduler in which one or more worker threads execute tasks from one
     //  or more task queues
     // once given a task, a worker must complete it before taking on new work
@@ -168,6 +182,8 @@ namespace Realm {
 
       virtual void set_thread_priority(Thread *thread, int new_priority);
 
+      void add_internal_task(InternalTask *itask);
+
     public:
       // the main scheduler loop - lock should be held before calling
       void scheduler_loop(void);
@@ -178,6 +194,8 @@ namespace Realm {
       // returns true if everything went well, false if running thread
       //   may have been left in a bad state
       virtual bool execute_task(Task *task) = 0;
+
+      virtual void execute_internal_task(InternalTask *task) = 0;
 
       virtual Thread *worker_create(bool make_active) = 0;
       virtual void worker_sleep(Thread *switch_to) = 0;
@@ -193,6 +211,9 @@ namespace Realm {
       std::set<Thread *> blocked_workers;
       // threads that block while holding a scheduler lock go here instead
       std::set<Thread *> spinning_workers;
+
+      // internal task list is NOT guarded by the main mutex
+      InternalTask::TaskList internal_tasks;
 
       typedef PriorityQueue<Thread *, DummyLock> ResumableQueue;
       ResumableQueue resumable_workers;
@@ -313,6 +334,8 @@ namespace Realm {
     protected:
       virtual bool execute_task(Task *task);
 
+      virtual void execute_internal_task(InternalTask *task);
+
       virtual Thread *worker_create(bool make_active);
       virtual void worker_sleep(Thread *switch_to);
       virtual void worker_wake(Thread *to_wake);
@@ -350,6 +373,8 @@ namespace Realm {
 
     protected:
       virtual bool execute_task(Task *task);
+
+      virtual void execute_internal_task(InternalTask *task);
 
       void host_thread_loop(void);
       

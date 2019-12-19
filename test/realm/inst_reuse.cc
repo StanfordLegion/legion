@@ -58,13 +58,17 @@ void top_level_task(const void *args, size_t arglen,
     std::vector<size_t> field_sizes(1, 8);
 
     RegionInstance inst;
-    Event e1 = RegionInstance::create_instance(inst,
-					       m_worker,
-					       bounds,
-					       field_sizes,
-					       0 /*SOA*/,
-					       ProfilingRequestSet());
+    RegionInstance::create_instance(inst,
+				    m_worker,
+				    bounds,
+				    field_sizes,
+				    0 /*SOA*/,
+				    ProfilingRequestSet());
     assert(inst.exists());
+
+    // prefetch the metadata for the worker processor - this event includes
+    //  the successful instance creation above
+    Event e1 = inst.fetch_metadata(p_worker);
 
     log_app.info() << "master created: " << inst << ", bounds=" << bounds;
 

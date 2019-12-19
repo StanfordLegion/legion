@@ -41,13 +41,15 @@ for _, expect_var in ipairs(expect_vars) do
   end
 end
 
+config.UNSPECIFIED = -1
+
 local default_options = {
   -- Main user-facing correctness flags:
   ["bounds-checks"] = false,
   ["bounds-checks-targets"] = ".*",
 
   -- Main user-facing optimization flags:
-  ["cuda"] = true,
+  ["cuda"] = config.UNSPECIFIED,
   ["cuda-offline"] = not data.is_luajit(),
   ["cuda-arch"] = os.getenv("GPU_ARCH") or "fermi",
   ["index-launch"] = true,
@@ -58,7 +60,7 @@ local default_options = {
   ["idempotent"] = true,
   ["replicable"] = true,
   ["mapping"] = true,
-  ["openmp"] = false,
+  ["openmp"] = config.UNSPECIFIED,
   ["openmp-offline"] = not data.is_luajit(),
   ["openmp-strict"] = false,
   ["skip-empty-tasks"] = true,
@@ -79,6 +81,7 @@ local default_options = {
   ["parallelize"] = true,
   ["parallelize-dop"] = "4",
   ["parallelize-global"] = true,
+  ["parallelize-debug"] = false,
 
   -- Experimental CUDA code generation flags:
   ["cuda-2d-launch"] = true,
@@ -88,6 +91,7 @@ local default_options = {
   ["aligned-instances"] = false,
   ["cached-iterators"] = false,
   ["debug"] = false,
+  ["warn-as-error"] = false,
   ["no-dynamic-branches"] = true,
   ["no-dynamic-branches-assert"] = false,
   ["override-demand-index-launch"] = false,

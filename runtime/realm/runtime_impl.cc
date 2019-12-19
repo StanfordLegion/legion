@@ -68,7 +68,7 @@ TYPE_IS_SERIALIZABLE(Realm::NodeAnnounceTag);
 TYPE_IS_SERIALIZABLE(Realm::Memory);
 TYPE_IS_SERIALIZABLE(Realm::Memory::Kind);
 TYPE_IS_SERIALIZABLE(Realm::Channel::SupportedPath);
-TYPE_IS_SERIALIZABLE(Realm::XferDes::XferKind);
+TYPE_IS_SERIALIZABLE(Realm::XferDesKind);
 
 namespace LegionRuntime {
   namespace Accessor {
@@ -395,7 +395,7 @@ namespace Realm {
 
       Event merged = Event::merge_events(events);
       log_taskreg.info() << "waiting on event: " << merged;
-      merged.wait();
+      merged.external_wait();
       return true;
 #if 0
       if(((RuntimeImpl *)impl)->task_table.count(taskid) > 0)
@@ -1077,11 +1077,12 @@ namespace Realm {
       PartitioningOpQueue::configure_from_cmdline(cmdline);
 
       // low-level runtime parameters
-#ifdef USE_GASNET
-      size_t reg_ib_mem_size = 256 << 20;
-#else
-      size_t reg_ib_mem_size = 64 << 20; // for transposes/serdez
-#endif
+      size_t reg_ib_mem_size;
+      if(Network::max_node_id > 0)
+	reg_ib_mem_size = 256 << 20; // for inter-node copies
+      else
+	reg_ib_mem_size = 64 << 20; // for local transposes/serdez
+
       size_t reg_mem_size = 0;
       size_t disk_mem_size = 0;
       // Static variable for stack size since we need to 
@@ -1132,6 +1133,7 @@ namespace Realm {
       cp.add_option_bool("-ll:frsrv_fallback", Config::use_fast_reservation_fallback);
       cp.add_option_int("-ll:machine_query_cache", Config::use_machine_query_cache);
       cp.add_option_int("-ll:defalloc", Config::deferred_instance_allocation);
+      cp.add_option_int("-ll:amprofile", Config::profile_activemsg_handlers);
 
       bool cmdline_ok = cp.parse_command_line(cmdline);
 
@@ -2071,8 +2073,9 @@ namespace Realm {
 	log_runtime.info() << "local processor shutdown tasks complete";
       }
 
-      // the operation table should be clear of work
+      // the operation tables on every rank should be clear of work
       optable.shutdown_check();
+      Network::barrier();
       
       // mark that a shutdown is in progress so that we can hopefully catch
       //  things that try to run during teardown
@@ -2113,6 +2116,9 @@ namespace Realm {
 	(*it)->detach(this, network_segments);
 
       sampling_profiler.shutdown();
+
+      if(Config::profile_activemsg_handlers)
+	activemsg_handler_table.report_message_handler_stats();
 
       {
 	std::vector<ProcessorImpl *>& local_procs = nodes[Network::my_node_id].processors;

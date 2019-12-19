@@ -32,9 +32,12 @@ add_subdirectory(virtual_map)
 add_subdirectory(attach_2darray_c_fortran_layout)
 add_subdirectory(attach_array_daxpy)
 
-if(Legion_USE_GASNet)
+if(Legion_MPI_INTEROP)
   add_subdirectory(mpi_interop)
-else()
+endif()
+
+# implicit_top_task doesn't work in master with multiple nodes
+if(NOT Legion_NETWORKS)
   add_subdirectory(implicit_top_task)
 endif()
 
@@ -44,4 +47,8 @@ endif()
 
 if(Legion_USE_Python)
   add_subdirectory(python_interop)
+endif()
+
+if(Legion_USE_OpenMP)
+  add_subdirectory(omp_saxpy)
 endif()

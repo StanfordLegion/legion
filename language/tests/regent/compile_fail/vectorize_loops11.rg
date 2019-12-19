@@ -13,7 +13,7 @@
 -- limitations under the License.
 
 -- fails-with:
--- vectorize_loops11.rg:27: vectorization failed: found an inadmissible statement
+-- vectorize_loops11.rg:27: vectorization failed: loop body has an expression as a statement
 --     regentlib.c.printf("test\n")
 --              ^
 

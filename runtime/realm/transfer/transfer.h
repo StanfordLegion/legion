@@ -32,6 +32,8 @@ namespace Realm {
   //  type of IndexSpace that is driving the transfer, so we need a widget that
   //  can hold an arbitrary IndexSpace and dispatch based on its type
 
+  class XferDes;
+
   class TransferIterator {
   public:
     template <typename S>
@@ -41,6 +43,10 @@ namespace Realm {
 
     // must be called (and waited on) before iteration is possible
     virtual Event request_metadata(void);
+
+    // specify the xd port used for indirect address flow control, if any
+    virtual void set_indirect_input_port(XferDes *xd, int port_idx,
+					 TransferIterator *inner_iter);
 
     virtual void reset(void) = 0;
     virtual bool done(void) = 0;

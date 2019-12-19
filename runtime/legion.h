@@ -663,6 +663,14 @@ namespace Legion {
       void set_point(const DomainPoint &point, const TaskArgument &arg,
                      bool replace = true);
       /**
+       * Associate a future with a domain point
+       * @param point the point to associate with the task argument
+       * @param future the future argument
+       * @param replace specify whether to overwrite an existing value
+       */
+      void set_point(const DomainPoint &point, const Future &f,
+                     bool replace = true);
+      /**
        * Remove a point from the argument map
        * @param point the point to be removed
        * @return true if the point was removed
@@ -1196,8 +1204,9 @@ namespace Legion {
        * true if the future can be used without blocking to wait
        * on the computation that the future represents, otherwise
        * it will return false.
+       * @param subscribe ask for the payload to be brought here when ready
        */
-      bool is_ready(void) const;
+      bool is_ready(bool subscribe = false) const;
     public:
       /**
        * Return a const reference to the future.
@@ -1544,6 +1553,9 @@ namespace Legion {
       std::vector<IndexSpaceRequirement> index_requirements;
       std::vector<RegionRequirement>     region_requirements;
       std::vector<Future>                futures;
+      // These are appended to the futures for the point
+      // task after the futures sent to all points above
+      std::vector<ArgumentMap>           point_futures;
       std::vector<Grant>                 grants;
       std::vector<PhaseBarrier>          wait_barriers;
       std::vector<PhaseBarrier>          arrive_barriers;
@@ -1659,9 +1671,17 @@ namespace Legion {
     public:
       // Specify src/dst indirect requirements (must have exactly 1 field)
       inline void add_src_indirect_field(const RegionRequirement &src_idx_req,
-                                         FieldID src_idx_fid, bool inst = true);
+                                         FieldID src_idx_fid, bool inst = true,
+                                         bool is_range_indirection = false);
       inline void add_dst_indirect_field(const RegionRequirement &dst_idx_req,
-                                         FieldID dst_idx_fid, bool inst = true);
+                                         FieldID dst_idx_fid, bool inst = true,
+                                         bool is_range_indirection = false);
+      inline RegionRequirement& add_src_indirect_field(
+                                         const RegionRequirement &src_idx_req,
+                                         bool is_range_indirection = false);
+      inline RegionRequirement& add_dst_indirect_field(
+                                         const RegionRequirement &dst_idx_req,
+                                         bool is_range_indirection = false);
     public:
       inline void add_grant(Grant g);
       inline void add_wait_barrier(PhaseBarrier bar);
@@ -1673,6 +1693,8 @@ namespace Legion {
       std::vector<RegionRequirement>  dst_requirements;
       std::vector<RegionRequirement>  src_indirect_requirements;
       std::vector<RegionRequirement>  dst_indirect_requirements;
+      std::vector<bool>               src_indirect_is_range;
+      std::vector<bool>               dst_indirect_is_range;
       std::vector<Grant>              grants;
       std::vector<PhaseBarrier>       wait_barriers;
       std::vector<PhaseBarrier>       arrive_barriers;
@@ -1717,9 +1739,17 @@ namespace Legion {
     public:
       // Specify src/dst indirect requirements (must have exactly 1 field)
       inline void add_src_indirect_field(const RegionRequirement &src_idx_req,
-                                         FieldID src_idx_fid, bool inst = true);
+                                         FieldID src_idx_fid, bool inst = true,
+                                         bool is_range_indirection = false);
       inline void add_dst_indirect_field(const RegionRequirement &dst_idx_req,
-                                         FieldID dst_idx_fid, bool inst = true);
+                                         FieldID dst_idx_fid, bool inst = true,
+                                         bool is_range_indirection = false);
+      inline RegionRequirement& add_src_indirect_field(
+                                         const RegionRequirement &src_idx_req,
+                                         bool is_range_indirection = false);
+      inline RegionRequirement& add_dst_indirect_field(
+                                         const RegionRequirement &dst_idx_req,
+                                         bool is_range_indirection = false);
     public:
       inline void add_grant(Grant g);
       inline void add_wait_barrier(PhaseBarrier bar);
@@ -1731,6 +1761,8 @@ namespace Legion {
       std::vector<RegionRequirement>  dst_requirements;
       std::vector<RegionRequirement>  src_indirect_requirements;
       std::vector<RegionRequirement>  dst_indirect_requirements;
+      std::vector<bool>               src_indirect_is_range;
+      std::vector<bool>               dst_indirect_is_range;
       std::vector<Grant>              grants;
       std::vector<PhaseBarrier>       wait_barriers;
       std::vector<PhaseBarrier>       arrive_barriers;
@@ -3271,6 +3303,22 @@ namespace Legion {
                                     unsigned index,
                                     LogicalPartition upper_bound,
                                     const DomainPoint &point);
+      ///@{
+      /**
+       * Invert the projection function. Given a logical region
+       * for this operation return all of the points that alias
+       * with it. Dependences will be resolved in the order that
+       * they are returned to the runtime. The returned result 
+       * must not be empty because it must contain at least the
+       * point for the given operation.
+       */
+      virtual void invert(LogicalRegion region, LogicalRegion upper_bound,
+                          const Domain &launch_domain,
+                          std::vector<DomainPoint> &ordered_points);
+      virtual void invert(LogicalRegion region, LogicalPartition upper_bound,
+                          const Domain &launch_domain,
+                          std::vector<DomainPoint> &ordered_points);
+      ///@}
       
       /**
        * Indicate whether calls to this projection functor
@@ -3287,6 +3335,13 @@ namespace Legion {
        * is invoked by the runtime.
        */
       virtual bool is_functional(void) const { return false; }
+
+      /**
+       * Indicate whether this is an invertible projection 
+       * functor which can be used to handle dependences 
+       * between point tasks in the same index space launch.
+       */
+      virtual bool is_invertible(void) const { return false; }
 
       /**
        * Specify the depth which this projection function goes
@@ -5908,7 +5963,7 @@ namespace Legion {
        * useful as a performance optimization to minimize the
        * number of mapping independence tests required.
        */
-      void issue_mapping_fence(Context ctx);
+      Future issue_mapping_fence(Context ctx);
 
       /**
        * Issue a Legion execution fence in the current context.  A 
@@ -5919,7 +5974,7 @@ namespace Legion {
        * such as modifications to the region tree made prior
        * to the fence visible to tasks issued after the fence.
        */
-      void issue_execution_fence(Context ctx); 
+      Future issue_execution_fence(Context ctx); 
     public:
       //------------------------------------------------------------------------
       // Tracing Operations 
@@ -5960,6 +6015,33 @@ namespace Legion {
        * @param ctx the enclosing task context
        */
       void end_static_trace(Context ctx);
+
+      /**
+       * Dynamically generate a unique TraceID for use across the machine
+       * @reutrn a TraceID that is globally unique across the machine
+       */
+      TraceID generate_dynamic_trace_id(void);
+
+      /** 
+       * Generate a contiguous set of TraceIDs for use by a library.
+       * This call will always generate the same answer for the same library
+       * name no many how many times it is called or on how many nodes it
+       * is called. If the count passed in to this method differs for the 
+       * same library name the runtime will raise an error.
+       * @param name a unique null-terminated string that names the library
+       * @param count the number of trace IDs that should be generated
+       * @return the first TraceID that is allocated to the library
+       */
+      TraceID generate_library_trace_ids(const char *name, size_t count);
+
+      /**
+       * Statically generate a unique Trace ID for use across the machine.
+       * This can only be called prior to the runtime starting. It must be
+       * invoked symmetrically across all the nodes in the machine prior
+       * to starting the runtime.
+       * @return a TraceID that is globally unique across the machine
+       */
+      static TraceID generate_static_trace_id(void);
     public:
       //------------------------------------------------------------------------
       // Frame Operations 
@@ -6167,6 +6249,18 @@ namespace Legion {
        */
       void raise_region_exception(Context ctx, PhysicalRegion region, 
                                   bool nuclear);
+
+      /**
+       * Yield the task to allow other tasks on the processor. In most
+       * Legion programs calling this should never be necessary. However,
+       * sometimes an application may want to put its own polling loop 
+       * inside a task. If it does it may need to yield the processor that
+       * it is running on to allow other tasks to run on that processor.
+       * This can be accomplished by invoking this method. The task will
+       * be pre-empted and other eligible tasks will be permitted to run on 
+       * this processor.
+       */
+      void yield(Context ctx);
     public:
       //------------------------------------------------------------------------
       // MPI Interoperability 
@@ -7032,36 +7126,13 @@ namespace Legion {
        * running in background mode.  Otherwise it is illegal to 
        * invoke this method. Returns the exit code for the application.
        */
-      static int wait_for_shutdown(void);
-
-      /**
-       * An alternative way to start the runtime to create an implicit
-       * top-level task in the main thread. After this call the main
-       * thread will be treated as though it is the top-level task 
-       * running on a specific kind of processor. Users can also mark
-       * that this implicit top-level task is control replicable for
-       * supporting implicit top-level tasks for multi-node runs.
-       */
-      static Context start_implicit(int argc, char **argv,
-                                    TaskID top_task_id,
-                                    Processor::Kind proc_kind,
-                                    const char *task_name = NULL,
-                                    bool control_replicable = false);
-
-      /**
-       * This is the final method for marking the end of an 
-       * implicit top-level task. Note that it executes asychronously
-       * and it is still the responsibility of the user to wait for 
-       * the runtime to shutdown when all of it's effects are done.
-       * The Context object is no longer valid after this call.
-       */
-      static void finish_implicit(Context ctx);
+      static int wait_for_shutdown(void); 
       
       /**
        * Set the top-level task ID for the runtime to use when beginning
-       * an application.  This should be set before calling start.  Otherwise
-       * the runtime will default to a value of zero.  Note the top-level
-       * task must be a single task and not an index space task.
+       * an application.  This should be set before calling start. If no
+       * top-level task ID is set then the runtime will not start running
+       * any tasks at start-up.
        * @param top_id ID of the top level task to be run
        */
       static void set_top_level_task_id(TaskID top_id);
@@ -7073,6 +7144,49 @@ namespace Legion {
        * have no effect after the top-level task is started.
        */
       static void set_top_level_task_mapper_id(MapperID mapper_id);
+
+      /**
+       * After the runtime is started, users can launch as many top-level
+       * tasks as they want using this method. Each one will start a new
+       * top-level task and returns values with a future. Currently we
+       * only permit this to be called from threads not managed by Legion.
+       */
+      Future launch_top_level_task(const TaskLauncher &launcher);
+
+      /**
+       * In addition to launching top-level tasks from outside the runtime,
+       * applications can bind external threads as new implicit top-level
+       * tasks to the runtime. This will tell the runtime that this external
+       * thread should now function as new top-level task that is executing.
+       * After this call the trhead will be treated as through it is a 
+       * top-level task running on a specific kind of processor. Users can 
+       * also mark that this implicit top-level task is control replicable 
+       * for supporting implicit top-level tasks for multi-node runs. For
+       * the control replicable case we expect to see the same number of 
+       * calls from every address space. This number is controlled by 
+       * shard_per_address_space and defaults to one. The application can
+       * also optionally specify the shard ID for every implicit top level
+       * task for control replication settings. If it is specified, then
+       * the application must specify it for all shards. Otherwise the
+       * runtime will allocate shard IDs contiguously on each node before
+       * proceeding to the next node.
+       */
+      Context begin_implicit_task(TaskID top_task_id,
+                                  MapperID mapper_id,
+                                  Processor::Kind proc_kind,
+                                  const char *task_name = NULL,
+                                  bool control_replicable = false,
+                                  unsigned shard_per_address_space = 1,
+                                  int shard_id = -1);
+
+      /**
+       * This is the final method for marking the end of an 
+       * implicit top-level task. Note that it executes asychronously
+       * and it is still the responsibility of the user to wait for 
+       * the runtime to shutdown when all of it's effects are done.
+       * The Context object is no longer valid after this call.
+       */
+      void finish_implicit_task(Context ctx);
 
       /**
        * Return the maximum number of dimensions that Legion was

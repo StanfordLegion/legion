@@ -387,8 +387,12 @@ function getMouseOver() {
     // descTexts is an array of Texts we will store in the desc view
     var descTexts = [];
     var total = d.end - d.start;
+    var delay = d.start - d.ready;
     var initiation = "";
     // Insert texts in reverse order
+    if ((d.ready != undefined) && (d.ready != "") && (delay != 0)) {
+	descTexts.push("Ready State: " + delay + "us");
+    }
     descTexts.push("End:   " + d.end + "us");
     descTexts.push("Start: " + d.start + "us");
     descTexts.push("Total: " + total + "us");
@@ -453,6 +457,13 @@ function createMenuList1() {
     var num_nodes = state.num_nodes;
     var num_mems = 0;
     var dropdown_options = [
+	                    { value: "ready",
+                              id: "ready_all",
+			      text: "View",
+			      count: 1,
+			      low_range: 0,
+			      high_range: 1
+			    },
 			    { value: "memories",
 			      id: "memories_all",
 			      text: "Memories",
@@ -464,6 +475,19 @@ function createMenuList1() {
 
     // memories list
     dropdown_options_memories = [];
+
+    // misc items list
+    var pkind = {
+	id: "rr",
+	value: "rdy",
+	count: 1,
+	low_range: 0,
+	high_range: 1,
+	text: "Ready State"
+      };
+
+    dropdown_options_misc = [];
+    dropdown_options_misc.push(pkind);
 
     // create the remaining entries
     function appendKind(elem) {
@@ -494,7 +518,8 @@ function createMenuList1() {
 	val = dropdown_options[j].low_range;
 	if (dropdown_options[j].id == "memories_all")
 	    num_nodes_options = dropdown_options_memories;
-
+	else if (dropdown_options[j].id == "ready_all")
+	    num_nodes_options = dropdown_options_misc;
 	else {
 	    for (var i=0; i<num_vals; i++)
 		{
@@ -544,6 +569,19 @@ function flattenLayoutProfileView() {
 	}
     }
     state.layoutData.forEach(appendElem);
+}
+
+function readyStateUpdate() {
+    state.flattenedLayoutData = [];
+    function appendElem(elem) {
+	if (elem.selected) {
+	    state.flattenedLayoutData.push(elem);
+	    elem.children.forEach(appendElem);
+	}
+    }
+    if (state.ready_selected) {
+	state.layoutData.forEach(appendElem);
+    }
 }
 
 function printSelected() {
@@ -692,12 +730,16 @@ function profileSelect(event) {
 	var count = 0;
 	$('#dropdown option:selected').each(function() {
 		map_selected[$(this).val()] = true;
-		count = 1;
+		count = count + 1;
 	    });
 	if (count == 0){
 	    text = "Must select at least one option";
 	    alert(text);
 	}
+	else if ((count == 1) && ("rdy" in map_selected)) {
+	    text = "Select additional options with View Ready State"
+	    alert(text);
+	    }
 	else {
 	    var lower_range =  $('#node_slider').slider("values", 0);
 	    var upper_range =  $('#node_slider').slider("values", 1);
@@ -791,13 +833,16 @@ function updateProfileView(map_selected) {
 	elem.children.forEach(updateSelect);
     }
     state.layoutData.forEach(updateSelect);
+    // add ready state to timeline
+    if ("rdy" in map_selected)
+	state.ready_selected=true;
+    else
+	state.ready_selected=false;
     countSelected();
     //    printSelected();
     flattenLayout();
     redoProfileView();
 }
-
-
 
 function flattenLayout() {
   state.flattenedLayoutData = [];
@@ -865,6 +910,7 @@ function getElement(depth, text, full_text, type, num_levels, loader,
     loaded: false,
     loader: loader,
     num_levels: num_levels,
+    num_levels_ready: num_levels,
     children: [],
     parent: _parent,
     text: text,
@@ -1352,7 +1398,10 @@ function calculateVisibileLevels() {
   state.flattenedLayoutData.forEach(function(elem) {
     if (elem.visible) {
       if (elem.enabled) {
-        levels += elem.num_levels;
+	  if (state.ready_selected && elem.num_levels_ready != undefined)
+	      levels += elem.num_levels_ready;
+	  else
+              levels += elem.num_levels;
       }
       levels += constants.elem_separation;
     }
@@ -1416,7 +1465,10 @@ function calculateBases() {
     }
     if (elem.visible) {
       if (elem.enabled) {
-        base += elem.num_levels;
+	  if (state.ready_selected && elem.num_levels_ready != undefined)
+	      base += elem.num_levels_ready;
+	  else
+              base += elem.num_levels;
       }
       base += constants.elem_separation;
     }
@@ -1509,21 +1561,27 @@ function expandByNodeProc(node, proc) {
 function lineLevelCalculator(timelineElement) {
   var level = timelineElement.base + 1;
   if (timelineElement.enabled) {
-    level += timelineElement.num_levels;
+      if (state.ready_selected && timelineElement.num_levels_ready != undefined)
+	  level += timelineElement.num_levels_ready;
+      else
+          level += timelineElement.num_levels;
   }
-  return constants.margin_top + level * state.thickness;
+    return constants.margin_top + level * state.thickness;
 };
 
 function utilLevelCalculator(timelineElement) {
   var level = timelineElement.base;
-  if (timelineElement.enabled) {
-    level += timelineElement.num_levels;
-  }
-  return constants.margin_top + level * state.thickness;
+    if (timelineElement.enabled) {
+	if (state.ready_selected && timelineElement.num_levels_ready != undefined)
+	    level += timeLineElement.num_levels_ready;
+	else
+            level +=  timeLineElement.num_levels;
+    }
+    return constants.margin_top + level * state.thickness;
 };
 
 
-function timelineLevelCalculator(timelineEvent) {  
+function timelineLevelCalculator(timelineEvent) {
   return constants.margin_top +
          (timelineEvent.proc.base + timelineEvent.level) * state.thickness;
 };
@@ -2208,13 +2266,19 @@ function defaultKeyUp(e) {
 }
 
 function load_proc_timeline(proc) {
-  var proc_name = proc.full_text;
-  state.processorData[proc_name] = {};
+    var proc_name = proc.full_text;
+    state.processorData[proc_name] = {};
+    var num_levels_ready = proc.num_levels;
+    if (state.ready_selected) {
+	proc.num_levels_ready = proc.num_levels;
+    }
   d3.tsv(proc.tsv,
     function(d, i) {
         var level = +d.level;
+        var ready = +d.ready;
         var start = +d.start;
         var end = +d.end;
+        var level_ready = +d.level_ready;
         var total = end - start;
         var _in = d.in === "" ? [] : JSON.parse(d.in)
         var out = d.out === "" ? [] : JSON.parse(d.out)
@@ -2224,6 +2288,8 @@ function load_proc_timeline(proc) {
             return {
                 id: i,
                 level: level,
+                level_ready: level_ready,
+                ready: ready,
                 start: start,
                 end: end,
                 color: d.color,
@@ -2240,14 +2306,20 @@ function load_proc_timeline(proc) {
         }
     },
     function(data) {
+	var num_levels_ready=0
       // split profiling items by which level they're on
       for(var i = 0; i < data.length; i++) {
-        var d = data[i];
-        if (d.level in state.processorData[proc_name]) {
-          state.processorData[proc_name][d.level].push(d);
-        } else {
-          state.processorData[proc_name][d.level] = [d];
-        }
+	  var d = data[i];
+	  var level_sel=d.level;
+          if (level_sel in state.processorData[proc_name]) {
+              state.processorData[proc_name][level_sel].push(d);
+          } else {
+              state.processorData[proc_name][level_sel] = [d];
+          }
+	  if ((d.level_ready != undefined) && (d.level_ready != 0) &&
+	      num_levels_ready < d.level_ready)
+	      num_levels_ready = d.level_ready;
+
         if (d.prof_uid != undefined && d.prof_uid !== "") {
           if (d.prof_uid in prof_uid_map) {
             prof_uid_map[d.prof_uid].push(d);
@@ -2256,11 +2328,15 @@ function load_proc_timeline(proc) {
           }
         }
       }
-      proc.loaded = true;
-      hideLoaderIcon();
-      redraw();
+    if (num_levels_ready > proc.num_levels)
+	proc.num_levels_ready = num_levels_ready;
+    else
+	proc.num_levels_ready = proc.num_levels;
+    proc.loaded = true;
+    hideLoaderIcon();
+    redraw();
     }
-  );
+ );
 }
 
 function initTimelineElements() {
@@ -2423,6 +2499,7 @@ function filterUtilData(timelineElem) {
     text: timelineElem.text,
     base: timelineElem.base,
     num_levels: timelineElem.num_levels,
+    num_levels_ready: timelineElem.num_levels_ready,
     data: newData
   };
 }
@@ -2576,6 +2653,8 @@ function initializeState() {
   state.display_critical_path = false;
   state.processor_kinds = {};
 
+  // display task ready state?
+  state.ready_selected = false;
   // TODO: change this
   state.x = d3.scale.linear().range([0, state.width]);
   state.y = d3.scale.linear().range([constants.util_levels * state.thickness, 0]);

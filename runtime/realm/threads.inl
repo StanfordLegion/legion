@@ -127,16 +127,27 @@ namespace Realm {
   class ThreadWaker : public CONDTYPE::Callback {
   public:
     ThreadWaker(const CONDTYPE& cond, Thread *_thread);
+    ~ThreadWaker();
     void operator()(bool _poisoned);
 
     Thread *thread;
-    bool poisoned;
+    bool poisoned, called;
   };
 
   template <typename CONDTYPE>
   ThreadWaker<CONDTYPE>::ThreadWaker(const CONDTYPE& cond, Thread *_thread)
-    : CONDTYPE::Callback(cond), thread(_thread)
+    : CONDTYPE::Callback(cond), thread(_thread), called(false)
   {
+    cond.add_callback(*this);
+  }
+
+  template <typename CONDTYPE>
+  ThreadWaker<CONDTYPE>::~ThreadWaker()
+  {
+    if(!called) {
+      // should only happen if we get unwound by an exception
+      (this->cond).remove_callback(*this);
+    }
   }
 
   template <typename CONDTYPE>
@@ -145,6 +156,7 @@ namespace Realm {
     // just store the poison state here - the thread will have to check it
     //  once it starts back up
     poisoned = _poisoned;
+    called = true;
 
     // mark the thread as ready and notify the thread's scheduler if it has already gone to sleep
     Thread::State old_state = thread->update_state(Thread::STATE_READY);
@@ -194,17 +206,21 @@ namespace Realm {
 
     // first, indicate our intent to sleep
     thread->update_state(STATE_BLOCKING);
-    // now create the callback so we know when to wake up
-    ThreadWaker<CONDTYPE> cb(cond, thread);
-    cond.add_callback(cb);
 
-    // now tell the scheduler we are blocking
-    //  (it will update our status if we succeed in blocking)
-    assert(thread->scheduler != 0);
-    thread->scheduler->thread_blocking(thread);
+    {
+      // now create the callback so we know when to wake up
+      ThreadWaker<CONDTYPE> cb(cond, thread);
 
-    // poison propagates to caller
-    poisoned = cb.poisoned;
+      // now tell the scheduler we are blocking
+      //  (it will update our status if we succeed in blocking)
+      assert(thread->scheduler != 0);
+
+      thread->scheduler->thread_blocking(thread);
+      assert(cb.called);
+
+      // poison propagates to caller
+      poisoned = cb.poisoned;
+    }
 
     // check signals again on the way out (async ones should have woken us already,
     //  but synchronous ones do not)

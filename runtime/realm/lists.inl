@@ -172,6 +172,33 @@ namespace Realm {
     return popped;
   }
 
+  template <typename T, IntrusiveListLink<T> T::*LINK, typename LT>
+  inline size_t IntrusiveList<T, LINK, LT>::erase(T *entry)
+  {
+    size_t count = 0;
+    lock.lock();
+    IntrusiveListLink<T> *pos = &head;
+    while(pos->next) {
+      if(pos->next == entry) {
+	// remove this from the list
+	count++;
+	T *nextnext = ((pos->next)->*LINK).next;
+#ifdef DEBUG_REALM_LISTS
+	((pos->next)->*LINK).next = 0;
+	((pos->next)->*LINK).current_list = 0;
+#endif
+	pos->next = nextnext;
+      } else {
+	// move to next entry
+	pos = &((pos->next)->*LINK);
+      }
+    }
+    // make sure the lastlink is still right
+    lastlink = pos;
+    lock.unlock();
+    return count;
+  }
+
 
   ////////////////////////////////////////////////////////////////////////
   //

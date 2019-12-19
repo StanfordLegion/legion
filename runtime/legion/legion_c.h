@@ -30,8 +30,8 @@
 
 #include "legion/legion_config.h"
 
-#ifndef LEGION_USE_PYTHON_CFFI
 #include <stdbool.h>
+#ifndef LEGION_USE_PYTHON_CFFI
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -554,7 +554,7 @@ extern "C" {
    * @see Legion::DomainPoint::nil()
    */
   legion_domain_point_t
-  legion_domain_point_nil();
+  legion_domain_point_nil(void);
 
   /**
    * @see Legion::DomainPoint::is_null()
@@ -2063,6 +2063,14 @@ extern "C" {
   legion_argument_map_create(void);
 
   /**
+   * @return Caller takes ownership of return value.
+   *
+   * @see Legion::ArgumentMap::ArgumentMap()
+   */
+  legion_argument_map_t
+  legion_argument_map_from_future_map(legion_future_map_t map);
+
+  /**
    * @see Legion::ArgumentMap::set_point()
    */
   void
@@ -2070,6 +2078,15 @@ extern "C" {
                                 legion_domain_point_t dp,
                                 legion_task_argument_t arg,
                                 bool replace /* = true */);
+
+  /**
+   * @see Legion::ArgumentMap::set_point()
+   */
+  void
+  legion_argument_map_set_future(legion_argument_map_t map,
+                                 legion_domain_point_t dp,
+                                 legion_future_t future,
+                                 bool replace /* = true */);
 
   /**
    * @param handle Caller must have ownership of parameter `handle`.
@@ -2293,6 +2310,12 @@ extern "C" {
    */
   bool
   legion_future_is_ready(legion_future_t handle);
+
+  /**
+   * @see Legion::Future::is_ready()
+   */
+  bool
+  legion_future_is_ready_subscribe(legion_future_t handle, bool subscribe);
 
   /**
    * @see Legion::Future::get_untyped_pointer()
@@ -2673,9 +2696,10 @@ extern "C" {
   /**
    * @see Legion::IndexTaskLauncher::region_requirements
    */
-  unsigned
+  void
   legion_index_launcher_set_region_requirement_logical_region(
     legion_index_launcher_t launcher,
+    unsigned idx,
     legion_logical_region_t handle,
     legion_projection_id_t proj /* = 0 */,
     legion_privilege_mode_t priv,
@@ -2687,9 +2711,10 @@ extern "C" {
   /**
    * @see Legion::IndexTaskLauncher::region_requirements
    */
-  unsigned
+  void
   legion_index_launcher_set_region_requirement_logical_partition(
     legion_index_launcher_t launcher,
+    unsigned idx,
     legion_logical_partition_t handle,
     legion_projection_id_t proj /* = 0 */,
     legion_privilege_mode_t priv,
@@ -2701,9 +2726,10 @@ extern "C" {
   /**
    * @see Legion::IndexTaskLauncher::region_requirements
    */
-  unsigned
+  void
   legion_index_launcher_set_region_requirement_logical_region_reduction(
     legion_index_launcher_t launcher,
+    unsigned idx,
     legion_logical_region_t handle,
     legion_projection_id_t proj /* = 0 */,
     legion_reduction_op_id_t redop,
@@ -2715,9 +2741,10 @@ extern "C" {
   /**
    * @see Legion::IndexTaskLauncher::region_requirements
    */
-  unsigned
+  void
   legion_index_launcher_set_region_requirement_logical_partition_reduction(
     legion_index_launcher_t launcher,
+    unsigned idx,
     legion_logical_partition_t handle,
     legion_projection_id_t proj /* = 0 */,
     legion_reduction_op_id_t redop,
@@ -2782,6 +2809,13 @@ extern "C" {
   void
   legion_index_launcher_add_arrival_barrier(legion_index_launcher_t launcher,
                                             legion_phase_barrier_t bar);
+
+  /**
+   * @see Legion::IndexTaskLauncher::point_futures
+   */
+  void
+  legion_index_launcher_add_point_future(legion_index_launcher_t launcher,
+                                         legion_argument_map_t map);
 
   /**
    * @see Legion::IndexTaskLauncher::sharding_space
@@ -2989,7 +3023,7 @@ extern "C" {
   legion_runtime_index_fill_field_future_with_domain(
     legion_runtime_t runtime,
     legion_context_t ctx,
-    legion_index_space_t domain,
+    legion_domain_t domain,
     legion_logical_partition_t handle,
     legion_logical_region_t parent,
     legion_field_id_t fid,
@@ -3685,14 +3719,14 @@ extern "C" {
   /**
    * @see Legion::Runtime::issue_mapping_fence()
    */
-  void
+  legion_future_t
   legion_runtime_issue_mapping_fence(legion_runtime_t runtime,
                                      legion_context_t ctx);
 
   /**
    * @see Legion::Runtime::issue_execution_fence()
    */
-  void
+  legion_future_t
   legion_runtime_issue_execution_fence(legion_runtime_t runtime,
                                        legion_context_t ctx);
 
@@ -3757,6 +3791,12 @@ extern "C" {
   legion_processor_t
   legion_runtime_get_executing_processor(legion_runtime_t runtime,
                                          legion_context_t ctx);
+
+  /**
+   * @see Legion::Runtime::yield()
+   */
+  void
+  legion_runtime_yield(legion_runtime_t runtime, legion_context_t ctx);
 
   void
   legion_runtime_enable_scheduler_lock(void);
@@ -4587,6 +4627,7 @@ extern "C" {
     const void *userdata,
     size_t userlen);
 
+#ifdef REALM_USE_LLVM
   /**
    * @see Legion::Runtime::register_task_variant()
    */
@@ -4619,7 +4660,9 @@ extern "C" {
     const char *entry_symbol,
     const void *userdata,
     size_t userlen);
+#endif
 
+#ifdef REALM_USE_PYTHON
   /**
    * @see Legion::Runtime::register_task_variant()
    */
@@ -4654,6 +4697,7 @@ extern "C" {
     size_t function_qualname_len,
     const void *userdata,
     size_t userlen);
+#endif
 
   /**
    * @see Legion::LegionTaskWrapper::legion_task_preamble()

@@ -695,7 +695,10 @@ namespace Realm {
 
   // collective communication within this network
   void GASNet1Module::barrier(void)
-  {}
+  {
+    gasnet_barrier_notify(0, GASNET_BARRIERFLAG_ANONYMOUS);
+    gasnet_barrier_wait(0, GASNET_BARRIERFLAG_ANONYMOUS);
+  }
     
   static const int GASNET_COLL_FLAGS = GASNET_COLL_IN_MYSYNC | GASNET_COLL_OUT_MYSYNC | GASNET_COLL_LOCAL;
   

@@ -71,7 +71,10 @@ void find_processors(Processor &first_cpu, Processor &first_gpu)
           break;
         }
       default:
-        assert(false);
+	{
+	  printf("Unknown Processor " IDFMT " (kind=%d)\n", it->id, it->kind());
+	  break;
+	}
     }
   }
   printf("\n");

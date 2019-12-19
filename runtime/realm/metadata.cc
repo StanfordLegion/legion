@@ -40,11 +40,18 @@ namespace Realm {
     void MetadataBase::mark_valid(NodeSet& early_reqs)
     {
       // take lock so we can make sure we get a precise list of early requestors
+      // if there was an event (i.e. an impatient local reqiest), trigger it too
+      Event to_trigger = Event::NO_EVENT;
       {
 	AutoLock<> a(mutex);
 	early_reqs = remote_copies;
 	state = STATE_VALID;
+	to_trigger = valid_event;
+	valid_event = Event::NO_EVENT;
       }
+
+      if(to_trigger.exists())
+	GenEventImpl::trigger(to_trigger, false /*!poisoned*/);
     }
 
     bool MetadataBase::handle_request(int requestor)
@@ -91,9 +98,6 @@ namespace Realm {
       if(state == STATE_VALID) 
 	return Event::NO_EVENT;
 
-      // sanity-check - should never be requesting data from ourselves
-      assert(owner != Network::my_node_id);
-
       Event e = Event::NO_EVENT;
       bool issue_request = false;
       {
@@ -113,7 +117,8 @@ namespace Realm {
 	    state = STATE_REQUESTED;
 	    valid_event = GenEventImpl::create_genevent()->current_event();
             e = valid_event;
-	    issue_request = true;
+	    // actually, no need to issue a request if we're the owner
+	    issue_request = (owner != Network::my_node_id);
 	    break;
 	  }
 
@@ -142,25 +147,6 @@ namespace Realm {
       return e;
     }
 
-    void MetadataBase::await_data(bool block /*= true*/)
-    {
-      // early out - valid data means no waiting
-      if(state == STATE_VALID) return;
-
-      // take lock to get event - must have already been requested (we don't have enough
-      //  information to do that now)
-      Event e = Event::NO_EVENT;
-      {
-	AutoLock<> a(mutex);
-
-	assert(state != STATE_INVALID);
-	e = valid_event;
-      }
-
-      if(!e.has_triggered())
-        e.wait(); // FIXME
-    }
-
     bool MetadataBase::initiate_cleanup(ID::IDType id)
     {
       NodeSet invals_to_send;
@@ -168,6 +154,9 @@ namespace Realm {
 	AutoLock<> a(mutex);
 
 	assert(state == STATE_VALID);
+
+	// eagerly invalidate local contents
+	do_invalidate();
 
 	if(remote_copies.empty()) {
 	  state = STATE_INVALID;
@@ -197,6 +186,7 @@ namespace Realm {
 	{
 	  // was valid, now invalid (up to app to make sure no races exist)
 	  state = STATE_INVALID;
+	  do_invalidate();
 	  break;
 	}
 

@@ -1198,6 +1198,8 @@ namespace Legion {
       std::vector<RegionTreePath>           scatter_privilege_paths;
       std::vector<unsigned>                 gather_parent_indexes;
       std::vector<unsigned>                 scatter_parent_indexes;
+      std::vector<bool>                     gather_is_range;
+      std::vector<bool>                     scatter_is_range;
       LegionVector<VersionInfo>::aligned    gather_versions;
       LegionVector<VersionInfo>::aligned    scatter_versions;
     protected: // for support with mapping
@@ -1339,7 +1341,7 @@ namespace Legion {
     public:
       FenceOp& operator=(const FenceOp &rhs);
     public:
-      void initialize(InnerContext *ctx, FenceKind kind);
+      Future initialize(InnerContext *ctx, FenceKind kind, bool need_future);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -1357,6 +1359,7 @@ namespace Legion {
     protected:
       FenceKind fence_kind;
       ApEvent execution_precondition;
+      Future result;
     };
 
     /**
@@ -2121,6 +2124,8 @@ namespace Legion {
     public:
       MustEpochOp& operator=(const MustEpochOp &rhs);
     public:
+      inline FutureMap get_future_map(void) const { return result_map; }
+    public:
       FutureMap initialize(InnerContext *ctx,
                            const MustEpochLauncher &launcher);
       void find_conflicted_regions(
@@ -2153,9 +2158,6 @@ namespace Legion {
       void add_mapping_dependence(RtEvent precondition);
       void register_single_task(SingleTask *single, unsigned index);
       void register_slice_task(SliceTask *slice);
-      void set_future(const DomainPoint &point, 
-                      const void *result, size_t result_size, bool owned);
-      void unpack_future(const DomainPoint &point, Deserializer &derez);
     public:
       // Methods for keeping track of when we can complete and commit
       void register_subop(Operation *op);

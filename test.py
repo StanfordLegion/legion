@@ -85,7 +85,7 @@ legion_gasnet_cxx_tests = [
 
 legion_openmp_cxx_tests = [
     # Examples
-    ['examples/omp_saxpy/omp_saxpy', []],
+    ['examples/omp_saxpy/omp_saxpy', ['-ll:ocpu', '1']],
 ]
 
 legion_python_cxx_tests = [
@@ -119,6 +119,7 @@ legion_python_cxx_tests = [
 
     ['bindings/python/legion_python', ['tests/fail/privileges.py', '-ll:py', '1', '-ll:cpu', '0']],
 
+    ['bindings/python/legion_python', ['tests/pass/copy.py', '-ll:py', '1', '-ll:cpu', '0']],
     ['bindings/python/legion_python', ['tests/pass/empty_region.py', '-ll:py', '1', '-ll:cpu', '0']],
     ['bindings/python/legion_python', ['tests/pass/print_once.py', '-ll:py', '1', '-ll:cpu', '0']],
     ['bindings/python/legion_python', ['tests/pass/privileges.py', '-ll:py', '1', '-ll:cpu', '0']],

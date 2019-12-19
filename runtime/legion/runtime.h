@@ -166,6 +166,7 @@ namespace Legion {
       bool has_point(const DomainPoint &point);
       void set_point(const DomainPoint &point, const TaskArgument &arg,
                      bool replace);
+      void set_point(const DomainPoint &point, const Future &f, bool replace);
       bool remove_point(const DomainPoint &point);
       TaskArgument get_point(const DomainPoint &point);
     public:
@@ -240,12 +241,15 @@ namespace Legion {
       };
     public:
       FutureImpl(Runtime *rt, bool register_future, DistributedID did, 
-                 AddressSpaceID owner_space, Operation *op = NULL);
+                 AddressSpaceID owner_space, ApEvent complete_event,
+                 Operation *op = NULL);
       FutureImpl(const FutureImpl &rhs);
       virtual ~FutureImpl(void);
     public:
       FutureImpl& operator=(const FutureImpl &rhs);
     public:
+      // Wait without subscribing to the payload
+      void wait(bool silence_warnings, const char *warning_string);
       void* get_untyped_result(bool silence_warnings = true,
                                const char *warning_string = NULL,
                                bool internal = false,
@@ -254,22 +258,21 @@ namespace Legion {
       bool is_empty(bool block, bool silence_warnings = true,
                     const char *warning_string = NULL,
                     bool internal = false);
-      bool is_ready(void);
       size_t get_untyped_size(bool internal = false);
-      ApEvent get_ready_event(void) const { return ready_event; }
+      ApEvent get_ready_event(void) const { return future_complete; }
     public:
       // This will simply save the value of the future
       void set_result(const void *args, size_t arglen, bool own);
       // This will save the value of the future locally
       void unpack_future(Deserializer &derez);
-      // Cause the future value to complete
-      void complete_future(void);
       // Reset the future in case we need to restart the
       // computation for resiliency reasons
       bool reset_future(void);
       // A special function for predicates to peek
       // at the boolean value of a future if it is set
       bool get_boolean_value(bool &valid);
+      // Request that the value be made ready on this node
+      ApEvent subscribe(void);
     public:
       virtual void notify_active(ReferenceMutator *mutator);
       virtual void notify_valid(ReferenceMutator *mutator);
@@ -277,15 +280,21 @@ namespace Legion {
       virtual void notify_inactive(ReferenceMutator *mutator);
     public:
       void register_dependence(Operation *consumer_op);
-      void register_waiter(AddressSpaceID sid, ReferenceMutator *mutator);
+      void register_remote(AddressSpaceID sid, ReferenceMutator *mutator);
     protected:
       void mark_sampled(void);
-      void broadcast_result(void);
+      void broadcast_result(std::set<AddressSpaceID> &targets,
+                            ApEvent complete, const bool need_lock);
+      void record_subscription(AddressSpaceID subscriber, bool need_lock);
+      void notify_remote_set(AddressSpaceID remote_space);
     public:
-      void record_future_registered(void);
+      void record_future_registered(ReferenceMutator *mutator);
       static void handle_future_result(Deserializer &derez, Runtime *rt);
       static void handle_future_subscription(Deserializer &derez, Runtime *rt,
                                              AddressSpaceID source);
+      static void handle_future_notification(Deserializer &derez, Runtime *rt,
+                                             AddressSpaceID source);
+      static void handle_future_broadcast(Deserializer &derez, Runtime *rt);
     public:
       void contribute_to_collective(const DynamicCollective &dc,unsigned count);
       static void handle_contribute_to_collective(const void *args);
@@ -301,13 +310,15 @@ namespace Legion {
     private:
       FRIEND_ALL_RUNTIME_CLASSES
       mutable LocalLock future_lock;
-      ApUserEvent ready_event;
+      ApEvent future_complete;
+      ApUserEvent subscription_event;
+      // On the owner node, keep track of the registered waiters
+      std::set<AddressSpaceID> subscribers;
       void *result; 
       size_t result_size;
+      AddressSpaceID result_set_space; // space on which the result was set
       volatile bool empty;
       volatile bool sampled;
-      // On the owner node, keep track of the registered waiters
-      std::set<AddressSpaceID> registered_waiters;
     };
 
     /**
@@ -326,18 +337,21 @@ namespace Legion {
                     Runtime *rt, DistributedID did, AddressSpaceID owner_space);
       FutureMapImpl(TaskContext *ctx, Runtime *rt, 
                     DistributedID did, AddressSpaceID owner_space,
-                    bool register_now = true); // empty map
+                    ApEvent ready_event, bool register_now = true); // remote
       FutureMapImpl(const FutureMapImpl &rhs);
       virtual ~FutureMapImpl(void);
     public:
       FutureMapImpl& operator=(const FutureMapImpl &rhs);
+    public:
+      inline ApEvent get_ready_event(void) const { return ready_event; }
     public:
       virtual void notify_active(ReferenceMutator *mutator);
       virtual void notify_valid(ReferenceMutator *mutator);
       virtual void notify_invalid(ReferenceMutator *mutator);
       virtual void notify_inactive(ReferenceMutator *mutator);
     public:
-      Future get_future(const DomainPoint &point, bool allow_empty = false);
+      Future get_future(const DomainPoint &point, RtEvent *wait_on = NULL);
+      void set_all_futures(const std::map<DomainPoint,Future> &others);
       void set_future(const DomainPoint &point, FutureImpl *impl,
                       ReferenceMutator *mutator);
       void get_void_result(const DomainPoint &point, 
@@ -345,11 +359,9 @@ namespace Legion {
                             const char *warning_string = NULL);
       void wait_all_results(bool silence_warnings = true,
                             const char *warning_string = NULL);
-      void complete_all_futures(void);
       bool reset_all_futures(void);
     public:
       void get_all_futures(std::map<DomainPoint,Future> &futures) const;
-      void set_all_futures(const std::map<DomainPoint,Future> &futures);
 #ifdef DEBUG_LEGION
     public:
       void add_valid_domain(const Domain &d);
@@ -370,7 +382,6 @@ namespace Legion {
       mutable LocalLock future_map_lock;
       ApEvent ready_event;
       std::map<DomainPoint,Future> futures;
-      bool valid;
 #ifdef DEBUG_LEGION
     private:
       std::vector<Domain> valid_domains;
@@ -1426,7 +1437,8 @@ namespace Legion {
       LogicalRegion project_point(Task *task, unsigned idx, Runtime *runtime,
                                   const DomainPoint &point);
       void project_points(const RegionRequirement &req, unsigned idx,
-          Runtime *runtime, const std::vector<PointTask*> &point_tasks);
+          Runtime *runtime, const std::vector<PointTask*> &point_tasks,
+          IndexSpaceNode *launch_space_node);
       // Generalized and annonymized
       void project_points(Operation *op, unsigned idx, 
                           const RegionRequirement &req, Runtime *runtime,
@@ -1446,9 +1458,15 @@ namespace Legion {
       void check_projection_partition_result(const RegionRequirement &req,
                                           Operation *op, unsigned idx,
                                           LogicalRegion result, Runtime *rt);
+      // Checking for inversion
+      void check_inversion(const Task *task, unsigned idx,
+                           const std::vector<DomainPoint> &ordered_points);
+      void check_containment(const Task *task, unsigned idx,
+                             const std::vector<DomainPoint> &ordered_points);
     public:
       const int depth; 
       const bool is_exclusive;
+      const bool is_invertible;
       const ProjectionID projection_id;
       ProjectionFunctor *const functor;
     private:
@@ -1468,7 +1486,7 @@ namespace Legion {
     public:
       struct LegionConfiguration {
       public:
-        LegionConfiguration(bool implicit_top)
+        LegionConfiguration(void)
           : delay_start(0),
             legion_collective_radix(LEGION_COLLECTIVE_RADIX),
             initial_task_window_size(LEGION_DEFAULT_MAX_TASK_WINDOW),
@@ -1481,7 +1499,6 @@ namespace Legion {
             gc_epoch_size(LEGION_DEFAULT_GC_EPOCH_SIZE),
             max_local_fields(LEGION_DEFAULT_LOCAL_FIELDS),
             max_replay_parallelism(LEGION_DEFAULT_MAX_REPLAY_PARALLELISM),
-            implicit_top_level(implicit_top),
             program_order_execution(false),
             dump_physical_traces(false),
             no_tracing(false),
@@ -1539,7 +1556,6 @@ namespace Legion {
         unsigned max_local_fields;
         unsigned max_replay_parallelism;
       public:
-        bool implicit_top_level;
         bool program_order_execution;
         bool dump_physical_traces;
         bool no_tracing;
@@ -1619,10 +1635,10 @@ namespace Legion {
       public:
         SelectTunableArgs(UniqueID uid, MapperID mid, MappingTagID t,
                           TunableID tune, const void *arg, size_t size,
-                          TaskContext *c, FutureImpl *f)
+                          TaskContext *c, FutureImpl *f, ApUserEvent trig)
           : LgTaskArgs<SelectTunableArgs>(uid), mapper_id(mid), tag(t),
             tunable_id(tune), args((size > 0) ? malloc(size) : NULL),
-            argsize(size), ctx(c), result(f) 
+            argsize(size), ctx(c), result(f), to_trigger(trig)
             { if (argsize > 0) memcpy(args, arg, argsize); }
       public:
         const MapperID mapper_id;
@@ -1633,6 +1649,7 @@ namespace Legion {
         unsigned tunable_index; // only valid for LegionSpy
         TaskContext *const ctx;
         FutureImpl *const result;
+        const ApUserEvent to_trigger;
       }; 
     public:
       struct ProcessorGroupInfo {
@@ -1682,7 +1699,6 @@ namespace Legion {
       const unsigned max_local_fields;
       const unsigned max_replay_parallelism;
     public:
-      const bool implicit_top_level;
       const bool program_order_execution;
       const bool dump_physical_traces;
       const bool no_tracing;
@@ -1730,7 +1746,7 @@ namespace Legion {
       void initialize_mappers(void);
       void initialize_virtual_manager(void);
       void initialize_runtime(void);
-      void startup_runtime(RtEvent top_level_precondition);
+      void startup_runtime(void);
       void finalize_runtime(void);
       ApEvent launch_mapper_task(Mapper *mapper, Processor proc, 
                                  TaskID tid,
@@ -2060,13 +2076,17 @@ namespace Legion {
     public:
       void issue_acquire(Context ctx, const AcquireLauncher &launcher);
       void issue_release(Context ctx, const ReleaseLauncher &launcher);
-      void issue_mapping_fence(Context ctx);
-      void issue_execution_fence(Context ctx);
+      Future issue_mapping_fence(Context ctx);
+      Future issue_execution_fence(Context ctx);
       void begin_trace(Context ctx, TraceID tid, bool logical_only);
       void end_trace(Context ctx, TraceID tid);
       void begin_static_trace(Context ctx, 
                               const std::set<RegionTreeID> *managed);
       void end_static_trace(Context ctx);
+      TraceID generate_dynamic_trace_id(void);
+      TraceID generate_library_trace_ids(const char *name, size_t count);
+      static TraceID& get_current_static_trace_id(void);
+      static TraceID generate_static_trace_id(void);
       void complete_frame(Context ctx);
       FutureMap execute_must_epoch(Context ctx, 
                                    const MustEpochLauncher &launcher);
@@ -2088,6 +2108,7 @@ namespace Legion {
       Processor get_executing_processor(Context ctx);
       void raise_region_exception(Context ctx, PhysicalRegion region, 
                                   bool nuclear);
+      void yield(Context ctx);
     public:
       const std::map<int,AddressSpace>& find_forward_MPI_mapping(void);
       const std::map<AddressSpace,int>& find_reverse_MPI_mapping(void);
@@ -2279,6 +2300,10 @@ namespace Legion {
       void send_slice_remote_mapped(Processor target, Serializer &rez);
       void send_slice_remote_complete(Processor target, Serializer &rez);
       void send_slice_remote_commit(Processor target, Serializer &rez);
+      void send_slice_find_intra_space_dependence(Processor target, 
+                                                  Serializer &rez);
+      void send_slice_record_intra_space_dependence(Processor target,
+                                                    Serializer &rez);
       void send_did_remote_registration(AddressSpaceID target, Serializer &rez);
       void send_did_remote_valid_update(AddressSpaceID target, Serializer &rez);
       void send_did_remote_gc_update(AddressSpaceID target, Serializer &rez);
@@ -2315,6 +2340,8 @@ namespace Legion {
 #endif
       void send_future_result(AddressSpaceID target, Serializer &rez);
       void send_future_subscription(AddressSpaceID target, Serializer &rez);
+      void send_future_notification(AddressSpaceID target, Serializer &rez);
+      void send_future_broadcast(AddressSpaceID target, Serializer &rez);
       void send_future_map_request_future(AddressSpaceID target, 
                                           Serializer &rez);
       void send_future_map_response_future(AddressSpaceID target,
@@ -2409,6 +2436,8 @@ namespace Legion {
       void send_mpi_rank_exchange(AddressSpaceID target, Serializer &rez);
       void send_library_mapper_request(AddressSpaceID target, Serializer &rez);
       void send_library_mapper_response(AddressSpaceID target, Serializer &rez);
+      void send_library_trace_request(AddressSpaceID target, Serializer &rez);
+      void send_library_trace_response(AddressSpaceID target, Serializer &rez);
       void send_library_projection_request(AddressSpaceID target, 
                                            Serializer &rez);
       void send_library_projection_response(AddressSpaceID target,
@@ -2499,6 +2528,8 @@ namespace Legion {
                                       AddressSpaceID source);
       void handle_slice_remote_complete(Deserializer &derez);
       void handle_slice_remote_commit(Deserializer &derez);
+      void handle_slice_find_intra_dependence(Deserializer &derez);
+      void handle_slice_record_intra_dependence(Deserializer &derez);
       void handle_did_remote_registration(Deserializer &derez, 
                                           AddressSpaceID source);
       void handle_did_remote_valid_update(Deserializer &derez);
@@ -2542,6 +2573,9 @@ namespace Legion {
       void handle_future_result(Deserializer &derez);
       void handle_future_subscription(Deserializer &derez, 
                                       AddressSpaceID source);
+      void handle_future_notification(Deserializer &derez,
+                                      AddressSpaceID source);
+      void handle_future_broadcast(Deserializer &derez);
       void handle_future_map_future_request(Deserializer &derez,
                                             AddressSpaceID source);
       void handle_future_map_future_response(Deserializer &derez);
@@ -2647,6 +2681,9 @@ namespace Legion {
       void handle_library_mapper_request(Deserializer &derez,
                                          AddressSpaceID source);
       void handle_library_mapper_response(Deserializer &derez);
+      void handle_library_trace_request(Deserializer &derez,
+                                        AddressSpaceID source);
+      void handle_library_trace_response(Deserializer &derez);
       void handle_library_projection_request(Deserializer &derez,
                                              AddressSpaceID source);
       void handle_library_projection_response(Deserializer &derez);
@@ -2768,7 +2805,7 @@ namespace Legion {
       FutureImpl* find_or_create_future(DistributedID did,
                                         ReferenceMutator *mutator);
       FutureMapImpl* find_or_create_future_map(DistributedID did, 
-                      TaskContext *ctx, ReferenceMutator *mutator);
+                TaskContext *ctx, ApEvent complete, ReferenceMutator *mutator);
       IndexSpace find_or_create_index_slice_space(const Domain &launch_domain);
       IndexSpace find_or_create_index_slice_space(const Domain &launch_domain,
                                                   const void *realm_is,
@@ -2909,8 +2946,7 @@ namespace Legion {
                                          FieldID &bad_field);
     public:
       // Methods for helping with dumb nested class scoping problems
-      Future help_create_future(Operation *op = NULL);
-      void help_complete_future(const Future &f);
+      Future help_create_future(ApEvent complete, Operation *op = NULL);
       bool help_reset_future(const Future &f);
       IndexSpace help_create_index_space_handle(TypeTag type_tag);
     public:
@@ -3032,6 +3068,7 @@ namespace Legion {
       unsigned unique_is_expr_id;
       unsigned unique_task_id;
       unsigned unique_mapper_id;
+      unsigned unique_trace_id;
       unsigned unique_projection_id;
       unsigned unique_redop_id;
       unsigned unique_serdez_id;
@@ -3047,6 +3084,16 @@ namespace Legion {
       std::map<std::string,LibraryMapperIDs> library_mapper_ids;
       // This is only valid on node 0
       unsigned unique_library_mapper_id;
+    protected:
+      struct LibraryTraceIDs {
+        TraceID result;
+        size_t count;
+        RtEvent ready;
+        bool result_set;
+      };
+      std::map<std::string,LibraryTraceIDs> library_trace_ids;
+      // This is only valid on node 0
+      unsigned unique_library_trace_id;
     protected:
       struct LibraryProjectionIDs {
       public:
@@ -3270,11 +3317,15 @@ namespace Legion {
           const LegionConfiguration &config, RealmRuntime &realm,
           Processor::Kind &startup_kind);
       static int wait_for_shutdown(void);
-      static Context start_implicit(int argc, char **argv,
-                                    TaskID top_task_id,
-                                    Processor::Kind proc_kind,
-                                    const char *task_name,
-                                    bool control_replicable);
+      Future launch_top_level_task(const TaskLauncher &launcher);
+      Context begin_implicit_task(TaskID top_task_id,
+                                  MapperID top_mapper_id,
+                                  Processor::Kind proc_kind,
+                                  const char *task_name,
+                                  bool control_replicable,
+                                  unsigned shard_per_address_space,
+                                  int shard_id);
+      void finish_implicit_task(Context ctx);
       static void set_top_level_task_id(TaskID top_id);
       static void set_top_level_task_mapper_id(MapperID mapper_id);
       static void configure_MPI_interoperability(int rank);
@@ -3348,6 +3399,7 @@ namespace Legion {
       static TaskID legion_main_id;
       static MapperID legion_main_mapper_id;
       static std::vector<RegistrationCallbackFnptr> registration_callbacks;
+      static bool legion_main_set;
       static bool runtime_initialized;
       static bool runtime_started;
       static bool runtime_backgrounded;

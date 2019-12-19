@@ -22,7 +22,7 @@ local log = require("common/log")
 local licm = require("regent/licm")
 local openmphelper = require("regent/openmphelper")
 local pretty = require("regent/pretty")
-local report = require("common/report")
+local report = require("regent/report")
 local std = require("regent/std")
 local symbol_table = require("regent/symbol_table")
 
@@ -6963,12 +6963,21 @@ function codegen.expr_attach_hdf5(cx, node)
   local field_map = node.field_map and codegen.expr(cx, node.field_map):read(cx, field_map_type)
 
   if not cx.variant:get_config_options().inner then
-    report.warn(node, "WARNING: Attach invalidates region contents. DO NOT attempt to access region after using attach.")
+    report.info(node, "WARNING: Attach invalidates region contents. DO NOT attempt to access region after using attach.")
   end
 
   assert(cx:has_region(region_type))
 
   local fm = terralib.newsymbol(c.legion_field_map_t, "fm")
+  local field_types = node.region.fields:map(function(field_path)
+      return std.get_field_path(region_type:fspace(), field_path)
+    end)
+  local absolute_field_paths = data.flatmap(function(pair)
+      local field_type, field_path = unpack(pair)
+      return std.flatten_struct_fields(field_type):map(function(suffix)
+        return field_path .. suffix
+      end)
+    end, data.zip(field_types, node.region.fields))
   local fm_setup = quote
     var [fm] = c.legion_field_map_create()
     [data.mapi(
@@ -6980,7 +6989,7 @@ function codegen.expr_attach_hdf5(cx, node)
                [(field_map and `([field_map.value][ [i-1] ])) or field_path:concat(".")])
          end
        end,
-       node.region.fields)]
+       absolute_field_paths)]
   end
   local fm_teardown = quote
     c.legion_field_map_destroy([fm])
@@ -7004,7 +7013,7 @@ function codegen.expr_attach_hdf5(cx, node)
       [filename.value], [region.value].impl, [parent], [fm], [mode.value])
     [fm_teardown]
 
-    [node.region.fields:map(
+    [absolute_field_paths:map(
        function(field_path)
          return quote
            -- FIXME: This is redundant (since the same physical region
@@ -7023,7 +7032,7 @@ function codegen.expr_detach_hdf5(cx, node)
   local region = codegen.expr_region_root(cx, node.region):read(cx, region_type)
 
   if not cx.variant:get_config_options().inner then
-    report.warn(node, "WARNING: Detach invalidates region contents. DO NOT attempt to access region after using detach.")
+    report.info(node, "WARNING: Detach invalidates region contents. DO NOT attempt to access region after using detach.")
   end
 
   assert(cx:has_region(region_type))
@@ -8443,6 +8452,7 @@ local function collect_symbols(cx, node, cuda)
       local absolute_field_paths = field_paths:map(
         function(field_path) return prefix .. field_path end)
       absolute_field_paths:map(function(field_path)
+        field_path = std.extract_privileged_prefix(region:fspace(), field_path)
         base_pointers[cx:region(region):base_pointer(field_path)] = true
         local stride = cx:region(region):stride(field_path)
         for idx = 2, #stride do strides[stride[idx]] = true end
@@ -8573,13 +8583,14 @@ function codegen.stat_for_list(cx, node)
   local cuda_2d_launch = false
   local cuda_2d_offset = nil
   local openmp = not cx.variant:is_cuda() and
-                 node.annotations.openmp:is(ast.annotation.Demand) and
-                 openmphelper.check_openmp_available()
+                 openmphelper.check_openmp_available() and
+                 node.annotations.openmp:is(ast.annotation.Demand)
+
   if node.annotations.openmp:is(ast.annotation.Demand) then
     local available, error_message = openmphelper.check_openmp_available()
-    if not available then
+    if std.config["openmp"] ~= 0 and not available then
       report.warn(node,
-        "ignoring demand pragma at " .. node.span.source ..
+        "ignoring pragma at " .. node.span.source ..
         ":" .. tostring(node.span.start.line) .. " since " .. error_message)
     end
   end
@@ -8757,9 +8768,11 @@ function codegen.stat_for_list(cx, node)
       if std.config["bounds-checks"] then
         preamble = quote
           [preamble];
-          [lrs:map_list(function(lr) return
-            quote
-              var p = [lr.type:ispace().index_type:zero()]
+          [lrs:map_list(function(lr)
+            local index_type = lr.type:ispace().index_type
+            if index_type:is_opaque() then index_type = std.int1d end
+            return quote
+              var p = [index_type:zero()]
               c.legion_domain_point_safe_cast([cx.runtime], [cx.context],
                 p:to_domain_point(), [lr].impl)
             end
@@ -9924,59 +9937,6 @@ function codegen.stat_raw_delete(cx, node)
   return actions
 end
 
-local make_dummy_task = terralib.memoize(
-  function()
-    local name = data.newtuple("__dummy")
-    local task = std.new_task(name)
-    local variant = task:make_variant("primary")
-    task:set_primary_variant(variant)
-    local expr_type = int
-    local node = ast.typed.top.Task {
-      name = name,
-      params = terralib.newlist(),
-      return_type = expr_type,
-      privileges = terralib.newlist(),
-      coherence_modes = data.newmap(),
-      flags = data.newmap(),
-      conditions = {},
-      constraints = terralib.newlist(),
-      body = ast.typed.Block {
-        stats = terralib.newlist({
-            ast.typed.stat.Return {
-              value = ast.typed.expr.Constant {
-                value = 0,
-                expr_type = expr_type,
-                annotations = ast.default_annotations(),
-                span = ast.trivial_span(),
-              },
-              annotations = ast.default_annotations(),
-              span = ast.trivial_span(),
-            },
-        }),
-        span = ast.trivial_span(),
-      },
-      config_options = ast.TaskConfigOptions {
-        leaf = true,
-        inner = false,
-        idempotent = true,
-        replicable = false,
-      },
-      region_divergence = false,
-      metadata = false,
-      prototype = task,
-      annotations = ast.default_annotations(),
-      span = ast.trivial_span(),
-    }
-    task:set_type(
-      terralib.types.functype(terralib.newlist(), node.return_type, false))
-    task:set_privileges(node.privileges)
-    task:set_conditions({})
-    task:set_param_constraints(node.constraints)
-    task:set_constraints({})
-    task:set_region_universe(data.newmap())
-    return codegen.entry(node)
-  end)
-
 function codegen.stat_fence(cx, node)
   local kind = node.kind
   local blocking = node.blocking
@@ -9990,32 +9950,24 @@ function codegen.stat_fence(cx, node)
 
   local actions = terralib.newlist()
 
+  local f = terralib.newsymbol(c.legion_future_t)
+
   actions:insert(
     quote
-      [issue_fence]([cx.runtime], [cx.context])
+      var [f] = [issue_fence]([cx.runtime], [cx.context])
     end)
 
   if blocking then
-    local task = make_dummy_task()
-
-    local call = ast.typed.expr.Call {
-      fn = ast.typed.expr.Function {
-        value = task,
-        expr_type = task:get_type(),
-        annotations = ast.default_annotations(),
-        span = node.span,
-      },
-      args = terralib.newlist(),
-      conditions = terralib.newlist(),
-      replicable = false,
-      expr_type = task:get_type().returntype,
-      annotations = node.annotations,
-      span = node.span,
-    }
-
-    local call_expr = codegen.expr(cx, call):read(cx)
-    actions:insert(call_expr.actions)
+    actions:insert(
+      quote
+        c.legion_future_get_void_result([f])
+      end)
   end
+
+  actions:insert(
+    quote
+      c.legion_future_destroy([f])
+    end)
 
   return quote
     [actions]
@@ -10695,7 +10647,7 @@ function codegen.top_task(cx, node)
   local task_name = task.name:mkstring("", ".", "")
   local bounds_checks = needs_bounds_checks(task_name)
   if bounds_checks and std.config["bounds-checks-targets"] ~= ".*" then
-    report.warn(node, "bounds checks are enabled for task " .. task_name)
+    report.info(node, "bounds checks are enabled for task " .. task_name)
   end
   local cx = cx:new_task_scope(return_type,
                                task:get_constraints(),
@@ -11150,19 +11102,22 @@ function codegen.top(cx, node)
         end, node)
     end
 
-    if node.annotations.cuda:is(ast.annotation.Demand) then 
+    if node.annotations.cuda:is(ast.annotation.Demand) then
       local available, error_message = cudahelper.check_cuda_available()
-      if not available then
-        report.warn(node,
-          "ignoring demand pragma at " .. node.span.source ..
-          ":" .. tostring(node.span.start.line) .. " since " .. error_message)
-      else
+      if available then
         local cuda_variant = task:make_variant("cuda")
         cuda_variant:set_is_cuda(true)
         std.register_variant(cuda_variant)
         task:set_cuda_variant(cuda_variant)
+      elseif std.config["cuda"] ~= 0 and
+             node.annotations.cuda:is(ast.annotation.Demand)
+      then
+        report.warn(node,
+          "ignoring pragma at " .. node.span.source ..
+          ":" .. tostring(node.span.start.line) .. " since " .. error_message)
       end
     end
+
     return task
 
   elseif node:is(ast.typed.top.Fspace) then
