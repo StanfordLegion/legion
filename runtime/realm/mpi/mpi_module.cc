@@ -572,9 +572,6 @@ namespace Realm {
         if((*it)->bytes == 0) continue;
         if((*it)->base != 0) continue;
         attach_size += (*it)->bytes;
-
-        (*it)->base = (void *) (intptr_t) attach_size;
-        (*it)->add_rdma_info(this, &attach_size, sizeof(void *));
     }
 
     void *baseptr;
@@ -588,8 +585,14 @@ namespace Realm {
     g_am_bases = (void **) malloc(size_p * num_nodes);
     CHECK_MPI( MPI_Allgather(&baseptr, size_p, MPI_BYTE, g_am_bases, size_p, MPI_BYTE, MPI_COMM_WORLD) );
 
+    char *seg_base = reinterpret_cast<char *>(baseptr);
+    seg_base += global_mem_size;
     for(std::vector<NetworkSegment *>::iterator it = segments.begin(); it != segments.end(); ++it) {
-        (*it)->base = (char *) ((*it)->base) + (ptrdiff_t) baseptr;
+        if((*it)->bytes == 0) continue;
+        if((*it)->base != 0) continue;
+        (*it)->base = seg_base;
+        (*it)->add_rdma_info(this, &seg_base, sizeof(void *));
+        seg_base += (*it)->bytes;
     }
 
     activemsg_handler_table.construct_handler_table();
@@ -669,16 +672,12 @@ namespace Realm {
 							    size_t storage_size)
   {
     assert(storage_size >= sizeof(MPIMessageImpl));
-    void * disp = NULL;
-    if (dest_payload_addr) {
-        /* use displacement for remote memory */
-        disp = (char *)dest_payload_addr - (ptrdiff_t) (g_am_bases[target]);
-    }
+    /* dest_payload_addr is already displacement */
     MPIMessageImpl *impl = new(storage_base) MPIMessageImpl(target,
 						              msgid,
 							      header_size,
 							      max_payload_size,
-							      disp);
+							      dest_payload_addr);
     return impl;
   }
 

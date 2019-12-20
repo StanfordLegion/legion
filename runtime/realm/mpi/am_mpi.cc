@@ -218,20 +218,15 @@ void AMSend(int tgt, int msgid, int header_size, int payload_size, const char *h
             exit(-1);
         }
     } else {
-        ret = MPI_Win_lock(MPI_LOCK_SHARED, tgt, 0, g_am_win);
-        if (ret != MPI_SUCCESS) {
-            fprintf(stderr, "MPI error in [Win_lock(MPI_LOCK_SHARED, tgt, 0, g_am_win)]\n");
-            exit(-1);
-        }
         assert(g_am_win);
         ret = MPI_Put(payload, payload_size, MPI_BYTE, tgt, dest, payload_size, MPI_BYTE, g_am_win);
         if (ret != MPI_SUCCESS) {
             fprintf(stderr, "MPI error in [Put(payload, payload_size, MPI_BYTE, tgt, dest, payload_size, MPI_BYTE, g_am_win)]\n");
             exit(-1);
         }
-        ret = MPI_Win_unlock(tgt, g_am_win);
+        ret = MPI_Win_flush(tgt, g_am_win);
         if (ret != MPI_SUCCESS) {
-            fprintf(stderr, "MPI error in [Win_unlock(tgt, g_am_win)]\n");
+            fprintf(stderr, "MPI error in [Win_flush(tgt, g_am_win)]\n");
             exit(-1);
         }
 
