@@ -546,6 +546,7 @@ namespace Legion {
       virtual ApEvent get_memo_completion(void) const
         { return get_task_completion(); }
       virtual void replay_mapping_output(void) { replay_map_task_output(); }
+      virtual void set_effects_postcondition(ApEvent postcondition);
     protected:
       // Boolean for each region saying if it is virtual mapped
       std::vector<bool>                     virtual_mapped;
@@ -1145,6 +1146,7 @@ namespace Legion {
       bool origin_mapped;
       UniqueID remote_owner_uid;
       TraceInfo *remote_trace_info;
+      ApUserEvent effects_postcondition;
     protected: 
       std::map<PhysicalManager*,std::pair<unsigned,bool> > acquired_instances;
       std::set<RtEvent> map_applied_conditions;
