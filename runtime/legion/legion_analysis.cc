@@ -188,7 +188,6 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void VersionInfo::record_equivalence_set(VersionManager *own,
-                                             const unsigned ver_num,
                                              EquivalenceSet *set,
                                              const FieldMask &set_mask)
     //--------------------------------------------------------------------------
@@ -196,31 +195,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert((owner == NULL) || (owner == own));
 #endif
-      // Save the owner in case we need to update this later
-      if (owner == NULL)
-      {
-        owner = own;
-        // Only record the version number the first time we record
-        // an equivalence set which will be the earliest version number
-        // for this owner that we could ever record. We may record 
-        // other equivalence sets later which are for later version 
-        // numbers, but it will be unsafe for us to update them here
-        version_number = ver_num;
-      }
+      owner = own;
       equivalence_sets.insert(set, set_mask);
-    }
-
-    //--------------------------------------------------------------------------
-    void VersionInfo::update_equivalence_sets(
-                                  const FieldMaskSet<EquivalenceSet> &to_add,
-                                  const FieldMaskSet<EquivalenceSet> &to_remove)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION 
-      assert(owner != NULL);
-#endif
-      // Tell the owner about the updated set
-      owner->update_equivalence_sets(version_number, to_add, to_remove);
     }
 
     //--------------------------------------------------------------------------
@@ -5086,11 +5062,11 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    PhysicalAnalysis::PhysicalAnalysis(Runtime *rt, Operation *o, 
-                                       unsigned idx, VersionInfo *info, bool h)
+    PhysicalAnalysis::PhysicalAnalysis(Runtime *rt, Operation *o, unsigned idx, 
+                                       const VersionInfo &info, bool h)
       : previous(rt->address_space), original_source(rt->address_space),
-        runtime(rt), op(o), index(idx), version_info(info), owns_op(false),
-        on_heap(h), remote_instances(NULL), restricted(false), 
+        runtime(rt), op(o), index(idx), version_manager(info.get_manager()), 
+        owns_op(false), on_heap(h), remote_instances(NULL), restricted(false), 
         parallel_traversals(false)
     //--------------------------------------------------------------------------
     {
@@ -5098,9 +5074,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     PhysicalAnalysis::PhysicalAnalysis(Runtime *rt, AddressSpaceID source, 
-                        AddressSpaceID prev, Operation *o, unsigned idx, bool h)
+                                AddressSpaceID prev, Operation *o, unsigned idx,
+                                VersionManager *man, bool h)
       : previous(prev), original_source(source), runtime(rt), op(o), index(idx),
-        version_info(NULL), owns_op(true), on_heap(h), remote_instances(NULL), 
+        version_manager(man), owns_op(true), on_heap(h), remote_instances(NULL), 
         restricted(false), parallel_traversals(false)
     //--------------------------------------------------------------------------
     {
@@ -5109,7 +5086,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     PhysicalAnalysis::PhysicalAnalysis(const PhysicalAnalysis &rhs)
       : previous(0), original_source(0), runtime(NULL), op(NULL), index(0),
-        version_info(NULL), owns_op(false), on_heap(false)
+        version_manager(NULL), owns_op(false), on_heap(false)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -5127,13 +5104,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalAnalysis::traverse(RtEvent precondition,
-                                    EquivalenceSet *set,
+    void PhysicalAnalysis::traverse(EquivalenceSet *set,
                                     const FieldMask &mask,
                                     std::set<RtEvent> &deferral_events,
                                     std::set<RtEvent> &applied_events,
-                                    FieldMask *remove_mask,
-                                    const bool original_set)
+                                    const bool cached_set,
+                                    RtEvent precondition/*= NO_EVENT*/,
+                                    const bool already_deferred /* = false*/)
     //--------------------------------------------------------------------------
     {
       if (precondition.exists() && !precondition.has_triggered())
@@ -5142,11 +5119,22 @@ namespace Legion {
         // a deferral of an the traversal since we haven't even
         // started the traversal yet
         defer_traversal(precondition, set, mask, deferral_events,applied_events,
-            RtUserEvent::NO_RT_USER_EVENT, false/*already deferred*/); 
+                   cached_set, RtUserEvent::NO_RT_USER_EVENT, already_deferred);
       }
       else
-        perform_traversal(set, mask, deferral_events, applied_events,
-                          remove_mask, original_set, false/*already deferred*/);
+      {
+        if (cached_set)
+        {
+          FieldMask stale_mask;
+          perform_traversal(set, mask, deferral_events, applied_events,
+                            &stale_mask, cached_set, already_deferred);
+          if (!!stale_mask)
+            stale_sets.insert(set, stale_mask);
+        }
+        else
+          perform_traversal(set, mask, deferral_events, applied_events,
+                            NULL/*remove*/, cached_set, already_deferred);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -5155,13 +5143,14 @@ namespace Legion {
                                            const FieldMask &mask,
                                            std::set<RtEvent> &deferral_events,
                                            std::set<RtEvent> &applied_events,
+                                           const bool cached_set,
                                            RtUserEvent deferral_event,
                                            const bool already_deferred)
     //--------------------------------------------------------------------------
     {
       // Make sure that we record that this has parallel traversals
-      DeferPerformTraversalArgs args(this, set, mask, 
-                    deferral_event, already_deferred);
+      const DeferPerformTraversalArgs args(this, set, mask, deferral_event, 
+                                          cached_set, already_deferred);
       runtime->issue_runtime_meta_task(args, 
           LG_THROUGHPUT_DEFERRED_PRIORITY, precondition);
       deferral_events.insert(args.done_event);
@@ -5173,8 +5162,8 @@ namespace Legion {
                                              const FieldMask &mask,
                                              std::set<RtEvent> &deferral_events,
                                              std::set<RtEvent> &applied_events,
-                                             FieldMask *remove_mask,
-                                             const bool original_set,
+                                             FieldMask *stale_mask,
+                                             const bool cached_set,
                                              const bool already_deferred)
     //--------------------------------------------------------------------------
     {
@@ -5269,9 +5258,9 @@ namespace Legion {
       assert(!remote_sets.empty());
 #endif
       FieldMaskSet<IndexSpaceExpression> remote_exprs; 
-      for (LegionMap<AddressSpaceID,FieldMaskSet<EquivalenceSet> >::aligned::
-            const_iterator rit = remote_sets.begin(); 
-            rit != remote_sets.end(); rit++)
+      for (LegionMap<std::pair<AddressSpaceID,bool>,
+                     FieldMaskSet<EquivalenceSet> >::aligned::const_iterator 
+            rit = remote_sets.begin(); rit != remote_sets.end(); rit++)
         for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
               rit->second.begin(); it != rit->second.end(); it++)
           remote_exprs.insert(it->first->set_expr, it->second);
@@ -5350,8 +5339,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool PhysicalAnalysis::update_alt_sets(EquivalenceSet *set, FieldMask &mask,
-                                           std::set<RtEvent> &applied_events)
+    bool PhysicalAnalysis::update_alt_sets(EquivalenceSet *set, FieldMask &mask)
     //--------------------------------------------------------------------------
     {
       if (parallel_traversals)
@@ -5395,10 +5383,6 @@ namespace Legion {
                                            const FieldMask &mask)
     //--------------------------------------------------------------------------
     {
-      // If we don't have a version info then we can skip this because 
-      // we know we don't record anything if version_info is NULL
-      if (version_info == NULL)
-        return;
       if (parallel_traversals)
       {
         // Need the lock if there are parallel traversals
@@ -5425,52 +5409,76 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalAnalysis::record_delete_set(EquivalenceSet *set,
-                       const FieldMask &mask, std::set<RtEvent> &applied_events)
+    void PhysicalAnalysis::record_stale_set(EquivalenceSet *set,
+                                            const FieldMask &mask)
     //--------------------------------------------------------------------------
     {
-      // If we don't have a version info then we can skip this because 
-      // we know we don't record anything if version_info is NULL
-      if (version_info == NULL)
-        return;
       if (parallel_traversals)
       {
         // Lock needed if we're doing parallel traversals
         AutoLock a_lock(*this);    
-        delete_sets.insert(set, mask);
+        stale_sets.insert(set, mask);
       }
       else
         // No lock needed if we're the only one
-        delete_sets.insert(set, mask);
+        stale_sets.insert(set, mask);
     }
 
     //--------------------------------------------------------------------------
     void PhysicalAnalysis::record_remote(EquivalenceSet *set, 
                                          const FieldMask &mask,
-                                         const AddressSpaceID owner)
+                                         const AddressSpaceID owner,
+                                         const bool cached_set)
     //--------------------------------------------------------------------------
     {
+      const std::pair<AddressSpaceID,bool> key(owner, cached_set);
       if (parallel_traversals)
       {
         AutoLock a_lock(*this);
-        remote_sets[owner].insert(set, mask);
+        remote_sets[key].insert(set, mask);
       }
       else
         // No lock needed if we're the only one
-        remote_sets[owner].insert(set, mask);
+        remote_sets[key].insert(set, mask);
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalAnalysis::apply_update_equivalence_sets(void)
+    void PhysicalAnalysis::update_stale_equivalence_sets(
+                                              std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
       // No need for the lock here since we know there are no 
       // races because there are no more traversals being performed
 #ifdef DEBUG_LEGION
-      assert(!alt_sets.empty() || !delete_sets.empty());
+      assert(!stale_sets.empty());
 #endif
-      if (version_info != NULL)
-        version_info->update_equivalence_sets(alt_sets, delete_sets);
+      // Check to see if we are on the local node for the version manager
+      // or whether we need to send a message to record the stale sets
+      if (original_source != runtime->address_space)
+      {
+        RtUserEvent applied = Runtime::create_rt_user_event();
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize<size_t>(stale_sets.size());
+          for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
+                stale_sets.begin(); it != stale_sets.end(); it++)
+          {
+            rez.serialize(it->first->did);
+            rez.serialize(it->second);
+          }
+          rez.serialize(version_manager);
+          rez.serialize(applied);
+        }
+        runtime->send_equivalence_set_stale_update(original_source, rez);
+        applied_events.insert(applied);
+      }
+      else // the local node case
+      {
+        const RtEvent done = version_manager->record_stale_sets(stale_sets);
+        if (done.exists())
+          applied_events.insert(done);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -5505,12 +5513,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     PhysicalAnalysis::DeferPerformTraversalArgs::DeferPerformTraversalArgs(
         PhysicalAnalysis *ana, EquivalenceSet *s, const FieldMask &m, 
-        RtUserEvent done, bool def)
+        RtUserEvent done, bool cached, bool def)
       : LgTaskArgs<DeferPerformTraversalArgs>(ana->op->get_unique_op_id()),
         analysis(ana), set(s), mask(new FieldMask(m)), 
         applied_event(Runtime::create_rt_user_event()),
         done_event(done.exists() ? done : Runtime::create_rt_user_event()), 
-        already_deferred(def)
+        cached_set(cached), already_deferred(def)
     //--------------------------------------------------------------------------
     {
       analysis->record_parallel_traversals();
@@ -5527,9 +5535,9 @@ namespace Legion {
       // Get this before doing anything
       const bool on_heap = dargs->analysis->on_heap;
       std::set<RtEvent> deferral_events, applied_events;
-      dargs->analysis->perform_traversal(dargs->set, *(dargs->mask), 
-          deferral_events, applied_events, NULL/*remove mask*/,
-          false/*original set*/, dargs->already_deferred);
+      dargs->analysis->traverse(dargs->set, *(dargs->mask), 
+          deferral_events, applied_events, dargs->cached_set, 
+          RtEvent::NO_RT_EVENT, dargs->already_deferred);
       if (!deferral_events.empty())
         Runtime::trigger_event(dargs->done_event,
             Runtime::merge_events(deferral_events));
@@ -5646,9 +5654,9 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    ValidInstAnalysis::ValidInstAnalysis(Runtime *rt, Operation *o, 
-                                         unsigned idx, ReductionOpID red)
-      : PhysicalAnalysis(rt, o, idx, NULL, false/*on heap*/), 
+    ValidInstAnalysis::ValidInstAnalysis(Runtime *rt, Operation *o,unsigned idx, 
+                                     const VersionInfo &info, ReductionOpID red)
+      : PhysicalAnalysis(rt, o, idx, info, false/*on heap*/), 
         redop(red), target(this)
     //--------------------------------------------------------------------------
     {
@@ -5657,8 +5665,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     ValidInstAnalysis::ValidInstAnalysis(Runtime *rt, AddressSpaceID src, 
                    AddressSpaceID prev, Operation *o, unsigned idx,
-                   ValidInstAnalysis *t, ReductionOpID red)
-      : PhysicalAnalysis(rt, src, prev, o, idx, true/*on heap*/), 
+                   VersionManager *man, ValidInstAnalysis *t, ReductionOpID red)
+      : PhysicalAnalysis(rt, src, prev, o, idx, man, true/*on heap*/), 
         redop(red), target(t)
     //--------------------------------------------------------------------------
     {
@@ -5693,13 +5701,13 @@ namespace Legion {
                                              const FieldMask &mask,
                                              std::set<RtEvent> &deferral_events,
                                              std::set<RtEvent> &applied_events,
-                                             FieldMask *remove_mask,
-                                             const bool original_set,
+                                             FieldMask *stale_mask,
+                                             const bool cached_set,
                                              const bool already_deferred)
     //--------------------------------------------------------------------------
     {
-      set->find_valid_instances(*this, mask, deferral_events, 
-                                applied_events, already_deferred);
+      set->find_valid_instances(*this, mask, deferral_events, applied_events, 
+                                cached_set, already_deferred);
     }
 
     //--------------------------------------------------------------------------
@@ -5722,13 +5730,14 @@ namespace Legion {
       if (remote_sets.empty())
         return RtEvent::NO_RT_EVENT;
       std::set<RtEvent> ready_events;
-      for (LegionMap<AddressSpaceID,FieldMaskSet<EquivalenceSet> >::aligned::
-            const_iterator rit = remote_sets.begin(); 
-            rit != remote_sets.end(); rit++)
+      for (LegionMap<std::pair<AddressSpaceID,bool>,
+                     FieldMaskSet<EquivalenceSet> >::aligned::const_iterator 
+            rit = remote_sets.begin(); rit != remote_sets.end(); rit++)
       {
 #ifdef DEBUG_LEGION
         assert(!rit->second.empty());
 #endif
+        const AddressSpaceID target_addr = rit->first.first;
         const RtUserEvent ready = Runtime::create_rt_user_event();
         const RtUserEvent applied = Runtime::create_rt_user_event();
         Serializer rez;
@@ -5742,14 +5751,16 @@ namespace Legion {
             rez.serialize(it->first->did);
             rez.serialize(it->second);
           }
-          op->pack_remote_operation(rez, rit->first);
+          op->pack_remote_operation(rez, target_addr);
           rez.serialize(index);
           rez.serialize(redop);
           rez.serialize(target);
           rez.serialize(ready);
           rez.serialize(applied);
+          rez.serialize(version_manager);
+          rez.serialize<bool>(rit->first.second);
         }
-        runtime->send_equivalence_set_remote_request_instances(rit->first, rez);
+        runtime->send_equivalence_set_remote_request_instances(target_addr,rez);
         ready_events.insert(ready);
         applied_events.insert(applied);
       }
@@ -5772,8 +5783,8 @@ namespace Legion {
         applied_events.insert(args.applied_event);
         return args.done_event;
       }
-      if (!alt_sets.empty() || !delete_sets.empty())
-        apply_update_equivalence_sets();
+      if (!stale_sets.empty())
+        update_stale_equivalence_sets(applied_events);
       if (remote_instances != NULL)
       {
         if (original_source != runtime->address_space)
@@ -5837,9 +5848,13 @@ namespace Legion {
       derez.deserialize(ready);
       RtUserEvent applied;
       derez.deserialize(applied);
+      VersionManager *version_manager;
+      derez.deserialize(version_manager);
+      bool cached_sets;
+      derez.deserialize(cached_sets);
 
       ValidInstAnalysis *analysis = new ValidInstAnalysis(runtime, 
-          original_source, previous, op, index, target, redop);
+          original_source, previous, op, index, version_manager, target, redop);
       analysis->add_reference();
       std::set<RtEvent> deferral_events, applied_events;
       // Wait for the equivalence sets to be ready if necessary
@@ -5847,8 +5862,8 @@ namespace Legion {
       if (!ready_events.empty())
         ready_event = Runtime::merge_events(ready_events);
       for (unsigned idx = 0; idx < eq_sets.size(); idx++)
-        analysis->traverse(ready_event, eq_sets[idx], eq_masks[idx],
-                           deferral_events, applied_events);
+        analysis->traverse(eq_sets[idx], eq_masks[idx], deferral_events, 
+                           applied_events, cached_sets, ready_event);
       const RtEvent traversal_done = deferral_events.empty() ?
         RtEvent::NO_RT_EVENT : Runtime::merge_events(deferral_events);
       if (traversal_done.exists() || analysis->has_remote_sets())
@@ -5881,8 +5896,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     InvalidInstAnalysis::InvalidInstAnalysis(Runtime *rt, Operation *o, 
-                    unsigned idx, const FieldMaskSet<InstanceView> &valid_insts)
-      : PhysicalAnalysis(rt, o, idx, NULL, false/*on heap*/), 
+                                  unsigned idx, const VersionInfo &info, 
+                                  const FieldMaskSet<InstanceView> &valid_insts)
+      : PhysicalAnalysis(rt, o, idx, info, false/*on heap*/), 
         valid_instances(valid_insts), target(this)
     //--------------------------------------------------------------------------
     {
@@ -5890,9 +5906,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     InvalidInstAnalysis::InvalidInstAnalysis(Runtime *rt, AddressSpaceID src, 
-        AddressSpaceID prev, Operation *o, unsigned idx, InvalidInstAnalysis *t,
-        const FieldMaskSet<InstanceView> &valid_insts)
-      : PhysicalAnalysis(rt, src, prev, o, idx, true/*on heap*/), 
+        AddressSpaceID prev, Operation *o, unsigned idx, VersionManager *man,
+        InvalidInstAnalysis *t, const FieldMaskSet<InstanceView> &valid_insts)
+      : PhysicalAnalysis(rt, src, prev, o, idx, man, true/*on heap*/), 
         valid_instances(valid_insts), target(t)
     //--------------------------------------------------------------------------
     {
@@ -5928,13 +5944,13 @@ namespace Legion {
                                              const FieldMask &mask,
                                              std::set<RtEvent> &deferral_events,
                                              std::set<RtEvent> &applied_events,
-                                             FieldMask *remove_mask,
-                                             const bool original_set,
+                                             FieldMask *stale_mask,
+                                             const bool cached_set,
                                              const bool already_deferred)
     //--------------------------------------------------------------------------
     {
-      set->find_invalid_instances(*this, mask, deferral_events, 
-                                  applied_events, already_deferred);
+      set->find_invalid_instances(*this, mask, deferral_events, applied_events, 
+                                  cached_set, already_deferred);
     }
 
     //--------------------------------------------------------------------------
@@ -5957,13 +5973,14 @@ namespace Legion {
       if (remote_sets.empty())
         return RtEvent::NO_RT_EVENT;
       std::set<RtEvent> ready_events;
-      for (LegionMap<AddressSpaceID,FieldMaskSet<EquivalenceSet> >::aligned::
-            const_iterator rit = remote_sets.begin(); 
-            rit != remote_sets.end(); rit++)
+      for (LegionMap<std::pair<AddressSpaceID,bool>,
+                     FieldMaskSet<EquivalenceSet> >::aligned::const_iterator 
+            rit = remote_sets.begin(); rit != remote_sets.end(); rit++)
       {
 #ifdef DEBUG_LEGION
         assert(!rit->second.empty());
 #endif
+        const AddressSpaceID target_addr = rit->first.first;
         const RtUserEvent ready = Runtime::create_rt_user_event();
         const RtUserEvent applied = Runtime::create_rt_user_event();
         Serializer rez;
@@ -5977,7 +5994,7 @@ namespace Legion {
             rez.serialize(it->first->did);
             rez.serialize(it->second);
           }
-          op->pack_remote_operation(rez, rit->first);
+          op->pack_remote_operation(rez, target_addr);
           rez.serialize(index);
           rez.serialize<size_t>(valid_instances.size());
           for (FieldMaskSet<InstanceView>::const_iterator it = 
@@ -5989,8 +6006,10 @@ namespace Legion {
           rez.serialize(target);
           rez.serialize(ready);
           rez.serialize(applied);
+          rez.serialize(version_manager);
+          rez.serialize<bool>(rit->first.second);
         }
-        runtime->send_equivalence_set_remote_request_invalid(rit->first, rez);
+        runtime->send_equivalence_set_remote_request_invalid(target_addr, rez);
         ready_events.insert(ready);
         applied_events.insert(applied);
       }
@@ -6013,8 +6032,8 @@ namespace Legion {
         applied_events.insert(args.applied_event);
         return args.done_event;
       }
-      if (!alt_sets.empty() || !delete_sets.empty())
-        apply_update_equivalence_sets();
+      if (!stale_sets.empty())
+        update_stale_equivalence_sets(applied_events);
       if (remote_instances != NULL)
       {
         if (original_source != runtime->address_space)
@@ -6092,9 +6111,14 @@ namespace Legion {
       derez.deserialize(ready);
       RtUserEvent applied;
       derez.deserialize(applied);
+      VersionManager *version_manager;
+      derez.deserialize(version_manager);
+      bool cached_sets;
+      derez.deserialize(cached_sets);
 
       InvalidInstAnalysis *analysis = new InvalidInstAnalysis(runtime, 
-          original_source, previous, op, index, target, valid_instances);
+          original_source, previous, op, index, version_manager, 
+          target, valid_instances);
       analysis->add_reference();
       std::set<RtEvent> deferral_events, applied_events;
       // Wait for the equivalence sets to be ready if necessary
@@ -6102,8 +6126,8 @@ namespace Legion {
       if (!ready_events.empty())
         ready_event = Runtime::merge_events(ready_events);
       for (unsigned idx = 0; idx < eq_sets.size(); idx++)
-        analysis->traverse(ready_event, eq_sets[idx], eq_masks[idx],
-                           deferral_events, applied_events);
+        analysis->traverse(eq_sets[idx], eq_masks[idx], deferral_events, 
+                           applied_events, cached_sets, ready_event);
       const RtEvent traversal_done = deferral_events.empty() ?
         RtEvent::NO_RT_EVENT : Runtime::merge_events(deferral_events);
       if (traversal_done.exists() || analysis->has_remote_sets())
@@ -6136,7 +6160,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     UpdateAnalysis::UpdateAnalysis(Runtime *rt, Operation *o, unsigned idx,
-                     VersionInfo *info, const RegionRequirement &req,
+                     const VersionInfo &info, const RegionRequirement &req,
                      RegionNode *rn, const InstanceSet &target_insts,
                      std::vector<InstanceView*> &target_vws,
                      const PhysicalTraceInfo &t_info,
@@ -6156,18 +6180,18 @@ namespace Legion {
     //--------------------------------------------------------------------------
     UpdateAnalysis::UpdateAnalysis(Runtime *rt, AddressSpaceID src, 
                      AddressSpaceID prev, Operation *o, unsigned idx, 
-                     const RegionUsage &use, RegionNode *rn, 
-                     InstanceSet &target_insts,
+                     VersionManager *man, const RegionUsage &use, 
+                     RegionNode *rn, InstanceSet &target_insts,
                      std::vector<InstanceView*> &target_vws,
                      const PhysicalTraceInfo &info,
                      const RtEvent user_reg, const ApEvent pre, 
                      const ApEvent term, const bool track, 
                      const bool check, const bool record, const bool skip)
-      : PhysicalAnalysis(rt, src, prev, o, idx, true/*on heap*/), usage(use), 
-        node(rn), target_instances(target_insts), target_views(target_vws), 
-        trace_info(info), precondition(pre), term_event(term), 
-        track_effects(track), check_initialized(check), record_valid(record), 
-        skip_output(skip), output_aggregator(NULL), 
+      : PhysicalAnalysis(rt, src, prev, o, idx, man, true/*on heap*/), 
+        usage(use), node(rn), target_instances(target_insts), 
+        target_views(target_vws), trace_info(info), precondition(pre), 
+        term_event(term), track_effects(track), check_initialized(check), 
+        record_valid(record), skip_output(skip), output_aggregator(NULL), 
         remote_user_registered(user_reg)
     //--------------------------------------------------------------------------
     {
@@ -6222,13 +6246,13 @@ namespace Legion {
                                            const FieldMask &mask,
                                            std::set<RtEvent> &deferral_events,
                                            std::set<RtEvent> &applied_events,
-                                           FieldMask *remove_mask,
-                                           const bool original_set,
+                                           FieldMask *stale_mask,
+                                           const bool cached_set,
                                            const bool already_deferred)
     //--------------------------------------------------------------------------
     {
       set->update_set(*this, mask, deferral_events, applied_events, 
-                      remove_mask, original_set, already_deferred);
+                      stale_mask, cached_set, already_deferred);
     }
 
     //--------------------------------------------------------------------------
@@ -6264,13 +6288,14 @@ namespace Legion {
         remote_user_registered = user_registered;
       }
       std::set<RtEvent> remote_events;
-      for (LegionMap<AddressSpaceID,FieldMaskSet<EquivalenceSet> >::aligned::
-            const_iterator rit = remote_sets.begin(); 
-            rit != remote_sets.end(); rit++)
+      for (LegionMap<std::pair<AddressSpaceID,bool>,
+                     FieldMaskSet<EquivalenceSet> >::aligned::const_iterator 
+            rit = remote_sets.begin(); rit != remote_sets.end(); rit++)
       {
 #ifdef DEBUG_LEGION
         assert(!rit->second.empty());
 #endif
+        const AddressSpaceID target = rit->first.first;
         const RtUserEvent updated = Runtime::create_rt_user_event();
         const RtUserEvent applied = Runtime::create_rt_user_event();
         const ApUserEvent effects = track_effects ? 
@@ -6286,7 +6311,7 @@ namespace Legion {
             rez.serialize(it->first->did);
             rez.serialize(it->second);
           }
-          op->pack_remote_operation(rez, rit->first);
+          op->pack_remote_operation(rez, target);
           rez.serialize(index);
           rez.serialize(node->handle);
           rez.serialize(usage);
@@ -6298,18 +6323,20 @@ namespace Legion {
             rez.serialize(target_views[idx]->did);
             rez.serialize(ref.get_valid_fields());
           }
-          trace_info.pack_trace_info<false>(rez, applied_events, rit->first);
+          trace_info.pack_trace_info<false>(rez, applied_events, target);
           rez.serialize(precondition);
           rez.serialize(term_event);
           rez.serialize(updated);
           rez.serialize(remote_user_registered);
           rez.serialize(applied);
           rez.serialize(effects);
+          rez.serialize(version_manager);
           rez.serialize<bool>(check_initialized);
           rez.serialize<bool>(record_valid);
           rez.serialize<bool>(skip_output);
+          rez.serialize<bool>(rit->first.second);
         }
-        runtime->send_equivalence_set_remote_updates(rit->first, rez);
+        runtime->send_equivalence_set_remote_updates(target, rez);
         remote_events.insert(updated);
         applied_events.insert(applied);
         if (track_effects)
@@ -6344,8 +6371,8 @@ namespace Legion {
         node->report_uninitialized_usage(op, index, usage, uninitialized,
                                          uninitialized_reported);
       }
-      if (!alt_sets.empty() || !delete_sets.empty())
-        apply_update_equivalence_sets();
+      if (!stale_sets.empty())
+        update_stale_equivalence_sets(applied_events);
       if (!input_aggregators.empty())
       {
         const bool needs_deferral = !already_deferred || 
@@ -6489,19 +6516,23 @@ namespace Legion {
       ApUserEvent effects_done;
       derez.deserialize(effects_done);
       const bool track_effects = effects_done.exists();
+      VersionManager *version_manager;
+      derez.deserialize(version_manager);
       bool check_initialized;
       derez.deserialize(check_initialized);
       bool record_valid;
       derez.deserialize(record_valid);
       bool skip_output;
       derez.deserialize(skip_output);
+      bool cached_sets;
+      derez.deserialize(cached_sets);
 
       RegionNode *node = runtime->forest->get_node(handle);
       // This takes ownership of the remote operation
       UpdateAnalysis *analysis = new UpdateAnalysis(runtime, original_source,
-          previous, op, index, usage, node, targets, target_views, trace_info, 
-          remote_user_registered, precondition, term_event, track_effects, 
-          check_initialized, record_valid, skip_output);
+          previous, op, index, version_manager, usage, node, targets, 
+          target_views, trace_info, remote_user_registered, precondition, 
+          term_event, track_effects,check_initialized,record_valid,skip_output);
       analysis->add_reference();
       std::set<RtEvent> deferral_events, applied_events; 
       // Make sure that all our pointers are ready
@@ -6509,8 +6540,8 @@ namespace Legion {
       if (!ready_events.empty())
         ready_event = Runtime::merge_events(ready_events);
       for (unsigned idx = 0; idx < eq_sets.size(); idx++)
-        analysis->traverse(ready_event, eq_sets[idx], eq_masks[idx],
-                           deferral_events, applied_events);
+        analysis->traverse(eq_sets[idx], eq_masks[idx], deferral_events, 
+                           applied_events, cached_sets, ready_event);
       const RtEvent traversal_done = deferral_events.empty() ?
         RtEvent::NO_RT_EVENT : Runtime::merge_events(deferral_events);
       std::set<RtEvent> update_events;
@@ -6556,7 +6587,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     AcquireAnalysis::AcquireAnalysis(Runtime *rt, Operation *o, 
-                                     unsigned idx, VersionInfo *info)
+                                     unsigned idx, const VersionInfo &info)
       : PhysicalAnalysis(rt, o, idx, info, false/*on heap*/), target(this)
     //--------------------------------------------------------------------------
     {
@@ -6564,8 +6595,9 @@ namespace Legion {
     
     //--------------------------------------------------------------------------
     AcquireAnalysis::AcquireAnalysis(Runtime *rt, AddressSpaceID src, 
-            AddressSpaceID prev, Operation *o, unsigned idx, AcquireAnalysis *t)
-      : PhysicalAnalysis(rt, src, prev, o, idx, true/*on heap*/), target(t)
+                      AddressSpaceID prev, Operation *o, unsigned idx, 
+                      VersionManager *man, AcquireAnalysis *t)
+      : PhysicalAnalysis(rt, src, prev, o, idx, man, true/*on heap*/), target(t)
     //--------------------------------------------------------------------------
     {
     }
@@ -6599,13 +6631,13 @@ namespace Legion {
                                             const FieldMask &mask,
                                             std::set<RtEvent> &deferral_events,
                                             std::set<RtEvent> &applied_events,
-                                            FieldMask *remove_mask,
-                                            const bool original_set,
+                                            FieldMask *stale_mask,
+                                            const bool cached_set,
                                             const bool already_deferred)
     //--------------------------------------------------------------------------
     {
-      set->acquire_restrictions(*this, mask, deferral_events, applied_events,
-                                remove_mask, original_set, already_deferred);
+      set->acquire_restrictions(*this, mask, deferral_events, applied_events, 
+                                stale_mask, cached_set, already_deferred);
     }
 
     //--------------------------------------------------------------------------
@@ -6623,21 +6655,19 @@ namespace Legion {
             LG_LATENCY_DEFERRED_PRIORITY, perform_precondition);
         applied_events.insert(args.applied_event);
         return args.done_event;
-      }
-      // Filter has no perform_updates call so we apply this here
-      if (!alt_sets.empty() || !delete_sets.empty())
-        apply_update_equivalence_sets();
+      } 
       // Easy out if there is nothing to do
       if (remote_sets.empty())
         return RtEvent::NO_RT_EVENT;
       std::set<RtEvent> remote_events;
-      for (LegionMap<AddressSpaceID,FieldMaskSet<EquivalenceSet> >::aligned::
-            const_iterator rit = remote_sets.begin(); 
-            rit != remote_sets.end(); rit++)
+      for (LegionMap<std::pair<AddressSpaceID,bool>,
+                     FieldMaskSet<EquivalenceSet> >::aligned::const_iterator 
+            rit = remote_sets.begin(); rit != remote_sets.end(); rit++)
       {
 #ifdef DEBUG_LEGION
         assert(!rit->second.empty());
 #endif
+        const AddressSpaceID target = rit->first.first;
         const RtUserEvent returned = Runtime::create_rt_user_event();
         const RtUserEvent applied = Runtime::create_rt_user_event();
         Serializer rez;
@@ -6651,13 +6681,15 @@ namespace Legion {
             rez.serialize(it->first->did);
             rez.serialize(it->second);
           }
-          op->pack_remote_operation(rez, rit->first);
+          op->pack_remote_operation(rez, target);
           rez.serialize(index);
           rez.serialize(returned);
           rez.serialize(applied);
           rez.serialize(target);
+          rez.serialize(version_manager);
+          rez.serialize<bool>(rit->first.second);
         }
-        runtime->send_equivalence_set_remote_acquires(rit->first, rez);
+        runtime->send_equivalence_set_remote_acquires(target, rez);
         applied_events.insert(applied);
         remote_events.insert(returned);
       }
@@ -6680,8 +6712,8 @@ namespace Legion {
         applied_events.insert(args.applied_event);
         return args.done_event;
       }
-      if (!alt_sets.empty() || !delete_sets.empty())
-        apply_update_equivalence_sets();
+      if (!stale_sets.empty())
+        update_stale_equivalence_sets(applied_events);
       if (remote_instances != NULL)
       {
         if (original_source != runtime->address_space)
@@ -6743,10 +6775,14 @@ namespace Legion {
       derez.deserialize(applied);
       AcquireAnalysis *target;
       derez.deserialize(target);
+      VersionManager *version_manager;
+      derez.deserialize(version_manager);
+      bool cached_sets;
+      derez.deserialize(cached_sets);
 
       // This takes ownership of the operation
       AcquireAnalysis *analysis = new AcquireAnalysis(runtime, original_source,
-                                                  previous, op, index, target);
+                                  previous, op, index, version_manager, target);
       analysis->add_reference();
       std::set<RtEvent> deferral_events, applied_events;
       // Make sure that all our pointers are ready
@@ -6754,8 +6790,8 @@ namespace Legion {
       if (!ready_events.empty())
         ready_event = Runtime::merge_events(ready_events);
       for (unsigned idx = 0; idx < eq_sets.size(); idx++)
-        analysis->traverse(ready_event, eq_sets[idx], eq_masks[idx],
-                           deferral_events, applied_events);
+        analysis->traverse(eq_sets[idx], eq_masks[idx], deferral_events, 
+                           applied_events, cached_sets, ready_event);
       const RtEvent traversal_done = deferral_events.empty() ?
         RtEvent::NO_RT_EVENT : Runtime::merge_events(deferral_events);
       if (traversal_done.exists() || analysis->has_remote_sets())
@@ -6788,7 +6824,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ReleaseAnalysis::ReleaseAnalysis(Runtime *rt, Operation *o, unsigned idx, 
-                                     ApEvent pre, VersionInfo *info,
+                                     ApEvent pre, const VersionInfo &info,
                                      const PhysicalTraceInfo &t_info)
       : PhysicalAnalysis(rt, o, idx, info, false/*on heap*/), 
         precondition(pre), target(this), trace_info(t_info),
@@ -6799,9 +6835,9 @@ namespace Legion {
     
     //--------------------------------------------------------------------------
     ReleaseAnalysis::ReleaseAnalysis(Runtime *rt, AddressSpaceID src, 
-            AddressSpaceID prev, Operation *o, unsigned idx, ApEvent pre,
-            ReleaseAnalysis *t, const PhysicalTraceInfo &info)
-      : PhysicalAnalysis(rt, src, prev, o, idx, true/*on heap*/), 
+            AddressSpaceID prev, Operation *o, unsigned idx,VersionManager *man,
+            ApEvent pre, ReleaseAnalysis *t, const PhysicalTraceInfo &info)
+      : PhysicalAnalysis(rt, src, prev, o, idx, man, true/*on heap*/), 
         precondition(pre), target(t), trace_info(info), 
         release_aggregator(NULL)
     //--------------------------------------------------------------------------
@@ -6837,13 +6873,13 @@ namespace Legion {
                                             const FieldMask &mask,
                                             std::set<RtEvent> &deferral_events,
                                             std::set<RtEvent> &applied_events,
-                                            FieldMask *remove_mask,
-                                            const bool original_set,
+                                            FieldMask *stale_mask,
+                                            const bool cached_set,
                                             const bool already_deferred)
     //--------------------------------------------------------------------------
     {
-      set->release_restrictions(*this, mask, deferral_events, applied_events,
-                                remove_mask, original_set, already_deferred);
+      set->release_restrictions(*this, mask, deferral_events, applied_events, 
+                                stale_mask, cached_set, already_deferred);
     }
 
     //--------------------------------------------------------------------------
@@ -6866,13 +6902,14 @@ namespace Legion {
       if (remote_sets.empty())
         return RtEvent::NO_RT_EVENT;
       std::set<RtEvent> remote_events;
-      for (LegionMap<AddressSpaceID,FieldMaskSet<EquivalenceSet> >::aligned::
-            const_iterator rit = remote_sets.begin(); 
-            rit != remote_sets.end(); rit++)
+      for (LegionMap<std::pair<AddressSpaceID,bool>,
+                     FieldMaskSet<EquivalenceSet> >::aligned::const_iterator 
+            rit = remote_sets.begin(); rit != remote_sets.end(); rit++)
       {
 #ifdef DEBUG_LEGION
         assert(!rit->second.empty());
 #endif
+        const AddressSpaceID target = rit->first.first;
         const RtUserEvent returned = Runtime::create_rt_user_event();
         const RtUserEvent applied = Runtime::create_rt_user_event();
         Serializer rez;
@@ -6886,15 +6923,17 @@ namespace Legion {
             rez.serialize(it->first->did);
             rez.serialize(it->second);
           }
-          op->pack_remote_operation(rez, rit->first);
+          op->pack_remote_operation(rez, target);
           rez.serialize(index);
           rez.serialize(precondition);
           rez.serialize(returned);
           rez.serialize(applied);
           rez.serialize(target);
-          trace_info.pack_trace_info<false>(rez, applied_events, rit->first);
+          trace_info.pack_trace_info<false>(rez, applied_events, target);
+          rez.serialize(version_manager);
+          rez.serialize<bool>(rit->first.second);
         }
-        runtime->send_equivalence_set_remote_releases(rit->first, rez);
+        runtime->send_equivalence_set_remote_releases(target, rez);
         applied_events.insert(applied);
         remote_events.insert(returned);
       }
@@ -6918,8 +6957,8 @@ namespace Legion {
         applied_events.insert(args.applied_event);
         return args.done_event;
       }
-      if (!alt_sets.empty() || !delete_sets.empty())
-        apply_update_equivalence_sets();
+      if (!stale_sets.empty())
+        update_stale_equivalence_sets(applied_events);
       // See if we have any instance names to send back
       if ((target != this) && (remote_instances != NULL))
       {
@@ -7002,9 +7041,13 @@ namespace Legion {
       derez.deserialize(target);
       const PhysicalTraceInfo trace_info = 
         PhysicalTraceInfo::unpack_trace_info(derez, runtime, op);
+      VersionManager *version_manager;
+      derez.deserialize(version_manager);
+      bool cached_sets;
+      derez.deserialize(cached_sets);
 
       ReleaseAnalysis *analysis = new ReleaseAnalysis(runtime, original_source,
-          previous, op, index, precondition, target, trace_info);
+        previous, op, index, version_manager, precondition, target, trace_info);
       analysis->add_reference();
       std::set<RtEvent> deferral_events, applied_events;
       RtEvent ready_event;
@@ -7012,8 +7055,8 @@ namespace Legion {
       if (!ready_events.empty())
         ready_event = Runtime::merge_events(ready_events);
       for (unsigned idx = 0; idx < eq_sets.size(); idx++)
-        analysis->traverse(ready_event, eq_sets[idx], eq_masks[idx],
-                           deferral_events, applied_events);
+        analysis->traverse(eq_sets[idx], eq_masks[idx], deferral_events, 
+                           applied_events, cached_sets, ready_event);
       const RtEvent traversal_done = deferral_events.empty() ?
         RtEvent::NO_RT_EVENT : Runtime::merge_events(deferral_events);
       if (traversal_done.exists() || analysis->has_remote_sets())
@@ -7050,7 +7093,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     CopyAcrossAnalysis::CopyAcrossAnalysis(Runtime *rt, Operation *o, 
-        unsigned src_idx, unsigned dst_idx, VersionInfo *info, 
+        unsigned src_idx, unsigned dst_idx, const VersionInfo &info, 
         const RegionRequirement &src_req,
         const RegionRequirement &dst_req, const InstanceSet &target_insts,
         const std::vector<InstanceView*> &target_vws, const ApEvent pre,
@@ -7085,7 +7128,7 @@ namespace Legion {
         const std::vector<unsigned> &src_idxes,
         const std::vector<unsigned> &dst_idxes, 
         const PhysicalTraceInfo &t_info, const bool perf)
-      : PhysicalAnalysis(rt, src, prev, o, dst_idx, true/*on heap*/), 
+      : PhysicalAnalysis(rt, src, prev, o, dst_idx,NULL/*man*/,true/*on heap*/),
         src_mask(perf ? FieldMask() : initialize_mask(src_idxes)), 
         dst_mask(perf ? FieldMask() : initialize_mask(dst_idxes)),
         src_index(src_idx), dst_index(dst_idx), 
@@ -7194,13 +7237,15 @@ namespace Legion {
       assert(target_instances.size() == target_views.size());
       assert(src_indexes.size() == dst_indexes.size());
 #endif
-      for (LegionMap<AddressSpaceID,FieldMaskSet<EquivalenceSet> >::aligned::
-            const_iterator rit = remote_sets.begin(); 
-            rit != remote_sets.end(); rit++)
+      for (LegionMap<std::pair<AddressSpaceID,bool>,
+                     FieldMaskSet<EquivalenceSet> >::aligned::const_iterator 
+            rit = remote_sets.begin(); rit != remote_sets.end(); rit++)
       {
 #ifdef DEBUG_LEGION
+        assert(!rit->first.second); // should not be a cached set here
         assert(!rit->second.empty());
 #endif
+        const AddressSpaceID target = rit->first.first;
         const ApUserEvent copy = Runtime::create_ap_user_event();
         const RtUserEvent applied = Runtime::create_rt_user_event();
         Serializer rez;
@@ -7214,7 +7259,7 @@ namespace Legion {
             rez.serialize(it->first->did);
             rez.serialize(it->second);
           }
-          op->pack_remote_operation(rez, rit->first);
+          op->pack_remote_operation(rez, target);
           rez.serialize(src_index);
           rez.serialize(dst_index);
           rez.serialize(src_usage);
@@ -7242,9 +7287,9 @@ namespace Legion {
           }
           rez.serialize(applied);
           rez.serialize(copy);
-          trace_info.pack_trace_info<false>(rez, applied_events, rit->first);
+          trace_info.pack_trace_info<false>(rez, applied_events, target);
         }
-        runtime->send_equivalence_set_remote_copies_across(rit->first, rez);
+        runtime->send_equivalence_set_remote_copies_across(target, rez);
         applied_events.insert(applied);
         copy_events.insert(copy);
       }
@@ -7283,7 +7328,7 @@ namespace Legion {
       // CopyAcrossAnalysis should have no alt-set tracking because 
       // individual equivalence sets may need to be traversed multiple times
       assert(alt_sets.empty());
-      assert(delete_sets.empty());
+      assert(stale_sets.empty());
 #endif
       if (across_aggregator != NULL)
       {
@@ -7512,7 +7557,7 @@ namespace Legion {
         if (overlap->is_empty())
           continue;
         set->issue_across_copies(*analysis, eq_masks[idx], overlap,
-            deferral_events, applied_events, NULL, false/*original set*/);
+                                 deferral_events, applied_events);
       }
       const RtEvent traversal_done = deferral_events.empty() ?
         RtEvent::NO_RT_EVENT : Runtime::merge_events(deferral_events);
@@ -7582,7 +7627,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     OverwriteAnalysis::OverwriteAnalysis(Runtime *rt, Operation *o, 
                         unsigned idx, const RegionUsage &use,
-                        VersionInfo *info, LogicalView *view, 
+                        const VersionInfo &info, LogicalView *view, 
                         const PhysicalTraceInfo &t_info,
                         const ApEvent pre, const RtEvent guard, 
                         const PredEvent pred, const bool track, 
@@ -7599,7 +7644,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     OverwriteAnalysis::OverwriteAnalysis(Runtime *rt, Operation *o, 
                         unsigned idx, const RegionUsage &use,
-                        VersionInfo *info, const std::set<LogicalView*> &v, 
+                        const VersionInfo &info,const std::set<LogicalView*> &v,
                         const PhysicalTraceInfo &t_info,
                         const ApEvent pre, const RtEvent guard, 
                         const PredEvent pred, const bool track, 
@@ -7615,15 +7660,16 @@ namespace Legion {
     //--------------------------------------------------------------------------
     OverwriteAnalysis::OverwriteAnalysis(Runtime *rt, AddressSpaceID src, 
                         AddressSpaceID prev, Operation *o, unsigned idx, 
-                        const RegionUsage &use, const std::set<LogicalView*> &v,
+                        VersionManager *man, const RegionUsage &use, 
+                        const std::set<LogicalView*> &v,
                         const PhysicalTraceInfo &info,
                         const ApEvent pre, const RtEvent guard, 
                         const PredEvent pred, const bool track, 
                         const bool restriction)
-      : PhysicalAnalysis(rt, src, prev, o, idx, true/*on heap*/), usage(use), 
-        views(v), trace_info(info), precondition(pre), guard_event(guard), 
-        pred_guard(pred), track_effects(track), add_restriction(restriction), 
-        output_aggregator(NULL)
+      : PhysicalAnalysis(rt, src, prev, o, idx, man, true/*on heap*/), 
+        usage(use), views(v), trace_info(info), precondition(pre), 
+        guard_event(guard), pred_guard(pred), track_effects(track), 
+        add_restriction(restriction), output_aggregator(NULL)
     //--------------------------------------------------------------------------
     {
     }
@@ -7660,13 +7706,13 @@ namespace Legion {
                                              const FieldMask &mask,
                                              std::set<RtEvent> &deferral_events,
                                              std::set<RtEvent> &applied_events,
-                                             FieldMask *remove_mask,
-                                             const bool original_set,
+                                             FieldMask *stale_mask,
+                                             const bool cached_set,
                                              const bool already_deferred)
     //--------------------------------------------------------------------------
     {
       set->overwrite_set(*this, mask, deferral_events, applied_events,
-                         remove_mask, original_set, already_deferred);
+                         stale_mask, cached_set, already_deferred);
     }
 
     //--------------------------------------------------------------------------
@@ -7689,13 +7735,14 @@ namespace Legion {
       if (remote_sets.empty())
         return RtEvent::NO_RT_EVENT;
       WrapperReferenceMutator mutator(applied_events);
-      for (LegionMap<AddressSpaceID,FieldMaskSet<EquivalenceSet> >::aligned::
-            const_iterator rit = remote_sets.begin(); 
-            rit != remote_sets.end(); rit++)
+      for (LegionMap<std::pair<AddressSpaceID,bool>,
+                     FieldMaskSet<EquivalenceSet> >::aligned::const_iterator 
+            rit = remote_sets.begin(); rit != remote_sets.end(); rit++)
       {
 #ifdef DEBUG_LEGION
         assert(!rit->second.empty());
 #endif
+        const AddressSpace target = rit->first.first;
         const RtUserEvent applied = Runtime::create_rt_user_event();
         const ApUserEvent effects = track_effects ? 
           Runtime::create_ap_user_event() : ApUserEvent::NO_AP_USER_EVENT;
@@ -7710,7 +7757,7 @@ namespace Legion {
             rez.serialize(it->first->did);
             rez.serialize(it->second);
           }
-          op->pack_remote_operation(rez, rit->first);
+          op->pack_remote_operation(rez, target);
           rez.serialize(index);
           rez.serialize(usage);
           rez.serialize<size_t>(views.size());
@@ -7723,15 +7770,17 @@ namespace Legion {
               rez.serialize((*it)->did);  
             }
           }
-          trace_info.pack_trace_info<false>(rez, applied_events, rit->first);
+          trace_info.pack_trace_info<false>(rez, applied_events, target);
           rez.serialize(pred_guard);
           rez.serialize(precondition);
           rez.serialize(guard_event);
           rez.serialize<bool>(add_restriction);
           rez.serialize(applied);
           rez.serialize(effects);
+          rez.serialize(version_manager);
+          rez.serialize<bool>(rit->first.second);
         }
-        runtime->send_equivalence_set_remote_overwrites(rit->first, rez);
+        runtime->send_equivalence_set_remote_overwrites(target, rez);
         applied_events.insert(applied);
         if (track_effects)
           effects_events.insert(effects);
@@ -7755,8 +7804,8 @@ namespace Legion {
         applied_events.insert(args.applied_event);
         return args.done_event;
       }
-      if (!alt_sets.empty() || !delete_sets.empty())
-        apply_update_equivalence_sets();
+      if (!stale_sets.empty())
+        update_stale_equivalence_sets(applied_events);
       if (output_aggregator != NULL)
       {
         output_aggregator->issue_updates(trace_info, precondition);
@@ -7858,12 +7907,16 @@ namespace Legion {
       derez.deserialize(applied);
       ApUserEvent effects;
       derez.deserialize(effects);
+      VersionManager *version_manager;
+      derez.deserialize(version_manager);
+      bool cached_sets;
+      derez.deserialize(cached_sets);
 
       // This takes ownership of the operation
       OverwriteAnalysis *analysis = new OverwriteAnalysis(runtime,
-          original_source, previous, op, index, usage, views, trace_info,
-          precondition, guard_event, pred_guard, effects.exists(), 
-          add_restriction);
+          original_source, previous, op, index, version_manager, usage, 
+          views, trace_info, precondition, guard_event, pred_guard, 
+          effects.exists(),  add_restriction);
       analysis->add_reference();
       std::set<RtEvent> deferral_events, applied_events;
       // Make sure that all our pointers are ready
@@ -7871,8 +7924,8 @@ namespace Legion {
       if (!ready_events.empty())
         ready_event = Runtime::merge_events(ready_events);
       for (unsigned idx = 0; idx < eq_sets.size(); idx++)
-        analysis->traverse(ready_event, eq_sets[idx], eq_masks[idx],
-                           deferral_events, applied_events);
+        analysis->traverse(eq_sets[idx], eq_masks[idx], deferral_events, 
+                           applied_events, cached_sets, ready_event);
       const RtEvent traversal_done = deferral_events.empty() ?
         RtEvent::NO_RT_EVENT : Runtime::merge_events(deferral_events);
       RtEvent remote_ready;
@@ -7902,7 +7955,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FilterAnalysis::FilterAnalysis(Runtime *rt, Operation *o, unsigned idx,
-                              VersionInfo *info, InstanceView *view,
+                              const VersionInfo &info, InstanceView *view,
                               LogicalView *reg_view, const bool remove_restrict)
       : PhysicalAnalysis(rt, o, idx, info, true/*on heap*/), inst_view(view), 
         registration_view(reg_view), remove_restriction(remove_restrict)
@@ -7913,10 +7966,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     FilterAnalysis::FilterAnalysis(Runtime *rt, AddressSpaceID src, 
                               AddressSpaceID prev, Operation *o, unsigned idx, 
-                              InstanceView *view, LogicalView *reg_view,
-                              const bool remove_restrict)
-      : PhysicalAnalysis(rt, src, prev, o, idx,true/*on heap*/),inst_view(view),
-        registration_view(reg_view), remove_restriction(remove_restrict)
+                              VersionManager *man, InstanceView *view, 
+                              LogicalView *reg_view, const bool remove_restrict)
+      : PhysicalAnalysis(rt, src, prev, o, idx, man, true/*on heap*/),
+        inst_view(view), registration_view(reg_view), 
+        remove_restriction(remove_restrict)
     //--------------------------------------------------------------------------
     {
     }
@@ -7952,13 +8006,13 @@ namespace Legion {
                                            const FieldMask &mask,
                                            std::set<RtEvent> &deferral_events,
                                            std::set<RtEvent> &applied_events,
-                                           FieldMask *remove_mask,
-                                           const bool original_set,
+                                           FieldMask *stale_mask,
+                                           const bool cached_set,
                                            const bool already_deferred)
     //--------------------------------------------------------------------------
     {
       set->filter_set(*this, mask, deferral_events, applied_events,
-                      remove_mask, original_set, already_deferred);
+                      stale_mask, cached_set, already_deferred);
     }
 
     //--------------------------------------------------------------------------
@@ -7977,16 +8031,20 @@ namespace Legion {
         applied_events.insert(args.applied_event);
         return args.done_event;
       }
+      // Filter has no perform_updates call so we apply this here
+      if (!stale_sets.empty())
+        update_stale_equivalence_sets(applied_events);
       if (remote_sets.empty())
         return RtEvent::NO_RT_EVENT;
       WrapperReferenceMutator mutator(applied_events);
-      for (LegionMap<AddressSpaceID,FieldMaskSet<EquivalenceSet> >::aligned::
-            const_iterator rit = remote_sets.begin(); 
-            rit != remote_sets.end(); rit++)
+      for (LegionMap<std::pair<AddressSpaceID,bool>,
+                     FieldMaskSet<EquivalenceSet> >::aligned::const_iterator 
+            rit = remote_sets.begin(); rit != remote_sets.end(); rit++)
       {
 #ifdef DEBUG_LEGION
         assert(!rit->second.empty());
 #endif
+        const AddressSpaceID target = rit->first.first;
         const RtUserEvent applied = Runtime::create_rt_user_event();
         Serializer rez;
         {
@@ -7999,7 +8057,7 @@ namespace Legion {
             rez.serialize(it->first->did);
             rez.serialize(it->second);
           }
-          op->pack_remote_operation(rez, rit->first);
+          op->pack_remote_operation(rez, target);
           rez.serialize(index);
           if (inst_view != NULL)
           {
@@ -8017,8 +8075,10 @@ namespace Legion {
             rez.serialize<DistributedID>(0);
           rez.serialize(remove_restriction);
           rez.serialize(applied);
+          rez.serialize(version_manager);
+          rez.serialize<bool>(rit->first.second);
         }
-        runtime->send_equivalence_set_remote_filters(rit->first, rez);
+        runtime->send_equivalence_set_remote_filters(target, rez);
         applied_events.insert(applied);
       }
       return RtEvent::NO_RT_EVENT;
@@ -8076,10 +8136,15 @@ namespace Legion {
       derez.deserialize(remove_restriction);
       RtUserEvent applied;
       derez.deserialize(applied);
+      VersionManager *version_manager;
+      derez.deserialize(version_manager);
+      bool cached_sets;
+      derez.deserialize(cached_sets);
 
       // This takes ownership of the remote operation
       FilterAnalysis *analysis = new FilterAnalysis(runtime, original_source,
-         previous, op, index, inst_view, registration_view, remove_restriction);
+         previous, op, index, version_manager, inst_view, registration_view, 
+         remove_restriction);
       analysis->add_reference();
       std::set<RtEvent> deferral_events, applied_events;
       // Make sure that all our pointers are ready
@@ -8087,8 +8152,8 @@ namespace Legion {
       if (!ready_events.empty())
         ready_event = Runtime::merge_events(ready_events);
       for (unsigned idx = 0; idx < eq_sets.size(); idx++)
-        analysis->traverse(ready_event, eq_sets[idx], eq_masks[idx],  
-                           deferral_events, applied_events);
+        analysis->traverse(eq_sets[idx], eq_masks[idx], deferral_events, 
+                           applied_events, cached_sets, ready_event);
       const RtEvent traversal_done = deferral_events.empty() ?
         RtEvent::NO_RT_EVENT : Runtime::merge_events(deferral_events);
       RtEvent remote_ready;
@@ -8524,6 +8589,16 @@ namespace Legion {
       // See if we need to wait for any refinements to finish
       while (!(mask * pending_refinements.get_valid_mask()) ||
               !(mask * refining_fields));
+    }
+
+    //--------------------------------------------------------------------------
+    void EquivalenceSet::refresh_refinement(RayTracer *target, 
+                                const FieldMask &mask, RtUserEvent refresh_done)
+    //--------------------------------------------------------------------------
+    {
+      ray_trace_equivalence_sets(target, set_expr, mask, 
+          (index_space_node == NULL) ? IndexSpace::NO_SPACE : 
+            index_space_node->handle, runtime->address_space, refresh_done);
     }
 
     //--------------------------------------------------------------------------
@@ -10097,6 +10172,7 @@ namespace Legion {
                                               FieldMask user_mask,
                                              std::set<RtEvent> &deferral_events,
                                               std::set<RtEvent> &applied_events,
+                                              const bool cached_set,
                                               const bool already_deferred)
     //--------------------------------------------------------------------------
     {
@@ -10104,7 +10180,7 @@ namespace Legion {
       if (!eq.has_lock())
       {
         defer_traversal(eq, analysis, user_mask, deferral_events,
-                        applied_events, already_deferred);
+                        applied_events, already_deferred, cached_set);
         return;
       }
       if (!is_logical_owner())
@@ -10114,7 +10190,8 @@ namespace Legion {
           request_remote_subsets(applied_events); 
         if (subsets.empty())
         {
-          analysis.record_remote(this, user_mask, logical_owner_space);
+          analysis.record_remote(this, user_mask, 
+                                 logical_owner_space, cached_set);
           return;
         }
         else
@@ -10122,7 +10199,8 @@ namespace Legion {
           const FieldMask non_subset = user_mask - subsets.get_valid_mask();
           if (!!non_subset)
           {
-            analysis.record_remote(this, non_subset, logical_owner_space);
+            analysis.record_remote(this, non_subset, 
+                                   logical_owner_space, cached_set);
             user_mask -= non_subset;
             if (!user_mask)
               return;
@@ -10148,12 +10226,12 @@ namespace Legion {
           to_traverse.insert(it->first, overlap);
         }
         eq.release();
-        // Update the user mask and the remove_mask if there is one
+        // Update the user mask and the stale_mask if there is one
         user_mask -= to_traverse.get_valid_mask();
         for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
               to_traverse.begin(); it != to_traverse.end(); it++) 
-          it->first->find_valid_instances(analysis, it->second, 
-                                          deferral_events, applied_events);
+          it->first->find_valid_instances(analysis, it->second, deferral_events,
+                                          applied_events, false/*original*/);
         eq.reacquire();
         // Return if our user mask is empty
         if (!user_mask)
@@ -10216,14 +10294,15 @@ namespace Legion {
                                                 FieldMask user_mask,
                                              std::set<RtEvent> &deferral_events,
                                               std::set<RtEvent> &applied_events,
-                                              const bool already_deferred)
+                                                const bool cached_set,
+                                                const bool already_deferred)
     //--------------------------------------------------------------------------
     {
       AutoTryLock eq(eq_lock);
       if (!eq.has_lock())
       {
         defer_traversal(eq, analysis, user_mask, deferral_events,
-                        applied_events, already_deferred);
+                        applied_events, already_deferred, cached_set);
         return;
       }
       if (!is_logical_owner())
@@ -10233,7 +10312,8 @@ namespace Legion {
           request_remote_subsets(applied_events); 
         if (subsets.empty())
         {
-          analysis.record_remote(this, user_mask, logical_owner_space);
+          analysis.record_remote(this, user_mask, 
+                                 logical_owner_space, cached_set);
           return;
         }
         else
@@ -10241,7 +10321,8 @@ namespace Legion {
           const FieldMask non_subset = user_mask - subsets.get_valid_mask();
           if (!!non_subset)
           {
-            analysis.record_remote(this, non_subset, logical_owner_space);
+            analysis.record_remote(this, non_subset, 
+                                   logical_owner_space, cached_set);
             user_mask -= non_subset;
             if (!user_mask)
               return;
@@ -10267,12 +10348,12 @@ namespace Legion {
           to_traverse.insert(it->first, overlap);
         }
         eq.release();
-        // Update the user mask and the remove_mask if there is one
+        // Update the user mask and the stale_mask if there is one
         user_mask -= to_traverse.get_valid_mask();
         for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
               to_traverse.begin(); it != to_traverse.end(); it++) 
           it->first->find_invalid_instances(analysis, it->second, 
-                                            deferral_events, applied_events);
+              deferral_events, applied_events, false/*original*/);
         eq.reacquire();
         // Return if our user mask is empty
         if (!user_mask)
@@ -10311,12 +10392,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool EquivalenceSet::defer_traversal(AutoTryLock &eq,
+    void EquivalenceSet::defer_traversal(AutoTryLock &eq,
                                          PhysicalAnalysis &analysis,
                                          const FieldMask &mask,
                                          std::set<RtEvent> &deferral_events,
                                          std::set<RtEvent> &applied_events,
-                                         const bool already_deferred)
+                                         const bool already_deferred,
+                                         const bool cached_set)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -10327,34 +10409,34 @@ namespace Legion {
       {
         const RtUserEvent deferral_event = Runtime::create_rt_user_event();
         const RtEvent precondition = chain_deferral_events(deferral_event);
-        analysis.defer_traversal(precondition, this, mask,
-              deferral_events, applied_events, deferral_event);
+        analysis.defer_traversal(precondition, this, mask, deferral_events, 
+                                 applied_events, cached_set, deferral_event);
       }
       else
-        analysis.defer_traversal(eq.try_next(), this, mask,
-                                 deferral_events, applied_events);
-      // Have to exit early since we didn't get the lock
-      return false;
+        analysis.defer_traversal(eq.try_next(), this, mask, deferral_events, 
+                                 applied_events, cached_set);
     }
 
     //--------------------------------------------------------------------------
-    bool EquivalenceSet::update_set(UpdateAnalysis &analysis,
+    void EquivalenceSet::update_set(UpdateAnalysis &analysis,
                                     FieldMask user_mask,
                                     std::set<RtEvent> &deferral_events,
                                     std::set<RtEvent> &applied_events,
                                     FieldMask *remove_mask, // can be NULL
-                                    const bool original_set/*=true*/,
+                                    const bool cached_set/*=true*/,
                                     const bool already_deferred/*=false*/)
     //--------------------------------------------------------------------------
     {
       // Try to get the lock, if we don't defer the traversal
       AutoTryLock eq(eq_lock);
       if (!eq.has_lock())
-        return defer_traversal(eq, analysis, user_mask, deferral_events,
-                               applied_events, already_deferred);
-      if (!original_set && 
-          analysis.update_alt_sets(this, user_mask, applied_events))
-        return false;
+      {
+        defer_traversal(eq, analysis, user_mask, deferral_events,
+                        applied_events, already_deferred, cached_set);
+        return;
+      }
+      if (!cached_set && analysis.update_alt_sets(this, user_mask))
+        return;
       if (!is_logical_owner())
       {
         // First check to see if our subsets are up to date
@@ -10362,18 +10444,20 @@ namespace Legion {
           request_remote_subsets(applied_events); 
         if (subsets.empty())
         {
-          analysis.record_remote(this, user_mask, logical_owner_space);
-          return false;
+          analysis.record_remote(this, user_mask, 
+                                 logical_owner_space, cached_set);
+          return;
         }
         else
         {
           const FieldMask non_subset = user_mask - subsets.get_valid_mask();
           if (!!non_subset)
           {
-            analysis.record_remote(this, non_subset, logical_owner_space);
+            analysis.record_remote(this, non_subset, 
+                                   logical_owner_space, cached_set);
             user_mask -= non_subset;
             if (!user_mask)
-              return false;
+              return;
           }
         }
         // Otherwise we fall through and record our subsets
@@ -10397,7 +10481,7 @@ namespace Legion {
         }
         eq.release();
         // Remove ourselves if we recursed
-        if (!original_set)
+        if (!cached_set)
           analysis.filter_alt_sets(this, to_traverse.get_valid_mask());
         // Update the user mask and the remove_mask if there is one
         user_mask -= to_traverse.get_valid_mask();
@@ -10412,10 +10496,7 @@ namespace Legion {
         if (!user_mask)
         {
           decrement_pending_analyses();
-          if (remove_mask != NULL)
-            return !!(*remove_mask);
-          else
-            return false;
+          return;
         }
       }
       decrement_pending_analyses();
@@ -10702,9 +10783,6 @@ namespace Legion {
 #endif
       }
       check_for_migration(analysis, applied_events);
-      if (remove_mask != NULL)
-        return !!(*remove_mask);
-      return false;
     }
 
     //--------------------------------------------------------------------------
@@ -11027,22 +11105,24 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool EquivalenceSet::acquire_restrictions(AcquireAnalysis &analysis,
+    void EquivalenceSet::acquire_restrictions(AcquireAnalysis &analysis,
                                           FieldMask acquire_mask,
                                           std::set<RtEvent> &deferral_events,
                                           std::set<RtEvent> &applied_events,
                                           FieldMask *remove_mask,
-                                          const bool original_set /*=true*/,
+                                          const bool cached_set/*=true*/,
                                           const bool already_deferred/*=false*/)
     //--------------------------------------------------------------------------
     {
       AutoTryLock eq(eq_lock);
       if (!eq.has_lock())
-        return defer_traversal(eq, analysis, acquire_mask, deferral_events,
-                               applied_events, already_deferred);
-      if (!original_set && 
-          analysis.update_alt_sets(this, acquire_mask, applied_events))
-        return false;
+      {
+        defer_traversal(eq, analysis, acquire_mask, deferral_events,
+                        applied_events, already_deferred, cached_set);
+        return;
+      }
+      if (!cached_set && analysis.update_alt_sets(this, acquire_mask))
+        return;
       if (!is_logical_owner())
       {
         // First check to see if our subsets are up to date
@@ -11050,18 +11130,20 @@ namespace Legion {
           request_remote_subsets(applied_events);
         if (subsets.empty())
         {
-          analysis.record_remote(this, acquire_mask, logical_owner_space);
-          return false;
+          analysis.record_remote(this, acquire_mask, 
+                                 logical_owner_space, cached_set);
+          return;
         }
         else
         {
           const FieldMask non_subset = acquire_mask - subsets.get_valid_mask();
           if (!!non_subset)
           {
-            analysis.record_remote(this, non_subset, logical_owner_space);
+            analysis.record_remote(this, non_subset, 
+                                   logical_owner_space, cached_set);
             acquire_mask -= non_subset;
             if (!acquire_mask)
-              return false;
+              return;
           }
         }
       }
@@ -11084,7 +11166,7 @@ namespace Legion {
         }
         eq.release();
         // Remove ourselves if we recursed
-        if (!original_set)
+        if (!cached_set)
           analysis.filter_alt_sets(this, to_traverse.get_valid_mask());
         // Update the acquire mask and the remove_mask if there is one
         acquire_mask -= to_traverse.get_valid_mask();
@@ -11099,10 +11181,7 @@ namespace Legion {
         if (!acquire_mask)
         {
           decrement_pending_analyses();
-          if (remove_mask != NULL)
-            return !!(*remove_mask);
-          else
-            return false;
+          return;
         }
       }
       decrement_pending_analyses();
@@ -11112,7 +11191,7 @@ namespace Legion {
 #endif
       acquire_mask &= restricted_fields;
       if (!acquire_mask)
-        return false;
+        return;
       // Now we need to lock the analysis if we're going to do this traversal
       AutoLock a_lock(analysis);
       for (FieldMaskSet<InstanceView>::const_iterator it = 
@@ -11126,28 +11205,27 @@ namespace Legion {
       }
       restricted_fields -= acquire_mask;
       check_for_migration(analysis, applied_events);
-      if (remove_mask != NULL)
-        return !!(*remove_mask);
-      return false;
     }
 
     //--------------------------------------------------------------------------
-    bool EquivalenceSet::release_restrictions(ReleaseAnalysis &analysis,
+    void EquivalenceSet::release_restrictions(ReleaseAnalysis &analysis,
                                           FieldMask release_mask,
                                           std::set<RtEvent> &deferral_events,
                                           std::set<RtEvent> &applied_events,
                                           FieldMask *remove_mask,
-                                          const bool original_set /*=true*/,
+                                          const bool cached_set/*=true*/,
                                           const bool already_deferred/*=false*/)
     //--------------------------------------------------------------------------
     {
       AutoTryLock eq(eq_lock);
       if (!eq.has_lock())
-        return defer_traversal(eq, analysis, release_mask, deferral_events,
-                               applied_events, already_deferred);
-      if (!original_set && 
-          analysis.update_alt_sets(this, release_mask, applied_events))
-        return false;
+      {
+        defer_traversal(eq, analysis, release_mask, deferral_events,
+                        applied_events, already_deferred, cached_set);
+        return;
+      }
+      if (!cached_set && analysis.update_alt_sets(this, release_mask))
+        return;
       if (!is_logical_owner())
       {
         // First check to see if our subsets are up to date
@@ -11155,18 +11233,20 @@ namespace Legion {
           request_remote_subsets(applied_events);
         if (subsets.empty())
         {
-          analysis.record_remote(this, release_mask, logical_owner_space);
-          return false;
+          analysis.record_remote(this, release_mask, 
+                                 logical_owner_space, cached_set);
+          return;
         }
         else
         {
           const FieldMask non_subset = release_mask - subsets.get_valid_mask();
           if (!!non_subset)
           {
-            analysis.record_remote(this, non_subset, logical_owner_space);
+            analysis.record_remote(this, non_subset, 
+                                   logical_owner_space, cached_set);
             release_mask -= non_subset;
             if (!release_mask)
-              return false;
+              return;
           }
         }
       }
@@ -11189,7 +11269,7 @@ namespace Legion {
         }
         eq.release();
         // Remove ourselves if we recursed
-        if (!original_set)
+        if (!cached_set)
           analysis.filter_alt_sets(this, to_traverse.get_valid_mask());
         // Update the release mask and the remove_mask if there is one
         release_mask -= to_traverse.get_valid_mask();
@@ -11204,10 +11284,7 @@ namespace Legion {
         if (!release_mask)
         {
           decrement_pending_analyses();
-          if (remove_mask != NULL)
-            return !!(*remove_mask);
-          else
-            return false;
+          return;
         }
       }
       decrement_pending_analyses();
@@ -11269,26 +11346,18 @@ namespace Legion {
 #endif
       }
       check_for_migration(analysis, applied_events);
-      if (remove_mask != NULL)
-        return !!(*remove_mask);
-      return false;
     }
 
     //--------------------------------------------------------------------------
-    bool EquivalenceSet::issue_across_copies(CopyAcrossAnalysis &analysis,
+    void EquivalenceSet::issue_across_copies(CopyAcrossAnalysis &analysis,
                                              FieldMask src_mask,
                                              IndexSpaceExpression *overlap,
                                              std::set<RtEvent> &deferral_events,
-                                             std::set<RtEvent> &applied_events,
-                                             FieldMask *remove_mask,
-                                             const bool original_set,
-                                             const bool already_deferred)
+                                             std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
-      AutoTryLock eq(eq_lock,1,false/*exclusive*/);
-      if (!eq.has_lock())
-        return defer_traversal(eq, analysis, src_mask, deferral_events,
-                               applied_events, already_deferred);
+      // No try lock since we can't defer this because of the overlap
+      AutoLock eq(eq_lock,1,false/*exclusive*/);
       // No alt-set tracking here for copy across because we might
       // need to to traverse this multiple times with different expressions
       if (!is_logical_owner())
@@ -11298,18 +11367,20 @@ namespace Legion {
           request_remote_subsets(applied_events);
         if (subsets.empty())
         {
-          analysis.record_remote(this, src_mask, logical_owner_space);
-          return false;
+          analysis.record_remote(this, src_mask, 
+                                 logical_owner_space, false/*cached set*/);
+          return;
         }
         else
         {
           const FieldMask non_subset = src_mask - subsets.get_valid_mask();
           if (!!non_subset)
           {
-            analysis.record_remote(this, non_subset, logical_owner_space);
+            analysis.record_remote(this, non_subset, 
+                                   logical_owner_space, false/*cached set*/);
             src_mask -= non_subset;
             if (!src_mask)
-              return false;
+              return;
           }
         }
       }
@@ -11343,18 +11414,14 @@ namespace Legion {
           if (subset_overlap->is_empty())
             continue;
           it->first->issue_across_copies(analysis, it->second, subset_overlap,
-              deferral_events, applied_events, NULL/*remove mask*/,
-              false/*original set*/);
+                                         deferral_events, applied_events);
         }
         eq.reacquire();
         // Return if ourt source mask is empty
         if (!src_mask)
         {
           decrement_pending_analyses();
-          if (remove_mask != NULL)
-            return !!(*remove_mask);
-          else
-            return false;
+          return;
         }
       }
       decrement_pending_analyses();
@@ -11543,27 +11610,27 @@ namespace Legion {
 #endif
       } 
       check_for_migration(analysis, applied_events);
-      if (remove_mask != NULL)
-        return !!(*remove_mask);
-      return false;
     }
 
     //--------------------------------------------------------------------------
-    bool EquivalenceSet::overwrite_set(OverwriteAnalysis &analysis,
+    void EquivalenceSet::overwrite_set(OverwriteAnalysis &analysis,
                                        FieldMask mask,
                                        std::set<RtEvent> &deferral_events,
                                        std::set<RtEvent> &applied_events,
                                        FieldMask *remove_mask,
-                                       const bool original_set,
+                                       const bool cached_set,
                                        const bool already_deferred)
     //--------------------------------------------------------------------------
     {
       AutoTryLock eq(eq_lock);
       if (!eq.has_lock())
-        return defer_traversal(eq, analysis, mask, deferral_events,
-                               applied_events, already_deferred);
-      if (!original_set && analysis.update_alt_sets(this, mask, applied_events))
-        return false;
+      {
+        defer_traversal(eq, analysis, mask, deferral_events,
+                        applied_events, already_deferred, cached_set);
+        return;
+      }
+      if (!cached_set && analysis.update_alt_sets(this, mask))
+        return;
       if (!is_logical_owner())
       {
         // First check to see if our subsets are up to date
@@ -11571,18 +11638,20 @@ namespace Legion {
           request_remote_subsets(applied_events);
         if (subsets.empty())
         {
-          analysis.record_remote(this, mask, logical_owner_space);
-          return false;
+          analysis.record_remote(this, mask, 
+                                 logical_owner_space, cached_set);
+          return;
         }
         else
         {
           const FieldMask non_subset = mask - subsets.get_valid_mask();
           if (!!non_subset)
           {
-            analysis.record_remote(this, non_subset, logical_owner_space);
+            analysis.record_remote(this, non_subset, 
+                                   logical_owner_space, cached_set);
             mask -= non_subset;
             if (!mask)
-              return false;
+              return;
           }
         }
       }
@@ -11604,7 +11673,7 @@ namespace Legion {
         }
         eq.release();
         // Remove ourselves if we recursed
-        if (!original_set)
+        if (!cached_set)
           analysis.filter_alt_sets(this, to_traverse.get_valid_mask());
         // Update the mask and the remove_mask if there is one
         mask -= to_traverse.get_valid_mask();
@@ -11613,16 +11682,13 @@ namespace Legion {
         for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
               to_traverse.begin(); it != to_traverse.end(); it++) 
           it->first->overwrite_set(analysis, it->second, deferral_events,
-              applied_events, NULL/*remove mask*/, false/*original_set*/);
+              applied_events, NULL/*remove mask*/, false/*cachd set*/);
         eq.reacquire();
         // Return if ourt mask is empty
         if (!mask)
         {
           decrement_pending_analyses();
-          if (remove_mask != NULL)
-            return !!(*remove_mask);
-          else
-            return false;
+          return;
         }
       }
       decrement_pending_analyses();
@@ -11756,26 +11822,26 @@ namespace Legion {
 #endif
       }
       check_for_migration(analysis, applied_events);
-      if (remove_mask != NULL)
-        return !!(*remove_mask);
-      return false;
     }
 
     //--------------------------------------------------------------------------
-    bool EquivalenceSet::filter_set(FilterAnalysis &analysis, FieldMask mask,
+    void EquivalenceSet::filter_set(FilterAnalysis &analysis, FieldMask mask,
                                     std::set<RtEvent> &deferral_events,
                                     std::set<RtEvent> &applied_events,
                                     FieldMask *remove_mask,
-                                    const bool original_set/*=true*/,
+                                    const bool cached_set/*=true*/,
                                     const bool already_deferred/*=false*/)
     //--------------------------------------------------------------------------
     {
       AutoTryLock eq(eq_lock);
       if (!eq.has_lock())
-        return defer_traversal(eq, analysis, mask, deferral_events,
-                               applied_events, already_deferred);
-      if (!original_set && analysis.update_alt_sets(this, mask, applied_events))
-        return false;
+      {
+        defer_traversal(eq, analysis, mask, deferral_events,
+                        applied_events, already_deferred, cached_set);
+        return;
+      }
+      if (!cached_set && analysis.update_alt_sets(this, mask))
+        return;
       if (!is_logical_owner())
       {
         // First check to see if our subsets are up to date
@@ -11783,18 +11849,20 @@ namespace Legion {
           request_remote_subsets(applied_events);
         if (subsets.empty())
         {
-          analysis.record_remote(this, mask, logical_owner_space);
-          return false;
+          analysis.record_remote(this, mask, 
+                                 logical_owner_space, cached_set);
+          return;
         }
         else
         {
           const FieldMask non_subset = mask - subsets.get_valid_mask();
           if (!!non_subset)
           {
-            analysis.record_remote(this, non_subset, logical_owner_space);
+            analysis.record_remote(this, non_subset, 
+                                   logical_owner_space, cached_set);
             mask -= non_subset;
             if (!mask)
-              return false;
+              return;
           }
         }
       }
@@ -11816,7 +11884,7 @@ namespace Legion {
         }
         eq.release();
         // Remove ourselves if we recursed
-        if (!original_set)
+        if (!cached_set)
           analysis.filter_alt_sets(this, to_traverse.get_valid_mask());
         // Update the mask and the remove_mask if there is one
         mask -= to_traverse.get_valid_mask();
@@ -11831,10 +11899,7 @@ namespace Legion {
         if (!mask)
         {
           decrement_pending_analyses();
-          if (remove_mask != NULL)
-            return !!(*remove_mask);
-          else
-            return false;
+          return;
         }
       }
       decrement_pending_analyses();
@@ -11890,9 +11955,6 @@ namespace Legion {
         }
       }
       check_for_migration(analysis, applied_events);
-      if (remove_mask != NULL)
-        return !!(*remove_mask);
-      return false;
     }
 
     //--------------------------------------------------------------------------
@@ -13642,7 +13704,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     VersionManager::VersionManager(RegionTreeNode *n, ContextID c)
-      : ctx(c), node(n), runtime(n->context->runtime), version_number(0)
+      : ctx(c), node(n), runtime(n->context->runtime)
     //--------------------------------------------------------------------------
     {
     }
@@ -13690,7 +13752,6 @@ namespace Legion {
       assert(waiting_infos.empty());
       assert(equivalence_sets_ready.empty());
 #endif
-      version_number = 0;
     }
 
     //--------------------------------------------------------------------------
@@ -13739,8 +13800,7 @@ namespace Legion {
                 const FieldMask overlap = it->second & version_mask;
                 if (!overlap)
                   continue;
-                version_info->record_equivalence_set(this, version_number,
-                                                     it->first, overlap);
+                version_info->record_equivalence_set(this, it->first, overlap);
               }
             }
           }
@@ -13767,10 +13827,9 @@ namespace Legion {
               continue;
             wait_on.insert(it->first);
             waiting_mask |= overlap;
-            remaining_mask -= overlap;
-            if (!remaining_mask)
-              break;
           }
+          if (!!waiting_mask)
+            remaining_mask -= waiting_mask;
         }
         // Get any fields that are already ready
         // Have to do this after looking for pending equivalence sets
@@ -13785,8 +13844,7 @@ namespace Legion {
               const FieldMask overlap = it->second & remaining_mask;
               if (!overlap)
                 continue;
-              version_info->record_equivalence_set(this, version_number,
-                                                   it->first, overlap);
+              version_info->record_equivalence_set(this, it->first, overlap);
             }
           }
           remaining_mask -= equivalence_sets.get_valid_mask();
@@ -13855,112 +13913,180 @@ namespace Legion {
     void VersionManager::finalize_equivalence_sets(RtUserEvent done_event)
     //--------------------------------------------------------------------------
     {
-      AutoLock m_lock(manager_lock);
-      LegionMap<RtUserEvent,FieldMask>::aligned::iterator finder =
-        equivalence_sets_ready.find(done_event);
+      std::set<RtEvent> done_preconditions;
+      {
+        AutoLock m_lock(manager_lock);
+        LegionMap<RtUserEvent,FieldMask>::aligned::iterator finder =
+          equivalence_sets_ready.find(done_event);
 #ifdef DEBUG_LEGION
-      assert(finder != equivalence_sets_ready.end());
+        assert(finder != equivalence_sets_ready.end());
 #endif
-      // If there are any pending equivalence sets, move them into 
-      // the actual equivalence sets
-      if (!pending_equivalence_sets.empty() && 
-          !(finder->second * pending_equivalence_sets.get_valid_mask()))
-      {
-        std::vector<EquivalenceSet*> to_delete;
-        for (FieldMaskSet<EquivalenceSet>::iterator it = 
-              pending_equivalence_sets.begin(); it !=
-              pending_equivalence_sets.end(); it++)
+        // See if there are any other events with overlapping fields,
+        // if there are then we can't actually move over any pending
+        // equivalence sets for those fields yet since we don't know
+        // which are ours, just record dependences on those events
+        if (equivalence_sets_ready.size() > 1)
         {
-          // Once it's valid for any field then it's valid for all of them
-          if (it->second * finder->second)
-            continue;
-          if (equivalence_sets.insert(it->first, it->second))
-            it->first->add_base_resource_ref(VERSION_MANAGER_REF);
-          to_delete.push_back(it->first);
-        }
-        if (!to_delete.empty())
-        {
-          if (to_delete.size() < pending_equivalence_sets.size())
+          FieldMask aliased;
+          for (LegionMap<RtUserEvent,FieldMask>::aligned::const_iterator it =
+                equivalence_sets_ready.begin(); it != 
+                equivalence_sets_ready.end(); it++)
           {
-            for (std::vector<EquivalenceSet*>::const_iterator it =
-                  to_delete.begin(); it != to_delete.end(); it++)
-              pending_equivalence_sets.erase(*it);
-            pending_equivalence_sets.tighten_valid_mask();
-          }
-          else
-            pending_equivalence_sets.clear();
-        }
-      }
-      if (!waiting_infos.empty() &&
-          !(waiting_infos.get_valid_mask() * finder->second))
-      {
-        std::vector<VersionInfo*> to_delete;
-        for (FieldMaskSet<VersionInfo>::iterator vit = 
-              waiting_infos.begin(); vit != waiting_infos.end(); vit++)
-        {
-          const FieldMask info_overlap = vit->second & finder->second;
-          if (!info_overlap)
-            continue;
-          for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
-                equivalence_sets.begin(); it != equivalence_sets.end(); it++)
-          {
-            const FieldMask overlap = info_overlap & it->second;
+            if (it->first == done_event)
+              continue;
+            const FieldMask overlap = it->second & finder->second;
             if (!overlap)
               continue;
-            vit->first->record_equivalence_set(this, version_number,
-                                               it->first, overlap);
+            done_preconditions.insert(it->first);
+            aliased |= overlap;
           }
-          vit.filter(info_overlap);
-          if (!vit->second)
-            to_delete.push_back(vit->first);
+          if (!!aliased)
+            finder->second -= aliased;
         }
-        if (!to_delete.empty())
+        // If there are any pending equivalence sets, move them into 
+        // the actual equivalence sets
+        if (!pending_equivalence_sets.empty() && 
+            !(finder->second * pending_equivalence_sets.get_valid_mask()))
         {
-          for (std::vector<VersionInfo*>::const_iterator it = 
-                to_delete.begin(); it != to_delete.end(); it++)
-            waiting_infos.erase(*it);
+          std::vector<EquivalenceSet*> to_delete;
+          for (FieldMaskSet<EquivalenceSet>::iterator it = 
+                pending_equivalence_sets.begin(); it !=
+                pending_equivalence_sets.end(); it++)
+          {
+            // Once it's valid for any field then it's valid for all of them
+            if (it->second * finder->second)
+              continue;
+            if (equivalence_sets.insert(it->first, it->second))
+              it->first->add_base_resource_ref(VERSION_MANAGER_REF);
+            to_delete.push_back(it->first);
+          }
+          if (!to_delete.empty())
+          {
+            if (to_delete.size() < pending_equivalence_sets.size())
+            {
+              for (std::vector<EquivalenceSet*>::const_iterator it =
+                    to_delete.begin(); it != to_delete.end(); it++)
+                pending_equivalence_sets.erase(*it);
+              pending_equivalence_sets.tighten_valid_mask();
+            }
+            else
+              pending_equivalence_sets.clear();
+          }
         }
+        if (!waiting_infos.empty() &&
+            !(waiting_infos.get_valid_mask() * finder->second))
+        {
+          std::vector<VersionInfo*> to_delete;
+          for (FieldMaskSet<VersionInfo>::iterator vit = 
+                waiting_infos.begin(); vit != waiting_infos.end(); vit++)
+          {
+            const FieldMask info_overlap = vit->second & finder->second;
+            if (!info_overlap)
+              continue;
+            for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
+                  equivalence_sets.begin(); it != equivalence_sets.end(); it++)
+            {
+              const FieldMask overlap = info_overlap & it->second;
+              if (!overlap)
+                continue;
+              vit->first->record_equivalence_set(this, it->first, overlap);
+            }
+            vit.filter(info_overlap);
+            if (!vit->second)
+              to_delete.push_back(vit->first);
+          }
+          if (!to_delete.empty())
+          {
+            for (std::vector<VersionInfo*>::const_iterator it = 
+                  to_delete.begin(); it != to_delete.end(); it++)
+              waiting_infos.erase(*it);
+          }
+        }
+        equivalence_sets_ready.erase(finder);
       }
-      Runtime::trigger_event(done_event);
-      equivalence_sets_ready.erase(finder);
+      if (!done_preconditions.empty())
+        Runtime::trigger_event(done_event,
+            Runtime::merge_events(done_preconditions));
+      else
+        Runtime::trigger_event(done_event);
     }
 
     //--------------------------------------------------------------------------
-    void VersionManager::update_equivalence_sets(const unsigned previous_number,
-                                  const FieldMaskSet<EquivalenceSet> &to_add,
-                                  const FieldMaskSet<EquivalenceSet> &to_delete)
+    RtEvent VersionManager::record_stale_sets(
+                                       FieldMaskSet<EquivalenceSet> &stale_sets)
     //--------------------------------------------------------------------------
     {
-      AutoLock m_lock(manager_lock);
 #ifdef DEBUG_LEGION
-      assert(previous_number <= version_number);
+      assert(!stale_sets.empty());
 #endif
-      if (previous_number < version_number)
-        return;
-      // Increment the version number so that we don't get stale updates
-      version_number++;
-      // Remove any sets from the old set that aren't in the new one
-      for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
-            to_delete.begin(); it != to_delete.end(); it++)
+      RtUserEvent compute_event;
       {
-        FieldMaskSet<EquivalenceSet>::iterator finder = 
-          equivalence_sets.find(it->first);
-        // Might already have been removed
-        if (finder == equivalence_sets.end())
-          continue;
-        finder.filter(it->second);
-        if (!finder->second)
+        FieldMask update_mask;
+        AutoLock m_lock(manager_lock);
+        // See which of our stale sets are still in the valid set, if they
+        // are then remove their fields, otherwise record that we don't need
+        // to update them
+        for (FieldMaskSet<EquivalenceSet>::iterator it = 
+              stale_sets.begin(); it != stale_sets.end(); it++)
         {
-          equivalence_sets.erase(finder);
-          if (it->first->remove_base_resource_ref(VERSION_MANAGER_REF))
-            delete it->first;
+          FieldMaskSet<EquivalenceSet>::iterator finder = 
+            equivalence_sets.find(it->first);
+          if (finder != equivalence_sets.end())
+          {
+            const FieldMask need_refinement = it->second & finder->second;
+            if (!!need_refinement)
+            {
+              update_mask |= need_refinement;
+              finder.filter(need_refinement);
+              if (!finder->second) // Reference flows back with stale sets
+                equivalence_sets.erase(finder);
+              else // Add a reference to keep the eq set live until we're done
+                it->first->add_base_resource_ref(VERSION_MANAGER_REF);
+              it.filter(~need_refinement);
+#ifdef DEBUG_LEGION
+              assert(!!it->second);
+#endif
+              continue;
+            }
+          }
+          it.clear();
+        }
+        if (!update_mask)
+          return RtEvent::NO_RT_EVENT;
+        compute_event = Runtime::create_rt_user_event();
+        equivalence_sets_ready[compute_event] = update_mask; 
+      }
+      // For these equivalence sets we need to perform additional ray 
+      // traces to get the new refineemnts of the sets
+      std::set<RtEvent> preconditions;
+      for (FieldMaskSet<EquivalenceSet>::iterator it = 
+            stale_sets.begin(); it != stale_sets.end(); it++)
+      {
+        // Skip any sets which didn't have valid fields
+        if (!it->second)
+          continue;
+        RtUserEvent refresh_done = Runtime::create_rt_user_event();
+        it->first->refresh_refinement(this, it->second, refresh_done);
+        preconditions.insert(refresh_done);
+        // Remove the reference that we are holding
+        if (it->first->remove_base_resource_ref(VERSION_MANAGER_REF))
+          delete it->first;
+      }
+      // Now launch a finalize task to complete the update 
+      if (!preconditions.empty())
+      {
+        const RtEvent precondition = Runtime::merge_events(preconditions);
+        if (precondition.exists() && !precondition.has_triggered())
+        {
+          LgFinalizeEqSetsArgs args(this, compute_event, implicit_provenance);
+          runtime->issue_runtime_meta_task(args, LG_LATENCY_DEFERRED_PRIORITY,
+                                           precondition);
+          return compute_event;
         }
       }
-      // Add in all the alt_sets and add references where necessary
-      for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
-            to_add.begin(); it != to_add.end(); it++)
-        if (equivalence_sets.insert(it->first, it->second))
-          it->first->add_base_resource_ref(VERSION_MANAGER_REF);
+      // If we make it here we can do the finalize call now
+      finalize_equivalence_sets(compute_event);
+      return RtEvent::NO_RT_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -13982,6 +14108,43 @@ namespace Legion {
     {
       const LgFinalizeEqSetsArgs *fargs = (const LgFinalizeEqSetsArgs*)args;
       fargs->manager->finalize_equivalence_sets(fargs->compute);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void VersionManager::handle_stale_update(Deserializer &derez,
+                                                        Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      size_t num_sets;
+      derez.deserialize(num_sets);
+      FieldMaskSet<EquivalenceSet> stale_sets;
+      std::set<RtEvent> ready_events;
+      for (unsigned idx = 0; idx < num_sets; idx++)
+      {
+        DistributedID did;
+        derez.deserialize(did);
+        RtEvent ready;
+        EquivalenceSet *set = 
+          runtime->find_or_request_equivalence_set(did, ready);
+        FieldMask mask;
+        derez.deserialize(mask);
+        stale_sets.insert(set, mask);
+        if (ready.exists() && !ready.has_triggered())
+          ready_events.insert(ready);
+      }
+      VersionManager *manager;
+      derez.deserialize(manager);
+      RtUserEvent done_event;
+      derez.deserialize(done_event);
+      if (!ready_events.empty())
+      {
+        const RtEvent wait_on = Runtime::merge_events(ready_events);
+        if (wait_on.exists() && !wait_on.has_triggered())
+          wait_on.wait();
+      }
+      const RtEvent done = manager->record_stale_sets(stale_sets);
+      Runtime::trigger_event(done_event, done);
     }
 
     /////////////////////////////////////////////////////////////

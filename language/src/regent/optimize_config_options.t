@@ -61,12 +61,12 @@ function context:__newindex (field, value)
   error ("context has no field '" .. field .. "' (in assignment)", 2)
 end
 
-function context.new_global_scope()
+function context.new_global_scope(node)
   local cx = {
-    leaf       = { true, nil },
-    inner      = { true, nil },
-    idempotent = { true, nil },
-    replicable = { true, nil },
+    leaf       = { not node.annotations.leaf:is(ast.annotation.Forbid), nil },
+    inner      = { not node.annotations.inner:is(ast.annotation.Forbid), nil },
+    idempotent = { not node.annotations.idempotent:is(ast.annotation.Forbid), nil },
+    replicable = { not node.annotations.replicable:is(ast.annotation.Forbid), nil },
   }
   return setmetatable(cx, context)
 end
@@ -725,7 +725,7 @@ function optimize_config_options.top(cx, node)
 end
 
 function optimize_config_options.entry(node)
-  local cx = context.new_global_scope()
+  local cx = context.new_global_scope(node)
   return optimize_config_options.top(cx, node)
 end
 

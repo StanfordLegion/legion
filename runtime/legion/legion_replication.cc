@@ -4538,7 +4538,7 @@ namespace Legion {
           context->convert_target_views(mapped_instances, mapped_views); 
           RegionNode *node = runtime->forest->get_node(requirement.region);
           UpdateAnalysis *analysis = new UpdateAnalysis(runtime, this, 
-                                      0/*index*/, &version_info,
+                                      0/*index*/, version_info,
                                       requirement, node, mapped_instances,
                                       mapped_views,trace_info,init_precondition,
                                       termination_event, true/*track effects*/,
@@ -4573,7 +4573,7 @@ namespace Legion {
         // All the users just need to do their registration
         RegionNode *node = runtime->forest->get_node(requirement.region);
         UpdateAnalysis *analysis = new UpdateAnalysis(runtime, this, 
-                                      0/*index*/, &version_info,
+                                      0/*index*/, version_info,
                                       requirement, node, mapped_instances,
                                       mapped_views,trace_info,init_precondition,
                                       termination_event, true/*track effects*/,
@@ -5030,7 +5030,7 @@ namespace Legion {
           termination_event = Runtime::create_ap_user_event();
         const PhysicalTraceInfo trace_info(this, 0/*idx*/, true/*init*/);
         UpdateAnalysis *analysis = new UpdateAnalysis(runtime, this, 0/*index*/,
-          &version_info, requirement, node, attach_instances, attach_views,
+          version_info, requirement, node, attach_instances, attach_views,
           trace_info, ApEvent::NO_AP_EVENT, mapping ? termination_event : 
             completion_event, false/*track effects*/, 
           false/*check initialized*/, true/*record valid*/,true/*skip output*/);

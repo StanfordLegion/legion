@@ -1228,6 +1228,9 @@ namespace Realm {
 	network_segments.push_back(&reg_mem_segment);
       }
 
+      // construct active message handler table once before any network(s) init
+      activemsg_handler_table.construct_handler_table();
+
       // attach to the network
       for(std::vector<NetworkModule *>::const_iterator it = network_modules.begin();
 	  it != network_modules.end();
@@ -2189,6 +2192,13 @@ namespace Realm {
 
 	for(std::vector<Module *>::iterator it = modules.begin();
 	    it != modules.end();
+	    it++) {
+	  (*it)->cleanup();
+	  delete (*it);
+	}
+
+	for(std::vector<NetworkModule *>::iterator it = network_modules.begin();
+	    it != network_modules.end();
 	    it++) {
 	  (*it)->cleanup();
 	  delete (*it);
