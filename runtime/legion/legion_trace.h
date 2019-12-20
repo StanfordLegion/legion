@@ -774,6 +774,7 @@ namespace Legion {
       void record_fill_views(const FieldMaskSet<FillView> &views);
     public:
       virtual void record_set_op_sync_event(ApEvent &lhs, Memoizable *memo);
+      virtual void record_set_effects(Memoizable *memo, ApEvent &rhs);
       virtual void record_complete_replay(Memoizable *memo, ApEvent rhs);
     public:
       RtEvent defer_template_deletion(void);
@@ -887,6 +888,7 @@ namespace Legion {
       ISSUE_COPY,
       ISSUE_FILL,
       SET_OP_SYNC_EVENT,
+      SET_EFFECTS,
       ASSIGN_FENCE_COMPLETION,
       COMPLETE_REPLAY,
     };
@@ -912,6 +914,7 @@ namespace Legion {
       virtual IssueCopy* as_issue_copy(void) { return NULL; }
       virtual IssueFill* as_issue_fill(void) { return NULL; }
       virtual SetOpSyncEvent* as_set_op_sync_event(void) { return NULL; }
+      virtual SetEffects* as_set_effects(void) { return NULL; }
       virtual CompleteReplay* as_complete_replay(void) { return NULL; }
     protected:
       std::map<TraceLocalID, Memoizable*> &operations;
@@ -1135,6 +1138,26 @@ namespace Legion {
     private:
       friend class PhysicalTemplate;
       unsigned lhs;
+    };
+
+    /**
+     * \class SetEffects
+     * This instruction has the following semantics:
+     *   operations[lhs].set_effects_postcondition(events[rhs])
+     */
+    class SetEffects : public Instruction {
+    public:
+      SetEffects(PhysicalTemplate& tpl, const TraceLocalID& lhs, unsigned rhs);
+      virtual void execute(void);
+      virtual std::string to_string(void);
+
+      virtual InstructionKind get_kind(void)
+        { return SET_EFFECTS; }
+      virtual SetEffects* as_set_effects(void)
+        { return this; }
+    private:
+      friend class PhysicalTemplate;
+      unsigned rhs;
     };
 
     /**

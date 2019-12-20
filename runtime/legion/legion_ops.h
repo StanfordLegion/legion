@@ -797,6 +797,7 @@ namespace Legion {
       typedef std::pair<unsigned, DomainPoint> TraceLocalID;
       virtual TraceLocalID get_trace_local_id(void) const = 0;
       virtual ApEvent compute_sync_precondition(const TraceInfo *in) const = 0;
+      virtual void set_effects_postcondition(ApEvent postcondition) = 0;
       virtual void complete_replay(ApEvent complete_event) = 0;
       virtual void find_equivalence_sets(Runtime *runtime, unsigned idx,
         const FieldMask &mask, FieldMaskSet<EquivalenceSet> &target) const = 0;
@@ -828,6 +829,7 @@ namespace Legion {
       typedef std::pair<unsigned, DomainPoint> TraceLocalID;
       virtual TraceLocalID get_trace_local_id(void) const;
       virtual ApEvent compute_sync_precondition(const TraceInfo *info) const;
+      virtual void set_effects_postcondition(ApEvent postcondition);
       virtual void complete_replay(ApEvent complete_event);
       virtual void find_equivalence_sets(Runtime *runtime, unsigned idx,
           const FieldMask &mask, FieldMaskSet<EquivalenceSet> &target) const;
@@ -889,6 +891,8 @@ namespace Legion {
       virtual PhysicalTemplate* get_template(void) const;
       virtual ApEvent compute_sync_precondition(const TraceInfo *info) const
         { assert(false); return ApEvent::NO_AP_EVENT; }
+      virtual void set_effects_postcondition(ApEvent postcondition)
+        { assert(false); }
       virtual void complete_replay(ApEvent complete_event)
         { assert(false); }
       virtual ApEvent get_memo_completion(void) const

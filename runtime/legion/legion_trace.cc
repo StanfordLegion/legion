@@ -2638,6 +2638,12 @@ namespace Legion {
               used[gen[fill->precondition_idx]] = true;
               break;
             }
+          case SET_EFFECTS:
+            {
+              SetEffects *effects = inst->as_set_effects();
+              used[gen[effects->rhs]] = true;
+              break;
+            }
           case COMPLETE_REPLAY:
             {
               CompleteReplay *complete = inst->as_complete_replay();
@@ -2830,6 +2836,11 @@ namespace Legion {
                 event_to_check = &inst->as_issue_fill()->precondition_idx;
                 break;
               }
+            case SET_EFFECTS :
+              {
+                event_to_check = &inst->as_set_effects()->rhs;
+                break;
+              }
             case COMPLETE_REPLAY :
               {
                 event_to_check = &inst->as_complete_replay()->rhs;
@@ -2949,6 +2960,10 @@ namespace Legion {
               SetOpSyncEvent *sync = inst->as_set_op_sync_event();
               inv_topo_order[sync->lhs] = topo_order.size();
               topo_order.push_back(sync->lhs);
+              break;
+            }
+          case SET_EFFECTS :
+            {
               break;
             }
           case ASSIGN_FENCE_COMPLETION :
@@ -3189,6 +3204,13 @@ namespace Legion {
               int subst = substs[fill->precondition_idx];
               if (subst >= 0) fill->precondition_idx = (unsigned)subst;
               lhs = fill->lhs;
+              break;
+            }
+          case SET_EFFECTS :
+            {
+              SetEffects *effects = inst->as_set_effects();
+              int subst = substs[effects->rhs];
+              if (subst >= 0) effects->rhs = (unsigned)subst;
               break;
             }
           case SET_OP_SYNC_EVENT :
@@ -3945,6 +3967,24 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void PhysicalTemplate::record_set_effects(Memoizable *memo, ApEvent &rhs)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(memo != NULL);
+      assert(memo->is_memoizing());
+#endif
+      AutoLock tpl_lock(template_lock);
+#ifdef DEBUG_LEGION
+      assert(is_recording());
+#endif
+
+      events.push_back(ApEvent());
+      insert_instruction(new SetEffects(*this, find_trace_local_id(memo),
+            find_event(rhs)));
+    }
+
+    //--------------------------------------------------------------------------
     void PhysicalTemplate::record_complete_replay(Memoizable* memo, ApEvent rhs)
     //--------------------------------------------------------------------------
     {
@@ -4540,6 +4580,49 @@ namespace Legion {
       ss << "events[" << lhs << "] = operations[" << owner
          << "].compute_sync_precondition()    (op kind: "
          << Operation::op_names[operations[owner]->get_memoizable_kind()] 
+         << ")";
+      return ss.str();
+    }
+
+    /////////////////////////////////////////////////////////////
+    // SetEffects
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    SetEffects::SetEffects(PhysicalTemplate& tpl, const TraceLocalID& l,
+                           unsigned r)
+      : Instruction(tpl, l), rhs(r)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(rhs < events.size());
+      assert(operations.find(owner) != operations.end());
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    void SetEffects::execute(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(operations.find(owner) != operations.end());
+      assert(operations.find(owner)->second != NULL);
+#endif
+      Memoizable *memoizable = operations[owner];
+#ifdef DEBUG_LEGION
+      assert(memoizable != NULL);
+#endif
+      memoizable->set_effects_postcondition(events[rhs]);
+    }
+
+    //--------------------------------------------------------------------------
+    std::string SetEffects::to_string(void)
+    //--------------------------------------------------------------------------
+    {
+      std::stringstream ss;
+      ss << "operations[" << owner << "].set_effects_postcondition(events["
+         << rhs << "])    (op kind: "
+         << Operation::op_names[operations[owner]->get_memoizable_kind()]
          << ")";
       return ss.str();
     }
