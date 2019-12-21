@@ -541,7 +541,7 @@ namespace Legion {
       TraceConditionSet(RegionTreeForest *forest);
       virtual ~TraceConditionSet(void);
     public:
-      void make_ready(void);
+      void make_ready(bool postcondition);
     public:
       bool require(Operation *op);
       void ensure(Operation *op);

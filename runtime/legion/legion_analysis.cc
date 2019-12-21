@@ -9675,6 +9675,20 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    FieldMask EquivalenceSet::is_restricted(InstanceView *view)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock eq(eq_lock,1,false/*exclusive*/);
+      FieldMask mask;
+
+      FieldMaskSet<InstanceView>::const_iterator finder =
+        restricted_instances.find(view);
+      if (finder != restricted_instances.end())
+        mask = finder->second;
+      return mask;
+    }
+
+    //--------------------------------------------------------------------------
     void EquivalenceSet::initialize_set(const RegionUsage &usage,
                                         const FieldMask &user_mask,
                                         const bool restricted,
