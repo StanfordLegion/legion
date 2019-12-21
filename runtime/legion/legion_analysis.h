@@ -2190,6 +2190,7 @@ namespace Legion {
       // Analysis methods
       inline bool has_restrictions(const FieldMask &mask) const
         { return !(mask * restricted_fields); }
+      FieldMask is_restricted(InstanceView *view);
       void initialize_set(const RegionUsage &usage,
                           const FieldMask &user_mask,
                           const bool restricted,

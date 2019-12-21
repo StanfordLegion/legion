@@ -65,11 +65,6 @@ do
   cmapper = terralib.includec("optimize_tracing_phase_barriers.h", include_dirs)
 end
 
-task dummy(r : region(ispace(int1d), int))
-where reads writes(r)
-do
-end
-
 task f1(r : region(ispace(int1d), int),
         a : phase_barrier,
         b : phase_barrier)
@@ -110,12 +105,12 @@ where reads writes(r), arrives(a), awaits(b) do
   end
 end
 
+__forbid(__inner)
 task t1(r : region(ispace(int1d), int),
         a : phase_barrier,
         b : phase_barrier)
 where reads writes simultaneous(r)
 do
-  dummy(r)
   __demand(__trace)
   for k = 0, 5 do
     f1(r, a, b)
@@ -128,12 +123,12 @@ do
   end
 end
 
+__forbid(__inner)
 task t2(r : region(ispace(int1d), int),
         a : phase_barrier,
         b : phase_barrier)
 where reads writes simultaneous(r)
 do
-  dummy(r)
   __demand(__trace)
   for k = 0, 5 do
     b = advance(b)

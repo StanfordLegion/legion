@@ -2079,7 +2079,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TraceConditionSet::make_ready(void)
+    void TraceConditionSet::make_ready(bool postcondition)
     //--------------------------------------------------------------------------
     {
       if (cached)
@@ -2100,6 +2100,49 @@ namespace Legion {
           Key key(tid, eq);
           FieldMaskSet <InstanceView> &vset = views_by_regions[key];
           vset.insert(it->first, eit->second);
+        }
+      }
+
+      // Filter out views that overlap with some restricted views
+      if (postcondition)
+      {
+        for (LegionMap<Key,FieldMaskSet<InstanceView> >::aligned::iterator it =
+             views_by_regions.begin(); it != views_by_regions.end(); ++it)
+        {
+          EquivalenceSet *eq = it->first.second;
+          FieldMaskSet<InstanceView> &all_views = it->second;
+          if (!eq->has_restrictions(all_views.get_valid_mask())) continue;
+
+          FieldMaskSet<InstanceView> restricted_views;
+          FieldMask restricted_mask;
+          for (FieldMaskSet<InstanceView>::iterator vit = all_views.begin();
+               vit != all_views.end(); ++vit)
+          {
+            FieldMask restricted = eq->is_restricted(vit->first);
+            FieldMask overlap = restricted & vit->second;
+            if (!!overlap)
+            {
+              restricted_views.insert(vit->first, overlap);
+              restricted_mask |= overlap;
+            }
+          }
+
+          std::vector<InstanceView*> to_delete;
+          for (FieldMaskSet<InstanceView>::iterator vit = all_views.begin();
+               vit != all_views.end(); ++vit)
+          {
+            vit.filter(restricted_mask);
+            if (!vit->second)
+              to_delete.push_back(vit->first);
+          }
+
+          for (std::vector<InstanceView*>::iterator vit = to_delete.begin();
+               vit != to_delete.end(); ++vit)
+            all_views.erase(*vit);
+
+          for (FieldMaskSet<InstanceView>::iterator vit =
+               restricted_views.begin(); vit != restricted_views.end(); ++vit)
+            all_views.insert(vit->first, vit->second);
         }
       }
 
@@ -2420,8 +2463,8 @@ namespace Legion {
     void PhysicalTemplate::generate_conditions(void)
     //--------------------------------------------------------------------------
     {
-      pre.make_ready();
-      post.make_ready();
+      pre.make_ready(false /*postcondition*/);
+      post.make_ready(true /*postcondition*/);
     }
 
     //--------------------------------------------------------------------------
