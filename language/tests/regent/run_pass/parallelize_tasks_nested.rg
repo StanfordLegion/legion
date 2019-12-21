@@ -47,7 +47,6 @@ __demand(__parallel)
 task stencil(r : region(ispace(int2d), fs))
 where reads(r.f), reads writes(r.g)
 do
-  __demand(__openmp)
   for e in r do
     e.g[0].val = 0.5 * (e.f[0] +
                  r[(e + {-2, 0}) % r.bounds].f[0] +
@@ -79,7 +78,7 @@ task test(size : int)
   stencil(primary_region)
   stencil_serial(primary_region)
   for e in primary_region do
-    regentlib.assert(cmath.fabs(e.h - e.g) < 0.000001, "test failed")
+    regentlib.assert(cmath.fabs(e.h[0].val - e.g[0].val) < 0.000001, "test failed")
   end
 end
 
