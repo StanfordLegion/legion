@@ -619,6 +619,13 @@ namespace Legion {
         broadcast_result(subscribers, future_complete, false/*need lock*/);
         subscribers.clear();
       }
+      if (subscription_event.exists())
+      {
+        Runtime::trigger_event(subscription_event);
+        subscription_event = ApUserEvent::NO_AP_USER_EVENT;
+        if (remove_base_resource_ref(RUNTIME_REF))
+          assert(false); // should always hold a reference from caller
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -696,15 +703,15 @@ namespace Legion {
         if (!subscription_event.exists())
         {
           subscription_event = Runtime::create_ap_user_event();
+          // Add a reference to prevent us from being collected
+          // until we get the result of the subscription
+          add_base_resource_ref(RUNTIME_REF);
           if (!is_owner())
           {
 #ifdef DEBUG_LEGION
             assert(!future_complete.exists());
 #endif
             future_complete = subscription_event;
-            // Add a reference to prevent us from being collected
-            // until we get the result of the subscription
-            add_base_resource_ref(RUNTIME_REF);
             // Send a request to the owner node to subscribe
             Serializer rez;
             rez.serialize(did);
@@ -809,26 +816,17 @@ namespace Legion {
             targets.begin(); it != targets.end(); it++)
       {
         if ((*it) == local_space)
+          continue;
+        Serializer rez;
         {
-#ifdef DEBUG_LEGION
-          assert(subscription_event.exists());
-#endif
-          Runtime::trigger_event(subscription_event, complete);
-          subscription_event = ApUserEvent::NO_AP_USER_EVENT;
+          rez.serialize(did);
+          RezCheck z(rez);
+          rez.serialize(result_size);
+          if (result_size > 0)
+            rez.serialize(result,result_size);
+          rez.serialize(complete);
         }
-        else
-        {
-          Serializer rez;
-          {
-            rez.serialize(did);
-            RezCheck z(rez);
-            rez.serialize(result_size);
-            if (result_size > 0)
-              rez.serialize(result,result_size);
-            rez.serialize(complete);
-          }
-          runtime->send_future_result(*it, rez);
-        }
+        runtime->send_future_result(*it, rez);
       }
     }
 
