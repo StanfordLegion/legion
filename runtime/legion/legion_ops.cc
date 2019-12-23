@@ -1524,6 +1524,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void RemoteMemoizable::set_effects_postcondition(ApEvent postcondition)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
     void RemoteMemoizable::complete_replay(ApEvent complete_event)
     //--------------------------------------------------------------------------
     {

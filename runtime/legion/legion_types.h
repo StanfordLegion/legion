@@ -1478,6 +1478,7 @@ namespace Legion {
     class IssueFill;
     class GetOpTermEvent;
     class SetOpSyncEvent;
+    class SetEffects;
     class CompleteReplay;
 
     // region_tree.h

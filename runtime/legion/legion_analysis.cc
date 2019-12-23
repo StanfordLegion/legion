@@ -762,6 +762,31 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void RemoteTraceRecorder::record_set_effects(Memoizable *memo, 
+                                                 ApEvent &rhs)
+    //--------------------------------------------------------------------------
+    {
+      if (local_space != origin_space)
+      {
+        RtUserEvent applied = Runtime::create_rt_user_event();
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(remote_tpl);
+          rez.serialize(REMOTE_TRACE_SET_EFFECTS);
+          rez.serialize(applied);
+          memo->pack_remote_memoizable(rez, origin_space);
+          rez.serialize(rhs);
+        }
+        runtime->send_remote_trace_update(origin_space, rez);
+        AutoLock a_lock(applied_lock);
+        applied_events.insert(applied);
+      }
+      else
+        remote_tpl->record_set_effects(memo, rhs);
+    }
+
+    //--------------------------------------------------------------------------
     void RemoteTraceRecorder::record_complete_replay(Memoizable *memo, 
                                                      ApEvent rhs)
     //--------------------------------------------------------------------------
@@ -1215,6 +1240,18 @@ namespace Legion {
             }
             else
               Runtime::trigger_event(done);
+            break;
+          }
+        case REMOTE_TRACE_SET_EFFECTS:
+          {
+            RtUserEvent applied;
+            derez.deserialize(applied);
+            Memoizable *memo = RemoteMemoizable::unpack_remote_memoizable(derez,
+                                                           NULL/*op*/, runtime);
+            ApEvent postcondition;
+            derez.deserialize(postcondition);
+            tpl->record_set_effects(memo, postcondition);
+            Runtime::trigger_event(applied);
             break;
           }
         case REMOTE_TRACE_COMPLETE_REPLAY:
@@ -9635,6 +9672,20 @@ namespace Legion {
       // If we are the owner then we know this update is stale so ignore it
       if (!is_logical_owner())
         logical_owner_space = new_logical_owner;
+    }
+
+    //--------------------------------------------------------------------------
+    FieldMask EquivalenceSet::is_restricted(InstanceView *view)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock eq(eq_lock,1,false/*exclusive*/);
+      FieldMask mask;
+
+      FieldMaskSet<InstanceView>::const_iterator finder =
+        restricted_instances.find(view);
+      if (finder != restricted_instances.end())
+        mask = finder->second;
+      return mask;
     }
 
     //--------------------------------------------------------------------------

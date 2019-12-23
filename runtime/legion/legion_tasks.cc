@@ -3195,6 +3195,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void SingleTask::set_effects_postcondition(ApEvent postcondition)
+    //--------------------------------------------------------------------------
+    {
+      effects_postconditions.insert(postcondition);
+    }
+
+    //--------------------------------------------------------------------------
     InnerContext* SingleTask::create_implicit_context(void)
     //--------------------------------------------------------------------------
     {
@@ -5224,6 +5231,8 @@ namespace Legion {
           effects_postconditions.insert(done_event);
           done_event = 
             Runtime::merge_events(&trace_info, effects_postconditions);
+          if (is_recording())
+            trace_info.record_set_effects(this, done_event);
         }
         for (unsigned idx = 0; idx < grants.size(); idx++)
           grants[idx].impl->register_operation(done_event);
@@ -5821,6 +5830,10 @@ namespace Legion {
         if (!arrive_barriers.empty())
         {
           ApEvent done_event = get_task_completion();
+          if (effects_postconditions.size() > 0)
+            // done_event is already included in effects_postconditions
+            done_event = Runtime::merge_events(NULL, effects_postconditions);
+
           for (std::vector<PhaseBarrier>::const_iterator it =
                arrive_barriers.begin(); it !=
                arrive_barriers.end(); it++)
@@ -6141,6 +6154,8 @@ namespace Legion {
             TraceInfo(this) : TraceInfo(*remote_trace_info, this);
           effects_condition = 
             Runtime::merge_events(&trace_info, effects_postconditions);
+          if (is_recording())
+            trace_info.record_set_effects(this, effects_condition);
           effects_postconditions.clear();
         }
         // If we mapped remotely we might have a deferred complete mapping
@@ -6570,6 +6585,10 @@ namespace Legion {
             (*it)[idx].set_ready_event(instance_ready_event);
         update_no_access_regions();
         launch_task();
+        ApEvent postcondition = ApEvent::NO_AP_EVENT;
+        if (effects_postconditions.size() > 0)
+          postcondition = Runtime::merge_events(NULL, effects_postconditions);
+        slice_owner->record_child_mapped(RtEvent::NO_RT_EVENT, postcondition);
       }
     }
 
@@ -7719,16 +7738,6 @@ namespace Legion {
             const ApEvent done = 
               Runtime::merge_events(&trace_info, effects_postconditions);
             effects_postconditions.clear();
-            // TODO: Something needs to go here for this to work with tracing
-#if 0
-            if (is_recording())
-            {
-#ifdef DEBUG_LEGION
-              assert((tpl != NULL) && tpl->is_recording());
-#endif
-              tpl->record_trigger_event(to_trigger, done);
-            }
-#endif
             Runtime::trigger_event(to_trigger, done);
           }
           // Don't worry about the else case because that only happens
@@ -9495,7 +9504,6 @@ namespace Legion {
       {
         PointTask *point = points[idx];
         point->replay_analysis();
-        record_child_mapped(RtEvent::NO_RT_EVENT, ApEvent::NO_AP_EVENT);
       }
     }
 

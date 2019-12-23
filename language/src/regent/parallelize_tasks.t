@@ -2385,14 +2385,20 @@ end
 
 local function find_field_accesses(context, accesses)
   return function(node, continuation)
-    if node:is(ast.typed.expr) and
-       std.is_ref(node.expr_type) then
-      if not context:is_centered(node) then
-        accesses:insert(node)
+    if node:is(ast.typed.expr) and std.is_ref(node.expr_type) then
+      local privileged_field_path =
+        std.extract_privileged_prefix(node.expr_type.refers_to_type,
+                                      node.expr_type.field_path)
+      if privileged_field_path == node.expr_type.field_path then
+        if not context:is_centered(node) then
+          accesses:insert(node)
+        end
+        context:push_scope(node.expr_type)
+        continuation(node, true)
+        context:pop_scope()
+      else
+        continuation(node, true)
       end
-      context:push_scope(node.expr_type)
-      continuation(node, true)
-      context:pop_scope()
     else
       continuation(node, true)
     end
