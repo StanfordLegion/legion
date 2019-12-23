@@ -696,15 +696,15 @@ namespace Legion {
         if (!subscription_event.exists())
         {
           subscription_event = Runtime::create_ap_user_event();
-          // Add a reference to prevent us from being collected
-          // until we get the result of the subscription
-          add_base_resource_ref(RUNTIME_REF);
           if (!is_owner())
           {
 #ifdef DEBUG_LEGION
             assert(!future_complete.exists());
 #endif
             future_complete = subscription_event;
+            // Add a reference to prevent us from being collected
+            // until we get the result of the subscription
+            add_base_resource_ref(RUNTIME_REF);
             // Send a request to the owner node to subscribe
             Serializer rez;
             rez.serialize(did);
