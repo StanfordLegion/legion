@@ -718,7 +718,7 @@ function analyze_access.stat_assignment(cx, node)
 
   return node {
     metadata = ast.metadata.Stat {
-      atomic = false,
+      centers = false,
       scalar = false,
     }
   }
@@ -738,11 +738,11 @@ function analyze_access.stat_reduce(cx, node)
   local lhs_scalar = node.lhs:is(ast.typed.expr.ID)
   local rhs_type = std.as_read(node.rhs.expr_type)
   local first = true
-  local atomic = nil
   local scalar = false
   local privilege =
     (reducible_type(lhs_type) and reducible_type(rhs_type) and std.reduces(node.op)) or
     "reads_writes"
+  local centers = (std.is_reduce(privilege) and data.newmap()) or false
   cx:forall_context(function(cx)
     local private, center, region_access =
       analyze_access.expr(cx, node.lhs, privilege)
@@ -755,16 +755,17 @@ function analyze_access.stat_reduce(cx, node)
       if lhs_scalar then
         scalar = not cx:is_local_variable(node.lhs.value)
       end
-      atomic = not private and region_access and std.is_reduce(privilege)
       first = false
+    end
+    if private and region_access and std.is_reduce(privilege) then
+      centers[cx.loop_var] = true
     end
     return private
   end)
 
-  assert(atomic ~= nil)
   return node {
     metadata = ast.metadata.Stat {
-      atomic = atomic and not scalar,
+      centers = centers,
       scalar = scalar,
     }
   }

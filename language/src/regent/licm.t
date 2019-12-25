@@ -239,12 +239,16 @@ end
 
 local licm = {}
 
-function licm.entry(loop_var, inner_loop)
-  assert(inner_loop:is(ast.typed.stat.ForNum))
-  local cx = context.new_loop_scope(loop_var)
-  check_invariant.block(cx, inner_loop.block)
-  inner_loop = hoist_region_accesses(cx, inner_loop)
-  return inner_loop
+function licm.entry(loop_var, block)
+  if #block.stats == 1 and block.stats[1]:is(ast.typed.stat.ForNum) then
+    local inner_loop = block.stats[1]
+    local cx = context.new_loop_scope(loop_var)
+    check_invariant.block(cx, inner_loop.block)
+    inner_loop = hoist_region_accesses(cx, inner_loop)
+    return block { stats = terralib.newlist({ inner_loop }) }
+  else
+    return block
+  end
 end
 
 return licm

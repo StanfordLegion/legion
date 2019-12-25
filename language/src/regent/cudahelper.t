@@ -12,6 +12,7 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
+local ast = require("regent/ast")
 local base = require("regent/std_base")
 local config = require("regent/config").args()
 local data = require("common/data")
@@ -380,10 +381,6 @@ function cudahelper.get_num_thread_y()
   return NUM_THREAD_Y
 end
 
-function cudahelper.get_tid_y()
-  return `(tid_y())
-end
-
 -- Slow atomic operation implementations (copied and modified from Ebb)
 local terra cas_uint64(address : &uint64, compare : uint64, value : uint64)
   return terralib.asm(terralib.types.uint64,
@@ -446,7 +443,7 @@ end
 -- ## Code generation for scalar reduction
 -- #################
 
-function cudahelper.compute_reduction_buffer_size(node, reductions)
+function cudahelper.compute_reduction_buffer_size(cx, node, reductions)
   local size = 0
   for k, v in pairs(reductions) do
     if size ~= 0 then
@@ -462,6 +459,7 @@ function cudahelper.compute_reduction_buffer_size(node, reductions)
     end
     size = size + THREAD_BLOCK_SIZE * sizeof(k.type)
   end
+  size = size + cx:compute_reduction_buffer_size()
   return size
 end
 
@@ -530,8 +528,8 @@ cudahelper.generate_buffer_reduction_kernel = terralib.memoize(function(type, op
   return kernel_id
 end)
 
-function cudahelper.generate_reduction_preamble(reductions)
-  local preamble = quote end
+function cudahelper.generate_reduction_preamble(cx, reductions)
+  local preamble = terralib.newlist()
   local device_ptrs = terralib.newlist()
   local device_ptrs_map = {}
   local host_ptrs_map = {}
@@ -541,8 +539,7 @@ function cudahelper.generate_reduction_preamble(reductions)
     local host_ptr = terralib.newsymbol(&red_var.type, red_var.displayname)
     local init_kernel_id = cudahelper.generate_buffer_init_kernel(red_var.type, red_op)
     local init_args = terralib.newlist({device_ptr})
-    preamble = quote
-      [preamble];
+    preamble:insert(quote
       var [device_ptr] = [&red_var.type](nil)
       var [host_ptr] = [&red_var.type](nil)
       do
@@ -552,7 +549,7 @@ function cudahelper.generate_reduction_preamble(reductions)
         var buffer = c.legion_deferred_buffer_char_1d_create(bounds, c.GPU_FB_MEM, [&int8](nil))
         [device_ptr] =
           [&red_var.type]([&opaque](c.legion_deferred_buffer_char_1d_ptr(buffer, bounds.lo)))
-        [cudahelper.codegen_kernel_call(init_kernel_id, GLOBAL_RED_BUFFER, init_args, 0, true)]
+        [cudahelper.codegen_kernel_call(cx, init_kernel_id, GLOBAL_RED_BUFFER, init_args, 0, true)]
       end
       do
         var bounds : c.legion_rect_1d_t
@@ -562,7 +559,7 @@ function cudahelper.generate_reduction_preamble(reductions)
         [host_ptr] =
           [&red_var.type]([&opaque](c.legion_deferred_buffer_char_1d_ptr(buffer, bounds.lo)))
       end
-    end
+    end)
     device_ptrs:insert(device_ptr)
     device_ptrs_map[device_ptr] = red_var
     host_ptrs_map[device_ptr] = host_ptr
@@ -610,23 +607,22 @@ function cudahelper.generate_reduction_tree(tid, shared_mem_ptr, red_op)
   return reduction_tree
 end
 
-function cudahelper.generate_reduction_kernel(reductions, device_ptrs_map)
-  local preamble = quote end
-  local postamble = quote end
+function cudahelper.generate_reduction_kernel(cx, reductions, device_ptrs_map)
+  local preamble = terralib.newlist()
+  local postamble = terralib.newlist()
   for device_ptr, red_var in pairs(device_ptrs_map) do
     local red_op = reductions[red_var]
     local shared_mem_ptr =
       cudalib.sharedmemory(red_var.type, THREAD_BLOCK_SIZE)
     local init = base.reduction_op_init[red_op][red_var.type]
-    preamble = quote
-      [preamble]
+    preamble:insert(quote
       var [red_var] = [init]
       [shared_mem_ptr][ tid_x() ] = [red_var]
-    end
+    end)
 
     local tid = terralib.newsymbol(c.size_t, "tid")
     local reduction_tree = cudahelper.generate_reduction_tree(tid, shared_mem_ptr, red_op)
-    postamble = quote
+    postamble:insert(quote
       do
         var [tid] = tid_x()
         var bid = [cudahelper.global_block_id()]
@@ -638,12 +634,16 @@ function cudahelper.generate_reduction_kernel(reductions, device_ptrs_map)
             &[device_ptr][bid % [GLOBAL_RED_BUFFER] ], [shared_mem_ptr][ [tid] ])
         end
       end
-    end
+    end)
   end
+
+  preamble:insertall(cx:generate_preamble())
+  postamble:insertall(cx:generate_postamble())
+
   return preamble, postamble
 end
 
-function cudahelper.generate_reduction_postamble(reductions, device_ptrs_map, host_ptrs_map)
+function cudahelper.generate_reduction_postamble(cx, reductions, device_ptrs_map, host_ptrs_map)
   local postamble = quote end
   for device_ptr, red_var in pairs(device_ptrs_map) do
     local red_op = reductions[red_var]
@@ -653,7 +653,7 @@ function cudahelper.generate_reduction_postamble(reductions, device_ptrs_map, ho
     local shared_mem_size = terralib.sizeof(red_var.type) * THREAD_BLOCK_SIZE
     postamble = quote
       [postamble];
-      [cudahelper.codegen_kernel_call(red_kernel_id, THREAD_BLOCK_SIZE, red_args, shared_mem_size, true)]
+      [cudahelper.codegen_kernel_call(cx, red_kernel_id, THREAD_BLOCK_SIZE, red_args, shared_mem_size, true)]
     end
   end
 
@@ -948,7 +948,7 @@ function cudahelper.generate_prefix_op_kernels(lhs_wr, lhs_rd, rhs, lhs_ptr, rhs
                             num_elmts : uint64,
                             [dir])
     var t = [cudahelper.global_thread_id()]
-    if t >= num_elmts - [BLOCK_SIZE] or t % [BLOCK_SIZE] == [BLOCK_SIZE - 1]then return end
+    if t >= num_elmts - [BLOCK_SIZE] or t % [BLOCK_SIZE] == [BLOCK_SIZE - 1] then return end
 
     var sum_loc = t / [BLOCK_SIZE] * [BLOCK_SIZE] + [BLOCK_SIZE - 1]
     var val_loc = t + [BLOCK_SIZE]
@@ -984,8 +984,8 @@ function cudahelper.generate_prefix_op_kernels(lhs_wr, lhs_rd, rhs, lhs_ptr, rhs
   return prescan_full, prescan_arbitrary, scan_full, scan_arbitrary, postscan_full
 end
 
-function cudahelper.generate_parallel_prefix_op(variant, total, lhs_wr, lhs_rd, rhs, lhs_ptr, rhs_ptr,
-                                                res, idx, dir, op, elem_type)
+function cudahelper.generate_parallel_prefix_op(cx, variant, total, lhs_wr, lhs_rd, rhs, lhs_ptr,
+                                                rhs_ptr, res, idx, dir, op, elem_type)
   local BLOCK_SIZE = THREAD_BLOCK_SIZE * 2
   local SHMEM_SIZE = terralib.sizeof(elem_type) * THREAD_BLOCK_SIZE * 2
 
@@ -1008,27 +1008,27 @@ function cudahelper.generate_parallel_prefix_op(variant, total, lhs_wr, lhs_rd, 
   local prescan_full_args = terralib.newlist()
   prescan_full_args:insertall({lhs_ptr_arg, rhs_ptr_arg, dir})
   local call_prescan_full =
-    cudahelper.codegen_kernel_call(prescan_full_id, num_threads, prescan_full_args, SHMEM_SIZE, true)
+    cudahelper.codegen_kernel_call(cx, prescan_full_id, num_threads, prescan_full_args, SHMEM_SIZE, true)
 
   local prescan_arb_args = terralib.newlist()
   prescan_arb_args:insertall({lhs_ptr_arg, rhs_ptr_arg, num_elmts, num_leaves, dir})
   local call_prescan_arbitrary =
-    cudahelper.codegen_kernel_call(prescan_arb_id, num_threads, prescan_arb_args, SHMEM_SIZE, true)
+    cudahelper.codegen_kernel_call(cx, prescan_arb_id, num_threads, prescan_arb_args, SHMEM_SIZE, true)
 
   local scan_full_args = terralib.newlist()
   scan_full_args:insertall({lhs_ptr_arg, offset, dir})
   local call_scan_full =
-    cudahelper.codegen_kernel_call(scan_full_id, num_threads, scan_full_args, SHMEM_SIZE, true)
+    cudahelper.codegen_kernel_call(cx, scan_full_id, num_threads, scan_full_args, SHMEM_SIZE, true)
 
   local scan_arb_args = terralib.newlist()
   scan_arb_args:insertall({lhs_ptr_arg, num_elmts, num_leaves, offset, dir})
   local call_scan_arbitrary =
-    cudahelper.codegen_kernel_call(scan_arb_id, num_threads, scan_arb_args, SHMEM_SIZE, true)
+    cudahelper.codegen_kernel_call(cx, scan_arb_id, num_threads, scan_arb_args, SHMEM_SIZE, true)
 
   local postscan_full_args = terralib.newlist()
   postscan_full_args:insertall({lhs_ptr, offset, num_elmts, dir})
   local call_postscan_full =
-    cudahelper.codegen_kernel_call(postscan_full_id, num_threads, postscan_full_args, 0, true)
+    cudahelper.codegen_kernel_call(cx, postscan_full_id, num_threads, postscan_full_args, 0, true)
 
   local terra recursive_scan :: {uint64,uint64,uint64,lhs_ptr.type,dir.type} -> {}
 
@@ -1148,7 +1148,7 @@ function cudahelper.generate_parallel_prefix_op(variant, total, lhs_wr, lhs_rd, 
   return launch
 end
 
-function cudahelper.codegen_kernel_call(kernel_id, count, args, shared_mem_size, tight, needs_2d)
+function cudahelper.codegen_kernel_call(cx, kernel_id, count, args, shared_mem_size, tight)
   local setupArguments = terralib.newlist()
 
   local offset = 0
@@ -1170,7 +1170,7 @@ function cudahelper.codegen_kernel_call(kernel_id, count, args, shared_mem_size,
   end
 
   local launch_domain_init = nil
-  if not needs_2d then
+  if not cx.use_2d_launch then
     launch_domain_init = quote
       if [count] <= THREAD_BLOCK_SIZE and tight then
         [block].x, [block].y, [block].z = [count], 1, 1
@@ -1252,6 +1252,196 @@ end
 
 function cudahelper.get_cuda_variant(math_fn)
   return math_fn:override(get_cuda_definition)
+end
+
+-- #####################################
+-- ## CUDA Codegen Context
+-- #################
+
+local context = {}
+
+function context:__index(field)
+  local value = context[field]
+  if value ~= nil then
+    return value
+  end
+  error("context has no field '" .. field .. "' (in lookup)", 2)
+end
+
+function context:__newindex(field, value)
+  error("context has no field '" .. field .. "' (in assignment)", 2)
+end
+
+function context.new(use_2d_launch, offset_2d)
+  local offset_2d = offset_2d or false
+  return setmetatable({
+    use_2d_launch = use_2d_launch,
+    offset_2d = offset_2d,
+    buffered_reductions = data.newmap(),
+  }, context)
+end
+
+function context:reduction_buffer(ref_type, value_type, op, generator)
+  local tbl = self.buffered_reductions[ref_type]
+  if tbl == nil then
+    tbl = {
+      buffer = cudalib.sharedmemory(value_type, THREAD_BLOCK_SIZE),
+      type = value_type,
+      op = op,
+      generator = generator,
+    }
+    self.buffered_reductions[ref_type] = tbl
+  end
+  return tbl
+end
+
+function context:compute_reduction_buffer_size()
+  local size = 0
+  for k, tbl in self.buffered_reductions:items() do
+    size = size + sizeof(tbl.type) * THREAD_BLOCK_SIZE
+  end
+  return size
+end
+
+function context:generate_preamble()
+  local preamble = terralib.newlist()
+
+  if self.use_2d_launch then
+    preamble:insert(quote
+      var [self.offset_2d:getsymbol()] = tid_y()
+    end)
+  end
+
+  for k, tbl in self.buffered_reductions:items() do
+    if tbl.type:isarray() then
+      local init = base.reduction_op_init[tbl.op][tbl.type.type]
+      preamble:insert(quote
+        for k = 0, [tbl.type.N] do
+          [tbl.buffer][ tid_y() + tid_x() * [NUM_THREAD_Y] ][k] = [init]
+        end
+      end)
+    else
+      local init = base.reduction_op_init[tbl.op][tbl.type]
+      preamble:insert(quote
+        [tbl.buffer][ tid_y() + tid_x() * [NUM_THREAD_Y] ] = [init]
+      end)
+    end
+  end
+
+  return preamble
+end
+
+function context:generate_postamble()
+  local postamble = terralib.newlist()
+
+  for k, tbl in self.buffered_reductions:items() do
+    if tbl.type:isarray() then
+      local init = base.reduction_op_init[tbl.op][tbl.type.type]
+      postamble:insert(quote
+        if tid_y() == 0 then
+          var off = tid_x() * [NUM_THREAD_Y]
+          for l = 1, [NUM_THREAD_Y] do
+            for k = 0, [tbl.type.N] do
+              [tbl.buffer][off][k] = 
+                [base.quote_binary_op(tbl.op,
+                  `([tbl.buffer][ [off] ][ [k] ]),
+                  `([tbl.buffer][ [off] + [l] ][ [k] ]))]
+            end
+          end
+          [tbl.generator(`([tbl.buffer][ [off] ]))]
+        end
+      end)
+    else
+      assert(false)
+    end
+  end
+
+  return postamble
+end
+
+local function check_2d_launch_profitable(node)
+  if not base.config["cuda-2d-launch"] or not node:is(ast.typed.stat.ForList) then
+    return false, false
+  end
+  -- TODO: This is a very simple heurstic that does not even extend to 3D case.
+  --       At least we need to check if the inner loop has any centered accesses with
+  --       respect to that loop. In the longer term, we need a better algorithm to detect
+  --       cases where multi-dimensional kernel launches are profitable.
+  if #node.block.stats == 1 and node.block.stats[1]:is(ast.typed.stat.ForNum) then
+    local inner_loop = node.block.stats[1]
+    if inner_loop.metadata and inner_loop.metadata.parallelizable then
+      assert(#inner_loop.values == 2)
+      return true, base.newsymbol(inner_loop.symbol:gettype(), "offset")
+    end
+  end
+  return false, false
+end
+
+function cudahelper.new_kernel_context(node)
+  local use_2d_launch, offset_2d = check_2d_launch_profitable(node)
+  return context.new(use_2d_launch, offset_2d)
+end
+
+function cudahelper.optimize_loop(cx, node, block)
+  if cx.use_2d_launch then
+    local inner_loop = block.stats[1]
+    local index_type = inner_loop.symbol:gettype()
+    -- If the inner loop is eligible to a 2D kernel launch, we change the stride of the inner
+    -- loop accordingly.
+    inner_loop = inner_loop {
+      values = terralib.newlist({
+        ast.typed.expr.Binary {
+          op = "+",
+          lhs = inner_loop.values[1],
+          rhs = ast.typed.expr.ID {
+            value = cx.offset_2d,
+            expr_type = index_type,
+            annotations = ast.default_annotations(),
+            span = inner_loop.span,
+          },
+          expr_type = inner_loop.values[1].expr_type,
+          annotations = ast.default_annotations(),
+          span = inner_loop.span,
+        },
+        inner_loop.values[2],
+        ast.typed.expr.Constant {
+          value = NUM_THREAD_Y,
+          expr_type = index_type,
+          annotations = ast.default_annotations(),
+          span = inner_loop.span,
+        }
+      })
+    }
+    block = block { stats = terralib.newlist({ inner_loop }) }
+  end
+  return block
+end
+
+function cudahelper.generate_region_reduction(cx, loop_symbol, node, rhs, lhs_type, value_type, gen)
+  if cx.use_2d_launch then
+    local needs_buffer = base.types.is_ref(lhs_type) and
+                         (value_type:isprimitive() or value_type:isarray()) and
+                         node.metadata and
+                         node.metadata.centers and
+                         node.metadata.centers:has(loop_symbol)
+    if needs_buffer then
+      local buffer = cx:reduction_buffer(lhs_type, value_type, node.op, gen).buffer
+      local lhs = `([buffer][ tid_y() + tid_x() * [NUM_THREAD_Y] ])
+      if value_type:isarray() then
+        return quote
+          for k = 0, [value_type.N] do
+            [lhs][k] = [base.quote_binary_op(node.op, `([lhs][ [k] ]), `([rhs][ [k] ]))]
+          end
+        end
+      else
+        return quote [lhs] = [base.quote_binary_op(node.op, lhs, rhs)] end
+      end
+    else
+      return gen(rhs)
+    end
+  else
+    return gen(rhs)
+  end
 end
 
 return cudahelper
