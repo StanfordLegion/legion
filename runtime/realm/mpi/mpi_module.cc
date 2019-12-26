@@ -32,12 +32,20 @@
   } \
 } while(0)
 
+#define DISP_OFFSET 0x100
+
 void enqueue_message(int target, int msgid,
                      const void *args, size_t arg_size,
                      const void *payload, size_t payload_size,
                      void *dstptr)
 {
-    Realm::MPI::AMSend(target, msgid, arg_size, payload_size, (const char *) args, (const char *) payload, (MPI_Aint)(dstptr));
+    MPI_Aint disp = (MPI_Aint)dstptr;
+    if (disp) {
+        /* Displacement is shifted by DISP_OFFSET */
+        Realm::MPI::AMSend(target, msgid, arg_size, payload_size, (const char *) args, (const char *) payload, 1, disp - DISP_OFFSET);
+    } else {
+        Realm::MPI::AMSend(target, msgid, arg_size, payload_size, (const char *) args, (const char *) payload, 0, 0);
+    }
 }
 
 namespace Realm {
@@ -270,7 +278,6 @@ namespace Realm {
             return 0;
     }
 
-
     ////////////////////////////////////////////////////////////////////////
     //
     // class MPIRemoteMemory
@@ -282,7 +289,7 @@ namespace Realm {
     class MPIRemoteMemory : public RemoteMemory {
       public:
         MPIRemoteMemory(Memory _me, size_t _size, Memory::Kind k,
-    		     MPI_Aint _disp, MPI_Win _win);
+    		    int _rank, MPI_Aint _base, MPI_Win _win);
 
         virtual void get_bytes(off_t offset, void *dst, size_t size);
         virtual void put_bytes(off_t offset, const void *src, size_t size);
@@ -290,36 +297,37 @@ namespace Realm {
         virtual void *get_remote_addr(off_t offset);
 
       protected:
-        MPI_Win win;
         int rank;
-        MPI_Aint disp;
+        MPI_Aint base;
+        MPI_Win win;
     };
 
     MPIRemoteMemory::MPIRemoteMemory(Memory _me, size_t _size,
-                                       Memory::Kind k,
-                                       MPI_Aint _disp, MPI_Win _win)
+                                     Memory::Kind k,
+                                     int _rank, MPI_Aint _base, MPI_Win _win)
         : RemoteMemory(_me, _size, k, MKIND_RDMA)
+        , rank(_rank)
+        , base(_base)
         , win(_win)
-        , disp(_disp)
     {
-        rank = ID(me).memory_owner_node();
     }
 
     void MPIRemoteMemory::get_bytes(off_t offset, void *dst, size_t size)
     {
-        CHECK_MPI( MPI_Get(dst, size, MPI_BYTE, rank, offset, size, MPI_BYTE, win) );
+        CHECK_MPI( MPI_Get(dst, size, MPI_BYTE, rank, base + offset, size, MPI_BYTE, win) );
         CHECK_MPI( MPI_Win_flush(rank, win) );
     }
 
     void MPIRemoteMemory::put_bytes(off_t offset, const void *src, size_t size)
     {
-        CHECK_MPI( MPI_Put(src, size, MPI_BYTE, rank, offset, size, MPI_BYTE, win) );
+        CHECK_MPI( MPI_Put(src, size, MPI_BYTE, rank, base + offset, size, MPI_BYTE, win) );
         CHECK_MPI( MPI_Win_flush(rank, win) );
     }
 
     void *MPIRemoteMemory::get_remote_addr(off_t offset)
     {
-        return (void *) (intptr_t) offset;
+        /* shift by DISP_OFFSET so it is never zero */
+        return (void *) (base + offset + DISP_OFFSET);
     }
 
     ////////////////////////////////////////////////////////////////////////
@@ -656,10 +664,13 @@ namespace Realm {
       // it's some other kind of memory that we pre-registered
       // rdma info should be the pointer in the remote address space
       assert(rdma_info.size() == sizeof(void *));
-      MPI_Aint disp;
-      memcpy(&disp, rdma_info.base(), sizeof(void *));
+      char *base;
+      memcpy(&base, rdma_info.base(), sizeof(void *));
+      // get displacement to the window
+      int rank = ID(m).memory_owner_node();
+      MPI_Aint disp = (MPI_Aint) base - (MPI_Aint) g_am_bases[rank];
 
-      return new MPIRemoteMemory(m, size, kind, disp, g_am_win);
+      return new MPIRemoteMemory(m, size, kind, rank, disp, g_am_win);
     }
   }
   
@@ -672,7 +683,6 @@ namespace Realm {
 							    size_t storage_size)
   {
     assert(storage_size >= sizeof(MPIMessageImpl));
-    /* dest_payload_addr is already displacement */
     MPIMessageImpl *impl = new(storage_base) MPIMessageImpl(target,
 						              msgid,
 							      header_size,

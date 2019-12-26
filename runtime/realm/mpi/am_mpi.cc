@@ -170,10 +170,9 @@ void AMPoll_cancel()
     }
 }
 
-void AMSend(int tgt, int msgid, int header_size, int payload_size, const char *header, const char *payload, MPI_Aint dest)
+void AMSend(int tgt, int msgid, int header_size, int payload_size, const char *header, const char *payload, int has_dest, MPI_Aint dest)
 {
     char buf_send[1024];
-    int n;
     int ret;
 
     struct AM_msg *msg = (struct AM_msg *)(buf_send);
@@ -182,42 +181,7 @@ void AMSend(int tgt, int msgid, int header_size, int payload_size, const char *h
     msg->payload_size = payload_size;
     char *msg_header = msg->stuff;
 
-    if (AM_MSG_HEADER_SIZE + header_size + payload_size < 1024) {
-        msg->type = 0;
-        memcpy(msg_header, header, header_size);
-        if (payload_size > 0) {
-            memcpy(msg_header + header_size, payload, payload_size);
-        }
-        n = AM_MSG_HEADER_SIZE + header_size + payload_size;
-        assert(tgt != node_this);
-        ret = MPI_Send(buf_send, n, MPI_CHAR, tgt, 0x1, MPI_COMM_WORLD);
-        if (ret != MPI_SUCCESS) {
-            fprintf(stderr, "MPI error in [Send(buf_send, n, MPI_CHAR, tgt, 0x1, MPI_COMM_WORLD)]\n");
-            exit(-1);
-        }
-    } else if (!dest) {
-        msg->type = 1;
-        int msg_tag = 0x0;
-        if (thread_id == 0) {
-            thread_id = num_threads.fetch_add_acqrel(1) + 1;
-        }
-        msg_tag = thread_id << 1;
-        memcpy(msg_header, &msg_tag, 4);
-        memcpy(msg_header + 4, header, header_size);
-        n = AM_MSG_HEADER_SIZE + 4 + header_size;
-        assert(tgt != node_this);
-        ret = MPI_Send(buf_send, n, MPI_BYTE, tgt, 0x1, MPI_COMM_WORLD);
-        if (ret != MPI_SUCCESS) {
-            fprintf(stderr, "MPI error in [Send(buf_send, n, MPI_BYTE, tgt, 0x1, MPI_COMM_WORLD)]\n");
-            exit(-1);
-        }
-        assert(tgt != node_this);
-        ret = MPI_Send(payload, payload_size, MPI_BYTE, tgt, msg_tag, MPI_COMM_WORLD);
-        if (ret != MPI_SUCCESS) {
-            fprintf(stderr, "MPI error in [Send(payload, payload_size, MPI_BYTE, tgt, msg_tag, MPI_COMM_WORLD)]\n");
-            exit(-1);
-        }
-    } else {
+    if (has_dest) {
         assert(g_am_win);
         ret = MPI_Put(payload, payload_size, MPI_BYTE, tgt, dest, payload_size, MPI_BYTE, g_am_win);
         if (ret != MPI_SUCCESS) {
@@ -233,11 +197,46 @@ void AMSend(int tgt, int msgid, int header_size, int payload_size, const char *h
         msg->type = 2;
         memcpy(msg_header, &dest, 4);
         memcpy(msg_header + 4, header, header_size);
-        n = AM_MSG_HEADER_SIZE + 4 + header_size;
+        int n = AM_MSG_HEADER_SIZE + 4 + header_size;
         assert(tgt != node_this);
         ret = MPI_Send(buf_send, n, MPI_BYTE, tgt, 0x1, MPI_COMM_WORLD);
         if (ret != MPI_SUCCESS) {
             fprintf(stderr, "MPI error in [Send(buf_send, n, MPI_BYTE, tgt, 0x1, MPI_COMM_WORLD)]\n");
+            exit(-1);
+        }
+    } else if (AM_MSG_HEADER_SIZE + header_size + payload_size < 1024) {
+        msg->type = 0;
+        memcpy(msg_header, header, header_size);
+        if (payload_size > 0) {
+            memcpy(msg_header + header_size, payload, payload_size);
+        }
+        int n = AM_MSG_HEADER_SIZE + header_size + payload_size;
+        assert(tgt != node_this);
+        ret = MPI_Send(buf_send, n, MPI_CHAR, tgt, 0x1, MPI_COMM_WORLD);
+        if (ret != MPI_SUCCESS) {
+            fprintf(stderr, "MPI error in [Send(buf_send, n, MPI_CHAR, tgt, 0x1, MPI_COMM_WORLD)]\n");
+            exit(-1);
+        }
+    } else {
+        msg->type = 1;
+        int msg_tag = 0x0;
+        if (thread_id == 0) {
+            thread_id = num_threads.fetch_add_acqrel(1) + 1;
+        }
+        msg_tag = thread_id << 1;
+        memcpy(msg_header, &msg_tag, 4);
+        memcpy(msg_header + 4, header, header_size);
+        int n = AM_MSG_HEADER_SIZE + 4 + header_size;
+        assert(tgt != node_this);
+        ret = MPI_Send(buf_send, n, MPI_BYTE, tgt, 0x1, MPI_COMM_WORLD);
+        if (ret != MPI_SUCCESS) {
+            fprintf(stderr, "MPI error in [Send(buf_send, n, MPI_BYTE, tgt, 0x1, MPI_COMM_WORLD)]\n");
+            exit(-1);
+        }
+        assert(tgt != node_this);
+        ret = MPI_Send(payload, payload_size, MPI_BYTE, tgt, msg_tag, MPI_COMM_WORLD);
+        if (ret != MPI_SUCCESS) {
+            fprintf(stderr, "MPI error in [Send(payload, payload_size, MPI_BYTE, tgt, msg_tag, MPI_COMM_WORLD)]\n");
             exit(-1);
         }
     }
