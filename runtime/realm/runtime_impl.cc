@@ -156,64 +156,75 @@ namespace Realm {
         sleep(1);
     }
 
+  template <typename TABLE>
+  void show_event_table(std::ostream& os, NodeID nodeid, TABLE& events)
+  {
+    // Iterate over all the events and get their implementations
+    for (unsigned long j = 0; j < events.max_entries(); j++) {
+      if (!events.has_entry(j))
+	continue;
+      GenEventImpl *e = events.lookup_entry(j, nodeid);
+      AutoLock<> a2(e->mutex);
+	
+      // print anything with either local or remote waiters
+      if(e->current_local_waiters.empty() &&
+	 e->future_local_waiters.empty() &&
+	 e->remote_waiters.empty())
+	continue;
+
+      size_t clw_size = 0;
+      for(EventWaiter *pos = e->current_local_waiters.head.next;
+	  pos;
+	  pos = pos->ew_list_link.next)
+	clw_size++;
+      EventImpl::gen_t gen = e->generation.load();
+      os << "Event " << e->me <<": gen=" << gen
+	 << " subscr=" << e->gen_subscribed.load()
+	 << " local=" << clw_size //e->current_local_waiters.size()
+	 << "+" << e->future_local_waiters.size()
+	 << " remote=" << e->remote_waiters.size() << "\n";
+      for(EventWaiter *pos = e->current_local_waiters.head.next;
+	  pos;
+	  pos = pos->ew_list_link.next) {
+	os << "  [" << (gen+1) << "] L:" << pos/*(*it)*/ << " - ";
+	pos/*(*it)*/->print(os);
+	os << "\n";
+      }
+      for(std::map<EventImpl::gen_t, EventWaiter::EventWaiterList>::const_iterator it = e->future_local_waiters.begin();
+	  it != e->future_local_waiters.end();
+	  it++) {
+	for(EventWaiter *pos = it->second.head.next;
+	    pos;
+	    pos = pos->ew_list_link.next) {
+	  os << "  [" << (it->first) << "] L:" << pos/*(*it2)*/ << " - ";
+	  pos/*(*it2)*/->print(os);
+	  os << "\n";
+	}
+      }
+      // for(std::map<Event::gen_t, NodeMask>::const_iterator it = e->remote_waiters.begin();
+      //     it != e->remote_waiters.end();
+      //     it++) {
+      //   fprintf(f, "  [%d] R:", it->first);
+      //   for(int k = 0; k < MAX_NUM_NODES; k++)
+      //     if(it->second.is_set(k))
+      // 	fprintf(f, " %d", k);
+      //   fprintf(f, "\n");
+      // }
+    }
+  }
+
   // not static so that it can be invoked manually from gdb
   void show_event_waiters(std::ostream& os)
   {
     os << "PRINTING ALL PENDING EVENTS:\n";
     for(NodeID i = 0; i <= Network::max_node_id; i++) {
       Node *n = &get_runtime()->nodes[i];
-      // Iterate over all the events and get their implementations
-      for (unsigned long j = 0; j < n->events.max_entries(); j++) {
-	if (!n->events.has_entry(j))
-	  continue;
-	GenEventImpl *e = n->events.lookup_entry(j, i/*node*/);
-	AutoLock<> a2(e->mutex);
-	
-	// print anything with either local or remote waiters
-	if(e->current_local_waiters.empty() &&
-	   e->future_local_waiters.empty() &&
-	   e->remote_waiters.empty())
-	  continue;
 
-	size_t clw_size = 0;
-	for(EventWaiter *pos = e->current_local_waiters.head.next;
-	    pos;
-	    pos = pos->ew_list_link.next)
-	  clw_size++;
-	EventImpl::gen_t gen = e->generation.load();
-	os << "Event " << e->me <<": gen=" << gen
-	   << " subscr=" << e->gen_subscribed.load()
-	   << " local=" << clw_size //e->current_local_waiters.size()
-	   << "+" << e->future_local_waiters.size()
-	   << " remote=" << e->remote_waiters.size() << "\n";
-	for(EventWaiter *pos = e->current_local_waiters.head.next;
-	    pos;
-	    pos = pos->ew_list_link.next) {
-	  os << "  [" << (gen+1) << "] L:" << pos/*(*it)*/ << " - ";
-	  pos/*(*it)*/->print(os);
-	  os << "\n";
-	}
-	for(std::map<EventImpl::gen_t, EventWaiter::EventWaiterList>::const_iterator it = e->future_local_waiters.begin();
-	    it != e->future_local_waiters.end();
-	    it++) {
-	  for(EventWaiter *pos = it->second.head.next;
-	      pos;
-	      pos = pos->ew_list_link.next) {
-	    os << "  [" << (it->first) << "] L:" << pos/*(*it2)*/ << " - ";
-	    pos/*(*it2)*/->print(os);
-	    os << "\n";
-	  }
-	}
-	// for(std::map<Event::gen_t, NodeMask>::const_iterator it = e->remote_waiters.begin();
-	//     it != e->remote_waiters.end();
-	//     it++) {
-	//   fprintf(f, "  [%d] R:", it->first);
-	//   for(int k = 0; k < MAX_NUM_NODES; k++)
-	//     if(it->second.is_set(k))
-	// 	fprintf(f, " %d", k);
-	//   fprintf(f, "\n");
-	// }
-      }
+      if(i == Network::my_node_id)
+	show_event_table(os, i, get_runtime()->local_events);
+      else
+	show_event_table(os, i, n->remote_events);
+
       for (unsigned long j = 0; j < n->barriers.max_entries(); j++) {
 	if (!n->barriers.has_entry(j))
 	  continue;
@@ -1203,7 +1214,7 @@ namespace Realm {
       //  active messages
       {
 	Node& n = nodes[Network::my_node_id];
-	local_event_free_list = new EventTableAllocator::FreeList(n.events, Network::my_node_id);
+	local_event_free_list = new LocalEventTableAllocator::FreeList(local_events, Network::my_node_id);
 	local_barrier_free_list = new BarrierTableAllocator::FreeList(n.barriers, Network::my_node_id);
 	local_reservation_free_list = new ReservationTableAllocator::FreeList(n.reservations, Network::my_node_id);
 	local_proc_group_free_list = new ProcessorGroupTableAllocator::FreeList(n.proc_groups, Network::my_node_id);
@@ -2237,9 +2248,16 @@ namespace Realm {
       ID id(e);
       assert(id.is_event());
 
-      Node *n = &nodes[id.event_creator_node()];
-      GenEventImpl *impl = n->events.lookup_entry(id.event_gen_event_idx(),
-						  id.event_creator_node());
+      GenEventImpl *impl;
+      if(NodeID(id.event_creator_node()) == Network::my_node_id) {
+	// use our shallower local event table
+	impl = local_events.lookup_entry(id.event_gen_event_idx(),
+					 id.event_creator_node());
+      } else {
+	Node *n = &nodes[id.event_creator_node()];
+	impl = n->remote_events.lookup_entry(id.event_gen_event_idx(),
+					     id.event_creator_node());
+      }
       {
 	ID check(impl->me);
 	assert(check.event_creator_node() == id.event_creator_node());

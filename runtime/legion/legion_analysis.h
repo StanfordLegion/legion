@@ -201,6 +201,7 @@ namespace Legion {
                          const std::deque<InstanceSet> &physical_instances) = 0;
       virtual void get_reduction_ready_events(Memoizable *memo,
                                            std::set<ApEvent> &ready_events) = 0;
+      virtual void record_set_effects(Memoizable *memo, ApEvent &rhs) = 0;
       virtual void record_complete_replay(Memoizable *memo, ApEvent rhs) = 0;
     };
 
@@ -222,6 +223,7 @@ namespace Legion {
         REMOTE_TRACE_ISSUE_FILL,
         REMOTE_TRACE_RECORD_OP_VIEW,
         REMOTE_TRACE_SET_OP_SYNC,
+        REMOTE_TRACE_SET_EFFECTS,
         REMOTE_TRACE_RECORD_MAPPER_OUTPUT,
         REMOTE_TRACE_GET_REDUCTION_EVENTS,
         REMOTE_TRACE_COMPLETE_REPLAY,
@@ -309,6 +311,7 @@ namespace Legion {
                           const std::deque<InstanceSet> &physical_instances);
       virtual void get_reduction_ready_events(Memoizable *memo,
                                               std::set<ApEvent> &ready_events);
+      virtual void record_set_effects(Memoizable *memo, ApEvent &rhs);
       virtual void record_complete_replay(Memoizable *memo, ApEvent rhs);
     public:
       static RemoteTraceRecorder* unpack_remote_recorder(Deserializer &derez,
@@ -398,6 +401,11 @@ namespace Legion {
         {
           base_sanity_check();
           rec->get_reduction_ready_events(local, ready_events);
+        }
+      inline void record_set_effects(Memoizable *memo, ApEvent &rhs) const
+        {
+          base_sanity_check();
+          rec->record_set_effects(memo, rhs);
         }
       inline void record_complete_replay(Memoizable *local, ApEvent ready_event)
         {
@@ -2242,6 +2250,7 @@ namespace Legion {
       // Analysis methods
       inline bool has_restrictions(const FieldMask &mask) const
         { return !(mask * restricted_fields); }
+      FieldMask is_restricted(InstanceView *view);
       void initialize_set(const RegionUsage &usage,
                           const FieldMask &user_mask,
                           const bool restricted,
@@ -2468,10 +2477,11 @@ namespace Legion {
       // the smaples per migration count, if it ever exceeds this 
       // then we'll issue a warning
       static const unsigned SAMPLES_PER_MIGRATION_TEST = 64;
-      // How many total samples do we want to remember
-      static const unsigned MIGRATION_MEMORIES = 64;
-      std::vector<AddressSpaceID> user_samples;
-      std::vector<unsigned> user_counts;
+      // How many total epochs we want to remember
+      static const unsigned MIGRATION_EPOCHS = 2;
+      std::vector<std::pair<AddressSpaceID,unsigned> > 
+        user_samples[MIGRATION_EPOCHS];
+      unsigned migration_index;
       unsigned sample_count;
       // Prevent migration while there are still analyses traversing the set
       unsigned pending_analyses;

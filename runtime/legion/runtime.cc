@@ -673,6 +673,13 @@ namespace Legion {
         broadcast_result(subscribers, future_complete, false/*need lock*/);
         subscribers.clear();
       }
+      if (subscription_event.exists())
+      {
+        Runtime::trigger_event(subscription_event);
+        subscription_event = ApUserEvent::NO_AP_USER_EVENT;
+        if (remove_base_resource_ref(RUNTIME_REF))
+          assert(false); // should always hold a reference from caller
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -910,31 +917,17 @@ namespace Legion {
             targets.begin(); it != targets.end(); it++)
       {
         if ((*it) == local_space)
+          continue;
+        Serializer rez;
         {
-#ifdef DEBUG_LEGION
-          assert(subscription_event.exists() || subscription_internal.exists());
-#endif
-          if (subscription_event.exists())
-          {
-            Runtime::trigger_event(subscription_event, complete);
-            subscription_event = ApUserEvent::NO_AP_USER_EVENT;
-          }
-          if (subscription_internal.exists())
-            Runtime::trigger_event(subscription_internal);
+          rez.serialize(did);
+          RezCheck z(rez);
+          rez.serialize(result_size);
+          if (result_size > 0)
+            rez.serialize(result,result_size);
+          rez.serialize(complete);
         }
-        else
-        {
-          Serializer rez;
-          {
-            rez.serialize(did);
-            RezCheck z(rez);
-            rez.serialize(result_size);
-            if (result_size > 0)
-              rez.serialize(result,result_size);
-            rez.serialize(complete);
-          }
-          runtime->send_future_result(*it, rez);
-        }
+        runtime->send_future_result(*it, rez);
       }
     }
 

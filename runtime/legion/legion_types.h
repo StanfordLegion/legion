@@ -1664,6 +1664,7 @@ namespace Legion {
     class IssueFill;
     class GetOpTermEvent;
     class SetOpSyncEvent;
+    class SetEffects;
     class CompleteReplay;
     class BarrierArrival;
     class BarrierAdvance;
