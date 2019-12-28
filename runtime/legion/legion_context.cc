@@ -4836,6 +4836,7 @@ namespace Legion {
                           "'predicate_false_future' fields of the "
                           "TaskLauncher struct.", impl->get_name(), 
                           get_task_name(), get_unique_id())
+          result->set_result(NULL, 0, false/*own*/);
         }
         return Future(result);
       }
@@ -4925,7 +4926,10 @@ namespace Legion {
           // Just initialize all the futures
           for (Domain::DomainPointIterator itr(launcher.launch_domain); 
                 itr; itr++)
-            result->get_future(itr.p, true/*internal*/);
+          {
+            Future f = result->get_future(itr.p, true/*internal*/);
+            f.impl->set_result(NULL, 0, false/*own*/);
+          }
         }
         else
         {
@@ -5002,6 +5006,7 @@ namespace Legion {
                           "'predicate_false_future' fields of the "
                           "IndexTaskLauncher struct.", impl->get_name(), 
                           get_task_name(), get_unique_id())
+          result->set_result(NULL, 0, false/*own*/);
         }
         return Future(result);
       }
@@ -11677,6 +11682,7 @@ namespace Legion {
                           "'predicate_false_future' fields of the "
                           "TaskLauncher struct.", impl->get_name(), 
                           get_task_name(), get_unique_id())
+          result->set_result(NULL, 0, false/*own*/);
         }
         return Future(result);
       }
@@ -11865,6 +11871,7 @@ namespace Legion {
                           "'predicate_false_future' fields of the "
                           "IndexTaskLauncher struct.", impl->get_name(), 
                           get_task_name(), get_unique_id())
+          result->set_result(NULL, 0, false/*own*/);
         }
         return Future(result);
       }

@@ -2809,7 +2809,7 @@ namespace Realm {
 	for(std::set<int>::const_iterator it = fields_to_merge.begin();
 	    it != fields_to_merge.end();
 	    ++it) {
-	  log_dma.print() << "merging field " << *it;
+	  //log_dma.print() << "merging field " << *it;
 	  OffsetsAndSize oas;
 	  oas.src_field_id = srcs[*it].field_id;
 	  oas.dst_field_id = dsts[*it].field_id;

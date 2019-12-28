@@ -1348,6 +1348,12 @@ namespace Legion {
       PartitionNode *parent_node = get_node(parent);
       IndexSpaceNode *color_space = parent_node->row_source->color_space;
       LegionColor color = color_space->linearize_color(realm_color, type_tag);
+      if (!color_space->contains_point(realm_color, type_tag))
+        REPORT_LEGION_ERROR(ERROR_INVALID_INDEX_SPACE_COLOR,
+                            "Invalid color space color for child %lld of "
+                            "logical partition (%d,%d,%d)", color,
+                            parent.index_partition.id, parent.field_space.id,
+                            parent.tree_id)
       IndexSpaceNode *index_node = parent_node->row_source->get_child(color);
       LogicalRegion result(parent.tree_id, index_node->handle,
                            parent.field_space);
@@ -8293,6 +8299,7 @@ namespace Legion {
         if (finder != color_map.end())
           return finder->second;
       }
+      // TODO: Remove this check here, it is not precise
       if (!color_space->contains_color(c, false/*report error*/))
         REPORT_LEGION_ERROR(ERROR_INVALID_INDEX_SPACE_COLOR,
                             "Invalid color space color for child %lld "
