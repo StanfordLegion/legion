@@ -673,6 +673,13 @@ namespace Legion {
         broadcast_result(subscribers, future_complete, false/*need lock*/);
         subscribers.clear();
       }
+      if (subscription_internal.exists())
+      {
+        Runtime::trigger_event(subscription_internal);
+        if (!subscription_event.exists() && 
+            remove_base_resource_ref(RUNTIME_REF))
+          assert(false); // should always hold reference from caller
+      }
       if (subscription_event.exists())
       {
         Runtime::trigger_event(subscription_event);
