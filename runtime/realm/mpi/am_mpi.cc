@@ -19,6 +19,7 @@
 static MPI_Win g_am_win = MPI_WIN_NULL;
 static void *g_am_base = NULL;
 static __thread int thread_id = 0;
+static __thread int am_seq = 0;
 static Realm::atomic<unsigned int> num_threads(0);
 static unsigned char buf_recv_list[AM_BUF_COUNT][1024];
 static unsigned char *buf_recv = buf_recv_list[0];
@@ -26,6 +27,7 @@ static MPI_Request req_recv_list[AM_BUF_COUNT];
 static int n_am_mult_recv = 5;
 static int node_size;
 static int node_this;
+static MPI_Comm comm_medium;
 
 namespace Realm {
 namespace MPI {
@@ -35,6 +37,9 @@ namespace MPI {
 
 void AM_Init(int *p_node_this, int *p_node_size)
 {
+    char *s;
+    int ret;
+
     int is_initialized;
     MPI_Initialized(&is_initialized);
     if (is_initialized) {
@@ -50,6 +55,19 @@ void AM_Init(int *p_node_this, int *p_node_size)
     MPI_Comm_rank(MPI_COMM_WORLD, &node_this);
     *p_node_size = node_size;
     *p_node_this = node_this;
+
+    s = getenv("AM_MULT_RECV");
+    if (s) {
+        n_am_mult_recv = atoi(s);
+    }
+    for (int  i = 0; i<n_am_mult_recv; i++) {
+        ret = MPI_Irecv(buf_recv_list[i], 1024, MPI_CHAR, MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &req_recv_list[i]);
+        if (ret != MPI_SUCCESS) {
+            fprintf(stderr, "MPI error in [Irecv(buf_recv_list[i], 1024, MPI_CHAR, MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &req_recv_list[i])]\n");
+            exit(-1);
+        }
+    }
+    MPI_Comm_dup(MPI_COMM_WORLD, &comm_medium);
 }
 
 void AM_Finalize()
@@ -77,6 +95,11 @@ void AM_Finalize()
     }
 
     AMPoll_cancel();
+    ret = MPI_Comm_free(&comm_medium);
+    if (ret != MPI_SUCCESS) {
+        fprintf(stderr, "MPI error in [Comm_free(&comm_medium)]\n");
+        exit(-1);
+    }
 
     MPI_Finalize();
 }
@@ -89,7 +112,6 @@ void AM_init_long_messages(MPI_Win win, void *am_base)
 
 void AMPoll()
 {
-    int i_got;
     int ret;
     struct AM_msg *msg;
     int tn_src;
@@ -97,7 +119,7 @@ void AMPoll()
     while (1) {
         int got_am;
         MPI_Status status;
-        i_got = -1;
+        int i_got = -1;
         ret = MPI_Testany(n_am_mult_recv, req_recv_list, &i_got, &got_am, &status);
         if (ret != MPI_SUCCESS) {
             fprintf(stderr, "MPI error in [Testany(n_am_mult_recv, req_recv_list, &i_got, &got_am, &status)]\n");
@@ -107,62 +129,48 @@ void AMPoll()
             break;
         }
         buf_recv = buf_recv_list[i_got];
-
         msg = (struct AM_msg *) buf_recv;
+
         tn_src = status.MPI_SOURCE;
 
         char *header;
         char *payload;
-        bool need_free = false;
+        int payload_type = 0;
         if (msg->type == 0) {
             header = msg->stuff;
             payload = msg->stuff + msg->header_size;
         } else if (msg->type == 1) {
-            int msg_tag = *(int *)(msg->stuff);
-            header = msg->stuff + sizeof(int);
+            header = msg->stuff + 4;
+
+            int msg_tag = *(int32_t *)(msg->stuff);
             payload = (char *) malloc(msg->payload_size);
-            need_free = true;
-            ret = MPI_Recv(payload, msg->payload_size, MPI_BYTE, tn_src, msg_tag, MPI_COMM_WORLD, &status);
+            payload_type = 1;    // need_free;
+            ret = MPI_Recv(payload, msg->payload_size, MPI_BYTE, tn_src, msg_tag, comm_medium, &status);
             if (ret != MPI_SUCCESS) {
-                fprintf(stderr, "MPI error in [Recv(payload, msg->payload_size, MPI_BYTE, tn_src, msg_tag, MPI_COMM_WORLD, &status)]\n");
+                fprintf(stderr, "MPI error in [Recv(payload, msg->payload_size, MPI_BYTE, tn_src, msg_tag, comm_medium, &status)]\n");
                 exit(-1);
             }
         } else if (msg->type == 2) {
-            int offset = *(int *)(msg->stuff);
-            header = msg->stuff + sizeof(int);
+            int offset = *(int32_t *)(msg->stuff);
+            header = msg->stuff + 4;
             payload = (char *) g_am_base + offset;
         }
 
-        Realm::ActiveMessageHandlerTable::MessageHandler handler = Realm::activemsg_handler_table.lookup_message_handler(msg->msgid);
-        (*handler) (tn_src, header, payload, msg->payload_size);
-        if (need_free) {
+        if (msg->msgid != 0x7fff) {
+            Realm::ActiveMessageHandlerTable::MessageHandler handler = Realm::activemsg_handler_table.lookup_message_handler(msg->msgid);
+            (*handler) (tn_src, header, payload, msg->payload_size);
+        }
+
+        if (payload_type == 1) {
             free(payload);
         }
-        ret = MPI_Irecv(buf_recv_list[i_got], 1024, MPI_CHAR, MPI_ANY_SOURCE, 0x1, MPI_COMM_WORLD, &req_recv_list[i_got]);
+        ret = MPI_Irecv(buf_recv_list[i_got], 1024, MPI_CHAR, MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &req_recv_list[i_got]);
         if (ret != MPI_SUCCESS) {
-            fprintf(stderr, "MPI error in [Irecv(buf_recv_list[i_got], 1024, MPI_CHAR, MPI_ANY_SOURCE, 0x1, MPI_COMM_WORLD, &req_recv_list[i_got])]\n");
+            fprintf(stderr, "MPI error in [Irecv(buf_recv_list[i_got], 1024, MPI_CHAR, MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &req_recv_list[i_got])]\n");
             exit(-1);
         }
     }
 
-}
-
-void AMPoll_init()
-{
-    char *s;
-    int ret;
-
-    s = getenv("AM_MULT_RECV");
-    if (s) {
-        n_am_mult_recv = atoi(s);
-    }
-    for (int  i = 0; i<n_am_mult_recv; i++) {
-        ret = MPI_Irecv(buf_recv_list[i], 1024, MPI_CHAR, MPI_ANY_SOURCE, 0x1, MPI_COMM_WORLD, &req_recv_list[i]);
-        if (ret != MPI_SUCCESS) {
-            fprintf(stderr, "MPI error in [Irecv(buf_recv_list[i], 1024, MPI_CHAR, MPI_ANY_SOURCE, 0x1, MPI_COMM_WORLD, &req_recv_list[i])]\n");
-            exit(-1);
-        }
-    }
 }
 
 void AMPoll_cancel()
@@ -203,7 +211,7 @@ void AMSend(int tgt, int msgid, int header_size, int payload_size, const char *h
         }
 
         msg->type = 2;
-        memcpy(msg_header, &dest, 4);
+        *((int32_t *) msg_header) = (int32_t) dest;
         memcpy(msg_header + 4, header, header_size);
         int n = AM_MSG_HEADER_SIZE + 4 + header_size;
         assert(tgt != node_this);
@@ -214,7 +222,9 @@ void AMSend(int tgt, int msgid, int header_size, int payload_size, const char *h
         }
     } else if (AM_MSG_HEADER_SIZE + header_size + payload_size < 1024) {
         msg->type = 0;
-        memcpy(msg_header, header, header_size);
+        if (header_size > 0) {
+            memcpy(msg_header, header, header_size);
+        }
         if (payload_size > 0) {
             memcpy(msg_header + header_size, payload, payload_size);
         }
@@ -231,8 +241,9 @@ void AMSend(int tgt, int msgid, int header_size, int payload_size, const char *h
         if (thread_id == 0) {
             thread_id = num_threads.fetch_add_acqrel(1) + 1;
         }
-        msg_tag = thread_id << 1;
-        memcpy(msg_header, &msg_tag, 4);
+        am_seq = (am_seq + 1) & 0x1f;
+        msg_tag = (thread_id << 10) + am_seq;
+        *((int32_t *) msg_header) = (int32_t) msg_tag;
         memcpy(msg_header + 4, header, header_size);
         int n = AM_MSG_HEADER_SIZE + 4 + header_size;
         assert(tgt != node_this);
@@ -242,11 +253,12 @@ void AMSend(int tgt, int msgid, int header_size, int payload_size, const char *h
             exit(-1);
         }
         assert(tgt != node_this);
-        ret = MPI_Send(payload, payload_size, MPI_BYTE, tgt, msg_tag, MPI_COMM_WORLD);
+        ret = MPI_Send(payload, payload_size, MPI_BYTE, tgt, msg_tag, comm_medium);
         if (ret != MPI_SUCCESS) {
-            fprintf(stderr, "MPI error in [Send(payload, payload_size, MPI_BYTE, tgt, msg_tag, MPI_COMM_WORLD)]\n");
+            fprintf(stderr, "MPI error in [Send(payload, payload_size, MPI_BYTE, tgt, msg_tag, comm_medium)]\n");
             exit(-1);
         }
+
     }
 }
 

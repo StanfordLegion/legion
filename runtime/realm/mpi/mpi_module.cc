@@ -470,7 +470,7 @@ namespace Realm {
         AM_Manager(){
             core_rsrv = NULL;
             p_thread = NULL;
-            shutdown_flag = false;
+            shutdown_flag.store(false);
         }
         ~AM_Manager(void){}
         void init_corereservation(Realm::CoreReservationSet& crs){
@@ -485,16 +485,15 @@ namespace Realm {
             p_thread = Realm::Thread::create_kernel_thread<AM_Manager, &AM_Manager::thread_loop>(this, tlp, *core_rsrv);
         }
         void thread_loop(void){
-            Realm::MPI::AMPoll_init();
             while (true) {
-                if (shutdown_flag) {
+                if (shutdown_flag.load()) {
                     break;
                 }
                 Realm::MPI::AMPoll();
             }
         }
         void stop_threads(){
-            shutdown_flag = true;
+            shutdown_flag.store(true);
             p_thread->join();
             delete p_thread;
             p_thread = NULL;
@@ -502,7 +501,7 @@ namespace Realm {
     protected:
         Realm::CoreReservation *core_rsrv;
         Realm::Thread *p_thread;
-        bool shutdown_flag;
+        Realm::atomic<bool> shutdown_flag;
     };
 
     AM_Manager g_am_manager;
