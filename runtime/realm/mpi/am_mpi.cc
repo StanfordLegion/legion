@@ -35,9 +35,17 @@ namespace MPI {
 
 void AM_Init(int *p_node_this, int *p_node_size)
 {
-    int mpi_thread_model;
-    MPI_Init_thread(NULL, NULL, MPI_THREAD_MULTIPLE, &mpi_thread_model);
-    assert(mpi_thread_model == MPI_THREAD_MULTIPLE);
+    int is_initialized;
+    MPI_Initialized(&is_initialized);
+    if (is_initialized) {
+        int mpi_thread_model;
+        MPI_Query_thread(&mpi_thread_model);
+        assert(mpi_thread_model == MPI_THREAD_MULTIPLE);
+    } else {
+        int mpi_thread_model;
+        MPI_Init_thread(NULL, NULL, MPI_THREAD_MULTIPLE, &mpi_thread_model);
+        assert(mpi_thread_model == MPI_THREAD_MULTIPLE);
+    }
     MPI_Comm_size(MPI_COMM_WORLD, &node_size);
     MPI_Comm_rank(MPI_COMM_WORLD, &node_this);
     *p_node_size = node_size;
