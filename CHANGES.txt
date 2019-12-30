@@ -40,13 +40,13 @@ Version 19.12.0 (December ??, 2019)
         ID and tag
   * Legion
     - A major overhaul of the Legion physical analysis to use an
-      approach based on bounding volume hierarchies. The change is
-      not visible to users, but will likely impact performance. Most
-      programs will get faster; programs that create many partitions
-      frequently on the fly may get slower. The later case will be fixed
-      in an upcoming release.
+        approach based on bounding volume hierarchies. The change is
+        not visible to users, but will likely impact performance. Most
+        programs will get faster; programs that create many partitions
+        frequently on the fly may get slower. The later case will be fixed
+        in an upcoming release.
     - Added support for indirect copy operations such as gather and 
-      scatter onto existing copy launchers
+        scatter onto existing copy launchers
   * Realm
     - `Event::subscribe` allows polling via `Event::has_triggered` to
         (eventually) succeed
@@ -61,6 +61,11 @@ Version 19.12.0 (December ??, 2019)
         Applications now must make sure that index spaces and instance
 	metadata are valid before use.  For details, see:
 	https://github.com/StanfordLegion/legion/issues/465
+
+Version 19.09.1 (September 13, 2019)
+  * Regent
+    - Fix for correctness bug in task inlining.  See:
+        https://github.com/StanfordLegion/legion/issues/582
 
 Version 19.09.0 (September 9, 2019)
   * Regent
