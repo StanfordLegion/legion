@@ -25,6 +25,7 @@ static unsigned char buf_recv_list[AM_BUF_COUNT][1024];
 static unsigned char *buf_recv = buf_recv_list[0];
 static MPI_Request req_recv_list[AM_BUF_COUNT];
 static int n_am_mult_recv = 5;
+static int pre_initialized;
 static int node_size;
 static int node_this;
 static MPI_Comm comm_medium;
@@ -40,9 +41,8 @@ void AM_Init(int *p_node_this, int *p_node_size)
     char *s;
     int ret;
 
-    int is_initialized;
-    MPI_Initialized(&is_initialized);
-    if (is_initialized) {
+    MPI_Initialized(&pre_initialized);
+    if (pre_initialized) {
         int mpi_thread_model;
         MPI_Query_thread(&mpi_thread_model);
         assert(mpi_thread_model == MPI_THREAD_MULTIPLE);
@@ -101,7 +101,9 @@ void AM_Finalize()
         exit(-1);
     }
 
-    MPI_Finalize();
+    if (!pre_initialized) {
+        MPI_Finalize();
+    }
 }
 
 void AM_init_long_messages(MPI_Win win, void *am_base)
