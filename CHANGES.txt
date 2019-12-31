@@ -1,7 +1,7 @@
 This file lists the major changes as they appear in the stable branch.  No
 attempt is made to keep this list accurate for the master branch.
 
-Version 19.12.0 (December ??, 2019)
+Version 19.12.0 (December 31, 2019)
   * Build
     - Both builds (Make and CMake) now generate `legion_defines.h` and
         `realm_defines.h`. By default these headers are generated in
