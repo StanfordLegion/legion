@@ -457,9 +457,9 @@ end
 local function generate_element_reductions(lhs, rhs, op, type, volatile)
   local actions = terralib.newlist()
   if type:isarray() then
-    for k = 0, type.N do
-      local lhs = `([lhs][ [k] ])
-      local rhs = `([rhs][ [k] ])
+    for k = 1, type.N do -- inclusive!
+      local lhs = `([lhs][ [k - 1] ])
+      local rhs = `([rhs][ [k - 1] ])
       actions:insert(generate_element_reduction(lhs, rhs, op, volatile))
     end
   else
