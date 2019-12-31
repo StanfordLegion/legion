@@ -9776,7 +9776,7 @@ end
 function codegen.stat_reduce(cx, node)
   local lhs = codegen.expr(cx, node.lhs)
   local rhs = codegen.expr(cx, node.rhs)
-  local atomic = std.is_ref(node.lhs) and node.metadata and
+  local atomic = std.is_ref(node.lhs.expr_type) and node.metadata and
     -- The 'centers' being false means the value type requires
     -- this reduction to be handled with read-write or overrides
     -- the operator.  This type of reductions are always centered,
