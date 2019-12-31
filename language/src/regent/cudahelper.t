@@ -607,7 +607,7 @@ function cudahelper.generate_reduction_tree(tid, shared_mem_ptr, num_threads, re
       if [tid] < step then
         [generate_element_reductions(`([shared_mem_ptr][ [tid] ]),
                                      `([shared_mem_ptr][ [tid] + [step] ]),
-                                     red_op, type, true)]
+                                     red_op, type, false)]
       end
       barrier()
     end)
@@ -618,7 +618,7 @@ function cudahelper.generate_reduction_tree(tid, shared_mem_ptr, num_threads, re
     unrolled_reductions:insert(quote
       [generate_element_reductions(`([shared_mem_ptr][ [tid] ]),
                                    `([shared_mem_ptr][ [tid] + [step] ]),
-                                   red_op, type, true)]
+                                   red_op, type, false)]
       barrier()
     end)
   end
