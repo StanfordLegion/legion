@@ -106,6 +106,10 @@ variables:
   #GASNETEX_SNAPSHOT_SOURCE_URL: ...
 .mpi: &mpi
   REALM_NETWORKS: "mpi"
+  # mpich-3.2
+  MPIR_CVAR_CH3_NOLOCAL: "1"
+  # mpich-3.3 & above
+  MPIR_CVAR_NOLOCAL: "1"
 .cmake: &cmake
   USE_CMAKE: "1"
 
