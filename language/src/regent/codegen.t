@@ -8825,7 +8825,6 @@ function codegen.stat_for_list(cx, node)
         [body]
         [kernel_postamble]
       end
-      kernel:printpretty(false)
 
       -- Register the kernel function to JIT
       local kernel_id = cx.task_meta:get_cuda_variant():add_cuda_kernel(kernel)
