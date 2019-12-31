@@ -439,6 +439,36 @@ function cudahelper.generate_atomic_update(op, typ)
   return atomic_op
 end
 
+local function generate_element_reduction(lhs, rhs, op, volatile)
+  if volatile then
+    return quote
+      do
+        var v = [base.quote_binary_op(op, lhs, rhs)]
+        terralib.attrstore(&[lhs], v, { isvolatile = true })
+      end
+    end
+  else
+    return quote
+      [lhs] = [base.quote_binary_op(op, lhs, rhs)]
+    end
+  end
+end
+
+local function generate_element_reductions(lhs, rhs, op, type, volatile)
+  local actions = terralib.newlist()
+  if type:isarray() then
+    for k = 0, type.N do
+      local lhs = `([lhs][ [k] ])
+      local rhs = `([rhs][ [k] ])
+      actions:insert(generate_element_reduction(lhs, rhs, op, volatile))
+    end
+  else
+    assert(type:isprimitive())
+    actions:insert(generate_element_reduction(lhs, rhs, op, volatile))
+  end
+  return quote [actions] end
+end
+
 -- #####################################
 -- ## Code generation for scalar reduction
 -- #################
@@ -515,7 +545,7 @@ cudahelper.generate_buffer_reduction_kernel = terralib.memoize(function(type, op
     var [tid] = tid_x()
     [shared_mem_ptr][ [tid] ] = [shared_mem_init]
     barrier()
-    [cudahelper.generate_reduction_tree(tid, shared_mem_ptr, op)]
+    [cudahelper.generate_reduction_tree(tid, shared_mem_ptr, op, type)]
     barrier()
     if [tid] == 0 then [result][0] = [shared_mem_ptr][ [tid] ] end
   end
@@ -568,7 +598,7 @@ function cudahelper.generate_reduction_preamble(cx, reductions)
   return device_ptrs, device_ptrs_map, host_ptrs_map, preamble
 end
 
-function cudahelper.generate_reduction_tree(tid, shared_mem_ptr, red_op)
+function cudahelper.generate_reduction_tree(tid, shared_mem_ptr, red_op, type)
   local reduction_tree = quote end
   local step = THREAD_BLOCK_SIZE
   while step > 64 do
@@ -576,11 +606,9 @@ function cudahelper.generate_reduction_tree(tid, shared_mem_ptr, red_op)
     reduction_tree = quote
       [reduction_tree]
       if [tid] < step then
-        var v = [base.quote_binary_op(red_op,
-                                      `([shared_mem_ptr][ [tid] ]),
-                                      `([shared_mem_ptr][ [tid] + [step] ]))]
-
-        terralib.attrstore(&[shared_mem_ptr][ [tid] ], v, { isvolatile = true })
+        [generate_element_reductions(`([shared_mem_ptr][ [tid] ]),
+                                     `([shared_mem_ptr][ [tid] + [step] ]),
+                                     red_op, type, true)]
       end
       barrier()
     end
@@ -589,12 +617,9 @@ function cudahelper.generate_reduction_tree(tid, shared_mem_ptr, red_op)
   while step > 1 do
     step = step / 2
     unrolled_reductions:insert(quote
-      do
-        var v = [base.quote_binary_op(red_op,
-                                      `([shared_mem_ptr][ [tid] ]),
-                                      `([shared_mem_ptr][ [tid] + [step] ]))]
-        terralib.attrstore(&[shared_mem_ptr][ [tid] ], v, { isvolatile = true })
-      end
+      [generate_element_reductions(`([shared_mem_ptr][ [tid] ]),
+                                   `([shared_mem_ptr][ [tid] + [step] ]),
+                                   red_op, type, true)]
       barrier()
     end)
   end
@@ -621,7 +646,8 @@ function cudahelper.generate_reduction_kernel(cx, reductions, device_ptrs_map)
     end)
 
     local tid = terralib.newsymbol(c.size_t, "tid")
-    local reduction_tree = cudahelper.generate_reduction_tree(tid, shared_mem_ptr, red_op)
+    local reduction_tree =
+      cudahelper.generate_reduction_tree(tid, shared_mem_ptr, red_op, red_var.type)
     postamble:insert(quote
       do
         var [tid] = tid_x()
@@ -1341,12 +1367,10 @@ function context:generate_postamble()
         if tid_y() == 0 then
           var off = tid_x() * [NUM_THREAD_Y]
           for l = 1, [NUM_THREAD_Y] do
-            for k = 0, [tbl.type.N] do
-              [tbl.buffer][off][k] = 
-                [base.quote_binary_op(tbl.op,
-                  `([tbl.buffer][ [off] ][ [k] ]),
-                  `([tbl.buffer][ [off] + [l] ][ [k] ]))]
-            end
+            [generate_element_reductions(
+              `([tbl.buffer][ [off] ]),
+              `([tbl.buffer][ [off] + [l] ]),
+              tbl.op, tbl.type, false)]
           end
           [tbl.generator(`([tbl.buffer][ [off] ]))]
         end
@@ -1427,15 +1451,7 @@ function cudahelper.generate_region_reduction(cx, loop_symbol, node, rhs, lhs_ty
     if needs_buffer then
       local buffer = cx:reduction_buffer(lhs_type, value_type, node.op, gen).buffer
       local lhs = `([buffer][ tid_y() + tid_x() * [NUM_THREAD_Y] ])
-      if value_type:isarray() then
-        return quote
-          for k = 0, [value_type.N] do
-            [lhs][k] = [base.quote_binary_op(node.op, `([lhs][ [k] ]), `([rhs][ [k] ]))]
-          end
-        end
-      else
-        return quote [lhs] = [base.quote_binary_op(node.op, lhs, rhs)] end
-      end
+      return generate_element_reductions(lhs, rhs, node.op, value_type, false)
     else
       return gen(rhs)
     end
