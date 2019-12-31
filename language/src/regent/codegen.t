@@ -11089,7 +11089,7 @@ function codegen.top(cx, node)
     std.register_variant(cpu_variant)
 
     -- Mark the variant as OpenMP variant when at least one OpenMP loop exists
-    if std.config["openmp"] then
+    if std.config["openmp"] ~= 0 and openmphelper.check_openmp_available() then
       ast.traverse_node_postorder(
         function(node)
           if node:is(ast.typed.stat) and
