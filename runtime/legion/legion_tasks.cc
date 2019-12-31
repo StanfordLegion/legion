@@ -5159,6 +5159,8 @@ namespace Legion {
             result.impl->set_result(
                 predicate_false_future.impl->get_untyped_result(true,NULL,true),
                 result_size, false/*own*/);
+          else
+            result.impl->set_result(NULL, 0, false/*own*/);
         }
         else
         {
@@ -5177,6 +5179,8 @@ namespace Legion {
         if (predicate_false_size > 0)
           result.impl->set_result(predicate_false_result,
                                   predicate_false_size, false/*own*/);
+        else
+          result.impl->set_result(NULL, 0, false/*own*/);
       }
       // Then clean up this task instance
       complete_mapping();
@@ -7134,6 +7138,8 @@ namespace Legion {
               Future f = future_map.impl->get_future(itr.p);
               if (result_size > 0)
                 f.impl->set_result(result, result_size, false/*own*/);
+              else
+                f.impl->set_result(NULL, 0, false/*own*/);
             }
           }
           else
@@ -7157,6 +7163,8 @@ namespace Legion {
             if (predicate_false_size > 0)
               f.impl->set_result(predicate_false_result,
                                  predicate_false_size, false/*own*/);
+            else
+              f.impl->set_result(NULL, 0, false/*own*/);
           }
         }
       }
@@ -7174,6 +7182,8 @@ namespace Legion {
               reduction_future.impl->set_result(
                 predicate_false_future.impl->get_untyped_result(true,NULL,true),
                 result_size, false/*own*/);
+            else
+              reduction_future.impl->set_result(NULL, 0, false/*own*/);
           }
           else
           {
@@ -7193,6 +7203,8 @@ namespace Legion {
           if (predicate_false_size > 0)
             reduction_future.impl->set_result(predicate_false_result,
                                   predicate_false_size, false/*own*/);
+          else
+            reduction_future.impl->set_result(NULL, 0, false/*own*/);
         }
       }
       // Then clean up this task execution

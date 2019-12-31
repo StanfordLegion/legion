@@ -147,7 +147,7 @@ task main()
 
   -- not optimized: projecting down dimension
   for c in cr do
-    func3(pr[int3d{c.x + c.y, 0, c.z}])
+    func3(pr[int3d{(c.x + c.y) % Nx, 0, c.z}])
   end
 
   -- not optimized: cancelling index field

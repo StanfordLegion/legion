@@ -7829,7 +7829,8 @@ namespace Legion {
           owner, reg_now), set_expr(expr),
         index_space_node(node), logical_owner_space(logical),
         eq_state(is_logical_owner() ? MAPPING_STATE : INVALID_STATE), 
-        subset_exprs(NULL), sample_count(0), pending_analyses(0)
+        subset_exprs(NULL), migration_index(0), sample_count(0), 
+        pending_analyses(0)
     //--------------------------------------------------------------------------
     {
       set_expr->add_expression_reference();
@@ -9381,14 +9382,19 @@ namespace Legion {
         disjoint_partition_refinements.clear();
       }
       // Pack the user samples and counts
-#ifdef DEBUG_LEGION
-      assert(user_samples.size() == user_counts.size());
-#endif
-      rez.serialize<size_t>(user_samples.size());
-      for (unsigned idx = 0; idx < user_samples.size(); idx++)
+      rez.serialize(migration_index);
+      for (unsigned idx = 0; idx < MIGRATION_EPOCHS; idx++)
       {
-        rez.serialize(user_samples[idx]);
-        rez.serialize(user_counts[idx]);
+        std::vector<std::pair<AddressSpaceID,unsigned> > &samples = 
+          user_samples[idx];
+        rez.serialize<size_t>(samples.size());
+        for (std::vector<std::pair<AddressSpaceID,unsigned> >::const_iterator
+              it = samples.begin(); it != samples.end(); it++)
+        {
+          rez.serialize(it->first);
+          rez.serialize(it->second);
+        }
+        samples.clear();
       }
       if (late_references != NULL)
       {
@@ -9557,16 +9563,21 @@ namespace Legion {
         derez.deserialize(mask);
         disjoint_partition_refinements.insert(dis, mask);
       }
-      size_t num_samples;
-      derez.deserialize(num_samples);
-      if (num_samples > 0)
+      derez.deserialize(migration_index);
+      for (unsigned idx1 = 0; idx1 < MIGRATION_EPOCHS; idx1++)
       {
-        user_samples.resize(num_samples);
-        user_counts.resize(num_samples);
-        for (unsigned idx = 0; idx < num_samples; idx++)
+        size_t num_samples;
+        derez.deserialize(num_samples);
+        if (num_samples > 0)
         {
-          derez.deserialize(user_samples[idx]);
-          derez.deserialize(user_counts[idx]);
+          std::vector<std::pair<AddressSpaceID,unsigned> > &samples =
+            user_samples[idx1];
+          samples.resize(num_samples);
+          for (unsigned idx2 = 0; idx2 < num_samples; idx2++)
+          {
+            derez.deserialize(samples[idx2].first);
+            derez.deserialize(samples[idx2].second);
+          }
         }
       }
       // If there are any pending anayses we need to wait for them to finish
@@ -10454,33 +10465,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    static inline unsigned int_sqrt(unsigned n)
-    //--------------------------------------------------------------------------
-    {
-      // Borrowed from https://en.wikipedia.org/wiki/Integer_square_root
-      unsigned shift = 2;
-      unsigned n_shifted = n >> shift;
-      while ((n_shifted != 0) && (n_shifted != n))
-      {
-        shift += 2;
-        n_shifted = n >> shift;
-      }
-      shift = shift - 2;
-      unsigned result = 0;
-      while (true)
-      {
-        result <<= 1;
-        unsigned candidate = result + 1;
-        if ((candidate * candidate) <= (n >> shift))
-          result = candidate;
-        if (shift == 0)
-          break;
-        shift -= 2;
-      }
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
     void EquivalenceSet::check_for_migration(PhysicalAnalysis &analysis,
                                              std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
@@ -10488,24 +10472,24 @@ namespace Legion {
 #ifndef DISABLE_EQUIVALENCE_SET_MIGRATION
 #ifdef DEBUG_LEGION
       assert(is_logical_owner());
-      assert(user_samples.size() == user_counts.size());
 #endif
       const AddressSpaceID eq_source = analysis.original_source;
       // Record our user in the set of previous users
       bool found = false;
-      for (unsigned idx = 0; idx < user_samples.size(); idx++)
+      std::vector<std::pair<AddressSpaceID,unsigned> > &current_samples = 
+        user_samples[migration_index];
+      for (std::vector<std::pair<AddressSpaceID,unsigned> >::iterator it =
+            current_samples.begin(); it != current_samples.end(); it++)
       {
-        if (user_samples[idx] != eq_source)
+        if (it->first != eq_source)
           continue;
         found = true;
-        user_counts[idx]++;
+        it->second++;
         break;
       }
       if (!found)
-      {
-        user_samples.push_back(eq_source);
-        user_counts.push_back(1);
-      }
+        current_samples.push_back(
+            std::pair<AddressSpaceID,unsigned>(eq_source,1));
       // Increase the sample count and if we haven't done enough
       // for a test then we can return and keep going
       if (++sample_count < SAMPLES_PER_MIGRATION_TEST)
@@ -10529,149 +10513,113 @@ namespace Legion {
         return;
       }
       // Issue a warning and don't migrate if we hit this case
-      if (user_samples.size() == SAMPLES_PER_MIGRATION_TEST)
+      if (current_samples.size() == SAMPLES_PER_MIGRATION_TEST)
       {
         REPORT_LEGION_WARNING(LEGION_WARNING_LARGE_EQUIVALENCE_SET_NODE_USAGE,
             "Internal runtime performance warning: equivalence set %lld has "
             "%zd different users which is the same as the sampling rate of "
             "%d. Please report this application use case to the Legion "
-            "developers mailing list.", did, user_samples.size(),
+            "developers mailing list.", did, current_samples.size(),
             SAMPLES_PER_MIGRATION_TEST)
         // Reset the data structures for the next run
-        user_samples.clear();
-        user_counts.clear();
+        current_samples.clear();
         sample_count = 0;
         return;
       }
+      // Sort the current samples so that they are in order
+#if MIGRATION_EPOCHS > 1
+      if (current_samples.size() > 1)
+        std::sort(current_samples.begin(), current_samples.end());
+#endif
+      // Increment this for the next pass
+      migration_index = (migration_index + 1) % MIGRATION_EPOCHS;
       // Don't do any migrations if we have any pending refinements
       // or we have outstanding analyses that prevent it for now
       if (!pending_refinements.empty() || !!refining_fields || 
           (pending_analyses > 0))
       {
         // Reset the data structures for the next run
-        user_samples.clear();
-        user_counts.clear();
         sample_count = 0;
+        user_samples[migration_index].clear();
         return;
       }
-#ifdef DEBUG_LEGION
-      assert(!user_samples.empty());
+      current_samples = user_samples[migration_index]; 
+#if MIGRATION_EPOCHS > 1
+      // Compute the summary from all the epochs into the epoch
+      // that we are about to clear
+      std::map<AddressSpaceID,unsigned> summary(
+          current_samples.begin(), current_samples.end());
+      for (unsigned idx = 1; idx < MIGRATION_EPOCHS; idx++)
+      {
+        const std::vector<std::pair<AddressSpaceID,unsigned> > 
+          &next_samples[(migration_index + idx) % MIGRATION_EPOCHS];
+        for (std::vector<std::pair<AddressSpaceID,unsigned> >::const_iterator
+              it = next_samples.begin(); it != next_samples.end(); it++)
+        {
+          std::map<AddressSpaceID,unsigned>::iterator finder = 
+            summary.find(it->first);
+          if (finder == summary.end())
+            summary.insert(*it);
+          else
+            finder.second += it->second;
+        }
+      }
+      current_samples.clear();
+      current_samples.insert(current_samples.begin(), 
+                             summary.begin(), summary.end());
 #endif
       AddressSpaceID new_logical_owner = logical_owner_space;
-      if (user_samples.size() > 1)
+      if (current_samples.size() > 1)
       {
-        bool has_logical_owner = false;
+        int logical_owner_count = -1;
         // Figure out which node(s) has/have the most uses 
         // Make sure that the current owner node is sticky
         // if it is tied for the most uses
-        unsigned max = user_counts[0]; 
-        unsigned total_users = max;
-        AddressSpaceID max_user = user_samples[0];
-        for (unsigned idx = 1; idx < user_samples.size(); idx++)
+        unsigned max_count = current_samples[0].second; 
+        AddressSpaceID max_user = current_samples[0].first;
+        for (unsigned idx = 1; idx < current_samples.size(); idx++)
         {
-          const unsigned user_count = user_counts[idx];
-          const AddressSpaceID user = user_samples[idx];
+          const AddressSpaceID user = current_samples[idx].first;
+          const unsigned user_count = current_samples[idx].second;
           if (user == logical_owner_space)
-            has_logical_owner = true;
-          else if (!has_logical_owner)
-            // Only need this statistic if we don't have the logical owner
-            total_users += user_count;
-          if (user_count < max)
+            logical_owner_count = user_count;
+          if (user_count < max_count)
             continue;
           // This is the part where we guarantee stickiness
-          if ((user_count == max) && (user != logical_owner_space))
+          if ((user_count == max_count) && (user != logical_owner_space))
             continue;
-          max = user_counts[idx];
-          max_user = user_samples[idx];
+          max_count = user_count;
+          max_user = user;
         }
-        // If the max_user is different than the current owner do the
-        // analysis to see if we can to change the analysis
-        if (max_user != logical_owner_space)
+        if (logical_owner_count > 0)
         {
-          if (has_logical_owner)
+          if (logical_owner_space != max_user)
           {
-            const unsigned long expected_average = 
-              total_users / user_samples.size();
-#if 0
             // If the logical owner is one of the current users then
             // we really better have a good reason to move this 
-            // equivalence set to a new node. Make sure it has at
-            // least double the number of expected users, if it has that
-            // then we compute the estimated standard deviation, if the
-            // max is at least 2 standard deviations from the average then
-            // that means we can move it with ~95% confidence
-            if (max > (2 * expected_average))
-            {
-              unsigned long variance = 0;
-              unsigned long max_diff2 = 0;
-              for (unsigned idx = 0; idx < user_counts.size(); idx++)
-              {
-                const unsigned long diff = user_counts[idx] - expected_average;
-                const unsigned long diff2 = diff * diff;
-                variance += diff2;
-                if (user_samples[idx] == max)
-                  max_diff2 = diff2;
-              }
-              variance /= (user_samples.size() - 1);
-              // Avoid taking the square root by seeing if the max is greater
-              // than two standard deviations (4 variances) away
-              if (max_diff2 >= (4 * variance))
-                new_logical_owner = max_user;
-            }
-#else
-            // If the logical owner is one of the current users then
-            // we really better have a good reason to move this 
-            // equivalence set to a new node. Make sure it has at
-            // least sqrt(N) times the number of expected users,
-            if (max > (2 * expected_average))
-            {
-              const unsigned long sqrt_n = int_sqrt(user_samples.size());
-              // Need + 1 here since int_sqrt rounds down
-              if (max > ((sqrt_n + 1) * expected_average))
-                new_logical_owner = max_user;
-            }
-#endif
-          }
-          else
-            // If we didn't have the current logical owner then
-            // just pick the maximum one
-            new_logical_owner = max_user;
-        }
-        // Now reset the data structure for the next iteration
-        if (total_users >= (MIGRATION_MEMORIES * SAMPLES_PER_MIGRATION_TEST))
-        {
-          // Scale each one by it's ratio, if it's zero then prune it
-          // from the list of active users
-          unsigned output_index = 0;
-          for (unsigned idx = 0; idx < user_samples.size(); idx++)
-          {
-            const unsigned new_count = 
-              ((MIGRATION_MEMORIES-1) * SAMPLES_PER_MIGRATION_TEST * 
-               user_samples[idx]) / total_users;
-            if (new_count == 0)
-              continue;
-            if (output_index != idx)
-              user_samples[output_index] = user_samples[idx];
-            user_counts[output_index++] = new_count;
-          }
-          if (output_index < user_samples.size())
-          {
-            // These will shrink but not necessarily deallocate
-            user_samples.resize(output_index);
-            user_counts.resize(output_index);
+            // equivalence set to a new node. For now the difference 
+            // between max_count and the current owner count has to
+            // be greater than the number of nodes that we see participating
+            // on this equivalence set. This heuristic should avoid 
+            // the ping-pong case even when our sampling rate does not
+            // naturally align with the number of nodes participating
+            if ((max_count - unsigned(logical_owner_count)) > 
+                current_samples.size()) 
+              new_logical_owner = max_user;
           }
         }
+        else
+          // If we didn't have the current logical owner then
+          // just pick the maximum one
+          new_logical_owner = max_user;
       }
       else
-      {
         // If all the requests came from the same node, send it there
-        new_logical_owner = user_samples.front();
-        // Reset our counts for the next iteration
-        if (user_counts[0] >= (MIGRATION_MEMORIES * SAMPLES_PER_MIGRATION_TEST))
-          user_counts[0] -= SAMPLES_PER_MIGRATION_TEST;
-      }
+        new_logical_owner = current_samples[0].first;
       // This always get reset here
       sample_count = 0;
+      // Reset this for the next iteration
+      current_samples.clear();
       // See if we are actually going to do the migration
       if (logical_owner_space == new_logical_owner)
       {
@@ -10714,7 +10662,7 @@ namespace Legion {
       }
       runtime->send_equivalence_set_migration(logical_owner_space, rez);
       applied_events.insert(done_migration);
-#endif
+#endif // DISABLE_EQUIVALENCE_SET MIGRATION
     }
 
     //--------------------------------------------------------------------------
