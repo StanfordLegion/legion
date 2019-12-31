@@ -545,7 +545,7 @@ cudahelper.generate_buffer_reduction_kernel = terralib.memoize(function(type, op
     var [tid] = tid_x()
     [shared_mem_ptr][ [tid] ] = [shared_mem_init]
     barrier()
-    [cudahelper.generate_reduction_tree(tid, shared_mem_ptr, op, type)]
+    [cudahelper.generate_reduction_tree(tid, shared_mem_ptr, THREAD_BLOCK_SIZE, op, type)]
     barrier()
     if [tid] == 0 then [result][0] = [shared_mem_ptr][ [tid] ] end
   end
@@ -598,20 +598,19 @@ function cudahelper.generate_reduction_preamble(cx, reductions)
   return device_ptrs, device_ptrs_map, host_ptrs_map, preamble
 end
 
-function cudahelper.generate_reduction_tree(tid, shared_mem_ptr, red_op, type)
-  local reduction_tree = quote end
-  local step = THREAD_BLOCK_SIZE
+function cudahelper.generate_reduction_tree(tid, shared_mem_ptr, num_threads, red_op, type)
+  local outer_reductions = terralib.newlist()
+  local step = num_threads
   while step > 64 do
     step = step / 2
-    reduction_tree = quote
-      [reduction_tree]
+    outer_reductions:insert(quote
       if [tid] < step then
         [generate_element_reductions(`([shared_mem_ptr][ [tid] ]),
                                      `([shared_mem_ptr][ [tid] + [step] ]),
                                      red_op, type, true)]
       end
       barrier()
-    end
+    end)
   end
   local unrolled_reductions = terralib.newlist()
   while step > 1 do
@@ -623,13 +622,18 @@ function cudahelper.generate_reduction_tree(tid, shared_mem_ptr, red_op, type)
       barrier()
     end)
   end
-  reduction_tree = quote
-    [reduction_tree]
-    if [tid] < 32 then
+  if #outer_reductions > 0 then
+    return quote
+      [outer_reductions]
+      if [tid] < 32 then
+        [unrolled_reductions]
+      end
+    end
+  else
+    return quote
       [unrolled_reductions]
     end
   end
-  return reduction_tree
 end
 
 function cudahelper.generate_reduction_kernel(cx, reductions, device_ptrs_map)
@@ -647,7 +651,7 @@ function cudahelper.generate_reduction_kernel(cx, reductions, device_ptrs_map)
 
     local tid = terralib.newsymbol(c.size_t, "tid")
     local reduction_tree =
-      cudahelper.generate_reduction_tree(tid, shared_mem_ptr, red_op, red_var.type)
+      cudahelper.generate_reduction_tree(tid, shared_mem_ptr, THREAD_BLOCK_SIZE, red_op, red_var.type)
     postamble:insert(quote
       do
         var [tid] = tid_x()
@@ -1361,23 +1365,15 @@ function context:generate_postamble()
   local postamble = terralib.newlist()
 
   for k, tbl in self.buffered_reductions:items() do
-    if tbl.type:isarray() then
-      local init = base.reduction_op_init[tbl.op][tbl.type.type]
-      postamble:insert(quote
-        if tid_y() == 0 then
-          var off = tid_x() * [NUM_THREAD_Y]
-          for l = 1, [NUM_THREAD_Y] do
-            [generate_element_reductions(
-              `([tbl.buffer][ [off] ]),
-              `([tbl.buffer][ [off] + [l] ]),
-              tbl.op, tbl.type, false)]
-          end
-          [tbl.generator(`([tbl.buffer][ [off] ]))]
-        end
-      end)
-    else
-      assert(false)
-    end
+    postamble:insert(quote
+      do
+        var tid = tid_y()
+        var buf = &[tbl.buffer][ tid_x() * [NUM_THREAD_Y] ]
+        barrier()
+        [cudahelper.generate_reduction_tree(tid, buf, NUM_THREAD_Y, tbl.op, tbl.type)]
+        if tid == 0 then [tbl.generator(`(@buf))] end
+      end
+    end)
   end
 
   return postamble
@@ -1450,8 +1446,12 @@ function cudahelper.generate_region_reduction(cx, loop_symbol, node, rhs, lhs_ty
                          node.metadata.centers:has(loop_symbol)
     if needs_buffer then
       local buffer = cx:reduction_buffer(lhs_type, value_type, node.op, gen).buffer
-      local lhs = `([buffer][ tid_y() + tid_x() * [NUM_THREAD_Y] ])
-      return generate_element_reductions(lhs, rhs, node.op, value_type, false)
+      return quote
+        do
+          var idx = tid_y() + tid_x() * [NUM_THREAD_Y]
+          [generate_element_reductions(`([buffer][ [idx] ]), rhs, node.op, value_type, false)]
+        end
+      end
     else
       return gen(rhs)
     end
