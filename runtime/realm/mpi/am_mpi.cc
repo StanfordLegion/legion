@@ -40,7 +40,6 @@ namespace MPI {
 void AM_Init(int *p_node_this, int *p_node_size)
 {
     char *s;
-    int ret;
 
     MPI_Initialized(&pre_initialized);
     if (pre_initialized) {
@@ -62,11 +61,7 @@ void AM_Init(int *p_node_this, int *p_node_size)
         n_am_mult_recv = atoi(s);
     }
     for (int  i = 0; i<n_am_mult_recv; i++) {
-        ret = MPI_Irecv(buf_recv_list[i], 1024, MPI_CHAR, MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &req_recv_list[i]);
-        if (ret != MPI_SUCCESS) {
-            fprintf(stderr, "MPI error in [Irecv(buf_recv_list[i], 1024, MPI_CHAR, MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &req_recv_list[i])]\n");
-            exit(-1);
-        }
+        CHECK_MPI( MPI_Irecv(buf_recv_list[i], 1024, MPI_CHAR, MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &req_recv_list[i]) );
     }
     MPI_Comm_dup(MPI_COMM_WORLD, &comm_medium);
 }
@@ -74,21 +69,12 @@ void AM_Init(int *p_node_this, int *p_node_size)
 void AM_Finalize()
 {
     MPI_Request req_final;
-    int ret;
 
-    ret = MPI_Ibarrier(MPI_COMM_WORLD, &req_final);
-    if (ret != MPI_SUCCESS) {
-        fprintf(stderr, "MPI error in [Ibarrier(MPI_COMM_WORLD, &req_final)]\n");
-        exit(-1);
-    }
+    CHECK_MPI( MPI_Ibarrier(MPI_COMM_WORLD, &req_final) );
     while (1) {
         int is_done;
         MPI_Status status;
-        ret = MPI_Test(&req_final, &is_done, &status);
-        if (ret != MPI_SUCCESS) {
-            fprintf(stderr, "MPI error in [Test(&req_final, &is_done, &status)]\n");
-            exit(-1);
-        }
+        CHECK_MPI( MPI_Test(&req_final, &is_done, &status) );
         if (req_final == MPI_REQUEST_NULL) {
             break;
         }
@@ -96,11 +82,7 @@ void AM_Finalize()
     }
 
     AMPoll_cancel();
-    ret = MPI_Comm_free(&comm_medium);
-    if (ret != MPI_SUCCESS) {
-        fprintf(stderr, "MPI error in [Comm_free(&comm_medium)]\n");
-        exit(-1);
-    }
+    CHECK_MPI( MPI_Comm_free(&comm_medium) );
 
     if (!pre_initialized) {
         MPI_Finalize();
@@ -115,18 +97,13 @@ void AM_init_long_messages(MPI_Win win, void *am_base)
 
 void AMPoll()
 {
-    int ret;
     struct AM_msg *msg;
     int tn_src;
 
     while (1) {
         int got_am;
         MPI_Status status;
-        ret = MPI_Test(&req_recv_list[i_recv_list], &got_am, &status);
-        if (ret != MPI_SUCCESS) {
-            fprintf(stderr, "MPI error in [Test(&req_recv_list[i_recv_list], &got_am, &status)]\n");
-            exit(-1);
-        }
+        CHECK_MPI( MPI_Test(&req_recv_list[i_recv_list], &got_am, &status) );
         if (!got_am) {
             break;
         }
@@ -146,11 +123,7 @@ void AMPoll()
             int msg_tag = *(int32_t *)(msg->stuff);
             payload = (char *) malloc(msg->payload_size);
             payload_type = 1;    // need_free;
-            ret = MPI_Recv(payload, msg->payload_size, MPI_BYTE, tn_src, msg_tag, comm_medium, &status);
-            if (ret != MPI_SUCCESS) {
-                fprintf(stderr, "MPI error in [Recv(payload, msg->payload_size, MPI_BYTE, tn_src, msg_tag, comm_medium, &status)]\n");
-                exit(-1);
-            }
+            CHECK_MPI( MPI_Recv(payload, msg->payload_size, MPI_BYTE, tn_src, msg_tag, comm_medium, &status) );
         } else if (msg->type == 2) {
             int offset = *(int32_t *)(msg->stuff);
             header = msg->stuff + 4;
@@ -165,11 +138,7 @@ void AMPoll()
         if (payload_type == 1) {
             free(payload);
         }
-        ret = MPI_Irecv(buf_recv_list[i_recv_list], 1024, MPI_CHAR, MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &req_recv_list[i_recv_list]);
-        if (ret != MPI_SUCCESS) {
-            fprintf(stderr, "MPI error in [Irecv(buf_recv_list[i_recv_list], 1024, MPI_CHAR, MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &req_recv_list[i_recv_list])]\n");
-            exit(-1);
-        }
+        CHECK_MPI( MPI_Irecv(buf_recv_list[i_recv_list], 1024, MPI_CHAR, MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &req_recv_list[i_recv_list]) );
         i_recv_list = (i_recv_list + 1) % n_am_mult_recv;
         buf_recv = buf_recv_list[i_recv_list];
     }
@@ -178,21 +147,14 @@ void AMPoll()
 
 void AMPoll_cancel()
 {
-    int ret;
-
     for (int  i = 0; i<n_am_mult_recv; i++) {
-        ret = MPI_Cancel(&req_recv_list[i]);
-        if (ret != MPI_SUCCESS) {
-            fprintf(stderr, "MPI error in [Cancel(&req_recv_list[i])]\n");
-            exit(-1);
-        }
+        CHECK_MPI( MPI_Cancel(&req_recv_list[i]) );
     }
 }
 
 void AMSend(int tgt, int msgid, int header_size, int payload_size, const char *header, const char *payload, int has_dest, MPI_Aint dest)
 {
     char buf_send[1024];
-    int ret;
 
     struct AM_msg *msg = (struct AM_msg *)(buf_send);
     msg->msgid = msgid;
@@ -202,27 +164,15 @@ void AMSend(int tgt, int msgid, int header_size, int payload_size, const char *h
 
     if (has_dest) {
         assert(g_am_win);
-        ret = MPI_Put(payload, payload_size, MPI_BYTE, tgt, dest, payload_size, MPI_BYTE, g_am_win);
-        if (ret != MPI_SUCCESS) {
-            fprintf(stderr, "MPI error in [Put(payload, payload_size, MPI_BYTE, tgt, dest, payload_size, MPI_BYTE, g_am_win)]\n");
-            exit(-1);
-        }
-        ret = MPI_Win_flush(tgt, g_am_win);
-        if (ret != MPI_SUCCESS) {
-            fprintf(stderr, "MPI error in [Win_flush(tgt, g_am_win)]\n");
-            exit(-1);
-        }
+        CHECK_MPI( MPI_Put(payload, payload_size, MPI_BYTE, tgt, dest, payload_size, MPI_BYTE, g_am_win) );
+        CHECK_MPI( MPI_Win_flush(tgt, g_am_win) );
 
         msg->type = 2;
         *((int32_t *) msg_header) = (int32_t) dest;
         memcpy(msg_header + 4, header, header_size);
         int n = AM_MSG_HEADER_SIZE + 4 + header_size;
         assert(tgt != node_this);
-        ret = MPI_Send(buf_send, n, MPI_BYTE, tgt, 0x1, MPI_COMM_WORLD);
-        if (ret != MPI_SUCCESS) {
-            fprintf(stderr, "MPI error in [Send(buf_send, n, MPI_BYTE, tgt, 0x1, MPI_COMM_WORLD)]\n");
-            exit(-1);
-        }
+        CHECK_MPI( MPI_Send(buf_send, n, MPI_BYTE, tgt, 0x1, MPI_COMM_WORLD) );
     } else if (AM_MSG_HEADER_SIZE + header_size + payload_size < 1024) {
         msg->type = 0;
         if (header_size > 0) {
@@ -233,11 +183,7 @@ void AMSend(int tgt, int msgid, int header_size, int payload_size, const char *h
         }
         int n = AM_MSG_HEADER_SIZE + header_size + payload_size;
         assert(tgt != node_this);
-        ret = MPI_Send(buf_send, n, MPI_CHAR, tgt, 0x1, MPI_COMM_WORLD);
-        if (ret != MPI_SUCCESS) {
-            fprintf(stderr, "MPI error in [Send(buf_send, n, MPI_CHAR, tgt, 0x1, MPI_COMM_WORLD)]\n");
-            exit(-1);
-        }
+        CHECK_MPI( MPI_Send(buf_send, n, MPI_CHAR, tgt, 0x1, MPI_COMM_WORLD) );
     } else {
         msg->type = 1;
         int msg_tag = 0x0;
@@ -250,17 +196,9 @@ void AMSend(int tgt, int msgid, int header_size, int payload_size, const char *h
         memcpy(msg_header + 4, header, header_size);
         int n = AM_MSG_HEADER_SIZE + 4 + header_size;
         assert(tgt != node_this);
-        ret = MPI_Send(buf_send, n, MPI_BYTE, tgt, 0x1, MPI_COMM_WORLD);
-        if (ret != MPI_SUCCESS) {
-            fprintf(stderr, "MPI error in [Send(buf_send, n, MPI_BYTE, tgt, 0x1, MPI_COMM_WORLD)]\n");
-            exit(-1);
-        }
+        CHECK_MPI( MPI_Send(buf_send, n, MPI_BYTE, tgt, 0x1, MPI_COMM_WORLD) );
         assert(tgt != node_this);
-        ret = MPI_Send(payload, payload_size, MPI_BYTE, tgt, msg_tag, comm_medium);
-        if (ret != MPI_SUCCESS) {
-            fprintf(stderr, "MPI error in [Send(payload, payload_size, MPI_BYTE, tgt, msg_tag, comm_medium)]\n");
-            exit(-1);
-        }
+        CHECK_MPI( MPI_Send(payload, payload_size, MPI_BYTE, tgt, msg_tag, comm_medium) );
 
     }
 }

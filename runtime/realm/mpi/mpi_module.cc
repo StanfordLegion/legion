@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-// MPI-1 network module implementation for Realm
+// MPI network module implementation for Realm
 
 #include "realm/network.h"
 
@@ -23,14 +23,6 @@
 
 #include "realm/runtime_impl.h"
 #include "realm/mem_impl.h"
-
-#define CHECK_MPI(cmd) do { \
-  int ret = (cmd); \
-  if(ret != MPI_SUCCESS) { \
-    fprintf(stderr, "MPI: %s = %d\n", #cmd, ret); \
-    exit(1); \
-  } \
-} while(0)
 
 #define DISP_OFFSET 0x100
 

@@ -18,14 +18,22 @@
 
 #include <cstring>
 #include <cstdlib>
-#include <cstdio>
 #include <mpi.h>
+#include <cstdio>
 #include <cassert>
 #include "realm/atomics.h"
 #include "realm/activemsg.h"
 
 #define AM_BUF_COUNT 128
 
+
+#define CHECK_MPI(cmd) do { \
+  int ret = (cmd); \
+  if(ret != MPI_SUCCESS) { \
+    fprintf(stderr, "MPI: %s = %d\n", #cmd, ret); \
+    exit(1); \
+  } \
+} while(0)
 
 namespace Realm {
 namespace MPI {
