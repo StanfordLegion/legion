@@ -15316,7 +15316,7 @@ namespace Legion {
                       launcher.handle.index_space.get_id(), dims)
                 output_constraint.ordering.push_back(*it);
               }
-              if (output_constraint.ordering.size() != dims)
+              if (int(output_constraint.ordering.size()) != dims)
                 REPORT_LEGION_ERROR(ERROR_ATTACH_HDF5_CONSTRAINT,
                     "Ordering constraint for attach %lld in task %s (UID %lld) "
                     "does not contain all the dimensions required for index "
@@ -15339,6 +15339,7 @@ namespace Legion {
               for (int i = 0; i < dims; i++)
                 output_constraint.ordering.push_back(
                     (DimensionKind)(DIM_X + i)); 
+              output_constraint.ordering.push_back(DIM_F);
             }
             output_constraint.contiguous = true;
             break;
