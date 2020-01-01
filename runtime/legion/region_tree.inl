@@ -3846,7 +3846,7 @@ namespace Legion {
 	for (int j = 0; j < DIM; j++)
 	  field_infos[i].offset[j] = 0;
 #ifdef DEBUG_LEGION
-        assert(dimension_order.ordering.size() == DIM);
+        assert(int(dimension_order.ordering.size()) == (DIM+1));
 #endif
         // Legion ordering constraints are listed from fastest to 
         // slowest like fortran order, hdf5 is the opposite though
