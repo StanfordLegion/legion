@@ -3855,7 +3855,7 @@ namespace Legion {
         // so we want to list dimensions in order from slowest to fastest
         for (unsigned idx = 0; idx < DIM; idx++)
           field_infos[i].dim_order[idx] = 
-            dimension_order.ordering[DIM - 2 - idx];
+            dimension_order.ordering[DIM - 1 - idx];
       }
       ready_event = ApEvent(PhysicalInstance::create_hdf5_instance(result, 
                             file_name, local_space, field_infos,
