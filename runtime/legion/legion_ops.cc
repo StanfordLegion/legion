@@ -15412,6 +15412,7 @@ namespace Legion {
       privilege_path.clear();
       version_info.clear();
       map_applied_conditions.clear();
+      layout_constraint_set = LayoutConstraintSet();
       runtime->free_attach_op(this);
     }
 
