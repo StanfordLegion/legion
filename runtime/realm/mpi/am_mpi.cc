@@ -29,6 +29,7 @@ static int pre_initialized;
 static int node_size;
 static int node_this;
 static MPI_Comm comm_medium;
+int i_recv_list = 0;
 
 namespace Realm {
 namespace MPI {
@@ -121,16 +122,14 @@ void AMPoll()
     while (1) {
         int got_am;
         MPI_Status status;
-        int i_got = -1;
-        ret = MPI_Testany(n_am_mult_recv, req_recv_list, &i_got, &got_am, &status);
+        ret = MPI_Test(&req_recv_list[i_recv_list], &got_am, &status);
         if (ret != MPI_SUCCESS) {
-            fprintf(stderr, "MPI error in [Testany(n_am_mult_recv, req_recv_list, &i_got, &got_am, &status)]\n");
+            fprintf(stderr, "MPI error in [Test(&req_recv_list[i_recv_list], &got_am, &status)]\n");
             exit(-1);
         }
         if (!got_am) {
             break;
         }
-        buf_recv = buf_recv_list[i_got];
         msg = (struct AM_msg *) buf_recv;
 
         tn_src = status.MPI_SOURCE;
@@ -166,11 +165,13 @@ void AMPoll()
         if (payload_type == 1) {
             free(payload);
         }
-        ret = MPI_Irecv(buf_recv_list[i_got], 1024, MPI_CHAR, MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &req_recv_list[i_got]);
+        ret = MPI_Irecv(buf_recv_list[i_recv_list], 1024, MPI_CHAR, MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &req_recv_list[i_recv_list]);
         if (ret != MPI_SUCCESS) {
-            fprintf(stderr, "MPI error in [Irecv(buf_recv_list[i_got], 1024, MPI_CHAR, MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &req_recv_list[i_got])]\n");
+            fprintf(stderr, "MPI error in [Irecv(buf_recv_list[i_recv_list], 1024, MPI_CHAR, MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &req_recv_list[i_recv_list])]\n");
             exit(-1);
         }
+        i_recv_list = (i_recv_list + 1) % n_am_mult_recv;
+        buf_recv = buf_recv_list[i_recv_list];
     }
 
 }
