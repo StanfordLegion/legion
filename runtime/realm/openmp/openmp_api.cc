@@ -241,6 +241,9 @@ namespace Realm {
     kmp_int32 __kmpc_ok_to_fork(ident_t *loc);
     kmp_int32 __kmpc_global_thread_num(ident_t *loc);
 
+    void __kmpc_push_num_threads(ident_t *loc, kmp_int32 global_tid,
+                                 kmp_int32 num_threads);
+
     void __kmpc_fork_call(ident_t *loc, kmp_int32 argc, kmpc_micro microtask, ...);
     void __kmpc_for_static_init_4(ident_t *loc, kmp_int32 global_tid,
 				  kmp_int32 schedtype,
@@ -438,6 +441,17 @@ namespace Realm {
       return 0;
   }
 
+  void __kmpc_push_num_threads(ident_t *loc, kmp_int32 global_tid,
+                               kmp_int32 num_threads)
+  {
+    Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info();
+    if(wi) {
+      wi->app_num_threads = num_threads; // TODO: connect this to something?
+    } else {
+      log_omp.warning() << "__kmpc_push_num_threads(" << num_threads << ") called on non-OpenMP Realm proessor - ignoring";
+    }
+  }
+
   void __kmpc_fork_call(ident_t *loc, kmp_int32 argc, kmpc_micro microtask, ...)
   {
     //printf("kmpc_fork(%p, %d)\n", loc, argc);
@@ -481,8 +495,8 @@ namespace Realm {
     }
 
     std::set<int> worker_ids;
-    // TODO: thread limit comes from where?
-    wi->pool->claim_workers(-1, worker_ids);
+    if(wi->app_num_threads != 1)
+      wi->pool->claim_workers(wi->app_num_threads - 1, worker_ids);
     int act_threads = 1 + worker_ids.size();
 
     ThreadPool::WorkItem *work = new ThreadPool::WorkItem;
