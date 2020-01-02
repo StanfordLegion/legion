@@ -2611,6 +2611,13 @@ namespace Legion {
         field_alignments[it->fid] = it->alignment;
       }
 
+      std::map<FieldID,off_t> offsets;
+      const std::vector<OffsetConstraint> &offset_constraints = 
+        constraints.offset_constraints;
+      for (std::vector<OffsetConstraint>::const_iterator it = 
+            offset_constraints.begin(); it != offset_constraints.end(); it++)
+        offsets[it->fid] = it->offset;
+
       if (ord.ordering.front() == DIM_F)
       {
         // AOS - all field in same group
@@ -2618,12 +2625,16 @@ namespace Legion {
         realm_constraints.field_groups[0].resize(field_set.size());
         for (unsigned idx = 0; idx < field_set.size(); idx++)
         {
+          const FieldID fid = field_set[idx];
 #ifdef DEBUG_LEGION
-          assert(field_alignments.find(field_set[idx]) !=
-                 field_alignments.end());
+          assert(field_alignments.find(fid) != field_alignments.end());
 #endif
-          realm_constraints.field_groups[0][idx].field_id = field_set[idx];
-          realm_constraints.field_groups[0][idx].offset = -1;
+          realm_constraints.field_groups[0][idx].field_id = fid;
+          std::map<FieldID,off_t>::const_iterator finder = offsets.find(fid);
+          if (finder != offsets.end())
+            realm_constraints.field_groups[0][idx].offset = finder->second;
+          else
+            realm_constraints.field_groups[0][idx].offset = -1;
           realm_constraints.field_groups[0][idx].size = field_sizes[idx];
           realm_constraints.field_groups[0][idx].alignment =
             field_alignments[field_set[idx]];
@@ -2635,13 +2646,17 @@ namespace Legion {
         realm_constraints.field_groups.resize(field_set.size());
         for (unsigned idx = 0; idx < field_set.size(); idx++)
         {
+          const FieldID fid = field_set[idx];
 #ifdef DEBUG_LEGION
-          assert(field_alignments.find(field_set[idx]) !=
-                 field_alignments.end());
+          assert(field_alignments.find(fid) != field_alignments.end());
 #endif
           realm_constraints.field_groups[idx].resize(1);
-          realm_constraints.field_groups[idx][0].field_id = field_set[idx];
-          realm_constraints.field_groups[idx][0].offset = -1;
+          realm_constraints.field_groups[idx][0].field_id = fid;
+          std::map<FieldID,off_t>::const_iterator finder = offsets.find(fid);
+          if (finder != offsets.end())
+            realm_constraints.field_groups[idx][0].offset = finder->second;
+          else
+            realm_constraints.field_groups[idx][0].offset = -1;
           realm_constraints.field_groups[idx][0].size = field_sizes[idx];
           realm_constraints.field_groups[idx][0].alignment =
             field_alignments[field_set[idx]];
@@ -2649,7 +2664,6 @@ namespace Legion {
       }
       else // Have to be AOS or SOA for now
         assert(false);
-      // TODO: Next go through and check for any offset constraints for fields
     }
     
   }; // namespace Internal
