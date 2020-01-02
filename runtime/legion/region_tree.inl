@@ -4318,16 +4318,22 @@ namespace Legion {
 				    const std::vector<Realm::FieldID> &field_ids,
                                     const std::vector<size_t> &field_sizes,
                                     const std::vector<const char*> &field_files,
+                                    const OrderingConstraint &dimension_order,
                                     bool read_only, ApEvent &ready_event)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(context->runtime, REALM_CREATE_INSTANCE_CALL);
+#ifdef DEBUG_LEGION
+      assert(int(dimension_order.ordering.size()) == (DIM+1));
+      assert(dimension_order.ordering.back() == DIM_F);
+#endif
       // Have to wait for the index space to be ready if necessary
       Realm::IndexSpace<DIM,T> local_space;
       get_realm_index_space(local_space, true/*tight*/);
       // No profiling for these kinds of instances currently
       Realm::ProfilingRequestSet requests;
       PhysicalInstance result;
+
 #ifdef USE_HDF
       std::vector<PhysicalInstance::HDF5FieldInfo<DIM,T> >
 	field_infos(field_ids.size());
@@ -4338,18 +4344,18 @@ namespace Legion {
 	field_infos[i].dataset_name = field_files[i];
 	for (int j = 0; j < DIM; j++)
 	  field_infos[i].offset[j] = 0;
-	// HDF5 is always C-style layout, so reverse dimensions by default
-	//  to match Legion's default of Fortran layout
-	// TODO: actually use layout constraints here!
-	for (int j = 0; j < DIM; j++)
-	  field_infos[i].dim_order[j] = DIM - 1 - j;
+        // Legion ordering constraints are listed from fastest to 
+        // slowest like fortran order, hdf5 is the opposite though
+        // so we want to list dimensions in order from slowest to fastest
+        for (unsigned idx = 0; idx < DIM; idx++)
+          field_infos[i].dim_order[idx] = 
+            dimension_order.ordering[DIM - 1 - idx];
       }
       ready_event = ApEvent(PhysicalInstance::create_hdf5_instance(result, 
                             file_name, local_space, field_infos,
 		            read_only, requests));
 #else
-      assert(0 && "no HDF5 support");
-      result = PhysicalInstance::NO_INST;
+      assert(false); // should never get here
 #endif
       return result;
     }

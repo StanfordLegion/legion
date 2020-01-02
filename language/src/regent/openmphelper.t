@@ -89,7 +89,7 @@ omp.generate_atomic_update = terralib.memoize(function(op, typ)
       local fun_name = string.format("__atomic_update_%s_%s", op_name, ctype)
       local C = terralib.includecstring(string.format([[
         #include <stdint.h>
-        void %s(%s *address, %s val) {
+        inline void %s(%s *address, %s val) {
           __sync_fetch_and_%s(address, val);
         }
       ]], fun_name, ctype, ctype, FAST_ATOMICS[op]))
@@ -100,7 +100,7 @@ omp.generate_atomic_update = terralib.memoize(function(op, typ)
       local fun_name = string.format("__compare_and_swap_%s_%s", op_name, ctype)
       local C = terralib.includecstring(string.format([[
         #include <stdint.h>
-        %s %s(%s *address, %s old, %s new) {
+        inline %s %s(%s *address, %s old, %s new) {
           return __sync_val_compare_and_swap(address, old, new);
         }
       ]], ctype, fun_name, ctype, ctype, ctype))
@@ -122,7 +122,7 @@ omp.generate_atomic_update = terralib.memoize(function(op, typ)
     local fun_name = string.format("__compare_and_swap_%s_%s", op_name, ctype)
     local C = terralib.includecstring(string.format([[
       #include <stdint.h>
-      %s %s(%s *address, %s old, %s new) {
+      inline %s %s(%s *address, %s old, %s new) {
         return __sync_val_compare_and_swap(address, old, new);
       }
     ]], cas_ctype, fun_name, cas_ctype, cas_ctype, cas_ctype))

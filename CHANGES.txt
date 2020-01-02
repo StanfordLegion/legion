@@ -1,7 +1,7 @@
 This file lists the major changes as they appear in the stable branch.  No
 attempt is made to keep this list accurate for the master branch.
 
-Version 19.12.0 (December ??, 2019)
+Version 19.12.0 (December 31, 2019)
   * Build
     - Both builds (Make and CMake) now generate `legion_defines.h` and
         `realm_defines.h`. By default these headers are generated in
@@ -26,13 +26,16 @@ Version 19.12.0 (December ??, 2019)
         an error if CUDA cannot be enabled (e.g. because the build
         does not support CUDA, or because the machine has no
         GPUs). Omitting this flag will now enable CUDA if it is
-        available (and will not error if it is not available)
+        available (and will not error if it is not available).
+        The behavior of `-fopenmp 1` has changed similarly.
     - The behavior of `__demand(__cuda)` has changed. This will now
         issue an error if a loop is not eligible for the CUDA
         transformation, regardless of whether CUDA is actually
-        available on the current machine or not
+        available on the current machine or not. The behavior of
+        `__demand(__openmp)` has changed similarly.
     - The annotation `__allow(__cuda)` is now permitted, and permits
-        (but does not require) tasks to be optimized with CUDA
+        (but does not require) tasks to be optimized with CUDA.
+    - Experimental support for 2D kernel launch in the CUDA code generation
   * Python
     - Add support for copies
     - Copies and fills now support multiple fields
@@ -40,13 +43,13 @@ Version 19.12.0 (December ??, 2019)
         ID and tag
   * Legion
     - A major overhaul of the Legion physical analysis to use an
-      approach based on bounding volume hierarchies. The change is
-      not visible to users, but will likely impact performance. Most
-      programs will get faster; programs that create many partitions
-      frequently on the fly may get slower. The later case will be fixed
-      in an upcoming release.
+        approach based on bounding volume hierarchies. The change is
+        not visible to users, but will likely impact performance. Most
+        programs will get faster; programs that create many partitions
+        frequently on the fly may get slower. The later case will be fixed
+        in an upcoming release.
     - Added support for indirect copy operations such as gather and 
-      scatter onto existing copy launchers
+        scatter onto existing copy launchers
   * Realm
     - `Event::subscribe` allows polling via `Event::has_triggered` to
         (eventually) succeed
@@ -61,6 +64,11 @@ Version 19.12.0 (December ??, 2019)
         Applications now must make sure that index spaces and instance
 	metadata are valid before use.  For details, see:
 	https://github.com/StanfordLegion/legion/issues/465
+
+Version 19.09.1 (September 13, 2019)
+  * Regent
+    - Fix for correctness bug in task inlining.  See:
+        https://github.com/StanfordLegion/legion/issues/582
 
 Version 19.09.0 (September 9, 2019)
   * Regent

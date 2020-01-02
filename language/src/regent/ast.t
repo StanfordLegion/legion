@@ -595,6 +595,6 @@ ast.typed.top:leaf("TaskParam", {"symbol", "param_type", "future"})
 ast:inner("metadata")
 ast.metadata:leaf("Task", {"reduction", "op"})
 ast.metadata:leaf("Loop", {"parallelizable", "reductions"})
-ast.metadata:leaf("Stat", {"atomic", "scalar"})
+ast.metadata:leaf("Stat", {"centers", "scalar"})
 
 return ast

@@ -19,6 +19,7 @@ local codegen_hooks = require("regent/codegen_hooks")
 local cudahelper = require("regent/cudahelper")
 local data = require("common/data")
 local log = require("common/log")
+local licm = require("regent/licm")
 local openmphelper = require("regent/openmphelper")
 local pretty = require("regent/pretty")
 local report = require("regent/report")
@@ -129,7 +130,9 @@ function context:new_local_scope(divergence, must_epoch, must_epoch_point, break
     regions = self.regions:new_local_scope(),
     lists_of_regions = self.lists_of_regions:new_local_scope(),
     cleanup_items = terralib.newlist(),
-    bounds_checks = self.bounds_checks
+    bounds_checks = self.bounds_checks,
+    codegen_contexts = self.codegen_contexts,
+    loop_symbol = self.loop_symbol,
   }, context)
 end
 
@@ -156,7 +159,9 @@ function context:new_task_scope(expected_return_type, constraints, orderings, le
     regions = symbol_table.new_global_scope({}),
     lists_of_regions = symbol_table.new_global_scope({}),
     cleanup_items = terralib.newlist(),
-    bounds_checks = bounds_checks
+    bounds_checks = bounds_checks,
+    codegen_contexts = data.newmap(),
+    loop_symbol = false
   }, context)
 end
 
@@ -339,6 +344,23 @@ function context:add_region_subregion(region_type, logical_region,
         strides = self:region(parent_region_type).strides,
         root_region_type = self:region(parent_region_type).root_region_type,
       }, region))
+end
+
+function context:add_codegen_context(name, context)
+  self.codegen_contexts[name] = context
+end
+
+function context:get_codegen_context(name)
+  assert(self.codegen_contexts[name] ~= nil)
+  return self.codegen_contexts[name]
+end
+
+function context:has_codegen_context(name)
+  return self.codegen_contexts[name] ~= nil
+end
+
+function context:set_loop_symbol(loop_symbol)
+  self.loop_symbol = loop_symbol
 end
 
 function region:field_type(field_path)
@@ -8595,9 +8617,9 @@ function codegen.stat_for_list(cx, node)
   -- Code generation for the loop body
   local block = node.block
 
-  -- If the loop needs the CUDA code generation, we replace calls to CPU math functions
-  -- with their GPU counterparts.
   if cuda then
+    -- If the loop needs the CUDA code generation, we replace calls to CPU math functions
+    -- with their GPU counterparts.
     block = ast.map_node_postorder(function(node)
       if node:is(ast.typed.expr.Call) then
         local value = node.fn.value
@@ -8611,8 +8633,19 @@ function codegen.stat_for_list(cx, node)
       else
         return node
       end
-    end, node.block)
+    end, block)
+
+    local cuda_cx = cudahelper.new_kernel_context(node)
+    cx:add_codegen_context("cuda", cuda_cx)
+    block = cudahelper.optimize_loop(cuda_cx, node, block)
+    if std.config["cuda-licm"] then
+      block = licm.entry(node.symbol, block)
+    end
   end
+
+  -- If we do either CUDA or OpenMP code generation,
+  -- we remember the loop variable of the loop that we parallelize over
+  if cuda or openmp then cx:set_loop_symbol(node.symbol) end
 
   local fields = index_type.fields
   local indices = terralib.newlist()
@@ -8729,6 +8762,7 @@ function codegen.stat_for_list(cx, node)
         end
       end
     else -- if openmp then
+      local cuda_cx = cx:get_codegen_context("cuda")
       assert(cuda)
       assert(not std.config["bounds-checks"], "bounds checks with CUDA are unsupported")
       local lower_bounds = indices:map(function(symbol)
@@ -8738,13 +8772,13 @@ function codegen.stat_for_list(cx, node)
         return terralib.newsymbol(c.coord_t, "cnt_" .. symbol.id)
       end)
       local args = data.filter(function(arg) return reductions[arg] == nil end, symbols)
-      local shared_mem_size = cudahelper.compute_reduction_buffer_size(node, reductions)
+      local shared_mem_size = cudahelper.compute_reduction_buffer_size(cuda_cx, node, reductions)
       local device_ptrs, device_ptrs_map, host_ptrs_map, host_preamble =
-        cudahelper.generate_reduction_preamble(reductions)
+        cudahelper.generate_reduction_preamble(cuda_cx, reductions)
       local kernel_preamble, kernel_postamble =
-        cudahelper.generate_reduction_kernel(reductions, device_ptrs_map)
+        cudahelper.generate_reduction_kernel(cuda_cx, reductions, device_ptrs_map)
       local host_postamble =
-        cudahelper.generate_reduction_postamble(reductions, device_ptrs_map, host_ptrs_map)
+        cudahelper.generate_reduction_postamble(cuda_cx, reductions, device_ptrs_map, host_ptrs_map)
       args:insertall(lower_bounds)
       args:insertall(counts)
       args:insertall(device_ptrs)
@@ -8796,7 +8830,7 @@ function codegen.stat_for_list(cx, node)
       local kernel_id = cx.task_meta:get_cuda_variant():add_cuda_kernel(kernel)
       local count = terralib.newsymbol(c.size_t, "count")
       local kernel_call =
-        cudahelper.codegen_kernel_call(kernel_id, count, args, shared_mem_size, false)
+        cudahelper.codegen_kernel_call(cuda_cx, kernel_id, count, args, shared_mem_size, false)
 
       local bounds_setup = terralib.newlist()
       bounds_setup:insert(quote var [count] = 1 end)
@@ -8829,10 +8863,9 @@ function codegen.stat_for_list(cx, node)
       [rect_it_step]([rect_it])
     end
     ::[break_label]::
-    [rect_it_destroy]([rect_it]) 
+    [rect_it_destroy]([rect_it])
     [postamble]
   end
-
 end
 
 function codegen.stat_for_list_vectorized(cx, node)
@@ -9740,21 +9773,42 @@ function codegen.stat_assignment(cx, node)
 end
 
 function codegen.stat_reduce(cx, node)
-  local actions = terralib.newlist()
   local lhs = codegen.expr(cx, node.lhs)
   local rhs = codegen.expr(cx, node.rhs)
-  local atomic = node.metadata and node.metadata.atomic
+  local atomic = std.is_ref(node.lhs.expr_type) and node.metadata and
+    -- The 'centers' being false means the value type requires
+    -- this reduction to be handled with read-write or overrides
+    -- the operator.  This type of reductions are always centered,
+    -- enforced by the checker, and thus do not need atomics.
+    node.metadata.centers and
+    not node.metadata.centers:has(cx.loop_symbol)
 
+  local actions = terralib.newlist()
   local rhs_expr = rhs:read(cx, node.rhs.expr_type)
-
   actions:insert(rhs_expr.actions)
-  rhs = values.value(
-    node,
-    expr.just(quote end, rhs_expr.value),
-    std.as_read(node.rhs.expr_type))
 
-  actions:insert(lhs:reduce(cx, rhs, node.op, node.lhs.expr_type, atomic).actions)
+  local lhs_actions = nil
+  if cx:has_codegen_context("cuda") then
+    local cuda_cx = cx:get_codegen_context("cuda")
+    local function generator(rhs_terra)
+      local rhs = values.value(
+        node,
+        expr.just(quote end, rhs_terra),
+        std.as_read(node.rhs.expr_type))
+      return lhs:reduce(cx, rhs, node.op, node.lhs.expr_type, atomic).actions
+    end
+    lhs_actions = cudahelper.generate_region_reduction(cuda_cx, cx.loop_symbol,
+        node, rhs_expr.value, node.lhs.expr_type, std.as_read(node.lhs.expr_type),
+        generator)
+  else
+    rhs = values.value(
+      node,
+      expr.just(quote end, rhs_expr.value),
+      std.as_read(node.rhs.expr_type))
+    lhs_actions = lhs:reduce(cx, rhs, node.op, node.lhs.expr_type, atomic).actions
+  end
 
+  actions:insert(lhs_actions)
   return quote [actions] end
 end
 
@@ -10223,8 +10277,9 @@ local function generate_parallel_prefix_gpu(cx, node)
   local dir = terralib.newsymbol(std.as_read(node.dir.expr_type), "dir")
   local total = terralib.newsymbol(uint64, "total")
 
+  local cuda_cx = cudahelper.new_kernel_context(node)
   local launch_actions =
-    cudahelper.generate_parallel_prefix_op(cx.task_meta:get_cuda_variant(), total,
+    cudahelper.generate_parallel_prefix_op(cuda_cx, cx.task_meta:get_cuda_variant(), total,
                                            lhs_write, lhs_read, rhs, lhs_base_pointer, rhs_base_pointer,
                                            res:getsymbol(), idx:getsymbol(), dir, node.op, elem_type)
   local preamble, postamble
@@ -11034,7 +11089,7 @@ function codegen.top(cx, node)
     std.register_variant(cpu_variant)
 
     -- Mark the variant as OpenMP variant when at least one OpenMP loop exists
-    if std.config["openmp"] then
+    if std.config["openmp"] ~= 0 and openmphelper.check_openmp_available() then
       ast.traverse_node_postorder(
         function(node)
           if node:is(ast.typed.stat) and
